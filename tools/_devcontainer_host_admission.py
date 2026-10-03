@@ -28,12 +28,13 @@ from single_instance_lease import AlreadyRunningError, SingleInstance  # noqa: E
 from _admission_protocol import ADMISSION_SERVICE as _ADMISSION_SERVICE  # noqa: E402
 from _admission_protocol import admission_dir  # noqa: E402
 
-# A real run takes the host-wide lease in `run-plugin-tests.py` itself;
-# `--guards`, `--collect-only`, and `--prepare-only` all skip it
-# (`needs_admission = not guards and not collect_only and not
-# prepare_only`); `--list` returns even earlier, before that script ever
+# A real run (including a bare `--prepare-only`, which can mutate the
+# shared on-disk venv a concurrent admitted run may depend on) takes the
+# host-wide lease in `run-plugin-tests.py` itself; only `--guards` and
+# `--collect-only` skip it (`needs_admission = not guards and not
+# collect_only`); `--list` returns even earlier, before that script ever
 # reaches its own admission check.
-_SKIPS_ADMISSION = frozenset({"--list", "--guards", "--collect-only", "--prepare-only"})
+_SKIPS_ADMISSION = frozenset({"--list", "--guards", "--collect-only"})
 
 
 def needs_admission(passthrough: list[str], canonicalize) -> bool:

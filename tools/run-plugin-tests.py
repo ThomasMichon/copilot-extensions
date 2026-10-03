@@ -512,7 +512,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     lease: SingleInstance | None = None
-    needs_admission = not args.guards and not args.collect_only and not args.prepare_only
+    # `--prepare-only` is deliberately NOT exempt here, unlike `--guards`/
+    # `--collect-only`: it can rebuild/delete the SHARED on-disk venv
+    # (`_ensure_venv`, via `--reinstall` or a drifted dependency
+    # fingerprint) that a concurrent bare admitted run may be relying on
+    # mid-execution -- exempting it would let `--prepare-only --reinstall`
+    # race and break that other run nondeterministically. The
+    # devcontainer wrapper's own internal `--prepare-only` call is
+    # unaffected: it runs inside a container with a fresh, always-
+    # uncontested tmpfs `$HOME`, so acquiring a lease there is a no-op in
+    # practice, not a behavior change.
+    needs_admission = not args.guards and not args.collect_only
     if needs_admission:
         if args.admission_wait:
             print(f"Waiting up to {args.admission_wait:g}s for the host test slot ...")

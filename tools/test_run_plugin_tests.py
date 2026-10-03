@@ -191,17 +191,26 @@ def test_guards_remain_available_without_heavy_admission(monkeypatch) -> None:
     assert runner.main(["alpha", "--guards"]) == 0
 
 
-def test_prepare_only_remains_available_without_heavy_admission(monkeypatch) -> None:
+def test_prepare_only_takes_heavy_admission(monkeypatch) -> None:
+    # Unlike --guards/--collect-only, --prepare-only is deliberately NOT
+    # exempt: it can rebuild/delete the SHARED on-disk venv a concurrent
+    # bare admitted run may be relying on mid-execution.
+    class Lease:
+        def release(self) -> None:
+            pass
+
     monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
     monkeypatch.setattr(runner.shutil, "which", lambda _name: "uv")
+    acquire_calls: list[float] = []
     monkeypatch.setattr(
         runner,
         "_acquire_admission",
-        lambda _wait: pytest.fail("a --prepare-only run must not take the heavy-test slot"),
+        lambda wait: acquire_calls.append(wait) or Lease(),
     )
     monkeypatch.setattr(runner, "run_plugin", lambda *_args, **_kwargs: 0)
 
     assert runner.main(["alpha", "--prepare-only"]) == 0
+    assert acquire_calls == [0.0]
 
 
 def test_run_plugin_prepare_only_never_invokes_pytest(monkeypatch, tmp_path: Path) -> None:

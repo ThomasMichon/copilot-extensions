@@ -2400,3 +2400,25 @@ resolved value). Live-validated: `--admission-wait bad` now rejects
 outright with a clear error, before any container is brought up. Added
 regression tests for both a single malformed value and a malformed
 earlier occurrence followed by a later valid one.
+
+### 2026-10-03 — Review round 6 (PR #5100): close the --prepare-only admission-bypass race
+A HIGH finding caught that `--prepare-only` was wrongly listed alongside
+`--guards`/`--collect-only` as exempt from the host-wide admission lease
+in both `run-plugin-tests.py`'s own `needs_admission` and the wrapper's
+mirrored `_devcontainer_host_admission._SKIPS_ADMISSION`. Unlike those
+two genuinely read-only flags, `--prepare-only` builds (and can rebuild
+or delete) the SHARED on-disk venv a concurrent bare admitted run may be
+relying on mid-execution -- an unadmitted `--prepare-only` run racing a
+real run isn't a read-only no-op, it's an uncoordinated writer against
+the same on-disk state. Removed the exemption from both files (kept in
+sync) and `TESTING.md`'s admission-exemption list; inverted the test
+that had asserted `--prepare-only` must NOT take the heavy-test slot
+into one confirming it now does. The wrapper's own internal prep-pass
+invocation (`run-plugin-tests.py ... --prepare-only` run inside the
+container) is unaffected in practice: that inner process always runs
+against a fresh per-container tmpfs `$HOME`, so its own admission
+attempt is trivially uncontested -- it's the outer, host-level sharing
+of a real checkout's venv across worktrees/containers that the fix
+actually closes. All tests, module-size, and docs-consistency checks
+still pass; a fresh Docker-backed end-to-end run confirmed the fix
+doesn't disturb the common case.

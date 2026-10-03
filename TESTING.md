@@ -62,12 +62,13 @@ python tools/run-plugin-tests.py agent-dispatch \
 Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
 than repeatedly importing file groups that contain no selected tests.
 
-Potentially heavy runs (everything except `--list`, `--guards`,
-`--collect-only`, and `--prepare-only`) also take one host-wide admission
-lease shared by every checkout and worktree. A
-second run fails fast and names the live holder instead of competing for CPU,
-memory, and process slots. Use a bounded wait when joining an existing queue is
-preferable:
+Potentially heavy runs (everything except `--list`, `--guards`, and
+`--collect-only`) also take one host-wide admission lease shared by every
+checkout and worktree -- including a bare `--prepare-only` pass, since it can
+rebuild or delete the shared on-disk venv a concurrent admitted run may
+depend on mid-execution. A second run fails fast and names the live holder
+instead of competing for CPU, memory, and process slots. Use a bounded wait
+when joining an existing queue is preferable:
 
 ```bash
 python tools/run-plugin-tests.py agent-worktrees --admission-wait 900

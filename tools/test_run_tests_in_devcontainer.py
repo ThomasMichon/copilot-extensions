@@ -1623,13 +1623,20 @@ def test_admission_needs_admission_false_for_skip_flags() -> None:
     assert wrapper._admission.needs_admission(["--list"], canon) is False
     assert wrapper._admission.needs_admission(["--guards"], canon) is False
     assert wrapper._admission.needs_admission(["--collect-only"], canon) is False
-    assert wrapper._admission.needs_admission(["--prepare-only"], canon) is False
 
 
 def test_admission_needs_admission_true_for_a_real_run() -> None:
     canon = wrapper._canonicalize_flag
     assert wrapper._admission.needs_admission(["agent-worktrees"], canon) is True
     assert wrapper._admission.needs_admission([], canon) is True
+
+
+def test_admission_needs_admission_true_for_prepare_only() -> None:
+    # Deliberately NOT exempt, unlike --guards/--collect-only: it can
+    # rebuild/delete the SHARED on-disk venv a concurrent bare admitted
+    # run may be relying on mid-execution.
+    canon = wrapper._canonicalize_flag
+    assert wrapper._admission.needs_admission(["--prepare-only"], canon) is True
 
 
 def test_admission_resolve_wait_defaults_to_zero() -> None:
