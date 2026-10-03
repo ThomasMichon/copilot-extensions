@@ -793,6 +793,23 @@ owned by another loop are selection blockers and are never silently cleared. The
 repository immediately before every mutation; comments from other authors are
 untrusted issue data.
 
+**Rehearsing a new or edited declaration before trusting it to run
+unattended:** `rehearsal_mode: true` (default `false`) makes every
+auto-approval step above a no-op -- the forge-side reservation/label still
+binds for real (so the rehearsal is observably real, not a dry run), but the
+task itself is deliberately left `proposed` rather than promoted to `queued`,
+so no pool worker ever auto-claims it. It stays parked across every later
+tick (re-examined and left alone each time, not abandoned) until an operator
+explicitly promotes it with `agent-dispatch approve <task-id>` -- at which
+point it becomes claimable exactly like any other queued task, and the
+normal evaluator/verification path applies unchanged once it completes. This
+is the recommended way to validate a brand-new declaration end-to-end (one
+real occurrence, one manually-approved task, watched through to completion
+via `agent-dispatch watch`/`agent-bridge`) before removing `rehearsal_mode`
+and letting it run autonomously. `discover` (below) remains the right first
+step when you don't want *any* forge-side side effect yet; `rehearsal_mode`
+is the next step once you do.
+
 ```bash
 agent-dispatch repository-issue-loop setup .copilot-extensions/agent-dispatch/registrar/issues.yaml
 agent-dispatch repository-issue-loop inspect .copilot-extensions/agent-dispatch/registrar/issues.yaml
