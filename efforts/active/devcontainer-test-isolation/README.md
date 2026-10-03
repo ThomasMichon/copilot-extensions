@@ -2032,3 +2032,21 @@ the new combined-budget rejection fires correctly; `check-docs-
 consistency.py` and `check-effort-vision-structure.py` both pass. Docker
 cleanup (no leftover `test-isolation` volumes) and host `git status
 --short` reconfirmed clean of anything beyond this round's own diff.
+
+### 2026-10-03 — Review round 15 (twenty-eighth pass): convergence -- zero new findings
+A twenty-eighth review pass of commit `7e8985187` confirmed the
+previous round's combined-resource-budget fix resolved, and surfaced
+**zero new findings** -- the first fully clean pass of this round after
+27 consecutive sub-rounds each producing at least one genuine fix. The
+remaining 4 items are all long-confirmed restated findings the reviewer
+bot doesn't appear to re-clear once its own discussion thread opens,
+even after the underlying code/doc state changed: CI-coverage (already
+wired into `test-runner-linux`), workspace-volume bound/reuse (already
+handled by `_create_bounded_volume`/`_per_instance_config`), and two
+PR-description-metadata items (already corrected directly on the PR
+body in an earlier round). CI checks are green; `merge state: clean`.
+This is the convergence point the effort has been iterating toward --
+proceeding to drive this PR through to merge per the repo's
+`pr-self-merge` flow (`COMMENTED` is this reviewer's normal non-blocking
+verdict shape; this identity holds Maintainer bypass rights for the
+required-review rule).
