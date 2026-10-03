@@ -114,8 +114,38 @@ def test_sweep_malformed_blocklist_reports_error(home: Path, tmp_path: Path, cap
     repos.add_repo("source", str(source), repo_class="worktree", plat="windows")
     repos.add_repo("target", str(tmp_path / "target"), repo_class="worktree",
                    visibility="public", plat="windows")
+    capsys.readouterr()  # discard add_repo's own "registered" confirmations
 
     rc = iblk_cli.cmd_identifiers_dispatch(["sweep", "--repo", "target"])
     assert rc == 1
     captured = capsys.readouterr()
-    assert "invalid YAML" in captured.out
+    assert "invalid YAML" in captured.err
+    assert captured.out == ""
+
+
+def test_sweep_malformed_blocklist_still_reports_valid_peer_entries(
+    home: Path, tmp_path: Path, capsys,
+):
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    (broken / ".identifier-blocklist").mkdir()
+    (broken / ".identifier-blocklist" / "block-for-public.yaml").write_text(
+        "entries: [unterminated", encoding="utf-8",
+    )
+    good = tmp_path / "good"
+    good.mkdir()
+    (good / ".identifier-blocklist").mkdir()
+    (good / ".identifier-blocklist" / "block-for-public.yaml").write_text(
+        "entries:\n  - token: still-valid\n", encoding="utf-8",
+    )
+    repos.add_repo("broken", str(broken), repo_class="worktree", plat="windows")
+    repos.add_repo("good", str(good), repo_class="worktree", plat="windows")
+    repos.add_repo("target", str(tmp_path / "target"), repo_class="worktree",
+                   visibility="public", plat="windows")
+    capsys.readouterr()  # discard add_repo's own "registered" confirmations
+
+    rc = iblk_cli.cmd_identifiers_dispatch(["sweep", "--repo", "target"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert captured.out.strip() == "still-valid"
+    assert "invalid YAML" in captured.err

@@ -142,6 +142,20 @@ def test_parse_blocklist_file_skips_non_mapping_entries(tmp_path: Path):
     assert len(entries) == 1
 
 
+def test_parse_blocklist_file_unreadable_raises_not_silent(tmp_path: Path, monkeypatch):
+    """A permissions/IO error reading an EXISTING file must be surfaced, not
+    treated the same as the file simply being absent."""
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("entries:\n  - token: x\n", encoding="utf-8")
+
+    def _raise(*a, **k):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(iblk.Path, "read_text", _raise)
+    with pytest.raises(iblk.BlocklistParseError, match="could not read"):
+        iblk.parse_blocklist_file(f, "r", "public")
+
+
 # ---------------------------------------------------------------------------
 # sweep()
 # ---------------------------------------------------------------------------
@@ -257,6 +271,28 @@ def test_sweep_propagates_malformed_blocklist_file(home: Path, tmp_path: Path):
         iblk.sweep("target")
 
 
+def test_sweep_preserves_valid_peer_entries_alongside_a_malformed_source(
+    home: Path, tmp_path: Path,
+):
+    """One source's broken YAML must not discard every other source's
+    already-successfully-parsed entries -- the raised exception still
+    carries them via `partial_entries`."""
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    _write_blocklist(broken, "public", "entries: [unterminated")
+    good = tmp_path / "good"
+    good.mkdir()
+    _write_blocklist(good, "public", "entries:\n  - token: still-valid\n")
+    repos.add_repo("broken", str(broken), repo_class="worktree", plat="windows")
+    repos.add_repo("good", str(good), repo_class="worktree", plat="windows")
+    repos.add_repo("target", str(tmp_path / "target"), repo_class="worktree",
+                   visibility="public", plat="windows")
+
+    with pytest.raises(iblk.BlocklistParseError) as excinfo:
+        iblk.sweep("target")
+    assert [e.token for e in excinfo.value.partial_entries] == ["still-valid"]
+
+
 # ---------------------------------------------------------------------------
 # render_ci_format()
 # ---------------------------------------------------------------------------
@@ -300,8 +336,10 @@ def test_render_ci_format_sanitizes_reason_delimiters():
 
 
 def test_render_ci_format_round_trips_through_ci_loader():
-    """The exact scenario the review flagged: an authored regex alternation
-    must survive render -> the real CI loader's own parsing unchanged."""
+    """An authored regex alternation (e.g. ``foo|bar``) must survive the
+    render -> the real CI loader's own parsing unchanged, since the
+    consumer's grammar reads an unescaped '|' as the token/reason
+    separator."""
     import importlib.util
     import sys as _sys
 

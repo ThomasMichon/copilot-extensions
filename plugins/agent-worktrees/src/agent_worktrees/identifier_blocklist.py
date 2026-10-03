@@ -100,13 +100,25 @@ class BlocklistEntry:
 
 class BlocklistParseError(Exception):
     """Raised when a ``.identifier-blocklist/`` file exists but fails to
-    parse as valid YAML.
+    parse as valid YAML, or can't be read for a reason other than simply
+    being absent (permissions, a transient I/O error, etc.).
 
     This is deliberately NOT swallowed the way a missing/absent file is: a
-    typo'd YAML file would otherwise silently drop its entire denylist while
-    the sweep still exits successfully, which could provision an incomplete
-    CI secret with no visible signal that anything went wrong.
+    typo'd YAML file (or an unreadable one) would otherwise silently drop
+    its entire denylist while the sweep still exits successfully, which
+    could provision an incomplete CI secret with no visible signal that
+    anything went wrong.
+
+    :attr:`partial_entries` carries every entry :func:`sweep` *did*
+    successfully parse from every other, unaffected source -- a caller that
+    wants "preserve what still works, but still fail loudly" (rather than
+    discarding everything) can use it instead of treating this exception as
+    all-or-nothing.
     """
+
+    def __init__(self, message: str, *, partial_entries: "list[BlocklistEntry] | None" = None):
+        super().__init__(message)
+        self.partial_entries: list[BlocklistEntry] = partial_entries or []
 
 
 def resolve_visibility_rank(entry: "repos_mod.RepoEntry | None") -> int:
@@ -166,16 +178,19 @@ def _compile_internal_token(raw: dict) -> str:
 def parse_blocklist_file(path: Path, source_repo: str, tier: str) -> list[BlocklistEntry]:
     """Parse one ``block-for-<tier>.yaml`` file into entries.
 
-    A missing file is a normal, silent no-op (not every repo carries every
-    tier). A file that exists but fails to parse as valid YAML raises
+    A missing file (``FileNotFoundError``) is a normal, silent no-op (not
+    every repo carries every tier). Any OTHER read failure (permissions, a
+    transient I/O error) or a YAML parse failure raises
     :class:`BlocklistParseError` instead of silently contributing nothing --
     see that class's docstring for why.
     """
     entries: list[BlocklistEntry] = []
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except FileNotFoundError:
         return entries
+    except OSError as exc:
+        raise BlocklistParseError(f"{path}: could not read ({exc})") from exc
     try:
         data = yaml.safe_load(text)
     except yaml.YAMLError as exc:
@@ -213,9 +228,15 @@ def sweep(target: str | None) -> list[BlocklistEntry]:
     convention is "what every *other* repo forbids", not self-reference,
     and including it would let a repo's own newly-added blocklist file
     immediately flag its own forbidden token inside that very file.
+
     Returns a deduplicated (by lowercased token + reason), deterministically
-    sorted list. Raises :class:`BlocklistParseError` if any discovered
-    blocklist file fails to parse -- never silently drops it.
+    sorted list. One source repo's blocklist file failing to parse never
+    discards every other source's valid entries: every *other* file is
+    still parsed and aggregated normally, and only once every source has
+    been attempted does :class:`BlocklistParseError` get raised -- carrying
+    every successfully-parsed entry in :attr:`BlocklistParseError.
+    partial_entries` so a caller can still use them rather than treating
+    one broken peer as reason to discard the whole sweep.
     """
     target_entry = repos_mod.find_repo(target) if target else None
     target_rank = resolve_visibility_rank(target_entry)
@@ -224,6 +245,7 @@ def sweep(target: str | None) -> list[BlocklistEntry]:
         return []
 
     seen: dict[tuple[str, str | None], BlocklistEntry] = {}
+    errors: list[str] = []
     for repo_entry in repos_mod.list_repos():
         if target_entry is not None and repo_entry.name == target_entry.name:
             continue
@@ -240,11 +262,23 @@ def sweep(target: str | None) -> list[BlocklistEntry]:
             file_path = blocklist_dir / TIER_FILES[tier]
             if not file_path.is_file():
                 continue
-            for entry in parse_blocklist_file(file_path, repo_entry.name, tier):
+            try:
+                parsed = parse_blocklist_file(file_path, repo_entry.name, tier)
+            except BlocklistParseError as exc:
+                errors.append(str(exc))
+                continue
+            for entry in parsed:
                 key = (entry.token.lower(), entry.reason)
                 seen.setdefault(key, entry)
 
-    return sorted(seen.values(), key=lambda e: (e.token.lower(), e.source_repo))
+    result = sorted(seen.values(), key=lambda e: (e.token.lower(), e.source_repo))
+    if errors:
+        plural = "s" if len(errors) != 1 else ""
+        raise BlocklistParseError(
+            f"{len(errors)} blocklist file{plural} failed to parse: " + "; ".join(errors),
+            partial_entries=result,
+        )
+    return result
 
 
 def _sanitize_ci_text(value: str) -> str:

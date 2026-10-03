@@ -1339,6 +1339,30 @@ def test_add_repo_cli_accepts_visibility_flag(home: Path, tmp_path: Path):
     assert repos.find_repo("pub-repo").visibility == "public"
 
 
+def test_add_repo_cli_rejects_invalid_visibility(home: Path, tmp_path: Path):
+    from agent_worktrees import repos_cli
+
+    repo = tmp_path / "bogus-repo"
+    repo.mkdir()
+    rc = repos_cli.cmd_repos_dispatch(
+        ["add", "bogus-repo", str(repo), "--visibility", "bogus"]
+    )
+    assert rc == 1
+    assert repos.find_repo("bogus-repo") is None
+
+
+def test_add_repo_cli_rejects_missing_visibility_value(home: Path, tmp_path: Path):
+    from agent_worktrees import repos_cli
+
+    repo = tmp_path / "missing-value-repo"
+    repo.mkdir()
+    rc = repos_cli.cmd_repos_dispatch(
+        ["add", "missing-value-repo", str(repo), "--visibility"]
+    )
+    assert rc == 1
+    assert repos.find_repo("missing-value-repo") is None
+
+
 def test_repos_set_visibility_cli(home: Path):
     from agent_worktrees import repos_cli
 

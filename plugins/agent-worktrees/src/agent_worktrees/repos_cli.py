@@ -271,7 +271,19 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             default_branch = repos.inrepo_declared_default_branch(path)
         contributing = _opt("--contributing") or contributing
         account = _opt("--account") or ""
-        visibility = _opt("--visibility") or ""
+        visibility = ""
+        if "--visibility" in rest:
+            visibility_raw = _opt("--visibility")
+            if visibility_raw is None:
+                output.err("repos add: --visibility requires a value")
+                return 1
+            visibility = repos.normalize_visibility(visibility_raw)
+            if not visibility:
+                output.err(
+                    f"repos add: invalid visibility '{visibility_raw}' -- "
+                    "must be one of: " + ", ".join(repos.VALID_VISIBILITY)
+                )
+                return 1
         raw_tags = _opt("--tags")
         if raw_tags:
             tags = [t.strip() for t in raw_tags.split(",") if t.strip()]

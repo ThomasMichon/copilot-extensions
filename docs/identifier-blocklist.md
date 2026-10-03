@@ -26,6 +26,15 @@ That worked, but it meant:
 
 ## The mechanism
 
+**Vision reconciliation:** this is new capability -- a repo-visibility
+classification plus a cross-repo blocklist-aggregation convention -- with no
+existing `agent-worktrees` vision item governing it (see
+`docs/patterns/README.md` § Design principle 0: cite, extend, or declare
+below-altitude). It is below-altitude: it composes with the existing
+`repos.yaml` registry and the pre-existing CI-secret identifier-guard
+mechanism without altering either's own governing intent, rather than
+introducing new architectural intent of its own.
+
 `agent-worktrees` owns the centralized, pluggable half (so any repo it
 manages can use it, not just this one):
 

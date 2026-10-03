@@ -96,11 +96,17 @@ def cmd_identifiers_dispatch(argv: list[str]) -> int:
         if target is None:
             target = cfg.active_project()
 
+        parse_error: iblk.BlocklistParseError | None = None
         try:
             entries = iblk.sweep(target)
         except iblk.BlocklistParseError as exc:
-            output.err(f"identifiers sweep: {exc}")
-            return 1
+            # Preserve every entry that DID parse successfully from other,
+            # unaffected sources -- one broken peer's blocklist must not
+            # discard everyone else's valid entries. Still fail loudly
+            # (nonzero exit, error on stderr/output.err) so the breakage is
+            # visible and fixed, rather than silently degrading enforcement.
+            parse_error = exc
+            entries = exc.partial_entries
 
         target_entry = repos_mod.find_repo(target) if target else None
         target_rank = iblk.resolve_visibility_rank(target_entry)
@@ -116,6 +122,7 @@ def cmd_identifiers_dispatch(argv: list[str]) -> int:
                     "target_visibility": (target_entry.visibility if target_entry else ""),
                     "resolved_visibility": resolved_visibility,
                     "tiers_applied": iblk.applicable_tiers(target_rank),
+                    "error": str(parse_error) if parse_error else None,
                     "entries": [
                         {
                             "token": e.token,
@@ -127,21 +134,25 @@ def cmd_identifiers_dispatch(argv: list[str]) -> int:
                     ],
                 }
             )
-            return 0
+            return 1 if parse_error else 0
 
         # ci format: stdout must carry ONLY the token|reason lines (or
         # nothing at all) -- this is meant to be piped straight into a
         # consumer (the live guard, or `secret set`), so any diagnostic
         # text on stdout would be parsed as a forbidden-identifier line.
-        # Route it to stderr instead, and emit nothing on stdout when empty.
+        # Route all diagnostics to stderr instead, and emit nothing on
+        # stdout when there are no entries to report.
+        if entries:
+            print(iblk.render_ci_format(entries))
+        if parse_error:
+            print(f"identifiers sweep: {parse_error}", file=sys.stderr)
+            return 1
         if not entries:
             print(
                 f"identifiers sweep: no applicable blocklist entries found for "
                 f"target '{target or '(unresolved)'}' (visibility={resolved_visibility}).",
                 file=sys.stderr,
             )
-            return 0
-        print(iblk.render_ci_format(entries))
         return 0
 
     output.err(f"Unknown identifiers subcommand: {sub}")

@@ -171,15 +171,46 @@ def _load_ci_identifiers(raw: str) -> list[tuple[str, str | None]]:
     return pairs
 
 
+class LiveSweepFailure(Exception):
+    """A configured live sweep (source 4) ran but failed -- as opposed to
+    simply being absent/not registered (which is never an error; see
+    ``_load_live_sweep_identifiers``'s docstring). Carries whatever
+    identifiers the sweep DID manage to parse via :attr:`pairs` before
+    failing, so a caller can still use them rather than discarding
+    everything a broken peer repo's blocklist didn't actually touch.
+    """
+
+    def __init__(self, message: str, pairs: list[tuple[str, str | None]]):
+        super().__init__(message)
+        self.pairs = pairs
+
+
 def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
     """Best-effort source 4: a locally registered ``agent-worktrees``' live
     cross-repo identifier-blocklist sweep, scoped to this repo as the sweep
     target (auto-resolved from cwd by ``identifiers sweep``).
 
     Absent anywhere this isn't installed/registered (a fresh clone, CI) --
-    any failure (missing binary, timeout, non-zero exit, empty output) is
-    silently swallowed so this is purely additive, never a new requirement.
-    Set ``COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP=1`` to opt out entirely.
+    a missing binary, a timeout, or any other environment-level failure to
+    even run the command is silently swallowed so this is purely additive,
+    never a new requirement. Set ``COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP=1``
+    to opt out entirely.
+
+    A sweep that DID run but failed (nonzero exit -- e.g. another locally
+    registered repo's ``.identifier-blocklist/`` file is malformed YAML) is
+    different: that is a genuinely broken *local configuration*, not mere
+    absence, so it is never silently swallowed. It raises
+    :class:`LiveSweepFailure`, which still carries whatever identifiers the
+    sweep DID manage to parse before failing (its own CLI still prints
+    every successfully-parsed peer's entries to stdout even on failure; see
+    ``identifier_blocklist_cli.py``) so a caller can use them defensively
+    while still treating the overall result as a failure.
+
+    One specific nonzero-exit case is NOT a configuration failure, though:
+    an installed ``agent-worktrees`` old enough to predate this feature
+    entirely rejects ``identifiers`` with its generic "Unknown subcommand"
+    dispatcher error -- that is absence (an unupdated install), not
+    breakage, so it is treated the same as the binary not existing at all.
     """
     if os.environ.get(LIVE_SWEEP_DISABLE_ENV, "").strip().lower() in ("1", "true", "yes"):
         return []
@@ -193,12 +224,31 @@ def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
         )
     except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
         return []
-    if proc.returncode != 0 or not proc.stdout.strip():
+    if proc.returncode != 0 and (
+        "Unknown subcommand" in proc.stderr or "Unknown subcommand" in proc.stdout
+    ):
+        # An installed agent-worktrees that predates the `identifiers`
+        # command entirely -- benign absence, not a configuration failure.
+        # (output.err prints to stdout, not stderr, so check both.)
         return []
-    return _load_ci_identifiers(proc.stdout)
+    pairs = _load_ci_identifiers(proc.stdout) if proc.stdout.strip() else []
+    if proc.returncode != 0:
+        detail = (proc.stderr.strip() or proc.stdout.strip() or "no details")
+        raise LiveSweepFailure(
+            f"agent-worktrees identifiers sweep failed: {detail}", pairs,
+        )
+    return pairs
 
 
-def _load_identifier_data() -> tuple[list[str], dict[str, str | None]]:
+def _load_identifier_data() -> tuple[list[str], dict[str, str | None], str | None]:
+    """Returns ``(identifiers, reasons, live_sweep_error)``.
+
+    ``live_sweep_error`` is ``None`` on success or benign absence of source
+    4, or a human-readable message when a configured live sweep failed --
+    the caller (``main``) must still fail the push when this is set, even
+    though ``identifiers``/``reasons`` already include whatever that sweep
+    DID manage to parse.
+    """
     ids: list[str] = []
     env = os.environ.get("COPILOT_EXTENSIONS_FORBIDDEN_IDS", "")
     ids += [s for s in (part.strip() for part in env.split(",")) if s]
@@ -213,7 +263,13 @@ def _load_identifier_data() -> tuple[list[str], dict[str, str | None]]:
     for ident, reason in _load_ci_identifiers(os.environ.get(CI_LIST_ENV, "")):
         ids.append(ident)
         ci_reasons.setdefault(ident, reason)
-    for ident, reason in _load_live_sweep_identifiers():
+    live_sweep_error: str | None = None
+    try:
+        sweep_pairs = _load_live_sweep_identifiers()
+    except LiveSweepFailure as exc:
+        sweep_pairs = exc.pairs
+        live_sweep_error = str(exc)
+    for ident, reason in sweep_pairs:
         ids.append(ident)
         ci_reasons.setdefault(ident, reason)
     # De-dupe literals case-insensitively without changing regex escapes.
@@ -222,11 +278,11 @@ def _load_identifier_data() -> tuple[list[str], dict[str, str | None]]:
         token = "regex:" + i[6:] if i.lower().startswith("regex:") else i.lower()
         if token:
             seen.setdefault(token, None)
-    return list(seen), ci_reasons
+    return list(seen), ci_reasons, live_sweep_error
 
 
 def _load_identifiers() -> list[str]:
-    identifiers, _ = _load_identifier_data()
+    identifiers, _, _ = _load_identifier_data()
     return identifiers
 
 
@@ -474,7 +530,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.all and args.paths_file:
         parser.error("--all and --paths-file are mutually exclusive")
 
-    identifiers, reasons = _load_identifier_data()
+    identifiers, reasons, live_sweep_error = _load_identifier_data()
+    if live_sweep_error:
+        # A configured live sweep (source 4) ran but failed -- a genuinely
+        # broken local configuration (e.g. another registered repo's
+        # .identifier-blocklist/ is malformed YAML), never silently
+        # swallowed the way simple absence is. Fail the push loudly even
+        # though `identifiers` above may already include every entry that
+        # sweep DID manage to parse before failing.
+        print(f"Internal-identifier guard FAILED: {live_sweep_error}")
+        return 1
     if not identifiers:
         print(
             "no forbidden identifiers configured "
