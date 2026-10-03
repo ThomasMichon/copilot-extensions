@@ -32,4 +32,11 @@ Four pieces, each independently testable:
   correlated back to the `dev` commit it was measured against (this
   effort's own 2026-10-01 storage/correlation decision) -- not yet wired
   into a real promotion run.
+- `ancestor_resolution`: Phase 2 -- given an arbitrary fork-point commit,
+  walks `main`'s own history of a plugin's checked-in baseline for the
+  newest generation whose `measured_commit` is an ancestor of that fork
+  point, then carries its line-level attribution forward through every
+  intervening commit's own diff (remapping line numbers through pure
+  insertions/deletions, invalidating a file's attribution entirely when a
+  diff actually replaces covered content).
 """

@@ -24,6 +24,7 @@ workflow_dispatch-only `coverage-guided-selection-integration` job.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -37,6 +38,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 from tools.coverage_guided_selection import baseline as baseline_mod  # noqa: E402
 from tools.coverage_guided_selection import correlation  # noqa: E402
 from tools.coverage_guided_selection import fallback, selection as select  # noqa: E402
+from tools.coverage_guided_selection import ancestor_resolution as ar
 
 
 def _synthetic_baseline() -> dict:
@@ -854,4 +856,258 @@ def test_collect_baseline_survives_a_real_spawn_based_multiprocessing_child(
     assert any(
         "test_real_spawn_child_completes" in nodeid for nodeid in result["tests"]
     )
+
+
+def _run_git(args: list, cwd: Path) -> subprocess.CompletedProcess:
+    env = dict(os.environ)
+    env.update({
+        "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
+        "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com",
+    })
+    proc = subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, env=env, check=False,
+    )
+    assert proc.returncode == 0, f"git {args} failed: {proc.stderr}"
+    return proc
+
+
+def _init_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _run_git(["init", "-q", "-b", "dev"], cwd=repo)
+    _run_git(["config", "user.name", "Test"], cwd=repo)
+    _run_git(["config", "user.email", "test@example.com"], cwd=repo)
+    return repo
+
+
+def _commit(repo: Path, message: str) -> str:
+    _run_git(["add", "-A"], cwd=repo)
+    _run_git(["commit", "-q", "-m", message], cwd=repo)
+    return _run_git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+
+
+class TestIsAncestor:
+    def test_true_for_a_real_ancestor(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+        (repo / "a.txt").write_text("1\n2\n")
+        c2 = _commit(repo, "second")
+        assert ar.is_ancestor(repo, c1, c2) is True
+
+    def test_false_for_a_non_ancestor(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+        _run_git(["checkout", "-q", "-b", "side", c1], cwd=repo)
+        (repo / "b.txt").write_text("x\n")
+        c2 = _commit(repo, "side commit")
+        _run_git(["checkout", "-q", "dev"], cwd=repo)
+        (repo / "a.txt").write_text("1\n2\n")
+        c3 = _commit(repo, "dev commit")
+        assert ar.is_ancestor(repo, c2, c3) is False
+
+    def test_a_commit_is_its_own_ancestor(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+        assert ar.is_ancestor(repo, c1, c1) is True
+
+    def test_raises_for_an_unreachable_commit(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+        with pytest.raises(ar.AncestorResolutionError):
+            ar.is_ancestor(repo, "0" * 40, c1)
+
+
+class TestResolveNearestBaseline:
+    def test_finds_the_newest_qualifying_generation(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        # A sequence of dev-side commits to serve as measured_commit values
+        # and as the fork point.
+        (repo / "src.py").write_text("line1\n")
+        dev_c1 = _commit(repo, "dev c1")
+        (repo / "src.py").write_text("line1\nline2\n")
+        dev_c2 = _commit(repo, "dev c2")
+        (repo / "src.py").write_text("line1\nline2\nline3\n")
+        dev_c3 = _commit(repo, "dev c3")
+
+        # main branch carries 3 baseline generations, oldest to newest,
+        # each measured against one of the dev commits above.
+        _run_git(["checkout", "-q", "-b", "main"], cwd=repo)
+        baseline_path = repo / ".github" / "coverage-baselines" / "myplugin.json"
+        baseline_path.parent.mkdir(parents=True)
+        baseline_path.write_text(json.dumps({"measured_commit": dev_c1, "coverage": {}}))
+        _commit(repo, "baseline gen 1")
+        baseline_path.write_text(json.dumps({"measured_commit": dev_c2, "coverage": {}}))
+        _commit(repo, "baseline gen 2")
+        baseline_path.write_text(json.dumps({"measured_commit": dev_c3, "coverage": {}}))
+        gen3_commit = _commit(repo, "baseline gen 3")
+
+        # A fork point between dev_c2 and dev_c3 (a PR branched before the
+        # newest baseline generation was ever measured).
+        _run_git(["checkout", "-q", "-b", "pr", dev_c2], cwd=repo)
+        (repo / "pr_only.py").write_text("x\n")
+        fork_commit = _commit(repo, "pr commit")
+
+        resolved = ar.resolve_nearest_baseline(repo, "myplugin", fork_commit, main_ref="main")
+        assert resolved is not None
+        assert resolved.baseline["measured_commit"] == dev_c2
+        assert resolved.baseline_commit != gen3_commit
+
+    def test_returns_none_when_no_generation_qualifies(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "src.py").write_text("line1\n")
+        dev_c1 = _commit(repo, "dev c1")
+
+        # A real commit that exists in the repo but sits on a disjoint
+        # side branch -- genuinely reachable (so merge-base can answer),
+        # just not an ancestor of the fork point below.
+        _run_git(["checkout", "-q", "-b", "unrelated", dev_c1], cwd=repo)
+        (repo / "side.py").write_text("x\n")
+        unrelated_commit = _commit(repo, "unrelated side commit")
+
+        _run_git(["checkout", "-q", "-b", "main", dev_c1], cwd=repo)
+        baseline_path = repo / ".github" / "coverage-baselines" / "myplugin.json"
+        baseline_path.parent.mkdir(parents=True)
+        baseline_path.write_text(
+            json.dumps({"measured_commit": unrelated_commit, "coverage": {}})
+        )
+        _commit(repo, "baseline gen 1")
+
+        _run_git(["checkout", "-q", "-b", "pr", dev_c1], cwd=repo)
+        fork_commit = dev_c1
+
+        resolved = ar.resolve_nearest_baseline(repo, "myplugin", fork_commit, main_ref="main")
+        assert resolved is None
+
+    def test_returns_none_when_baseline_file_never_existed(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "src.py").write_text("line1\n")
+        c1 = _commit(repo, "only commit")
+        resolved = ar.resolve_nearest_baseline(repo, "nope", c1, main_ref="dev")
+        assert resolved is None
+
+
+class TestComputeFileRemap:
+    def test_unchanged_file(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n2\n3\n")
+        (repo / "b.txt").write_text("x\n")
+        c1 = _commit(repo, "first")
+        (repo / "b.txt").write_text("y\n")
+        c2 = _commit(repo, "second")
+        result = ar.compute_file_remap(repo, "a.txt", c1, c2)
+        assert result.status == "unchanged"
+
+    def test_pure_insertion_is_remapped(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n2\n3\n")
+        c1 = _commit(repo, "first")
+        (repo / "a.txt").write_text("1\nNEW\n2\n3\n")
+        c2 = _commit(repo, "insert a line")
+        result = ar.compute_file_remap(repo, "a.txt", c1, c2)
+        assert result.status == "remapped"
+        # old line 1 unaffected, old lines 2/3 shift down by 1
+        assert ar.remap_line(1, result.hunks) == 1
+        assert ar.remap_line(2, result.hunks) == 3
+        assert ar.remap_line(3, result.hunks) == 4
+
+    def test_pure_deletion_is_remapped_and_drops_removed_lines(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n2\n3\n4\n")
+        c1 = _commit(repo, "first")
+        (repo / "a.txt").write_text("1\n4\n")
+        c2 = _commit(repo, "delete two lines")
+        result = ar.compute_file_remap(repo, "a.txt", c1, c2)
+        assert result.status == "remapped"
+        assert ar.remap_line(1, result.hunks) == 1
+        assert ar.remap_line(2, result.hunks) is None  # deleted
+        assert ar.remap_line(3, result.hunks) is None  # deleted
+        assert ar.remap_line(4, result.hunks) == 2
+
+    def test_content_replacement_is_invalid(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n2\n3\n")
+        c1 = _commit(repo, "first")
+        (repo / "a.txt").write_text("1\nCHANGED\n3\n")
+        c2 = _commit(repo, "replace a line")
+        result = ar.compute_file_remap(repo, "a.txt", c1, c2)
+        assert result.status == "invalid"
+
+    def test_mixed_insertion_and_replacement_is_invalid(self, tmp_path):
+        """A file can have one hunk that's a pure insertion and another
+        that's a real replacement -- the whole file must still invalidate,
+        not just the replaced hunk's range."""
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
+        c1 = _commit(repo, "first")
+        (repo / "a.txt").write_text("1\nNEW\n2\n3\n4\n5\n6\n7\nCHANGED\n9\n10\n")
+        c2 = _commit(repo, "insert then replace")
+        result = ar.compute_file_remap(repo, "a.txt", c1, c2)
+        assert result.status == "invalid"
+
+
+class TestRemapOrInvalidateBaseline:
+    def test_full_integration_across_three_files(self, tmp_path):
+        """One untouched file, one cleanly-shiftable file, one
+        content-replaced file -- in the same remap pass."""
+        repo = _init_repo(tmp_path)
+        (repo / "unchanged.py").write_text("a\nb\n")
+        (repo / "shifted.py").write_text("1\n2\n3\n")
+        (repo / "replaced.py").write_text("x\ny\nz\n")
+        old_commit = _commit(repo, "baseline measured here")
+
+        (repo / "shifted.py").write_text("1\nNEW\n2\n3\n")
+        (repo / "replaced.py").write_text("x\nCHANGED\nz\n")
+        fork_commit = _commit(repo, "fork point")
+
+        baseline = {
+            "measured_commit": old_commit,
+            "coverage": {
+                "unchanged.py": {"1": ["test_u"]},
+                "shifted.py": {"2": ["test_s"], "3": ["test_s2"]},
+                "replaced.py": {"2": ["test_r"]},
+            },
+        }
+        resolved = ar.ResolvedBaseline(baseline=baseline, baseline_commit=old_commit)
+        result = ar.remap_or_invalidate_baseline(repo, resolved, fork_commit)
+
+        assert result["coverage"]["unchanged.py"] == {"1": ["test_u"]}
+        assert result["coverage"]["shifted.py"] == {"3": ["test_s"], "4": ["test_s2"]}
+        assert "replaced.py" not in result["coverage"]
+        assert result["remap_invalidated_files"] == ["replaced.py"]
+        assert result["remapped_to_commit"] == fork_commit
+        assert result["measured_commit"] == old_commit  # provenance preserved
+
+    def test_a_file_whose_only_covered_lines_were_deleted_is_invalidated(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "f.py").write_text("1\n2\n3\n")
+        old_commit = _commit(repo, "baseline measured here")
+        (repo / "f.py").write_text("1\n3\n")  # deletes line 2
+        fork_commit = _commit(repo, "delete the only covered line")
+
+        baseline = {
+            "measured_commit": old_commit,
+            "coverage": {"f.py": {"2": ["only_test"]}},
+        }
+        resolved = ar.ResolvedBaseline(baseline=baseline, baseline_commit=old_commit)
+        result = ar.remap_or_invalidate_baseline(repo, resolved, fork_commit)
+
+        assert "f.py" not in result["coverage"]
+        assert result["remap_invalidated_files"] == ["f.py"]
+
+    def test_does_not_mutate_the_input_baseline(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "f.py").write_text("1\n2\n")
+        old_commit = _commit(repo, "c1")
+        fork_commit = old_commit  # no changes at all
+
+        baseline = {"measured_commit": old_commit, "coverage": {"f.py": {"1": ["t"]}}}
+        resolved = ar.ResolvedBaseline(baseline=baseline, baseline_commit=old_commit)
+        ar.remap_or_invalidate_baseline(repo, resolved, fork_commit)
+
+        assert baseline == {"measured_commit": old_commit, "coverage": {"f.py": {"1": ["t"]}}}
+
 

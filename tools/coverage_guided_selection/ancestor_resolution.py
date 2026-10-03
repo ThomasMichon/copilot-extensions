@@ -1,0 +1,263 @@
+"""Phase 2: nearest-ancestor baseline resolution + attribution remap/invalidate.
+
+Realizes this effort's own Phase 2 (see `efforts/active/coverage-guided-ci`'s
+Plan): given an arbitrary fork-point commit (typically a PR branch's own
+merge-base against `dev`, which may sit behind `main`'s current baseline
+generation, or behind several), resolve the **newest** coverage baseline
+checked into `main` (see `correlation.py`) whose own `measured_commit` is an
+ancestor of that fork point, per the vision's "baseline reachable from any
+fork point" Feature -- then carry that baseline's line-level attribution
+forward through every intervening commit's own diff, file by file:
+
+- A file whose diff between the baseline's `measured_commit` and the fork
+  point is **entirely pure insertions/deletions** (no hunk both removes and
+  adds lines -- i.e. no hunk actually replaces/edits existing content) has
+  its covered line numbers translated through the diff's own line-number
+  shift. A line that was itself deleted drops out silently (correct: that
+  line no longer exists to be covered).
+- A file with **any** hunk that both removes and adds lines genuinely
+  changed content, so old line numbers inside it can't be trusted to still
+  mean the same thing -- that file's attribution is **invalidated**
+  (dropped from the resulting baseline's ``coverage`` map entirely), which
+  `selection.select_tests` already treats as ``no_baseline_entry`` --
+  forcing the smoke/coverage-debt fallback for that file specifically,
+  never a silently stale selection.
+
+This module only reads git history (``git log``, ``git show``, ``git diff``,
+``git merge-base``) from an already-fetched local clone -- it performs no
+network I/O of its own and never writes anything.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+from dataclasses import dataclass, field
+from pathlib import Path
+
+
+class AncestorResolutionError(RuntimeError):
+    """Raised when git plumbing needed for resolution fails unexpectedly."""
+
+
+def _git(args: list[str], *, cwd: Path) -> str:
+    proc = subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, check=False,
+    )
+    if proc.returncode != 0:
+        raise AncestorResolutionError(
+            f"git {' '.join(args)} failed (exit {proc.returncode}): "
+            f"{proc.stderr.strip()}"
+        )
+    return proc.stdout
+
+
+def is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
+    """True if `ancestor` is an ancestor of (or equal to) `descendant`.
+
+    `git merge-base --is-ancestor` exits 0 for yes, 1 for no, and anything
+    else (128, a missing/unreachable commit) is a genuine plumbing failure
+    this surfaces loudly rather than silently treating as "no".
+    """
+    proc = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=repo_root, capture_output=True, text=True, check=False,
+    )
+    if proc.returncode not in (0, 1):
+        raise AncestorResolutionError(
+            "git merge-base --is-ancestor failed unexpectedly "
+            f"(exit {proc.returncode}): {proc.stderr.strip()}"
+        )
+    return proc.returncode == 0
+
+
+@dataclass(frozen=True)
+class ResolvedBaseline:
+    baseline: dict
+    #: the `main`-branch commit the baseline JSON was actually read from --
+    #: distinct from `baseline["measured_commit"]`, which is the `dev`
+    #: commit coverage was collected against.
+    baseline_commit: str
+
+
+def resolve_nearest_baseline(
+    repo_root: Path,
+    plugin: str,
+    fork_commit: str,
+    *,
+    main_ref: str = "main",
+) -> ResolvedBaseline | None:
+    """Walk `main_ref`'s own history of the plugin's baseline file for the
+    newest generation whose embedded `measured_commit` is an ancestor of
+    `fork_commit`.
+
+    Returns `None` if no generation qualifies -- the baseline file was
+    never checked in on this branch, or every generation was measured on a
+    commit that isn't actually an ancestor of `fork_commit` (a fork point
+    older than this plugin's very first enrolled baseline). Either case is
+    the "no attribution available" signal the vision's own smoke-fallback
+    Concept exists to catch -- this function raises for a genuine git
+    plumbing failure, never for "nothing found".
+    """
+    from . import correlation
+
+    path = correlation.baseline_path_on_main(plugin)
+    log_output = _git(["log", "--format=%H", main_ref, "--", path], cwd=repo_root)
+    revisions = [line.strip() for line in log_output.splitlines() if line.strip()]
+    for rev in revisions:
+        try:
+            content = _git(["show", f"{rev}:{path}"], cwd=repo_root)
+        except AncestorResolutionError:
+            continue
+        try:
+            candidate = json.loads(content)
+        except json.JSONDecodeError:
+            continue
+        measured_commit = candidate.get("measured_commit")
+        if not measured_commit:
+            continue
+        if is_ancestor(repo_root, measured_commit, fork_commit):
+            return ResolvedBaseline(baseline=candidate, baseline_commit=rev)
+    return None
+
+
+_HUNK_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+
+#: (old_start, old_len, new_start, new_len) per hunk.
+Hunk = tuple[int, int, int, int]
+
+
+def _parse_hunks(diff_text: str) -> list[Hunk]:
+    hunks: list[Hunk] = []
+    for line in diff_text.splitlines():
+        m = _HUNK_RE.match(line)
+        if not m:
+            continue
+        old_start = int(m.group(1))
+        old_len = int(m.group(2)) if m.group(2) is not None else 1
+        new_start = int(m.group(3))
+        new_len = int(m.group(4)) if m.group(4) is not None else 1
+        hunks.append((old_start, old_len, new_start, new_len))
+    return hunks
+
+
+@dataclass(frozen=True)
+class FileRemapResult:
+    #: "unchanged" (file untouched between the two commits -- old line
+    #: numbers are still valid as-is), "remapped" (every hunk was a pure
+    #: insertion/deletion -- `hunks` translates old line numbers), or
+    #: "invalid" (at least one hunk replaced/edited existing content).
+    status: str
+    hunks: tuple[Hunk, ...] = field(default_factory=tuple)
+
+
+def compute_file_remap(
+    repo_root: Path, file_path: str, old_commit: str, new_commit: str,
+) -> FileRemapResult:
+    """Classify a single file's diff between two commits.
+
+    Uses `--unified=0` so every hunk boundary is exact (no shared context
+    lines padding a hunk's old/new ranges), which is what makes "a hunk with
+    both a nonzero old_len and a nonzero new_len genuinely replaced content"
+    a reliable signal -- with default context lines, an insertion right next
+    to an unrelated unchanged line could otherwise appear to "replace" that
+    context line.
+    """
+    diff_text = _git(
+        ["diff", "--unified=0", "--no-color", old_commit, new_commit,
+         "--", file_path],
+        cwd=repo_root,
+    )
+    if not diff_text.strip():
+        return FileRemapResult(status="unchanged")
+
+    hunks = _parse_hunks(diff_text)
+    for old_start, old_len, new_start, new_len in hunks:
+        if old_len > 0 and new_len > 0:
+            return FileRemapResult(status="invalid")
+    return FileRemapResult(status="remapped", hunks=tuple(hunks))
+
+
+def remap_line(old_line: int, hunks: tuple[Hunk, ...]) -> int | None:
+    """Translate `old_line` through a file's own pure insert/delete hunks.
+
+    Returns `None` if `old_line` fell inside a deleted range (the line no
+    longer exists at the new commit -- correctly drops out of attribution
+    rather than erroring).
+    """
+    offset = 0
+    for old_start, old_len, new_start, new_len in hunks:
+        if old_len == 0:
+            # Pure insertion: `new_len` new lines appear right after old
+            # line `old_start` (git reports the insertion point as the old
+            # line immediately preceding it, with a 0-length old range).
+            if old_line >= old_start + 1:
+                offset += new_len
+        else:
+            if old_line < old_start:
+                continue
+            if old_line >= old_start + old_len:
+                # Pure deletion: old_len lines removed, new_len (0) added.
+                offset += new_len - old_len
+            else:
+                return None  # old_line itself was deleted
+    return old_line + offset
+
+
+def remap_or_invalidate_baseline(
+    repo_root: Path, resolved: ResolvedBaseline, fork_commit: str,
+) -> dict:
+    """Carry a resolved baseline's attribution forward to `fork_commit`.
+
+    Returns a new baseline dict (the input is never mutated) whose
+    ``coverage`` map reflects `fork_commit`'s own line numbers: unchanged
+    files pass through as-is, cleanly-shiftable files have their covered
+    line numbers translated, and files with real content changes are
+    dropped entirely -- which `selection.select_tests` already treats as
+    ``no_baseline_entry``, forcing that file's own smoke/coverage-debt
+    fallback rather than a silently stale selection.
+
+    The original `baseline["measured_commit"]` is preserved verbatim
+    (provenance: what coverage.py actually measured); the new
+    `"remapped_to_commit"` field records the fork point this remap carried
+    attribution forward to, and `"remap_invalidated_files"` lists every
+    file this remap had to drop, for a caller that wants to report why a
+    selection fell back for a given file without re-deriving it.
+    """
+    baseline = resolved.baseline
+    old_commit = baseline["measured_commit"]
+    new_coverage: dict[str, dict[str, list[str]]] = {}
+    invalidated: list[str] = []
+
+    for file, per_line in baseline.get("coverage", {}).items():
+        result = compute_file_remap(repo_root, file, old_commit, fork_commit)
+        if result.status == "unchanged":
+            new_coverage[file] = per_line
+            continue
+        if result.status == "invalid":
+            invalidated.append(file)
+            continue
+        remapped: dict[str, list[str]] = {}
+        for line_str, tests in per_line.items():
+            new_line = remap_line(int(line_str), result.hunks)
+            if new_line is None:
+                continue
+            bucket = remapped.setdefault(str(new_line), [])
+            for t in tests:
+                if t not in bucket:
+                    bucket.append(t)
+        if remapped:
+            new_coverage[file] = remapped
+        else:
+            # Every covered line in this file was deleted outright --
+            # equivalent to invalidation (no attribution left to select
+            # from), but worth distinguishing in the report from a real
+            # content-replacement invalidation.
+            invalidated.append(file)
+
+    out = dict(baseline)
+    out["coverage"] = new_coverage
+    out["remapped_to_commit"] = fork_commit
+    out["remap_invalidated_files"] = sorted(invalidated)
+    return out
