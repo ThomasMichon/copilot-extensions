@@ -1,5 +1,5 @@
 {
-  "comment": "Fix failed-reap-exposes-stale-as-live bug; sweep orphaned write/claim sidecars (fourth review round)",
+  "comment": "Fix failed-reap-exposes-stale-as-live bug; sweep orphaned write/claim sidecars",
   "changes": [
     {
       "plugin": "agent-remote-driver",

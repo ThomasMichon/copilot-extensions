@@ -181,14 +181,25 @@ test("GET /events disconnects a client whose buffered backlog exceeds maxSseBuff
       // socket-level read error on the client, depending on timing. Either
       // outcome proves the connection did not survive to keep buffering
       // further events indefinitely; a read that keeps succeeding forever
-      // would be the actual failure this test guards against.
+      // would be the actual failure this test guards against. Each read is
+      // raced against a short deadline so a regression (the server no
+      // longer disconnects) fails this test deterministically instead of
+      // hanging the whole process.
+      const READ_TIMEOUT_MS = 2_000;
+      const readOrTimeout = () =>
+        Promise.race([
+          reader.read(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("read() timed out")), READ_TIMEOUT_MS)),
+        ]);
+
       let disconnected = false;
       try {
         for (let i = 0; i < 20 && !disconnected; i += 1) {
-          const result = await reader.read();
+          const result = await readOrTimeout();
           disconnected = result.done;
         }
-      } catch {
+      } catch (e) {
+        assert.doesNotMatch(e.message, /timed out/, "server never disconnected the over-backlogged client");
         disconnected = true; // the abrupt destroy() surfaced as a read error -- also a disconnect
       }
       assert.equal(disconnected, true, "expected the over-backlogged connection to be closed by the server");

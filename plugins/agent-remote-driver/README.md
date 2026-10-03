@@ -114,8 +114,12 @@ this plugin addresses both directly:
   place) or mid-reap (between claiming an entry and deleting/restoring it)
   leaves a credential-bearing file that isn't a bare `.json` descriptor and
   would otherwise never be swept by the main loop at all. A sidecar is
-  reaped only once its owning pid is confirmed dead -- while the owner is
-  still alive it may genuinely be mid-operation.
+  reaped only once its OWNER pid -- parsed from the filename itself, never
+  from the file's own JSON content -- is confirmed dead; while the owner is
+  still alive it may genuinely be mid-operation. The filename is load-bearing
+  here: a `.reap-claim.*` sidecar's content is the CLAIMED (already-stale)
+  target session's own descriptor, so checking its content pid would make
+  every live, currently-reaping claimant's own in-flight file look orphaned.
 - **Heartbeat-qualified liveness, not bare pid-liveness.** A dead process's
   pid can be recycled by an unrelated later process, so a bare
   `process.kill(pid, 0)` check alone is not trustworthy at fleet scale.
@@ -274,11 +278,16 @@ directory this process can create and write to.
   `efforts/active/cli-default-bridging/README.md` Phase 2 for the fix.
 - **The discovery directory keeps growing / an entry outlives its session.**
   Every new session self-heals this at its own startup (see *Fleet
-  hygiene*); it is not a sign of a leak by itself. If a specific entry
-  persists well past its heartbeat-timeout window (default 90s) with a
-  genuinely dead process, that is a real `registry.mjs` bug -- file it,
-  don't hand-delete the file as a workaround (another session's sweep would
-  have removed it on its own next startup).
+  hygiene*); it is not a sign of a leak by itself. A dead entry's physical
+  removal still waits for an actual sweep to run (another session starting,
+  or `bin/list-sessions.mjs`) -- seeing one persist with no new session and
+  no `list-sessions` run in between is expected, not a bug. Only report an
+  entry that survives an actual sweep (confirm by starting a new session or
+  running `bin/list-sessions.mjs` and checking it's still there) with a
+  genuinely dead process past its heartbeat-timeout window (default 90s) --
+  that is a real `registry.mjs` bug. Don't hand-delete the file as a
+  workaround either way; a real sweep would have removed it correctly on
+  its own.
 - **`bin/list-sessions.mjs` exits 1 with "could not read the session
   registry."** The discovery directory itself is inaccessible (permissions,
   a disk/mount issue) -- distinct from a genuinely empty fleet, which exits

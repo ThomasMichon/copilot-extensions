@@ -189,14 +189,20 @@ export function reapIfStillStale(path, snapshotDescriptor, opts = {}, renameFn =
   return { removed, descriptor: claimed };
 }
 
-// Matches an orphaned sidecar's name: an interrupted write's `.tmp` (see
-// discovery.mjs's writeDescriptorAtomic: `<name>.json.<pid>.<ts>.tmp`) or an
-// interrupted reap's claim file (see reapIfStillStale above:
-// `<name>.json.reap-claim.<pid>.<ts>`). Both carry the same bearer token as
-// the real descriptor they were derived from.
-const SIDECAR_RE = /\.json\.(?:\d+\.\d+\.tmp|reap-claim\.\d+\.\d+)$/;
+// Matches an orphaned sidecar's name AND captures its OWNER pid directly
+// from the filename -- not from the descriptor content, which for a
+// `.reap-claim.*` file is the CLAIMED (already-judged-stale) target
+// session's own pid, never the claimant/reaper's. Checking the content pid
+// there would make a live, mid-reap claimant's own in-flight file look
+// "owned by a dead pid" and get deleted out from under it. The two
+// capture groups correspond to the two sidecar shapes:
+//   - `<name>.json.<pid>.<ts>.tmp`           (an interrupted writeDescriptorAtomic)
+//   - `<name>.json.reap-claim.<pid>.<ts>`    (an interrupted reapIfStillStale)
+// Both carry the same bearer token as the real descriptor they were derived
+// from.
+const SIDECAR_RE = /\.json\.(?:(\d+)\.\d+\.tmp|reap-claim\.(\d+)\.\d+)$/;
 
-function listSidecarPaths(dir) {
+function listSidecarEntries(dir) {
   let names;
   try {
     names = readdirSync(dir);
@@ -204,7 +210,14 @@ function listSidecarPaths(dir) {
     if (e && e.code === "ENOENT") return [];
     throw e;
   }
-  return names.filter((n) => SIDECAR_RE.test(n)).map((n) => join(dir, n));
+  const entries = [];
+  for (const n of names) {
+    const m = n.match(SIDECAR_RE);
+    if (!m) continue;
+    const ownerPid = Number(m[1] || m[2]);
+    entries.push({ path: join(dir, n), ownerPid });
+  }
+  return entries;
 }
 
 // Removes orphaned sidecar files. `listDescriptorFiles` only ever looks at
@@ -214,14 +227,18 @@ function listSidecarPaths(dir) {
 // this module ever sweeping it, since neither pattern is a bare `.json`
 // file. Both carry a bearer token, so an orphan left behind is a
 // credential-bearing file that would otherwise persist forever. A sidecar
-// is reaped only when its OWNING pid is dead (the same conservative "fail
-// toward keeping" posture as the rest of this module) -- while its owner is
-// still alive it may genuinely be mid-operation, not orphaned.
+// is reaped only when its OWNER pid (parsed from the FILENAME -- see
+// SIDECAR_RE above, never the descriptor's own content) is dead (the same
+// conservative "fail toward keeping" posture as the rest of this module) --
+// while its owner is still alive it may genuinely be mid-operation, not
+// orphaned. This also means a `.tmp` file that is still genuinely mid-write
+// (and therefore parses as unreadable/null) is correctly left alone as long
+// as its writer is alive -- liveness never depends on being able to parse
+// the file's own content at all.
 export function sweepOrphanedSidecars(dir) {
   const removed = [];
-  for (const path of listSidecarPaths(dir)) {
-    const descriptor = readDescriptorSafe(path);
-    if (descriptor && isProcessAlive(descriptor.pid)) continue; // may be genuinely mid-operation
+  for (const { path, ownerPid } of listSidecarEntries(dir)) {
+    if (isProcessAlive(ownerPid)) continue; // may be genuinely mid-operation
     try {
       unlinkSync(path);
       removed.push(path);
@@ -231,6 +248,7 @@ export function sweepOrphanedSidecars(dir) {
   }
   return removed;
 }
+
 
 // Removes every stale descriptor in `dir`, AND any orphaned write/claim
 // sidecar (see sweepOrphanedSidecars above). Best-effort: a file that

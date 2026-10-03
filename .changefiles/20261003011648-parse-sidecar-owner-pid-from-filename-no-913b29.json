@@ -1,0 +1,9 @@
+{
+  "comment": "Parse sidecar owner pid from filename, not JSON content, before reaping",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "dev"
+    }
+  ]
+}

@@ -567,3 +567,34 @@ than this PR's scope, and not proportionate for a plugin that is
 `defaultEnabled: false` and has not yet been run against a single real
 `copilot` session (that gap is already named, separately, as this effort's
 next slice). Tracked here rather than re-attempted a fourth time.
+
+### 2026-10-03 (cont'd) — Fifth review round: sidecar reaping used the wrong PID
+
+A genuine bug in round 4's own fix: `sweepOrphanedSidecars` checked the
+sidecar's JSON **content** pid for liveness, but a `.reap-claim.*` sidecar's
+content is the CLAIMED (already-judged-stale) target session's own
+descriptor — its pid is *expected* to be dead. Checking that content pid
+made every live, currently-reaping claimant's own in-flight claim file look
+"owned by a dead pid" and get deleted out from under it mid-operation.
+Separately, a genuinely mid-write `.tmp` file (unparseable content) was
+being treated identically to an orphan regardless of whether its writer was
+alive. Fixed: `sweepOrphanedSidecars` now parses the OWNER pid directly from
+the filename (`SIDECAR_RE`'s capture groups) for both sidecar shapes, never
+from content — a `.tmp`'s filename pid already happened to match its writer
+by construction, but a `.reap-claim.*`'s filename pid (the claimant) and
+content pid (the claimed target) are deliberately different, and only the
+filename one is the correct liveness signal either way.
+
+Also fixed in this round: the SSE-backlog regression test's read loop had
+no bound of its own — a real regression (server stops disconnecting
+over-backlogged clients) would have hung the test process instead of
+failing it; raced each read against a 2s deadline. Removed "(Nth review
+round)" wording from changefile comments (durable release metadata should
+describe the technical change, not the review process). Clarified the
+README's dead-entry-persistence wording: a dead entry's physical removal
+genuinely waits for a sweep to run; seeing one persist with no sweep
+triggered in between is expected, not evidence of a bug on its own.
+
+5 new `node --test` cases this round (73 total for the plugin, all
+passing), explicitly covering the filename-vs-content pid mismatch for both
+sidecar shapes.

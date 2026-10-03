@@ -339,26 +339,56 @@ function writeSidecar(dir, name, descriptor) {
   return path;
 }
 
-test("sweepOrphanedSidecars removes a .tmp sidecar whose owning pid is dead", () => {
-  const dir = tmpDir();
-  const path = writeSidecar(dir, `s1.json.${deadPid()}.1700000000000.tmp`, { pid: deadPid(), sessionId: "s1" });
-  const removed = sweepOrphanedSidecars(dir);
-  assert.deepEqual(removed, [path]);
-  assert.equal(existsSync(path), false);
-});
-
-test("sweepOrphanedSidecars removes a .reap-claim.* sidecar whose owning pid is dead", () => {
+test("sweepOrphanedSidecars removes a .tmp sidecar whose owning pid (from the filename) is dead", () => {
   const dir = tmpDir();
   const pid = deadPid();
-  const path = writeSidecar(dir, `s1.json.reap-claim.${pid}.1700000000000`, { pid, sessionId: "s1" });
+  const path = writeSidecar(dir, `s1.json.${pid}.1700000000000.tmp`, { pid, sessionId: "s1" });
   const removed = sweepOrphanedSidecars(dir);
   assert.deepEqual(removed, [path]);
   assert.equal(existsSync(path), false);
 });
 
-test("sweepOrphanedSidecars leaves a sidecar alone while its owning pid is still alive -- may be mid-operation", () => {
+test("sweepOrphanedSidecars removes a .reap-claim.* sidecar whose CLAIMANT pid (from the filename) is dead", () => {
+  const dir = tmpDir();
+  const claimantPid = deadPid();
+  // Content carries the ORIGINAL (already-stale) target session's pid --
+  // deliberately a DIFFERENT dead pid than the claimant's, to confirm
+  // liveness is decided by the filename, not the content.
+  const path = writeSidecar(dir, `s1.json.reap-claim.${claimantPid}.1700000000000`, { pid: deadPid(), sessionId: "s1" });
+  const removed = sweepOrphanedSidecars(dir);
+  assert.deepEqual(removed, [path]);
+  assert.equal(existsSync(path), false);
+});
+
+test("sweepOrphanedSidecars leaves a sidecar alone while its OWNER pid (filename) is alive -- may be mid-operation", () => {
   const dir = tmpDir();
   const path = writeSidecar(dir, `s1.json.${process.pid}.1700000000000.tmp`, { pid: process.pid, sessionId: "s1" });
+  const removed = sweepOrphanedSidecars(dir);
+  assert.deepEqual(removed, []);
+  assert.equal(existsSync(path), true);
+});
+
+test("sweepOrphanedSidecars keeps a LIVE claimant's .reap-claim.* file even though its CONTENT pid is a dead (already-reaped) target", () => {
+  // This is the exact bug this fix closes: a .reap-claim.<claimantPid>.<ts>
+  // file's JSON body is the CLAIMED (already stale) target session's own
+  // descriptor -- its pid is expected to be dead. Checking that content
+  // pid for liveness would make every legitimate, still-in-flight claim
+  // look "orphaned" and get deleted out from under a live, currently-
+  // reaping claimant.
+  const dir = tmpDir();
+  const path = writeSidecar(dir, `s1.json.reap-claim.${process.pid}.1700000000000`, {
+    pid: deadPid(), // the claimed target's own pid -- expected to be dead
+    sessionId: "s1",
+  });
+  const removed = sweepOrphanedSidecars(dir);
+  assert.deepEqual(removed, []);
+  assert.equal(existsSync(path), true);
+});
+
+test("sweepOrphanedSidecars keeps a mid-write .tmp file (unparseable content) as long as its FILENAME pid is alive", () => {
+  const dir = tmpDir();
+  const path = join(dir, `s1.json.${process.pid}.1700000000000.tmp`);
+  writeFileSync(path, '{"incomplete truncated conte'); // not valid JSON -- genuinely mid-write
   const removed = sweepOrphanedSidecars(dir);
   assert.deepEqual(removed, []);
   assert.equal(existsSync(path), true);
