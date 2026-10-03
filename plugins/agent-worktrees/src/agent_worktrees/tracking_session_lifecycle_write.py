@@ -123,6 +123,12 @@ def apply_session_link_succession(args: dict) -> dict:
         # value is separate repairable metadata (a later call correcting it,
         # e.g. handed-off -> concluded, for an otherwise-unchanged link must
         # still count as idempotent), so it is deliberately excluded here.
+        # The two-way link fields alone are NOT enough, though: some other
+        # mechanism could move the resolved head elsewhere later while
+        # leaving this stale pair's fields intact, so a replay of this exact
+        # pair genuinely moves head (and ownership) back -- also require the
+        # successor to already BE the live resolved head for this to count
+        # as a true no-op.
         pred = record.session_entry(predecessor_id)
         succ = record.session_entry(successor_id)
         already_linked = bool(
@@ -130,6 +136,7 @@ def apply_session_link_succession(args: dict) -> dict:
             and succ is not None
             and pred.successor == successor_id
             and succ.predecessor == predecessor_id
+            and record.resolved_head_session == successor_id
         )
         try:
             tracking.link_succession(

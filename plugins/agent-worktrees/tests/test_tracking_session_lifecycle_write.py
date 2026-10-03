@@ -231,6 +231,49 @@ def test_link_succession_feeds_claim_history_once_for_a_default_tokenless_retry(
     assert [e["event"] for e in events] == ["reassigned"]
 
 
+def test_link_succession_records_a_fresh_reassignment_after_head_moved_elsewhere(
+    record_path,
+):
+    """The two-way link fields alone are NOT a sufficient idempotency
+    signal: if some other mechanism moves the resolved head elsewhere
+    later while leaving this pair's predecessor.successor/
+    successor.predecessor fields intact, a replay of the SAME pair
+    genuinely moves head (and ownership) back to the successor -- that
+    must fire a second "reassigned" entry, not be suppressed as a no-op."""
+    from agent_worktrees import claim_history, obligations, tracking
+    from agent_worktrees.tracking import ResourceClaim
+
+    record = load_record(record_path)
+    record.sessions.append(SessionEntry("new", "2026-01-01T00:00:00"))
+    record.sessions.append(SessionEntry("third", "2026-01-01T00:00:00"))
+    record.resources = [
+        ResourceClaim(kind="pr", ref="o/r#1", state=obligations.ACTIVE),
+    ]
+    save_record(record, record_path)
+
+    args = {
+        "worktree_id": "wt-1",
+        "yaml_path": str(record_path),
+        "predecessor": "solo",
+        "successor": "new",
+        "predecessor_state": "handed-off",
+    }
+    result1 = tracking_session_lifecycle_write.apply_session_link_succession(args)
+    assert result1["ok"] is True
+
+    # Head moves elsewhere via some other mechanism, leaving the
+    # solo->new link fields themselves untouched.
+    record = load_record(record_path)
+    tracking._append_head_transition(record, "third", reason="test-rebind")
+    save_record(record, record_path)
+
+    result2 = tracking_session_lifecycle_write.apply_session_link_succession(args)
+    assert result2["ok"] is True
+
+    events = claim_history.history_for_ref("o/r#1")
+    assert [e["event"] for e in events] == ["reassigned", "reassigned"]
+
+
 def test_link_succession_feeds_claim_history_once_for_a_concluded_retry(
     record_path,
 ):
