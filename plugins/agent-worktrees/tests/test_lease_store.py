@@ -467,3 +467,40 @@ def test_squash_stale_dry_run_reports_without_pushing(
 
     assert report == [{"ref": released.ref, "old_oid": released.oid, "new_oid": ""}]
     assert remote_oid(remote, released.ref) == released.oid
+
+
+def test_squash_stale_skips_a_ref_reacquired_mid_sweep(
+    remote: Path, settings: LeaseSettings,
+) -> None:
+    """A concurrent `acquire()` racing in between `squash_stale`'s own
+    `list()` read and its push (another client re-acquiring the resource
+    right after it was released) must never be clobbered -- the push's own
+    compare-and-swap (the same `--force-with-lease` discipline every other
+    lease mutation uses) rejects it, and `squash_stale` skips that ref
+    gracefully rather than raising or corrupting the live lease."""
+    client = store(settings)
+    acquired = client.acquire("machine", "raced", "holder")
+    renewed = client.renew("machine", "raced", acquired.oid)
+    released = client.release("machine", "raced", renewed.oid)
+
+    later = store(settings, now=BASE + timedelta(days=60))
+    racer = store(settings, now=BASE + timedelta(days=60))
+    real_git = later._git
+    reacquired = {}
+
+    def _race_before_push(args, **kwargs):
+        if "push" in args and "--force-with-lease" in " ".join(args):
+            reacquired["snapshot"] = racer.acquire("machine", "raced", "new-holder")
+        return real_git(args, **kwargs)
+
+    later._git = _race_before_push  # type: ignore[method-assign]
+
+    report = later.squash_stale(retention_days=30)
+
+    assert report == []
+    assert "snapshot" in reacquired
+    live = later.inspect("machine", "raced")
+    assert live.record.state == "leased"
+    assert live.record.holder == "new-holder"
+    assert live.oid == reacquired["snapshot"].oid
+    assert remote_oid(remote, released.ref) == reacquired["snapshot"].oid
