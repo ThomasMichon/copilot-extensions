@@ -216,6 +216,24 @@ def test_doctor_fails_on_published_prereq_gap(monkeypatch, capsys):
     assert payload["plugin_alignment"]["published_prereq_gaps"] == [["some-plugin", "node"]]
 
 
+def test_doctor_remote_discovery_qualifies_success_as_membership_only(monkeypatch, capsys):
+    """Remote discovery (no local checkout) cannot run the published-prereq
+    check at all (model.coverage() needs ``find_repo_root()`` to find one) --
+    a clean report in that mode must say so rather than imply full
+    validation."""
+    from worktree_manager import doctor_cli, source_config
+
+    _patch_common(
+        monkeypatch, doctor_cli, source_config,
+        cov=_cov(source_kind="remote"),
+    )
+
+    assert wm.main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "no drift" in out
+    assert "published-prerequisite checks need a local checkout and were skipped" in out
+
+
 def test_doctor_unreachable_marketplace_does_not_fail_alignment(monkeypatch, capsys):
     from worktree_manager import doctor_cli, source_config
 

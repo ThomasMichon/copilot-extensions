@@ -62,10 +62,16 @@ def _print_alignment(cov) -> None:
         print("    ✗ a plugin publishes a prereq the catalog does not carry:")
         for plug, pr in cov.published_prereq_gaps:
             print(f"        - {plug}: {pr}")
+    remote_note = (
+        " (membership only — published-prerequisite checks need a local "
+        "checkout and were skipped)"
+        if cov.source_kind == "remote"
+        else ""
+    )
     if cov.ok and not cov.uncovered:
-        print("    ✓ every discovered plugin has an authored catalog entry; no drift.")
+        print(f"    ✓ every discovered plugin has an authored catalog entry; no drift{remote_note}.")
     elif cov.ok:
-        print("    ✓ no errors (uncovered plugins are handled by inference).")
+        print(f"    ✓ no errors (uncovered plugins are handled by inference){remote_note}.")
     print()
 
 
