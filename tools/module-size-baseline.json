@@ -95,6 +95,6 @@
   "worktree-manager/src/worktree_manager/__main__.py": 1841,
   "worktree-manager/src/worktree_manager/production_picker/picker_tui/data_ssh.py": 2196,
   "worktree-manager/src/worktree_manager/production_picker/picker_tui/derive.py": 1023,
-  "worktree-manager/src/worktree_manager/self_install.py": 1015,
+  "worktree-manager/src/worktree_manager/self_install.py": 1123,
   "worktree-manager/src/worktree_manager/terminal_fragment.py": 1256
 }

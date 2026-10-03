@@ -189,6 +189,52 @@ decorators (`rename`, `defer`, `code-mode`, `transform`, `storage`) also vanish;
 their fallback is the wider raw catalog and must be documented honestly. A raw
 `curl`/HTTP/product-API bypass is never this fallback.
 
+## Per-toolset ownership: consolidate CLI/REST alongside MCP, not just the MCP
+
+A domain/service agent's job is to be the **one** place the host reaches that
+toolset — not only its MCP server. Most real backends are reachable through
+more than one surface (an MCP server, a CLI like `az`/`gh`/`kubectl`, a REST
+API, a vendor SDK); when the agent wraps only the MCP tools and leaves the
+CLI/REST surface unclaimed, the primary agent (or another plugin) ends up
+calling that CLI directly for the exact same backend. That reintroduces the
+problem per-agent MCP ownership exists to solve: authenticated access and
+noisy round-trips back on the primary context, now through a second,
+unguarded path alongside the sub-agent's guarded one.
+
+**Design every domain agent to own the whole toolset, not one transport into
+it.** Concretely:
+
+- If the domain has a CLI (or REST surface) that reaches the **same** backend
+  the agent's MCP server wraps, document and drive that CLI **from inside the
+  agent** — the same write-safety rules (bounded writes, confirmation,
+  attribution, read-back) apply to a CLI-driven mutation exactly as they do to
+  an MCP-driven one. Don't let the CLI surface stay an implicit, undocumented
+  side door.
+- A direct caller-level CLI/REST call to that backend is a **fallback for the
+  owning agent's own unavailability** (its MCP catalog and materialized/
+  one-shot recovery paths all failed) — not a routine parallel path a caller
+  reaches for merely because a local credential or CLI happens to also work.
+  State this boundary explicitly in the agent's own doc, so callers and
+  reviewers have one place to check it.
+- When review finds the primary agent (or a different plugin) running that
+  domain's CLI directly as a matter of routine, that's a signal to **extend**
+  the owning agent to cover it — not to leave two co-equal paths into the same
+  backend.
+
+**Worked example (generic).** A domain agent that wraps an issue-tracker MCP
+server is the natural place to also drive that same tracker's CLI/REST calls
+reaching the identical backend — item creation, label updates, link
+verification, token minting for a downstream call. The agent's own doc states
+this scope explicitly (e.g. "the preferred path for this tracker's CLI/REST
+calls too, not just the MCP's own tools"), and a host-level direct CLI call to
+that backend is reserved for the agent being genuinely down, not a shortcut
+taken because a locally available credential/CLI happens to also work.
+
+This is a design posture, not (yet) a `reviewing-customizations` machine
+check — audit for it by reading a domain agent's actual scope against what
+CLI/REST surfaces exist for its backend, and by grepping the consuming repo
+for direct CLI calls to a backend an agent already owns.
+
 ## Anti-recursion and tool access
 
 Give agents `tools: ["*"]` (or omit the field) so they have full access to file

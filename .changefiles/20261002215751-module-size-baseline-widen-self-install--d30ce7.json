@@ -1,0 +1,9 @@
+{
+  "comment": "module-size-baseline: widen self_install.py to its current 1123 lines after #5000 (tracked for a proper split in #5016)",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}
