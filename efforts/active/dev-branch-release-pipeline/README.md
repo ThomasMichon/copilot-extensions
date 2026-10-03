@@ -655,8 +655,8 @@ Round 2 (operator's response to that evaluation):
     `agent-bridge machines --all-projects` for a registered `atlas-core`
     machine to drive this audit — not found in this harness's topology at
     all (9 real machines registered, none named `atlas-core`). The operator
-    confirmed `atlas-core` was a placeholder/leaked name from `aperture-labs`
-    config, not a real second harness-relevant workstation — the
+    confirmed `atlas-core` was a placeholder/leaked name from private
+    downstream-repository config, not a real second harness-relevant workstation — the
     prior Journal entry's reference to "this machine's (`atlas-core`)"
     local anchor checkout was a misattribution, not evidence of a second
     real machine actually carrying the stale-config hazard. No real second
@@ -2489,8 +2489,8 @@ Attempted to drive the "audit every machine for the stale-`default_branch:
 main` hazard" item and found `atlas-core` was never a real registered
 machine in this harness's topology (`agent-bridge machines --all-projects`
 lists 9 real machines, none named `atlas-core`). Operator confirmed
-`atlas-core` was a placeholder/leaked name from `aperture-labs` config,
-not a real second harness-relevant workstation — the prior
+`atlas-core` was a placeholder/leaked name from private downstream-
+repository config, not a real second harness-relevant workstation — the prior
 Journal entry's "this machine's (`atlas-core`)" phrasing was a
 misattribution. Closed the item rather than leaving it open against a
 machine that doesn't exist.
