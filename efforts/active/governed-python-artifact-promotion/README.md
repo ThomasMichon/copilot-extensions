@@ -570,16 +570,40 @@ win grows with build complexity.
   exists before treating the failure as benign, otherwise re-raising as
   `ArtifactBuildError` with the original cause. (4) a documentation-
   process finding: the prior Journal entry's arithmetic was wrong (100 + 8
-  ≠ 106; corrected to 100 + 6 = 106, matching the real measured count).
+  ? 106; corrected to 100 + 6 = 106, matching the real measured count).
   (5) the new module's own docstring baked in a PR/review-round reference
   -- corrected to describe only the timeless technical reason for the
   split, per `CONTRIBUTING.md`'s "describe current state, not review
   history" rule. 4 more unit tests (110 total). Re-verified for real:
   `agent-bridge` still builds correctly with the install now explicitly
-  pinned to this machine's governed index. This slice has now gone
-  through 8 automated review rounds, each finding genuine, progressively
-  narrower issues -- consistent with this effort's own documented review
-  history on its prior slice.
+  pinned to this machine's governed index.
+- A ninth review round found 3 more real issues: (1) `_is_public_pypi_url`/
+  `_url_host`/`_trusted_index_hosts` compared hostnames without
+  normalizing a legally-trailing root dot (`pypi.org.` is DNS-equivalent
+  to `pypi.org`, but a raw string comparison treated them as different),
+  letting that spelling bypass the public-PyPI denylist -- fixed with a
+  shared `_normalize_hostname` helper applied consistently everywhere a
+  hostname is compared. (2) `--no-config` only disables config FILES --
+  `uv` still honors `UV_EXTRA_INDEX_URL`/`UV_FIND_LINKS` from the
+  environment (confirmed common on this repo's own clean-room runners),
+  either of which could still supply `setuptools`/`wheel` from an
+  unvalidated source despite the explicit `--index-url`; fixed by adding
+  both to the stripped-variable list alongside the four already removed.
+  (3) `_assert_toolchain_satisfies_build_requires` looked up
+  `toolchain.packages.get(req.name)` directly, but PEP 508 names are
+  case-insensitive while `Requirement.name` preserves the source's own
+  literal spelling (`Setuptools>=90` would miss the lowercase `setuptools`
+  lock entry); separately, a genuinely applicable requirement for a
+  package this toolchain does NOT lock at all was silently treated as
+  satisfied, even though `--no-build-isolation` means nothing installs it
+  automatically. Fixed by canonicalizing both sides via
+  `packaging.utils.canonicalize_name` before lookup, and failing closed
+  (not skipping) when an applicable requirement names an unlocked
+  package. 6 more unit tests (113 total); re-verified for real against
+  `agent-bridge`. This slice has now gone through 9 automated review
+  rounds, each finding genuine, progressively narrower issues --
+  consistent with this effort's own documented review history on its
+  prior slice.
 - Real smoke test (not just mocked unit tests): built `agent-bridge` (10
   wheels) then `agent-worktrees` (its own wheel + vendored libs) against
   the SAME `--toolchain-venv` -- both manifests recorded the identical

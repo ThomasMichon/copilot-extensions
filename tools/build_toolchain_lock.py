@@ -192,6 +192,16 @@ _PUBLIC_PYPI_HOSTS = {"pypi.org", "pypi.python.org", "test.pypi.org"}
 _TRUSTED_INDEX_HOSTS_ENV_VAR = "BUILD_PYTHON_ARTIFACTS_TRUSTED_INDEX_HOSTS"
 
 
+def _normalize_hostname(host: str) -> str:
+    """Lowercases ``host`` and strips a single trailing root dot -- a
+    fully-qualified hostname may legally end in `.` (e.g. `pypi.org.`),
+    which DNS treats as identical to `pypi.org`, but a raw string/set
+    comparison would not -- letting that spelling bypass both the public-
+    PyPI denylist and the trust allowlist."""
+    host = host.lower()
+    return host[:-1] if host.endswith(".") else host
+
+
 def _is_public_pypi_url(url: str) -> bool:
     """Whether ``url`` resolves to a public PyPI-family index (production
     or Test PyPI) -- a feed configuration that NAMES one of these hosts,
@@ -200,19 +210,20 @@ def _is_public_pypi_url(url: str) -> bool:
         host = urllib.parse.urlsplit(url).hostname
     except ValueError:
         return False
-    return (host or "").lower() in _PUBLIC_PYPI_HOSTS
+    return _normalize_hostname(host or "") in _PUBLIC_PYPI_HOSTS
 
 
 def _url_host(url: str) -> str | None:
     try:
-        return urllib.parse.urlsplit(url).hostname
+        host = urllib.parse.urlsplit(url).hostname
     except ValueError:
         return None
+    return _normalize_hostname(host) if host else None
 
 
 def _trusted_index_hosts(env: dict) -> set[str]:
     raw = env.get(_TRUSTED_INDEX_HOSTS_ENV_VAR, "")
-    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+    return {_normalize_hostname(h.strip()) for h in raw.split(",") if h.strip()}
 
 
 def _effective_uv_toml_candidates(env: dict) -> list[Path]:
@@ -292,7 +303,7 @@ def _validated_trusted_index_url(env: dict) -> str | None:
     if not url or _is_public_pypi_url(url):
         return None
     host = _url_host(url)
-    if host is None or host.lower() not in trusted_hosts:
+    if host is None or host not in trusted_hosts:
         return None
     return url
 
@@ -383,13 +394,17 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
                     f"{result.stdout}\n{result.stderr}"
                 )
             staging_venv_python = _venv_python_path(staging_venv_dir)
-            # Strip any ambient SUPPLEMENTAL-index variable -- the install
-            # must consult ONLY the one validated URL, passed explicitly
-            # below, never whatever `uv` would otherwise additionally
-            # source from the environment or a project/user config file.
+            # Strip every ambient variable that could supply packages from
+            # somewhere other than the one validated URL below -- `--no-
+            # config` only disables config FILES; `uv` still honors these
+            # environment-based package sources (UV_EXTRA_INDEX_URL/
+            # UV_FIND_LINKS are flat-file/extra-index sources independent
+            # of the default-index machinery entirely, confirmed common on
+            # this repo's own clean-room runners).
             install_env = dict(env)
             for var in (
                 "UV_INDEX", "UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_CONFIG_FILE",
+                "UV_EXTRA_INDEX_URL", "UV_FIND_LINKS",
             ):
                 install_env.pop(var, None)
             install = subprocess.run(
@@ -495,9 +510,24 @@ def _assert_toolchain_satisfies_build_requires(
     can never substitute a different version to satisfy this itself, so
     this must be checked before the build runs, not discovered as a
     mysterious build failure (or, worse, a successful build against a
-    toolchain the source's own manifest says is insufficient)."""
+    toolchain the source's own manifest says is insufficient).
+
+    Also fails closed on any OTHER applicable requirement naming a
+    package this toolchain does not lock at all (anything outside
+    `setuptools`/`wheel`) -- `--no-build-isolation` means nothing installs
+    it automatically, so silently treating "not one of the packages we
+    lock" as "therefore satisfied" would let a genuinely unmet build
+    dependency through undetected. Package names are compared PEP 503-
+    canonicalized (case-insensitive, `-`/`_`/`.` runs collapsed) since
+    `Requirement.name` preserves the source's own literal spelling (e.g.
+    `Setuptools` must still match the locked `setuptools` entry)."""
     from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.utils import canonicalize_name
     from packaging.version import InvalidVersion, Version
+
+    locked_by_canonical_name = {
+        canonicalize_name(name): version for name, version in toolchain.packages.items()
+    }
 
     for raw in _read_build_system_requires(source_dir):
         try:
@@ -511,9 +541,16 @@ def _assert_toolchain_satisfies_build_requires(
             environment=toolchain.marker_environment
         ):
             continue  # this constraint does not apply in this environment
-        locked = toolchain.packages.get(req.name)
+        canonical_name = canonicalize_name(req.name)
+        locked = locked_by_canonical_name.get(canonical_name)
         if locked is None:
-            continue  # a requirement on a package this toolchain doesn't lock
+            raise ArtifactBuildError(
+                f"{source_dir}: declares an applicable build requirement "
+                f"{raw!r} for {req.name!r}, which this locked toolchain "
+                "does not pin at all -- --no-build-isolation means nothing "
+                "installs it automatically, so this cannot be verified as "
+                "satisfied"
+            )
         try:
             locked_version = Version(locked)
         except InvalidVersion as exc:
