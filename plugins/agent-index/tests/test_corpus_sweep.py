@@ -107,12 +107,51 @@ def test_explicit_commits_source_resolves_against_parent_repo(tmp_path, monkeypa
     by_name = {s.name: s for s in engine.configured_source_specs()}
 
     spec = engine._resolve_explicit_source_spec("git:copilot-extensions:commits", by_name)
-    assert spec.name == "git:copilot-extensions:commits"
+    # Resolved to the PARENT spec's own bare name -- not the ":commits" (never
+    # an independent source) that was requested. Correct for a git source
+    # (GitRepoConnector derives its own commit/file sub-source names from the
+    # resolved repo, not from this ``source`` string) and REQUIRED for a
+    # github source (see the github test below -- its ``source`` param IS
+    # parsed for owner/repo, so a leftover suffix breaks it outright).
+    assert spec.name == "git:copilot-extensions"
     assert engine._connector_kwargs(spec) == {
         "repo_path": str(ce),
         "ref": "origin/dev",
         "token": "tok-someacct",
     }
+
+
+def test_explicit_github_issues_or_pulls_source_resolves_against_parent(
+    tmp_path, monkeypatch
+) -> None:
+    """A direct ``--source github:owner/repo:issues`` (or ``:pulls``) request
+    must resolve to its PARENT ``github:owner/repo`` spec -- both sub-sources
+    are a BYPRODUCT one ``_iter_issue_timeline`` crawl emits together, never
+    independently configured. Critically, the connector must be constructed
+    with the BASE name: ``GitHubConnector._parse_source`` naively splits on
+    the first ``/``, so a lingering ``:issues``/``:pulls`` suffix parses as
+    part of the REPO name (``owner/repo:issues`` -> repo ``"repo:issues"``),
+    producing a malformed API URL and a 404 on every request -- confirmed live
+    across every configured github source when this was still unfixed."""
+    dotfiles, ce = _registry(tmp_path, monkeypatch)
+    _write(dotfiles / ".agent-index" / "config.yaml", """\
+        corpus:
+          sources:
+            - name: github:owner/dotfiles
+              type: github
+              repo: owner/dotfiles
+              auth: {account: someacct}
+    """)
+    monkeypatch.setattr(engine, "_resolve_gh_token", lambda account: f"tok-{account}")
+    by_name = {s.name: s for s in engine.configured_source_specs()}
+
+    for suffix in (":issues", ":pulls"):
+        spec = engine._resolve_explicit_source_spec(f"github:owner/dotfiles{suffix}", by_name)
+        assert spec.name == "github:owner/dotfiles", (
+            f"a {suffix} request must resolve to the PARENT's bare name, not keep "
+            "the suffix -- GitHubConnector parses `source` directly for owner/repo"
+        )
+        assert engine._connector_kwargs(spec) == {"token": "tok-someacct"}
 
 
 def test_unconfigured_commits_source_without_parent_raises(tmp_path, monkeypatch) -> None:
