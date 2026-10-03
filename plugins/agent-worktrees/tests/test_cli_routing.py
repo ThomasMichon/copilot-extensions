@@ -735,6 +735,21 @@ def test_forks_is_no_project_command():
     assert m._is_no_project_invocation(["forks", "set", "owner/repo", "--owner", "me"])
 
 
+@pytest.mark.guard
+def test_identifiers_sweep_with_explicit_repo_is_no_project_invocation():
+    """'identifiers sweep --repo NAME' names its own sweep target explicitly
+    and never consults CWD, so it must run from a neutral cwd (e.g. invoked
+    for a different repo entirely) without resolving a project first.
+
+    The bare form (no --repo) still auto-resolves its target from CWD via
+    cfg.active_project(), so 'identifiers' itself is deliberately NOT an
+    unconditional _NO_PROJECT_COMMANDS entry -- only this explicit-target
+    invocation shape is exempted."""
+    assert "identifiers" not in m._NO_PROJECT_COMMANDS
+    assert m._is_no_project_invocation(["identifiers", "sweep", "--repo", "copilot-extensions"])
+    assert not m._is_no_project_invocation(["identifiers", "sweep"])
+
+
 def test_forks_dispatch_runs_from_neutral_cwd_without_resolving_project(
     monkeypatch, tmp_path, capsys,
 ):

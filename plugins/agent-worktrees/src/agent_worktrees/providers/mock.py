@@ -206,6 +206,7 @@ class MockPRProvider:
     def merge_pull(
         self, repo: str, number: int, *, squash: bool = True, admin: bool = False,
         api_base: str = "", token: str | None = None,
+        delete_source_branch: bool = True,
     ) -> str:
         pr = self._get(repo, number)
         if pr.merged:
@@ -230,6 +231,7 @@ class MockPRProvider:
     def enable_auto_merge(
         self, repo: str, number: int, *, squash: bool = True,
         api_base: str = "", token: str | None = None,
+        delete_source_branch: bool = True,
     ) -> str:
         self._get(repo, number).auto_merge_armed = True
         return ""

@@ -1,11 +1,12 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/copilot-extensions-harness/cross-repo-debug-tracking.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.5-dev2","renderedBytes":2261,"schema":"copilot-extensions.instruction-projection","sourceId":"cross-repo-debug-tracking","template":"instructions/cross-repo-debug-tracking.instructions.md","templateBytes":1483,"templateSha256":"948fcb1fa052c62d0cc0c4f00a9e281b9822655773d9ca45dc191e4dbdbec1b3","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/copilot-extensions-harness/cross-repo-debug-tracking.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.5-dev2","renderedBytes":2315,"schema":"copilot-extensions.instruction-projection","sourceId":"cross-repo-debug-tracking","template":"instructions/cross-repo-debug-tracking.instructions.md","templateBytes":1483,"templateSha256":"948fcb1fa052c62d0cc0c4f00a9e281b9822655773d9ca45dc191e4dbdbec1b3","version":1} -->
 
-> If `cross-repo-debug-tracking.local.instructions.md` exists here, prefer it -- it reflects
-> the currently installed payload; this file reflects the last
-> synced-and-reviewed state.
+> If `cross-repo-debug-tracking.local.instructions.md` exists here, compare
+> `pluginVersion` and prefer whichever is newer. On a tie,
+> compare `templateSha256`: matching means prefer local;
+> differing means prefer this checked-in file.
 
 # Cross-repo debug tracking fallback
 

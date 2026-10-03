@@ -961,6 +961,44 @@ def test_proposed_task_retries_transient_approve_failure():
     ]
 
 
+def test_rehearsal_mode_parks_fully_bound_task_as_proposed():
+    provider = FakeProvider([_issue(1)])
+    client = FakeClient()
+
+    run_tick(
+        client,
+        _config(rehearsal_mode=True),
+        provider=provider,
+        clock=lambda: 10_000,
+    )
+    assert client.tasks[0]["status"] == "proposed"
+
+    # A second tick re-examines the same fully-bound proposed task and
+    # still never auto-approves it -- rehearsal_mode is a standing park,
+    # not a one-tick delay.
+    result = run_tick(
+        client,
+        _config(rehearsal_mode=True),
+        provider=provider,
+        clock=lambda: 10_001,
+    )
+
+    assert client.tasks[0]["status"] == "proposed"
+    assert result["reconciled_proposed"] == [
+        {"task_id": "task-1", "action": "awaiting-manual-approval"}
+    ]
+    # The forge-side reservation still binds for real (so the rehearsal is
+    # visibly real, not a no-op) -- only the task's own queue status parks.
+    assert [item[1] for item in provider.claimed] == ["task-1"]
+    reservation = next(iter(client.resource_reservations.values()))
+    assert reservation["task_id"] == "task-1"
+
+    # A human can still promote it explicitly -- rehearsal_mode only skips
+    # the *automatic* approval, never blocks a deliberate one.
+    approved = client.approve("task-1")
+    assert approved["status"] == "queued"
+
+
 def test_uncertain_abandon_retains_reservations_until_terminal_reread():
     provider = FakeProvider([_issue(1), _issue(2)])
     client = FakeClient(fail_bind_at=2, fail_abandon_once=True)
@@ -1784,6 +1822,16 @@ def test_validate_config_accepts_azure_devops_discovery_scope():
         "area_path": "example-project\\Team",
         "max_age_days": 180,
     }
+
+
+def test_validate_config_defaults_rehearsal_mode_false():
+    assert validate_config(_config())["rehearsal_mode"] is False
+    assert validate_config(_config(rehearsal_mode=True))["rehearsal_mode"] is True
+
+
+def test_validate_config_rejects_non_bool_rehearsal_mode():
+    with pytest.raises(RegistrarError, match="rehearsal_mode: expected true/false"):
+        validate_config(_config(rehearsal_mode="yes"))
 
 
 def test_validate_config_rejects_discovery_scope_for_github():

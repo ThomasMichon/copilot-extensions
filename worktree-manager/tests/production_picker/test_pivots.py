@@ -895,6 +895,51 @@ def test_create_action_rejects_blank_choice_options(tmp_path):
 
 
 @pytest.mark.guard
+def test_create_action_options_command_allows_omitted_static_options(tmp_path):
+    [p] = [pivots.parse_manifest(
+        {"label": "M", "list": ["x"], "create_action": {
+            "label": "New", "run": ["x"],
+            "fields": [{"name": "criteria", "type": "multichoice",
+                        "options_command": ["agent-dispatch", "registrar", "vocabulary"]}],
+        }},
+        name="m", source_path="x")]
+    field = p.create_action.fields[0]
+    assert field["options_command"] == ("agent-dispatch", "registrar", "vocabulary")
+    assert "options" not in field
+    # allow_other is auto-forced true -- a live-sourced field must always
+    # degrade to free text if its command fails or returns nothing.
+    assert field["allow_other"] is True
+
+
+@pytest.mark.guard
+def test_create_action_options_command_keeps_static_options_as_fallback(tmp_path):
+    [p] = [pivots.parse_manifest(
+        {"label": "M", "list": ["x"], "create_action": {
+            "label": "New", "run": ["x"],
+            "fields": [{"name": "criteria", "type": "choice",
+                        "options": ["low", "high"],
+                        "options_command": ["agent-dispatch", "registrar", "vocabulary"]}],
+        }},
+        name="m", source_path="x")]
+    field = p.create_action.fields[0]
+    assert field["options"] == ("low", "high")
+    assert field["options_command"] == ("agent-dispatch", "registrar", "vocabulary")
+
+
+@pytest.mark.guard
+def test_create_action_options_command_rejects_blank_argv(tmp_path):
+    for bad in ([], [""], "agent-dispatch", [1, "y"]):
+        with pytest.raises(pivots.ManifestError):
+            pivots.parse_manifest(
+                {"label": "M", "list": ["x"], "create_action": {
+                    "label": "New", "run": ["x"],
+                    "fields": [{"name": "criteria", "type": "multichoice",
+                                "options_command": bad}],
+                }},
+                name="m", source_path="x")
+
+
+@pytest.mark.guard
 def test_create_action_field_requires_name(tmp_path):
     with pytest.raises(pivots.ManifestError):
         pivots.parse_manifest(

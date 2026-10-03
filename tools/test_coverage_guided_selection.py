@@ -24,6 +24,7 @@ workflow_dispatch-only `coverage-guided-selection-integration` job.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -37,6 +38,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 from tools.coverage_guided_selection import baseline as baseline_mod  # noqa: E402
 from tools.coverage_guided_selection import correlation  # noqa: E402
 from tools.coverage_guided_selection import fallback, selection as select  # noqa: E402
+from tools.coverage_guided_selection import ancestor_resolution as ar
 
 
 def _synthetic_baseline() -> dict:
@@ -324,6 +326,124 @@ class TestCorrelation:
             correlation.require_measured_commit(baseline)
 
 
+class TestPlanChunks:
+    """Fast, pure-function tests for `_plan_chunks` -- no real subprocess."""
+
+    def test_small_suite_stays_a_single_unsplit_chunk(self, tmp_path: Path) -> None:
+        tests_dir = tmp_path / "tests"
+        tests_dir.mkdir()
+        for i in range(3):
+            (tests_dir / f"test_{i}.py").write_text("def test_x(): pass\n")
+
+        chunks = baseline_mod._plan_chunks(tmp_path, "tests", max_files_per_chunk=25)
+
+        # Exactly the original, unsplit `test_path` -- confirms collection
+        # behavior for every suite within the limit is bit-for-bit
+        # identical to before chunking existed.
+        assert chunks == [["tests"]]
+
+    def test_a_single_file_test_path_stays_a_single_chunk(self, tmp_path: Path) -> None:
+        chunks = baseline_mod._plan_chunks(
+            tmp_path, "tests/test_one.py", max_files_per_chunk=25
+        )
+        assert chunks == [["tests/test_one.py"]]
+
+    def test_large_suite_splits_into_bounded_chunks(self, tmp_path: Path) -> None:
+        tests_dir = tmp_path / "tests"
+        tests_dir.mkdir()
+        names = [f"test_{i:02d}.py" for i in range(7)]
+        for name in names:
+            (tests_dir / name).write_text("def test_x(): pass\n")
+
+        chunks = baseline_mod._plan_chunks(tmp_path, "tests", max_files_per_chunk=3)
+
+        assert [len(c) for c in chunks] == [3, 3, 1]
+        # Every discovered file appears in exactly one chunk, and chunk
+        # order matches sorted discovery order (stable, reproducible
+        # chunking across runs).
+        flattened = [path for chunk in chunks for path in chunk]
+        assert flattened == sorted(f"tests/{name}" for name in names)
+
+    def test_large_suite_includes_both_default_pytest_filename_patterns(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression test: pytest's own default collection matches BOTH
+        # `test_*.py` and `*_test.py` -- a suite large enough to chunk must
+        # not silently drop files matching the second pattern just because
+        # it crossed the threshold (a suite below the threshold passes the
+        # whole directory straight to pytest, which already finds both).
+        tests_dir = tmp_path / "tests"
+        tests_dir.mkdir()
+        names = [f"test_{i:02d}.py" for i in range(6)] + ["extra_test.py"]
+        for name in names:
+            (tests_dir / name).write_text("def test_x(): pass\n")
+
+        chunks = baseline_mod._plan_chunks(tmp_path, "tests", max_files_per_chunk=3)
+
+        flattened = {path for chunk in chunks for path in chunk}
+        assert flattened == {f"tests/{name}" for name in names}
+
+    def test_large_suite_outside_cwd_keeps_absolute_paths(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression test: a test_path outside cwd entirely (e.g. a shared
+        # test directory) must keep working once it's large enough to
+        # chunk, not raise ValueError from an impossible relative_to(cwd)
+        # -- a suite below the threshold passes the whole (possibly
+        # absolute, possibly out-of-tree) test_path straight through
+        # unmodified, so chunking must preserve that same tolerance.
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        external_tests = tmp_path / "shared-tests"
+        external_tests.mkdir()
+        names = [f"test_{i:02d}.py" for i in range(5)]
+        for name in names:
+            (external_tests / name).write_text("def test_x(): pass\n")
+
+        chunks = baseline_mod._plan_chunks(
+            cwd, str(external_tests), max_files_per_chunk=2
+        )
+
+        flattened = {path for chunk in chunks for path in chunk}
+        assert flattened == {str(external_tests / name) for name in names}
+
+
+class TestMergeChunkResults:
+    """Fast, pure-function tests for `_merge_chunk_results` -- no real
+    subprocess."""
+
+    def test_durations_union_across_chunks(self) -> None:
+        chunks = [
+            {"durations": {"tests/test_a.py::test_1": 0.1}, "coverage": {}},
+            {"durations": {"tests/test_b.py::test_2": 0.2}, "coverage": {}},
+        ]
+        merged = baseline_mod._merge_chunk_results(chunks)
+        assert merged["durations"] == {
+            "tests/test_a.py::test_1": 0.1,
+            "tests/test_b.py::test_2": 0.2,
+        }
+
+    def test_coverage_lines_union_when_a_shared_file_spans_chunks(self) -> None:
+        # A shared helper module touched by tests from two different
+        # chunks must have both chunks' own attributed tests present on
+        # the same line, not one silently clobbering the other.
+        chunks = [
+            {
+                "durations": {},
+                "coverage": {"src/helper.py": {"10": ["tests/test_a.py::test_1"]}},
+            },
+            {
+                "durations": {},
+                "coverage": {"src/helper.py": {"10": ["tests/test_b.py::test_2"]}},
+            },
+        ]
+        merged = baseline_mod._merge_chunk_results(chunks)
+        assert merged["coverage"]["src/helper.py"]["10"] == [
+            "tests/test_a.py::test_1",
+            "tests/test_b.py::test_2",
+        ]
+
+
 class TestBaselineCollectionErrorContract:
     """Fast, mocked tests for the two non-clean collection outcomes --
     neither spawns a real subprocess, so both run in the always-on
@@ -377,13 +497,15 @@ class TestBaselineCollectionErrorContract:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         # Mocked, no real subprocess: the driver's own out-file argument is
-        # the 6th positional arg after the driver script path (see
-        # _DRIVER_SCRIPT's own argv unpacking), so a fake "subprocess" just
-        # has to write valid merged JSON there and report success.
+        # the 6th of 7 positional args after the driver script path (see
+        # _DRIVER_SCRIPT's own argv unpacking: test_paths, cov_source, cwd,
+        # cov_data_file, json_report_file, out_file, basetemp), so a fake
+        # "subprocess" just has to write valid merged JSON there and
+        # report success.
         import json as json_module
 
         def _fake_run(args, **kwargs):
-            out_file = Path(args[-1])
+            out_file = Path(args[-2])
             out_file.write_text(
                 json_module.dumps({"durations": {}, "coverage": {}})
             )
@@ -604,3 +726,501 @@ def test_collect_baseline_with_project_dir_resolves_real_plugin_dependencies() -
         for tests in file_coverage.values():
             for test_id in tests:
                 assert test_id in result["tests"]
+
+
+def test_collect_baseline_chunks_a_large_suite_and_merges_the_results(
+    tmp_path: Path,
+) -> None:
+    # Real, opt-in end-to-end proof of the chunking fix this effort's
+    # agent-mcp enrollment surfaced the need for: constructs a synthetic
+    # suite larger than `max_files_per_chunk` (forced down to 2 here, so
+    # this stays fast) with a module shared across every test file, and
+    # confirms `collect_baseline` genuinely runs more than one pytest
+    # process (not just one covering everything) yet still returns a
+    # single, correctly merged baseline -- every test's own duration
+    # present, and the shared module's coverage attributed to tests from
+    # every chunk, not just whichever chunk happened to run first.
+    if os.environ.get("CGS_RUN_INTEGRATION_TEST") != "1":
+        pytest.skip(
+            "opt-in only: set CGS_RUN_INTEGRATION_TEST=1 to run the real "
+            "uv/coverage subprocess integration test"
+        )
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "__init__.py").write_text("")
+    (src_dir / "shared.py").write_text(
+        "def shared_line():\n    return 'touched by every chunk'\n"
+    )
+
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    test_names = [f"test_chunk_{i}.py" for i in range(5)]
+    for name in test_names:
+        (tests_dir / name).write_text(
+            "import sys\n"
+            "sys.path.insert(0, str((__import__('pathlib').Path(__file__)."
+            "parent.parent / 'src')))\n"
+            "from shared import shared_line\n"
+            "\n\n"
+            f"def test_{name[:-3]}():\n"
+            "    assert shared_line()\n"
+        )
+
+    result = baseline_mod.collect_baseline(
+        cwd=tmp_path,
+        test_path="tests",
+        cov_source="src",
+        plugin="chunking-regression",
+        timeout_s=60.0,
+        max_files_per_chunk=2,
+    )
+
+    assert len(result["tests"]) == len(test_names), (
+        "every test across every chunk must round-trip into the merged "
+        "duration map"
+    )
+    shared_file = "src/shared.py"
+    assert shared_file in result["coverage"]
+    attributed_tests = {
+        test_id
+        for tests in result["coverage"][shared_file].values()
+        for test_id in tests
+    }
+    assert len(attributed_tests) == len(test_names), (
+        "the shared module's coverage must be attributed to a test from "
+        f"every chunk, not just one; got {sorted(attributed_tests)!r}"
+    )
+
+
+def test_collect_baseline_survives_a_real_spawn_based_multiprocessing_child(
+    tmp_path: Path,
+) -> None:
+    # Regression test for a real failure this effort's agent-worktrees
+    # enrollment surfaced: `_DRIVER_SCRIPT` used to call `pytest.main(...)`
+    # unguarded at module scope. A plugin's own tests may spawn a real
+    # child process via `multiprocessing.get_context("spawn")` (e.g. to
+    # test genuine cross-process file-lock contention) -- `spawn`
+    # bootstraps a fresh interpreter that re-imports the driver script as
+    # a plain module (not `__main__`) to reconstruct its pickled target,
+    # which re-executed `pytest.main(...)` unconditionally and tripped
+    # multiprocessing's own bootstrap-safety guard ("An attempt has been
+    # made to start a new process before the current process has finished
+    # its bootstrapping phase"), killing the spawned child before it ever
+    # ran its real target -- and the doomed re-execution's own
+    # half-started pytest-cov instance corrupted the real coverage data
+    # file the parent was still writing to. Constructs a throwaway suite
+    # with a real `spawn`-context child (mirroring the real failure, not
+    # just a synthetic unit test of the guard itself) to confirm the fix
+    # holds end to end.
+    if os.environ.get("CGS_RUN_INTEGRATION_TEST") != "1":
+        pytest.skip(
+            "opt-in only: set CGS_RUN_INTEGRATION_TEST=1 to run the real "
+            "uv/coverage subprocess integration test"
+        )
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "__init__.py").write_text("")
+
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "__init__.py").write_text("")
+    (tests_dir / "test_spawn_child.py").write_text(
+        "import multiprocessing\n"
+        "\n\n"
+        "def _child_target(ready_path):\n"
+        "    with open(ready_path, 'w', encoding='utf-8') as fh:\n"
+        "        fh.write('ok')\n"
+        "\n\n"
+        "def test_real_spawn_child_completes(tmp_path):\n"
+        "    ready = tmp_path / 'ready'\n"
+        "    ctx = multiprocessing.get_context('spawn')\n"
+        "    proc = ctx.Process(target=_child_target, args=(str(ready),))\n"
+        "    proc.start()\n"
+        "    proc.join(timeout=30)\n"
+        "    assert proc.exitcode == 0, (\n"
+        "        f'spawned child must exit cleanly, got {proc.exitcode}'\n"
+        "    )\n"
+        "    assert ready.read_text(encoding='utf-8') == 'ok'\n"
+    )
+
+    result = baseline_mod.collect_baseline(
+        cwd=tmp_path,
+        test_path="tests",
+        cov_source="src",
+        plugin="spawn-regression",
+        timeout_s=60.0,
+    )
+
+    assert any(
+        "test_real_spawn_child_completes" in nodeid for nodeid in result["tests"]
+    )
+
+
+def _run_git(args: list, cwd: Path) -> subprocess.CompletedProcess:
+    # Scrub ambient Git repository-selection variables (GIT_DIR,
+    # GIT_WORK_TREE, etc.) before layering on test author identity --
+    # otherwise a runner/harness that happens to set one of these isolates
+    # these "independent" throwaway test repos a lot less than their own
+    # fresh `tmp_path` cwd implies, since such a variable silently overrides
+    # `cwd` for every git invocation below. Matches the production
+    # convention in `ancestor_resolution.scrubbed_git_env` /
+    # `agent_worktrees.git_ops`.
+    env = ar.scrubbed_git_env()
+    env.update({
+        "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
+        "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com",
+    })
+    proc = subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, env=env, check=False,
+    )
+    assert proc.returncode == 0, f"git {args} failed: {proc.stderr}"
+    return proc
+
+
+def _init_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _run_git(["init", "-q", "-b", "dev"], cwd=repo)
+    _run_git(["config", "user.name", "Test"], cwd=repo)
+    _run_git(["config", "user.email", "test@example.com"], cwd=repo)
+    return repo
+
+
+def _commit(repo: Path, message: str) -> str:
+    _run_git(["add", "-A"], cwd=repo)
+    _run_git(["commit", "-q", "-m", message], cwd=repo)
+    return _run_git(["rev-parse", "HEAD"], cwd=repo).stdout.strip()
+
+
+class TestIsAncestor:
+    def test_true_for_a_real_ancestor(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+        (repo / "a.txt").write_text("1\n2\n")
+        c2 = _commit(repo, "second")
+        assert ar.is_ancestor(repo, c1, c2) is True
+
+    def test_false_for_a_non_ancestor(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+        _run_git(["checkout", "-q", "-b", "side", c1], cwd=repo)
+        (repo / "b.txt").write_text("x\n")
+        c2 = _commit(repo, "side commit")
+        _run_git(["checkout", "-q", "dev"], cwd=repo)
+        (repo / "a.txt").write_text("1\n2\n")
+        c3 = _commit(repo, "dev commit")
+        assert ar.is_ancestor(repo, c2, c3) is False
+
+    def test_a_commit_is_its_own_ancestor(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+        assert ar.is_ancestor(repo, c1, c1) is True
+
+    def test_raises_for_an_unreachable_commit(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+        with pytest.raises(ar.AncestorResolutionError):
+            ar.is_ancestor(repo, "0" * 40, c1)
+
+
+class TestResolveNearestBaseline:
+    def test_finds_the_newest_qualifying_generation(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        # A sequence of dev-side commits to serve as measured_commit values
+        # and as the fork point.
+        (repo / "src.py").write_text("line1\n")
+        dev_c1 = _commit(repo, "dev c1")
+        (repo / "src.py").write_text("line1\nline2\n")
+        dev_c2 = _commit(repo, "dev c2")
+        (repo / "src.py").write_text("line1\nline2\nline3\n")
+        dev_c3 = _commit(repo, "dev c3")
+
+        # main branch carries 3 baseline generations, oldest to newest,
+        # each measured against one of the dev commits above.
+        _run_git(["checkout", "-q", "-b", "main"], cwd=repo)
+        baseline_path = repo / ".github" / "coverage-baselines" / "myplugin.json"
+        baseline_path.parent.mkdir(parents=True)
+        baseline_path.write_text(json.dumps({"measured_commit": dev_c1, "coverage": {}}))
+        _commit(repo, "baseline gen 1")
+        baseline_path.write_text(json.dumps({"measured_commit": dev_c2, "coverage": {}}))
+        _commit(repo, "baseline gen 2")
+        baseline_path.write_text(json.dumps({"measured_commit": dev_c3, "coverage": {}}))
+        gen3_commit = _commit(repo, "baseline gen 3")
+
+        # A fork point between dev_c2 and dev_c3 (a PR branched before the
+        # newest baseline generation was ever measured).
+        _run_git(["checkout", "-q", "-b", "pr", dev_c2], cwd=repo)
+        (repo / "pr_only.py").write_text("x\n")
+        fork_commit = _commit(repo, "pr commit")
+
+        resolved = ar.resolve_nearest_baseline(repo, "myplugin", fork_commit, main_ref="main")
+        assert resolved is not None
+        assert resolved.baseline["measured_commit"] == dev_c2
+        assert resolved.baseline_commit != gen3_commit
+
+    def test_returns_none_when_no_generation_qualifies(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "src.py").write_text("line1\n")
+        dev_c1 = _commit(repo, "dev c1")
+
+        # A real commit that exists in the repo but sits on a disjoint
+        # side branch -- genuinely reachable (so merge-base can answer),
+        # just not an ancestor of the fork point below.
+        _run_git(["checkout", "-q", "-b", "unrelated", dev_c1], cwd=repo)
+        (repo / "side.py").write_text("x\n")
+        unrelated_commit = _commit(repo, "unrelated side commit")
+
+        _run_git(["checkout", "-q", "-b", "main", dev_c1], cwd=repo)
+        baseline_path = repo / ".github" / "coverage-baselines" / "myplugin.json"
+        baseline_path.parent.mkdir(parents=True)
+        baseline_path.write_text(
+            json.dumps({"measured_commit": unrelated_commit, "coverage": {}})
+        )
+        _commit(repo, "baseline gen 1")
+
+        _run_git(["checkout", "-q", "-b", "pr", dev_c1], cwd=repo)
+        fork_commit = dev_c1
+
+        resolved = ar.resolve_nearest_baseline(repo, "myplugin", fork_commit, main_ref="main")
+        assert resolved is None
+
+    def test_returns_none_when_baseline_file_never_existed(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "src.py").write_text("line1\n")
+        c1 = _commit(repo, "only commit")
+        resolved = ar.resolve_nearest_baseline(repo, "nope", c1, main_ref="dev")
+        assert resolved is None
+
+
+class TestComputeFileRemap:
+    def test_unchanged_file(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n2\n3\n")
+        (repo / "b.txt").write_text("x\n")
+        c1 = _commit(repo, "first")
+        (repo / "b.txt").write_text("y\n")
+        c2 = _commit(repo, "second")
+        result = ar.compute_file_remap(repo, "a.txt", c1, c2)
+        assert result.status == "unchanged"
+
+    def test_pure_insertion_invalidates_lines_after_the_insertion_point(self, tmp_path):
+        """A pure line-coordinate shift proves nothing about *execution* --
+        inserted code can introduce new control flow (an early `return`,
+        a new guard clause) that causes a test which used to reach a line
+        to no longer reach it, even though the line number itself
+        translates cleanly. So a preceding insertion must invalidate
+        (return None), never silently remap."""
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n2\n3\n")
+        c1 = _commit(repo, "first")
+        (repo / "a.txt").write_text("1\nNEW\n2\n3\n")
+        c2 = _commit(repo, "insert a line")
+        result = ar.compute_file_remap(repo, "a.txt", c1, c2)
+        assert result.status == "remapped"
+        # old line 1 sits strictly before the insertion -- still safe.
+        assert ar.remap_line(1, result.hunks) == 1
+        # old lines 2/3 sit after the insertion -- conservatively dropped,
+        # NOT remapped to their shifted positions (3/4), since nothing
+        # about hunk lengths proves the insertion was execution-neutral.
+        assert ar.remap_line(2, result.hunks) is None
+        assert ar.remap_line(3, result.hunks) is None
+
+    def test_control_flow_changing_insertion_before_a_covered_line_is_invalidated(
+        self, tmp_path,
+    ):
+        """Inserting an early guard clause/return before a
+        previously-covered line must not carry that line's old attribution
+        forward, even though the line number itself maps cleanly to a new
+        position."""
+        repo = _init_repo(tmp_path)
+        (repo / "f.py").write_text(
+            "def handler(x):\n"
+            "    do_setup()\n"
+            "    return process(x)\n"  # old line 3 -- covered below
+        )
+        old_commit = _commit(repo, "baseline measured here")
+        (repo / "f.py").write_text(
+            "def handler(x):\n"
+            "    do_setup()\n"
+            "    if not x:\n"
+            "        return None\n"  # a NEW early exit inserted above
+            "    return process(x)\n"
+        )
+        fork_commit = _commit(repo, "insert an early-exit guard clause")
+
+        baseline = {
+            "measured_commit": old_commit,
+            "coverage": {"f.py": {"3": ["test_handler_with_x"]}},
+        }
+        resolved = ar.ResolvedBaseline(baseline=baseline, baseline_commit=old_commit)
+        result = ar.remap_or_invalidate_baseline(repo, resolved, fork_commit)
+
+        # The old covered line's attribution must NOT survive as a
+        # confident remap to the new line 5 -- the whole file is dropped
+        # (its only covered line had nothing safely attributable left).
+        assert "f.py" not in result["coverage"]
+        assert result["remap_invalidated_files"] == ["f.py"]
+
+    def test_pure_deletion_is_remapped_and_drops_removed_lines(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n2\n3\n4\n")
+        c1 = _commit(repo, "first")
+        (repo / "a.txt").write_text("1\n4\n")
+        c2 = _commit(repo, "delete two lines")
+        result = ar.compute_file_remap(repo, "a.txt", c1, c2)
+        assert result.status == "remapped"
+        assert ar.remap_line(1, result.hunks) == 1
+        assert ar.remap_line(2, result.hunks) is None  # deleted
+        assert ar.remap_line(3, result.hunks) is None  # deleted
+        assert ar.remap_line(4, result.hunks) == 2
+
+    def test_cumulative_shift_across_several_real_intervening_deletion_commits(
+        self, tmp_path,
+    ):
+        """The Validation Plan's own required shape: baseline measured here
+        -> several real, separate line-shifting commits -> fork point.
+        `compute_file_remap` diffs directly between the two endpoints
+        (never walking or applying each intervening commit one at a time),
+        so this also confirms that approach produces the same cumulative
+        result a step-by-step replay would. Uses deletions (not
+        insertions) throughout: only a preceding deletion is safely
+        remappable under the asymmetric insertion/deletion policy above."""
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n2\n3\n4\n5\n6\n7\n")
+        baseline_commit = _commit(repo, "baseline measured here")
+
+        # Commit 2: delete old line 2.
+        (repo / "a.txt").write_text("1\n3\n4\n5\n6\n7\n")
+        _commit(repo, "intervening commit 1: delete old line 2")
+
+        # Commit 3: delete two more lines (old lines 3 and 4) -- a second,
+        # independent real commit, not folded into commit 2's own diff.
+        (repo / "a.txt").write_text("1\n5\n6\n7\n")
+        _commit(repo, "intervening commit 2: delete two more lines")
+
+        # Commit 4 (the fork point): delete what was originally old line 7.
+        (repo / "a.txt").write_text("1\n5\n6\n")
+        fork_commit = _commit(repo, "fork point: delete the old last line")
+
+        result = ar.compute_file_remap(repo, "a.txt", baseline_commit, fork_commit)
+        assert result.status == "remapped"
+
+        # Hand-computed expected mapping from the baseline's old line
+        # numbers (1-7) to the fork point's new line numbers, reflecting
+        # the CUMULATIVE effect of all three intervening deletion commits
+        # combined: old 1 -> new 1 ("1"); old lines 2-4 were each deleted
+        # by one of the three commits -> None; old 5 -> new 2 ("5", 3
+        # lines removed ahead of it); old 6 -> new 3; old 7 was deleted by
+        # the fork-point commit itself -> None.
+        assert ar.remap_line(1, result.hunks) == 1
+        assert ar.remap_line(2, result.hunks) is None
+        assert ar.remap_line(3, result.hunks) is None
+        assert ar.remap_line(4, result.hunks) is None
+        assert ar.remap_line(5, result.hunks) == 2
+        assert ar.remap_line(6, result.hunks) == 3
+        assert ar.remap_line(7, result.hunks) is None
+
+    def test_content_replacement_is_invalid(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n2\n3\n")
+        c1 = _commit(repo, "first")
+        (repo / "a.txt").write_text("1\nCHANGED\n3\n")
+        c2 = _commit(repo, "replace a line")
+        result = ar.compute_file_remap(repo, "a.txt", c1, c2)
+        assert result.status == "invalid"
+
+    def test_mixed_insertion_and_replacement_is_invalid(self, tmp_path):
+        """A file can have one hunk that's a pure insertion and another
+        that's a real replacement -- the whole file must still invalidate,
+        not just the replaced hunk's range."""
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n")
+        c1 = _commit(repo, "first")
+        (repo / "a.txt").write_text("1\nNEW\n2\n3\n4\n5\n6\n7\nCHANGED\n9\n10\n")
+        c2 = _commit(repo, "insert then replace")
+        result = ar.compute_file_remap(repo, "a.txt", c1, c2)
+        assert result.status == "invalid"
+
+    def test_binary_file_change_with_no_parsed_hunks_is_invalid(self, tmp_path):
+        """A nonempty diff isn't always textual: a binary file change
+        produces `Binary files ... differ` with no `@@` hunks at all.
+        Treating "no hunks parsed" the same as "unchanged" would silently
+        carry every old attribution forward across a real, unparsed
+        change -- this must invalidate instead."""
+        repo = _init_repo(tmp_path)
+        (repo / "a.bin").write_bytes(b"\x00\x01\x02")
+        c1 = _commit(repo, "first")
+        (repo / "a.bin").write_bytes(b"\xff\xfe\xfd")
+        c2 = _commit(repo, "change binary content")
+        result = ar.compute_file_remap(repo, "a.bin", c1, c2)
+        assert result.status == "invalid"
+
+
+class TestRemapOrInvalidateBaseline:
+    def test_full_integration_across_three_files(self, tmp_path):
+        """One untouched file, one cleanly-shiftable (deletion-only) file,
+        one content-replaced file -- in the same remap pass."""
+        repo = _init_repo(tmp_path)
+        (repo / "unchanged.py").write_text("a\nb\n")
+        (repo / "shifted.py").write_text("1\n2\n3\n")
+        (repo / "replaced.py").write_text("x\ny\nz\n")
+        old_commit = _commit(repo, "baseline measured here")
+
+        (repo / "shifted.py").write_text("2\n3\n")  # delete old line 1
+        (repo / "replaced.py").write_text("x\nCHANGED\nz\n")
+        fork_commit = _commit(repo, "fork point")
+
+        baseline = {
+            "measured_commit": old_commit,
+            "coverage": {
+                "unchanged.py": {"1": ["test_u"]},
+                "shifted.py": {"2": ["test_s"], "3": ["test_s2"]},
+                "replaced.py": {"2": ["test_r"]},
+            },
+        }
+        resolved = ar.ResolvedBaseline(baseline=baseline, baseline_commit=old_commit)
+        result = ar.remap_or_invalidate_baseline(repo, resolved, fork_commit)
+
+        assert result["coverage"]["unchanged.py"] == {"1": ["test_u"]}
+        assert result["coverage"]["shifted.py"] == {"1": ["test_s"], "2": ["test_s2"]}
+        assert "replaced.py" not in result["coverage"]
+        assert result["remap_invalidated_files"] == ["replaced.py"]
+        assert result["remapped_to_commit"] == fork_commit
+        assert result["measured_commit"] == old_commit  # provenance preserved
+
+    def test_a_file_whose_only_covered_lines_were_deleted_is_invalidated(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "f.py").write_text("1\n2\n3\n")
+        old_commit = _commit(repo, "baseline measured here")
+        (repo / "f.py").write_text("1\n3\n")  # deletes line 2
+        fork_commit = _commit(repo, "delete the only covered line")
+
+        baseline = {
+            "measured_commit": old_commit,
+            "coverage": {"f.py": {"2": ["only_test"]}},
+        }
+        resolved = ar.ResolvedBaseline(baseline=baseline, baseline_commit=old_commit)
+        result = ar.remap_or_invalidate_baseline(repo, resolved, fork_commit)
+
+        assert "f.py" not in result["coverage"]
+        assert result["remap_invalidated_files"] == ["f.py"]
+
+    def test_does_not_mutate_the_input_baseline(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "f.py").write_text("1\n2\n")
+        old_commit = _commit(repo, "c1")
+        fork_commit = old_commit  # no changes at all
+
+        baseline = {"measured_commit": old_commit, "coverage": {"f.py": {"1": ["t"]}}}
+        resolved = ar.ResolvedBaseline(baseline=baseline, baseline_commit=old_commit)
+        ar.remap_or_invalidate_baseline(repo, resolved, fork_commit)
+
+        assert baseline == {"measured_commit": old_commit, "coverage": {"f.py": {"1": ["t"]}}}
+
+

@@ -87,6 +87,25 @@ def test_probe_command_uses_nullglob():
     assert "nullglob" in cl.probe_command()
 
 
+def test_probe_command_scans_dotfiles_by_default():
+    # Regression: /workspaces/* alone (even with nullglob) never matches the
+    # dot-prefixed dotfiles checkout -- bash's default pathname expansion
+    # skips any name beginning with '.' unless dotglob is set, which this
+    # probe does not enable. The dotfiles dir must appear as an explicit extra
+    # scan target instead.
+    cmd = cl.probe_command()
+    assert f"{cl.config.DOTFILES_DIR}/.git" in cmd
+
+
+def test_probe_command_extra_dirs_is_overridable_and_omittable():
+    cmd = cl.probe_command(extra_dirs=("/custom/extra",))
+    assert "/custom/extra/.git" in cmd
+    assert cl.config.DOTFILES_DIR not in cmd
+
+    cmd_none = cl.probe_command(extra_dirs=())
+    assert cl.config.DOTFILES_DIR not in cmd_none
+
+
 # ── parse_probe ──────────────────────────────────────────────────────────────
 
 def test_parse_clean_output():

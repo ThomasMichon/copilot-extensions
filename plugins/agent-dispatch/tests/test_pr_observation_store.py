@@ -22,6 +22,7 @@ def _observation(
     holds: frozenset[HoldReason] = frozenset(),
     diff_hash: str = "diff-1",
     base_sha: str = "base-1",
+    last_commit_at: float | None = 1234.0,
 ) -> PRObservation:
     return PRObservation(
         number=number,
@@ -29,6 +30,7 @@ def _observation(
         mergeability=mergeability,
         holds=holds,
         revision=Revision(diff_hash=diff_hash, base_sha=base_sha),
+        last_commit_at=last_commit_at,
     )
 
 

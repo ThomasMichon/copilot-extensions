@@ -488,12 +488,41 @@ class PickerScreenPivotActionsMixin:
         picker-new-session-prompt-and-composer) -- the registered-pivot
         counterpart to ``_open_pivot_form``, minus the row/card: there is no
         selected entry to resolve fields/tokens against, so ``fields`` comes
-        straight from the manifest's own static ``create_action.fields``."""
+        straight from the manifest's own static ``create_action.fields``,
+        except any field declaring ``options_command`` (Phase B item 3): that
+        field's ``options`` are instead resolved live, off the render flow,
+        right before the modal opens -- see :meth:`_open_create_action_now`."""
         reg = self._reg_pivot()
         if reg is None or reg.create_action is None:
             return
         action = reg.create_action
+        fields = list(action.fields)
+        if not any(f.get("options_command") for f in fields):
+            self._open_create_action_now(reg, action, fields)
+            return
 
+        from . import tasks
+
+        def _work():
+            resolved = []
+            for f in fields:
+                cmd = f.get("options_command")
+                if not cmd:
+                    resolved.append(f)
+                    continue
+                live = tasks.resolve_dynamic_options(cmd)
+                merged = dict(f)
+                if live:
+                    merged["options"] = live
+                resolved.append(merged)
+            return resolved
+
+        def _done(resolved_fields):
+            self._open_create_action_now(reg, action, resolved_fields)
+
+        self._run_bg(f"{action.label} · loading options", _work, _done, quiet=True)
+
+    def _open_create_action_now(self, reg, action, fields):
         def _after(values):
             if values is None:
                 self.debug = f"{action.label} · cancelled"
@@ -501,7 +530,7 @@ class PickerScreenPivotActionsMixin:
             self._run_create_action(reg, action, values)
 
         self.app.push_screen(
-            CreateActionScreen(action.label, list(action.fields), confirm=action.confirm),
+            CreateActionScreen(action.label, fields, confirm=action.confirm),
             _after,
         )
     def _run_create_action(self, reg, action, values):

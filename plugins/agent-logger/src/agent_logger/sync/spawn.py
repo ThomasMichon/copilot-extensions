@@ -94,13 +94,13 @@ def _detach_kwargs() -> dict:
     return {**detached_kwargs(), "close_fds": True}
 
 
-def spawn_detached_sync(cfg, *, prune: bool = False) -> int:
+def spawn_detached_sync(cfg, *, prune: bool = False, full: bool = False) -> int:
     """Stage the package and launch a detached child that runs one sync pass.
 
     Returns quickly (0) after spawning. Dedupes against an in-flight sync via a
     non-blocking probe of the push lock. The launched child runs
-    ``agent_logger.sync.engine run [--prune]`` from the staged copy with a
-    neutral cwd; it removes its staging dir on exit.
+    ``agent_logger.sync.engine run [--prune] [--full]`` from the staged copy
+    with a neutral cwd; it removes its staging dir on exit.
     """
     # A sync already running? Skip staging entirely (rapid session-end dedupe).
     lock_file = cfg.home / cfg.sync_lock_name
@@ -132,6 +132,8 @@ def spawn_detached_sync(cfg, *, prune: bool = False) -> int:
     cmd = [windowless_python(python), "-m", "agent_logger.sync.engine", "run"]
     if prune:
         cmd.append("--prune")
+    if full:
+        cmd.append("--full")
     env.update(windowless_python_env(python))
 
     try:

@@ -23,6 +23,11 @@
   [`efforts/active/task-verification-gate/inception-transcript.md`](../task-verification-gate/inception-transcript.md)
   — read it before starting design work here (per #4691's own instruction);
   this effort does not re-quote it in full.
+- **Related:** [`agent-dispatch-recipe-composability`](../agent-dispatch-recipe-composability/README.md)
+  (#4959) builds on this effort's `extends:` resolution mechanism to
+  generalize it (any already-resolved declaration as a base, chaining,
+  script-path-hook override values) — a distinct, later-starting effort,
+  not a duplicate of this one's scope.
 
 ## Guiding Intent
 
@@ -340,7 +345,7 @@ below — read it before starting any Phase 3 work).
       the global-recipes item above and is not complete until that lands.
 
 ### Phase 4 — Reviewer-recipe delta (Request item b's remainder)
-- [ ] Add a **configurable stale-exit parameter** to the reviewer recipe
+- [x] Add a **configurable stale-exit parameter** to the reviewer recipe
       (e.g. `stale_after_days`, measured since the target change's last
       commit) alongside merged/abandoned in its resolution logic. This is a
       **per-declaration param, not an engine constant** — different
@@ -349,13 +354,13 @@ below — read it before starting any Phase 3 work).
       GitHub repo like this one or a harness repo). No default bakes in a
       single "one true" cadence; a declaration that omits the param leaves
       staleness un-checked (never silently applies a guessed default).
-- [ ] Confirm (and extend if needed) the reviewer recipe's evaluator uses
+- [x] Confirm (and extend if needed) the reviewer recipe's evaluator uses
       `task-verification-gate`'s `require_verification` +
       suspend-requires-verdict pattern: when a reviewer task suspends
       (`run`-hibernates) without having posted a verdict, the evaluator (or
       the `run`-outage recovery sweep, whichever owns this case) wakes it
       rather than leaving it silently parked.
-- [ ] Tests: a reviewer task that suspends without a verdict is woken, not
+- [x] Tests: a reviewer task that suspends without a verdict is woken, not
       left parked; two fixture declarations with different
       `stale_after_days` values (e.g. 7 and 30) each resolve via the
       stale-exit path only once *their own* configured threshold is crossed,
@@ -934,3 +939,77 @@ built-in `agent_dispatch/identities/goal-driven.identity.md`, public
 a worked migration example + shipped-recipes table in
 `plugins/agent-dispatch/README.md`, and 7 new tests. Full affected-file
 suite green (3743 passed, 23 skipped, the one known flake above).
+
+### 2026-10-02 — Phase 4: reviewer stale-exit + verification-gate wiring landed
+- Added an optional top-level `stale_after_days` field to
+  `kind: reviewer-loop` declarations (`reviewer_loops.py`). It is validated
+  as a finite positive number, rejected from inline `evaluator` overrides as
+  a derived field, and threaded onto the expanded evaluator registration as
+  `spec.reviewer_loop.stale_after_days` — explicitly per declaration, with
+  **no default** when omitted.
+- Wired the reviewer-loop lifecycle extension into submitted verification in
+  the way the review correctly required, not just as a point-in-time check:
+  `verification.py` now wraps matching evaluator registrations with
+  `ReviewerLoopEvaluator`, which preserves any existing merged/abandoned
+  decisions from the underlying evaluator, abandons immediately once the
+  stale deadline has actually passed, and (when it has *not* passed yet)
+  schedules a future submitted-verification request at exactly that deadline
+  via the existing background verification-request drain. Advancing the queue
+  clock and letting the drain run is now enough to fire the stale-exit; no
+  ad hoc direct `evaluate_submitted_task` call is required.
+- Wired the same deadline into the suspended reviewer lifecycle: a new
+  `reconcile_reviewer_deadlines()` pass (piggybacked on the existing
+  always-on liveness/cooldown loop in `coordinator_loops.py`) wakes a
+  suspended reviewer once its stale deadline elapses. If the task is parked
+  behind a detached run-waiter, the reconciler supersedes that waiter and
+  queues the normal wake path; otherwise it uses the existing `resume`
+  transition. This closes the exact gap the review called out: an unchanged
+  hibernated review no longer waits forever for some unrelated external
+  event before it can be driven to expiry.
+- Confirmed and retained the pre-existing generic suspend-requires-verdict
+  wiring instead of adding redundant code: the existing monitor/run-waiter
+  recovery machinery is what wakes a suspended reviewer without a verdict;
+  Phase 4 only needed to cover it with the right reviewer-specific deadline
+  triggers and tests.
+- Production metadata source: stale evaluation now accepts either inline
+  reviewer metadata (`payload_inline.reviewer_loop.last_commit_at`) **or**
+  the standard GitHub-backed provider path. `github_provider_adapter.py` now
+  reads the current PR head commit's `committedDate`; `PRObservation` /
+  `PRObservationStore` persist that `last_commit_at`, and reviewer stale
+  evaluation can derive it from a standard `payload_ref` of the form
+  `github-pr:owner/repo#123` without requiring every consumer's custom
+  emitter to invent its own metadata contract.
+- Tests added/extended:
+  - `test_verification.py`: one declaration with `stale_after_days: 7` and
+    one with `30` abandon only at their own thresholds; a declaration with
+    no `stale_after_days` never takes the stale-exit path; the delayed
+    verification request is scheduled and later fires by clock advance alone;
+    and the provider-observation-store fallback path supplies
+    `last_commit_at` when only a standard `github-pr:...` payload ref is
+    present.
+  - `test_coordinator.py`: a suspended reviewer task with no verdict is
+    re-woken by the real reviewer-deadline recovery sweep (run-waiter
+    superseded + wake queued), not by a synthetic event-note injection.
+  - `test_registrar_discovery.py`: reviewer-loop expansion threads
+    `stale_after_days` onto the evaluator registration spec.
+  - `test_github_provider_adapter.py`, `test_pr_observation_store.py`, and
+    `test_pr_review_poll_loop.py`: the provider-observation path now carries
+    and persists `last_commit_at`.
+- README updated (`plugins/agent-dispatch/README.md`) to document the new
+  reviewer-loop parameter, its no-default behavior, and the two metadata
+  sources (inline reviewer metadata or the GitHub PR-observation cache).
+- Validation-coupled fix found while driving the full suite: `payload.py`'s
+  temporary spill file names were unnecessarily long for deep Windows
+  worktree paths, which made `test_payload_endpoint_spilled_blob` fail before
+  the Phase 4 assertions were even reachable in a full-suite run. Shortened
+  the temp spill suffix without changing blob refs or persisted payload
+  names. Also shortened one procutil test's per-case leaf while keeping it
+  within pytest's own temp root, preserving its quoting/Unicode coverage
+  without relying on Windows long-path policy in this deep worktree.
+- Validation:
+  - focused reviewer-loop/provider-path tests: pass
+  - full `agent-dispatch` suite: **3747 passed, 23 skipped**
+  - neither of the two effort-noted unrelated flakes
+    (`test_idle_headless_fleet_nudge_includes_remote_host`,
+    `test_consume_baton_*` under a live Copilot CLI session) appeared in
+    this run.

@@ -216,6 +216,7 @@ class PRProvider(Protocol):
     def merge_pull(
         self, repo: str, number: int, *, squash: bool = True, admin: bool = False,
         api_base: str = "", token: str | None = None,
+        delete_source_branch: bool = True,
     ) -> str:
         """Directly merge a PR **now** (the submitter-direct merge primitive).
 
@@ -227,9 +228,11 @@ class PRProvider(Protocol):
 
         - **github** runs ``gh pr merge <n> --squash`` (``--admin`` when ``admin``
           is set for the owner's sanctioned merge past a non-blocking gate).
-          Blocking review policy must use ``admin=False``.
-          Deliberately does **not** delete the source branch, so ``finalize`` can
-          still affirm the merge against the (still-present) head.
+          Blocking review policy must use ``admin=False``. ``delete_source_branch``
+          (default ``True``, matching :meth:`request_auto_complete`) passes
+          ``--delete-branch``: safe because ``finalize``/``pr-complete`` verify a
+          merged PR against the tracked record's own ``pr.head_sha``, never by
+          requiring the live remote branch to still exist.
         - **gitea / azure-devops** are unsupported today (return a message).
 
         Returns "" on success, or a human-readable error string. ``--now`` is only
@@ -263,6 +266,7 @@ class PRProvider(Protocol):
     def enable_auto_merge(
         self, repo: str, number: int, *, squash: bool = True,
         api_base: str = "", token: str | None = None,
+        delete_source_branch: bool = True,
     ) -> str:
         """Enable the provider's **native CI-gated auto-merge** on a PR (#225).
 
@@ -272,8 +276,9 @@ class PRProvider(Protocol):
         required checks pass -- letting an agent stop watching attentively.
 
         - **github** runs ``gh pr merge <n> --squash --auto`` (no ``--admin``: it
-          must wait on the checks, not bypass them). The source branch is not
-          deleted, so ``finalize`` can still affirm the eventual merge.
+          must wait on the checks, not bypass them). ``delete_source_branch``
+          (default ``True``) passes ``--delete-branch``, same safety reasoning as
+          :meth:`merge_pull`.
         - **gitea / azure-devops** are unsupported here today (they merge via
           their own consent/auto-complete flow); they return a message so the
           caller falls back to a direct merge.

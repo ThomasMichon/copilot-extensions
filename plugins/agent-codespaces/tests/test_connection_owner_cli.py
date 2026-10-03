@@ -192,3 +192,193 @@ def test_connection_owner_empty_block_claims_slot(tmp_path, monkeypatch):
     # repo1's empty block claimed the slot (defaults -> enabled=True) -> repo2's
     # enabled:false is ignored.
     assert merged.connection_owner.enabled is True
+
+
+def test_the_daemon_logs_to_a_rotated_file(monkeypatch, tmp_path):
+    """Headless (a scheduled task), the Owner's stderr goes nowhere: its relay
+    and forward re-establishes must land in a file a drop can be checked against."""
+    import logging
+    from logging.handlers import RotatingFileHandler
+
+    from agent_codespaces import owner_cli
+
+    monkeypatch.setenv("AGENT_CODESPACES_HOME", str(tmp_path))
+    root = logging.getLogger()
+    before, level = list(root.handlers), root.level
+    try:
+        path = owner_cli._attach_owner_log()
+        assert path == str((tmp_path / "logs" / "owner.log").resolve())
+        assert owner_cli._attach_owner_log() == path  # idempotent: one handler
+        added = [h for h in root.handlers if h not in before]
+        assert len(added) == 1 and isinstance(added[0], logging.FileHandler)
+        assert not isinstance(added[0], RotatingFileHandler)  # never rotates while running
+        logging.getLogger("ssh-manager.relay").warning("relay re-establishing")
+        added[0].flush()
+        assert "relay re-establishing" in (tmp_path / "logs" / "owner.log").read_text("utf-8")
+        # A relative AGENT_CODESPACES_HOME is the same file: still one handler.
+        monkeypatch.chdir(tmp_path.parent)
+        monkeypatch.setenv("AGENT_CODESPACES_HOME", tmp_path.name)
+        assert owner_cli._attach_owner_log() == path
+        assert len([h for h in root.handlers if h not in before]) == 1
+    finally:
+        for h in [h for h in root.handlers if h not in before]:
+            root.removeHandler(h)
+            h.close()
+        root.setLevel(level)
+
+
+def test_an_unopenable_owner_log_falls_back_to_stderr(monkeypatch, tmp_path, capsys):
+    import logging
+
+    from agent_codespaces import owner_cli
+
+    blocker = tmp_path / "logs"
+    blocker.write_text("a file where the logs dir should be", "utf-8")
+    monkeypatch.setenv("AGENT_CODESPACES_HOME", str(tmp_path))
+    level = logging.getLogger().level
+    assert owner_cli._attach_owner_log() is None
+    assert logging.getLogger().level == level  # nothing changed when it can't log
+    assert "logging to stderr only" in capsys.readouterr().err
+
+
+def test_only_the_owner_that_won_the_machine_logs_its_lifecycle(monkeypatch, caplog):
+    """A concurrent start that finds a live Owner must not log a start/stop
+    pair: the log would then show restarts that never happened."""
+    import asyncio
+    import logging
+    from types import SimpleNamespace
+
+    from agent_codespaces import owner_beacon
+
+    ran: list[str] = []
+    monkeypatch.setattr(owner_beacon, "_START_HOOKS", [])
+    owner_beacon.on_owner_start(lambda: ran.append("opened log"))
+    monkeypatch.setattr(owner, "claim_owner_singleton", lambda _interval: False)
+    with caplog.at_level(logging.INFO, logger="agent-codespaces"):
+        asyncio.run(owner.run_owner_daemon(SimpleNamespace(), interval=15.0))
+    lost = [r.getMessage() for r in caplog.records]
+    assert any("already live" in m for m in lost)
+    assert not any("Connection Owner started" in m or "stopping" in m for m in lost)
+    assert ran == []  # a losing start never opens (or rotates) the live Owner's log
+    caplog.clear()
+    keeper = owner_beacon.BeaconKeeper(SimpleNamespace(active_codespaces=lambda: []), 15.0, lambda: None)
+    with caplog.at_level(logging.INFO, logger="agent-codespaces"):
+        keeper.start()
+        keeper.stop()
+    won = [r.getMessage() for r in caplog.records]
+    assert ran == ["opened log"]
+    assert any("Connection Owner started" in m for m in won)
+    assert any("Connection Owner stopping" in m for m in won)
+
+
+def test_an_unresolvable_owner_log_path_falls_back_to_stderr(monkeypatch, capsys):
+    from agent_codespaces import owner_cli
+
+    class Looping:
+        def resolve(self):
+            raise RuntimeError("Symlink loop")
+
+        def __str__(self):
+            return "loop/owner.log"
+
+    monkeypatch.setattr(owner_cli, "owner_log_path", lambda: Looping())
+    assert owner_cli._attach_owner_log() is None
+    assert "logging to stderr only" in capsys.readouterr().err
+
+
+def test_the_owner_log_rotates_only_when_an_owner_starts(monkeypatch, tmp_path):
+    """Past the cap, a starting Owner shifts the log to ``.1`` (older ones on);
+    one a predecessor still holds open (the rename fails) is just appended to."""
+    import os
+
+    from agent_codespaces import owner_cli
+
+    monkeypatch.setattr(owner_cli, "OWNER_LOG_MAX_BYTES", 10)
+    log = tmp_path / "owner.log"
+    log.write_text("x" * 20, "utf-8")
+    (tmp_path / "owner.log.1").write_text("older", "utf-8")
+    owner_cli._rotate_at_start(log)
+    assert not log.exists()
+    assert (tmp_path / "owner.log.1").read_text("utf-8") == "x" * 20
+    assert (tmp_path / "owner.log.2").read_text("utf-8") == "older"
+    log.write_text("small", "utf-8")
+    owner_cli._rotate_at_start(log)  # under the cap: untouched
+    assert log.read_text("utf-8") == "small"
+    log.write_text("y" * 20, "utf-8")
+
+    def busy(*_a):
+        raise PermissionError("in use by the previous Owner")
+
+    monkeypatch.setattr(os, "replace", busy)
+    owner_cli._rotate_at_start(log)  # never raises; this Owner appends instead
+    assert log.read_text("utf-8") == "y" * 20
+
+
+def test_a_held_open_log_leaves_every_backup_in_place(monkeypatch, tmp_path):
+    """Only the active file is held open by a predecessor: its refused rename
+    must come before any backup moves, or the history would be shifted and the
+    oldest backup overwritten without the active file ever rotating."""
+    import os
+
+    from agent_codespaces import owner_cli
+
+    monkeypatch.setattr(owner_cli, "OWNER_LOG_MAX_BYTES", 10)
+    log = tmp_path / "owner.log"
+    log.write_text("z" * 20, "utf-8")
+    for n, text in ((1, "one"), (2, "two"), (3, "three")):
+        (tmp_path / f"owner.log.{n}").write_text(text, "utf-8")
+    real = os.replace
+
+    def active_held(src, dst):
+        if str(src) == str(log):
+            raise PermissionError("in use by the previous Owner")
+        return real(src, dst)
+
+    monkeypatch.setattr(os, "replace", active_held)
+    owner_cli._rotate_at_start(log)
+    assert log.read_text("utf-8") == "z" * 20
+    for n, text in ((1, "one"), (2, "two"), (3, "three")):
+        assert (tmp_path / f"owner.log.{n}").read_text("utf-8") == text
+
+
+def test_an_interrupted_rotation_finishes_at_the_next_start(monkeypatch, tmp_path):
+    from agent_codespaces import owner_cli
+
+    monkeypatch.setattr(owner_cli, "OWNER_LOG_MAX_BYTES", 10)
+    log = tmp_path / "owner.log"
+    (tmp_path / "owner.log.rotating").write_text("staged", "utf-8")
+    (tmp_path / "owner.log.1").write_text("one", "utf-8")
+    log.write_text("new", "utf-8")
+    owner_cli._rotate_at_start(log)
+    assert (tmp_path / "owner.log.1").read_text("utf-8") == "staged"
+    assert (tmp_path / "owner.log.2").read_text("utf-8") == "one"
+    assert log.read_text("utf-8") == "new" and not (tmp_path / "owner.log.rotating").exists()
+
+
+def test_a_rotation_interrupted_after_shifting_backups_keeps_every_backup(monkeypatch, tmp_path):
+    """``.2 -> .3`` and ``.1 -> .2`` succeed, then ``.rotating -> .1`` fails: the
+    next start must not shift ``.2`` again (it would overwrite it)."""
+    import os
+
+    from agent_codespaces import owner_cli
+
+    monkeypatch.setattr(owner_cli, "OWNER_LOG_MAX_BYTES", 10)
+    log = tmp_path / "owner.log"
+    log.write_text("z" * 20, "utf-8")
+    for n, text in ((1, "one"), (2, "two"), (3, "three")):
+        (tmp_path / f"owner.log.{n}").write_text(text, "utf-8")
+    real = os.replace
+
+    def last_step_fails(src, dst):
+        if str(src).endswith(".rotating"):
+            raise PermissionError("interrupted")
+        return real(src, dst)
+
+    monkeypatch.setattr(os, "replace", last_step_fails)
+    owner_cli._rotate_at_start(log)
+    monkeypatch.setattr(os, "replace", real)
+    owner_cli._rotate_at_start(log)  # the next start finishes it
+    assert (tmp_path / "owner.log.1").read_text("utf-8") == "z" * 20
+    assert (tmp_path / "owner.log.2").read_text("utf-8") == "one"
+    assert (tmp_path / "owner.log.3").read_text("utf-8") == "two"
+    assert not (tmp_path / "owner.log.rotating").exists()

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-import uuid
+import tempfile
 from pathlib import Path
 
 BLOB_PREFIX = "blob:"
@@ -54,9 +54,16 @@ class PayloadStore:
         if path.exists():
             return ref
         self.root.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(self.root),
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            text=True,
+        )
+        tmp = Path(tmp_name)
         try:
-            tmp.write_text(content, encoding="utf-8")
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(content)
             os.replace(tmp, path)
         finally:
             tmp.unlink(missing_ok=True)

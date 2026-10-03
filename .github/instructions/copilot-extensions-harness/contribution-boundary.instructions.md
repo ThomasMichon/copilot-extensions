@@ -1,11 +1,12 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/copilot-extensions-harness/contribution-boundary.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.5-dev2","renderedBytes":1200,"schema":"copilot-extensions.instruction-projection","sourceId":"contribution-boundary","template":"instructions/contribution-boundary.instructions.md","templateBytes":439,"templateSha256":"f482a287e533f53d982fc06cf4f6ba74bdd4f2665f9bcb66a77583a306a445dd","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/copilot-extensions-harness/contribution-boundary.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.5-dev2","renderedBytes":1254,"schema":"copilot-extensions.instruction-projection","sourceId":"contribution-boundary","template":"instructions/contribution-boundary.instructions.md","templateBytes":439,"templateSha256":"f482a287e533f53d982fc06cf4f6ba74bdd4f2665f9bcb66a77583a306a445dd","version":1} -->
 
-> If `contribution-boundary.local.instructions.md` exists here, prefer it -- it reflects
-> the currently installed payload; this file reflects the last
-> synced-and-reviewed state.
+> If `contribution-boundary.local.instructions.md` exists here, compare
+> `pluginVersion` and prefer whichever is newer. On a tie,
+> compare `templateSha256`: matching means prefer local;
+> differing means prefer this checked-in file.
 
 # Contribution boundary fallback
 

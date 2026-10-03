@@ -96,6 +96,23 @@ fence that worktree until a claimed cleanup result reaches `complete` or
   legitimate retry, but no two callers ever spawn the same attempt or exclusive
   resource.
 
+**Dropping a carried session: `release_requested`.** The carried-session reuse
+above is a *candidate*, not an unconditional carry-forward — a confirmed-gone
+body must never keep getting resumed forever. `reserve_spawn` only drops a
+carried `session_handle` once it finds the reservation that recorded it marked
+`release_requested = 1` **and** in a terminal state (`settled`/`failed`/
+`rearmed`). `fail_spawn`/`settle_spawn` take an explicit `release_requested`
+flag the caller sets **only** once it has independently confirmed the body is
+gone (never for an ordinary business-logic failure, where the body might still
+be alive and worth resuming); `rearm_spawn` always sets it, since an operator
+rearm explicitly starts the task over. Before this flag existed (fixed in
+copilot-extensions#4990, filed as #4978), every genuine confirmed-gone
+recovery path left it unset, so a dead body's session kept getting carried
+forward into every later reservation — for this task *and* any other task
+sharing the `exclusive_key` — perpetually failing a resume against a
+confirmed-gone body instead of ever reaching a fresh spawn. See
+`troubleshooting-agent-dispatch`'s "stuck on the same dead session" entry.
+
 Retired reservations keep session and allocation cleanup as separate
 `conclusion_state`/`conclusion_detail` metadata. Positive body absence first
 retires the active reservation atomically; only then may the supervisor run the
@@ -316,6 +333,19 @@ later claim or reservation observes the rearmed state normally.
 Dead-letter visibility is set-oriented: a supervisor logs one bounded,
 actionable summary when its blocked task set changes, rather than repeating one
 warning per task on every cycle.
+
+**Where that log (and every other `agent-dispatch.*` log call) actually goes.**
+Both the coordinator and the supervisor normally run headless (`pythonw.exe`,
+no console), and neither configured a logging handler until
+copilot-extensions#4990 — every `log.info`/`log.warning`/`log.exception` call
+across the whole package, including this dead-letter summary and every
+recovery-path message above, was silently dropped. `configure_file_logging`
+(`logging_setup.py`) now wires a rotating file handler into both daemon
+entrypoints at startup: `<install_dir>/logs/coordinator.log` and
+`<install_dir>/logs/supervisor.log` (`<install_dir>` is normally
+`~/.agent-dispatch`; see `install_paths.install_dir()`). Read these first when
+diagnosing a stalled lane instead of guessing from `list`/`show`/`doctor`
+output alone — see `troubleshooting-agent-dispatch`.
 
 ## Registered supervision (built) — register-and-return
 

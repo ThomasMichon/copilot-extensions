@@ -36,6 +36,7 @@ def _binding(prcfg) -> dict:
         "wip_title_prefixes": tuple(getattr(prcfg, "wip_title_prefixes", ()) or ()),
         "approval_required": bool(getattr(prcfg, "approval_required", True)),
         "allow_stale_approval": bool(getattr(prcfg, "allow_stale_approval", False)),
+        "dismiss_stale_reviews": getattr(prcfg, "dismiss_stale_reviews", None),
     }
 
 

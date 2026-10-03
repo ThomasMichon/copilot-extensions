@@ -54,7 +54,12 @@ class IngestTarget(Target):
         return env
 
     def push(
-        self, source: Path, machine: str, include_sessions: set[str] | None = None
+        self,
+        source: Path,
+        machine: str,
+        include_sessions: set[str] | None = None,
+        *,
+        batch_mode: bool = False,
     ) -> PushResult:
         url = self._url()
         if not url:
@@ -99,7 +104,9 @@ class IngestTarget(Target):
                     "-az",
                     "--delete",
                     *(["--delete-excluded"] if include_sessions is None else []),
-                    *rsync_session_filters(include_sessions, detritus.roots),
+                    *rsync_session_filters(
+                        include_sessions, detritus.roots, batch_mode=batch_mode
+                    ),
                 ]
                 if pw:
                     cmd += [f"--password-file={pw_arg}"]

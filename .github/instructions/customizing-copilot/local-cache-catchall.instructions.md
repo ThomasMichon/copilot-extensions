@@ -1,14 +1,19 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/customizing-copilot/local-cache-catchall.instructions.md","plugin":"customizing-copilot@copilot-extensions","pluginVersion":"0.2.2-dev4","renderedBytes":1077,"schema":"copilot-extensions.instruction-projection","sourceId":"local-cache-catchall","template":"instructions/local-cache-catchall.instructions.md","templateBytes":334,"templateSha256":"1c02bc7822a50336f5fd695ea8172985a1932ab64e00a613a1ed68667a83342c","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/customizing-copilot/local-cache-catchall.instructions.md","plugin":"customizing-copilot@copilot-extensions","pluginVersion":"0.2.3-dev1","renderedBytes":1451,"schema":"copilot-extensions.instruction-projection","sourceId":"local-cache-catchall","template":"instructions/local-cache-catchall.instructions.md","templateBytes":654,"templateSha256":"e5b6cc8bdf06330916e726021e615d6f2a533df5f2b89d4ce9103f4ed0c6ca3d","version":1} -->
 
-> If `local-cache-catchall.local.instructions.md` exists here, prefer it -- it reflects
-> the currently installed payload; this file reflects the last
-> synced-and-reviewed state.
+> If `local-cache-catchall.local.instructions.md` exists here, compare
+> `pluginVersion` and prefer whichever is newer. On a tie,
+> compare `templateSha256`: matching means prefer local;
+> differing means prefer this checked-in file.
 
 Check `.github/instructions/**/*.local.instructions.md` for any files
-present now, read each one, and treat its contents as authoritative for
-this session -- in addition to, and preferred over, any checked-in
-`.instructions.md` file already loaded for the same plugin and source.
-Their absence is not an error.
+present now and read each one. When a checked-in `.instructions.md` file
+exists for the same plugin and source, compare both files' embedded
+marker `pluginVersion` fields and prefer whichever is newer; on a tie,
+compare `templateSha256` instead of whole-file bytes (which always
+differ -- only the checked-in file carries the preamble) -- prefer the
+checked-in file only if that hash differs too, otherwise the local file
+stays authoritative. With no checked-in file yet for that path, the
+local file is authoritative on its own. Their absence is not an error.

@@ -185,6 +185,7 @@ from .task_lifecycle_cli import (  # noqa: F401 -- re-exported for existing call
     _cmd_show,
     _cmd_start,
     _cmd_suspend,
+    _cmd_unexclude,
     _cmd_unpause,
     _cmd_worktree_status,
     _cmd_yield,

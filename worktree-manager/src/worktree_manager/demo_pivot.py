@@ -56,11 +56,24 @@ def entries() -> list[dict]:
     return [dict(r) for r in _ROWS]
 
 
+#: A harmless, synthetic "vocabulary" source for the create_action's
+#: dynamically-sourced ``criteria`` field (picker-new-session-prompt-and-
+#: composer, Phase B item 3) -- mirrors ``agent-dispatch registrar
+#: vocabulary``'s JSON-array-of-strings contract without depending on a
+#: real registrar sweep, so a --demo render can show the live-options path
+#: end to end.
+_VOCABULARY = ["recalibration", "maintenance", "audit", "neurotoxin-safety"]
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     verb = next((a for a in args if not a.startswith("-")), None)
     if verb == "list":
         json.dump(entries(), sys.stdout)
+        sys.stdout.write("\n")
+        return 0
+    if verb == "vocabulary":
+        json.dump(_VOCABULARY, sys.stdout)
         sys.stdout.write("\n")
         return 0
     if verb == "create":

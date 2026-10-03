@@ -89,7 +89,35 @@ def _seed_older_install(tmp: Path, root: Path, version: str) -> None:
     assert res.action == "installed" and current_version(root) == version
 
 
-def test_self_update_fetches_local_remote_and_publishes_new_slot(tmp_path, monkeypatch):
+@pytest.fixture
+def mock_cutover(monkeypatch):
+    """This file is about the real git-fetch -> versioned-slot-publish delivery
+    path, not daemon cutover -- but every ``self_update(dry_run=False)`` call
+    below still reaches its own real (unmocked) cutover step,
+    ``mux_daemon_cutover.activate_after_update`` -> ``spawn_passive``, which
+    launches a REAL, detached/breakaway background OS process (see
+    ``spawn_passive``'s ``windowless_daemon_kwargs(breakaway=True)``) rooted at
+    this test's own ``tmp_path``. That process outlives both the test and the
+    whole pytest run -- pytest's teardown has no handle on a detached child --
+    and this exact pattern was confirmed to leak a real, persistent Windows
+    user-PATH mutation pointing at a since-deleted tmp_path on a machine that
+    ran the suite natively (see ``test_update.py``'s
+    ``test_self_update_without_git_falls_back_to_tarball``). Mock it here too,
+    for every test in this file that drives a real ``self_update``.
+    """
+    seen: dict[str, object] = {}
+
+    def _fake_cutover(**kw):
+        seen["cutover_kwargs"] = kw
+        return {"action": "cutover", "result": {"ok": True}}
+
+    monkeypatch.setattr(
+        "worktree_manager.mux_daemon_cutover.activate_after_update", _fake_cutover
+    )
+    return seen
+
+
+def test_self_update_fetches_local_remote_and_publishes_new_slot(tmp_path, monkeypatch, mock_cutover):
     root = tmp_path / "root"
     monkeypatch.setattr(si, "local_bin", lambda: tmp_path / "localbin")
     _seed_older_install(tmp_path, root, "1.0.0")
@@ -110,7 +138,7 @@ def test_self_update_fetches_local_remote_and_publishes_new_slot(tmp_path, monke
     assert (version_slot("9.9.9", root) / "src" / "worktree_manager" / "__init__.py").exists()
 
 
-def test_self_update_reports_error_and_cleans_up_when_pointer_unresolvable(tmp_path, monkeypatch):
+def test_self_update_reports_error_and_cleans_up_when_pointer_unresolvable(tmp_path, monkeypatch, mock_cutover):
     """Round-8 review finding: self_update() must translate a materialization
     failure into a clean SelfUpdateResult(action="error") -- not let the
     RuntimeError escape past self_update's own documented best-effort/
@@ -138,7 +166,7 @@ def test_self_update_reports_error_and_cleans_up_when_pointer_unresolvable(tmp_p
     assert not version_slot("9.9.9", root).exists()
 
 
-def test_self_update_second_run_is_version_gated(tmp_path, monkeypatch):
+def test_self_update_second_run_is_version_gated(tmp_path, monkeypatch, mock_cutover):
     root = tmp_path / "root"
     monkeypatch.setattr(si, "local_bin", lambda: tmp_path / "localbin")
     _seed_older_install(tmp_path, root, "1.0.0")
@@ -155,7 +183,7 @@ def test_self_update_second_run_is_version_gated(tmp_path, monkeypatch):
     assert current_version(root) == "9.9.9"
 
 
-def test_self_update_fetch_path_honors_switched_source(tmp_path, monkeypatch):
+def test_self_update_fetch_path_honors_switched_source(tmp_path, monkeypatch, mock_cutover):
     """After the first update, re-pointing the source config at a different remote
     must take effect on the *fetch* path (staging already exists) — i.e. the
     override is authoritative every run, not just on the initial clone."""
@@ -178,7 +206,7 @@ def test_self_update_fetch_path_honors_switched_source(tmp_path, monkeypatch):
     assert version_slot("9.9.10", root).is_dir()
 
 
-def test_self_update_uses_configured_ref(tmp_path, monkeypatch):
+def test_self_update_uses_configured_ref(tmp_path, monkeypatch, mock_cutover):
     """With no explicit ref, self_update fetches the branch from the source config."""
     root = tmp_path / "root"
     monkeypatch.setattr(si, "local_bin", lambda: tmp_path / "localbin")

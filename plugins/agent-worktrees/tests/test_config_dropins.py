@@ -91,6 +91,31 @@ def test_pr_required_body_sections_rejects_non_string_shape():
     assert error == "repos.sample.pr.required_body_sections must be a list"
 
 
+def test_pr_dismiss_stale_reviews_accepts_booleans():
+    assert dropins._validate_pr(
+        {"dismiss_stale_reviews": True}, location="repos.sample.pr",
+    ) is None
+    assert dropins._validate_pr(
+        {"dismiss_stale_reviews": False}, location="repos.sample.pr",
+    ) is None
+
+
+def test_pr_dismiss_stale_reviews_accepts_null():
+    # Tri-state: null means "unknown/unread", same as leaving it unset.
+    assert dropins._validate_pr(
+        {"dismiss_stale_reviews": None}, location="repos.sample.pr",
+    ) is None
+
+
+def test_pr_dismiss_stale_reviews_rejects_non_bool_non_null():
+    error = dropins._validate_pr(
+        {"dismiss_stale_reviews": "true"},
+        location="repos.sample.pr",
+    )
+
+    assert error == "repos.sample.pr.dismiss_stale_reviews must be a boolean or null"
+
+
 def test_pr_source_attribution_accepts_codename_string():
     error = dropins._validate_pr(
         {"source_attribution": "codename"},

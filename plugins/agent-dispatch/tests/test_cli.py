@@ -1571,6 +1571,58 @@ def test_create_cli_sends_producer_fence(monkeypatch, capsys):
     assert seen["producer_request_id"] == "request-1"
 
 
+def test_create_cli_criteria_json_merges_into_labels(monkeypatch, capsys):
+    import json
+
+    seen = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def create(self, title, **kwargs):
+            seen.update(title=title, **kwargs)
+            return {"id": "task-1", "status": "queued", "owner": None}
+
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    monkeypatch.setattr(
+        "agent_dispatch.__main__._scope_repo", lambda _args: "example.com/acme/widget"
+    )
+    args = _args(
+        [
+            "create",
+            "picker-authored",
+            "--label",
+            "manual",
+            "--criteria-json",
+            json.dumps(["review", "docs"]),
+        ]
+    )
+
+    assert args.func(args) == 0
+    assert seen["labels"] == ["manual", "review", "docs"]
+
+
+def test_create_cli_criteria_json_invalid_json_errors(monkeypatch, capsys):
+    monkeypatch.setattr("agent_dispatch.__main__._scope_repo", lambda _args: "repo")
+    args = _args(["create", "x", "--criteria-json", "not json"])
+    assert args.func(args) == 2
+    assert "must be valid JSON" in capsys.readouterr().err
+
+
+def test_create_cli_criteria_json_rejects_non_array(monkeypatch, capsys):
+    import json
+
+    monkeypatch.setattr("agent_dispatch.__main__._scope_repo", lambda _args: "repo")
+    for bad in (json.dumps({"a": 1}), json.dumps(["ok", 1]), json.dumps(["ok", ""])):
+        args = _args(["create", "x", "--criteria-json", bad])
+        assert args.func(args) == 2
+        assert "must be a JSON array" in capsys.readouterr().err
+
+
 def test_create_cli_ignores_capability_env_for_unmanaged_create(
     monkeypatch, capsys
 ):
@@ -2728,6 +2780,44 @@ def test_pause_and_unpause_cli(monkeypatch):
     }
 
 
+def test_unexclude_cli(monkeypatch):
+    from agent_dispatch import __main__
+
+    seen = {}
+
+    class _C:
+        def clear_exclude(self, task_id, *, exclude=None, actor=None, expected_status=None):
+            seen["clear_exclude"] = dict(
+                task_id=task_id, exclude=exclude, actor=actor, expected_status=expected_status
+            )
+            return {"id": task_id, "excludes": []}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    monkeypatch.setattr(__main__, "_owner_from_identity", lambda args: None)
+
+    args = build_parser().parse_args(
+        ["unexclude", "t1", "--exclude", "machine:tmichon-cloud2", "--actor", "alice"]
+    )
+    assert args.func(args) == 0
+    assert seen["clear_exclude"] == {
+        "task_id": "t1",
+        "exclude": "machine:tmichon-cloud2",
+        "actor": "alice",
+        "expected_status": None,
+    }
+
+    # Omitting --exclude clears every exclusion on the task.
+    args = build_parser().parse_args(["unexclude", "t1", "--actor", "alice"])
+    assert args.func(args) == 0
+    assert seen["clear_exclude"]["exclude"] is None
+
+
 def test_pause_defaults_actor_to_resolved_identity(monkeypatch):
     from agent_dispatch import __main__
 
@@ -3526,6 +3616,12 @@ class _PickupClient:
 def test_consume_baton_completes_on_pickup(monkeypatch, capsys):
     from agent_dispatch import __main__, identity
 
+    # Isolated from any ambient real session identity: this test exercises
+    # plain baton-mode completion, not the separate session-fencing feature
+    # (covered by its own tests below) -- without this, running inside a
+    # real Copilot session (COPILOT_AGENT_SESSION_ID set) inserts an extra
+    # bind_owner_session transition this test never expects.
+    monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
     fake = _PickupClient("proposed")
     monkeypatch.setattr(__main__, "_client", lambda args: fake)
     monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
@@ -3541,6 +3637,9 @@ def test_consume_baton_completes_on_pickup(monkeypatch, capsys):
 def test_consume_defer_complete_stops_at_started(monkeypatch, capsys):
     from agent_dispatch import __main__, identity
 
+    # See test_consume_baton_completes_on_pickup's comment -- isolates this
+    # from ambient session-fencing, which this test doesn't exercise.
+    monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
     fake = _PickupClient("proposed")
     monkeypatch.setattr(__main__, "_client", lambda args: fake)
     monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
@@ -3915,6 +4014,12 @@ def test_consume_accepts_an_initially_started_task_owned_by_this_invocation(
     the task's owner) proceeds normally."""
     from agent_dispatch import __main__, identity
 
+    # Isolated from ambient session-fencing -- see
+    # test_consume_baton_completes_on_pickup's comment; this test's own
+    # matching-owner contract is exercised with the env var unset, deliberately
+    # distinct from test_consume_without_session_identity_skips_bind_as_before's
+    # own, narrower "no identity at all" case below.
+    monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
     fake = _PickupClient("started", owner="m/wt")
     monkeypatch.setattr(__main__, "_client", lambda args: fake)
     monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))

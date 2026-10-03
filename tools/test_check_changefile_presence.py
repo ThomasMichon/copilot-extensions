@@ -3,8 +3,9 @@ replacement for check-version-bump.py's manual bump requirement).
 
 Drives the real ``tools/check-changefile-presence.py`` as a subprocess inside
 a throwaway git repo (mirroring ``test_check_version_bump.py``), copying its
-two real dependencies (``check-version-bump.py`` for plugin-diff detection,
-``changefile.py`` for reading pending changefiles) alongside it.
+real dependencies (``check-version-bump.py`` for plugin-diff detection plus
+ITS OWN two imports, and ``changefile.py`` for reading pending changefiles)
+alongside it.
 
 Run:  python -m pytest tools/test_check_changefile_presence.py
 """
@@ -19,7 +20,12 @@ import pytest
 
 TOOLS_DIR = Path(__file__).resolve().parent
 SCRIPT = TOOLS_DIR / "check-changefile-presence.py"
-DEP_SCRIPTS = ["check-version-bump.py", "changefile.py", "uv_editable_ref.py"]
+# check-version-bump.py itself imports uv_editable_ref and installer_engine_ref
+# -- omitting either produced a silent ModuleNotFoundError that failed EVERY
+# test in this file (and was never caught, because this suite isn't wired
+# into CI at all; see the ci.yml note added alongside this fix).
+DEP_SCRIPTS = ["check-version-bump.py", "changefile.py", "uv_editable_ref.py",
+               "installer_engine_ref.py"]
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -105,6 +111,73 @@ def test_changefile_for_a_different_plugin_does_not_satisfy(repo: Path):
     _git(repo, "commit", "-qm", "alpha feature, changefile names beta instead")
     result = _run(repo)
     assert result.returncode == 1, result.stdout + result.stderr
+    assert "alpha" in result.stderr
+
+
+def test_unrelated_pending_changefile_does_not_satisfy(repo: Path):
+    """The regression this test exists for (PR #4942 review): `dev` is a
+    rolling pre-release branch, so some OTHER, already-merged-but-not-yet-
+    promoted PR routinely leaves its own still-pending changefile for a
+    plugin THIS PR also happens to touch. That coincidence must not count --
+    only a changefile THIS diff itself adds may satisfy the requirement, or
+    a later promotion that consumes the unrelated changefile first would
+    ship this PR's content with no bump at all."""
+    _write(repo, ".changefiles/unrelated-already-pending.json",
+           json.dumps({"comment": "unrelated", "changes": [{"plugin": "alpha", "type": "patch"}]}))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "unrelated PR already merged, still pending promotion")
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", base_sha)
+
+    _write(repo, "plugins/alpha/src/alpha/feature.py", "def f():\n    return 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "alpha feature, no changefile of its own")
+    result = _run(repo)
+    assert result.returncode == 1, (
+        "alpha must still be charged even though an unrelated, already-"
+        "pending changefile from a different PR already names it: "
+        + result.stdout + result.stderr
+    )
+    assert "alpha" in result.stderr
+
+
+def test_nested_added_changefile_does_not_satisfy_via_basename_collision(repo: Path):
+    """The regression this test exists for (PR #4954 review): a changefile
+    added at a NESTED path (e.g. ``.changefiles/archive/pending.json``) must
+    not satisfy the requirement by basename alone just because an existing,
+    unrelated TOP-LEVEL file of the same name (``.changefiles/pending.json``)
+    already happens to name the SAME plugin this diff touches --
+    ``changefile.read_changefiles()`` only ever globs ``.changefiles/*.json``
+    non-recursively, so the nested file this PR adds is never actually
+    consumed at all. The existing top-level file must name `alpha` (not an
+    unrelated plugin) for this to actually exercise the basename collision:
+    naming a different plugin would make `alpha` still get flagged missing
+    for an unrelated reason, passing even without the top-level-path
+    restriction this test exists to prove (PR #4954 review)."""
+    _write(repo, ".changefiles/pending.json",
+           json.dumps({"comment": "unrelated top-level file, same basename as the nested one below",
+                       "changes": [{"plugin": "alpha", "type": "patch"}]}))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "unrelated top-level pending.json, already merged")
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", base_sha)
+
+    _write(repo, "plugins/alpha/src/alpha/feature.py", "def f():\n    return 1\n")
+    _write(repo, ".changefiles/archive/pending.json",
+           json.dumps({"comment": "archived, not consumable",
+                       "changes": [{"plugin": "alpha", "type": "patch"}]}))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "alpha feature, changefile only added at a nested path")
+    result = _run(repo)
+    assert result.returncode == 1, (
+        "alpha must still be charged -- the added changefile is nested, not "
+        "top-level, so read_changefiles() never actually sees it: "
+        + result.stdout + result.stderr
+    )
     assert "alpha" in result.stderr
 
 

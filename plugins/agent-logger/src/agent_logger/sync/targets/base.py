@@ -239,6 +239,18 @@ class PushResult:
     excluded_byte_count: int = 0
     excluded_roots: tuple[str, ...] = ()
     excluded_measurement_complete: bool = True
+    #: Session ids with at least one file deferred (e.g. a transient Windows
+    #: sharing violation on a live in-use file) -- a transfer that reported
+    #: ``ok=True`` overall but did NOT fully land for these ids. A caller
+    #: tracking "what's already synced" (see
+    #: :mod:`agent_logger.sync.change_tracker`) must not mark a deferred
+    #: session as synced, or an incomplete transfer gets permanently masked
+    #: once the file unlocks without its size/mtime changing again.
+    deferred_sessions: tuple[str, ...] = ()
+    #: Whether the global session-index files (``session-store.db`` and its
+    #: WAL/SHM) had at least one file deferred -- same reasoning as
+    #: ``deferred_sessions``, kept separate since the index is not a session.
+    index_deferred: bool = False
 
 
 @dataclass
@@ -278,6 +290,8 @@ _SIDECAR_EXCLUDES = (
 def rsync_session_filters(
     include_sessions: set[str] | None,
     detritus_roots: tuple[Path, ...] = (),
+    *,
+    batch_mode: bool = False,
 ) -> list[str]:
     """Build rsync include/exclude args restricting the transfer to session data.
 
@@ -292,6 +306,15 @@ def rsync_session_filters(
     ``session-state/<id>`` trees and matching provenance sidecars are
     transferred; the global session-store.db is excluded so other repos'
     sessions never leak to the destination.
+
+    ``batch_mode``, when set, means *include_sessions* is a transport-size
+    slice of an otherwise-unfiltered push (change-tracking's incremental or
+    segmented-full reconciliation batches -- see
+    :mod:`agent_logger.sync.engine`'s ``_push_incremental``), never a genuine
+    repo-scope business filter. It still transfers the global index (so a
+    routine run eventually refreshes it, same as the pre-change-tracking
+    unfiltered push always did) even though this particular call only
+    carries a subset of sessions.
     """
     exclusions = [*_SIDECAR_EXCLUDES, *(rsync_exclude(root) for root in detritus_roots)]
     if include_sessions is None:
@@ -313,8 +336,58 @@ def rsync_session_filters(
     filters.append("--include=provenance/")
     for sid in sorted(include_sessions):
         filters.append(f"--include=provenance/{sid}.json")
+    if batch_mode:
+        filters.append("--include=session-store.db")
+        filters.append("--include=session-store.db-wal")
+        filters.append("--include=session-store.db-shm")
     filters.append("--exclude=*")
     return filters
+
+
+#: Top-level session-index files kept alongside the ``session-state`` tree when
+#: no repo allowlist narrows the scope. Everything else under the source (the
+#: rest of ~/.copilot: binaries, installed plugins, OAuth/credential state,
+#: encryption keys, settings) is never archived. Shared by rsync-based targets
+#: (the include rules above) and :func:`is_session_path_included` (used by the
+#: filesystem targets' own file-by-file copy loop).
+SESSION_INDEX_NAMES = frozenset(
+    {"session-store.db", "session-store.db-wal", "session-store.db-shm"}
+)
+
+
+def is_session_path_included(
+    rel: Path, include_sessions: set[str] | None, *, batch_mode: bool = False
+) -> bool:
+    """Decide whether a relative source path is in scope for a filesystem-
+    style (file-by-file) push -- the non-rsync counterpart of
+    :func:`rsync_session_filters`'s include/exclude rules.
+
+    With no allowlist, the whole ``session-state`` tree and the
+    ``session-store.db`` index are included. With an allowlist, only
+    ``session-state/<id>/`` for an allowed ``<id>`` is included (the global
+    index is skipped so other repos' session metadata never leaks).
+    ``batch_mode`` keeps the index with a narrow *include_sessions*
+    (change_tracker batching, not a genuine repo-scope filter).
+    """
+    parts = rel.parts
+    if not parts:
+        return False
+    if parts[0] == "session-state":
+        if include_sessions is None:
+            return True
+        return len(parts) >= 2 and parts[1] in include_sessions
+    if parts[0] == "provenance":
+        if len(parts) != 2 or rel.suffix != ".json":
+            return False
+        if include_sessions is None:
+            return True
+        return rel.stem in include_sessions
+    # Top-level session index: kept when unfiltered, or a batch_mode slice.
+    return (
+        (include_sessions is None or batch_mode)
+        and len(parts) == 1
+        and rel.name in SESSION_INDEX_NAMES
+    )
 
 
 @dataclass
@@ -343,7 +416,12 @@ class Target(ABC):
 
     @abstractmethod
     def push(
-        self, source: Path, machine: str, include_sessions: set[str] | None = None
+        self,
+        source: Path,
+        machine: str,
+        include_sessions: set[str] | None = None,
+        *,
+        batch_mode: bool = False,
     ) -> PushResult:
         """Publish *source* under the target's ``{machine}/`` subpath.
 
@@ -357,11 +435,30 @@ class Target(ABC):
         to the named ``session-state/<id>`` directories (repo-allowlist
         filtering) and drops the global session-store.db, so sessions from
         other repos never leak.
+
+        ``batch_mode``, when set alongside a non-``None`` ``include_sessions``,
+        signals that the narrowing is a transport-size slice of an otherwise
+        unfiltered push (see :mod:`agent_logger.sync.change_tracker`'s
+        incremental/segmented-full reconciliation), not a genuine repo-scope
+        filter -- the global index is still transferred, and a target that
+        would otherwise treat a filtered push as an atomic rescue operation
+        (locked files aborting the whole batch) instead defers locked files
+        and continues, exactly as an unfiltered push would.
         """
 
     @abstractmethod
     def doctor(self) -> DoctorResult:
         """Check that the target is reachable/usable without transferring."""
+
+    def heartbeat(self, machine: str) -> None:
+        """Best-effort: record that a sync pass completed successfully even
+        though nothing needed transferring (keeps destination-persisted
+        health metadata, e.g. ``last_sync_utc``, current between full
+        reconciliation passes -- otherwise a routine health check can report
+        a perfectly healthy, unchanged destination as stale). A no-op for
+        targets that don't persist sidecar health metadata.
+        """
+        return None
 
     def prune(self, machine: str, retention_days: int | None) -> int:
         """Remove session data older than *retention_days*.

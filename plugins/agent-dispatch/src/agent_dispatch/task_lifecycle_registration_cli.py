@@ -286,6 +286,27 @@ def register_task_lifecycle_commands(sub) -> None:
     p.set_defaults(func=_core()._cmd_unpause)
 
     p = sub.add_parser(
+        "unexclude",
+        help="remove a self-exclusion appended by `yield --exclude`/"
+        "`--exclude-self` (clears all exclusions by default)",
+    )
+    p.add_argument("task_id")
+    p.add_argument(
+        "--exclude",
+        help="remove only this exclusion token (e.g. 'machine:tmichon-cloud2'); "
+        "omit to clear every exclusion on the task",
+    )
+    p.add_argument("--actor", help="operator identity recorded in the audit trail")
+    p.add_argument(
+        "--expected-status",
+        dest="expected_status",
+        help="reject with 'task changed; refresh and retry' if the task's "
+        "current status doesn't match this (a stale cached row) -- ignored "
+        "when the task already has no matching exclusion (a harmless no-op)",
+    )
+    p.set_defaults(func=_core()._cmd_unexclude)
+
+    p = sub.add_parser(
         "embody",
         help="Phase 1's interactive-embodiment transaction: open a task into "
         "an interactive CLI-backed session (currently requires --interactive)",

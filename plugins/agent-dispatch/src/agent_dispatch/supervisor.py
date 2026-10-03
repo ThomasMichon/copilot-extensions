@@ -980,7 +980,9 @@ class Supervisor:
                             disposition="failed",
                         )
                     else:
-                        self.client.fail_spawn(res["key"], detail=detail)
+                        self.client.fail_spawn(
+                            res["key"], detail=detail, release_requested=True
+                        )
                     reconciled += 1
                 except DispatchError:
                     log.exception("failed to release gone reserving body %s", res["key"])
@@ -1016,6 +1018,7 @@ class Supervisor:
                             "script body confirmed gone while reserving "
                             f"(worker {worker_id}, pid {pid})"
                         ),
+                        release_requested=True,
                     )
                     reconciled += 1
                 except DispatchError:
@@ -1068,7 +1071,9 @@ class Supervisor:
                             disposition="failed",
                         )
                     else:
-                        self.client.fail_spawn(res["key"], detail=detail)
+                        self.client.fail_spawn(
+                            res["key"], detail=detail, release_requested=True
+                        )
                     reconciled += 1
                 except DispatchError:
                     log.exception(
@@ -2984,9 +2989,12 @@ class Supervisor:
                             self.client.settle_spawn(
                                 res["key"],
                                 detail=f"{detail}; productive turn completed",
+                                release_requested=True,
                             )
                         else:
-                            self.client.fail_spawn(res["key"], detail=detail)
+                            self.client.fail_spawn(
+                                res["key"], detail=detail, release_requested=True
+                            )
                         recovered += 1
                         log.info(
                             "recovered gone fleet body for task %s (%s); reservation "
@@ -3043,9 +3051,12 @@ class Supervisor:
                             self.client.settle_spawn(
                                 res["key"],
                                 detail=f"{detail}; productive turn completed",
+                                release_requested=True,
                             )
                         else:
-                            self.client.fail_spawn(res["key"], detail=detail)
+                            self.client.fail_spawn(
+                                res["key"], detail=detail, release_requested=True
+                            )
                         recovered += 1
                         log.info(
                             "recovered gone local body for task %s (%s); reservation "
@@ -3081,7 +3092,9 @@ class Supervisor:
                     except DispatchError:
                         log.exception("failed to abandon gone script task %s", task["id"])
                     try:
-                        self.client.settle_spawn(res["key"], detail=detail)
+                        self.client.settle_spawn(
+                            res["key"], detail=detail, release_requested=True
+                        )
                         recovered += 1
                         log.info(
                             "abandoned gone script body for task %s (%s)",
@@ -3133,9 +3146,10 @@ class Supervisor:
                     self.client.settle_spawn(
                         res["key"],
                         detail=f"{detail}; productive turn completed",
+                        release_requested=True,
                     )
                 else:
-                    self.client.fail_spawn(res["key"], detail=detail)
+                    self.client.fail_spawn(res["key"], detail=detail, release_requested=True)
                 recovered += 1
                 log.info(
                     "recovered gone embody for task %s (%s); reservation released for re-embody",

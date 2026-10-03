@@ -63,75 +63,96 @@ _DRIVER_SCRIPT = textwrap.dedent(
 
     import pytest
 
-    test_path, cov_source, cwd, cov_data_file, json_report_file, out_file = sys.argv[1:7]
+    # Every statement below must stay inside this guard. A plugin's own
+    # tests may spawn real child processes via `multiprocessing.get_context
+    # ("spawn")` -- `spawn` bootstraps a fresh interpreter that re-imports
+    # this very script as a plain module (not as `__main__`) to reconstruct
+    # the pickled target it needs to run. Without this guard, that
+    # re-import re-executes `pytest.main(...)` unconditionally, which
+    # multiprocessing's own bootstrap-safety check catches and raises
+    # "An attempt has been made to start a new process before the current
+    # process has finished its bootstrapping phase" for -- confirmed live:
+    # `agent-worktrees`' own real cross-process file-lock tests spawn
+    # exactly such a child, which died at bootstrap with that exact error
+    # (observable as the spawned process simply never living), and the
+    # doomed re-execution's own half-started pytest-cov instance is what
+    # corrupted the real coverage data file the parent process was still
+    # writing to (`coverage.exceptions.DataError: ... no such table:
+    # context`). This is the same "Safe importing of main module" hazard
+    # Python's own `multiprocessing` docs describe for any script, not
+    # something specific to pytest or coverage.
+    if __name__ == "__main__":
+        test_paths_json, cov_source, cwd, cov_data_file, json_report_file, out_file, basetemp = sys.argv[1:8]
+        test_paths = json.loads(test_paths_json)
 
-    exit_code = pytest.main(
-        [
-            test_path,
-            "-q",
-            f"--cov={cov_source}",
-            "--cov-context=test",
-            "--json-report",
-            f"--json-report-file={json_report_file}",
-            "-p",
-            "no:cacheprovider",
-            # Override any project-configured `addopts` (pytest.ini/
-            # pyproject.toml/setup.cfg) for this invocation only: an
-            # addopts like "-m smoke" would otherwise silently narrow
-            # collection to a subset while this run still exits 0, letting
-            # a partial run be recorded as a complete, authoritative
-            # baseline. Clearing the *environment* variable alone (see
-            # _AMBIENT_PYTEST_SELECTION_ENV_VARS) does not reach this
-            # configured-file source.
-            "-o",
-            "addopts=",
-        ]
-    )
+        exit_code = pytest.main(
+            [
+                *test_paths,
+                "-q",
+                f"--basetemp={basetemp}",
+                f"--cov={cov_source}",
+                "--cov-context=test",
+                "--json-report",
+                f"--json-report-file={json_report_file}",
+                "-p",
+                "no:cacheprovider",
+                # Override any project-configured `addopts` (pytest.ini/
+                # pyproject.toml/setup.cfg) for this invocation only: an
+                # addopts like "-m smoke" would otherwise silently narrow
+                # collection to a subset while this run still exits 0, letting
+                # a partial run be recorded as a complete, authoritative
+                # baseline. Clearing the *environment* variable alone (see
+                # _AMBIENT_PYTEST_SELECTION_ENV_VARS) does not reach this
+                # configured-file source.
+                "-o",
+                "addopts=",
+            ]
+        )
 
-    if exit_code != 0:
-        sys.exit(exit_code)
+        if exit_code != 0:
+            sys.exit(exit_code)
 
-    import coverage
+        import coverage
 
-    cov = coverage.CoverageData(basename=cov_data_file)
-    cov.read()
+        cov = coverage.CoverageData(basename=cov_data_file)
+        cov.read()
 
-    cwd_path = Path(cwd).resolve()
-    phase_suffixes = ("|run", "|setup", "|teardown")
-    coverage_map = {}
-    for measured_file in cov.measured_files():
-        try:
-            rel = str(Path(measured_file).resolve().relative_to(cwd_path))
-        except ValueError:
-            rel = measured_file
-        per_line = {}
-        for lineno, contexts in cov.contexts_by_lineno(measured_file).items():
-            tests = set()
-            for ctx in contexts:
-                for suffix in phase_suffixes:
-                    if ctx.endswith(suffix):
-                        tests.add(ctx[: -len(suffix)])
-                        break
-            if tests:
-                per_line[str(lineno)] = sorted(tests)
-        if per_line:
-            coverage_map[rel] = per_line
+        cwd_path = Path(cwd).resolve()
+        phase_suffixes = ("|run", "|setup", "|teardown")
+        coverage_map = {}
+        for measured_file in cov.measured_files():
+            try:
+                rel = str(Path(measured_file).resolve().relative_to(cwd_path))
+            except ValueError:
+                rel = measured_file
+            per_line = {}
+            for lineno, contexts in cov.contexts_by_lineno(measured_file).items():
+                tests = set()
+                for ctx in contexts:
+                    for suffix in phase_suffixes:
+                        if ctx.endswith(suffix):
+                            tests.add(ctx[: -len(suffix)])
+                            break
+                if tests:
+                    per_line[str(lineno)] = sorted(tests)
+            if per_line:
+                coverage_map[rel] = per_line
 
-    report = json.loads(Path(json_report_file).read_text())
-    durations = {}
-    for test in report.get("tests", []):
-        nodeid = test.get("nodeid")
-        if nodeid is None:
-            continue
-        total = 0.0
-        for phase in ("setup", "call", "teardown"):
-            phase_data = test.get(phase)
-            if phase_data:
-                total += float(phase_data.get("duration", 0.0))
-        durations[nodeid] = total
+        report = json.loads(Path(json_report_file).read_text())
+        durations = {}
+        for test in report.get("tests", []):
+            nodeid = test.get("nodeid")
+            if nodeid is None:
+                continue
+            total = 0.0
+            for phase in ("setup", "call", "teardown"):
+                phase_data = test.get(phase)
+                if phase_data:
+                    total += float(phase_data.get("duration", 0.0))
+            durations[nodeid] = total
 
-    Path(out_file).write_text(json.dumps({"durations": durations, "coverage": coverage_map}))
-    sys.exit(0)
+        Path(out_file).write_text(json.dumps({"durations": durations, "coverage": coverage_map}))
+        sys.exit(0)
     """
 )
 
@@ -222,6 +243,77 @@ def _prepare_project_venv(project_dir: Path, tmp_path: Path, *, timeout_s: float
     return python_exe
 
 
+def _discover_test_files(cwd: Path, test_path: str) -> list[Path] | None:
+    """Every file under `test_path` matching pytest's own default
+    collection patterns (`test_*.py` and `*_test.py` -- confirmed in
+    pytest's documented `python_files` default; a project overriding that
+    default via its own `pyproject.toml`/`pytest.ini` is not accounted for
+    here, same as `run-plugin-tests.py`'s own single-pattern discovery),
+    sorted, deduped (a name like `test_foo_test.py` matches both patterns).
+    Returns `None` if `test_path` isn't a directory (e.g. it already names
+    a single file) -- the caller then treats it as a single, unsplit
+    chunk."""
+    target = (cwd / test_path).resolve()
+    if not target.is_dir():
+        return None
+    return sorted(
+        {*target.rglob("test_*.py"), *target.rglob("*_test.py")}
+    )
+
+
+def _relative_or_absolute(path: Path, cwd: Path) -> str:
+    """`path` relative to `cwd` when possible, or `path` itself (resolved,
+    absolute) when it isn't -- e.g. a test directory given as an absolute
+    path outside `cwd` entirely. Pytest accepts either form as a positional
+    collection argument regardless of its own `cwd`, so an out-of-tree
+    `test_path` keeps working once a suite is large enough to chunk, not
+    just while it stays under the single-chunk threshold."""
+    try:
+        return str(path.relative_to(cwd))
+    except ValueError:
+        return str(path)
+
+
+def _plan_chunks(cwd: Path, test_path: str, max_files_per_chunk: int) -> list[list[str]]:
+    """Split `test_path` into chunks of at most `max_files_per_chunk` test
+    files each -- mirrors `tools/run-plugin-tests.py`'s own sub-suite
+    chunking (`_test_file_groups`, default 25 files), which this function
+    reuses the same `partition` helper for. A suite within the limit (or a
+    single file rather than a directory) stays exactly one chunk, naming
+    `test_path` itself unchanged, so collection behavior for every
+    already-enrolled plugin is bit-for-bit identical to before chunking
+    existed."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from plugin_test_containment import partition
+
+    test_files = _discover_test_files(cwd, test_path)
+    if test_files is None or len(test_files) <= max_files_per_chunk:
+        return [[test_path]]
+    return partition(
+        [_relative_or_absolute(f, cwd) for f in test_files], max_files_per_chunk
+    )
+
+
+def _merge_chunk_results(chunks: list[dict]) -> dict:
+    """Combine each chunk's own `{"durations": ..., "coverage": ...}` dict
+    (as `_DRIVER_SCRIPT` emits per chunk) into one. Test durations are a
+    flat union (a given test belongs to exactly one chunk); coverage lines
+    need a real per-line union of attributed test names, since a shared
+    source file touched by tests from more than one chunk would otherwise
+    have one chunk's attribution silently clobber another's."""
+    durations: dict[str, float] = {}
+    coverage: dict[str, dict[str, list[str]]] = {}
+    for chunk in chunks:
+        durations.update(chunk["durations"])
+        for file, per_line in chunk["coverage"].items():
+            merged_file = coverage.setdefault(file, {})
+            for line, tests in per_line.items():
+                existing = set(merged_file.get(line, ()))
+                existing.update(tests)
+                merged_file[line] = sorted(existing)
+    return {"durations": durations, "coverage": coverage}
+
+
 def collect_baseline(
     *,
     cwd: Path,
@@ -231,6 +323,7 @@ def collect_baseline(
     timeout_s: float = 300.0,
     measured_commit: str | None = None,
     project_dir: Path | None = None,
+    max_files_per_chunk: int = 25,
 ) -> dict:
     """Run `test_path` under coverage and return a portable baseline dict.
 
@@ -254,57 +347,102 @@ def collect_baseline(
     measured, not just a dependency-free script plugin. Omit it for a
     plugin like `ai-attribution` with no installable package.
 
+    `max_files_per_chunk` bounds how many test files run in a single pytest
+    process at once (default 25, matching `run-plugin-tests.py`'s own
+    `--max-files-per-sub-suite` default). Confirmed live: `agent-mcp`'s
+    full suite (54 files, real process/watchdog-management tests) reliably
+    crashed a single unchunked collection pass with near-zero captured
+    output, while the trusted runner's own chunked sub-suites pass it
+    cleanly -- this mirrors that same chunking so a large or
+    subprocess-heavy suite doesn't need its own one-off accommodation.
+
     Raises `BaselineCollectionError` for any outcome other than a clean,
     fully-passing run (exit code 0) -- a baseline is only ever earned from
-    evidence the validation gate itself would accept.
+    evidence the validation gate itself would accept. A chunked suite fails
+    fast on the first non-clean chunk, exactly like a single-chunk suite
+    always has.
     """
-    with tempfile.TemporaryDirectory(prefix="cgs-baseline-") as tmp:
+    with tempfile.TemporaryDirectory(
+        prefix="cgs-baseline-", ignore_cleanup_errors=True
+    ) as tmp:
+        # `ignore_cleanup_errors=True` matches `run-plugin-tests.py`'s own
+        # sandboxed-tempdir handling -- confirmed live: a plugin whose own
+        # real tests spawn child processes (e.g. `agent-worktrees`' real
+        # cross-process file-lock tests) can leave a lingering handle open
+        # on a file under this tempdir past this function's own return,
+        # which would otherwise turn a clean, fully-passing collection run
+        # into a raised `OSError` on cleanup -- discarding a baseline that
+        # was already earned.
         cwd = cwd.resolve()  # resolve once: both the subprocess cwd and the
         # driver's own cwd argv must agree, or a relative `cwd` double-joins
         # itself when the driver re-resolves it from inside that directory.
         tmp_path = Path(tmp)
         driver_file = tmp_path / "_cgs_driver.py"
         driver_file.write_text(_DRIVER_SCRIPT)
-        cov_data_file = tmp_path / ".coverage"
-        json_report_file = tmp_path / "report.json"
-        out_file = tmp_path / "baseline.json"
-        driver_args = [
-            test_path, cov_source, str(cwd),
-            str(cov_data_file), str(json_report_file), str(out_file),
-        ]
+        sandbox = tmp_path / "sandbox"  # one sandbox reused across every
+        # chunk -- matches `run-plugin-tests.py`'s own sequential sub-suite
+        # loop, which shares a single sandbox the same way.
 
         if project_dir is not None:
             python_exe = _prepare_project_venv(project_dir, tmp_path, timeout_s=timeout_s)
-            command = [str(python_exe), str(driver_file), *driver_args]
+            command_prefix = [str(python_exe), str(driver_file)]
         else:
-            command = [
+            command_prefix = [
                 "uv", "run",
                 "--with", "pytest-cov",
                 "--with", "coverage",
                 "--with", "pytest-json-report",
-                "python", str(driver_file), *driver_args,
+                "python", str(driver_file),
             ]
 
-        proc = None
-        try:
-            proc = subprocess.run(
-                command,
-                cwd=cwd,
-                env=_subprocess_env(cov_data_file, tmp_path / "sandbox"),
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
-            )
-        except subprocess.TimeoutExpired as exc:
-            # A hang is just as non-clean a collection outcome as a nonzero
-            # exit: translate it into the same error contract instead of
-            # letting it escape as an undocumented `TimeoutExpired`, so every
-            # caller only ever needs to catch `BaselineCollectionError`.
-            raise _timeout_error(exc, timeout_s=timeout_s) from exc
-        if proc.returncode != 0:
-            raise BaselineCollectionError(proc.returncode, proc.stdout, proc.stderr)
+        chunks = _plan_chunks(cwd, test_path, max_files_per_chunk)
+        chunk_results = []
+        for index, chunk_paths in enumerate(chunks):
+            chunk_cov_data_file = tmp_path / f".coverage.{index}"
+            chunk_json_report_file = tmp_path / f"report.{index}.json"
+            chunk_out_file = tmp_path / f"baseline.{index}.json"
+            # An explicit, short `--basetemp` (rather than pytest's own
+            # TMPDIR-derived default) keeps every `tmp_path`-fixture path a
+            # test creates well clear of AF_UNIX's 108-byte `sun_path`
+            # limit -- confirmed live: without this, `agent-mcp`'s own
+            # real-socket cutover tests failed with "AF_UNIX path too
+            # long" once `_subprocess_env`'s `isolated_environment`
+            # redirected TMPDIR into a deeply nested sandbox path pytest's
+            # default tmp_path root would otherwise nest even deeper under
+            # (`.../sandbox/tmp/pytest-of-<user>/pytest-<n>/...`). Mirrors
+            # `run-plugin-tests.py`'s own `--basetemp` override for the
+            # identical reason.
+            basetemp = tmp_path / f"pt{index}"
+            driver_args = [
+                json.dumps(chunk_paths), cov_source, str(cwd),
+                str(chunk_cov_data_file), str(chunk_json_report_file), str(chunk_out_file),
+                str(basetemp),
+            ]
+            command = [*command_prefix, *driver_args]
 
-        merged = json.loads(out_file.read_text())
+            proc = None
+            try:
+                proc = subprocess.run(
+                    command,
+                    cwd=cwd,
+                    env=_subprocess_env(chunk_cov_data_file, sandbox),
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_s,
+                )
+            except subprocess.TimeoutExpired as exc:
+                # A hang is just as non-clean a collection outcome as a
+                # nonzero exit: translate it into the same error contract
+                # instead of letting it escape as an undocumented
+                # `TimeoutExpired`, so every caller only ever needs to catch
+                # `BaselineCollectionError`.
+                raise _timeout_error(exc, timeout_s=timeout_s) from exc
+            if proc.returncode != 0:
+                raise BaselineCollectionError(proc.returncode, proc.stdout, proc.stderr)
+
+            chunk_results.append(json.loads(chunk_out_file.read_text()))
+
+        merged = _merge_chunk_results(chunk_results)
 
     return {
         "schema_version": BASELINE_SCHEMA_VERSION,
@@ -384,6 +522,14 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
         help="a plugin's own root (pyproject.toml) to install editable before "
              "collecting -- needed for a plugin with real dependencies",
     )
+    parser.add_argument(
+        "--max-files-per-chunk",
+        type=int,
+        default=25,
+        help="split a suite larger than this many test files into sequential "
+             "chunks, matching run-plugin-tests.py's own sub-suite chunking "
+             "(default: 25)",
+    )
     args = parser.parse_args(argv)
 
     baseline = collect_baseline(
@@ -393,6 +539,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
         plugin=args.plugin,
         measured_commit=args.measured_commit,
         project_dir=Path(args.project_dir) if args.project_dir else None,
+        max_files_per_chunk=args.max_files_per_chunk,
     )
     Path(args.out).write_text(json.dumps(baseline, indent=2, sort_keys=True))
     print(f"wrote baseline for {args.plugin} to {args.out}")

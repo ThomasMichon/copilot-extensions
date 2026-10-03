@@ -48,3 +48,18 @@ def register_registrar_commands(sub) -> None:
     rp.add_argument("repo_root", help="path to the repo root to read declarations from")
     rp.add_argument("--owner", help="provenance override (default: repo:<name>)")
     rp.set_defaults(func=_core()._cmd_registrar)
+    rp = reg_sub.add_parser(
+        "vocabulary",
+        help="aggregate the active declaration set's effective permit values per "
+        "filter dimension -- the known-value vocabulary a task could target to "
+        "be eligible for at least one active pool (e.g. for a picker's "
+        "dynamically-sourced criteria dropdown)",
+    )
+    rp.add_argument(
+        "--dim",
+        choices=sorted(["repo", "machine", "env", "role", "worktree", "task-type", "capabilities"]),
+        help="emit only this dimension's values (a flat array) instead of the "
+        "full per-dimension mapping",
+    )
+    rp.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    rp.set_defaults(func=_core()._cmd_registrar)

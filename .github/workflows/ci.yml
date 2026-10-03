@@ -196,6 +196,14 @@ jobs:
         # the diff scoped to this PR's own commits regardless of dev's drift.
         if: github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'dev'
         run: python tools/check-changefile-presence.py --base ${{ github.event.pull_request.base.sha }} --head ${{ github.event.pull_request.head.sha }}
+      - name: Changefile presence guard tests
+        # Unconditional (unlike the step above): this is the tool's own unit
+        # suite, not a PR-diff check, so it must run on every push/PR
+        # regardless of base branch. Previously not wired in at all -- the
+        # suite silently bit-rotted (a missing test-fixture dependency broke
+        # every test with an import error) with nothing to catch it
+        # (PR #4942 review).
+        run: python -m pytest -q tools/test_check_changefile_presence.py
       - name: Module size (hard cap + shrink-only baseline, PR diff only)
         # Scoped to files THIS PR's own commits touch (like the changefile-
         # presence step above) -- a PR is never blocked by growth in a file it

@@ -702,8 +702,14 @@ class TaskRunner:
 
             rec = await asyncio.to_thread(self.store.get_task, task.id)
             status = rec.status if rec is not None else TaskStatus.FAILED.value
-            if status == TaskStatus.COMPLETE.value:
-                self.tasks_completed += 1
+            if status in (TaskStatus.COMPLETE.value, TaskStatus.PARTIAL.value):
+                # PARTIAL still stored real content for its non-failed sources,
+                # so it needs the same post-index pass (clustering etc.) as a
+                # clean COMPLETE -- it just doesn't count as a full success.
+                if status == TaskStatus.COMPLETE.value:
+                    self.tasks_completed += 1
+                else:
+                    self.tasks_failed += 1
                 if self._post_index_fn is not None:
                     try:
                         await asyncio.to_thread(self._post_index_fn)

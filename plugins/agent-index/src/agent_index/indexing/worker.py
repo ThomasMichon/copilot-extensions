@@ -137,7 +137,11 @@ def run_worker(task_id: str) -> int:
     if task is None:
         print(f"[FAIL] worker: task {task_id} not found", file=sys.stderr)
         return 2
-    if task.status in {TaskStatus.COMPLETE.value, TaskStatus.CANCELLED.value}:
+    if task.status in {
+        TaskStatus.COMPLETE.value,
+        TaskStatus.PARTIAL.value,
+        TaskStatus.CANCELLED.value,
+    }:
         return 0  # already terminal — idempotent no-op
 
     # Host-resource good citizen: this worker is a dedicated indexing subprocess,
@@ -179,6 +183,25 @@ def run_worker(task_id: str) -> int:
         )
         if isinstance(result, dict):
             store.set_result_stats(task_id, result)
+        sources_failed = result.get("sources_failed") if isinstance(result, dict) else None
+        if sources_failed:
+            # One or more of the requested sources individually failed inside
+            # the run-reindex loop (caught per-source so the OTHER sources
+            # still get indexed, per #1350) -- the worker itself didn't crash,
+            # but this is NOT a clean run. Surface that distinction in status
+            # instead of masking it behind plain COMPLETE (see TaskStatus.PARTIAL's
+            # docstring for why this matters).
+            store.update_progress(
+                task_id, "complete", 100.0, "Indexing complete with source failures"
+            )
+            store.update_status(task_id, TaskStatus.PARTIAL.value)
+            log.warning(
+                "worker: task %s partial -- %d source(s) failed: %s",
+                task_id,
+                len(sources_failed),
+                [f.get("source") for f in sources_failed],
+            )
+            return 0
         store.update_progress(task_id, "complete", 100.0, "Indexing complete")
         store.update_status(task_id, TaskStatus.COMPLETE.value)
         log.info("worker: task %s complete", task_id)

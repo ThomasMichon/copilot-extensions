@@ -36,7 +36,9 @@ def _repos_usage() -> None:
     print("  add <name> <path>                   Register a repo at a known path")
     print("     [--class C] [--remote URL] [--default-branch B]")
     print("     [--account LOGIN] [--tags a,b] [--contributing PATH]")
-    print("     [--agent|--no-agent]")
+    print("     [--agent|--no-agent] [--visibility private|internal|public]")
+    print("  set-visibility <name> <tier>         Set a repo's audience-exposure tier")
+    print("     (private|internal|public -- see docs/identifier-blocklist.md)")
     print("  remove <name>                       Remove a repo from the registry")
     print("  clone <remote> [--name N]           Clone a repo to srcroot and register")
     print("     [--target PATH]")
@@ -184,6 +186,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                             "account": e.account,
                             "resolved_account": repos.resolve_account(e),
                             "agent": e.agent,
+                            "visibility": e.visibility,
                             "paths": e.paths,
                         }
                         for e in entries
@@ -199,6 +202,8 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             output.header("Repos Registry")
             for e in entries:
                 tag = f"[{e.repo_class}]" if e.agent else f"[{e.repo_class} no-agent]"
+                if e.visibility:
+                    tag = f"{tag[:-1]} visibility={e.visibility}]"
                 local = e.local_path(plat) or "(no local path)"
                 print(f"  {e.name:<25} {tag:<20} {local}")
                 if e.remote:
@@ -266,6 +271,19 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             default_branch = repos.inrepo_declared_default_branch(path)
         contributing = _opt("--contributing") or contributing
         account = _opt("--account") or ""
+        visibility = ""
+        if "--visibility" in rest:
+            visibility_raw = _opt("--visibility")
+            if visibility_raw is None:
+                output.err("repos add: --visibility requires a value")
+                return 1
+            visibility = repos.normalize_visibility(visibility_raw)
+            if not visibility:
+                output.err(
+                    f"repos add: invalid visibility '{visibility_raw}' -- "
+                    "must be one of: " + ", ".join(repos.VALID_VISIBILITY)
+                )
+                return 1
         raw_tags = _opt("--tags")
         if raw_tags:
             tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
@@ -286,8 +304,33 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             contributing=contributing,
             account=account,
             agent=agent_flag,
+            visibility=visibility,
         )
         _core()._clarify_registration_account(remote, name, account, path)
+        return 0
+
+    if sub == "set-visibility":
+        if len(rest) < 2:
+            output.err(
+                "Usage: repos set-visibility <name> private|internal|public"
+            )
+            return 1
+        name, tier = rest[0], rest[1]
+        norm = repos.normalize_visibility(tier)
+        if not norm:
+            output.err(
+                f"Invalid visibility '{tier}' -- must be one of: "
+                + ", ".join(repos.VALID_VISIBILITY)
+            )
+            return 1
+        entry = repos.find_repo(name)
+        if entry is None:
+            output.err(f"No such repo: {name}")
+            return 1
+        registry = repos.read_registry()
+        registry.repos[name].visibility = norm
+        repos.write_registry(registry)
+        output.ok(f"{name}: visibility set to {norm}")
         return 0
 
     if sub == "remove":

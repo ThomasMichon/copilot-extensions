@@ -1,11 +1,12 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/agent-dispatch/blocked-task-fallback.instructions.md","plugin":"agent-dispatch@copilot-extensions","pluginVersion":"0.7.18-dev1","renderedBytes":2697,"schema":"copilot-extensions.instruction-projection","sourceId":"blocked-task-fallback","template":"instructions/blocked-task-fallback.instructions.md","templateBytes":1958,"templateSha256":"f8521aeb78c58bf04ed5e6dd755dc8a0fcd2c0899e29698091e7e2ceb849cfed","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/agent-dispatch/blocked-task-fallback.instructions.md","plugin":"agent-dispatch@copilot-extensions","pluginVersion":"0.8.0-dev1","renderedBytes":2750,"schema":"copilot-extensions.instruction-projection","sourceId":"blocked-task-fallback","template":"instructions/blocked-task-fallback.instructions.md","templateBytes":1958,"templateSha256":"f8521aeb78c58bf04ed5e6dd755dc8a0fcd2c0899e29698091e7e2ceb849cfed","version":1} -->
 
-> If `blocked-task-fallback.local.instructions.md` exists here, prefer it -- it reflects
-> the currently installed payload; this file reflects the last
-> synced-and-reviewed state.
+> If `blocked-task-fallback.local.instructions.md` exists here, compare
+> `pluginVersion` and prefer whichever is newer. On a tie,
+> compare `templateSha256`: matching means prefer local;
+> differing means prefer this checked-in file.
 
 # Agent Dispatch -- a live task is structurally blocked
 

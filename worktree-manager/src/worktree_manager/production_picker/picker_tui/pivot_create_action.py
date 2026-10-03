@@ -70,16 +70,43 @@ def _parse_create_fields(raw: object, *, where: str) -> tuple[Mapping[str, objec
             )
         if ftype in choice_types:
             opts = item.get("options")
-            if not isinstance(opts, Sequence) or isinstance(opts, (str, bytes)) or not opts:
-                raise ManifestError(
-                    f"{where}[{i}].options is required (non-empty array) for a "
-                    f"{ftype} field"
-                )
-            if any(not isinstance(o, str) or not o.strip() for o in opts):
-                raise ManifestError(
-                    f"{where}[{i}].options must be an array of non-blank strings"
-                )
-            field["options"] = tuple(opts)
+            opts_cmd = item.get("options_command")
+            if opts_cmd is not None:
+                if (
+                    not isinstance(opts_cmd, Sequence)
+                    or isinstance(opts_cmd, (str, bytes))
+                    or not opts_cmd
+                    or any(not isinstance(o, str) or not o for o in opts_cmd)
+                ):
+                    raise ManifestError(
+                        f"{where}[{i}].options_command must be a non-empty array "
+                        "of strings"
+                    )
+                field["options_command"] = tuple(opts_cmd)
+                # The live command's result is never guaranteed (the target may
+                # be absent, slow, or return nothing this run) -- allow_other is
+                # therefore mandatory whenever options are dynamically sourced,
+                # so the field always degrades to free text rather than ever
+                # rendering genuinely unanswerable.
+                allow_other = True
+            if opts is not None or opts_cmd is None:
+                if (
+                    not isinstance(opts, Sequence)
+                    or isinstance(opts, (str, bytes))
+                    or not opts
+                ):
+                    if opts_cmd is None:
+                        raise ManifestError(
+                            f"{where}[{i}].options is required (non-empty array) "
+                            f"for a {ftype} field unless options_command is set"
+                        )
+                else:
+                    if any(not isinstance(o, str) or not o.strip() for o in opts):
+                        raise ManifestError(
+                            f"{where}[{i}].options must be an array of non-blank "
+                            "strings"
+                        )
+                    field["options"] = tuple(opts)
             if allow_other:
                 field["allow_other"] = True
         condition = item.get("show_when")

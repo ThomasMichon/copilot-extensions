@@ -40,6 +40,7 @@ slices:
 
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import subprocess
 from collections.abc import Callable, Mapping
@@ -69,6 +70,7 @@ query($owner:String!,$name:String!,$number:Int!) {
       commits(last:1) {
         nodes {
           commit {
+            committedDate
             statusCheckRollup { state }
           }
         }
@@ -128,6 +130,7 @@ class PRObservation:
     mergeability: Mergeability
     holds: frozenset[HoldReason]
     revision: Revision
+    last_commit_at: float | None = None
 
 
 def _has_wip_marker(title: str, labels: tuple[str, ...]) -> bool:
@@ -170,6 +173,24 @@ def _mergeability(pull_request: Mapping[str, Any]) -> Mergeability:
         raise GitHubPRObservationError(
             f"unrecognized GitHub statusCheckRollup state {state!r}"
         ) from None
+
+
+def _last_commit_at(pull_request: Mapping[str, Any]) -> float | None:
+    commits = ((pull_request.get("commits") or {}).get("nodes")) or []
+    if not commits:
+        return None
+    commit = (commits[-1].get("commit") or {}) if isinstance(commits[-1], Mapping) else {}
+    committed = commit.get("committedDate")
+    if committed is None:
+        return None
+    if not isinstance(committed, str) or not committed:
+        raise GitHubPRObservationError("PR payload has invalid commits[*].commit.committedDate")
+    try:
+        return datetime.fromisoformat(committed.replace("Z", "+00:00")).timestamp()
+    except ValueError as exc:
+        raise GitHubPRObservationError(
+            f"PR payload has invalid commits[*].commit.committedDate {committed!r}"
+        ) from exc
 
 
 def _holds(pull_request: Mapping[str, Any]) -> frozenset[HoldReason]:
@@ -215,6 +236,7 @@ def observe_pr_state(pull_request: Mapping[str, Any]) -> PRObservation:
         mergeability=_mergeability(pull_request),
         holds=_holds(pull_request),
         revision=Revision(diff_hash=head_sha, base_sha=base_sha),
+        last_commit_at=_last_commit_at(pull_request),
     )
 
 

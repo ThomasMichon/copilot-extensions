@@ -359,6 +359,7 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             stale_approval_head_sha=tracked_head_sha,
             stale_approval_head_observed_at=head_observed_at,
             review_blocking=review_blocking,
+            dismiss_stale_reviews=getattr(prcfg, "dismiss_stale_reviews", None),
             on_error=lambda e: print(f"pr-watch: poll error (will retry): {e}", file=sys.stderr),
         )
         if not result.matched:

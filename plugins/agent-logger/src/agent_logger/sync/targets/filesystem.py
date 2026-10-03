@@ -30,7 +30,7 @@ from agent_logger.sync.detritus import (
     is_excluded,
 )
 from agent_logger.sync.lock import sync_lock
-from agent_logger.sync.meta import read_sync_meta, write_sync_meta
+from agent_logger.sync.meta import heartbeat_sync_meta, read_sync_meta, write_sync_meta
 from agent_logger.sync.provenance import (
     MAX_PROVENANCE_BYTES,
     RESCUE_SNAPSHOT_PROVENANCE,
@@ -38,26 +38,23 @@ from agent_logger.sync.provenance import (
     is_link_or_reparse,
     open_regular_no_follow,
     rescue_snapshot_path,
+)
+from agent_logger.sync.provenance import (
     windows_extended_path as _windows_extended_path,
 )
 from agent_logger.sync.targets.base import (
+    SESSION_INDEX_NAMES,
     DoctorResult,
     FleetSyncStatus,
     PushResult,
     SyncStatus,
     Target,
+    is_session_path_included,
 )
 
 #: Excluded from sync: legacy lock names, ``.lock``/``.tmp`` suffixes, and ``.hold`` (Copilot's restrictive-ACL ``inuse.<pid>.hold`` marker).
 _EXCLUDE_NAMES, _EXCLUDE_SUFFIXES = frozenset({".lock", "lock"}), (".lock", ".tmp", ".hold")
 
-#: Top-level session-index files kept alongside the ``session-state`` tree when
-#: no repo allowlist narrows the scope. Everything else under the source (the
-#: rest of ~/.copilot: binaries, installed plugins, OAuth/credential state,
-#: encryption keys, settings) is never archived.
-_SESSION_INDEX_NAMES = frozenset(
-    {"session-store.db", "session-store.db-wal", "session-store.db-shm"}
-)
 _MAX_TRANSACTION_MANIFEST_BYTES = 16 * 1024 * 1024
 _MAX_FLEET_MACHINE_DEPTH = 4
 _MAX_FLEET_MACHINES = 1000
@@ -1398,39 +1395,20 @@ def _count_sessions(dest: Path) -> int:
     return sum(1 for d in base.iterdir() if d.is_dir())
 
 
-def _included(rel: Path, include_sessions: set[str] | None) -> bool:
-    """Decide whether a relative source path is in scope.
+def _deferred_session_ids(locked_paths: list[Path]) -> tuple[str, ...]:
+    """Session ids with >=1 deferred (locked) file -- parsed from each path's
+    ``session-state/<id>/...`` or ``provenance/<id>.json`` shape."""
+    ids: set[str] = set()
+    for rel in locked_paths:
+        parts = rel.parts
+        if len(parts) >= 2 and parts[0] in ("session-state", "provenance"):
+            ids.add(Path(parts[1]).stem if parts[0] == "provenance" else parts[1])
+    return tuple(sorted(ids))
 
-    session-sync archives *session* data only -- the ``session-state`` tree,
-    optional per-session ``provenance`` sidecars, plus the global
-    ``session-store.db`` index -- never the rest of the source (``~/.copilot``:
-    binaries, installed plugins, OAuth/credential state, encryption keys,
-    settings).
 
-    With no allowlist, the whole ``session-state`` tree and the session-store.db
-    index are included. With an allowlist, only ``session-state/<id>/`` for an
-    allowed ``<id>`` is included (the global session-store.db is skipped so
-    other repos' session metadata never leaks).
-    """
-    parts = rel.parts
-    if not parts:
-        return False
-    if parts[0] == "session-state":
-        if include_sessions is None:
-            return True
-        return len(parts) >= 2 and parts[1] in include_sessions
-    if parts[0] == "provenance":
-        if len(parts) != 2 or rel.suffix != ".json":
-            return False
-        if include_sessions is None:
-            return True
-        return rel.stem in include_sessions
-    # Top-level session index: kept only when not filtering by repo.
-    return (
-        include_sessions is None
-        and len(parts) == 1
-        and rel.name in _SESSION_INDEX_NAMES
-    )
+def _index_deferred(locked_paths: list[Path]) -> bool:
+    """Whether a deferred (locked) path is a top-level index file."""
+    return any(len(rel.parts) == 1 and rel.name in SESSION_INDEX_NAMES for rel in locked_paths)
 
 
 class FilesystemTarget(Target):
@@ -1442,7 +1420,8 @@ class FilesystemTarget(Target):
         raise NotImplementedError
 
     def push(
-        self, source: Path, machine: str, include_sessions: set[str] | None = None
+        self, source: Path, machine: str, include_sessions: set[str] | None = None,
+        *, batch_mode: bool = False,
     ) -> PushResult:
         try:
             safe_source = _existing_real_directory(source)
@@ -1467,7 +1446,10 @@ class FilesystemTarget(Target):
         copied = 0
         nbytes = 0
         locked_paths: list[Path] = []
-        if include_sessions is not None:
+        # batch_mode falls through to the plain copy-with-defer loop below
+        # like an unfiltered push; real repo-scope filtering takes the
+        # atomic rescue path.
+        if include_sessions is not None and not batch_mode:
             lock_file = dest / ".session-sync-rescue.lock"
             cleanup_warnings = []
             try:
@@ -1534,7 +1516,7 @@ class FilesystemTarget(Target):
                 excluded_measurement_complete=detritus.measurement_complete,
             )
         try:
-            destination_detritus = discover_session_detritus(dest, None)
+            destination_detritus = discover_session_detritus(dest, include_sessions)
         except OSError as exc:
             return PushResult(
                 ok=False,
@@ -1559,7 +1541,7 @@ class FilesystemTarget(Target):
                 if _is_excluded_name(src_file.name):
                     continue
                 rel = src_file.relative_to(source)
-                if not _included(rel, include_sessions):
+                if not is_session_path_included(rel, include_sessions, batch_mode=batch_mode):
                     continue
                 dst_file = dest / rel
                 try:
@@ -1592,7 +1574,7 @@ class FilesystemTarget(Target):
             return PushResult(ok=False, detail=f"cannot inspect source: {exc}")
 
         try:
-            latest_detritus = discover_session_detritus(source, None)
+            latest_detritus = discover_session_detritus(source, include_sessions)
         except OSError as exc:
             return PushResult(
                 ok=False,
@@ -1645,6 +1627,8 @@ class FilesystemTarget(Target):
             excluded_byte_count=detritus.byte_count,
             excluded_roots=tuple(str(root) for root in detritus.roots),
             excluded_measurement_complete=detritus.measurement_complete,
+            deferred_sessions=_deferred_session_ids(locked_paths),
+            index_deferred=_index_deferred(locked_paths),
         )
 
     def sync_status(self, machine: str) -> SyncStatus:
@@ -1658,6 +1642,22 @@ class FilesystemTarget(Target):
             return SyncStatus(supported=True, metadata=metadata)
         except (OSError, ValueError) as exc:
             return SyncStatus(supported=True, error=str(exc))
+
+    def heartbeat(self, machine: str) -> None:
+        """Re-stamp destination health metadata, no transfer -- see
+        ``agent_logger.sync.meta.heartbeat_sync_meta``.
+
+        A no-op when the machine root doesn't already exist: a deleted
+        destination must never get a fresh "ok" heartbeat recreating an
+        empty directory and masking that its sessions are actually gone.
+        """
+        try:
+            dest = _existing_relative_directory(self._root(), Path(machine))
+        except OSError:
+            return
+        if dest is None:
+            return
+        heartbeat_sync_meta(dest, machine, self.name, _count_sessions(dest))
 
     def fleet_sync_status(self) -> FleetSyncStatus:
         """Read bounded per-machine metadata without entering session payloads."""

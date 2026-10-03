@@ -10,7 +10,7 @@ import yaml
 
 from . import activity, output, profile_assignment, related_briefing, sessions, tracking
 from . import config as cfg, session_context as session_context_mod
-from . import session_tracking_cli, status_monitor_runtime, status_updater_cli
+from . import session_tracking_cli, status_monitor_runtime, status_updater_cli, tracking_session_registration_write as _session_register_write
 
 
 def _core():
@@ -683,11 +683,9 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
         session_id=session_id,
     )
 
-    upd_path = None
     try:
         rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
-        if rec_path.exists():
-            upd_path = tracking.load_record(rec_path).worktree_path
+        upd_path = tracking.load_record(rec_path).worktree_path if rec_path.exists() else None
     except Exception:
         upd_path = None
     if not _register_manager_owned_monitor_session(
@@ -698,10 +696,10 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
         _spawn_status_updater(wt_id, upd_path or wdir)
 
     try:
-        record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
-        head = record.resolved_head_session
+        head = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml").resolved_head_session
     except Exception:
         head = None
+    sys.stderr.write(_session_register_write.head_hold_note(session_id, head))
     _json_output(
         {
             "worktree_id": wt_id,
@@ -709,6 +707,7 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
             "pane": pane_id,
             "bound": True,
             "head_session": head,
+            "is_head": head == session_id,
             "handoff_token": handoff_token,
             "candidate_before_ack": candidate_before_ack,
             "candidate_acknowledged": bool(handoff_token and candidate_before_ack == session_id),

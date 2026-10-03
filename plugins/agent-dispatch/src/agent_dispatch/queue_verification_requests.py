@@ -17,6 +17,7 @@ class QueueVerificationRequestsMixin:
         task_id: str,
         *,
         trigger: str,
+        not_before: float | None = None,
         now: float | None = None,
     ) -> VerificationRequest:
         ts = self._now(now)
@@ -37,7 +38,77 @@ class QueueVerificationRequestsMixin:
             if not task.evaluator_ref:
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} has no evaluator_ref to verify against")
-            row = self._insert_verification_request(conn, task_id, task.generation, trigger, ts)
+            row = self._insert_verification_request(
+                conn,
+                task_id,
+                task.generation,
+                trigger,
+                ts,
+                not_before=not_before,
+            )
+            conn.execute("COMMIT")
+        self._notify_verification()
+        return VerificationRequest._from_row(row)
+
+    def schedule_submitted_verification(
+        self,
+        task_id: str,
+        *,
+        trigger: str,
+        not_before: float,
+        now: float | None = None,
+    ) -> VerificationRequest:
+        ts = self._now(now)
+        if not_before <= ts:
+            return self.request_submitted_verification(
+                task_id,
+                trigger=trigger,
+                not_before=not_before,
+                now=ts,
+            )
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
+            if task.status != Status.SUBMITTED:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"cannot queue submitted verification for a {task.status!r} task"
+                )
+            if not task.require_verification:
+                conn.execute("COMMIT")
+                raise TaskError(f"task {task_id!r} does not require verification")
+            if not task.evaluator_ref:
+                conn.execute("COMMIT")
+                raise TaskError(f"task {task_id!r} has no evaluator_ref to verify against")
+            existing = conn.execute(
+                "SELECT * FROM verification_requests WHERE task_id = ? AND generation = ?"
+                " AND status = 'pending' ORDER BY not_before ASC, created_at ASC, id ASC LIMIT 1",
+                (task_id, task.generation),
+            ).fetchone()
+            if existing is None:
+                row = self._insert_verification_request(
+                    conn,
+                    task_id,
+                    task.generation,
+                    trigger,
+                    ts,
+                    not_before=not_before,
+                )
+            else:
+                current_not_before = float(existing["not_before"])
+                if current_not_before > not_before:
+                    conn.execute(
+                        "UPDATE verification_requests SET not_before = ?, updated_at = ?,"
+                        " last_error = NULL WHERE id = ? AND status = 'pending'",
+                        (not_before, ts, existing["id"]),
+                    )
+                row = conn.execute(
+                    "SELECT * FROM verification_requests WHERE id = ?",
+                    (existing["id"],),
+                ).fetchone()
             conn.execute("COMMIT")
         self._notify_verification()
         return VerificationRequest._from_row(row)
@@ -56,6 +127,16 @@ class QueueVerificationRequestsMixin:
                 "SELECT 1 FROM verification_requests WHERE status = 'pending' LIMIT 1"
             ).fetchone()
         return row is not None
+
+    def next_pending_verification_not_before(self) -> float | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT MIN(not_before) AS next_due FROM verification_requests"
+                " WHERE status = 'pending'"
+            ).fetchone()
+        if row is None or row["next_due"] is None:
+            return None
+        return float(row["next_due"])
 
     def recover_inflight_verification_requests(
         self,
@@ -206,13 +287,16 @@ class QueueVerificationRequestsMixin:
         generation: int,
         trigger: str,
         ts: float,
+        *,
+        not_before: float | None = None,
     ) -> sqlite3.Row:
         request_id = f"verify:{task_id}:{generation}:{uuid.uuid4().hex[:12]}"
+        due_at = ts if not_before is None else float(not_before)
         conn.execute(
             "INSERT INTO verification_requests ("
             " id, task_id, generation, trigger, status, attempts, not_before, created_at, updated_at"
             ") VALUES (?, ?, ?, ?, 'pending', 0, ?, ?, ?)",
-            (request_id, task_id, generation, trigger, ts, ts, ts),
+            (request_id, task_id, generation, trigger, due_at, ts, ts),
         )
         return conn.execute(
             "SELECT * FROM verification_requests WHERE id = ?",

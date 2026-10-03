@@ -230,6 +230,17 @@ def _cmd_unpause(args: argparse.Namespace) -> int:
             )
         )
 
+def _cmd_unexclude(args: argparse.Namespace) -> int:
+    with _core()._client(args) as c:
+        return _core()._emit(
+            c.clear_exclude(
+                args.task_id,
+                exclude=args.exclude,
+                actor=_core()._hold_actor(args),
+                expected_status=args.expected_status,
+            )
+        )
+
 def _cmd_embody_interactive(args: argparse.Namespace) -> int:
     """Run Phase 1's interactive-embodiment transaction and print its result.
 

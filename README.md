@@ -56,6 +56,7 @@ curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/mai
 | [agent-containers](plugins/agent-containers/) | CLI + resolver | Manage a fleet of local Docker dev containers, borrow/release them per effort, and address them as bridge agents (`container:<name>`). |
 | [agent-mcp](plugins/agent-mcp/) | MCP bridge | Wrap an upstream MCP server (HTTP or stdio), inject host credentials, reshape its catalog, and materialize a bridge-equivalent fallback. Agent authoring policy remains in `customizing-copilot`. |
 | [agent-ssh](plugins/agent-ssh/) | SSH connectivity CLI | Emit and verify machine-name SSH profiles from a normalized registry, and define the public transport-provider contract for direct or tunnel transports. |
+| [agent-remote-driver](plugins/agent-remote-driver/) | SDK extension | User-global, launch-time SDK extension giving any `copilot` session baseline drivability (attach to its live event stream, send/steer, abort) over a loopback HTTP surface, independent of agent-bridge or any other coordination plugin being installed in that venue. Payload-only — no runtime to install. Not yet enabled by default (`cli-default-bridging` effort, pre-validation). |
 | [efforts](plugins/efforts/) | Planning skills | Plan a stretch of work as an **effort** — a folder with a README-as-shared-contract (premise + plan + journal) that humans and agents coordinate through. The executor plugins above bind its participant seam. |
 | [visions](plugins/visions/) | Planning skills | Keep a persistent **vision** — a north-star statement of what a system should ultimately be — and derive efforts from the delta between vision and reality. Payload-only — no runtime to install. |
 | [agent-logger](plugins/agent-logger/) | Session logging | Turn raw Copilot sessions into structured Markdown logs — a segmenter, a voice-neutral log-writer agent, and a `session-sync` step that pushes local or validated provider-rescued session data to a configurable target (local / OneDrive / SSH / ingest). Personality is injected by the host, never built in. |
@@ -79,16 +80,16 @@ All support **Windows** and **Linux/WSL** (macOS planned).
 
 ## Architecture at a glance
 
-23 plugins, one marketplace. **Thirteen ship a runtime** (a `uv`-built venv under
+24 plugins, one marketplace. **Thirteen ship a runtime** (a `uv`-built venv under
 a plugin-owned runtime root such as `~/.agent-*` or `~/.budget-guidance`, plus a
-`~/.local/bin` binstub, deployed by the plugin's own installer); **ten are
+`~/.local/bin` binstub, deployed by the plugin's own installer); **eleven are
 payload-only** — `efforts` (skills), `visions` (skills),
 `context-handoff` (hook + session extension + skill), `customizing-copilot` (skills),
 `copilot-extensions-harness` (skills + contribution-boundary hook), `wsl-setup` (skills),
 `harness-knowledge` (skills), `ai-attribution` (hook + skill),
-`delegation-guidance` (hook + skill), and `agent-conduct-guidance`
-(instruction projection + skill) need no install beyond enabling the
-plugin.
+`delegation-guidance` (hook + skill), `agent-conduct-guidance`
+(instruction projection + skill), and `agent-remote-driver` (SDK extension)
+need no install beyond enabling the plugin.
 Everything installs **from the marketplace** and runs
 **from local install paths** — no git checkout required at runtime.
 

@@ -80,31 +80,34 @@ def _resolve_explicit_source_spec(
     """Resolve one explicitly-named ``--source``/``{"source": ...}`` request.
 
     Prefers the matching configured spec so its repo/auth resolve correctly.
-    ``git:<name>:commits`` is never itself a configured source -- a git
-    connector's commit history is a BYPRODUCT its ``discover()`` emits
-    alongside files, using whatever repo path its *file* source resolved. A
-    bare synthesized spec for it has no repo/repo_path, so it used to silently
+    ``git:<name>:commits`` and ``github:<owner>/<repo>:issues``/``:pulls`` are
+    never themselves configured sources -- each is a BYPRODUCT its connector's
+    ``discover()`` emits alongside its sibling content (files+commits in one
+    git crawl; issues+pulls in one GitHub issues-API crawl), using whatever
+    identity its *base* source resolves. A bare synthesized spec for one of
+    these has no repo/repo_path/auth_account, so it used to either silently
     fall back to ``GitRepoConnector``'s cwd/env default (virtually always the
-    wrong repo), surfacing only as an opaque ``git ls-files`` exit-128 deep in
-    a subprocess traceback. Resolve it against its parent file source's config
-    instead, so an explicit ``git:X:commits`` request indexes the right repo.
-    Any other unresolvable name synthesizes a bare spec, which
-    ``_connector_kwargs`` now raises loudly on (see its docstring) rather than
-    silently defaulting.
+    wrong repo, surfacing only as an opaque ``git ls-files`` exit-128) or, for
+    ``github:``, get constructed with the SUFFIX STILL IN THE NAME --
+    ``GitHubConnector._parse_source`` naively splits on the first ``/``, so
+    ``github:owner/repo:issues`` parses as repo ``"repo:issues"``, producing a
+    malformed API URL and a 404 on every request (confirmed identically across
+    all of ``:issues``/``:pulls`` for every configured github source).
+
+    Resolve the request against its BASE source's spec instead (returned
+    as-is, so the connector is constructed with the correct bare name and
+    inherits the base's real repo/repo_path/auth_account/ref) -- a full
+    reindex of the base naturally refreshes all of its byproducts together,
+    same as requesting the base name directly. Any other unresolvable name
+    synthesizes a bare spec, which ``_connector_kwargs`` now raises loudly on
+    (see its docstring) rather than silently defaulting.
     """
     spec = by_name.get(source)
-    if spec is None and source.endswith(":commits"):
-        parent = by_name.get(source[: -len(":commits")])
-        if parent is not None:
-            spec = SourceSpec(
-                name=source,
-                type=parent.type,
-                repo=parent.repo,
-                auth_account=parent.auth_account,
-                trust_domain=parent.trust_domain,
-                repo_path=parent.repo_path,
-                ref=parent.ref,
-            )
+    if spec is None:
+        for suffix in (":commits", ":issues", ":pulls"):
+            if source.endswith(suffix):
+                spec = by_name.get(source[: -len(suffix)])
+                break
     return spec or SourceSpec(name=source, type=_type_from_name(source))
 
 

@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import os
+import signal
+import subprocess
+import sys
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agent_bridge.connect import ConnectTracker
 from agent_bridge.db import Database
 from agent_bridge.events import EventLog
 from agent_bridge.models import SessionStatus
@@ -287,6 +294,245 @@ class TestStartSession:
                 and event.data["status"] == SessionStatus.FAILED.value
                 for event in session.event_log.get_events()
             )
+
+
+class TestLocalCacheRefreshWiring:
+    """local-cache-delivery-primacy Phase 2: a ``target.type == "local"``
+    spawn refreshes this worktree's gitignored ``*.local.instructions.md``
+    siblings before the Copilot CLI process is launched -- the one
+    remaining local-spawn path ``agent_worktrees``' own create/resume/
+    ``sessionStart`` refresh doesn't already cover. See
+    ``local_cache_refresh.py`` and ``efforts/active/local-cache-delivery-
+    primacy`` Phase 2's Plan.
+
+    The refresh call lives inside ``_connect_via_session_host`` itself
+    (``session_host_connection.py``), right after ``resolve_local_launch``
+    resolves the authoritative ``work_dir`` -- NOT at ``start_session``'s
+    own ``target.type == "local"`` entry, where a project-backed target's
+    real directory isn't known yet. These tests therefore drive the real
+    Session-Host-mode path end to end (a real
+    ``LocalSpawner`` + a tiny fake ACP agent subprocess, matching
+    ``test_session_host.py``'s own established pattern for this exact
+    boundary) rather than the lighter ``_connect_via_session_host``-stub
+    fixture other ``TestStartSession`` tests use, since that stub would
+    skip the very code path under test here."""
+
+    _FAKE_AGENT_SRC = (
+        "import asyncio, acp\n"
+        "from acp.schema import InitializeResponse, NewSessionResponse, "
+        "AgentCapabilities\n"
+        "class Agent:\n"
+        "    async def initialize(self, protocol_version, **kw):\n"
+        "        return InitializeResponse(protocol_version=protocol_version, "
+        "agent_capabilities=AgentCapabilities())\n"
+        "    async def new_session(self, cwd, **kw):\n"
+        "        return NewSessionResponse(session_id='host-mode-sess')\n"
+        "    def __getattr__(self, name):\n"
+        "        if name.startswith('_') or name == 'on_connect':\n"
+        "            raise AttributeError(name)\n"
+        "        async def _noop(*a, **k):\n"
+        "            return None\n"
+        "        return _noop\n"
+        "asyncio.run(acp.run_agent(Agent()))\n"
+    )
+
+    def _fake_agent_argv(self, tmp_path: Path) -> list[str]:
+        agent_script = tmp_path / "fake_agent.py"
+        agent_script.write_text(self._FAKE_AGENT_SRC)
+        return [sys.executable, str(agent_script)]
+
+    async def _kill(self, mgr, session) -> None:
+        """Reap both the host and the real child process the Session-Host
+        machinery spawns -- captured BEFORE ``shutdown()``, which
+        deliberately detaches in host mode (leaving both processes alive)
+        rather than reaping them; reading ``session.pid`` afterward
+        always returns ``None`` (``Session.pid`` is only populated while
+        ``client.is_running``), so a naive post-shutdown read is a no-op
+        that leaks a detached host/agent pair on every successful test."""
+        host_pid: int | None = None
+        child_pid: int | None = None
+        with contextlib.suppress(Exception):
+            if mgr._host_index is not None:
+                records = mgr._host_index.all()
+                if records:
+                    host_pid, child_pid = records[0].host_pid, records[0].child_pid
+        with contextlib.suppress(Exception):
+            await session.client.shutdown()
+        for pid in (host_pid, child_pid):
+            if not pid:
+                continue
+            with contextlib.suppress(Exception):
+                if sys.platform == "win32":
+                    subprocess.run(
+                        ["taskkill", "/PID", str(pid), "/T", "/F"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                else:
+                    os.kill(pid, signal.SIGKILL)
+
+    @pytest.mark.asyncio
+    async def test_direct_cwd_target_refreshes_using_that_directory(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        fake_argv = self._fake_agent_argv(tmp_path)
+
+        async def _fake_resolve(target, *, tracker=None, session_id=""):
+            return fake_argv, str(tmp_path), dict(os.environ)
+
+        monkeypatch.setattr(
+            "agent_bridge.transport.resolve_local_launch", _fake_resolve
+        )
+        mock_refresh = AsyncMock()
+        monkeypatch.setattr(
+            "agent_bridge.local_cache_refresh.refresh_local_cache", mock_refresh
+        )
+
+        db = Database(tmp_path / "s.db")
+        mgr = SessionManager(db, session_host_state_dir=str(tmp_path / "hosts"))
+        session = None
+        try:
+            session = await asyncio.wait_for(
+                mgr.start_session(SpawnTarget(type="local", cwd=str(tmp_path))),
+                timeout=30,
+            )
+            mock_refresh.assert_awaited_once_with(str(tmp_path))
+        finally:
+            if session is not None:
+                await self._kill(mgr, session)
+            db.close()
+
+    @pytest.mark.asyncio
+    async def test_project_backed_target_with_no_cwd_refreshes_the_resolved_worktree(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """A project-backed target (``cwd=None``) has NO authoritative
+        directory until ``resolve_local_launch`` resolves one -- the
+        refresh must use that resolved ``work_dir``, never skip because
+        ``target.cwd`` was unset at ``start_session``'s own entry."""
+        resolved_dir = tmp_path / "resolved-worktree"
+        resolved_dir.mkdir()
+        fake_argv = self._fake_agent_argv(tmp_path)
+
+        async def _fake_resolve(target, *, tracker=None, session_id=""):
+            return fake_argv, str(resolved_dir), dict(os.environ)
+
+        monkeypatch.setattr(
+            "agent_bridge.transport.resolve_local_launch", _fake_resolve
+        )
+        mock_refresh = AsyncMock()
+        monkeypatch.setattr(
+            "agent_bridge.local_cache_refresh.refresh_local_cache", mock_refresh
+        )
+
+        db = Database(tmp_path / "s.db")
+        mgr = SessionManager(db, session_host_state_dir=str(tmp_path / "hosts"))
+        session = None
+        try:
+            session = await asyncio.wait_for(
+                mgr.start_session(
+                    SpawnTarget(type="local", project="some-project", cwd=None)
+                ),
+                timeout=30,
+            )
+            mock_refresh.assert_awaited_once_with(str(resolved_dir))
+        finally:
+            if session is not None:
+                await self._kill(mgr, session)
+            db.close()
+
+    @pytest.mark.asyncio
+    async def test_a_refresh_failure_never_fails_the_spawn(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """``refresh_local_cache`` is itself fully best-effort and never
+        raises in real use -- this proves the call site also doesn't
+        depend on that contract never being violated (defense in depth):
+        even a callee that raises must never fail the spawn."""
+        fake_argv = self._fake_agent_argv(tmp_path)
+
+        async def _fake_resolve(target, *, tracker=None, session_id=""):
+            return fake_argv, str(tmp_path), dict(os.environ)
+
+        monkeypatch.setattr(
+            "agent_bridge.transport.resolve_local_launch", _fake_resolve
+        )
+
+        async def _boom(*a, **k):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(
+            "agent_bridge.local_cache_refresh.refresh_local_cache", _boom
+        )
+
+        db = Database(tmp_path / "s.db")
+        mgr = SessionManager(db, session_host_state_dir=str(tmp_path / "hosts"))
+        session = None
+        try:
+            session = await asyncio.wait_for(
+                mgr.start_session(SpawnTarget(type="local", cwd=str(tmp_path))),
+                timeout=30,
+            )
+            assert session.status == SessionStatus.IDLE
+        finally:
+            if session is not None:
+                await self._kill(mgr, session)
+            db.close()
+
+    @pytest.mark.asyncio
+    async def test_a_remote_boundary_call_never_invokes_resolve_local_launch_or_refresh(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """A remote-boundary call (``remote_child_argv`` set -- the
+        CodeSpace/mesh shape) has no local worktree to resolve at all
+        (see ``session_host_connection.py``'s own ``if remote_child_argv
+        is not None`` branch): it must never reach ``resolve_local_launch``
+        or the refresh, which this proves directly against the real
+        ``_connect_via_session_host`` method -- not inferred from the
+        ``if``/``else`` structure alone."""
+
+        async def _unexpected_resolve(*a, **k):
+            raise AssertionError(
+                "resolve_local_launch must never be called on the remote-"
+                "boundary branch"
+            )
+
+        monkeypatch.setattr(
+            "agent_bridge.transport.resolve_local_launch", _unexpected_resolve
+        )
+        mock_refresh = AsyncMock()
+        monkeypatch.setattr(
+            "agent_bridge.local_cache_refresh.refresh_local_cache", mock_refresh
+        )
+
+        class _SentinelStop(Exception):
+            pass
+
+        class _StubSpawner:
+            boundary = "codespace"
+
+            async def spawn(self, *a, **k):
+                raise _SentinelStop
+
+        db = Database(tmp_path / "s.db")
+        mgr = SessionManager(db, session_host_state_dir=str(tmp_path / "hosts"))
+        try:
+            from agent_bridge.connect import ConnectError
+
+            with pytest.raises(ConnectError) as excinfo:
+                await mgr._connect_via_session_host(
+                    SpawnTarget(type="command", cwd="/workspaces/repo"),
+                    tracker=ConnectTracker(lambda *a, **k: None, session_id="sid"),
+                    session_id="sid",
+                    on_acp_event=lambda *a, **k: None,
+                    permission_callback=None,
+                    spawner=_StubSpawner(),
+                    remote_child_argv=["codespace-agent"],
+                    remote_cwd="/workspaces/repo",
+                )
+            assert isinstance(excinfo.value.__cause__, _SentinelStop)
+        finally:
+            db.close()
+        mock_refresh.assert_not_awaited()
 
 
 class TestConcurrencyGuard:
@@ -5200,3 +5446,4 @@ class TestContainerClaimKey:
 
         t = SpawnTarget(type="local", cwd="/tmp", caller_worktree="/wt/a")
         assert sm._container_claim_key(t) is None
+

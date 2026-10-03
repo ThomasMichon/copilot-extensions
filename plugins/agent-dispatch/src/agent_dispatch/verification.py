@@ -18,7 +18,9 @@ from .producers.evaluator import (
     NoOp,
 )
 from .queue import Status, TaskError, TaskQueue
+from .pr_observation_store import observation_store_path
 from .registrations import RegistrationKind
+from .reviewer_loops import wrap_reviewer_loop_evaluator
 
 log = logging.getLogger("agent-dispatch.verification")
 
@@ -81,6 +83,11 @@ def _active_evaluators(
             continue
         try:
             loaded = load_registration_evaluator(spec)
+            loaded = wrap_reviewer_loop_evaluator(
+                loaded,
+                spec,
+                observation_store_path=observation_store_path(queue.db_path),
+            )
         except EvaluatorError as exc:
             log.warning(
                 "skipping evaluator registration %s (%s): %s",
@@ -200,6 +207,7 @@ def evaluate_submitted_task(
         )
 
     task_payload = asdict(task)
+    task_payload["payload_inline"] = queue.read_payload(task)
     task_payload["event_notes"] = _event_notes(queue, task_id)
     event = {"type": "task.submitted", "task": task_payload}
     try:
@@ -286,6 +294,21 @@ def evaluate_submitted_task(
             decisions=rendered,
             applied=applied,
         )
+
+    next_verification = getattr(evaluator, "next_verification_not_before", None)
+    if callable(next_verification) and all(
+        isinstance(decision, NoOp) for decision in decisions
+    ):
+        not_before = next_verification(event)
+        if isinstance(not_before, (int, float)):
+            try:
+                queue.schedule_submitted_verification(
+                    task_id,
+                    trigger="reviewer-loop-stale-deadline",
+                    not_before=float(not_before),
+                )
+            except TaskError:
+                pass
 
     return _verification_report(
         task_id=task_id,

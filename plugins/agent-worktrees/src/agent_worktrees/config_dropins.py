@@ -367,6 +367,10 @@ def _validate_pr(raw: object, *, location: str) -> str | None:
     for name in boolean_fields:
         if name in raw and not isinstance(raw[name], bool):
             return f"{location}.{name} must be a boolean"
+    if "dismiss_stale_reviews" in raw:
+        value = raw["dismiss_stale_reviews"]
+        if value is not None and not isinstance(value, bool):
+            return f"{location}.dismiss_stale_reviews must be a boolean or null"
     if "source_attribution" in raw:
         value = raw["source_attribution"]
         is_valid_bool = isinstance(value, bool)

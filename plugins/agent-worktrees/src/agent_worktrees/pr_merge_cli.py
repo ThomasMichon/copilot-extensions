@@ -332,6 +332,7 @@ def _pr_merge_now(
                 args.repo,
                 args.pr,
                 squash=True,
+                delete_source_branch=getattr(prcfg, "delete_source_branch", True),
                 api_base=base,
                 token=tok,
             )
@@ -372,6 +373,7 @@ def _pr_merge_now(
             args.pr,
             squash=True,
             admin=bypass_review_gate or not flow.review_blocking,
+            delete_source_branch=getattr(prcfg, "delete_source_branch", True),
             api_base=base,
             token=tok,
         )
