@@ -713,21 +713,29 @@ jobs:
           # comparison), but it surfaced this real structural gap: nothing
           # here actually pinned promotion to what `gate` validated.
           DEV_SHA: ${{ needs.gate.outputs.sha }}
-          # `promote_release.py`'s own `measured_commit` consistency check
-          # (see `_write_coverage_baselines_into_scratch`) refuses any
-          # baseline not measured against this exact `DEV_SHA` -- a stale
-          # artifact from a superseded run can never be silently checked
-          # in by passing this directory, whether or not it's empty.
-          COVERAGE_BASELINES_DIR: coverage-baselines
         run: |
+          # NOTE (workflow-only main bootstrap, see PR #5085): this
+          # intentionally does NOT forward `--coverage-baselines-dir` to
+          # `tools/promote_release.py` on `main` -- `main`'s own copy of
+          # that script still checks the FULL per-line coverage map into
+          # the generated commit's tree, which is exactly what made two
+          # plugins' baseline JSON exceed GitHub's 100MB push limit (#5075).
+          # The real fix (a small pointer checked in instead, full payload
+          # published as a Release asset -- see the "Publish coverage
+          # baselines" step above) lives in `tools/promote_release.py` on
+          # `dev` (PR #5078), which this repo's own `main`-only bootstrap
+          # gate refuses to accept directly (workflow-files only -- see
+          # `main source gate`'s own script). Once dev's own fix promotes
+          # through this now-unblocked pipeline for real, this forwarding
+          # is restored atomically alongside it; until then, a promotion
+          # simply omits the git-committed pointer for this round (the
+          # Release asset above still publishes the real evidence).
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$PUSH_INPUT" = "false" ]; then
-            python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
-              --coverage-baselines-dir "$COVERAGE_BASELINES_DIR"
+            python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main
             echo "land=false" >> "$GITHUB_OUTPUT"
           else
             python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
-              --push --candidate-branch "$CANDIDATE_BRANCH" \
-              --coverage-baselines-dir "$COVERAGE_BASELINES_DIR"
+              --push --candidate-branch "$CANDIDATE_BRANCH"
             echo "land=true" >> "$GITHUB_OUTPUT"
             # Consumed changefiles are no longer swept off `dev` by this
             # run: `purge-consumed-changefiles.yml` does that once daily
@@ -738,6 +746,59 @@ jobs:
             # already ignores a changefile that existed at the last
             # recorded promotion's `dev_head`, regardless of whether it's
             # still physically present on `dev`).
+          fi
+      - name: Publish coverage baselines as a GitHub Release (durable evidence for this dev commit)
+        # Runs AFTER "Promote" (not before): on the dev-side fix
+        # (PR #5078) `promote_release.py`'s own validation is what checks
+        # a baseline's identity before accepting it -- publishing first
+        # risked a since-rejected upload silently overwriting an already-
+        # published, still-valid release's assets. This workflow-only
+        # bootstrap keeps the same ordering for consistency, even though
+        # `main`'s own `promote_release.py` doesn't yet perform that
+        # check itself (see the NOTE in the "Promote" step above).
+        #
+        # Gated on the "Promote" step's own outcome, NOT the more precise
+        # `baselines_written` signal the dev-side fix uses: this bootstrap
+        # never forwards `--coverage-baselines-dir` at all (see the NOTE
+        # above), so `tools/promote_release.py` on `main` never performs
+        # its own baseline validation here regardless -- there is no more
+        # precise signal to gate on until the real fix (#5078) lands.
+        # `land == 'true'` IS still required, though: `promote_release.py`
+        # exits 0 for a `workflow_dispatch --push=false` dry run too (only
+        # the real push is skipped), and a dry run must never have the
+        # side effect of publishing a real Release.
+        #
+        # The full per-line coverage-baseline JSON for a large plugin
+        # suite can exceed GitHub's 100MB per-file git push limit, so the
+        # full payload is published here, as a Release asset, instead of
+        # ever entering a git tree -- see
+        # `tools/coverage_guided_selection/correlation.py`'s module
+        # docstring for the full design.
+        #
+        # Tagged on `DEV_SHA` itself (via `release_tag_for`'s formula, not
+        # the promotion's own eventual `main`-side tag) -- deliberately
+        # decoupled from whether/when/how this `dev` commit's promotion
+        # actually lands. Idempotent: a retried run for the exact same
+        # `DEV_SHA` uploads over (never duplicates) an already-published
+        # release's assets.
+        if: steps.decide.outputs.proceed == 'true' && steps.promote.outputs.land == 'true'
+        env:
+          DEV_SHA: ${{ needs.gate.outputs.sha }}
+        run: |
+          # Mirrors `correlation.release_tag_for` -- duplicated here (not
+          # imported; this step has no Python dependency at all otherwise)
+          # -- keep in sync by hand if that formula ever changes. Uses the
+          # FULL `DEV_SHA`, never a truncated prefix -- see that
+          # function's own docstring for why a shortened prefix risks a
+          # release-tag collision between two distinct commits.
+          release_tag="coverage-baselines-${DEV_SHA}"
+          if gh release view "$release_tag" >/dev/null 2>&1; then
+            gh release upload "$release_tag" coverage-baselines/*.json --clobber
+          else
+            gh release create "$release_tag" --target "$DEV_SHA" \
+              --title "Coverage baselines @ ${DEV_SHA:0:12}" \
+              --notes "Per-plugin coverage baselines measured against dev commit $DEV_SHA. Correlated via the small pointer files promote_release.py checks into .github/coverage-baselines/ on main -- see tools/coverage_guided_selection/correlation.py." \
+              coverage-baselines/*.json
           fi
       - name: Land the candidate branch on main via PR + squash-merge
         id: land
