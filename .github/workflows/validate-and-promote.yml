@@ -757,6 +757,13 @@ jobs:
         # `main`'s own `promote_release.py` doesn't yet perform that
         # check itself (see the NOTE in the "Promote" step above).
         #
+        # Gated on the "Promote" step's own outcome, NOT the more precise
+        # `baselines_written` signal the dev-side fix uses: this bootstrap
+        # never forwards `--coverage-baselines-dir` at all (see the NOTE
+        # above), so `tools/promote_release.py` on `main` never performs
+        # its own baseline validation here regardless -- there is no more
+        # precise signal to gate on until the real fix (#5078) lands.
+        #
         # The full per-line coverage-baseline JSON for a large plugin
         # suite can exceed GitHub's 100MB per-file git push limit, so the
         # full payload is published here, as a Release asset, instead of
