@@ -14,8 +14,14 @@ via ``Target.push(..., include_sessions=...)``.
 This is a *local* optimization, never a second source of truth: the
 destination is always authoritative. A periodic full reconciliation pass
 (see :func:`ChangeTracker.should_full_sync`) and the explicit ``run --full``
-escape hatch exist precisely so local drift (a corrupted/stale db, content
-this signature scheme can't detect) is never permanent -- see the
+escape hatch exist precisely so local drift (a corrupted/stale tracker db,
+or a change this signature scheme itself can't see -- e.g. a session the
+tracker never knew about) is never permanent. This is a stat-based
+signature, the same bound every target's own transport already accepts
+(rsync without ``--checksum``, this module's own size/mtime compare): a
+file whose *content* changes while its size and mtime are both deliberately
+restored to their prior values is invisible to this scheme and to the
+underlying transport alike, full reconciliation included -- see the
 ``session-sync-setup`` skill's "Change tracking" section for the operator
 workflow.
 """
@@ -29,6 +35,8 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+
+from agent_logger.sync.detritus import discover_session_tree_detritus
 
 
 def resolve_settings(raw: dict[str, Any]) -> dict[str, Any]:
@@ -93,7 +101,11 @@ def _compute_index_signature(source: Path) -> str:
     return hasher.hexdigest()
 
 
-def compute_signature(session_dir: Path, provenance_file: Path | None = None) -> str:
+def compute_signature(
+    session_dir: Path,
+    provenance_file: Path | None = None,
+    excluded_roots: tuple[Path, ...] = (),
+) -> str:
     """Cheap content signature: sha256 over every file's sorted (relpath,
     size, mtime_ns), plus *provenance_file*'s own stat when it exists.
 
@@ -105,10 +117,18 @@ def compute_signature(session_dir: Path, provenance_file: Path | None = None) ->
     ``session-state/<id>``, see :func:`~agent_logger.sync.targets.base.
     rsync_session_filters`): without it, updating only the sidecar would
     leave the signature unchanged and the update would never be detected.
+    *excluded_roots* (absolute paths, e.g. from
+    :func:`~agent_logger.sync.detritus.discover_session_tree_detritus`)
+    skips generated-artifact subtrees (node_modules, browser profiles,
+    venvs...) the transport never sends -- without this, churn inside an
+    excluded subtree would mark the session "changed" and trigger a
+    wasted push of content that gets filtered right back out.
     """
     hasher = hashlib.sha256()
     entries: list[tuple[str, int, int]] = []
     for path in session_dir.rglob("*"):
+        if any(root in path.parents or root == path for root in excluded_roots):
+            continue
         if not path.is_file():
             continue
         try:
@@ -202,7 +222,9 @@ class ChangeTracker:
                 if not candidate.is_dir():
                     continue
                 signature = compute_signature(
-                    candidate, provenance_dir / f"{candidate.name}.json"
+                    candidate,
+                    provenance_dir / f"{candidate.name}.json",
+                    discover_session_tree_detritus(candidate).roots,
                 )
                 row = conn.execute(
                     "SELECT signature FROM session_signatures WHERE session_id = ?",
@@ -242,7 +264,9 @@ class ChangeTracker:
             if not session_dir.is_dir():
                 continue
             signatures[session_id] = compute_signature(
-                session_dir, provenance_dir / f"{session_id}.json"
+                session_dir,
+                provenance_dir / f"{session_id}.json",
+                discover_session_tree_detritus(session_dir).roots,
             )
         return signatures
 
@@ -366,8 +390,23 @@ class ChangeTracker:
 
     def record_index(self, source: Path) -> None:
         """Persist the global session-index files' current stat signature
-        as synced (see :meth:`index_changed`)."""
-        signature = _compute_index_signature(source)
+        as synced (see :meth:`index_changed`).
+
+        Recomputes *now* -- a push caller should prefer :meth:`snapshot_index`
+        (before the transfer) + :meth:`record_index_signature` (after it
+        succeeds), for the same before/after-the-transfer reason as
+        :meth:`snapshot`/:meth:`record_signatures`.
+        """
+        self.record_index_signature(_compute_index_signature(source))
+
+    def snapshot_index(self, source: Path) -> str:
+        """Capture the index files' current signature -- call before the
+        transfer, then persist via :meth:`record_index_signature` only
+        after it succeeds."""
+        return _compute_index_signature(source)
+
+    def record_index_signature(self, signature: str) -> None:
+        """Persist a pre-captured index signature (see :meth:`snapshot_index`)."""
         with _connect(self.db_path) as conn:
             conn.execute(
                 "INSERT INTO sync_meta (key, value) VALUES (?, ?) "

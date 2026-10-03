@@ -1738,6 +1738,44 @@ def test_sync_meta_bounds_deferred_file_samples(tmp_path: Path) -> None:
     )
 
 
+def test_heartbeat_sync_meta_preserves_fields_only_touching_timestamp(
+    tmp_path: Path,
+) -> None:
+    from agent_logger.sync import meta
+
+    meta.write_sync_meta(
+        tmp_path,
+        "machine",
+        "local",
+        "partial",
+        session_count=5,
+        deferred_files=[f"path-{i}" for i in range(20)],
+    )
+    before = meta.read_sync_meta(tmp_path)
+    assert before["consecutive_partial_count"] == 1
+    assert before["deferred_file_count"] == 20
+
+    meta.heartbeat_sync_meta(tmp_path, "machine", "local", fallback_session_count=5)
+    after = meta.read_sync_meta(tmp_path)
+
+    # Only the timestamp may change -- status/counts/samples untouched.
+    assert after["status"] == "partial"
+    assert after["consecutive_partial_count"] == 1
+    assert after["deferred_file_count"] == 20
+    assert after["session_count"] == 5
+    assert after["last_sync_utc"] != "" and after["last_sync_utc"] is not None
+
+
+def test_heartbeat_sync_meta_writes_fresh_when_nothing_exists(tmp_path: Path) -> None:
+    from agent_logger.sync import meta
+
+    meta.heartbeat_sync_meta(tmp_path, "machine", "local", fallback_session_count=3)
+    payload = meta.read_sync_meta(tmp_path)
+    assert payload is not None
+    assert payload["status"] == "ok"
+    assert payload["session_count"] == 3
+
+
 def test_sync_meta_tracks_and_resets_consecutive_partial_count(
     tmp_path: Path,
 ) -> None:

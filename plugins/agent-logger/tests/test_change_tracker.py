@@ -42,6 +42,36 @@ def test_compute_signature_changes_on_new_file(tmp_path: Path) -> None:
     assert before != after
 
 
+def test_compute_signature_ignores_excluded_roots(tmp_path: Path) -> None:
+    """Content inside an excluded (detritus) subtree must not perturb the
+    signature -- the transport never sends it, so tracking it would trigger
+    wasted pushes for content that gets filtered right back out."""
+    sess = _make_session(tmp_path, "abc-123")
+    node_modules = sess / "files" / "tool-output" / "proj" / "node_modules"
+    node_modules.mkdir(parents=True)
+    (node_modules / "pkg.js").write_text("v1", encoding="utf-8")
+
+    before = compute_signature(sess, excluded_roots=(node_modules,))
+    (node_modules / "pkg.js").write_text("v2-longer", encoding="utf-8")
+    (node_modules / "new.js").write_text("new", encoding="utf-8")
+    after = compute_signature(sess, excluded_roots=(node_modules,))
+    assert before == after
+
+
+def test_compute_signature_without_excluded_roots_still_sees_the_change(
+    tmp_path: Path,
+) -> None:
+    sess = _make_session(tmp_path, "abc-123")
+    node_modules = sess / "files" / "tool-output" / "proj" / "node_modules"
+    node_modules.mkdir(parents=True)
+    (node_modules / "pkg.js").write_text("v1", encoding="utf-8")
+
+    before = compute_signature(sess)
+    (node_modules / "pkg.js").write_text("v2-longer", encoding="utf-8")
+    after = compute_signature(sess)
+    assert before != after
+
+
 def test_compute_signature_uses_relative_paths_not_absolute(tmp_path: Path) -> None:
     """The signature is keyed by each file's *relative* path within the
     session dir, so moving the same session tree elsewhere on disk (same

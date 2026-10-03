@@ -10,9 +10,9 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
 
 SYNC_VERSION = "1.0.0"
 MAX_DEFERRED_FILE_SAMPLES = 10
@@ -95,35 +95,46 @@ def write_sync_meta(
             pass
 
 
-def heartbeat_sync_meta(dest: Path, machine: str, transport: str, fallback_session_count: int) -> None:
-    """Re-stamp an existing ``sync-meta.json``'s ``last_sync_utc`` without
-    requiring any transfer -- a no-change fast path still needs the
+def heartbeat_sync_meta(
+    dest: Path, machine: str, transport: str, fallback_session_count: int
+) -> None:
+    """Re-stamp an existing ``sync-meta.json``'s ``last_sync_utc`` IN PLACE,
+    touching no other field -- a no-change fast path still needs the
     destination's own health metadata to reflect a just-verified-current
     pass, or a routine health check would see only the last real *transfer*
     (which may predate the periodic full-reconciliation window) and report a
-    healthy, unchanged destination as stale. Best-effort, like
-    :func:`write_sync_meta` itself. *fallback_session_count* is used only
-    when no prior metadata exists to copy a session count from.
+    healthy, unchanged destination as stale.
+
+    Deliberately does NOT round-trip through :func:`write_sync_meta`: that
+    function's own side effects (bumping ``consecutive_partial_count``,
+    truncating ``deferred_files``/``excluded_detritus_roots`` back down to
+    their sample caps) are meant for an actual new transfer attempt, not a
+    skip -- replaying them here would misclassify health (a bumped partial
+    streak with no new attempt) and silently shrink an already-bounded
+    sample list further each heartbeat. Falls back to a full
+    :func:`write_sync_meta` call only when no metadata exists yet at all
+    (first-ever heartbeat, nothing to preserve).
     """
     try:
         previous = read_sync_meta(dest)
     except OSError:
         previous = None
-    previous = previous or {}
-    write_sync_meta(
-        dest,
-        machine,
-        transport,
-        str(previous.get("status", "ok")),
-        int(previous.get("session_count", 0)) or fallback_session_count,
-        deferred_files=previous.get("deferred_files", []),
-        excluded_roots=previous.get("excluded_detritus_roots", []),
-        excluded_file_count=previous.get("excluded_detritus_file_count", 0),
-        excluded_byte_count=previous.get("excluded_detritus_byte_count", 0),
-        excluded_measurement_complete=previous.get(
-            "excluded_detritus_measurement_complete", True
-        ),
-    )
+    if previous is None:
+        write_sync_meta(dest, machine, transport, "ok", fallback_session_count)
+        return
+    previous["last_sync_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    meta_file = dest / "sync-meta.json"
+    tmp = meta_file.with_name(f".sync-meta.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(json.dumps(previous, indent=2), encoding="utf-8")
+        os.replace(tmp, meta_file)
+    except OSError:
+        pass
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def read_sync_meta(dest: Path) -> dict | None:

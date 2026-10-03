@@ -90,22 +90,30 @@ def _all_session_ids(source: Path) -> list[str]:
 
 
 def _record_push_result(
-    tracker, snapshot: dict[str, str], result, unfiltered: bool, source: Path
+    tracker, snapshot: dict[str, str], result, unfiltered: bool, index_snapshot: str | None,
 ) -> None:
     """After a successful push, persist only sessions that fully transferred.
 
     A session with at least one deferred (locked) file did NOT fully land --
     recording its signature anyway would permanently mask the gap once the
-    file unlocks without its size/mtime changing again. Also refreshes the
-    index tracker whenever this push was unfiltered (batch_mode always
-    carries the global index then, regardless of which sessions it covers).
+    file unlocks without its size/mtime changing again. Any PRIOR stored
+    signature for a deferred session is also dropped (not just withheld):
+    an unchanged-since-last-full-sync session whose only issue this pass
+    was a transiently locked file would otherwise still match its old row
+    and be skipped as "already synced" on the very next incremental check.
+    Also records *index_snapshot* (captured before this push, see
+    :meth:`~agent_logger.sync.change_tracker.ChangeTracker.snapshot_index`)
+    whenever this push was unfiltered -- never recomputed after the fact,
+    for the same before/after-the-transfer reason as session signatures.
     """
     to_record = {
         sid: sig for sid, sig in snapshot.items() if sid not in result.deferred_sessions
     }
     tracker.record_signatures(to_record)
-    if unfiltered:
-        tracker.record_index(source)
+    if result.deferred_sessions:
+        tracker.forget(result.deferred_sessions)
+    if unfiltered and index_snapshot is not None:
+        tracker.record_index_signature(index_snapshot)
 
 
 def _push_incremental(
@@ -178,9 +186,10 @@ def _push_incremental(
         # post-push could capture a live append that happened during the
         # push but was never actually transferred, permanently masking it.
         snapshot = tracker.snapshot(source, final_include)
+        index_snapshot = tracker.snapshot_index(source) if unfiltered else None
         result = target.push(source, machine, final_include, batch_mode=unfiltered)
         if result.ok:
-            _record_push_result(tracker, snapshot, result, unfiltered, source)
+            _record_push_result(tracker, snapshot, result, unfiltered, index_snapshot)
         return result
 
     all_ids = _all_session_ids(source)
@@ -204,6 +213,7 @@ def _push_incremental(
         if verbose:
             print(f"session-sync: full sync batch {batch_count} ({len(batch)} session(s))")
         snapshot = tracker.snapshot(source, batch)
+        index_snapshot = tracker.snapshot_index(source) if unfiltered else None
         result = target.push(source, machine, set(batch), batch_mode=unfiltered)
         if not result.ok:
             return result
@@ -212,7 +222,7 @@ def _push_incremental(
         total_excluded_bytes += result.excluded_byte_count
         excluded_roots.extend(result.excluded_roots)
         measurement_complete = measurement_complete and result.excluded_measurement_complete
-        _record_push_result(tracker, snapshot, result, unfiltered, source)
+        _record_push_result(tracker, snapshot, result, unfiltered, index_snapshot)
 
     vanished = tracker.vanished_sessions(source)
     if vanished:
