@@ -64,6 +64,10 @@ def _pr_watch_usage() -> None:
     print(file=out)
     print("  Overrides: --host URL (api base), --token TOKEN.", file=out)
     print(file=out)
+    print("  Run this FROM your own (claimant) worktree -- never from an", file=out)
+    print("  untracked directory or the target repo's own checkout. <owner/name>", file=out)
+    print("  addresses the target; no local checkout of it is required.", file=out)
+    print(file=out)
     print("  One-shot read: `wait ... --timeout 1` returns the current-state", file=out)
     print("  snapshot (verdict/merge/consent) even on timeout; or use the", file=out)
     print("  worktree-scoped `pr-status` for the same live state without waiting.", file=out)
@@ -81,6 +85,47 @@ def _pr_parse_repo(value: str) -> str:
     if value.count("/") != 1 or not all(value.split("/")):
         raise ValueError("repo must be a 'owner/name' (or ADO 'project/repo') slug")
     return value
+
+
+def require_claimant_worktree(verb: str) -> tuple[str | None, str]:
+    """Resolve CWD to the worktree that CLAIMS (owns, is responsible for the
+    lifetime of) this ``pr-*`` operation -- the contract behind
+    ``foreign-repo-pr-operations``: the **owning** project is always the
+    CWD; a (possibly foreign) **target** repo is always an explicit argument,
+    never inferred from "whichever repo's checkout I happen to be sitting
+    in." Returns ``(worktree_id, "")`` on success, or ``(None,
+    actionable_message)`` when CWD cannot be traced back to a live, tracked
+    worktree at all -- running from an untracked directory, a bare project
+    anchor, or the *target* repo's own checkout (instead of the caller's own
+    worktree) all fail this check.
+
+    Every ``pr-*`` command that can address a foreign repo calls this FIRST,
+    before any repo/config resolution, so a bad calling pattern is rejected
+    with concrete guidance rather than silently doing the wrong thing (or
+    worse, surfacing some unrelated downstream error that reads like a
+    reason to abandon this tool and shell out to ``gh``/``az repos``/``git``
+    directly -- which loses this command's provider/policy/binding
+    resolution entirely).
+    """
+    from . import worktree_identity
+
+    worktree_id = worktree_identity._infer_worktree_id_from_cwd()
+    if worktree_id:
+        return worktree_id, ""
+    return None, (
+        f"{verb}: this directory isn't a tracked agent-worktrees worktree, so "
+        "there's no claimant to own this operation. Run it FROM the worktree "
+        "responsible for the work (your own project's worktree -- `cd` there, "
+        "or launch/resume it first), and address the target repo as an "
+        f"explicit argument, e.g. `{verb} owner/target-repo <pr>` -- never "
+        "from an untracked directory, a bare project anchor, or the target "
+        "repo's own checkout. This works for a repo you have no local "
+        "checkout of at all; it does not require creating or entering a "
+        "worktree of the target. See the agent-worktrees `pr-workflow` "
+        "skill's foreign-repo-addressing section. Do not fall back to "
+        "gh/az repos/git directly for this -- that skips the provider, "
+        "token, and policy resolution this command exists to get right."
+    )
 
 
 def _infer_active_repo_slug(config: cfg.Config) -> str | None:
@@ -379,6 +424,11 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
     except SystemExit as exc:
         return int(exc.code or 0)
 
+    _claimant_id, claimant_error = require_claimant_worktree(f"pr-watch {verb}")
+    if claimant_error:
+        output.err(claimant_error)
+        return 2
+
     if verb == "wait":
         if args.timeout < 0:
             output.err("--timeout must be >= 0 (0 = no limit)")
@@ -402,10 +452,15 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
         if not resolution.resolved:
             output.err(
                 f"pr-watch: {args.repo!r} is not a registered repo this "
-                "machine can resolve a PR binding for -- register it "
-                "(agent-worktrees repos add) or run this from a worktree "
-                "that already has it registered. Refusing to fall back to "
-                "the active project's own binding for a different repo."
+                "machine can resolve a PR binding for. Register it "
+                "(agent-worktrees repos add <name> <path> --remote <url>) "
+                "so its own provider/token/policy can be resolved, then "
+                "retry -- CWD stays your own (claimant) worktree; "
+                f"{args.repo!r} is just the argument, you do not need a "
+                "local checkout of it. Refusing to fall back to the "
+                "active project's own binding for a different repo, and "
+                "do not fall back to gh/az repos/git directly -- that "
+                "skips this command's provider/token/policy resolution."
             )
             return 2
         repo_cfg = resolution.repo_config

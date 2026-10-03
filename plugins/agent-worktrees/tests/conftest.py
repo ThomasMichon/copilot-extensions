@@ -272,6 +272,29 @@ def _isolate_pivots(tmp_path_factory):
         os.environ["AGENT_WORKTREES_PLUGINS_DIR"] = saved_plugins
 
 
+@pytest.fixture(autouse=True)
+def _assume_valid_claimant_worktree(monkeypatch):
+    """Default ``pr_cli.require_claimant_worktree``'s underlying CWD->worktree
+    resolution to "resolves cleanly" for every test.
+
+    :func:`agent_worktrees.worktree_identity._infer_worktree_id_from_cwd`
+    reads the REAL git worktree structure of wherever the test process's CWD
+    happens to be (unaffected by ``_isolate_agent_worktrees_home`` above,
+    which only isolates registries under HOME) -- so left unmocked, whether
+    a ``pr-watch``/``pr-merge`` dispatcher test's claimant check passes would
+    depend on the ambient checkout the suite happens to run from, not the
+    test's own fixtures. Default it to a fixed, deterministic worktree id; a
+    test of the claimant guard itself (or of CWD-identity resolution)
+    overrides this explicitly.
+    """
+    from agent_worktrees import worktree_identity
+
+    monkeypatch.setattr(
+        worktree_identity, "_infer_worktree_id_from_cwd",
+        lambda config=None: "test-claimant-worktree",
+    )
+
+
 @pytest.fixture
 def tmp_tracking_dir(tmp_path: Path) -> Path:
     """Temporary tracking directory for worktree YAMLs."""

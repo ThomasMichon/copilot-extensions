@@ -228,10 +228,17 @@ identity operation on an unfamiliar target.
    docs you actually need, then read its narrative + `CONTRIBUTING.md` for the
    contribution flow. Don't crawl the tree to figure out the repo.
 3. Act on the plan:
-   - local -> edit per class (worktree
+   - **editing code** -> local (worktree
      `<agent-worktrees catalog argv[0]> create` / singleton
-     anchor / reference read-only);
-   - elsewhere -> delegate via agent-bridge / agent-codespaces.
+     anchor / reference read-only) or elsewhere via agent-bridge /
+     agent-codespaces.
+   - **only checking/merging an existing PR, nothing else** -> no new
+     worktree needed. Stay in **your own** worktree (the claimant) and
+     address the target by slug: `pr-watch wait <owner/name> <pr>` /
+     `pr-merge <owner/name> <pr> --now`, once that repo is registered (see
+     `pr-workflow.md`'s *Addressing a foreign repo* section for the full
+     contract and its refusal/guidance behavior). Don't create or `cd` into
+     a worktree of the target purely to run these two commands.
 4. Land changes through the **target repo's** own contribution flow (its branch
    naming, PR/merge policy, version-bump rules) -- not this repo's.
    - **Check the target repo's PR flow before you drive one -- every time,
