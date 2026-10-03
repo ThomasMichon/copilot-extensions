@@ -537,13 +537,17 @@ def _fetch_raw_tasks_direct(
     args: argparse.Namespace, *, endpoint: str | None = None
 ) -> list[dict]:
     """Network-only half of :func:`_fetch_rows_direct`: fetch this machine's
-    own coordinator ``/tasks`` endpoint and return the raw task dicts,
-    recording the resolved endpoint in ``_RELAY_ENDPOINT`` as a side effect
-    (same as the combined function used to). Split out so Phase 3a's relay
-    (``board_relay.py``) can drive its own zero-network local recompute tick
-    by re-running :func:`_build` against the last-fetched raw tasks instead
-    of re-fetching -- never imported by the plain one-shot/poll path, which
-    keeps calling the combined :func:`_fetch_rows_direct` below unchanged.
+    own coordinator ``/tasks`` endpoint and return the raw task dicts. The
+    resolved ``endpoint`` (``endpoint`` itself when given, otherwise a fresh
+    ``_endpoint()`` resolution) is recorded in ``_RELAY_ENDPOINT`` as a side
+    effect, so a subsequent :func:`_relay_fetch_many` call with no explicit
+    ``endpoint`` of its own reuses this same resolution instead of
+    re-resolving ``active.json`` independently. Split out so Phase 3a's
+    relay (``board_relay.py``) can drive its own zero-network local
+    recompute tick by re-running :func:`_build` against the last-fetched
+    raw tasks instead of re-fetching -- never imported by the plain
+    one-shot/poll path, which keeps calling the combined
+    :func:`_fetch_rows_direct` below unchanged.
 
     ``endpoint``, when given, pins the request to a caller-resolved
     coordinator base URL (a live relay connection's own

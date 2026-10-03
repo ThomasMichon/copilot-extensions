@@ -306,12 +306,12 @@ def register_task_routes(
         event_task = _event_task_dict(task)
         bus.publish({"type": event_type, "task": event_task})
         # Heartbeats and activity updates run periodically for every live
-        # task and never transition state -- recording them as
-        # `kind: state_transition` telemetry would gain configured spools
-        # misleading, high-volume records for a no-op-from-telemetry's
-        # perspective mutation. The content-free bus wake above still
-        # fires unconditionally (the Picker's `--subscribe` relay still
-        # needs it to know something happened).
+        # task and never transition its state -- recording them as
+        # `kind: state_transition` telemetry would give a configured spool
+        # misleading, high-volume records for a mutation that is a no-op
+        # from telemetry's own perspective. The content-free bus wake above
+        # still fires unconditionally (the Picker's `--subscribe` relay
+        # still needs it to know something happened).
         if event_type not in _NO_TELEMETRY_EVENT_TYPES:
             telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
 

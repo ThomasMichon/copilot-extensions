@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 import types
 
 import pytest
@@ -141,6 +142,80 @@ def test_event_loop_trailing_fetch_after_mid_fetch_event(monkeypatch):
     assert rc == 0
     assert calls["full"] == 2
     assert [frame["entry"]["v"] for frame in stop.emitted] == [1, 2]
+
+
+def test_event_loop_serializes_every_writer_never_running_concurrently(
+    monkeypatch,
+):
+    """The effort's Validation Plan requires proving the event-woken fetch,
+    the long reconcile, and the local recompute tick never run
+    concurrently (`efforts/active/pivot-streaming-transport/README.md`'s
+    Validation Plan; `phase-3-design.md`'s "serialize every writer" design
+    bullet). The single-threaded control loop achieves this by
+    construction -- there is only ever one writer active at a time, with no
+    explicit lock needed -- rather than the design document's own literal
+    snapshot-owner-lock mechanism (see `board_relay.py`'s own module
+    docstring for why). This test makes the event wake and the long
+    reconcile/recompute timers all fall due together (every interval set to
+    0), instruments every writer entry/exit with a shared counter (plus a
+    real sleep inside each call, so an actual overlap would be observable),
+    and asserts the maximum concurrent writer count ever seen is exactly
+    1."""
+    monkeypatch.setattr(board_relay, "DEBOUNCE_WINDOW_SECONDS", 0.0)
+    monkeypatch.setattr(board_relay, "MIN_REFETCH_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(board_relay, "RECOMPUTE_INTERVAL_SECONDS", 0.0)
+    monkeypatch.setattr(board_relay, "LONG_RECONCILE_SECONDS", 0.0)
+
+    reader = _reader_with(("event", {"type": "task.progress"}))
+
+    state = {"active": 0, "max_active": 0}
+    lock = threading.Lock()
+
+    def _enter() -> None:
+        with lock:
+            state["active"] += 1
+            state["max_active"] = max(state["max_active"], state["active"])
+
+    def _exit() -> None:
+        with lock:
+            state["active"] -= 1
+
+    class FakeSnapshot:
+        def __init__(self):
+            self.calls = 0
+
+        def full_refetch(self):
+            _enter()
+            try:
+                time.sleep(0.02)
+                self.calls += 1
+                return [{"id": "t1", "v": self.calls}]
+            finally:
+                _exit()
+
+        def recompute_only(self):
+            _enter()
+            try:
+                time.sleep(0.02)
+                self.calls += 1
+                return [{"id": "t1", "v": self.calls}]
+            finally:
+                _exit()
+
+    # Enough frames to let the one queued event, then at least one
+    # recompute tick and one long reconcile (all due immediately with every
+    # interval at 0), each actually run.
+    stop = _StopAfter(limit=3)
+    monkeypatch.setattr(board_cli, "_emit_frame", stop)
+
+    rc = board_relay._event_loop(
+        None, None, reader, FakeSnapshot(), [], interval=0.0
+    )
+
+    assert rc == 0
+    assert len(stop.emitted) == 3
+    assert state["max_active"] == 1
+    assert state["active"] == 0  # every entry was matched by an exit
 
 
 def test_event_loop_recompute_tick_never_touches_network(monkeypatch):

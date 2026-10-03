@@ -297,10 +297,13 @@ insufficient.)_
       version-skew-gated ready-frame handshake closing the startup/reconnect
       subscription gap (with a no-observable-barrier fallback to plain
       polling for an old daemon); debounced, rate-limited event-woken
-      re-fetches with a trailing-dirty flag; a local no-network tick for
-      every purely clock-driven field (activity TTL, stalled-text,
-      recent-mins cutoff, relay-staleness); a single snapshot-owner lock
-      serializing every writer; and bounded-backoff reconnection with
+      re-fetches that never drop a mid-fetch event; a local no-network tick
+      for every purely clock-driven field (activity TTL, stalled-text,
+      recent-mins cutoff, relay-staleness); every writer serialized against
+      every other (shipped as a single-threaded control loop rather than
+      the design document's own literal snapshot-owner lock -- same
+      requirement, simpler mechanism; see `phase-3-design.md`'s
+      implementation notes); and bounded-backoff reconnection with
       fresh-client endpoint re-resolution. Every board-visible mutation
       across `coordinator_tasks.py`, `mcp_http.py`, and
       `coordinator_verification.py` needs at least one bus event (audited
@@ -410,6 +413,31 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
         reconnect's promotion reconcile has already run — sharing the
         snapshot-owner lock alone doesn't prove the quiescence ordering is
         actually enforced.
+
+        **Implementation note (agent-dispatch's 3a PR,
+        ThomasMichon/copilot-extensions#4994):** every one of these
+        acceptance criteria is covered in
+        `plugins/agent-dispatch/tests/test_board_relay.py`, adapted to the
+        shipped single-control-loop mechanism (see `phase-3-design.md`'s own
+        implementation notes) rather than literal lock/dirty-bit
+        instrumentation: `test_connect_waits_for_ready_before_the_startup_
+        reconcile` (ready-frame handshake ordering),
+        `test_event_loop_trailing_fetch_after_mid_fetch_event` (exactly one
+        trailing fetch, not zero or a pile-up),
+        `test_event_loop_serializes_every_writer_never_running_
+        concurrently` (the event-woken fetch / long reconcile / local
+        recompute tick never run concurrently -- proven via a shared
+        active-writer counter asserting a max of 1, with the event wake
+        and both timers made to fall due together), and
+        `test_reconnect_loop_successful_handoff_returns_connected_without_
+        recursing` (the fallback poller's exact call order: one last poll
+        tick, then the promotion reconcile, never a poll tick after it --
+        `_drive`'s own iterative state machine hands control to exactly one
+        of the event loop or the reconnect loop at a time, so there is no
+        "quiescence" step to separately verify). `test_coordinator.py`'s
+        `test_stream_events_ready_frame_handshake` and
+        `test_board_cli.py`'s relay-unavailable-fallback tests cover the
+        remaining coordinator-kill/control-frame-leak criteria.
   - **3b:** a regression test per new failure mode the cache introduces —
         recovery from an uninitialized namespace (never silently published
         as complete), recovery from a hung/crashed background refresh task
