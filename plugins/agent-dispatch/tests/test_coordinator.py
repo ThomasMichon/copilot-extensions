@@ -1604,6 +1604,28 @@ def test_heartbeat_over_http_publishes_bus_event(api):
     assert any(e["type"] == "task.heartbeat" for e in events)
 
 
+def test_heartbeat_over_http_does_not_emit_telemetry(api):
+    """A heartbeat runs periodically for every live task and never
+    transitions state -- it must still wake the bus (the subscribe relay
+    needs that), but must NOT record a `kind: state_transition` telemetry
+    event, which would otherwise accumulate misleading high-volume records
+    in any configured telemetry spool."""
+    from agent_dispatch import telemetry
+
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+
+    seen: list[dict] = []
+    telemetry.set_telemetry_sink(seen.append)
+    try:
+        r = api.post(f"/tasks/{tid}/heartbeat", json={"worker_id": "w1"})
+        assert r.status_code == 200
+        assert seen == []
+    finally:
+        telemetry.clear_telemetry_sink()
+
+
 def test_activity_over_http_publishes_bus_event(api):
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     reservation = api.post(
@@ -1621,6 +1643,35 @@ def test_activity_over_http_publishes_bus_event(api):
     )
     assert r.status_code == 200
     assert any(e["type"] == "task.activity_updated" for e in events)
+
+
+def test_activity_over_http_does_not_emit_telemetry(api):
+    """Same no-telemetry contract as heartbeat (above) -- activity updates
+    also run periodically for every live task without transitioning
+    state."""
+    from agent_dispatch import telemetry
+
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    reservation = api.post(
+        "/spawn-reservations", json={"task_id": tid, "reserved_by": "sup"}
+    ).json()["reservation"]
+    key = reservation["key"]
+    api.post(
+        f"/spawn-reservations/{key}/spawned",
+        json={"session_handle": "local-body:s1"},
+    )
+
+    seen: list[dict] = []
+    telemetry.set_telemetry_sink(seen.append)
+    try:
+        r = api.post(
+            f"/tasks/{tid}/activity",
+            json={"activity": "ACTIVE", "reservation_key": key},
+        )
+        assert r.status_code == 200
+        assert seen == []
+    finally:
+        telemetry.clear_telemetry_sink()
 
 
 def test_steer_take_over_http_publishes_bus_event(api):

@@ -49,6 +49,8 @@ class _FakeClient:
     used -- ``health``/``stream_events`` are reached through separately
     monkeypatched module-level functions/classes instead)."""
 
+    base_url = "http://fake-coordinator"
+
     def close(self) -> None:
         pass
 
@@ -354,7 +356,7 @@ def test_reconnect_loop_successful_handoff_returns_connected_without_recursing(m
     monkeypatch.setattr(board_relay, "_Reader", FakeReader)
 
     class FakeSnapshot:
-        def __init__(self, args):
+        def __init__(self, args, endpoint=None):
             pass
 
         def full_refetch(self):
@@ -404,7 +406,7 @@ def test_connect_waits_for_ready_before_the_startup_reconcile(monkeypatch):
     monkeypatch.setattr(board_relay, "_Reader", FakeReader)
 
     class FakeSnapshot:
-        def __init__(self, args):
+        def __init__(self, args, endpoint=None):
             pass
 
         def full_refetch(self):
@@ -443,7 +445,7 @@ def test_connect_emits_startup_reconcile_diff_against_prev(monkeypatch):
     monkeypatch.setattr(board_relay, "_Reader", FakeReader)
 
     class FakeSnapshot:
-        def __init__(self, args):
+        def __init__(self, args, endpoint=None):
             pass
 
         def full_refetch(self):
@@ -478,6 +480,8 @@ def test_connect_treats_priming_failure_as_disconnected_not_empty(monkeypatch):
     closed = {"n": 0}
 
     class FakeClient:
+        base_url = "http://fake-coordinator"
+
         def close(self):
             closed["n"] += 1
 
@@ -494,7 +498,7 @@ def test_connect_treats_priming_failure_as_disconnected_not_empty(monkeypatch):
     monkeypatch.setattr(board_relay, "_Reader", FakeReader)
 
     class FakeSnapshot:
-        def __init__(self, args):
+        def __init__(self, args, endpoint=None):
             pass
 
         def full_refetch(self):
@@ -570,7 +574,7 @@ def test_many_reconnect_cycles_never_recurse(monkeypatch):
     monkeypatch.setattr(board_relay, "_Reader", FakeReader)
 
     class FakeSnapshot:
-        def __init__(self, args):
+        def __init__(self, args, endpoint=None):
             pass
 
         def full_refetch(self):
@@ -596,3 +600,235 @@ def test_many_reconnect_cycles_never_recurse(monkeypatch):
 
     assert rc == 0
     assert state["n"] >= cycles
+
+
+def test_reader_queue_coalesces_a_burst_of_events_into_one_pending_wake():
+    """``_CoalescingEventQueue`` must never grow unboundedly under sustained
+    event traffic: many wake-only ``put_event()`` calls while nothing has
+    drained the queue yet collapse into exactly one queued ``("event",
+    None)`` item, not one per call."""
+    q = board_relay._CoalescingEventQueue()
+    for _ in range(500):
+        q.put_event()
+
+    assert q.get(timeout=0.01) == ("event", None)
+    with pytest.raises(queue.Empty):
+        q.get(timeout=0.01)
+
+    # Once drained, a fresh wake is signaled again (not permanently
+    # coalesced away).
+    q.put_event()
+    assert q.get(timeout=0.01) == ("event", None)
+
+
+def test_reader_queue_never_coalesces_or_drops_control_items():
+    """``ready``/``disconnected`` control items are never coalesced with
+    each other or with a pending event wake -- every call to
+    ``put_control`` is unconditionally enqueued and delivered in order."""
+    q = board_relay._CoalescingEventQueue()
+    q.put_event()
+    q.put_control("ready", None)
+    q.put_event()  # coalesced: an event wake is already pending
+    q.put_control("disconnected", None)
+
+    assert q.get(timeout=0.01) == ("event", None)
+    assert q.get(timeout=0.01) == ("ready", None)
+    assert q.get(timeout=0.01) == ("disconnected", None)
+    with pytest.raises(queue.Empty):
+        q.get(timeout=0.01)
+
+
+def test_run_relay_returns_0_on_keyboard_interrupt_during_initial_connect(
+    monkeypatch,
+):
+    """A `KeyboardInterrupt` landing during the very first connection
+    attempt (before `_drive`'s own loop, and before `_event_loop`'s own
+    internal handler could ever see it) must still return 0 cleanly, like
+    `board_cli.poll_loop` does -- not propagate uncaught."""
+
+    def raise_keyboard_interrupt(args):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(board_relay, "_build_client", raise_keyboard_interrupt)
+
+    import io
+
+    rc = board_relay.run_relay(
+        "args", io.StringIO(), initial_rows=[], interval=2.0
+    )
+
+    assert rc == 0
+
+
+def test_event_loop_retries_a_failed_event_woken_refetch(monkeypatch):
+    """A transient `/tasks` failure on an event-woken re-fetch must not
+    silently drop the wake until the next (up to 45s later) long
+    reconcile -- the loop must retry on its own (rate-limited), and once
+    the retry succeeds, actually emit the diff."""
+    monkeypatch.setattr(board_relay, "DEBOUNCE_WINDOW_SECONDS", 0.0)
+    monkeypatch.setattr(board_relay, "MIN_REFETCH_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(board_relay, "RECOMPUTE_INTERVAL_SECONDS", 1000.0)
+    monkeypatch.setattr(board_relay, "LONG_RECONCILE_SECONDS", 1000.0)
+
+    reader = _reader_with(("event", {"type": "task.progress"}))
+    calls = {"full": 0}
+
+    class FakeSnapshot:
+        def full_refetch(self):
+            calls["full"] += 1
+            if calls["full"] == 1:
+                return None  # transient failure on the event-woken fetch
+            return [{"id": "t1", "v": calls["full"]}]
+
+        def recompute_only(self):
+            raise AssertionError("recompute_only must not run for this test")
+
+    stop = _StopAfter(limit=1)
+    monkeypatch.setattr(board_cli, "_emit_frame", stop)
+
+    rc = board_relay._event_loop(
+        None, None, reader, FakeSnapshot(), [], interval=0.01
+    )
+
+    assert rc == 0
+    assert calls["full"] == 2  # the failed fetch, then exactly one retry
+    assert stop.emitted and stop.emitted[0]["type"] == "delta"
+
+
+def test_connect_binds_snapshot_reads_to_the_connected_endpoint(monkeypatch):
+    """`_Snapshot` must be constructed against the exact coordinator base
+    URL the connected client resolved (`client.base_url`), never an
+    independent `_endpoint()` re-resolution -- otherwise a cutover landing
+    between the SSE connection and the snapshot's own fetches could read a
+    different coordinator generation than the one publishing events."""
+    seen_endpoints = []
+
+    class FakeClient:
+        base_url = "http://pinned-endpoint:1234"
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(board_relay, "_build_client", lambda args: FakeClient())
+    monkeypatch.setattr(
+        board_relay, "_daemon_supports_ready_frame", lambda client: True
+    )
+
+    class FakeReader:
+        def __init__(self, client):
+            self.queue: queue.Queue = queue.Queue()
+            self.queue.put(("ready", None))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(board_relay, "_Reader", FakeReader)
+
+    class FakeSnapshot:
+        def __init__(self, args, endpoint=None):
+            seen_endpoints.append(endpoint)
+
+        def full_refetch(self):
+            return []
+
+    monkeypatch.setattr(board_relay, "_Snapshot", FakeSnapshot)
+
+    import io
+
+    outcome = board_relay._connect(
+        "args", io.StringIO(), [], allow_relay_unavailable=True
+    )
+
+    assert isinstance(outcome, board_relay._Connected)
+    assert seen_endpoints == ["http://pinned-endpoint:1234"]
+
+
+def test_snapshot_full_refetch_pins_endpoint_to_the_connected_coordinator(
+    monkeypatch,
+):
+    """`_Snapshot.full_refetch()` must pass its bound ``endpoint`` through
+    to both `_fetch_raw_tasks_direct` and `_relay_fetch_many` -- never let
+    either re-resolve `active.json` independently."""
+    seen = {"tasks_endpoint": None, "relay_endpoint": None}
+
+    def fake_fetch_raw_tasks_direct(args, *, endpoint=None):
+        seen["tasks_endpoint"] = endpoint
+        return [{"id": "t1", "repo": "r", "worktree_id": "w"}]
+
+    def fake_relay_fetch_many(refs, *, endpoint=None):
+        seen["relay_endpoint"] = endpoint
+        return {}
+
+    monkeypatch.setattr(
+        board_cli, "_fetch_raw_tasks_direct", fake_fetch_raw_tasks_direct
+    )
+    monkeypatch.setattr(board_cli, "_relay_fetch_many", fake_relay_fetch_many)
+
+    args = types.SimpleNamespace(machine="m1", recent_mins=60)
+    snapshot = board_relay._Snapshot(args, "http://pinned-endpoint:5678")
+    rows = snapshot.full_refetch()
+
+    assert rows is not None
+    assert seen["tasks_endpoint"] == "http://pinned-endpoint:5678"
+    # relay_fetch_many is only invoked if _build actually needs a relay
+    # lookup for this task's group; a minimal task dict with no
+    # worktree-status-relevant fields may not trigger one, so only assert
+    # the endpoint when it was actually called.
+    if seen["relay_endpoint"] is not None:
+        assert seen["relay_endpoint"] == "http://pinned-endpoint:5678"
+
+
+def test_establish_with_fallback_polling_keeps_polling_during_the_handshake(
+    monkeypatch,
+):
+    """The fallback poller must keep ticking on `interval`'s own cadence for
+    the *entire* duration of `_establish`'s blocking handshake, not just
+    during the backoff wait between attempts."""
+    handshake_entered = threading.Event()
+    release_handshake = threading.Event()
+    poll_calls = {"n": 0}
+
+    def fake_establish(args, *, allow_relay_unavailable):
+        handshake_entered.set()
+        assert release_handshake.wait(timeout=5), "poller never ran during handshake"
+        return board_relay._Established(client=_FakeClient(), reader=None)
+
+    monkeypatch.setattr(board_relay, "_establish", fake_establish)
+
+    def poll_tick(prev):
+        poll_calls["n"] += 1
+        if poll_calls["n"] >= 3:
+            release_handshake.set()
+        return True, prev
+
+    outcome, prev = board_relay._establish_with_fallback_polling(
+        "args", None, [], 0.01, poll_tick=poll_tick
+    )
+
+    assert isinstance(outcome, board_relay._Established)
+    assert poll_calls["n"] >= 3
+
+
+def test_establish_with_fallback_polling_stops_when_poll_tick_reports_closed_pipe(
+    monkeypatch,
+):
+    """If the fallback poller's own pipe closes while still waiting on the
+    handshake, the helper must return 0 immediately rather than waiting for
+    the (now-pointless) background connect attempt to finish."""
+    release_handshake = threading.Event()
+
+    def fake_establish(args, *, allow_relay_unavailable):
+        assert release_handshake.wait(timeout=5)
+        return board_relay._ConnectFailed()
+
+    monkeypatch.setattr(board_relay, "_establish", fake_establish)
+
+    def poll_tick(prev):
+        release_handshake.set()
+        return False, prev  # simulated closed pipe
+
+    outcome, _prev = board_relay._establish_with_fallback_polling(
+        "args", None, [], 0.01, poll_tick=poll_tick
+    )
+
+    assert outcome == 0

@@ -290,6 +290,43 @@ def test_mcp_heartbeat_and_recover_publish_bus_events(tmp_path):
         stop()
 
 
+def test_mcp_heartbeat_does_not_emit_telemetry(tmp_path):
+    """Same no-telemetry contract as `coordinator_tasks.py`'s own HTTP
+    `/tasks/{id}/heartbeat` route -- `dispatch_heartbeat` must still wake
+    the bus (the subscribe relay needs that; see the test above), but must
+    NOT record a `kind: state_transition` telemetry event for a periodic,
+    non-state-transitioning lease extension."""
+    import asyncio
+
+    from agent_dispatch import telemetry
+
+    queue = TaskQueue(tmp_path / "tasks.db")
+    app = create_app(queue)
+    url, stop = _boot(app)
+    try:
+        client = DispatchClient(url)
+        task = client.create("work")
+        client.claim("w1", repo=TEST_REPO)
+        client.start(task["id"], "w1")
+
+        seen: list[dict] = []
+        telemetry.set_telemetry_sink(seen.append)
+        try:
+            result = asyncio.new_event_loop().run_until_complete(
+                _call(
+                    url,
+                    "dispatch_heartbeat",
+                    {"task_id": task["id"], "worker_id": "w1"},
+                )
+            )
+            assert not result.is_error
+            assert seen == []
+        finally:
+            telemetry.clear_telemetry_sink()
+    finally:
+        stop()
+
+
 def test_mcp_rearm_spawn(coord):
     import asyncio
     import json

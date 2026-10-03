@@ -47,6 +47,17 @@ MACHINE_HEADER = "x-agent-machine"
 WORKTREE_HEADER = "x-agent-worktree"
 REPO_HEADER = "x-agent-repo"
 
+#: Mirrors ``coordinator_tasks.py``'s own ``_NO_TELEMETRY_EVENT_TYPES``:
+#: event types that run periodically for every live task without ever
+#: transitioning its state -- excluded from this transport's own ``_emit``
+#: telemetry side effect so a configured spool doesn't accumulate
+#: misleading high-volume ``kind: state_transition`` records for them. The
+#: bus publish (the actual wake every ``--subscribe`` relay/poller needs)
+#: still fires unconditionally. (``mcp_http.py`` only has the heartbeat
+#: tool, not a periodic activity-update one, so this set is narrower than
+#: the HTTP transport's own.)
+_NO_TELEMETRY_EVENT_TYPES = frozenset({"task.heartbeat"})
+
 
 def _bearer_credential(authorization: str) -> str | None:
     parts = authorization.split(None, 1)
@@ -113,7 +124,10 @@ def build_coordinator_mcp(
         event_task = _event_task_dict(task)
         bus.publish({"type": event_type, "task": event_task})
         # Generic telemetry seam (no-op unless a consumer registered a sink).
-        telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
+        # Skip it for periodic, non-state-transition event types (e.g. a
+        # heartbeat lease extension) -- see `_NO_TELEMETRY_EVENT_TYPES`.
+        if event_type not in _NO_TELEMETRY_EVENT_TYPES:
+            telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
 
     def _emit_producer_event(event_type: str, detail: dict[str, object]) -> None:
         bus.publish({"type": event_type, "producer_fence": detail})

@@ -72,6 +72,16 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, Complet
         # as the client that rides it.
         self._tunnel = tunnel
 
+    @property
+    def base_url(self) -> str:
+        """The coordinator base URL this client is actually bound to --
+        never re-resolved. Lets a caller that needs a second request path
+        (e.g. a plain ``urllib`` fetch run alongside this client's own SSE
+        connection) target the exact same coordinator generation instead of
+        re-resolving ``active.json``/``AGENT_DISPATCH_URL`` independently,
+        which could observe a cutover between the two calls."""
+        return str(self._http.base_url).rstrip("/")
+
     def close(self) -> None:
         self._http.close()
         if self._tunnel is not None:

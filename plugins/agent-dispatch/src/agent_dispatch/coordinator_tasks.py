@@ -54,6 +54,14 @@ HttpStructuredResult = Annotated[
     StructuredResult, BeforeValidator(_strict_structured_result)
 ]
 
+#: Event types that run periodically for every live task without ever
+#: transitioning its state (a heartbeat lease extension, a routine activity
+#: string update) -- excluded from `_emit`'s telemetry side effect so a
+#: configured telemetry spool doesn't accumulate misleading high-volume
+#: `kind: state_transition` records for them. The bus publish (the actual
+#: wake every `--subscribe` relay/poller needs) still fires unconditionally.
+_NO_TELEMETRY_EVENT_TYPES = frozenset({"task.heartbeat", "task.activity_updated"})
+
 
 class ProducerScopeBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -297,7 +305,15 @@ def register_task_routes(
     def _emit(event_type: str, task: dict) -> None:
         event_task = _event_task_dict(task)
         bus.publish({"type": event_type, "task": event_task})
-        telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
+        # Heartbeats and activity updates run periodically for every live
+        # task and never transition state -- recording them as
+        # `kind: state_transition` telemetry would gain configured spools
+        # misleading, high-volume records for a no-op-from-telemetry's
+        # perspective mutation. The content-free bus wake above still
+        # fires unconditionally (the Picker's `--subscribe` relay still
+        # needs it to know something happened).
+        if event_type not in _NO_TELEMETRY_EVENT_TYPES:
+            telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
 
     def _emit_producer_event(event_type: str, detail: dict[str, object]) -> None:
         bus.publish({"type": event_type, "producer_fence": detail})

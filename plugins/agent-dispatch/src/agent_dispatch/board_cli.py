@@ -352,10 +352,17 @@ def _relay_fetch(repo: str, worktree_id: str) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _relay_fetch_many(refs: list[tuple[str, str]]) -> dict[tuple[str, str], dict | None]:
+def _relay_fetch_many(
+    refs: list[tuple[str, str]], *, endpoint: str | None = None
+) -> dict[tuple[str, str], dict | None]:
+    """``endpoint`` pins the request to a caller-resolved coordinator base
+    URL (e.g. a live relay connection's own :class:`DispatchClient`) instead
+    of re-resolving via ``_RELAY_ENDPOINT``/``_endpoint()`` -- required so a
+    cutover landing between a relay's SSE connection and this call can never
+    point the two at different coordinator generations."""
     if not refs:
         return {}
-    endpoint = _RELAY_ENDPOINT or _endpoint()
+    endpoint = endpoint or _RELAY_ENDPOINT or _endpoint()
     payload = json.dumps(
         [{"repo": repo, "worktree_id": worktree_id} for repo, worktree_id in refs]
     ).encode("utf-8")
@@ -526,7 +533,9 @@ def _fetch_rows_delegated(args: argparse.Namespace) -> list[dict]:
     return json.loads(result.stdout or "[]")
 
 
-def _fetch_raw_tasks_direct(args: argparse.Namespace) -> list[dict]:
+def _fetch_raw_tasks_direct(
+    args: argparse.Namespace, *, endpoint: str | None = None
+) -> list[dict]:
     """Network-only half of :func:`_fetch_rows_direct`: fetch this machine's
     own coordinator ``/tasks`` endpoint and return the raw task dicts,
     recording the resolved endpoint in ``_RELAY_ENDPOINT`` as a side effect
@@ -534,7 +543,14 @@ def _fetch_raw_tasks_direct(args: argparse.Namespace) -> list[dict]:
     (``board_relay.py``) can drive its own zero-network local recompute tick
     by re-running :func:`_build` against the last-fetched raw tasks instead
     of re-fetching -- never imported by the plain one-shot/poll path, which
-    keeps calling the combined :func:`_fetch_rows_direct` below unchanged."""
+    keeps calling the combined :func:`_fetch_rows_direct` below unchanged.
+
+    ``endpoint``, when given, pins the request to a caller-resolved
+    coordinator base URL (a live relay connection's own
+    :class:`DispatchClient`) instead of re-resolving ``active.json`` here --
+    required so a cutover landing between the relay's SSE connection and
+    this fetch can never read a different coordinator generation's tasks
+    than the one the connection's event bus will publish mutations for."""
     query = {
         "status": (
             "proposed,queued,claimed,started,suspended,"
@@ -544,7 +560,7 @@ def _fetch_raw_tasks_direct(args: argparse.Namespace) -> list[dict]:
     }
     if args.label:
         query["label"] = args.label
-    endpoint = _endpoint()
+    endpoint = endpoint or _endpoint()
     url = f"{endpoint}/tasks?{urllib.parse.urlencode(query)}"
     request = urllib.request.Request(url)
     token = os.environ.get("AGENT_DISPATCH_TOKEN")
