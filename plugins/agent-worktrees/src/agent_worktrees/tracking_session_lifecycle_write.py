@@ -134,11 +134,15 @@ def apply_session_link_succession(args: dict) -> dict:
         else:
             pred = record.session_entry(predecessor_id)
             succ = record.session_entry(successor_id)
+            # Only the succession LINK itself (who points to whom) signals
+            # an already-settled retry -- the predecessor's own state value
+            # is separate repairable metadata: a later call correcting it
+            # (e.g. handed-off -> concluded) with the same link unchanged
+            # must still count as idempotent, not a fresh reassignment.
             already_linked = bool(
                 pred is not None
                 and succ is not None
                 and pred.successor == successor_id
-                and pred.state == predecessor_state
                 and succ.predecessor == predecessor_id
             )
         try:

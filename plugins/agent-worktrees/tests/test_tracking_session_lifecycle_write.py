@@ -234,6 +234,44 @@ def test_link_succession_feeds_claim_history_once_for_a_concluded_retry(
     assert [e["event"] for e in events] == ["reassigned"]
 
 
+def test_link_succession_does_not_duplicate_on_a_predecessor_state_repair(
+    record_path,
+):
+    """A second call repairing only the predecessor's recorded state (e.g.
+    correcting ``handed-off`` to ``concluded``) for the SAME, already-settled
+    predecessor/successor link must not count as a fresh reassignment -- the
+    acting successor never changed, only predecessor metadata did."""
+    from agent_worktrees import claim_history, obligations
+    from agent_worktrees.tracking import ResourceClaim
+
+    record = load_record(record_path)
+    record.sessions.append(SessionEntry("new", "2026-01-01T00:00:00"))
+    record.resources = [
+        ResourceClaim(kind="pr", ref="o/r#1", state=obligations.ACTIVE),
+    ]
+    save_record(record, record_path)
+
+    result1 = tracking_session_lifecycle_write.apply_session_link_succession({
+        "worktree_id": "wt-1",
+        "yaml_path": str(record_path),
+        "predecessor": "solo",
+        "successor": "new",
+        "predecessor_state": "handed-off",
+    })
+    assert result1["ok"] is True
+    result2 = tracking_session_lifecycle_write.apply_session_link_succession({
+        "worktree_id": "wt-1",
+        "yaml_path": str(record_path),
+        "predecessor": "solo",
+        "successor": "new",
+        "predecessor_state": "concluded",
+    })
+    assert result2["ok"] is True
+
+    events = claim_history.history_for_ref("o/r#1")
+    assert [e["event"] for e in events] == ["reassigned"]
+
+
 def test_dispatch_reaches_session_conclude_through_a_live_daemon(record_path):
     """End-to-end: proves ``tracking_write.dispatch`` reaches
     ``apply_session_conclude`` via an actual ``CoalescingServer``, the
