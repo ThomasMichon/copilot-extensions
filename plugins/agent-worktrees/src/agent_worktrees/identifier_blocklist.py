@@ -146,19 +146,25 @@ def applicable_tiers(target_rank: int) -> list[str]:
     ]
 
 
-def _compile_internal_token(raw: dict) -> str:
+def _compile_internal_token(raw: dict, *, context: str) -> str:
     """Resolve one YAML entry mapping to the internal token representation.
 
     Returns a plain literal substring, or a ``regex:<pattern>`` token -- the
     same shape :func:`render_ci_format` and every downstream consumer
-    already understands. Returns ``""`` for a mapping with no usable token.
+    already understands. Raises :class:`BlocklistParseError` (naming
+    *context*, typically ``<path> (entry #N)``) for a missing/empty
+    ``token`` field or an unrecognized ``kind`` -- a typo here (e.g.
+    ``kind: regxe``) must never silently fall back to a narrower, wrong
+    interpretation while reporting success.
     """
     token = str(raw.get("token", "") or "").strip()
     if not token:
-        return ""
+        raise BlocklistParseError(f"{context}: missing required 'token' field")
     kind = str(raw.get("kind", "literal") or "literal").strip().lower()
     if kind not in ("literal", "regex"):
-        kind = "literal"
+        raise BlocklistParseError(
+            f"{context}: unknown kind '{kind}' (expected 'literal' or 'regex')"
+        )
     whole_word = bool(raw.get("whole_word", False))
     case_sensitive = bool(raw.get("case_sensitive", False))
 
@@ -179,10 +185,15 @@ def parse_blocklist_file(path: Path, source_repo: str, tier: str) -> list[Blockl
     """Parse one ``block-for-<tier>.yaml`` file into entries.
 
     A missing file (``FileNotFoundError``) is a normal, silent no-op (not
-    every repo carries every tier). Any OTHER read failure (permissions, a
-    transient I/O error) or a YAML parse failure raises
-    :class:`BlocklistParseError` instead of silently contributing nothing --
-    see that class's docstring for why.
+    every repo carries every tier). An entirely empty file (or one holding
+    only an empty YAML document / an empty ``entries:`` mapping) is a
+    legitimate placeholder with zero entries, also not an error. Anything
+    else that doesn't match the documented shape -- a non-mapping/non-list
+    top-level document, a misspelled or non-list ``entries`` key, a
+    non-mapping list item, or an entry :func:`_compile_internal_token`
+    rejects -- raises :class:`BlocklistParseError` instead of silently
+    discarding content, same as a YAML syntax error or an OSError reading
+    the file. See that class's docstring for why.
     """
     entries: list[BlocklistEntry] = []
     try:
@@ -196,27 +207,60 @@ def parse_blocklist_file(path: Path, source_repo: str, tier: str) -> list[Blockl
     except yaml.YAMLError as exc:
         raise BlocklistParseError(f"{path}: invalid YAML ({exc})") from exc
 
+    if data is None:
+        return entries  # a fully empty file is a legitimate zero-entry placeholder
     if isinstance(data, dict):
-        raw_entries = data.get("entries", [])
+        if "entries" not in data:
+            if data == {}:
+                return entries  # an explicit `{}` placeholder, same as empty
+            raise BlocklistParseError(
+                f"{path}: missing required top-level 'entries' key "
+                "(check for a misspelling)"
+            )
+        raw_entries = data["entries"]
     elif isinstance(data, list):
         raw_entries = data
     else:
-        raw_entries = []
+        raise BlocklistParseError(
+            f"{path}: expected a YAML mapping with 'entries' or a bare list, "
+            f"got {type(data).__name__}"
+        )
+    if raw_entries is None:
+        return entries  # `entries:` with no value is also a zero-entry placeholder
     if not isinstance(raw_entries, list):
-        return entries
+        raise BlocklistParseError(
+            f"{path}: 'entries' must be a list, got {type(raw_entries).__name__}"
+        )
 
-    for raw in raw_entries:
+    for idx, raw in enumerate(raw_entries):
+        context = f"{path} (entry #{idx + 1})"
         if not isinstance(raw, dict):
-            continue
-        token = _compile_internal_token(raw)
-        if not token:
-            continue
+            raise BlocklistParseError(f"{context}: expected a mapping, got {type(raw).__name__}")
+        token = _compile_internal_token(raw, context=context)
         reason = raw.get("reason")
         reason = str(reason).strip() or None if reason else None
         entries.append(
             BlocklistEntry(token=token, reason=reason, source_repo=source_repo, source_tier=tier)
         )
     return entries
+
+
+def _dedup_key(token: str) -> str:
+    """Case-aware deduplication key for a token.
+
+    Lowercasing every token (as the aggregator used to) breaks a
+    ``case_sensitive`` entry: ``CAR`` and ``car`` compile to distinct
+    ``(?-i:...)`` regex tokens that must stay distinct, not collapse into
+    one. A literal token is still lowercased (its own matching is always
+    case-insensitive, so two differently-cased spellings of the same
+    literal genuinely are the same entry); a ``regex:``-prefixed token's
+    pattern keeps its exact case -- only the ``regex:`` marker itself is
+    normalized, matching how the CI consumer's own loader already
+    distinguishes the two kinds.
+    """
+    if token.lower().startswith("regex:"):
+        return "regex:" + token[len("regex:"):]
+    return token.lower()
 
 
 def sweep(target: str | None) -> list[BlocklistEntry]:
@@ -229,7 +273,8 @@ def sweep(target: str | None) -> list[BlocklistEntry]:
     and including it would let a repo's own newly-added blocklist file
     immediately flag its own forbidden token inside that very file.
 
-    Returns a deduplicated (by lowercased token + reason), deterministically
+    Returns a deduplicated (see :func:`_dedup_key` -- case-sensitive for a
+    ``regex:`` token, case-insensitive for a literal), deterministically
     sorted list. One source repo's blocklist file failing to parse never
     discards every other source's valid entries: every *other* file is
     still parsed and aggregated normally, and only once every source has
@@ -268,10 +313,10 @@ def sweep(target: str | None) -> list[BlocklistEntry]:
                 errors.append(str(exc))
                 continue
             for entry in parsed:
-                key = (entry.token.lower(), entry.reason)
+                key = (_dedup_key(entry.token), entry.reason)
                 seen.setdefault(key, entry)
 
-    result = sorted(seen.values(), key=lambda e: (e.token.lower(), e.source_repo))
+    result = sorted(seen.values(), key=lambda e: (_dedup_key(e.token), e.source_repo))
     if errors:
         plural = "s" if len(errors) != 1 else ""
         raise BlocklistParseError(

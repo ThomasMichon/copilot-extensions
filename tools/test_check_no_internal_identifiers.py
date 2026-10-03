@@ -218,6 +218,26 @@ def test_live_sweep_treats_unknown_subcommand_as_benign_absence(
     assert module._load_live_sweep_identifiers() == []
 
 
+def test_live_sweep_treats_unresolved_project_as_benign_absence(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """An installed agent-worktrees whose cwd isn't a registered project on
+    this machine must also be treated as absent, not a configuration
+    failure -- it rejects before subcommand dispatch with the generic
+    "Could not resolve a project" response."""
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 1
+        stdout = "Could not resolve a project for 'identifiers'. Context is discovered from the cwd.\n"
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    assert module._load_live_sweep_identifiers() == []
+
+
 def test_live_sweep_merges_into_load_identifier_data(repo: Path, monkeypatch: pytest.MonkeyPatch):
     module = _load_module(repo)
     monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)

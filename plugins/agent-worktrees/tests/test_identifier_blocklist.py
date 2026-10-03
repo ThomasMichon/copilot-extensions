@@ -62,33 +62,43 @@ def test_applicable_tiers_private_target_gets_nothing():
 # ---------------------------------------------------------------------------
 
 def test_compile_internal_token_plain_literal():
-    assert iblk._compile_internal_token({"token": "legacy-system"}) == "legacy-system"
+    assert (
+        iblk._compile_internal_token({"token": "legacy-system"}, context="t")
+        == "legacy-system"
+    )
 
 
 def test_compile_internal_token_regex_kind():
-    token = iblk._compile_internal_token({"token": r"\bSPO\b", "kind": "regex"})
+    token = iblk._compile_internal_token(
+        {"token": r"\bSPO\b", "kind": "regex"}, context="t",
+    )
     assert token == r"regex:\bSPO\b"
 
 
 def test_compile_internal_token_whole_word_escapes_literal():
-    token = iblk._compile_internal_token({"token": "spo-core", "whole_word": True})
+    token = iblk._compile_internal_token(
+        {"token": "spo-core", "whole_word": True}, context="t",
+    )
     assert token == r"regex:\bspo\-core\b"
 
 
 def test_compile_internal_token_case_sensitive_wraps_group():
     token = iblk._compile_internal_token(
-        {"token": "CAR", "whole_word": True, "case_sensitive": True}
+        {"token": "CAR", "whole_word": True, "case_sensitive": True}, context="t",
     )
     assert token == r"regex:(?-i:\bCAR\b)"
 
 
-def test_compile_internal_token_empty_token_returns_empty():
-    assert iblk._compile_internal_token({"token": ""}) == ""
-    assert iblk._compile_internal_token({}) == ""
+def test_compile_internal_token_empty_token_raises():
+    with pytest.raises(iblk.BlocklistParseError, match="missing required 'token'"):
+        iblk._compile_internal_token({"token": ""}, context="t")
+    with pytest.raises(iblk.BlocklistParseError, match="missing required 'token'"):
+        iblk._compile_internal_token({}, context="t")
 
 
-def test_compile_internal_token_unknown_kind_falls_back_to_literal():
-    assert iblk._compile_internal_token({"token": "x", "kind": "bogus"}) == "x"
+def test_compile_internal_token_unknown_kind_raises():
+    with pytest.raises(iblk.BlocklistParseError, match="unknown kind"):
+        iblk._compile_internal_token({"token": "x", "kind": "bogus"}, context="t")
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +138,24 @@ def test_parse_blocklist_file_missing_returns_empty(tmp_path: Path):
     assert entries == []
 
 
+def test_parse_blocklist_file_empty_document_returns_empty(tmp_path: Path):
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("", encoding="utf-8")
+    assert iblk.parse_blocklist_file(f, "r", "public") == []
+
+
+def test_parse_blocklist_file_empty_mapping_returns_empty(tmp_path: Path):
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("{}\n", encoding="utf-8")
+    assert iblk.parse_blocklist_file(f, "r", "public") == []
+
+
+def test_parse_blocklist_file_entries_key_with_no_value_returns_empty(tmp_path: Path):
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("entries:\n", encoding="utf-8")
+    assert iblk.parse_blocklist_file(f, "r", "public") == []
+
+
 def test_parse_blocklist_file_malformed_yaml_raises(tmp_path: Path):
     f = tmp_path / "bad.yaml"
     f.write_text("entries: [unterminated", encoding="utf-8")
@@ -135,11 +163,49 @@ def test_parse_blocklist_file_malformed_yaml_raises(tmp_path: Path):
         iblk.parse_blocklist_file(f, "r", "public")
 
 
-def test_parse_blocklist_file_skips_non_mapping_entries(tmp_path: Path):
+def test_parse_blocklist_file_rejects_non_mapping_entries(tmp_path: Path):
     f = tmp_path / "block-for-public.yaml"
     f.write_text("entries:\n  - token: legacy-system\n  - just a string\n", encoding="utf-8")
-    entries = iblk.parse_blocklist_file(f, "r", "public")
-    assert len(entries) == 1
+    with pytest.raises(iblk.BlocklistParseError, match="expected a mapping"):
+        iblk.parse_blocklist_file(f, "r", "public")
+
+
+def test_parse_blocklist_file_rejects_missing_entries_key(tmp_path: Path):
+    """A misspelled top-level key (e.g. 'enteries') must be a hard error,
+    not silently treated as zero entries -- that would hide the exact typo
+    this validation exists to catch."""
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("enteries:\n  - token: oops\n", encoding="utf-8")
+    with pytest.raises(iblk.BlocklistParseError, match="missing required top-level 'entries'"):
+        iblk.parse_blocklist_file(f, "r", "public")
+
+
+def test_parse_blocklist_file_rejects_non_list_entries(tmp_path: Path):
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("entries: not-a-list\n", encoding="utf-8")
+    with pytest.raises(iblk.BlocklistParseError, match="must be a list"):
+        iblk.parse_blocklist_file(f, "r", "public")
+
+
+def test_parse_blocklist_file_rejects_non_dict_non_list_top_level(tmp_path: Path):
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("just a bare string\n", encoding="utf-8")
+    with pytest.raises(iblk.BlocklistParseError, match="expected a YAML mapping"):
+        iblk.parse_blocklist_file(f, "r", "public")
+
+
+def test_parse_blocklist_file_rejects_missing_token(tmp_path: Path):
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("entries:\n  - reason: no token here\n", encoding="utf-8")
+    with pytest.raises(iblk.BlocklistParseError, match="missing required 'token'"):
+        iblk.parse_blocklist_file(f, "r", "public")
+
+
+def test_parse_blocklist_file_rejects_unknown_kind(tmp_path: Path):
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("entries:\n  - token: x\n    kind: regxe\n", encoding="utf-8")
+    with pytest.raises(iblk.BlocklistParseError, match="unknown kind"):
+        iblk.parse_blocklist_file(f, "r", "public")
 
 
 def test_parse_blocklist_file_unreadable_raises_not_silent(tmp_path: Path, monkeypatch):
@@ -227,6 +293,34 @@ def test_sweep_deduplicates_identical_entries(home: Path, tmp_path: Path):
 
     entries = iblk.sweep("target")
     assert len(entries) == 1
+
+
+def test_sweep_preserves_case_sensitive_entries_distinctly(home: Path, tmp_path: Path):
+    """Two case-sensitive entries differing only by case (CAR vs car) must
+    not collapse into one -- lowercasing the dedup key would silently drop
+    enforcement for one of the two spellings."""
+    source = tmp_path / "source"
+    source.mkdir()
+    _write_blocklist(
+        source, "public",
+        "entries:\n"
+        "  - token: CAR\n"
+        "    whole_word: true\n"
+        "    case_sensitive: true\n"
+        "    reason: same reason\n"
+        "  - token: car\n"
+        "    whole_word: true\n"
+        "    case_sensitive: true\n"
+        "    reason: same reason\n",
+    )
+    repos.add_repo("source", str(source), repo_class="worktree", plat="windows")
+    repos.add_repo("target", str(tmp_path / "target"), repo_class="worktree",
+                   visibility="public", plat="windows")
+
+    entries = iblk.sweep("target")
+    assert len(entries) == 2
+    tokens = {e.token for e in entries}
+    assert tokens == {r"regex:(?-i:\bCAR\b)", r"regex:(?-i:\bcar\b)"}
 
 
 def test_sweep_ignores_repo_with_no_local_path(home: Path, tmp_path: Path):

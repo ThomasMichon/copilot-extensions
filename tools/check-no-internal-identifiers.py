@@ -211,6 +211,10 @@ def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
     entirely rejects ``identifiers`` with its generic "Unknown subcommand"
     dispatcher error -- that is absence (an unupdated install), not
     breakage, so it is treated the same as the binary not existing at all.
+    Likewise, an installed-but-UNREGISTERED checkout (this repo's cwd isn't
+    adopted as an ``agent-worktrees`` project on this machine) is rejected
+    even earlier, before subcommand dispatch, with a generic "Could not
+    resolve a project" response -- also benign absence, not breakage.
     """
     if os.environ.get(LIVE_SWEEP_DISABLE_ENV, "").strip().lower() in ("1", "true", "yes"):
         return []
@@ -224,12 +228,14 @@ def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
         )
     except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
         return []
-    if proc.returncode != 0 and (
-        "Unknown subcommand" in proc.stderr or "Unknown subcommand" in proc.stdout
+    if proc.returncode != 0 and any(
+        marker in proc.stderr or marker in proc.stdout
+        for marker in ("Unknown subcommand", "Could not resolve a project")
     ):
-        # An installed agent-worktrees that predates the `identifiers`
-        # command entirely -- benign absence, not a configuration failure.
-        # (output.err prints to stdout, not stderr, so check both.)
+        # An installed agent-worktrees that either predates the
+        # `identifiers` command entirely, or whose cwd isn't a registered
+        # project on this machine -- benign absence, not a configuration
+        # failure. (output.err prints to stdout, not stderr, so check both.)
         return []
     pairs = _load_ci_identifiers(proc.stdout) if proc.stdout.strip() else []
     if proc.returncode != 0:
