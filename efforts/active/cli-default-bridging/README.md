@@ -27,10 +27,12 @@
   [`agent-bridge-cli-session-alignment`](../agent-bridge-cli-session-alignment/README.md) —
   a parallel consistency/alignment pass (evidence-gathered across
   `agent-bridge`, `agent-codespaces`, `agent-containers`, `agent-ssh`) over
-  the same CLI-mode surface, in Phase 3 (operator/contributor review) as of
-  2026-09-30. This effort's Phase 1 work should be checked against that
-  review's outcome once it lands, since it may adjust CLI-mode's
-  parameter/behavior surface.
+  the same CLI-mode surface. Its own Phase 3 checklist (operator review,
+  share-for-feedback) remains unchecked as of this writing, but the
+  contributor feedback and implementation it was gathering buy-in for have
+  already landed (issue #4702's comments; merged PRs #4658, #4913) — see
+  Phase 0 below for why that is enough to act on here regardless of the
+  sibling effort's own checkbox state.
 - **Related issue (explicitly deferred there, reopened here for the
   agent-driven case):**
   [#2971](https://github.com/ThomasMichon/copilot-extensions/issues/2971) —
@@ -68,13 +70,13 @@ before any sibling vision's opt-in-only language changes.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| _(to be filled in before execution begins)_ | | |
+| ThomasMichon | Sole participant; drives all phases, owns PRs | local worktree |
 
 ## Coordination
 
 - **Topology:** independent per-phase PRs, same as `agent-bridge-cli-mode-sessions`.
-- **Host (owns PRs):** _(to be named before execution begins)_.
-- **Delegates:** _(to be named before execution begins)_.
+- **Host (owns PRs):** ThomasMichon.
+- **Delegates:** none at present.
 - **Handoff:** a completed phase lands as its own reviewed PR before the next
   phase starts, per this repo's normal effort flow.
 
@@ -132,19 +134,73 @@ and ordering before Phase 0 work begins.)_
 
 ### Phase 0 — Confirm the foundation this effort builds on
 
-- [ ] Check `agent-bridge-cli-mode-sessions`' still-open Validation Plan item
+- [x] Check `agent-bridge-cli-mode-sessions`' still-open Validation Plan item
       ("two concurrent CLI-mode allocation attempts for the same cwd resolve
       through the existing single-current-session-per-worktree gate") — this
       is launch-time allocation, distinct from Phase 2's driver-exclusivity
       below (an already-running session), but confirm the distinction holds
       before building on it.
-- [ ] Note (don't block on) `agent-bridge-cli-mode-sessions`' open Phase 5
+      **Confirmed.** The open item is scoped to `register_live_session` /
+      `cli_mode_reservations` (schema v17→v18): an explicit,
+      operator-initiated, worktree-id-keyed reservation claimed atomically at
+      *registration/launch* time, reusing the existing
+      `single-current-session-per-worktree` gate so a second registration for
+      the same worktree cannot steal an already-claimed reservation. That is
+      entirely about who gets to **launch** a CLI-mode session for a given
+      cwd/worktree before one exists yet. Phase 2 below is a different
+      question — arbitrating who may **drive** a session that is already
+      running — with no existing mechanism closing it today (raw mux allows
+      multi-attach by default). The distinction holds; Phase 2 is not
+      redundant with this item.
+- [x] Note (don't block on) `agent-bridge-cli-mode-sessions`' open Phase 5
       items (docs/architecture updates, vision closure) and open bug #1167 —
       neither blocks this effort's work, but Phase 5's doc updates should be
       cross-checked against whatever this effort changes.
-- [ ] Check `agent-bridge-cli-session-alignment`'s Phase 3 review outcome
+      Noted, not blocking. #1167 (Windows SSH dispatch landing at the wrong
+      cwd after resolver bootstrap failure) is squarely that effort's own
+      CWD-keyed discovery scope, not this effort's.
+- [x] Check `agent-bridge-cli-session-alignment`'s Phase 3 review outcome
       once it lands; adjust Phase 1 below if it changes CLI-mode's
       parameter/behavior surface.
+      **The substance this checkbox cares about has landed; the sibling
+      effort's own Phase 3 checklist has not been marked done and this item
+      does not claim otherwise.** Evidence: contributor
+      (`namankanakiya`) buy-in and a detailed per-finding response recorded
+      in issue #4702's comments, implemented across merged PR #4658
+      (forwarded-route takeover fix) and merged PR #4913 (the
+      CLI-session-alignment diff, split out of #4658 at the maintainer's
+      request). `agent-bridge-cli-session-alignment/README.md`'s own Phase 3
+      items ("Operator reviews the drafted findings/proposal", "Share with
+      the reviewed contributor for feedback") remain unchecked there — that
+      effort's own completion is out of scope here and not altered by this
+      file. What matters for *this* effort is only that CLI-mode's
+      parameter/behavior surface already changed as a result, so Phase 1/2
+      below must build on the new surface rather than the one described
+      when this effort was drafted:
+      - `agent-ssh` now has an **attached-by-default** `copilot <host>` CLI
+        entry point (previously `--detach`/`--stop`-only, no attach mode),
+        and `"ssh"` was added to agent-bridge's `--cli` routing table
+        (`_CLI_MODE_VENUE_BINSTUBS`). Phase 1's validation-track list below
+        ("a local machine, a CodeSpace, a trusted container, and at least
+        one Dev Box image") should add an SSH-reachable machine as a fifth,
+        now-reachable venue, or explicitly fold it into "a local machine".
+      - A new HTTP protocol **v20** route, `CLI_MODE_UNCLAIMED_RELEASE`,
+        gives an atomic *unclaimed-only* reservation release (client never
+        sends it to a pre-v20 daemon). This is still a **launch-time**
+        reservation primitive (same `cli_mode_reservations` table as above),
+        not a driver-exclusivity mechanism for an already-running session —
+        but its atomic-claim/compare-and-delete shape is a directly relevant
+        precedent to study when designing Phase 2's driver-exclusivity
+        primitive.
+      - `agent-codespaces` gained dynamic `--forward 0:PORT` local forwards
+        (daemon/OS-assigned host port, opt-in) and an Owner beacon carrying
+        a process-birth identity (`owner_identity`). Separately, a shared,
+        OS-released `keeper_holds` primitive (per-scope holds over one
+        shared forward) was added to `ssh-manager`, used by both
+        `agent-containers` and `agent-ssh` — not `agent-codespaces`. None of
+        this is a CLI-mode behavior change Phase 1 needs to react to
+        directly, but worth knowing about if Phase 1's extension needs its
+        own port/connection bookkeeping per venue.
 
 ### Phase 1 — User-global remote-driver extension
 
@@ -157,6 +213,11 @@ and ordering before Phase 0 work begins.)_
 - [ ] Scaffold and install it on at least one local machine, one CodeSpace,
       and one container, proving launch-time presence without an
       agent-worktrees or agent-bridge install in the venue itself.
+      (Phase 0 update: `agent-ssh` now also has an attached-by-default
+      `copilot <host>` CLI entry point — PR #4913 — so an SSH-reachable
+      machine is a now-reachable fifth venue candidate alongside the four
+      named validation tracks; fold it into "a local machine" or add it
+      explicitly when scoping this item.)
 
 ### Phase 2 — Driver exclusivity arbitration for mux-hosted sessions
 
@@ -242,3 +303,38 @@ effort's premise away from "whether full drive is achievable at all" toward
 "what's still missing to make it agent-bridge's/agent-dispatch's validated
 default." Status remains Draft pending the review gate before any Phase 1
 work starts.
+
+### 2026-10-02 — Phase 0 complete
+
+Confirmed all three Phase 0 checks (see Plan above for full detail):
+
+1. The still-open `agent-bridge-cli-mode-sessions` Validation Plan item is
+   genuinely launch-time allocation (`cli_mode_reservations`,
+   worktree-id-keyed, claimed at registration), not a stand-in for Phase 2's
+   driver-exclusivity-on-an-already-running-session question — the
+   distinction holds and Phase 2 is not redundant.
+2. Bug #1167 and the open Phase 5 docs items are noted, non-blocking, and
+   squarely that effort's own scope.
+3. `agent-bridge-cli-session-alignment`'s review-gathering substance landed
+   — contributor (`namankanakiya`) buy-in and a detailed per-finding
+   response recorded in issue #4702's comments, implemented across merged
+   PRs #4658 (forwarded-route takeover fix) and #4913 (CLI-session-alignment
+   diff, split from #4658 at the maintainer's request). That sibling
+   effort's own Phase 3 checklist ("Operator reviews...", "Share with the
+   reviewed contributor...") is still unchecked in its own README — this
+   entry does not mark it done, only notes that the surface it was gating
+   already changed. Three changes relevant here, now folded into Phase 1
+   above: `agent-ssh` gained an attached-by-default `copilot <host>` entry
+   point (a fifth reachable venue); a new atomic unclaimed-only
+   reservation-release primitive (protocol v20, `CLI_MODE_UNCLAIMED_RELEASE`)
+   is a relevant precedent for Phase 2's driver-exclusivity design (though it
+   is itself still launch-time, not live-session arbitration); and
+   `agent-codespaces` gained dynamic-forward/owner-identity changes, while a
+   separate `keeper_holds` primitive landed in `ssh-manager` shared by
+   `agent-containers`/`agent-ssh` (not `agent-codespaces`) — adjacent
+   context, not a required Phase 1 change.
+
+Before binding effort-focus and starting Phase 1 execution, the
+`## Participants`/`## Coordination` tables still need a real participant and
+host named (not a placeholder) — `effort-focus bind` refuses while they're
+unfilled. Flagged to the operator rather than invented.

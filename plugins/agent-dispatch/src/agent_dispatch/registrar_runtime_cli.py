@@ -180,6 +180,24 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
         if args.registrar_command == "discover-repo":
             decls = rd.discover_repo(args.repo_root, owner=args.owner)
             return _core()._emit([summarize(d) for d in decls])
+        if args.registrar_command == "vocabulary":
+            from .registrar import filter_vocabulary
+
+            sources = rd.RegistrarSources()
+            report = sources.refresh(emit_warnings=False)
+            vocab = filter_vocabulary(report.combined.declarations)
+            if getattr(args, "dim", None):
+                values = vocab.get(args.dim, [])
+                if args.json:
+                    return _core()._emit(values)
+                for value in values:
+                    print(value)
+                return 0
+            if args.json:
+                return _core()._emit(vocab)
+            for dim in sorted(vocab):
+                print(f"{dim}: {', '.join(vocab[dim])}")
+            return 0
     except RegistrarError as exc:
         print(f"agent-dispatch registrar: {exc}", file=sys.stderr)
         return 2

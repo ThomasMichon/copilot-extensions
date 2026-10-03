@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import venv
 from pathlib import Path
 
@@ -30,24 +31,23 @@ def _copy_payload(tmp_path: Path, name: str) -> Path:
 
 
 def _site_packages(interpreter: Path) -> Path:
-    result = subprocess.run(
-        [
-            str(interpreter),
-            "-I",
-            "-X",
-            "utf8",
-            "-c",
-            (
-                "import site; print(next(p for p in site.getsitepackages() "
-                "if p.endswith(('site-packages','dist-packages'))))"
-            ),
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=True,
-    )
-    return Path(result.stdout.strip())
+    """Resolve a just-created venv's site-packages directory from its
+    on-disk layout, without spawning the venv's own interpreter to ask.
+
+    `venv.EnvBuilder.create()` always builds a venv matching the invoking
+    (current) process's own Python version -- never cross-version -- so
+    this process's own ``sys.version_info`` is authoritative for a venv
+    this test just created; there is no need to introspect the child
+    interpreter at all. This also avoids spawning a nested interpreter
+    from inside this suite's own coverage/pytest-cov-instrumented run,
+    which this helper must stay compatible with (see the
+    coverage-baseline collection harness,
+    `tools/coverage_guided_selection/baseline.py`).
+    """
+    slot = interpreter.parent.parent
+    if os.name == "nt":
+        return slot / "Lib" / "site-packages"
+    return slot / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
 
 
 def _write_module(path: Path, module_name: str) -> None:

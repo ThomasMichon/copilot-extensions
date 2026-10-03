@@ -397,15 +397,43 @@ real code, not assumption:
       different pre-existing Textual-pilot timing flake confirmed
       isolated-pass, same class observed throughout this session's earlier
       PR too).
-- [ ] `agent-dispatch`'s manifest declares its own `create_action` (title +
+- [x] `agent-dispatch`'s manifest declares its own `create_action` (title +
       prompt/goal textarea + a tags/criteria picker -- see the Tasks-pane
       effort's own Phase 10 Plan for the exact field list and the pool-
-      filter-vocabulary source still to be confirmed). **Investigated, not
-      yet written this session** -- see the Journal: the tags/criteria
-      vocabulary source is still unconfirmed (`registrar.py`/`overrides.py`,
-      per that effort's own Phase 10 note), so the manifest's exact `fields`
-      list can't be finalized yet; blocks on that lookup, not on anything
-      this effort's own Phase B needs to invent.
+      filter-vocabulary source still to be confirmed). **Resolved
+      2026-10-02:** traced the vocabulary question all the way through --
+      `registrar.py`'s `_FILTER_DIMS` only names dimensions, never values, so
+      added `filter_vocabulary()` (aggregates every active declaration's
+      `effective_filters().permit` per dimension) plus a new
+      `agent-dispatch registrar vocabulary [--dim] [--json]` CLI exposing it
+      (reuses `RegistrarSources().refresh()`, the same active-declaration
+      sweep `registrar doctor` already performs -- "already cached", per the
+      operator's own framing). Confirmed live against this machine's real
+      registrar set (not just unit tests). The picker's generic
+      `create_action` field schema gained a new `options_command` key
+      (`pivot_create_action.py` + `pivot_registry_materialization.py`'s
+      command-resolution, mirroring `run`'s own identity-verified resolution)
+      for a `choice`/`multichoice` field whose options are sourced from a
+      live subprocess instead of a static array; `allow_other` is auto-forced
+      true whenever it's set, so a failed/slow/empty command (bounded to 5s,
+      `tasks.OPTIONS_COMMAND_TIMEOUT`) always degrades to free text rather
+      than ever blocking the dialog. `engine_pivot_actions.py._open_create_action`
+      resolves any such fields off-thread (`_run_bg`) before pushing
+      `CreateActionScreen`, so the render flow is never blocked.
+      `pivots/agent-dispatch.json` now declares the real `create_action`:
+      title/prompt + a `criteria` multichoice sourced from
+      `registrar vocabulary --dim task-type --json`, submitted via a new
+      `agent-dispatch create --criteria-json` flag (a JSON array merged into
+      `--label`) -- chosen because the ACTUAL task-routing mechanism today
+      is the legacy `pool.labels & task.labels` intersection
+      (`reviewer_loop_commands.py`), not `registrar.py`'s newer
+      `Filters.permits` (confirmed that's only consulted for
+      declaration-to-machine matching, `registrar_reconcile.py`, today) --
+      so `task-type`'s vocabulary (pool names + labels) is the dimension
+      that's genuinely wired to real routing right now. repo/role/
+      capabilities vocabulary exists (`filter_vocabulary` returns them too)
+      but isn't yet connected to an actual routing predicate for a created
+      task -- left as a named follow-up, not invented speculatively here.
 - [x] Submitting calls `propose`+`queue` (already-implemented `client.py`
       calls) against the coordinator, per that effort's own Phase 10 spec.
       **Resolved 2026-10-01, no new plumbing needed:** `agent-dispatch
@@ -420,17 +448,30 @@ real code, not assumption:
       `run_resolved` path the row-scoped `kind:"form"` action already uses --
       no two-step orchestration, no propose-id-capture-then-queue chaining,
       needs inventing at the picker layer.
-- [~] Tests: the new manifest field parses correctly (and degrades
+- [x] Tests: the new manifest field parses correctly (and degrades
       gracefully for a pivot that doesn't declare one); the UI affordance
       appears/is absent correctly; a synthetic pivot's create action renders
       and submits via the generic mechanism (mirroring
       `test_registered_pivot_*` patterns already in
       `test_picker_tui.py`); `agent-dispatch`'s own composer round-trips
-      title/prompt/tags into the exact `propose`/`queue` call shape. The
-      manifest-parsing half is done (18 tests) and the engine-wiring half is
-      now done too (4 new tests, see above, render-verified against the
-      `--demo` fixture); the `agent-dispatch`-manifest half remains, blocked
-      on the tags/criteria vocabulary lookup above.
+      title/prompt/tags into the exact `propose`/`queue` call shape.
+      **Completed 2026-10-02:** `test_pivots.py` (options_command parsing +
+      allow_other auto-force + blank-argv rejection), `test_pivot_registry.py`
+      (options_command command-path resolution/validation, mirroring the
+      existing `create_action.run` coverage), `test_resolve_dynamic_options.py`
+      (the new `tasks.resolve_dynamic_options` helper: success/timeout/
+      not-found/non-zero-exit/non-JSON/non-array/non-string-items, all ->
+      `[]`, never raises), `test_picker_tui.py` (two new engine-wiring tests:
+      live options land in the rendered field before the modal opens; a
+      failing command still opens the modal with an empty/free-text-only
+      field) -- plus `agent-dispatch`'s own `test_registrar.py`
+      (`filter_vocabulary` aggregation/omission semantics) and `test_cli.py`
+      (`--criteria-json` merge/validation). All new + pre-existing tests
+      green; not render-verified with a screenshot this round (the engine
+      wiring itself was already screenshot-verified in the prior session --
+      this change extends the field schema, not the render path). All three
+      halves (manifest-parsing, engine-wiring, agent-dispatch's own
+      manifest) are now done.
 
 ## Validation Plan
 
@@ -465,10 +506,22 @@ real code, not assumption:
       task…" action to hand-author a task; confirm it appears with the
       exact title/prompt/tags entered, immediately eligible for its
       declared pool per the tags/criteria submitted.
-- [ ] Both phases: full `worktree-manager` + `agent-dispatch` test suites
+- [x] Both phases: full `worktree-manager` + `agent-dispatch` test suites
       stay green (baseline: whatever the two packages' full-suite pass
       counts are at the time each phase's PR opens -- record them in that
       PR/Journal entry, not assumed from an earlier session).
+      **Completed 2026-10-02:** `worktree-manager` full suite: 1539 passed,
+      3 skipped, 6 failed -- all 6 confirmed pre-existing (reproduced
+      identically on the base commit via `git stash`; none touch any file
+      this session changed: `test_mux_daemon.py` x2, `test_update.py`
+      tarball-symlink, `test_trusted_materializer_parity.py`, and two
+      unrelated `test_picker_tui.py` Textual-pilot timing flakes, the same
+      flake class the Journal already flagged once this effort). `agent-
+      dispatch` full suite: 3758 passed, 23 skipped, 5 failed -- all 5
+      likewise confirmed pre-existing via the same `git stash` check
+      (`test_cli.py` consume/baton x3, `test_managed_companion.py`,
+      `test_supervisor.py` fleet-nudge; none touch `create_cli.py`/
+      `registrar*.py`).
 
 ## Proposal
 
@@ -1560,3 +1613,85 @@ pass-in-isolation each time, not a regression.
 `create_action` manifest) remains blocked on the tags/criteria vocabulary
 lookup noted above; the literal Picker end-to-end click-through from Phase
 A's Validation Plan also remains open.
+
+### 2026-10-02 (later still) — Phase B item 3: resolved the tags/criteria vocabulary question, agent-dispatch's own `create_action` landed
+Resumed via handoff from the previous session. Read the Tasks-pane effort's
+own Phase 10 note fresh first (per the handoff's instruction), then traced
+`registrar.py`/`overrides.py` directly: confirmed `_FILTER_DIMS` only names
+dimensions (repo/machine/env/role/worktree/task-type/capabilities), never
+enumerable values -- there genuinely was no existing accessor, matching
+both sessions' read. Asked the operator how to resolve it (a genuine design
+crossroads, not something to decide solo after two sessions flagged it
+unresolved): the operator wanted a live-sourced dropdown backed by
+agent-dispatch's own already-cached registrar sweep, free text as fallback
+only.
+
+Built exactly that. `registrar.filter_vocabulary()` aggregates every active
+declaration's `effective_filters().permit` per dimension (the
+`name`/`labels`/`repos` shorthand already folds in, so an ordinary pool
+contributes its name/labels as `task-type` values with zero extra
+authoring); a new `agent-dispatch registrar vocabulary [--dim] [--json]`
+CLI exposes it, reusing `RegistrarSources().refresh()` -- the SAME sweep
+`registrar doctor` already performs, so this is genuinely "already cached",
+not a new discovery pass. Verified live against this machine's real
+registrar set (not just synthetic unit tests) -- real repo/machine/task-type
+values came back.
+
+Traced one more layer before wiring the picker side: confirmed `--require`/
+`--exclude` are free-form worker-capability tokens (a different system),
+and -- more importantly -- that `registrar.py`'s `Filters.permits` is
+*only* consulted today for declaration-to-machine matching
+(`registrar_reconcile.runs_on_machine`), NOT for routing a created task to
+a pool. The actual live routing mechanism is the much simpler
+`pool.labels & task.labels` intersection in `reviewer_loop_commands.py`.
+This matters: it means `task-type`'s vocabulary (pool names + declared
+labels) is the one dimension genuinely wired to real routing right now --
+so that's what the picker's `criteria` field targets, submitted as
+`--label`s via a new `--criteria-json` flag, rather than inventing
+untested semantics for repo/role/capabilities. Documented this scope
+explicitly in the Plan rather than silently overclaiming full
+multi-dimensional routing.
+
+Extended the generic `create_action` field schema (not agent-dispatch-
+specific) with `options_command`: a `choice`/`multichoice` field can now
+source its options from a live subprocess instead of (or alongside, as a
+fallback) a static array. `allow_other` is auto-forced true whenever
+`options_command` is set -- a live source is never guaranteed, so the field
+must always be answerable via free text. The command's argv head is
+resolved through the exact same identity-verified path `create_action.run`
+already uses (`pivot_registry_materialization.py`). Runtime resolution
+(`tasks.resolve_dynamic_options`, bounded to `OPTIONS_COMMAND_TIMEOUT=5s`,
+never raises) happens off the render flow via the existing `_run_bg`
+pattern in `engine_pivot_actions._open_create_action`, right before the
+modal opens -- a pivot with no dynamic fields takes the unchanged fast
+path (no extra thread hop).
+
+`pivots/agent-dispatch.json` now declares the real `create_action`: title
+(text) + prompt (textarea) + `criteria` (multichoice, `options_command`:
+`agent-dispatch registrar vocabulary --dim task-type --json`, allow_other).
+
+**Tests:** `test_registrar.py` (3 new: aggregation, reject-only/
+unconstrained omission, empty input), `test_cli.py` (3 new:
+`--criteria-json` merges into labels, invalid JSON errors, non-array/non-
+string-item rejection), `test_pivots.py` (3 new: options_command parsing
+with/without static fallback options, allow_other auto-force, blank-argv
+rejection), `test_pivot_registry.py` (2 new: command-path resolution +
+missing-target validation, mirroring the existing `create_action.run`
+coverage), `test_resolve_dynamic_options.py` (new file, 8 tests covering
+every failure mode), `test_picker_tui.py` (2 new engine-wiring tests: live
+options land before the modal opens; a failing command still opens the
+modal, degraded to free-text-only). All green.
+
+**Validation Plan:** ran BOTH full suites fresh (not assumed from an
+earlier session) -- `worktree-manager`: 1539 passed, 3 skipped, 6 failed;
+`agent-dispatch`: 3758 passed, 23 skipped, 5 failed. Every failure
+confirmed pre-existing via `git stash` (reproduces identically on the base
+commit) and confirmed to touch no file this session changed -- recorded in
+the Validation Plan above rather than silently assumed clean.
+
+**Still open:** the live-coordinator click-through of the Tasks pane's
+"New …" button (needs a real coordinator with active registrars, not
+available this session) and Phase A's own literal Picker end-to-end
+click-through both remain unchecked in the Validation Plan. Neither blocks
+landing this slice -- both are genuinely separate from what this session's
+code changes.

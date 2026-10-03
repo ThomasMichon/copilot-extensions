@@ -253,6 +253,22 @@ def _pr_entry_merge_status(pr, repo) -> bool | None:
         return True
     number = getattr(pr, "number", None)
     slug = getattr(pr, "repo", "") or ""
+    if slug and "/" not in slug:
+        # Older records keep the project name ("my-project"), not the
+        # hosting owner/name the provider needs: asking for it fails and
+        # leaves a merged, aligned worktree unfinalizable forever. The tracked
+        # PR URL names the real repository (its authority is checked below).
+        # The URL and the number are stored separately, so they must name the
+        # same PR: otherwise a stale record could certify a different change.
+        import re
+
+        from .pr_ops import _repo_slug_from_pr_url
+
+        url = (getattr(pr, "url", "") or "").strip()
+        url_number = re.search(r"/pulls?/(\d+)/?$", url)
+        if url_number is None or (number and int(url_number.group(1)) != int(number)):
+            return None
+        slug = _repo_slug_from_pr_url(url, getattr(repo.pr, "api_base", "") or "") or slug
     if not number and not slug:
         return None if getattr(pr, "state", "") == "merged" else False
     if not number or not slug:

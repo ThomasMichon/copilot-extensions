@@ -240,16 +240,25 @@ jobs:
         # dependency-having plugin -- proves the `project_dir`
         # editable-install path, not just a dependency-free script
         # plugin), then agent-codespaces, agent-containers, agent-vault,
-        # agent-logger, agent-mcp, and agent-bridge (by far the largest so
-        # far: 178 test files, 2993 collected tests). `baseline.py` chunks
-        # a suite larger than its own `--max-files-per-chunk` (default 25,
-        # matching `run-plugin-tests.py`'s own sub-suite chunking) into
-        # sequential pytest processes and merges the results, rather than
-        # collecting an entire suite in one process -- needed for
-        # agent-mcp's own 54-file suite, whose real process/watchdog-
-        # management tests otherwise exceeded a process-count ceiling an
-        # unchunked collection pass has no way to bound; confirmed it also
-        # scales to agent-bridge's own much larger 8-chunk suite cleanly.
+        # agent-logger, agent-mcp, agent-bridge, and agent-worktrees (the
+        # largest: 265 test files, 6451 collected tests). `baseline.py`
+        # chunks a suite larger than its own `--max-files-per-chunk`
+        # (default 25, matching `run-plugin-tests.py`'s own sub-suite
+        # chunking) into sequential pytest processes and merges the
+        # results, rather than collecting an entire suite in one process
+        # -- needed for agent-mcp's own 54-file suite, whose real
+        # process/watchdog-management tests otherwise exceeded a
+        # process-count ceiling an unchunked collection pass has no way to
+        # bound; confirmed it also scales to agent-bridge's own much
+        # larger 8-chunk suite cleanly. agent-worktrees' own real
+        # cross-process file-lock tests (spawning a genuine
+        # `multiprocessing.get_context("spawn")` child) additionally
+        # needed `_DRIVER_SCRIPT` to guard its `pytest.main(...)` call
+        # behind `if __name__ == "__main__":` -- spawn re-imports that
+        # script as a plain module to bootstrap, and an unguarded call
+        # re-executed pytest.main() during that bootstrap, tripping
+        # multiprocessing's own safety check and corrupting the real
+        # coverage data file in the process.
         # Independent
         # of, and in addition to, the trusted `run-plugin-tests.py` run
         # above -- this step's own failure never fails this job (see
@@ -265,7 +274,7 @@ jobs:
         # confirmed for every plugin enrolled so far) rather than
         # hardcoded per plugin, so enrolling the next one only ever touches
         # this `if:` list and the `promote` job's matching one below.
-        if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers","agent-vault","agent-logger","agent-mcp","agent-bridge"]'), matrix.plugin)
+        if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers","agent-vault","agent-logger","agent-mcp","agent-bridge","agent-worktrees"]'), matrix.plugin)
         continue-on-error: true
         run: |
           plugin="${{ matrix.plugin }}"
@@ -277,7 +286,7 @@ jobs:
             --measured-commit "${{ needs.gate.outputs.sha }}" \
             --out "${plugin}.json"
       - name: Upload coverage baseline - ${{ matrix.plugin }}
-        if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers","agent-vault","agent-logger","agent-mcp","agent-bridge"]'), matrix.plugin)
+        if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers","agent-vault","agent-logger","agent-mcp","agent-bridge","agent-worktrees"]'), matrix.plugin)
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
@@ -659,7 +668,7 @@ jobs:
         # that's the single other place a plugin gets "enrolled".
         run: |
           missing=()
-          for plugin in agent-ssh agent-codespaces agent-containers agent-vault agent-logger agent-mcp agent-bridge; do
+          for plugin in agent-ssh agent-codespaces agent-containers agent-vault agent-logger agent-mcp agent-bridge agent-worktrees; do
             if [ ! -f "coverage-baselines/${plugin}.json" ]; then
               missing+=("$plugin")
             fi

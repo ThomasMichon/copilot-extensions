@@ -30,11 +30,14 @@ and ``self._now()`` from that class and is not usable standalone.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import uuid
 from collections.abc import Callable
 
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
+
+log = logging.getLogger("agent-dispatch.queue")
 
 
 def spawn_key(task_id: str, attempt: int) -> str:
@@ -215,21 +218,34 @@ class SpawnReservationMixin:
                     carried_worktree = prior["worktree"]
                     carried_session = prior["session_handle"]
                     if carried_session is not None:
-                        # A later failed attempt may have copied this handle
-                        # before the retiring settlement was understood.
+                        # rearmed counts as retired too (copilot-extensions#4978):
+                        # an operator rearm starts the task over, so its carried
+                        # session must never be resumed again.
                         retired = conn.execute(
                             "SELECT 1 FROM spawn_reservations "
                             "WHERE exclusive_key = ? AND session_handle = ? "
-                            "AND release_requested = 1 AND state IN (?, ?) LIMIT 1",
+                            "AND release_requested = 1 AND state IN (?, ?, ?) LIMIT 1",
                             (
                                 task.exclusive_key,
                                 carried_session,
                                 SpawnState.SETTLED,
                                 SpawnState.FAILED,
+                                SpawnState.REARMED,
                             ),
                         ).fetchone()
                         if retired is not None:
+                            log.info(
+                                "reserve_spawn: dropping retired carried session %r "
+                                "for %r (task %s, attempt %s); spawning fresh",
+                                carried_session, task.exclusive_key, task_id, attempt,
+                            )
                             carried_session = None
+                        else:
+                            log.info(
+                                "reserve_spawn: carrying session %r forward for %r "
+                                "(task %s, attempt %s); will try to resume it",
+                                carried_session, task.exclusive_key, task_id, attempt,
+                            )
                     worktree_ownership = "reused"
             if carried_worktree is not None:
                 cleanup_claims = conn.execute(
@@ -273,97 +289,6 @@ class SpawnReservationMixin:
             conn.execute("COMMIT")
         return SpawnReservation._from_row(row), True
 
-    def rearm_spawn(
-        self,
-        task_id: str,
-        *,
-        permitted: bool = False,
-        reason: str | None = None,
-        min_failures: int = 3,
-        now: float | None = None,
-    ) -> dict[str, object]:
-        """Atomically retire failed spawn attempts so one fresh retry is eligible.
-
-        The task must still be queued and unowned, no active reservation may
-        exist, and at least ``min_failures`` failed attempts must be present.
-        All checks and the failed->rearmed transition share one
-        ``BEGIN IMMEDIATE`` transaction with task claims and spawn reservations.
-        """
-        if not permitted:
-            raise TaskError("rearming spawn reservations requires explicit permission")
-        reason = (reason or "").strip()
-        if not reason:
-            raise TaskError("rearming spawn reservations requires a non-empty reason")
-        if min_failures < 3:
-            raise TaskError("min_failures must be at least 3")
-
-        ts = self._now(now)
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            task = self._fetch(conn, task_id)
-            if task is None:
-                conn.execute("COMMIT")
-                raise TaskError(f"no such task {task_id!r}")
-            if task.status != Status.QUEUED or task.owner is not None:
-                conn.execute("COMMIT")
-                raise TaskError(
-                    f"task {task_id!r} is {task.status!r} with owner "
-                    f"{task.owner!r}; rearm requires queued and unowned"
-                )
-            rows = conn.execute(
-                "SELECT * FROM spawn_reservations WHERE task_id = ? ORDER BY attempt ASC",
-                (task_id,),
-            ).fetchall()
-            active = [row["key"] for row in rows if row["state"] in SpawnState.ACTIVE]
-            if active:
-                conn.execute("COMMIT")
-                raise TaskError(
-                    f"task {task_id!r} has active spawn reservation(s): {', '.join(active)}"
-                )
-            failed = [row for row in rows if row["state"] == SpawnState.FAILED]
-            pending_cleanup = [
-                row["key"] for row in failed if row["conclusion_state"] == "pending"
-            ]
-            if pending_cleanup:
-                conn.execute("COMMIT")
-                raise TaskError(
-                    f"task {task_id!r} has pending spawn cleanup: {', '.join(pending_cleanup)}"
-                )
-            if len(failed) < min_failures:
-                conn.execute("COMMIT")
-                raise TaskError(
-                    f"task {task_id!r} has {len(failed)} failed spawn reservation(s); "
-                    f"at least {min_failures} required"
-                )
-
-            keys: list[str] = []
-            for row in failed:
-                keys.append(row["key"])
-                prior = (row["detail"] or "").strip()
-                detail = f"{prior}\nrearmed: {reason}".strip()
-                conn.execute(
-                    "UPDATE spawn_reservations "
-                    "SET state = ?, updated_at = ?, detail = ? WHERE key = ?",
-                    (SpawnState.REARMED, ts, detail, row["key"]),
-                )
-            self._audit(
-                conn,
-                task_id,
-                ts=ts,
-                from_status=Status.QUEUED,
-                to_status=Status.QUEUED,
-                worker="operator",
-                note=f"spawn reservations rearmed: {reason}",
-            )
-            conn.execute("COMMIT")
-        return {
-            "task_id": task_id,
-            "rearmed": len(keys),
-            "reservation_keys": keys,
-            "reason": reason,
-            "next_attempt": max(row["attempt"] for row in rows) + 1,
-        }
-
     def _update_reservation(
         self,
         key: str,
@@ -377,6 +302,7 @@ class SpawnReservationMixin:
         conclusion_state: str | None = None,
         conclusion_detail: str | None = None,
         claim_token: str | None = None,
+        release_requested: bool = False,
         guard: Callable[[sqlite3.Row], None] | None = None,
     ) -> SpawnReservation:
         ts = self._now(now)
@@ -457,7 +383,9 @@ class SpawnReservationMixin:
                 "conclusion_detail = CASE WHEN ? IS NOT NULL THEN ? "
                 "ELSE conclusion_detail END, "
                 "cleanup_claim_expires_at = CASE WHEN ? IS NOT NULL THEN 0 "
-                "ELSE cleanup_claim_expires_at END WHERE key = ?",
+                "ELSE cleanup_claim_expires_at END, "
+                "release_requested = CASE WHEN ? THEN 1 ELSE release_requested END "
+                "WHERE key = ?",
                 (
                     to_state,
                     ts,
@@ -471,6 +399,7 @@ class SpawnReservationMixin:
                     conclusion_detail,
                     conclusion_detail,
                     claim_token,
+                    1 if release_requested else 0,
                     key,
                 ),
             )
@@ -615,6 +544,7 @@ class SpawnReservationMixin:
         claim_token: str | None = None,
         force: bool = False,
         confirmed_absent: bool = False,
+        release_requested: bool = False,
         now: float | None = None,
     ) -> SpawnReservation:
         """Mark a reservation ``failed`` (spawn failed or lost), releasing the
@@ -639,6 +569,11 @@ class SpawnReservationMixin:
         Never widens plain ``force``'s own handle-less eligibility on its
         own -- masking a still-live orphaned worker requires the caller to
         have done the absence check itself.
+
+        ``release_requested`` marks this ``session_handle`` as retired for
+        :meth:`reserve_spawn`'s carried-session lookup. Pass ``True`` only
+        once independently confirmed gone -- never for an ordinary failure
+        where the body might still be alive and worth resuming.
 
         The eligibility check runs inside the same transaction as the state
         transition (via ``_update_reservation``'s ``guard``), not a separate
@@ -674,6 +609,7 @@ class SpawnReservationMixin:
             conclusion_state=conclusion_state,
             conclusion_detail=conclusion_detail,
             claim_token=claim_token,
+            release_requested=release_requested,
             guard=guard,
             now=now,
         )
@@ -844,6 +780,7 @@ class SpawnReservationMixin:
         conclusion_state: str | None = None,
         conclusion_detail: str | None = None,
         claim_token: str | None = None,
+        release_requested: bool = False,
         now: float | None = None,
     ) -> SpawnReservation:
         """Mark a reservation ``settled`` (its task reached a terminal outcome).
@@ -852,6 +789,9 @@ class SpawnReservationMixin:
         update. Once exact body absence is proven, allocation cleanup may remain
         ``pending`` or ``held`` here as inspectable conclusion metadata without
         retaining an active spawn fence.
+
+        ``release_requested`` -- see :meth:`fail_spawn`'s doc: pass ``True``
+        only once the caller has independently confirmed the body is gone.
         """
         return self._update_reservation(
             key,
@@ -862,6 +802,7 @@ class SpawnReservationMixin:
             conclusion_state=conclusion_state,
             conclusion_detail=conclusion_detail,
             claim_token=claim_token,
+            release_requested=release_requested,
             now=now,
         )
 

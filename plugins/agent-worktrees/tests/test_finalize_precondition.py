@@ -885,6 +885,54 @@ class TestPrMergeStatusIndeterminateVsUnmerged:
     latter into False let a tree-only upstream match certify and prune a
     record whose merge boundary genuinely can't be checked."""
 
+    def test_a_project_name_repo_is_queried_by_the_slug_its_pr_url_names(self):
+        """Older records store the project name ("my-project"), not the
+        hosting owner/name: the provider must be asked for the URL's repo, or a
+        merged, aligned worktree can never finalize."""
+        from agent_worktrees import providers
+        from agent_worktrees.providers.github import GitHubProvider
+
+        asked = []
+
+        class _Merged(GitHubProvider):
+            def get_pull(self, slug, number, **_kwargs):
+                asked.append((slug, number))
+                return SimpleNamespace(merged=True, state="merged", head_sha="abc123")
+
+        with mock.patch.object(providers, "get_provider", lambda _name: _Merged()), \
+                mock.patch.object(providers, "account_token_for_slug", lambda *_a: None):
+            pr = SimpleNamespace(
+                branch="user/x/fix", repo="my-project", number=584, provider="github",
+                state="merged", head_sha="", url="https://github.com/octo/my-project/pull/584",
+            )
+            repo = SimpleNamespace(pr=SimpleNamespace(provider="github", api_base=""))
+            assert finalize_open_pr_gate.pr_merge_status(SimpleNamespace(pr=pr, prs=[pr]), repo) is True
+        assert asked[0] == ("octo/my-project", 584)
+        assert pr.head_sha == "abc123"  # repaired in place for the boundary check
+
+    def test_a_project_name_repo_whose_url_names_another_pr_is_indeterminate(self):
+        """The URL and number are stored apart: a URL naming a different PR must
+        not let that PR's merge certify this record."""
+        from agent_worktrees import providers
+
+        asked = []
+
+        class _Any:
+            def get_pull(self, slug, number, **_kwargs):
+                asked.append((slug, number))
+                return SimpleNamespace(merged=True, state="merged", head_sha="abc123")
+
+        with mock.patch.object(providers, "get_provider", lambda _name: _Any()), \
+                mock.patch.object(providers, "account_token_for_slug", lambda *_a: None):
+            pr = SimpleNamespace(
+                branch="user/x/fix", repo="my-project", number=584, provider="github",
+                state="merged", head_sha="", url="https://github.com/octo/my-project/pull/585",
+            )
+            repo = SimpleNamespace(pr=SimpleNamespace(provider="github", api_base=""))
+            status = finalize_open_pr_gate.pr_merge_status(SimpleNamespace(pr=pr, prs=[pr]), repo)
+        assert status is None
+        assert asked == [] and pr.head_sha == ""
+
     def test_no_pr_at_all_is_confirmed_unmerged(self):
         record = SimpleNamespace(pr=None)
         assert finalize_open_pr_gate.pr_merge_status(record, repo=None) is False

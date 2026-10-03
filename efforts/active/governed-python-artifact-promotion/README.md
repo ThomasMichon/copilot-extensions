@@ -98,10 +98,38 @@ distribution unit.
 
 ### Phase 2 — Promotion-built, content-addressed first-party artifacts
 
-- [ ] Build first-party wheels and manifests during promotion, keyed by
-      plugin payload hash, platform, architecture, and Python ABI, covering
-      the plugin's own wheel and every vendored `libs/<lib>` wheel it
-      requires after materialization.
+- [x] **Tool built (2026-10-02); pipeline wiring still open.**
+      `tools/build_python_artifacts.py` builds a plugin's own wheel plus
+      every vendored `libs/<lib>` wheel it needs, discovering both the
+      dev-branch live `editable = true` canonical-reference form and an
+      ordinary in-tree vendored copy, recursively. The originally requested
+      top-level plugin's own escaping references are validated as a whole
+      via `uv_editable_ref.uv_editable_problems`; every reference
+      discovered while recursing into an already-found vendored lib (an
+      escaping `editable = true` entry, or a non-editable in-tree one) is
+      instead validated per-entry with this tool's own structural
+      validators, since a vendored lib can legitimately cross-reference a
+      sibling vendored lib without `editable = true` -- a pattern
+      `uv_editable_problems` was never designed to accept at the
+      whole-consumer level. It writes a manifest
+      recording the payload hash (a working-tree content hash — not `git
+      HEAD`, since promotion's scratch tree is mutated by version bumps and
+      materialization before the build runs), the wheel filenames' own
+      python/abi/platform tags (with a hard failure on a genuinely
+      conflicting tag across the set, never a silent first-match guess),
+      each wheel's sha256, and the build-tool `Generator:` actually used
+      (read from each built wheel's own `dist-info/WHEEL`, required —
+      a wheel with no readable `Generator:` fails the build rather than
+      recording an unknown toolchain) — all folded together into one
+      `artifact_id`, including every wheel's own digest. **Not yet done:**
+      wiring this into the real promotion pipeline (`promote_release.py`)
+      — `build_python_artifacts.py` is a standalone, independently usable
+      tool today, not yet invoked anywhere in `validate-and-promote.yml`'s
+      actual promotion flow — and a per-run shared build-toolchain lock
+      (this tool still builds each wheel via the normal isolated PEP 517
+      build rather than one pre-resolved, pinned environment reused across
+      every wheel in a run). This checklist item stays open until
+      promotion actually invokes the builder.
 - [ ] Resolve and pin a dependency closure for the third-party portion only,
       using a lag-tolerant selection policy informed by Phase 1, and record
       it in the manifest.
@@ -109,6 +137,7 @@ distribution unit.
       authentication, publication channel, credential model) — see Open
       Design Questions below; resolve these concretely during this phase,
       not deferred further.
+
 
 ### Phase 3 — Verified consumption with correct fallback
 
@@ -226,6 +255,23 @@ answer against the actual repository/CI configuration:
   predictable asset filenames (one per platform/arch/ABI, plus one per
   vendored lib wheel), requiring no separate discovery service and matching
   a pattern this codebase already trusts.
+- **Wheel-tag semantic compatibility:** an artifact set's
+  python/abi/platform tag reconciliation
+  (`build_python_artifacts.overall_identity_tags`) currently treats any two
+  differing, non-universal tags in the same slot as a hard conflict
+  (strict string equality or fail closed) -- deliberately conservative, but
+  not semantically correct: e.g. an `abi3`-tagged wheel is genuinely
+  compatible with any `cp3x`-tagged wheel for a newer interpreter (CPython's
+  stable ABI), and manylinux platform tags have their own compatibility
+  hierarchy, neither of which this reconciliation understands. **Not yet a
+  real problem**: every plugin/lib in this repo is pure-Python
+  (`py3-none-any`) today (confirmed by the Build hermeticity survey above),
+  so this never fires in practice. Resolving it concretely (a real PEP
+  425/600-aware compatibility resolver, or an explicit target-tag-set
+  validation approach) is deferred to whichever future phase first needs to
+  build a platform-specific artifact -- not solved speculatively here, per
+  this effort's own established pattern of naming real gaps rather than
+  pre-solving unneeded generality.
 
 ## Validation Plan
 
@@ -322,6 +368,260 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
+
+- Implemented the first real Phase 2 slice: a tool that builds a plugin's
+  own wheel plus every vendored `libs/<lib>` wheel it needs (via `uv build
+  --wheel`), enumerating the vendored set by reusing
+  `uv_editable_ref.find_uv_editable_refs` recursively (the same primitive
+  `materialize_main.py` already uses, so artifact coverage and the
+  materialized tree can never disagree about which libs are in scope), and
+  validating each discovered reference with `uv_editable_problems` -- the
+  same acceptance check materialization itself applies -- so this tool can
+  never build or describe a source materialization would have refused.
+- Manifest fields: `payload_hash` (a working-tree content hash of the
+  plugin dir + every vendored lib dir, order-independent -- deliberately
+  NOT `git HEAD`, since promotion builds from a scratch tree already
+  mutated by version bumps/materialization before the build runs), each
+  wheel's `python_tag`/`abi_tag`/`platform_tag` (parsed from the wheel
+  filename itself -- the canonical, self-describing source, never guessed
+  from the running interpreter, with a hard failure on a genuinely
+  conflicting tag across the wheel set), each wheel's sha256, and the
+  build `Generator:` actually read from each wheel's own `dist-info/WHEEL`
+  (required -- an unreadable/missing one fails the build). All of it,
+  including every wheel's own digest, folds into one `artifact_id`.
+- Automated PR review (`ThomasMichon/copilot-extensions#4961`) found 8 real
+  issues in the first draft, all fixed before merge: vendored-reference
+  discovery accepted what materialization would reject (fixed by reusing
+  `uv_editable_problems`); the payload hash used `git HEAD` instead of the
+  actual working tree the build reads (fixed with a direct content hash);
+  the wheel-filename parser mis-parsed an optional PEP 427 build tag
+  (rewritten as right-to-left tokenizing instead of a single backtracking
+  regex); conflicting platform/ABI tags across a wheel set were silently
+  resolved by whichever wheel came first (now a hard failure); a missing
+  `Generator:` was silently recorded as unknown (now a hard failure); the
+  `artifact_id` omitted the wheels' own digests (now included); and two
+  documentation-process findings (keep the Phase 2 plan item open until
+  pipeline-wired; add the required Documentation impact statement).
+- 33 unit tests (`tools/test_build_python_artifacts.py`), all green;
+  confirmed zero regressions against the rest of `tools/`'s suite (the only
+  failures in a full `pytest tools/` run are 45 pre-existing,
+  environment-specific `clean-room`/WSL-bash failures unrelated to this
+  change). Smoke-tested for real against `agent-bridge` repeatedly across
+  every review round: built all 10 wheels (the plugin + its 9 vendored
+  libs), every one reporting `setuptools (84.0.0)` as its actual generator,
+  manifest written correctly.
+- A second review round found 2 more issues (1 real, 1 stale): `build_wheel`'s
+  new-wheel detection diffed `out_dir`'s own filenames before/after, which
+  would silently see "0 new wheels" on a second invocation rebuilding the
+  exact same filename (an identical version rebuilt again, or a retry
+  after a later manifest step left a same-named wheel behind) -- fixed by
+  building into a fresh temporary staging directory every time and moving
+  the single result into `out_dir` (overwriting deliberately), with a new
+  regression test and a direct double-invocation smoke test against
+  `agent-bridge` confirming it. The "add a Documentation impact statement"
+  finding was already addressed in the PR description by the time of this
+  round -- the review tooling diffs file content, not the PR body, so it
+  could not see that fix; left as a reviewer-visible non-issue rather than
+  a code change.
+- A third review round found 3 more issues: the payload-hash serialization
+  joined `"path:digest"` strings with a plain separator, which is
+  ambiguous for pathological filenames (two different `(path, digest)` sets
+  can serialize identically) -- fixed with a shared `_hash_fields` helper
+  that length-prefixes every field before hashing, applied consistently to
+  `directory_content_hash`, `compute_payload_hash`, and `artifact_id`
+  itself (which also now folds in every wheel's filename+digest the same
+  unambiguous way); `payload_hash` was computed AFTER every wheel had
+  already been built, so a build backend leaving residue inside the source
+  tree (e.g. setuptools' `build_meta` creating a `*.egg-info` directory
+  alongside the sources) would be folded into the identity of the very
+  input that produced it -- fixed by computing it before the first build,
+  with a regression test simulating exactly that residue; and
+  `read_wheel_generator` decoded `dist-info/WHEEL` with `errors="replace"`,
+  which would silently accept corrupt metadata as a known toolchain --
+  fixed to fail closed on invalid UTF-8. The stale "Documentation impact"
+  finding and a stale test-count note recurred across rounds for the same
+  PR-body-vs-file-diff reason noted above; both are now also reflected in
+  this Journal entry's own diff.
+  **Documentation impact:** this effort doc is the sole documentation
+  surface for `tools/build_python_artifacts.py` (a new, standalone tool);
+  no other repository documentation describes it, and `TESTING.md` does
+  not enumerate individual `tools/test_*.py` files, so it remains accurate
+  without changes.
+- A fourth review round found 1 more real issue and reiterated 1 carried-
+  over, non-blocking one: `*.egg-info`'s directory name varies per package
+  (unlike the fixed names already ignored), so a build's residue left
+  behind from one invocation was still being hashed as part of the NEXT
+  invocation's "pre-build" tree -- fixed by ignoring any directory
+  component ending in `.egg-info` (mirroring `uv_editable_ref._file_hashes`'s
+  own identical exclusion), with a repeated-invocation regression test.
+  The carried-over "validate wheel tags semantically, not by string
+  equality" finding is real but out of proportion to this slice: resolving
+  it needs genuine PEP 425/600 compatibility-class logic (`abi3` forward
+  compatibility, manylinux platform-tag hierarchies), and no plugin/lib in
+  this repo ships anything but a pure-Python wheel today. Recorded as a
+  new, named Open Design Question above rather than solved speculatively,
+  matching this effort's own established pattern for genuinely deferred
+  work.
+- A fifth review round found the most substantial gap yet, confirmed by a
+  direct smoke test against `agent-worktrees` (not just `agent-bridge`):
+  discovery only ever looked for the dev-branch LIVE, escaping,
+  `editable = true` canonical-reference form -- so it found nothing at all
+  for a plugin that vendors libs in-tree by design, AND would find nothing
+  for ANY plugin once promotion's own `materialize_main.py` has rewritten
+  every live reference into exactly that in-tree form (the actual state
+  this tool runs against during real promotion). Fixed by classifying each
+  `[tool.uv.sources]` entry by its `editable` marker rather than by whether
+  it escapes the immediate consumer's own directory: an `editable = true`
+  entry is the dev-branch live form (`find_uv_editable_refs`, validated
+  against the real top-level plugin only); anything else whose path
+  resolves into a `libs/<lib>` directory is an in-tree vendored copy
+  (`find_in_tree_lib_sources`, validated with lighter, direction-neutral
+  structural checks). The smoke test against `agent-worktrees` additionally
+  surfaced a THIRD real shape neither form alone covered: a vendored lib
+  cross-referencing a SIBLING vendored lib one level up without
+  `editable = true` (`plugins/agent-worktrees/libs/plugin-activation`
+  depending on `../dropin-registry`) -- resolved by applying
+  `uv_editable_problems`'s strict escaping-form validation ONLY to the
+  originally requested top-level plugin, never while recursing into an
+  already-discovered vendored lib's own manifest, where a sibling in-tree
+  cross-reference is legitimate. Two more real, lower-severity findings
+  from this round fixed in the same pass: an out-of-tree `--out-dir` nested
+  inside a hashed source directory would fold a prior run's own output
+  into the NEXT run's payload hash (now rejected explicitly before
+  building); and the manifest's `version` field used the wheel's PEP
+  440-normalized spelling (`"0.4.1.dev3"`) instead of the raw declared one
+  (`"0.4.1-dev3"`), which would never exactly match the `<plugin>-v<version>`
+  release-tag identity this effort documents (now reads the raw version
+  from `pyproject.toml` directly, with a sanity check that it still
+  corresponds to the wheel's own normalized version). 49 unit tests now
+  (`tools/test_build_python_artifacts.py`), including one derived directly
+  from the real `agent-worktrees` cross-reference bug the smoke test found;
+  re-verified `agent-bridge` and `agent-worktrees` both build correctly.
+- A sixth review round confirmed the recursive-discovery fix and found 3
+  more real issues against it: the in-tree lib validation only checked the
+  lib directory itself for a symlink, missing one nested anywhere below it
+  (fixed by reusing `uv_editable_ref._find_symlink`'s own recursive check,
+  applied to both vendored libs and -- a second occurrence of the same
+  gap -- the top-level plugin directory itself, which had no symlink
+  protection at all); the in-tree discovery's `candidate.parent.name ==
+  "libs"` check was too permissive, accepting a non-editable path that
+  escaped to an UNRELATED plugin's `libs/` directory (fixed by constraining
+  accepted locations to the consumer's own `libs/` or, when the consumer
+  itself already lives directly under a directory named `libs`, that same
+  parent `libs/` folder -- matching `materialize_nested_uv_editable_refs`'s
+  own identical "expected sibling location" constraint); and the manifest
+  only recorded the artifact SET's aggregate tags, not each wheel's own
+  parsed `python_tag`/`abi_tag`/`platform_tag` as the effort's own
+  documentation already claimed (fixed by adding them to every wheel
+  entry). 52 unit tests now, 3 environment-conditional (skip when this
+  particular sandboxed machine's own symlink-resolution restriction makes
+  the scenario unexercisable, same limitation already noted for `uv`
+  itself elsewhere in this effort's Journal); re-verified both plugins
+  build correctly, with their manifests' wheel entries now carrying tags.
+- A seventh review round found 3 more real issues: the per-entry symlink/
+  structure/location validation applied only to the top-level plugin's
+  escaping references (via `uv_editable_problems`, run once) -- a NESTED
+  lib's own escaping, `editable = true` reference was queued and built
+  completely unvalidated, since recursion deliberately stopped re-running
+  the whole-consumer `uv_editable_problems` check (to allow the legitimate
+  sibling cross-reference case from the prior round). Fixed by extracting
+  a new, single-entry validator (`_validate_editable_canonical_ref`,
+  reusing the exact same primitives `uv_editable_problems` itself calls)
+  and applying it to every escaping `editable = true` entry at EVERY
+  recursion depth, not only the top level; `plugin` (the CLI argument)
+  was used directly as a path component (`PLUGINS_DIR / plugin` and the
+  manifest filename) with no validation at all, letting an absolute value
+  or a `../` traversal escape both -- fixed by reusing `is_safe_lib_name`
+  on it the same way a vendored-lib name already is; and two different
+  sources producing the identical wheel filename within ONE invocation
+  would silently overwrite each other, leaving an earlier manifest entry's
+  sha256 describing bytes no longer on disk -- fixed by tracking filenames
+  already produced THIS invocation and failing closed on a real collision,
+  while still preserving the intentional retry-overwrite behavior for a
+  prior invocation's own leftover wheel. 56 unit tests now; re-verified
+  both `agent-bridge` and `agent-worktrees` build correctly.
+- An eighth review round reported 0 new open findings (its lighter "needs
+  a closer look" banner, versus the prior seven rounds' "changes
+  recommended") and confirmed both of round seven's HIGH findings
+  resolved, but surfaced 3 more real, narrower edge cases from
+  code already in place: an `editable = true` entry whose path does NOT
+  escape its own consumer root fell through BOTH discovery functions
+  entirely (neither `find_uv_editable_refs`, which only returns escaping
+  entries, nor `find_in_tree_lib_sources`, which skips every
+  `editable = true` entry) and would have been silently omitted from the
+  manifest rather than built or explicitly rejected -- fixed with an
+  explicit check that fails closed on this unsupported combination;
+  deduplicating a vendored lib solely by its final directory name could
+  silently drop one of two genuinely distinct sources sharing a name
+  (e.g. two different `libs/.../libs/widget` trees) -- fixed by comparing
+  the resolved canonical directory whenever a name repeats, failing closed
+  on a real mismatch; and a malformed wheel with more than one
+  `dist-info/WHEEL` entry would silently trust whichever ZIP member came
+  first -- fixed to require exactly one. 59 unit tests now; re-verified
+  both plugins build correctly.
+- A ninth review round found the previous round's own first fix was
+  itself incomplete: a non-editable escaping reference was assumed to
+  always be a legitimate sibling in-tree cross-reference that
+  `find_in_tree_lib_sources`'s own (deliberately tighter) scan would
+  "always" pick up -- but if the target escapes to somewhere outside
+  every allowed `libs/` location, that scan also skips it, so the
+  `continue` silently dropped the dependency from the artifact set
+  entirely (the build still "succeeded"), even though
+  `materialize_nested_uv_editable_refs` would refuse the exact same
+  reference. Fixed by cross-checking: every non-editable escaping
+  reference must appear in that same consumer's own in-tree-discovered
+  set, or the build now fails closed naming the exact unaccounted-for
+  reference. 60 unit tests now; re-verified both plugins build correctly.
+- A tenth review round confirmed that fix and found one more real,
+  narrower issue plus 3 documentation-process/style corrections:
+  `_read_sources_table` called `.get()` on `[tool]` and `[tool.uv]` before
+  checking their own types, so a structurally valid-but-malformed TOML
+  document (e.g. `tool = []`) raised an uncaught `AttributeError` instead
+  of the documented `ArtifactBuildError` -- especially reachable while
+  recursively inspecting a vendored lib, where the top-level
+  `uv_editable_problems` guard never runs; fixed by validating each
+  intermediate table explicitly, with 2 new regression cases. The 3
+  style findings (review-round chronology embedded in non-Journal design
+  documentation and in a test comment, per `CONTRIBUTING.md`'s "describe
+  current state, not review history" rule) are corrected directly in this
+  same diff -- this Phase 2 checklist item and the Wheel-tag semantic
+  compatibility Open Design Question entry now describe only the enduring
+  technical state, and the egg-info test comment states the invariant
+  without naming a review round. 62 unit tests now; re-verified both
+  plugins build correctly.
+- An eleventh review round found one more instance of the same class of
+  bug: `read_project_version` also called `.get()` on `[project]` before
+  checking it was a table, raising an uncaught `AttributeError` on a
+  malformed-but-TOML-valid manifest -- fixed identically to
+  `_read_sources_table`'s own prior fix, with a regression test. 63 unit
+  tests now; re-verified both plugins build correctly.
+- A twelfth review round found `parse_wheel_filename` could still misparse
+  a non-normalized wheel name: PEP 427 normalizes a distribution's own
+  `-`/`_`/`.` runs to a single `_` specifically so the filename split is
+  unambiguous, but the parser reconstructed `name` by rejoining multiple
+  tokens with `-` whenever more than one remained, so a malformed,
+  unnormalized name like `demo-pkg` in `demo-pkg-1.2.3-py3-none-any.whl`
+  was silently accepted as `name="demo", version="pkg"`. Fixed by treating
+  `name` as always exactly the first token (never rejoined) and requiring
+  `version` to look like a real version (start with a digit, per PEP 440)
+  -- both properties a well-formed wheel always has, closing the
+  ambiguity rather than guessing. 64 unit tests now; re-verified both
+  plugins build correctly. This slice has now gone through 12 automated
+  review rounds, each finding genuine, progressively narrower issues -- a
+  pattern consistent with this effort's own documented review history on
+  its original design PR.
+- **Not yet done** (explicitly out of scope for this slice, named in the
+  Phase 2 checklist): wiring this into the real `promote_release.py`
+  pipeline; a per-promotion-run shared build-toolchain lock (this slice
+  builds each wheel via the normal isolated PEP 517 build rather than a
+  pre-resolved, pinned one -- `build_toolchain` here records whatever the
+  ambient build actually used, which is correct per-wheel but does not yet
+  guarantee one shared value across a whole promotion run); the
+  third-party dependency-closure resolution/lag-tolerant selection; and
+  the trust/publication contract (attestation, GitHub Release channel).
+  **Next:** pick up one of those as the next Phase 2 slice.
 
 ### 2026-10-02 - Phase 1 spike run: governed-feed resolution proven, lag measured, timing/storage baselined
 

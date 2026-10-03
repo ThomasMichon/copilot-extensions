@@ -14,6 +14,7 @@ import httpx
 from .client_completion_review import CompletionReviewMixin
 from .client_exclude import ClearExcludeClientMixin
 from .client_registrations import RegistrationClientMixin
+from .client_spawn_terminal import SpawnTerminalClientMixin
 from .client_suspend import SuspendClientMixin
 from .client_verification import VerificationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
@@ -43,7 +44,7 @@ class DispatchUpgradeRequired(DispatchError):
         super().__init__(426, detail)
 
 
-class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin):
+class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(
@@ -803,31 +804,6 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, Complet
             )
         )
 
-    def fail_spawn(
-        self,
-        key: str,
-        *,
-        detail: str | None = None,
-        conclusion_state: str | None = None,
-        conclusion_detail: str | None = None,
-        claim_token: str | None = None,
-        force: bool = False,
-        confirmed_absent: bool = False,
-    ) -> dict:
-        return self._unwrap(
-            self._http.post(
-                f"/spawn-reservations/{key}/fail",
-                json={
-                    "detail": detail,
-                    "conclusion_state": conclusion_state,
-                    "conclusion_detail": conclusion_detail,
-                    "claim_token": claim_token,
-                    "force": force,
-                    "confirmed_absent": confirmed_absent,
-                },
-            )
-        )
-
     def defer_spawn(self, key: str, *, detail: str | None = None) -> dict:
         return self._unwrap(
             self._http.post(f"/spawn-reservations/{key}/defer", json={"detail": detail})
@@ -871,27 +847,6 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, Complet
     def record_cold(self, key: str) -> dict:
         return self._unwrap(
             self._http.post(f"/spawn-reservations/{key}/cold")
-        )
-
-    def settle_spawn(
-        self,
-        key: str,
-        *,
-        detail: str | None = None,
-        conclusion_state: str | None = None,
-        conclusion_detail: str | None = None,
-        claim_token: str | None = None,
-    ) -> dict:
-        return self._unwrap(
-            self._http.post(
-                f"/spawn-reservations/{key}/settle",
-                json={
-                    "detail": detail,
-                    "conclusion_state": conclusion_state,
-                    "conclusion_detail": conclusion_detail,
-                    "claim_token": claim_token,
-                },
-            )
         )
 
     def record_spawn_conclusion(

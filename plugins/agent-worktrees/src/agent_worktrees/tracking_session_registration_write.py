@@ -173,6 +173,13 @@ def apply_session_register(args: dict) -> dict:
                     tracking.save_record(record, yaml_path)
                     return {"error": "lifecycle", "message": str(exc)}
                 tracking.save_record(record, yaml_path)
+                if linked_handoff is not None:
+                    tracking.record_pr_claims_reassigned(
+                        record,
+                        predecessor_session_id=linked_handoff.predecessor,
+                        successor_session_id=linked_handoff.successor,
+                        note="context-handoff linked",
+                    )
                 return {
                     "ok": True,
                     "linked_handoff": (
@@ -284,6 +291,13 @@ def apply_session_register(args: dict) -> dict:
                 at=event_at,
             )
         tracking.save_record(record, yaml_path)
+        if linked_handoff is not None:
+            tracking.record_pr_claims_reassigned(
+                record,
+                predecessor_session_id=linked_handoff.predecessor,
+                successor_session_id=linked_handoff.successor,
+                note="context-handoff linked",
+            )
         return {
             "ok": True,
             "linked_handoff": (

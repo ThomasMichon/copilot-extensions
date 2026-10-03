@@ -1,0 +1,9 @@
+{
+  "comment": "create_action fields can declare 'options_command' to source choice/multichoice options from a live subprocess (allow_other auto-forced, resolved off-thread before the dialog opens); agent-dispatch's own Tasks pivot now ships a real create_action.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "minor"
+    }
+  ]
+}

@@ -590,6 +590,43 @@ def test_explicit_filters_win_over_shorthand():
     assert not d.permits({"task-type": "general"})
 
 
+def test_filter_vocabulary_aggregates_permit_values_across_declarations():
+    from agent_dispatch.registrar import filter_vocabulary
+
+    a = load_declaration({"name": "review", "labels": ["review", "docs"]})
+    b = load_declaration(
+        {
+            "name": "worker",
+            "repos": "lane-a",
+            "filters": {"permit": {"role": ["worker"], "capabilities": ["checkout"]}},
+        }
+    )
+    vocab = filter_vocabulary([a, b])
+    assert vocab["task-type"] == ["docs", "review", "worker"]
+    assert vocab["repo"] == ["lane-a"]
+    assert vocab["role"] == ["worker"]
+    assert vocab["capabilities"] == ["checkout"]
+
+
+def test_filter_vocabulary_omits_unconstrained_dims_and_reject_only_values():
+    from agent_dispatch.registrar import filter_vocabulary
+
+    d = load_declaration(
+        {"name": "general", "repos": "all", "filters": {"reject": {"env": ["prod"]}}}
+    )
+    vocab = filter_vocabulary([d])
+    # "general" names its own task-type shorthand (always-on permit); "env" is
+    # reject-only (steer away from, never a target) and "repos: all" leaves
+    # "repo" unconstrained -- neither should appear.
+    assert vocab == {"task-type": ["general"]}
+
+
+def test_filter_vocabulary_empty_declarations_is_empty():
+    from agent_dispatch.registrar import filter_vocabulary
+
+    assert filter_vocabulary([]) == {}
+
+
 def test_permits_rejects_bad_attrs_shape():
     d = load_declaration({"name": "x"})
     with pytest.raises(RegistrarError, match="task attributes"):
