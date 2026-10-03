@@ -228,10 +228,17 @@ def compute_file_remap(
     a reliable signal -- with default context lines, an insertion right next
     to an unrelated unchanged line could otherwise appear to "replace" that
     context line.
+
+    `--no-ext-diff --no-textconv` disable `GIT_EXTERNAL_DIFF` and any
+    configured `diff.*.textconv` driver: either could otherwise transform
+    or replace this machine-readable output in a way `_parse_hunks` can't
+    recognize as unified-diff syntax, silently reporting "unchanged"/
+    "remapped" instead of the real edit -- stale attribution carried
+    forward as if it were still accurate.
     """
     diff_text = _git(
-        ["diff", "--unified=0", "--no-color", old_commit, new_commit,
-         "--", file_path],
+        ["diff", "--unified=0", "--no-color", "--no-ext-diff", "--no-textconv",
+         old_commit, new_commit, "--", file_path],
         cwd=repo_root,
     )
     if not diff_text.strip():

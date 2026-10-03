@@ -371,11 +371,17 @@ diffs) covering: a real ancestor/non-ancestor/self pair and an unreachable
 commit; the newest-qualifying-generation resolution case and the
 none-qualify case; pure insertion, pure deletion, content replacement, a
 mixed insertion-then-replacement hunk set (confirming the whole file
-invalidates, not just the replaced hunk's own range); and a full
+invalidates, not just the replaced hunk's own range); a full
 three-file integration pass (one untouched, one cleanly-shifted, one
 content-replaced) plus a "the only covered line was itself deleted" edge
-case and a no-mutation check on the input baseline. Full
-`tools/test_coverage_guided_selection.py` suite: 46 passed, 5 skipped
+case and a no-mutation check on the input baseline; and, added during
+review, a real multi-commit cumulative-remap case (baseline measured ->
+two separate real intervening insertion commits -> a fork-point commit
+that also deletes a line, with a hand-computed expected mapping). Every
+git subprocess scrubs ambient repository-selection env vars and disables
+external-diff/textconv transforms that could otherwise mask or distort
+machine-readable output. Full
+`tools/test_coverage_guided_selection.py` suite: 47 passed, 5 skipped
 (the pre-existing opt-in real-subprocess integration tests, unaffected).
 `ruff check --select F,E9` (this repo's actual required lint selection)
 clean.
