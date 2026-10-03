@@ -289,6 +289,32 @@ class _Snapshot:
         )
 
 
+def _drain_until(reader: _Reader, duration: float) -> bool:
+    """Drain ``ready``/``event`` markers off ``reader.queue`` for up to
+    ``duration`` seconds -- both are coalescible no-ops once a fetch
+    covering them is already about to run (the upcoming full re-fetch sees
+    any mutation they represent regardless, so leaving them unread would
+    only make the *next* loop iteration treat them as a fresh, redundant
+    wake). Returns ``True`` the moment a ``disconnected`` item is seen
+    (caller must return :class:`_Disconnected` immediately), ``False`` once
+    ``duration`` elapses with no disconnect observed. Shared by the
+    debounce window and the rate-limit wait below -- both are "wait this
+    long, coalescing anything that arrives, but never miss a disconnect"."""
+    deadline = time.monotonic() + duration
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        try:
+            kind, _payload = reader.queue.get(timeout=remaining)
+        except queue.Empty:
+            return False
+        if kind == "disconnected":
+            return True
+        # "ready"/"event": nothing to do, the upcoming full re-fetch
+        # already covers it.
+
+
 def _emit_diff(out, prev: list[dict], curr: list[dict]) -> tuple[bool, list[dict]]:
     """Diff ``curr`` against ``prev`` and emit delta/removed frames. Returns
     ``(ok, new_prev)`` -- ``ok`` is False once the reader has closed the
@@ -546,27 +572,20 @@ def _event_loop(
                 # this loop is single-threaded) is instead simply left on
                 # the queue and picked up next iteration -- the "trailing
                 # fetch" the design document describes, by construction.
-                deadline = time.monotonic() + DEBOUNCE_WINDOW_SECONDS
-                disconnected_during_debounce = False
-                while True:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        break
-                    try:
-                        kind2, _payload2 = reader.queue.get(timeout=remaining)
-                    except queue.Empty:
-                        break
-                    if kind2 == "disconnected":
-                        disconnected_during_debounce = True
-                        break
-                    # another coalesced "event"/stray "ready": nothing to do,
-                    # the upcoming full re-fetch already covers it
-                if disconnected_during_debounce:
+                if _drain_until(reader, DEBOUNCE_WINDOW_SECONDS):
                     return _Disconnected(prev)
 
                 wait_for = refetch_floor - (time.monotonic() - last_fetch_at)
                 if wait_for > 0:
-                    time.sleep(wait_for)
+                    # Drain (never just sleep through) events arriving
+                    # during this rate-limit wait too -- the upcoming full
+                    # re-fetch already covers them, so leaving them unread
+                    # would only make the *next* loop iteration treat them
+                    # as a fresh, redundant wake (sustained heartbeat/
+                    # activity traffic could then keep the relay fetching
+                    # at the floor cadence indefinitely).
+                    if _drain_until(reader, wait_for):
+                        return _Disconnected(prev)
                 curr = snapshot.full_refetch()
                 last_fetch_at = time.monotonic()
                 if curr is not None:

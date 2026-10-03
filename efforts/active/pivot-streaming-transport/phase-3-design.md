@@ -64,17 +64,16 @@ phase) is considered.
         across a throttled wait; it never causes an update to be dropped,
         only delayed to the next allowed tick.
 
-        **Implementation note (agent-dispatch's 3a PR,
-        ThomasMichon/copilot-extensions#4994):** the shipped relay
-        satisfies the "never drop a mid-fetch event" requirement without a
-        separate dirty-bit field — its single control loop's reader thread
-        simply leaves a mid-fetch event unread on its queue until the
-        current fetch's loop iteration finishes, so it is picked up as an
-        ordinary wake on the very next iteration. The functional behavior
-        (coalesce a burst, never drop a mid-fetch event, rate-limit the
-        trailing fetch) is identical; only the mechanism differs. See the
-        "serialize every writer" bullet below for the same note on that
-        requirement's own mechanism.
+        **Implementation note:** the shipped relay satisfies the "never
+        drop a mid-fetch event" requirement without a separate dirty-bit
+        field — its single control loop's reader thread simply leaves a
+        mid-fetch event unread on its queue until the current fetch's loop
+        iteration finishes, so it is picked up as an ordinary wake on the
+        very next iteration. The functional behavior (coalesce a burst,
+        never drop a mid-fetch event, rate-limit the trailing fetch) is
+        identical; only the mechanism differs. See the "serialize every
+        writer" bullet below for the same note on that requirement's own
+        mechanism.
   - [ ] **Close the gap between the initial snapshot and the subscription
         actually being live — and prove it's actually live, not just that
         the HTTP response started:** a mutation that lands after the
@@ -283,10 +282,9 @@ phase) is considered.
         another writer holds it queues (coalescing with any already-pending
         debounced wake) rather than running concurrently.
 
-        **Implementation note (agent-dispatch's 3a PR,
-        ThomasMichon/copilot-extensions#4994):** the shipped relay
-        (`board_relay.py`) satisfies this requirement by construction
-        instead of with an explicit lock object: a **single** control loop
+        **Implementation note:** the shipped relay (`board_relay.py`)
+        satisfies this requirement by construction instead of with an
+        explicit lock object: a **single** control loop
         (`run_relay`/`_drive`) is the only thread that ever calls any
         writer — the event-woken re-fetch, the long reconcile, and the
         local recompute tick all run one-at-a-time inside that same loop,

@@ -414,8 +414,7 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
         snapshot-owner lock alone doesn't prove the quiescence ordering is
         actually enforced.
 
-        **Implementation note (agent-dispatch's 3a PR,
-        ThomasMichon/copilot-extensions#4994):** every one of these
+        **Implementation note:** every one of these
         acceptance criteria is covered in
         `plugins/agent-dispatch/tests/test_board_relay.py`, adapted to the
         shipped single-control-loop mechanism (see `phase-3-design.md`'s own

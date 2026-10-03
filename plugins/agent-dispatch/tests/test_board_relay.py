@@ -144,6 +144,61 @@ def test_event_loop_trailing_fetch_after_mid_fetch_event(monkeypatch):
     assert [frame["entry"]["v"] for frame in stop.emitted] == [1, 2]
 
 
+def test_event_loop_drains_events_arriving_during_the_rate_limit_wait(
+    monkeypatch,
+):
+    """An event arriving while the loop is in its post-debounce rate-limit
+    wait (waiting out `refetch_floor` before the next full re-fetch is
+    allowed to run) must be drained/coalesced there too -- not left on the
+    queue, which would make the *next* loop iteration treat it as a fresh,
+    redundant wake and trigger a second trailing full-board fetch even
+    though the fetch about to run already covers it (sustained heartbeat/
+    activity traffic could otherwise keep the relay fetching at the floor
+    cadence indefinitely)."""
+    monkeypatch.setattr(board_relay, "DEBOUNCE_WINDOW_SECONDS", 0.0)
+    monkeypatch.setattr(board_relay, "MIN_REFETCH_INTERVAL_SECONDS", 0.2)
+    monkeypatch.setattr(board_relay, "RECOMPUTE_INTERVAL_SECONDS", 1000.0)
+    monkeypatch.setattr(board_relay, "LONG_RECONCILE_SECONDS", 1000.0)
+
+    reader = _reader_with(("event", {"type": "task.progress"}))
+    injected = threading.Event()
+
+    def inject_event_during_rate_limit_wait():
+        time.sleep(0.05)  # well within the ~0.2s rate-limit wait
+        reader.queue.put(("event", {"type": "task.progress"}))
+        injected.set()
+
+    injector = threading.Thread(
+        target=inject_event_during_rate_limit_wait, daemon=True
+    )
+    injector.start()
+
+    calls = {"full": 0}
+
+    class FakeSnapshot:
+        def full_refetch(self):
+            calls["full"] += 1
+            return [{"id": "t1", "v": calls["full"]}]
+
+        def recompute_only(self):
+            raise AssertionError("recompute_only must not run for this test")
+
+    stop = _StopAfter(limit=1)
+    monkeypatch.setattr(board_cli, "_emit_frame", stop)
+
+    rc = board_relay._event_loop(
+        None, None, reader, FakeSnapshot(), [], interval=0.0
+    )
+    injector.join(timeout=5)
+
+    assert rc == 0
+    assert injected.is_set()
+    # Exactly one full fetch -- the injected mid-wait event must be
+    # drained/coalesced into it, never left on the queue to trigger a
+    # second, redundant trailing fetch.
+    assert calls["full"] == 1
+
+
 def test_event_loop_serializes_every_writer_never_running_concurrently(
     monkeypatch,
 ):
