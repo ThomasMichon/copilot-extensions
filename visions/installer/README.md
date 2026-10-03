@@ -225,9 +225,17 @@ Inspects the live install for drift and breakage — missing prerequisites,
 stale or broken binstubs, unmet plugin prerequisites, mis-registered repos — and
 offers to repair, so a machine can be brought back to turnkey without an agent.
 
-### git-referenced-presets
-Ingests shareable presets by Git reference to preconfigure related repos,
-accounts, and venue settings for a specific work arrangement in one step.
+### harness-plugin-onboard-presets
+Ingests a shareable preset **as part of a `<repo>-harness` plugin's own
+payload** — related-repo declarations, CodeSpace/venue support, and more —
+discovered and merged automatically, the same layered way CodeSpace config
+already merges a generic `config.yaml` across every adopted repo, to
+preconfigure related repos, accounts, and venue settings for a specific work
+arrangement in one step. **Supersedes** an earlier, abandoned design
+(ingesting a shareable config bundle by explicit Git reference, chosen by a
+human at onboarding time): a plugin-carried preset is adopted the same way the
+plugin itself is, with no separate reference-resolution step a human must
+remember to repeat.
 
 ## Behaviors
 

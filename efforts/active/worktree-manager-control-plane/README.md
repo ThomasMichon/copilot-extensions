@@ -884,22 +884,27 @@ worktree-manager.
       client-side re-resolution piece scoped in `agent-worktrees` first.
       Tracked as
       [#5001](https://github.com/ThomasMichon/copilot-extensions/issues/5001).
-- [x] `doctor`/validation breadth: plugin-catalog alignment (coverage)
-      reporting added alongside the existing mux-daemon-health report.
-      Closes installer §`health-doctoring-and-validation` (partial — see
-      below for what remains).
+- [ ] `doctor`/validation breadth: plugin-catalog alignment (coverage)
+      reporting landed (PR #4986), covering unmet-plugin-prerequisite/
+      cross-plugin-drift detection. The governing vision
+      (installer §`health-doctoring-and-validation`) also covers missing
+      prerequisites, stale/broken binstubs, and mis-registered repos — doctor
+      already reports the prereq/core-install/binstub pieces from earlier
+      phases, but a dedicated mis-registered-repos check remains open, so
+      this item stays unchecked.
 - [ ] Plugin updating & alignment: largely covered already (`worktree-manager
       update` + `agent-worktrees update`/`reconcile-plugins`); remains open
       only for whatever further cross-plugin alignment surfacing doctor/
       configurator work turns up. Closes installer
       §`plugin-updating-and-alignment`.
-- [ ] ~~Git-referenced presets~~ **superseded** — see the 2026-10-02 Journal
+- [ ] ~~Git-referenced presets~~ **superseded** — see the 2026-10-03 Journal
       entry below. The installer §`git-referenced-presets` vision text (a
-      human ingesting a shareable config bundle by Git reference) is being
-      replaced by a different mechanism: a `<repo>-harness` plugin shipping
-      its own onboard config (related-repo declarations, CodeSpace/venue
-      settings) as part of its payload, discovered and merged the same way
-      `agent-codespaces`' `load_merged_config()` already layers per-repo
+      human ingesting a shareable config bundle by Git reference) has been
+      **revised in place** to §`harness-plugin-onboard-presets`: a
+      `<repo>-harness` plugin shipping its own onboard config (related-repo
+      declarations, CodeSpace/venue settings) as part of its payload,
+      discovered and merged the same way `agent-codespaces`'
+      `load_merged_config()` already layers per-repo
       `.agent-codespaces/config.yaml` files across adopted repos — with
       Worktree Manager eventually reading that merged result into its own
       `harness_state`/`doctor` surface (`build_state()` in
@@ -1090,12 +1095,15 @@ claiming discipline alone.
 
 - **2026-10-03** — Operator direction: the installer §`git-referenced-presets`
   vision item (a human ingesting a shareable config bundle by explicit Git
-  reference) is being **superseded**, not merely deferred. The real
-  direction is a `<repo>-harness` plugin shipping its own onboard "preset"
-  — related-repo declarations, CodeSpace/venue support, and more — as part
-  of its own plugin payload, picked up automatically rather than ingested
-  by reference. Investigated the existing substrate this would build on
-  (no code named "preset" exists yet — this is a forward design, not
+  reference) is **superseded**, not merely deferred — revised in place to
+  §`harness-plugin-onboard-presets` in the same PR as this entry
+  (`visions/installer/README.md`, per this repo's cross-repo-sequencing
+  rule: the vision update lands before any further realization work). The
+  real direction is a `<repo>-harness` plugin shipping its own onboard
+  "preset" — related-repo declarations, CodeSpace/venue support, and more
+  — as part of its own plugin payload, picked up automatically rather than
+  ingested by reference. Investigated the existing substrate this would
+  build on (no code named "preset" exists yet — this is a forward design, not
   something already implemented under a different name):
   `worktree-manager/src/worktree_manager/harness_state.py`'s
   `build_state()`/`build_repos()`/`build_projects()` already sweep the
@@ -1113,11 +1121,25 @@ claiming discipline alone.
   eventually folding that merged result into its own `harness_state`/
   `doctor` surface. No design doc exists for this yet (not even a stub) —
   it is the real next open item for anyone picking up presets, replacing
-  (not just updating) the original git-ref-ingestion framing. Docs-only;
-  updated the Phase 7 checklist above to reflect the supersession and left
-  a comment on issue
+  (not just updating) the original git-ref-ingestion framing. Updated the
+  Phase 7 checklist above to reflect the supersession, revised the
+  governing installer vision in place
+  (§`git-referenced-presets` → §`harness-plugin-onboard-presets`, plus the
+  `visions/README.md` one-line summary), and left a comment on issue
   [#358](https://github.com/ThomasMichon/copilot-extensions/issues/358)
-  pointing at this entry.
+  pointing at this entry. **Also includes an unrelated fix-forward
+  commit** in the same PR: `plugins/agent-dispatch/skills/
+  troubleshooting-agent-dispatch/SKILL.md` had 15
+  `bare-agent-command` marketplace-isolation-guard findings (more than
+  issue [#5030](https://github.com/ThomasMichon/copilot-extensions/issues/5030)'s
+  originally-reported 7) failing the required `guards + lint`/`PR gate`
+  check on `origin/dev` itself, blocking this PR (and every other open PR
+  rebased past PR #5023) regardless of diff content. Rewrote every bare
+  `agent-dispatch`/`agent-bridge`/`agent-mcp` command reference to the
+  `<plugin> catalog argv[0]` convention the rest of the agent-dispatch
+  skills already use, rather than papering over the findings with
+  `marketplace-isolation: allow` exemption comments — verified via the full
+  `test_check_marketplace_isolation.py` suite (18/18) and `check-skills`.
 
 - **2026-10-02** — Added a genuine `## Participants` declaration (this
   effort predates that template convention and had none) solely so an
