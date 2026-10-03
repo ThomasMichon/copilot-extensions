@@ -7,8 +7,10 @@ protocol constants, and optional diff-scoped source coverage.
 
 **Commit-based cross-checks are opportunistic, not load-bearing**: a squash
 merge can orphan a provenance ``commit`` (copilot-extensions#2230, #5050), so
-that cross-check is skipped, never failed, once unresolvable -- the durable
-evidence is ``source_git_blob``/``source_sha256``, always format-validated.
+that cross-check is skipped, never failed, once unresolvable -- but
+``source_git_blob``/``source_sha256`` are content-addressed, so this checker
+resolves the blob directly by object id and verifies content instead; only
+once the blob is also unresolvable does evidence genuinely run out.
 
 Usage:
 
@@ -19,11 +21,8 @@ from __future__ import annotations
 
 import argparse
 import ast
-import hashlib
 import json
-import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -82,25 +81,21 @@ _HTTP_CAPABILITY_CONSTANTS = {
     "dispatch_task_session": "DISPATCH_TASK_SESSION_PROTOCOL_VERSION",
     "cli_mode_unclaimed_release": "CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION",
 }
-_FETCH_RECOVERY_ATTEMPTED = False
-_MAIN_REFSPEC = "+refs/heads/main:refs/remotes/origin/main"
 
+# Git-evidence resolution (commit/blob lookups, opportunistic across a
+# squash-merge-orphaned commit) lives in a sibling module to keep this file
+# under its line-count cap -- see tools/agent_bridge_contract_git.py.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import agent_bridge_contract_git as _eg  # noqa: E402
 
-def _clean_git_environment() -> dict[str, str]:
-    environment = {
-        key: value for key, value in os.environ.items() if not key.startswith("GIT_")
-    }
-    environment.update(
-        {
-            "GIT_CONFIG_GLOBAL": os.devnull,
-            "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_NO_LAZY_FETCH": "1",
-            "GIT_NO_REPLACE_OBJECTS": "1",
-            "GIT_OPTIONAL_LOCKS": "0",
-            "GIT_TERMINAL_PROMPT": "0",
-        }
-    )
-    return environment
+_sha256_bytes = _eg.sha256_bytes
+_git = _eg.git
+_ensure_commit_available = _eg.ensure_commit_available
+_git_blob = _eg.git_blob
+_git_file_sha256 = _eg.git_file_sha256
+_blob_sha256 = _eg.blob_sha256
+_plugin_version_at = _eg.plugin_version_at
+_integer_constant_at = _eg.integer_constant_at
 
 
 def _load_json(path: Path, errors: list[str], label: str) -> Any | None:
@@ -111,16 +106,6 @@ def _load_json(path: Path, errors: list[str], label: str) -> Any | None:
     except (OSError, json.JSONDecodeError) as exc:
         errors.append(f"{label}: cannot read valid JSON: {exc}")
     return None
-
-
-def _sha256_bytes(data: bytes) -> str:
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        canonical = data
-    else:
-        canonical = text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
-    return hashlib.sha256(canonical).hexdigest()
 
 
 def _sha256(path: Path) -> str:
@@ -161,94 +146,6 @@ def _validate_hash(
         actual = _sha256(path)
         if actual != expected:
             errors.append(f"{label}: stale sha256 (expected {expected}, actual {actual})")
-
-
-def _git(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(REPO), *args],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=_clean_git_environment(),
-    )
-
-
-def _ensure_commit_available(commit: str) -> bool:
-    global _FETCH_RECOVERY_ATTEMPTED
-
-    if _git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0:
-        return True
-    if _FETCH_RECOVERY_ATTEMPTED:
-        return False
-    _FETCH_RECOVERY_ATTEMPTED = True
-    for fetch_args in (
-        ("fetch", "--quiet", "origin", _MAIN_REFSPEC),
-        ("fetch", "--quiet", "--unshallow", "origin"),
-        ("fetch", "--quiet", "origin", _MAIN_REFSPEC),
-    ):
-        _git(*fetch_args)
-        if _git("cat-file", "-e", f"{commit}^{{commit}}").returncode == 0:
-            return True
-    return False
-
-
-def _git_blob(commit: str, path: str) -> str | None:
-    if not _ensure_commit_available(commit):
-        return None
-    result = _git("rev-parse", "--verify", f"{commit}:{path}")
-    value = result.stdout.strip()
-    return value if result.returncode == 0 and _GIT_OBJECT_RE.fullmatch(value) else None
-
-
-def _git_file_sha256(commit: str, path: str) -> str | None:
-    if not _ensure_commit_available(commit):
-        return None
-    result = subprocess.run(
-        ["git", "-C", str(REPO), "show", f"{commit}:{path}"],
-        capture_output=True,
-        check=False,
-        env=_clean_git_environment(),
-    )
-    if result.returncode != 0:
-        return None
-    return _sha256_bytes(result.stdout)
-
-
-def _plugin_version_at(commit: str) -> str | None:
-    if not _ensure_commit_available(commit):
-        return None
-    result = _git("show", f"{commit}:plugins/agent-bridge/plugin.json")
-    if result.returncode != 0:
-        return None
-    try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-    version = data.get("version")
-    return version if isinstance(version, str) else None
-
-
-def _integer_constant_at(commit: str, path: str, name: str) -> int | None:
-    if not _ensure_commit_available(commit):
-        return None
-    result = _git("show", f"{commit}:{path}")
-    if result.returncode != 0:
-        return None
-    try:
-        tree = ast.parse(result.stdout, filename=f"{commit}:{path}")
-    except SyntaxError:
-        return None
-    for node in tree.body:
-        if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-            and node.targets[0].id == name
-            and isinstance(node.value, ast.Constant)
-            and isinstance(node.value.value, int)
-        ):
-            return node.value.value
-    return None
 
 
 def _integer_constants(path: Path, errors: list[str], label: str) -> dict[str, int]:
@@ -611,7 +508,8 @@ def _validate_contract(
             if not isinstance(blob, str) or not _GIT_OBJECT_RE.fullmatch(blob):
                 errors.append(f"{prov_label}.source_git_blob: must be a full lowercase Git blob")
             commit_resolvable = _ensure_commit_available(commit)
-            if isinstance(blob, str) and _GIT_OBJECT_RE.fullmatch(blob) and commit_resolvable:
+            blob_well_formed = isinstance(blob, str) and _GIT_OBJECT_RE.fullmatch(blob)
+            if blob_well_formed and commit_resolvable:
                 actual_blob = _git_blob(commit, source_path)
                 if actual_blob is None:
                     errors.append(f"{prov_label}: cannot resolve {commit}:{source_path}")
@@ -730,6 +628,19 @@ def _validate_contract(
                                 f"{fixture_label}: source_sha256 is "
                                 f"{captured_sha256}, historical source is "
                                 f"{historical_sha256!r}"
+                            )
+                    elif isinstance(captured_blob, str) and _GIT_OBJECT_RE.fullmatch(captured_blob):
+                        # Commit unresolvable -- fall back to the blob's own
+                        # content-addressed hash (#5050 review discussion).
+                        # If the blob is unresolvable too, evidence has
+                        # simply run out (opportunistic, not load-bearing);
+                        # only a resolvable-but-wrong hash is an error.
+                        direct_sha256 = _blob_sha256(captured_blob)
+                        if direct_sha256 is not None and direct_sha256 != captured_sha256:
+                            errors.append(
+                                f"{fixture_label}: source_sha256 is "
+                                f"{captured_sha256}, direct blob "
+                                f"{captured_blob} hashes to {direct_sha256!r}"
                             )
                     if not isinstance(captured_source, str) or captured_source not in source_records:
                         errors.append(
