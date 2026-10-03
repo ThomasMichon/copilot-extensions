@@ -496,6 +496,54 @@ def test_reconnect_loop_polls_at_interval_cadence_during_backoff(monkeypatch):
     assert poll_calls["n"] >= 5
 
 
+def test_reconnect_loop_polls_immediately_after_the_final_backoff_sleep(
+    monkeypatch,
+):
+    """The backoff wait's final sleep -- the one that reaches the deadline
+    exactly -- must still be followed by a poll tick before the loop moves
+    on to the next connection attempt. Skipping that last tick left up to
+    an extra full `interval` gap at every reconnect-attempt boundary (this
+    wait's own exit, plus `_establish_with_fallback_polling`'s own first
+    tick not landing until its first `interval` elapses)."""
+    fake_clock = {"t": 0.0}
+
+    def fake_monotonic():
+        return fake_clock["t"]
+
+    def fake_sleep(secs):
+        fake_clock["t"] += secs
+
+    monkeypatch.setattr(board_relay.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(board_relay.time, "sleep", fake_sleep)
+    monkeypatch.setattr(board_relay, "MAX_RECONNECT_ATTEMPTS", 1)
+    monkeypatch.setattr(board_relay, "INITIAL_RECONNECT_BACKOFF_SECONDS", 10.0)
+
+    poll_calls = {"n": 0}
+
+    def fake_fetch_rows(args):
+        poll_calls["n"] += 1
+        return [{"id": "t1", "v": poll_calls["n"]}]
+
+    monkeypatch.setattr(board_cli, "_fetch_rows", fake_fetch_rows)
+
+    def fail_build_client(args):
+        raise RuntimeError("endpoint unreachable")
+
+    monkeypatch.setattr(board_relay, "_build_client", fail_build_client)
+    monkeypatch.setattr(board_cli, "poll_loop", lambda args, out, prev, interval: 0)
+
+    import io
+
+    board_relay._reconnect_loop(
+        "args", io.StringIO(), [{"id": "t1", "v": 0}], interval=2.0
+    )
+
+    # 1 correctness-first tick + 5 ticks during the 10s/2s backoff wait,
+    # including the final tick right as the deadline is reached -- 6 total,
+    # not 5 (the exact bug this guards against: skipping that last tick).
+    assert poll_calls["n"] == 6
+
+
 def test_reconnect_loop_successful_handoff_returns_connected_without_recursing(monkeypatch):
     """A successful reconnect returns a `_Connected` (carrying the promoted
     snapshot as `prev`) for the top-level iterative driver to resume the

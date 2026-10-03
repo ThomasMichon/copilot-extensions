@@ -913,9 +913,9 @@ def register_task_routes(
             status = 404 if msg.startswith("no such task") else 409
             raise HTTPException(status_code=status, detail=msg) from exc
         # A board-sort-/liveness-relevant mutation (updates `lease_expires_at`/
-        # `last_seen_at`/`updated_at`) with no prior bus event -- Phase 3a's
-        # event-coverage audit. A pure wake signal is enough: the relay only
-        # treats any event as a trigger for a full re-fetch, never a payload.
+        # `last_seen_at`/`updated_at`): publish a content-free wake so the
+        # agent-dispatch relay's `--subscribe` fast path treats it as a
+        # trigger for a full re-fetch, the same as every other mutation here.
         bus.publish({"type": "task.steer_taken", "task_id": task_id})
         key = "steers" if body.all_pending else "steer"
         return {"task_id": task_id, key: steer}
@@ -928,9 +928,10 @@ def register_task_routes(
     @app.post("/recover")
     def recover() -> dict:
         counts = queue.reconcile_liveness()
-        # Manual recovery can requeue, suspend, or dead-letter rows with no
-        # event published at all today -- Phase 3a's event-coverage audit.
-        # Content-free: a pure wake signal, same as every other bullet here.
+        # Manual recovery can requeue, suspend, or dead-letter rows: publish
+        # a content-free wake so the agent-dispatch relay's `--subscribe`
+        # fast path treats it as a trigger for a full re-fetch, the same as
+        # every other mutation here.
         bus.publish({"type": "task.recovered", **counts})
         return {"recovered": counts["requeued"], **counts}
 

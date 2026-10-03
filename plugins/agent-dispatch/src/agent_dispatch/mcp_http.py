@@ -816,9 +816,10 @@ def build_coordinator_mcp(
     def recover() -> dict:
         """Force a liveness GC pass (requeue tasks whose owner is confirmed gone)."""
         counts = queue.reconcile_liveness()
-        # Matching the HTTP /recover route's own event (Phase 3a audit): this
-        # call bypasses _mutate entirely (no single task/CompletionOutcome to
-        # route through it), so publish directly -- content-free wake signal.
+        # Matches the HTTP /recover route's own event: this call bypasses
+        # _mutate entirely (no single task/CompletionOutcome to route
+        # through it), so publish directly -- a content-free wake signal
+        # for the agent-dispatch relay's `--subscribe` fast path.
         bus.publish({"type": "task.recovered", **counts})
         return {"recovered": counts["requeued"], **counts}
 

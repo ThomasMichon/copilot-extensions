@@ -726,15 +726,18 @@ def _reconnect_loop(args, out, prev: list[dict], interval: float) -> int | _Conn
 
         # Wait out this attempt's backoff, but keep polling on --interval's
         # own cadence throughout rather than blocking for the whole backoff
-        # window in one sleep.
+        # window in one sleep -- including the final, possibly-partial
+        # sleep that reaches the deadline itself: skipping that last tick
+        # left up to a full extra `interval` gap at every reconnect-attempt
+        # boundary (the backoff loop's own exit, plus
+        # `_establish_with_fallback_polling`'s own first tick not landing
+        # until its first `interval` elapses).
         deadline = time.monotonic() + backoff
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
             time.sleep(min(interval, remaining))
-            if time.monotonic() >= deadline:
-                break
             ok, prev = _poll_tick(prev)
             if not ok:
                 return 0
