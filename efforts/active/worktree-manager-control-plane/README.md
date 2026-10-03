@@ -884,6 +884,30 @@ worktree-manager.
       client-side re-resolution piece scoped in `agent-worktrees` first.
       Tracked as
       [#5001](https://github.com/ThomasMichon/copilot-extensions/issues/5001).
+- [x] `doctor`/validation breadth: plugin-catalog alignment (coverage)
+      reporting added alongside the existing mux-daemon-health report.
+      Closes installer §`health-doctoring-and-validation` (partial — see
+      below for what remains).
+- [ ] Plugin updating & alignment: largely covered already (`worktree-manager
+      update` + `agent-worktrees update`/`reconcile-plugins`); remains open
+      only for whatever further cross-plugin alignment surfacing doctor/
+      configurator work turns up. Closes installer
+      §`plugin-updating-and-alignment`.
+- [ ] ~~Git-referenced presets~~ **superseded** — see the 2026-10-02 Journal
+      entry below. The installer §`git-referenced-presets` vision text (a
+      human ingesting a shareable config bundle by Git reference) is being
+      replaced by a different mechanism: a `<repo>-harness` plugin shipping
+      its own onboard config (related-repo declarations, CodeSpace/venue
+      settings) as part of its payload, discovered and merged the same way
+      `agent-codespaces`' `load_merged_config()` already layers per-repo
+      `.agent-codespaces/config.yaml` files across adopted repos — with
+      Worktree Manager eventually reading that merged result into its own
+      `harness_state`/`doctor` surface (`build_state()` in
+      `harness_state.py` is the existing registered-projects-manifest +
+      plugin-reconciliation sweep this would extend). No design doc exists
+      yet for the harness-plugin-onboard-preset mechanism itself — that is
+      the next real open item once someone picks this phase back up, not
+      the original git-ref-ingestion design.
 
 ### Phase 8 — Reconcile deferred backlog
 
@@ -1063,6 +1087,37 @@ claiming discipline alone.
   git-referenced presets (installer §`git-referenced-presets`, tracked by
   issue #358) remains fully undesigned — the next natural slice if this
   phase is picked up again.
+
+- **2026-10-03** — Operator direction: the installer §`git-referenced-presets`
+  vision item (a human ingesting a shareable config bundle by explicit Git
+  reference) is being **superseded**, not merely deferred. The real
+  direction is a `<repo>-harness` plugin shipping its own onboard "preset"
+  — related-repo declarations, CodeSpace/venue support, and more — as part
+  of its own plugin payload, picked up automatically rather than ingested
+  by reference. Investigated the existing substrate this would build on
+  (no code named "preset" exists yet — this is a forward design, not
+  something already implemented under a different name):
+  `worktree-manager/src/worktree_manager/harness_state.py`'s
+  `build_state()`/`build_repos()`/`build_projects()` already sweep the
+  registered-projects manifest (`~/.agent-worktrees/{repos,projects}.yaml`)
+  plus each repo's own `enabledPlugins` into a read-only "checkout layout"
+  model Worktree Manager already consumes; separately,
+  `plugins/agent-codespaces/src/agent_codespaces/config.py`'s
+  `load_merged_config()` already layers and deep-merges a generic
+  `.agent-codespaces/config.yaml` across every *adopted* repo (including a
+  `codespace_plugins:` list explicitly documented in-code as "same entry
+  shape as a harness plugin's `codespacePlugins` manifest array"). The
+  onboard-preset mechanism is the natural extension of both: a
+  `<repo>-harness` plugin's own payload carries the equivalent default
+  config, discovered/merged the same layered way, with Worktree Manager
+  eventually folding that merged result into its own `harness_state`/
+  `doctor` surface. No design doc exists for this yet (not even a stub) —
+  it is the real next open item for anyone picking up presets, replacing
+  (not just updating) the original git-ref-ingestion framing. Docs-only;
+  updated the Phase 7 checklist above to reflect the supersession and left
+  a comment on issue
+  [#358](https://github.com/ThomasMichon/copilot-extensions/issues/358)
+  pointing at this entry.
 
 - **2026-10-02** — Added a genuine `## Participants` declaration (this
   effort predates that template convention and had none) solely so an
