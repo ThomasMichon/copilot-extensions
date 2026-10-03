@@ -120,7 +120,12 @@ def _fake_runtime(runtime_root: Path) -> Path:
 #: any code at all). Stripped from every subprocess env this suite builds
 #: for the *target* (fake-runtime) interpreter: this process's own ambient
 #: values describe this test suite's interpreter, never the payload's.
-_PYTHON_REDIRECT_ENV_VARS = ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV")
+_PYTHON_REDIRECT_ENV_VARS = (
+    "PYTHONHOME",
+    "PYTHONPATH",
+    "VIRTUAL_ENV",
+    "__PYVENV_LAUNCHER__",  # macOS: redirects venv interpreter selection too
+)
 
 
 def _clean_subprocess_env() -> dict[str, str]:
