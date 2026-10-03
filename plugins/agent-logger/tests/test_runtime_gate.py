@@ -114,6 +114,23 @@ def _fake_runtime(runtime_root: Path) -> Path:
     return interpreter
 
 
+#: Environment variables that redirect a Python interpreter's own module/
+#: path resolution (PYTHONHOME in particular makes a different interpreter
+#: unable to even bootstrap its `encodings` module, fataling before it runs
+#: any code at all). Stripped from every subprocess env this suite builds
+#: for the *target* (fake-runtime) interpreter: this process's own ambient
+#: values describe this test suite's interpreter, never the payload's.
+_PYTHON_REDIRECT_ENV_VARS = ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV")
+
+
+def _clean_subprocess_env() -> dict[str, str]:
+    """`os.environ.copy()`, minus the vars in `_PYTHON_REDIRECT_ENV_VARS`."""
+    env = os.environ.copy()
+    for name in _PYTHON_REDIRECT_ENV_VARS:
+        env.pop(name, None)
+    return env
+
+
 def _write_gate_stubs(payload: Path) -> None:
     context_dir = payload / "scripts" / "installation-context"
     context_dir.mkdir(parents=True, exist_ok=True)
@@ -243,7 +260,7 @@ def test_payload_dispatch_uses_cell_scoped_runtime(
     context.write_text("{}\n", encoding="utf-8")
     runtime = _fake_runtime(cell_root)
     capture = tmp_path / f"{shell}-{command}.json"
-    env = os.environ.copy()
+    env = _clean_subprocess_env()
     profile = tmp_path / f"profile-{shell}-{command}"
     profile.mkdir()
     env.update(
@@ -307,7 +324,7 @@ def test_two_namespaced_cells_keep_runtime_artifacts_separate(tmp_path: Path) ->
     profile = tmp_path / "profile"
     profile.mkdir()
 
-    env_a = os.environ.copy()
+    env_a = _clean_subprocess_env()
     env_a.update(
         {
             "HOME": str(profile),
@@ -330,7 +347,7 @@ def test_two_namespaced_cells_keep_runtime_artifacts_separate(tmp_path: Path) ->
             ),
         }
     )
-    env_b = os.environ.copy()
+    env_b = _clean_subprocess_env()
     env_b.update(
         {
             "HOME": str(profile),
@@ -383,7 +400,7 @@ def test_cross_cell_context_mismatch_is_rejected(tmp_path: Path, shell: str) -> 
     context = cell_root / "install.json"
     context.parent.mkdir(parents=True)
     context.write_text("{}\n", encoding="utf-8")
-    env = os.environ.copy()
+    env = _clean_subprocess_env()
     profile = tmp_path / f"profile-mismatch-{shell}"
     profile.mkdir()
     env.update(
