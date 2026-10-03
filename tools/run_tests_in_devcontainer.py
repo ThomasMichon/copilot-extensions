@@ -26,9 +26,9 @@ Everything after the recognized flags below (or a literal ``--`` anywhere in
 the remaining arguments) passes through to ``tools/run-plugin-tests.py``
 inside the container, with two normalizations (``--base`` rewritten to its
 resolved SHA; ``--reinstall`` applied to the prep pass then stripped from
-the real pass) and three exceptions: ``--allow-host-state`` is rejected,
-``--admission-wait``'s host-wide lease loses cross-process coordination
-in-container, and an over-ceiling resource-limit override is rejected.
+the real pass) and two exceptions: ``--allow-host-state`` is rejected, and
+an over-ceiling resource-limit override is rejected. ``--admission-wait``
+is also consulted for a HOST-side lease acquisition before any work begins.
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ import tarfile
 import tempfile
 import uuid
 from pathlib import Path
+import _devcontainer_host_admission as _admission
 import _devcontainer_network_scope as _net_scope
 
 REPO = Path(__file__).resolve().parents[1]
@@ -172,9 +173,7 @@ def _scrubbed_git_env() -> dict[str, str]:
 def _devcontainer_exe() -> str:
     exe = shutil.which("devcontainer")
     if not exe:
-        raise SystemExit(
-            "devcontainer CLI not found. Install with `npm i -g @devcontainers/cli`."
-        )
+        raise SystemExit("devcontainer CLI not found. Install with `npm i -g @devcontainers/cli`.")
     return exe
 
 
@@ -273,15 +272,13 @@ def _tracked_paths(*, include_untracked: bool) -> list[str]:
 
 
 def _warn_about_dirty_tracked_files() -> None:
-    """Print a clear, explicit stderr warning naming every tracked file
-    with an uncommitted modification -- the tracked-files-only boundary
-    is about which PATHS are copied, not BYTES; an uncommitted secret in
-    an otherwise-tracked file is still copied in. Fails CLOSED if ``git
-    status`` can't run. ``--ignore-submodules=all`` is required: ``git
-    status`` otherwise recursively inspects any initialized submodule,
-    consulting a SUBMODULE-specific filter assignment
-    `_discover_configured_clean_filters` never covers -- the snapshot
-    never copies submodule contents anyway."""
+    """Print a clear, explicit stderr warning naming every tracked file with an uncommitted
+    modification -- the tracked-files-only boundary is about which PATHS are copied, not
+    BYTES; an uncommitted secret in an otherwise-tracked file is still copied in. Fails
+    CLOSED if ``git status`` can't run. ``--ignore-submodules=all`` is required: ``git
+    status`` otherwise recursively inspects any initialized submodule, consulting a
+    SUBMODULE-specific filter assignment `_discover_configured_clean_filters` never covers
+    -- the snapshot never copies submodule contents anyway."""
     res = subprocess.run(
         ["git", "-C", str(REPO), "status", "--porcelain=v1", "--untracked-files=no",
          "--ignore-submodules=all"],
@@ -299,11 +296,10 @@ def _warn_about_dirty_tracked_files() -> None:
     if not dirty:
         return
     print(
-        "warning: the following tracked file(s) have uncommitted changes and "
-        "their CURRENT on-disk content (not the last-committed version) will "
-        "be copied into the test-isolation container, which has outbound "
-        "network access -- do not run this against a checkout with an "
-        "uncommitted secret pasted into an otherwise-tracked file:",
+        "warning: the following tracked file(s) have uncommitted changes and their CURRENT "
+        "on-disk content (not the last-committed version) will be copied into the "
+        "test-isolation container, which has outbound network access -- do not run this "
+        "against a checkout with an uncommitted secret pasted into an otherwise-tracked file:",
         file=sys.stderr,
     )
     for path in dirty:
@@ -378,14 +374,13 @@ def _canonicalize_flag(name: str) -> str:
 
 def _reject_resource_overrides_exceeding_container_ceilings(passthrough: list[str]) -> None:
     """Reject a `--max-memory-mb`/`--max-processes`/`--max-temp-mb`
-    combination this wrapper's container can't honor -- a third exception
-    alongside `--allow-host-state`/`--admission-wait`. Resolves each
-    flag's LAST occurrence (matching argparse semantics) and, for any not
-    given, the inner runner's own default. Checks `--max-processes`
-    against a REDUCED ceiling, and memory+temp COMBINED against a reduced
-    memory ceiling: `/tmp` is memory-backed tmpfs sharing the SAME
-    cgroup, so two individually-safe values can together still exceed
-    it."""
+    combination this wrapper's container can't honor -- a second
+    exception alongside `--allow-host-state`. Resolves each flag's LAST
+    occurrence (matching argparse semantics) and, for any not given, the
+    inner runner's own default. Checks `--max-processes` against a
+    REDUCED ceiling, and memory+temp COMBINED against a reduced memory
+    ceiling: `/tmp` is memory-backed tmpfs sharing the SAME cgroup, so
+    two individually-safe values can together still exceed it."""
     requested = {"--max-memory-mb": None, "--max-processes": None, "--max-temp-mb": None}
     for i, arg in enumerate(passthrough):
         name, eq, value_str = arg.partition("=")
@@ -409,25 +404,24 @@ def _reject_resource_overrides_exceeding_container_ceilings(passthrough: list[st
     if temp_mb > _CONTAINER_TMP_MB_CEILING:
         raise SystemExit(
             f"--max-temp-mb {temp_mb} exceeds /tmp's physical tmpfs ceiling "
-            f"({_CONTAINER_TMP_MB_CEILING} MiB) -- ENOSPC regardless of "
-            "memory budget. Lower it, or run run-plugin-tests.py directly."
+            f"({_CONTAINER_TMP_MB_CEILING} MiB) -- ENOSPC regardless of memory "
+            "budget. Lower it, or run run-plugin-tests.py directly."
         )
     effective_memory_ceiling = _CONTAINER_MEMORY_MB_CEILING - _CONTAINER_OVERHEAD_MB
     if memory_mb + temp_mb > effective_memory_ceiling:
         raise SystemExit(
             f"--max-memory-mb {memory_mb} plus --max-temp-mb {temp_mb} "
             f"({memory_mb + temp_mb} MiB combined) exceeds the effective "
-            f"container memory budget ({effective_memory_ceiling} MiB) -- "
-            "/tmp is memory-backed tmpfs, sharing the SAME --memory "
-            "cgroup. Lower one or both, or run run-plugin-tests.py "
-            "directly."
+            f"container memory budget ({effective_memory_ceiling} MiB) -- /tmp is "
+            "memory-backed tmpfs, sharing the SAME --memory cgroup. Lower one or "
+            "both, or run run-plugin-tests.py directly."
         )
     effective_pids_ceiling = _CONTAINER_PIDS_CEILING - _CONTAINER_PIDS_RESERVED
     if processes is not None and processes > effective_pids_ceiling:
         raise SystemExit(
-            f"--max-processes {processes} exceeds the effective container "
-            f"PID budget ({effective_pids_ceiling}) -- would be silently "
-            "preempted. Lower it, or run run-plugin-tests.py directly."
+            f"--max-processes {processes} exceeds the effective container PID "
+            f"budget ({effective_pids_ceiling}) -- would be silently preempted. "
+            "Lower it, or run run-plugin-tests.py directly."
         )
 
 
@@ -585,11 +579,10 @@ def _materialized_git_dir(stack: contextlib.ExitStack, passthrough: list[str]) -
     if _changed_mode_active(passthrough):
         if not base_resolves:
             raise SystemExit(
-                f"changed-selection mode is active but its diff base "
-                f"({base_ref!r}) does not resolve on the host -- refusing "
-                "to silently build a snapshot that would make the "
-                "in-container run report \"no plugin suites to run\" "
-                "instead of the real problem. Fetch or correct --base."
+                f"changed-selection mode is active but its diff base ({base_ref!r}) does not "
+                "resolve on the host -- refusing to silently build a snapshot that would make "
+                "the in-container run report \"no plugin suites to run\" instead of the real "
+                "problem. Fetch or correct --base."
             )
         merge_base_res = subprocess.run(
             ["git", "-C", str(REPO), "merge-base", base_ref, "HEAD"],
@@ -597,10 +590,9 @@ def _materialized_git_dir(stack: contextlib.ExitStack, passthrough: list[str]) -
         )
         if merge_base_res.returncode != 0:
             raise SystemExit(
-                f"changed-selection mode is active but {base_ref!r} and "
-                "HEAD share no merge base (orphan/unrelated history) -- "
-                "refusing to silently build a snapshot that would make the "
-                "in-container three-dot diff fail. Correct --base."
+                f"changed-selection mode is active but {base_ref!r} and HEAD share no merge "
+                "base (orphan/unrelated history) -- refusing to silently build a snapshot "
+                "that would make the in-container three-dot diff fail. Correct --base."
             )
     # Only include the base ref's closure when changed-selection actually
     # consults it -- an `--all`/explicit-plugin run never uses `base_ref`,
@@ -924,72 +916,79 @@ def main(argv: list[str] | None = None) -> int:
             for arg in passthrough
         ):
             raise SystemExit(
-                "--allow-host-state is not supported through "
-                "tools/run_tests_in_devcontainer.py: its documented contract "
-                "(preserve the caller's real HOME/config/credentials) cannot "
-                "be honored here -- the container always gets a fresh, "
-                "credential-free tmpfs $HOME by design. Run "
-                "tools/run-plugin-tests.py directly (outside the "
-                "devcontainer) for an --allow-host-state check instead."
+                "--allow-host-state is not supported through tools/run_tests_in_devcontainer.py: its "
+                "documented contract (preserve the caller's real HOME/config/credentials) cannot be "
+                "honored here -- the container always gets a fresh, credential-free tmpfs $HOME by "
+                "design. Run tools/run-plugin-tests.py directly (outside the devcontainer) for an "
+                "--allow-host-state check instead."
             )
-        # A third documented exception, alongside the two above -- see
-        # the function's own docstring.
+        # The second documented exception -- see the function's own
+        # docstring.
         _reject_resource_overrides_exceeding_container_ceilings(passthrough)
         # Rewriting `--base` to its resolved SHA here means both the
         # snapshot and the in-container command see the SAME resolved
         # commit -- see `_rewrite_base_to_resolved_sha`.
         passthrough = _rewrite_base_to_resolved_sha(passthrough)
 
-        instance_label = uuid.uuid4().hex[:12]
-        config_path, volume_name = _per_instance_config(instance_label)
-        # `container_id` doubles as the lifecycle marker the `finally`
-        # below uses to pick cleanup: still `None` means `_bring_up`
-        # never returned one, a real id means normal teardown. One
-        # try/finally spanning the whole lifecycle means no window where
-        # a signal could raise before any cleanup guard is active.
-        container_id: str | None = None
-        result: int | None = None
-        primary_failed = False
+        # Acquire the host-wide lease `run-plugin-tests.py` itself uses,
+        # on the HOST, first -- its in-container acquisition is uncontested.
+        # Own try/finally from the moment of acquisition: a later failure
+        # (even as early as `_per_instance_config`) can never leak it.
+        admission_lease = None
         try:
+            if _admission.needs_admission(passthrough, _canonicalize_flag):
+                admission_lease = _admission.acquire(_admission.resolve_admission_wait(passthrough, _canonicalize_flag))
+
+            instance_label = uuid.uuid4().hex[:12]
+            config_path, volume_name = _per_instance_config(instance_label)
+            # `container_id` doubles as the lifecycle marker the `finally`
+            # below uses to pick cleanup: still `None` means `_bring_up`
+            # never returned one, a real id means normal teardown. No
+            # window where a signal could raise before cleanup is active.
+            container_id: str | None = None
+            result: int | None = None
+            primary_failed = False
             try:
-                _create_bounded_volume(volume_name)
-                container_id = _bring_up(instance_label, config_path)
-                _populate_workspace(container_id, passthrough, include_untracked=ns.include_untracked)
-                # Phase 2 networking split -- skipped for `--list`.
-                if not _net_scope.is_list_only(passthrough, _canonicalize_flag):
-                    _net_scope.prepare_dependencies(
-                        _devcontainer_exe(), REPO, container_id, config_path, passthrough, _canonicalize_flag,
-                    )
-                    _net_scope.disconnect_container_networks(container_id)
-                    # The prep pass rebuilt the venv(s); --reinstall here
-                    # would rebuild again with no network left.
-                    passthrough = _net_scope.strip_reinstall(passthrough, _canonicalize_flag)
-                result = _run_tests(container_id, config_path, passthrough)
-                primary_failed = result != 0
-            except BaseException:
-                primary_failed = True
-                raise
-            finally:
-                # The primary path's result/exception must win over a
-                # secondary cleanup failure -- a bare `finally` raising
-                # would otherwise silently discard it. `primary_failed`
-                # tells which case this is: report (don't re-raise) a
-                # cleanup failure once the primary already failed; raise
-                # it directly only when the primary truly succeeded.
-                if container_id is None:
-                    with _cleanup_signals_deferred():
-                        _cleanup_orphan(instance_label, volume_name)
-                elif not ns.keep:
-                    try:
+                try:
+                    _create_bounded_volume(volume_name)
+                    container_id = _bring_up(instance_label, config_path)
+                    _populate_workspace(container_id, passthrough, include_untracked=ns.include_untracked)
+                    # Phase 2 networking split -- skipped for `--list`.
+                    if not _net_scope.is_list_only(passthrough, _canonicalize_flag):
+                        _net_scope.prepare_dependencies(
+                            _devcontainer_exe(), REPO, container_id, config_path, passthrough, _canonicalize_flag,
+                        )
+                        _net_scope.disconnect_container_networks(container_id)
+                        # The prep pass rebuilt the venv(s); --reinstall here
+                        # would rebuild again with no network left.
+                        passthrough = _net_scope.strip_reinstall(passthrough, _canonicalize_flag)
+                    result = _run_tests(container_id, config_path, passthrough)
+                    primary_failed = result != 0
+                except BaseException:
+                    primary_failed = True
+                    raise
+                finally:
+                    # The primary result/exception must win over a secondary cleanup failure -- a bare
+                    # `finally` raising would otherwise silently discard it. `primary_failed` tells which
+                    # case this is: report (don't re-raise) a cleanup failure once the primary already
+                    # failed; raise it directly only when the primary succeeded.
+                    if container_id is None:
                         with _cleanup_signals_deferred():
-                            _tear_down(container_id, volume_name)
-                    except BaseException as teardown_exc:
-                        if not primary_failed:
-                            raise
-                        print(f"warning: teardown also failed: {teardown_exc}", file=sys.stderr)
-            return result
+                            _cleanup_orphan(instance_label, volume_name)
+                    elif not ns.keep:
+                        try:
+                            with _cleanup_signals_deferred():
+                                _tear_down(container_id, volume_name)
+                        except BaseException as teardown_exc:
+                            if not primary_failed:
+                                raise
+                            print(f"warning: teardown also failed: {teardown_exc}", file=sys.stderr)
+                return result
+            finally:
+                shutil.rmtree(config_path.parent, ignore_errors=True)
         finally:
-            shutil.rmtree(config_path.parent, ignore_errors=True)
+            if admission_lease is not None:
+                admission_lease.release()
     finally:
         signal.signal(signal.SIGTERM, previous_sigterm_handler)
         signal.signal(signal.SIGHUP, previous_sighup_handler)

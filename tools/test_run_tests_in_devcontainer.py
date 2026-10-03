@@ -1618,6 +1618,183 @@ def test_disconnect_container_networks_fails_closed_for_none_mode_with_extra_net
             raise AssertionError("expected SystemExit")
 
 
+def test_admission_needs_admission_false_for_skip_flags() -> None:
+    canon = wrapper._canonicalize_flag
+    assert wrapper._admission.needs_admission(["--list"], canon) is False
+    assert wrapper._admission.needs_admission(["--guards"], canon) is False
+    assert wrapper._admission.needs_admission(["--collect-only"], canon) is False
+    assert wrapper._admission.needs_admission(["--prepare-only"], canon) is False
+
+
+def test_admission_needs_admission_true_for_a_real_run() -> None:
+    canon = wrapper._canonicalize_flag
+    assert wrapper._admission.needs_admission(["agent-worktrees"], canon) is True
+    assert wrapper._admission.needs_admission([], canon) is True
+
+
+def test_admission_resolve_wait_defaults_to_zero() -> None:
+    assert wrapper._admission.resolve_admission_wait(["agent-worktrees"], wrapper._canonicalize_flag) == 0.0
+
+
+def test_admission_resolve_wait_extracts_space_and_equals_forms() -> None:
+    canon = wrapper._canonicalize_flag
+    assert wrapper._admission.resolve_admission_wait(["--admission-wait", "30"], canon) == 30.0
+    assert wrapper._admission.resolve_admission_wait(["--admission-wait=45"], canon) == 45.0
+
+
+def test_admission_resolve_wait_honors_last_repeated_occurrence() -> None:
+    canon = wrapper._canonicalize_flag
+    passthrough = ["--admission-wait", "10", "--admission-wait", "20"]
+    assert wrapper._admission.resolve_admission_wait(passthrough, canon) == 20.0
+
+
+def test_admission_resolve_wait_rejects_malformed_value_immediately() -> None:
+    # Matches argparse's own semantics: each occurrence is validated as
+    # it's seen, not just the FINAL resolved value -- a malformed earlier
+    # occurrence must not be silently masked by a later valid override,
+    # since argparse itself would reject it the moment it's parsed.
+    canon = wrapper._canonicalize_flag
+    try:
+        wrapper._admission.resolve_admission_wait(["--admission-wait", "bad"], canon)
+    except SystemExit as exc:
+        assert "bad" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+
+
+def test_admission_resolve_wait_rejects_malformed_earlier_occurrence_even_with_later_valid_one() -> None:
+    canon = wrapper._canonicalize_flag
+    passthrough = ["--admission-wait", "bad", "--admission-wait", "20"]
+    try:
+        wrapper._admission.resolve_admission_wait(passthrough, canon)
+    except SystemExit as exc:
+        assert "bad" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+
+
+def test_admission_acquire_rejects_negative_wait_with_system_exit() -> None:
+    try:
+        wrapper._admission.acquire(-1.0)
+    except SystemExit as exc:
+        assert "non-negative" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+
+
+def test_admission_acquire_succeeds_when_uncontested(tmp_path: Path) -> None:
+    with mock.patch.object(wrapper._admission, "admission_dir", return_value=tmp_path):
+        lease = wrapper._admission.acquire(0.0)
+    try:
+        assert lease.held
+    finally:
+        lease.release()
+
+
+def test_admission_acquire_fails_fast_when_busy_and_wait_is_zero(tmp_path: Path) -> None:
+    with mock.patch.object(wrapper._admission, "admission_dir", return_value=tmp_path):
+        holder = wrapper._admission.acquire(0.0)
+        try:
+            try:
+                wrapper._admission.acquire(0.0)
+            except SystemExit as exc:
+                assert "BUSY" in str(exc)
+            else:
+                raise AssertionError("expected SystemExit")
+        finally:
+            holder.release()
+
+
+def test_admission_acquire_waits_then_succeeds_once_released(tmp_path: Path) -> None:
+    import threading
+
+    with mock.patch.object(wrapper._admission, "admission_dir", return_value=tmp_path):
+        holder = wrapper._admission.acquire(0.0)
+
+        def release_soon() -> None:
+            import time
+            time.sleep(0.1)
+            holder.release()
+
+        threading.Thread(target=release_soon).start()
+        lease = wrapper._admission.acquire(2.0)
+    try:
+        assert lease.held
+    finally:
+        lease.release()
+
+
+def test_main_acquires_and_releases_admission_lease_around_the_run(monkeypatch, tmp_path: Path) -> None:
+    order: list[str] = []
+    fake_lease = mock.Mock()
+    fake_lease.release = mock.Mock(side_effect=lambda: order.append("release"))
+
+    config_path = tmp_path / "cfgdir-admission" / "devcontainer.json"
+    config_path.parent.mkdir()
+    config_path.write_text("{}")
+    monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
+    monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
+    monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: order.append("bring-up") or "container-admission")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
+    monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
+    monkeypatch.setattr(wrapper._net_scope, "is_list_only", lambda passthrough, canonicalize: True)
+    monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: order.append("run") or 0)
+    monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: True)
+    monkeypatch.setattr(wrapper._admission, "acquire", lambda wait: order.append("acquire") or fake_lease)
+
+    rc = wrapper.main(["agent-worktrees"])
+    assert rc == 0
+    assert order == ["acquire", "bring-up", "run", "release"]
+
+
+def test_main_releases_admission_lease_even_when_per_instance_config_fails(monkeypatch) -> None:
+    # Invariant: once the host-wide lease is acquired, it must be released
+    # on EVERY exit path -- including a failure as early as
+    # `_per_instance_config` itself, not just the common success path.
+    release_calls: list[str] = []
+    fake_lease = mock.Mock()
+    fake_lease.release = mock.Mock(side_effect=lambda: release_calls.append("release"))
+
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: True)
+    monkeypatch.setattr(wrapper._admission, "acquire", lambda wait: fake_lease)
+
+    def failing_per_instance_config(label: str):
+        raise SystemExit("devcontainer config write failed: boom")
+
+    monkeypatch.setattr(wrapper, "_per_instance_config", failing_per_instance_config)
+
+    try:
+        wrapper.main(["agent-worktrees"])
+    except SystemExit as exc:
+        assert "boom" in str(exc)
+    else:
+        raise AssertionError("expected the original SystemExit to propagate")
+    assert release_calls == ["release"]
+
+
+def test_main_skips_admission_for_guards(monkeypatch, tmp_path: Path) -> None:
+    acquire_calls: list[float] = []
+    config_path = tmp_path / "cfgdir-guards" / "devcontainer.json"
+    config_path.parent.mkdir()
+    config_path.write_text("{}")
+    monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
+    monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
+    monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-guards")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
+    monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
+    monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
+    monkeypatch.setattr(wrapper._admission, "acquire", lambda wait: acquire_calls.append(wait))
+
+    rc = wrapper.main(["agent-worktrees", "--guards"])
+    assert rc == 0
+    assert acquire_calls == []
+
+
 def test_tear_down_removes_container_then_volume_on_success() -> None:
     container_result = mock.Mock(returncode=0, stderr="")
     volume_result = mock.Mock(returncode=0, stderr="")
@@ -1752,6 +1929,7 @@ def test_main_installs_a_sigterm_handler(monkeypatch) -> None:
     monkeypatch.setattr(wrapper, "_per_instance_config", fake_per_instance_config)
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda instance_label, config_path: "container-1")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace",
                          lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests",
@@ -1785,6 +1963,7 @@ def test_main_restores_the_previous_sigterm_handler_after_returning(monkeypatch,
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-restore")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
     monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
@@ -1813,6 +1992,7 @@ def test_main_installs_and_restores_a_sighup_handler(monkeypatch, tmp_path: Path
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-sighup")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
     monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
@@ -2079,6 +2259,7 @@ def test_main_strips_double_dash_separator_anywhere_in_passthrough(monkeypatch) 
                          lambda label: (Path("/tmp/fake-devcontainer-dir/devcontainer.json"), "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, config_path: "container-1")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests",
                          lambda container_id, config_path, passthrough: calls.append(passthrough) or 0)
@@ -2110,6 +2291,7 @@ def test_main_prepares_dependencies_and_disconnects_networks_before_running_test
                          lambda label: (Path("/tmp/fake-devcontainer-dir/devcontainer.json"), "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, config_path: "container-1")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
                          lambda exe, repo, container_id, config_path, passthrough, canonicalize: order.append("prepare"))
@@ -2134,6 +2316,7 @@ def test_main_strips_reinstall_before_the_real_pass_after_preparing(monkeypatch)
                          lambda label: (Path("/tmp/fake-devcontainer-dir/devcontainer.json"), "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, config_path: "container-1")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
                          lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
@@ -2157,6 +2340,7 @@ def test_main_skips_dependency_preparation_and_disconnect_for_list_only(monkeypa
                          lambda label: (Path("/tmp/fake-devcontainer-dir/devcontainer.json"), "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, config_path: "container-1")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
                          lambda exe, repo, container_id, config_path, passthrough, canonicalize: order.append("prepare"))
@@ -2188,6 +2372,7 @@ def test_main_tears_down_container_and_volume_unless_keep_is_passed(monkeypatch,
                          lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-2")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
     monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
@@ -2230,6 +2415,7 @@ def test_main_defers_sigterm_during_the_teardown_call(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-sigterm")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
     monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
@@ -2270,6 +2456,7 @@ def test_main_propagates_a_signal_received_during_successful_teardown(monkeypatc
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-sigterm-success")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
     monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
@@ -2301,6 +2488,7 @@ def test_main_raises_teardown_failure_when_primary_path_succeeded(monkeypatch, t
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-3")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace",
                          lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
@@ -2331,6 +2519,7 @@ def test_main_preserves_primary_exception_when_teardown_also_fails(monkeypatch, 
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-4")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
 
     def failing_populate(container_id: str, passthrough: list[str], *, include_untracked: bool) -> None:
         raise SystemExit("primary failure: real test problem")
@@ -2369,6 +2558,7 @@ def test_main_preserves_nonzero_test_result_when_teardown_also_fails(monkeypatch
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-5")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace",
                          lambda container_id, passthrough, *, include_untracked: None)
     # A real test FAILURE (nonzero exit), not an exception.
@@ -2401,6 +2591,7 @@ def test_main_cleans_up_orphan_and_reraises_when_bring_up_fails(monkeypatch, tmp
                          lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", failing_bring_up)
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(
         wrapper, "_cleanup_orphan",
         lambda instance_label, volume_name: cleanup_calls.append((instance_label, volume_name)),
@@ -2440,6 +2631,7 @@ def test_main_tears_down_not_orphan_cleans_up_when_bring_up_succeeded_but_someth
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-gap")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", failing_populate)
     monkeypatch.setattr(
         wrapper, "_tear_down",
@@ -2475,6 +2667,7 @@ def test_main_cleans_up_orphan_when_create_bounded_volume_itself_fails(monkeypat
     monkeypatch.setattr(wrapper, "_per_instance_config",
                          lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", failing_create_volume)
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(
         wrapper, "_cleanup_orphan",
         lambda instance_label, volume_name: cleanup_calls.append((instance_label, volume_name)),

@@ -4,7 +4,7 @@
 - **Repo:** ThomasMichon/copilot-extensions
 - **Branch(es):** TBD (one per phase)
 - **Created:** 2026-10-02
-- **Status:** Active (Phase 1 done; Phase 2 in progress -- CI-lane decided, networking-scope closed, admission-lease closure still landing via separate PR)
+- **Status:** Done; pending archive (Phase 1 and Phase 2 both complete -- CI-lane decided, networking-scope closed, admission-lease closed; no remaining Plan/Validation Plan items)
 - **Vision:** [`test-portfolio`](../../../visions/test-portfolio/README.md)'s
   containment boundary and host-safe-default behaviors; relates to, without
   changing, [`agent-containers`](../../../visions/plugins/agent-containers/README.md)'s
@@ -331,17 +331,18 @@ verbatim ask.
       flags (`--changed`, `--all`, `-k`, etc.) semantically unchanged --
       with one deliberate normalization (a resolvable `--base` is rewritten
       to its resolved commit SHA before the in-container invocation is
-      assembled; see `TESTING.md` for why) and three known exceptions:
+      assembled; see `TESTING.md` for why) and two documented exceptions:
       `--allow-host-state` is rejected outright (its documented contract --
       preserve the caller's real HOME/config/credentials -- can't be
       honored here, since this wrapper's container always gets a fresh,
-      credential-free tmpfs `$HOME` by design), `--admission-wait`'s
-      host-wide lease loses its cross-process coordination once run inside
-      the container (a tracked Phase 2 gap, see the Validation Plan item
-      below), and a `--max-memory-mb`/`--max-processes`/`--max-temp-mb`
+      credential-free tmpfs `$HOME` by design), and a
+      `--max-memory-mb`/`--max-processes`/`--max-temp-mb`
       value above the container's own fixed outer ceiling is rejected
       outright (the outer container would otherwise silently preempt it
-      regardless of what the inner runner believes it has) -- so the
+      regardless of what the inner runner believes it has). `--admission-
+      wait`'s host-wide lease also no longer loses cross-process
+      coordination once run inside the container -- closed in Phase 2, see
+      that phase's own Plan item -- so the
       container adds a real OS-level boundary strictly on top of (never
       instead of, never duplicating) the turn-key runner's existing
       process-level containment. Validated end-to-end against a real
@@ -418,14 +419,30 @@ verbatim ask.
       `docker inspect` that the container's `NetworkSettings.Networks`
       is empty during the real pass, and that a DNS lookup from inside
       the container fails outright.
-- [ ] Close the host-wide admission-lease residual gap: `--admission-wait`
+- [x] Close the host-wide admission-lease residual gap: `--admission-wait`
       coordinates against a lease stored under `$HOME`/`XDG_CACHE_HOME`,
       which is a fresh tmpfs per container invocation, so concurrent
       wrapped runs acquire unrelated per-container leases instead of one
       shared host-wide slot. Needs a host-side admission mechanism
       acquired before container startup (or an explicit decision that the
       added cross-process coordination isn't worth it yet, recorded here
-      rather than left silently broken).
+      rather than left silently broken). **Closed.** A new
+      `tools/_devcontainer_host_admission.py` module acquires the SAME
+      host-wide lease on the HOST, before any container work begins,
+      mirroring that script's own skip logic (`--list`/`--guards`/
+      `--collect-only`/`--prepare-only` never gate on it either) and its
+      `--admission-wait` default (0.0, fail fast). The lock dir/service
+      name live in a shared `tools/_admission_protocol.py` module both
+      this file and `run-plugin-tests.py` import (that script's
+      hyphenated filename can't be imported directly, hence the separate
+      module one level up), rather than being duplicated by hand in two
+      places, which would risk one side silently drifting from the
+      other and recreating a split-brain coordination gap. Live-
+      validated: a wrapped run holding the lease made a
+      concurrent bare `run-plugin-tests.py` invocation fail fast with the
+      same `[BUSY]` message a second bare invocation would have gotten,
+      and a concurrent `--guards` wrapped run was confirmed NOT blocked
+      by it.
 
 ## Validation Plan
 
@@ -458,9 +475,10 @@ verbatim ask.
       explicitly re-affirmed as an accepted, documented tradeoff rather than
       left open indefinitely. **Closed** -- see the paired Plan item above
       for the implementation and live validation.
-- [ ] Phase 2: the host-wide admission-lease residual gap is either closed
+- [x] Phase 2: the host-wide admission-lease residual gap is either closed
       (a real host-side lease mechanism) or explicitly re-affirmed as an
-      accepted, documented tradeoff.
+      accepted, documented tradeoff. **Closed** -- see the paired Plan
+      item above for the implementation and live validation.
 
 ## Proposal
 
@@ -468,10 +486,9 @@ Phase 1 delivered `.devcontainer/test-isolation/devcontainer.json` (the hardened
 workspace-volume-backed spec) and `tools/run_tests_in_devcontainer.py` (the
 opt-in wrapper that brings it up, populates it, and runs
 `tools/run-plugin-tests.py` inside it), both live-validated end-to-end
-against a real plugin suite. Phase 2's CI-lane question is decided (no
-lane, an accepted coverage tradeoff recorded above) and the networking-
-scope residual gap is closed; the host-wide admission-lease residual gap
-remains open, landing as its own follow-up PR.
+against a real plugin suite. Phase 2 is now complete: the CI-lane question
+was decided (no lane), and both Phase 1 residual gaps (networking,
+admission-lease) are closed.
 
 
 ## Journal
@@ -2251,47 +2268,135 @@ what was done at the time, not rewritten). Unit tests, module-size,
 docs-consistency, and effort-vision-structure checks all re-confirmed
 passing after the fix.
 
-### 2026-10-03 — Review round 2 (PR #5095): fail-closed network-mode check
-A HIGH-severity finding caught that `disconnect_container_networks` read
-an empty `NetworkSettings.Networks` map as "nothing to disconnect,
-already isolated" -- but Docker can report that same empty map for a
+### 2026-10-03 — Phase 2 item 3: admission-lease gap closed, Phase 2 complete
+Implemented the last of Phase 2's three items: `--admission-wait`'s host-
+wide heavy-test-slot lease previously lived under `$HOME`/
+`XDG_CACHE_HOME`, a fresh tmpfs per container invocation, so two wrapped
+runs (or a wrapped run and a bare `run-plugin-tests.py` invocation) never
+actually contended for the same slot. A new module,
+`tools/_devcontainer_host_admission.py`, acquires that SAME lease
+(identical lock directory + service name, kept in sync by hand with
+`run-plugin-tests.py`'s own `_admission_dir`/`_ADMISSION_SERVICE` --
+that script's hyphenated filename can't be imported as a module) on the
+HOST, before any container work begins, and holds it for the run's
+entire lifetime. Mirrors that script's own skip logic exactly: `--list`/`--prepare-only`/
+`--guards`/`--collect-only` never gate on the lease either, and
+`--admission-wait`'s own default (0.0, fail fast) is preserved.
+
+Live-validated against real Docker: started a wrapped `ai-attribution`
+run in the background, confirmed via `ls ~/.cache/copilot-extensions/
+test-runner/` that the lock file's mtime updated, then launched a
+concurrent BARE `python tools/run-plugin-tests.py ai-attribution`
+invocation and confirmed it failed fast with the exact `[BUSY]` message
+format that script already uses for two bare invocations -- real
+cross-invocation coordination, not just two independent uncontested
+leases. Separately confirmed a concurrent `--guards` wrapped run was NOT
+blocked while another run held the lease (`--admission-wait 30` holder),
+matching `run-plugin-tests.py`'s own `needs_admission` exemption for
+guard-only runs. Both containers/volumes confirmed torn down afterward.
+
+One real regression this round caught and fixed itself: the initial bulk
+patch of existing unit tests (disabling the new admission acquisition so
+they wouldn't hit the real host lock file) missed one test
+(`test_main_cleans_up_orphan_when_create_bounded_volume_itself_fails`)
+because it fails before `_bring_up` is ever reached, the anchor the bulk
+patch keyed off of -- confirmed by literally watching that lock file's
+mtime change across individual test reruns, then fixed by patching it
+directly. Unit tests grew to 134 (all passing), with all of them now
+confirmed to touch only `tmp_path`-scoped fake lock directories, never
+the real host one. `TESTING.md` and this README updated. `check-module-
+size.py`, `check-docs-consistency.py`, and `check-effort-vision-
+structure.py` all pass.
+
+**Phase 2 is now complete**: the CI-lane decision (no lane), the
+networking-scope closure, and the admission-lease closure are all
+landed. The `devcontainer-test-isolation` effort's own Plan and
+Validation Plan have no remaining open items as of this entry.
+
+### 2026-10-03 — Review round 2 (PRs #5095/#5100): fail-closed network check, shared admission protocol
+Two more review rounds surfaced real fixes, not just doc corrections.
+**On #5095 (networking):** a HIGH finding caught that
+`disconnect_container_networks` read an empty
+`NetworkSettings.Networks` map as "nothing to disconnect, already
+isolated" -- but Docker can report that same empty map for a
 namespace-sharing mode (`--network host`, `--network container:<id>`)
-where the container still has real network access, the same pattern
-this repo's own `agent-containers` restricted-fleet check
+where the container still has real network access, a pattern this
+repo's own `agent-containers` restricted-fleet check
 (`lifecycle.py:411-429`) already treats as uninspectable and rejects.
-Fixed by also reading `HostConfig.NetworkMode`: a `host`/`container:<id>`
-mode is now rejected outright, `none` is a legitimate no-op (Docker's
-real shape there is `{"none": {}}`, never truly empty), and any OTHER
-mode reporting zero attached networks is now rejected too rather than
-silently trusted. Added dedicated unit tests for each new fail-closed
-path; all pass, along with module-size/docs-consistency/effort-vision-
+Fixed by also reading `HostConfig.NetworkMode` and failing closed: a
+`host`/`container:<id>` mode is rejected outright (disconnecting named
+networks can't isolate it), `none` is a legitimate no-op (Docker's real
+shape there is exactly `{"none": {}}`, never truly empty), and any
+OTHER mode reporting zero attached networks is now also rejected rather
+than silently trusted. **On #5100 (admission-lease):** a previously-
+flagged-but-unaddressed MEDIUM finding was fixed too: the lock
+directory/service name were duplicated by hand between
+`run-plugin-tests.py` and `tools/_devcontainer_host_admission.py`,
+risking silent drift if only one side were ever updated. Extracted both
+into a new shared `tools/_admission_protocol.py`, imported by both
+(working around `run-plugin-tests.py`'s hyphenated filename the same
+way the lease library itself is already imported). Also added `--list`
+to TESTING.md's admission-exemption list (it returns before that check
+even runs) and reverted umbrella issue #5040's status back to
+accurately reflect only-merged state (it had prematurely said "Done"
+based on PRs that hadn't merged yet -- a reviewer finding on its own).
+Unit tests grew further to cover the new fail-closed paths (`host`,
+`container:<id>`, `none`, and the empty-map-with-non-none-mode case);
+all still pass, module-size/docs-consistency/effort-vision-structure
+checks all still pass, and a fresh Docker-backed end-to-end run
+(`ai-attribution`, 98 passed / 6 skipped) confirmed the real container's
+actual `NetworkMode` is `bridge` (never one of the rejected modes) and
+teardown stayed clean.
+
+### 2026-10-03 — Review round 3 (PRs #5095/#5100): none-mode shortcut closed, negative-wait fixed
+A HIGH finding caught the `none`-mode fast path's own remaining gap:
+`HostConfig.NetworkMode` reflects CREATION-time config, not live state --
+a later `docker network connect` can attach a real, reachable network to
+a "none"-mode container while this field stays frozen reporting `none`.
+The earlier fix only checked `network_mode == "none"` and returned
+immediately; it needed to also verify `NetworkSettings.Networks` is
+EXACTLY `{"none": {}}` (Docker's real shape for an untouched
+`--network none` container) before trusting it, matching the stricter
+check `plugins/agent-containers/src/agent_containers/lifecycle.py`
+already applies. Fixed, with a new regression test for a `none`-mode
+container reporting an unexpected extra network. Separately, a MEDIUM
+finding caught that a negative `--admission-wait` reached
+`_devcontainer_host_admission.acquire` as an uncaught `ValueError`
+instead of a clean CLI-style error; now raises `SystemExit` like every
+other caller-facing failure in that function. Unit tests grew further;
+all pass, along with module-size/docs-consistency/effort-vision-
 structure checks, and a fresh Docker-backed end-to-end run confirmed the
-real container's own `NetworkMode` is `bridge` (never a rejected mode).
+fix doesn't disturb the common case.
 
-### 2026-10-03 — Review round 3 (PR #5095): none-mode shortcut closed
-A follow-up HIGH finding caught the `none`-mode fast path's own
-remaining gap: `HostConfig.NetworkMode` reflects CREATION-time config,
-not live state -- a later `docker network connect` can attach a real,
-reachable network to a "none"-mode container while this field stays
-frozen reporting `none`. The earlier fix only checked `network_mode ==
-"none"` and returned immediately; it now also verifies
-`NetworkSettings.Networks` is EXACTLY `{"none": {}}` (Docker's real
-shape for an untouched `--network none` container) before trusting it,
-matching the stricter check `agent-containers`' own `lifecycle.py`
-already applies. Added a regression test for a `none`-mode container
-reporting an unexpected extra network; all tests, module-size, and docs
-checks still pass.
-
-### 2026-10-03 — Review round 4 (PR #5095): none-mode key-only match, doc polish
+### 2026-10-03 — Review round 4 (PRs #5095/#5100): none-mode key-only match, doc polish
 The `none`-mode comparison from round 3 was itself still too strict: it
 compared the WHOLE `EndpointSettings` value to `{}`, but a legitimate
 `--network none` container's "none" entry still carries real (non-empty)
 endpoint metadata -- only the NETWORK KEY is the actual isolation
 invariant, matching `agent-containers`' own check exactly. Fixed to
 compare `set(networks.keys())` against `{"none"}` instead of the whole
-dict. Also documented `--reinstall`'s normalization in the module's own
-passthrough-contract docstring (a previously-missed finding) and added
-a regression test for a `none`-mode container with real endpoint
-metadata attached. All tests, module-size, and docs-consistency checks
-still pass; a fresh Docker-backed end-to-end run confirmed the fix
-doesn't disturb the common case.
+dict. Also: moved review-process framing ("a review round caught...")
+out of the durable Plan section into this Journal instead, documented
+`--reinstall`'s normalization in the module's own passthrough-contract
+docstring (a previously-missed finding), and added a regression test
+for a `none`-mode container with real endpoint metadata attached (to
+pin the now-correct, less-strict comparison). All tests, module-size,
+and docs-consistency checks still pass; a fresh Docker-backed end-to-end
+run confirmed the fix doesn't disturb the common case.
+
+### 2026-10-03 — Review round 5 (PR #5100): reject malformed --admission-wait immediately
+A MEDIUM finding caught that `resolve_admission_wait` silently accepted
+a malformed `--admission-wait` value by catching its `ValueError` and
+`continue`-ing, leaving the running default (or a LATER valid override)
+in place -- unlike `run-plugin-tests.py`'s own argparse, which validates
+each occurrence as it's parsed. Worst case: `--admission-wait bad` alone
+would silently resolve to 0.0 (acquire immediately) instead of being
+rejected, starting real container work before the inner runner ever got
+a chance to reject the same bad value itself; with a busy host slot, the
+bad value could even be masked by an unrelated `[BUSY]` error. Fixed to
+raise `SystemExit` the moment ANY occurrence fails to parse, matching
+argparse's per-occurrence validation exactly (not just the final
+resolved value). Live-validated: `--admission-wait bad` now rejects
+outright with a clear error, before any container is brought up. Added
+regression tests for both a single malformed value and a malformed
+earlier occurrence followed by a later valid one.

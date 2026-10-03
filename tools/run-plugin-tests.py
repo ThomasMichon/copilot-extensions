@@ -68,6 +68,7 @@ VENV_ROOT = REPO / ".test-venvs" / sys.platform
 PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
 LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"
+TOOLS_DIR = REPO / "tools"
 
 # Plugins whose OWN test suites assert properties about OTHER plugins (a
 # repo-wide contract, not something scoped to their own diff) -- see
@@ -80,16 +81,14 @@ _CROSS_PLUGIN_CONTRACT_TESTERS = {"copilot-extensions-harness"}
 sys.path.insert(0, str(LEASE_LIB))
 from single_instance_lease import AlreadyRunningError, SingleInstance  # noqa: E402
 
-_ADMISSION_SERVICE = "copilot-extensions-test-runner"
-
-
-def _admission_dir() -> Path:
-    """Return a per-user, host-wide lock directory shared by all worktrees."""
-    if os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-    else:
-        base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
-    return base / "copilot-extensions" / "test-runner"
+# Shared with tools/_devcontainer_host_admission.py -- the devcontainer
+# wrapper's own hyphenated-filename-adjacent helper -- so both agree on
+# the SAME lock dir/service name without duplicating the constants by
+# hand (this script's own hyphenated filename can't be imported as a
+# module, which is why the shared module lives one level up instead).
+sys.path.insert(0, str(TOOLS_DIR))
+from _admission_protocol import ADMISSION_SERVICE as _ADMISSION_SERVICE  # noqa: E402
+from _admission_protocol import admission_dir as _admission_dir  # noqa: E402
 
 
 def _acquire_admission(wait_seconds: float) -> SingleInstance:

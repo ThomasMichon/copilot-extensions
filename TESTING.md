@@ -62,9 +62,9 @@ python tools/run-plugin-tests.py agent-dispatch \
 Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
 than repeatedly importing file groups that contain no selected tests.
 
-Potentially heavy runs (everything except `--guards`, `--collect-only`, and
-`--prepare-only`) also
-take one host-wide admission lease shared by every checkout and worktree. A
+Potentially heavy runs (everything except `--list`, `--guards`,
+`--collect-only`, and `--prepare-only`) also take one host-wide admission
+lease shared by every checkout and worktree. A
 second run fails fast and names the live holder instead of competing for CPU,
 memory, and process slots. Use a bounded wait when joining an existing queue is
 preferable:
@@ -152,13 +152,15 @@ arguments) is passed through to `tools/run-plugin-tests.py` *inside* the
 container -- with one normalization (a `--base` value that resolves on
 the host is rewritten to its resolved commit SHA, or appended when
 changed-selection is active and `--base` was omitted entirely, before
-the in-container invocation is assembled; see below for why) and three
+the in-container invocation is assembled; see below for why) and two
 known exceptions to otherwise-transparent passthrough: `--allow-host-state`
-is rejected outright (see below), `--admission-wait`'s lease loses its
-host-wide coordination once run inside the container (see the Phase 2
-admission-lease gap below), and a `--max-memory-mb`/`--max-processes`/
+is rejected outright (see below), and a `--max-memory-mb`/`--max-processes`/
 `--max-temp-mb` value above the container's own fixed outer ceiling is
-rejected outright (see below). The wrapper:
+rejected outright (see below). `--admission-wait` is also consulted by
+the wrapper itself: it acquires the SAME host-wide lease
+`run-plugin-tests.py` would, on the HOST, before any container work
+begins (closing the Phase 2 admission-lease gap below), then still
+passes the flag through unchanged. The wrapper:
 
 1. Writes a per-invocation copy of `.devcontainer/test-isolation/devcontainer.json` with
    its workspace volume name made unique to this run, creates that volume
@@ -283,30 +285,30 @@ snapshot even though the underlying commit object is present. A bare SHA
 has no such problem -- it resolves against any clone containing its
 object, named ref or not.
 
-Two of `run-plugin-tests.py`'s own flags cannot retain their documented
-semantics through this wrapper, for the same structural reason (a fresh,
+One of `run-plugin-tests.py`'s own flags cannot retain its documented
+semantics through this wrapper, for a structural reason (a fresh,
 credential-free tmpfs `$HOME` per container): `--allow-host-state` is
 rejected outright with a clear error (its whole contract is preserving
 the caller's real HOME/config/credentials, which this isolation boundary
 specifically does not expose) -- run `tools/run-plugin-tests.py` directly
-for that case instead. `--admission-wait`/the host-wide heavy-test-slot
-lease it waits for is a known, accepted residual gap: that lease lives
-under `$HOME`/`XDG_CACHE_HOME`, which is a fresh tmpfs per container
-invocation, so concurrent wrapped runs acquire unrelated per-container
-leases rather than coordinating against one shared host-wide slot. A
-genuine fix needs a host-side admission mechanism (acquired before
-container startup) rather than relying on the inner runner's own
-container-local lease; tracked as an open Phase 2 item, not silently
-worked around here.
+for that case instead. `--admission-wait`'s host-wide heavy-test-slot
+lease had the same structural problem (its lease lives under
+`$HOME`/`XDG_CACHE_HOME`, a fresh tmpfs per container invocation, so
+concurrent wrapped runs would otherwise acquire unrelated per-container
+leases instead of coordinating against one shared host-wide slot) --
+closed in Phase 2: the wrapper itself acquires that same host-wide lease
+on the HOST, before any container work begins, and holds it for the
+run's entire lifetime, so wrapped and bare invocations correctly
+serialize against each other.
 
-A third exception, for a different reason: the container itself enforces
+A second exception, for a different reason: the container itself enforces
 FIXED, lower outer resource ceilings (`--memory=14g`, `--pids-limit=512`,
 and `/tmp`'s own `size=6144m` tmpfs) regardless of what the inner runner's
 own `--max-memory-mb`/`--max-processes`/`--max-temp-mb` flags claim. A
 value above the matching outer ceiling would otherwise pass through
 unmodified, then be silently preempted by the container at the wrong
 moment (an OOM-kill, a hit `ENOSPC` on `/tmp`, or a stalled fork) instead
-of the clear, immediate rejection the other two exceptions already give
+of the clear, immediate rejection the other exception already gives
 -- so the wrapper rejects an over-the-ceiling value outright, before any
 container work begins, naming the exact flag/value/ceiling involved.
 
