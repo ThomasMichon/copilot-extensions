@@ -557,11 +557,22 @@ def _event_loop(
             next_deadline = min(next_recompute_at, next_reconcile_at)
             if next_event_fetch_at is not None:
                 next_deadline = min(next_deadline, next_event_fetch_at)
-            timeout = max(0.0, next_deadline - now)
-            try:
-                kind, _payload = reader.queue.get(timeout=timeout)
-            except queue.Empty:
+            if now >= next_deadline:
+                # Something is already due -- force this iteration to be
+                # "timer" work *without* touching the queue at all.
+                # Otherwise, under continuous event traffic (a steady
+                # heartbeat/activity stream), `reader.queue.get()` below
+                # would keep returning real "event" items faster than any
+                # timeout could elapse, so `queue.Empty` -- the only other
+                # path to "timer" -- would never fire and the pending
+                # fetch/recompute/reconcile would starve indefinitely.
                 kind = "timer"
+            else:
+                timeout = next_deadline - now
+                try:
+                    kind, _payload = reader.queue.get(timeout=timeout)
+                except queue.Empty:
+                    kind = "timer"
 
             if kind == "disconnected":
                 return _Disconnected(prev)

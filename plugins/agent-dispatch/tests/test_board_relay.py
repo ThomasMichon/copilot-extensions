@@ -198,6 +198,69 @@ def test_event_loop_coalesces_events_arriving_during_the_rate_limit_wait(
     assert calls["full"] == 1
 
 
+def test_event_loop_recompute_tick_survives_continuous_event_traffic(
+    monkeypatch,
+):
+    """Continuous event traffic (events arriving faster than any single
+    `queue.get()` timeout could elapse) must never starve already-due
+    timer work. Once a fetch is deferred (`next_event_fetch_at` set), a
+    steady stream of further events previously kept re-entering the
+    `queue.get()` call with a real item every time, so `queue.Empty` (the
+    only path into `kind == "timer"`) could never fire and the recompute/
+    reconcile/pending-fetch timers would starve indefinitely. This proves
+    the recompute tick still fires repeatedly even while events keep
+    arriving back-to-back, faster than the recompute cadence itself."""
+    monkeypatch.setattr(board_relay, "DEBOUNCE_WINDOW_SECONDS", 0.0)
+    monkeypatch.setattr(board_relay, "MIN_REFETCH_INTERVAL_SECONDS", 10.0)
+    monkeypatch.setattr(board_relay, "RECOMPUTE_INTERVAL_SECONDS", 0.03)
+    monkeypatch.setattr(board_relay, "LONG_RECONCILE_SECONDS", 1000.0)
+
+    reader = _reader_with(("event", {"type": "task.progress"}))
+    stop_injecting = threading.Event()
+
+    def inject_continuous_events():
+        # Faster than RECOMPUTE_INTERVAL_SECONDS, so the control loop's
+        # `queue.get()` keeps finding a real item instead of ever timing
+        # out, for as long as this injector runs.
+        while not stop_injecting.is_set():
+            reader.queue.put(("event", {"type": "task.activity_updated"}))
+            time.sleep(0.005)
+
+    injector = threading.Thread(target=inject_continuous_events, daemon=True)
+    injector.start()
+
+    calls = {"full": 0, "recompute": 0}
+
+    class FakeSnapshot:
+        def full_refetch(self):
+            calls["full"] += 1
+            return [{"id": "t1", "v": calls["full"]}]
+
+        def recompute_only(self):
+            calls["recompute"] += 1
+            return [{"id": "t1", "v": calls["recompute"]}]
+
+    stop = _StopAfter(limit=3)
+    monkeypatch.setattr(board_cli, "_emit_frame", stop)
+
+    try:
+        rc = board_relay._event_loop(
+            None, None, reader, FakeSnapshot(), [], interval=10.0
+        )
+    finally:
+        stop_injecting.set()
+        injector.join(timeout=5)
+
+    assert rc == 0
+    # The recompute tick must have fired repeatedly despite the continuous
+    # event stream -- the bug this guards against is it never firing at
+    # all (starved) while events keep arriving.
+    assert calls["recompute"] >= 3
+    # The 10s rate-limit floor is far longer than this test's own runtime,
+    # so the deferred fetch must not have run yet either.
+    assert calls["full"] == 0
+
+
 def test_event_loop_rate_limit_wait_never_blocks_independent_timers(
     monkeypatch,
 ):
