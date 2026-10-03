@@ -210,8 +210,8 @@ def test_the_daemon_logs_to_a_rotated_file(monkeypatch, tmp_path):
         assert path == str((tmp_path / "logs" / "owner.log").resolve())
         assert owner_cli._attach_owner_log() == path  # idempotent: one handler
         added = [h for h in root.handlers if h not in before]
-        assert len(added) == 1 and isinstance(added[0], RotatingFileHandler)
-        assert added[0].maxBytes == owner_cli.OWNER_LOG_MAX_BYTES
+        assert len(added) == 1 and isinstance(added[0], logging.FileHandler)
+        assert not isinstance(added[0], RotatingFileHandler)  # never rotates while running
         logging.getLogger("ssh-manager.relay").warning("relay re-establishing")
         added[0].flush()
         assert "relay re-establishing" in (tmp_path / "logs" / "owner.log").read_text("utf-8")
@@ -284,3 +284,31 @@ def test_an_unresolvable_owner_log_path_falls_back_to_stderr(monkeypatch, capsys
     monkeypatch.setattr(owner_cli, "owner_log_path", lambda: Looping())
     assert owner_cli._attach_owner_log() is None
     assert "logging to stderr only" in capsys.readouterr().err
+
+
+def test_the_owner_log_rotates_only_when_an_owner_starts(monkeypatch, tmp_path):
+    """Past the cap, a starting Owner shifts the log to ``.1`` (older ones on);
+    one a predecessor still holds open (the rename fails) is just appended to."""
+    import os
+
+    from agent_codespaces import owner_cli
+
+    monkeypatch.setattr(owner_cli, "OWNER_LOG_MAX_BYTES", 10)
+    log = tmp_path / "owner.log"
+    log.write_text("x" * 20, "utf-8")
+    (tmp_path / "owner.log.1").write_text("older", "utf-8")
+    owner_cli._rotate_at_start(log)
+    assert not log.exists()
+    assert (tmp_path / "owner.log.1").read_text("utf-8") == "x" * 20
+    assert (tmp_path / "owner.log.2").read_text("utf-8") == "older"
+    log.write_text("small", "utf-8")
+    owner_cli._rotate_at_start(log)  # under the cap: untouched
+    assert log.read_text("utf-8") == "small"
+    log.write_text("y" * 20, "utf-8")
+
+    def busy(*_a):
+        raise PermissionError("in use by the previous Owner")
+
+    monkeypatch.setattr(os, "replace", busy)
+    owner_cli._rotate_at_start(log)  # never raises; this Owner appends instead
+    assert log.read_text("utf-8") == "y" * 20

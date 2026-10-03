@@ -271,7 +271,7 @@ hold stays up to an hour to retry it, and the next Owner start resumes it after
 that. `delete` removes a CodeSpace's local mirror once its hub copy is current,
 then or on a later retry (`AGENT_CODESPACES_TRANSCRIPT_MIRROR=0` turns this off).
 The Owner usually runs headless, so it logs to
-`~/.agent-codespaces/logs/owner.log` (size-rotated; under
+`~/.agent-codespaces/logs/owner.log` (rotated when an Owner starts; under
 `AGENT_CODESPACES_HOME` when set): its start and stop, every relay or forward
 re-establish, and every failed cycle. Read it first when a worker's credential
 relay or a forward drops. Observe and steer it through agent-bridge

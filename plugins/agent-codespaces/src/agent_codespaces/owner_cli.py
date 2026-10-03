@@ -40,6 +40,9 @@ def _transcript_mirror():
 #: The resident daemon's own log: it usually runs headless (a scheduled task
 #: or an on-demand detached start), where stderr goes nowhere, so a relay or
 #: forward re-establish would otherwise leave no trace to correlate a drop with.
+#: Rotated only when an Owner starts, never while one runs: two Owners overlap
+#: during a takeover (the old one writes until it sees the new beacon), and a
+#: mid-run rollover from either would lose records or fail its renames.
 OWNER_LOG_MAX_BYTES = 5 * 1024 * 1024
 OWNER_LOG_BACKUPS = 3
 
@@ -50,22 +53,40 @@ def owner_log_path():
     return _runtime_dir() / "logs" / "owner.log"
 
 
+def _rotate_at_start(path) -> None:
+    """Shift ``owner.log`` to ``.1`` (and on) when it's past the size cap. Best
+    effort: a predecessor still writing it (Windows refuses the rename) just
+    means this Owner appends and the next start rotates."""
+    import os
+
+    try:
+        if path.stat().st_size < OWNER_LOG_MAX_BYTES:
+            return
+        for n in range(OWNER_LOG_BACKUPS - 1, 0, -1):
+            older = path.with_name(f"{path.name}.{n}")
+            if older.exists():
+                os.replace(older, path.with_name(f"{path.name}.{n + 1}"))
+        os.replace(path, path.with_name(f"{path.name}.1"))
+    except OSError:
+        pass
+
+
 def _attach_owner_log() -> str | None:
-    """Also log to a size-rotated ``logs/owner.log``; its path, or ``None``
-    when it can't be opened (the daemon still runs, logging to stderr)."""
+    """Also log to ``logs/owner.log`` (append-only while running, rotated at
+    start); its path, or ``None`` when it can't be opened (the daemon still
+    runs, logging to stderr)."""
     import logging
-    from logging.handlers import RotatingFileHandler
 
     path = owner_log_path()
     root = logging.getLogger()
     try:
         path = path.resolve()
-        if any(isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", None) == str(path)
+        if any(isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", None) == str(path)
                for h in root.handlers):
             return str(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        handler = RotatingFileHandler(path, maxBytes=OWNER_LOG_MAX_BYTES,
-                                      backupCount=OWNER_LOG_BACKUPS, encoding="utf-8")
+        _rotate_at_start(path)
+        handler = logging.FileHandler(path, mode="a", encoding="utf-8")
     except (OSError, RuntimeError) as exc:  # RuntimeError: a symlink loop on Python < 3.13
         print(f"connection-owner: can't open {path} ({exc}); logging to stderr only", file=sys.stderr)
         return None
