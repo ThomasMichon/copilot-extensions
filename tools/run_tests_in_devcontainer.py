@@ -96,14 +96,12 @@ EXCLUDED_TOP_LEVEL = {
 def _minimal_repo_selection_env() -> dict[str, str]:
     """A blanket ``GIT_*`` strip used only by
     `_discover_configured_clean_filters`, which must run BEFORE
-    `_scrubbed_git_env`'s own clean-filter overrides exist. `check-attr`
-    never invokes a clean filter, but this is still a host-side Git probe
-    needing the SAME non-filter protections `_scrubbed_git_env` applies:
+    `_scrubbed_git_env`'s own overrides exist. `check-attr` never invokes
+    a clean filter, but this is still a host-side Git probe needing the
+    SAME non-filter protections `_scrubbed_git_env` applies:
     `core.fsmonitor=false` (confirmed live that `GIT_OPTIONAL_LOCKS=0`
     can make even read-only `ls-files`/`check-attr` consult a configured
-    hook), and `GIT_NO_LAZY_FETCH=1`/`GIT_NO_REPLACE_OBJECTS=1` (a
-    partial clone's missing cached `.gitattributes` blob could otherwise
-    fetch objects into the real checkout)."""
+    hook), and `GIT_NO_LAZY_FETCH=1`/`GIT_NO_REPLACE_OBJECTS=1`."""
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_OPTIONAL_LOCKS"] = "0"
@@ -116,24 +114,28 @@ def _minimal_repo_selection_env() -> dict[str, str]:
 
 
 def _discover_configured_clean_filters() -> list[str]:
-    """Discover every distinct Git ``filter`` attribute name any tracked
-    path's ``.gitattributes`` assigns (``check-attr`` across all tracked
-    paths at once). A read-only probe (``status``/``diff``) against the
-    REAL host checkout invokes a configured ``filter.<name>.clean``
-    command for any path needing re-hashing -- confirmed live: a toy
-    clean-filter script DOES run during an ordinary ``git status`` once a
-    same-size content change forces a real re-hash. Degrades to an empty
-    list on any failure rather than blocking the snapshot."""
+    """Discover every distinct Git ``filter`` attribute name assigned to
+    any TRACKED path, honoring the WORKING-TREE `.gitattributes` (not
+    `--cached`, which confirmed live silently misses an uncommitted
+    `.gitattributes` edit assigning a NEW filter). A read-only probe
+    (`status`/`diff`) invokes a configured `filter.<name>.clean` for any
+    path needing re-hashing, OR `filter.<name>.process` (a separate,
+    higher-precedence protocol) if ALSO configured -- both confirmed live
+    to execute host code during an ordinary `git status`, so
+    `_scrubbed_git_env` neutralizes both for every name returned here.
+    FAILS CLOSED (raises) on any subprocess failure rather than
+    degrading to an empty list -- "couldn't determine" is not "nothing to
+    neutralize"."""
     env = _minimal_repo_selection_env()
     ls = subprocess.run(["git", "-C", str(REPO), "ls-files", "-z"], capture_output=True, timeout=60, env=env)
     if ls.returncode != 0:
-        return []
+        raise SystemExit("could not list tracked files to discover configured clean/process filters")
     check = subprocess.run(
-        ["git", "-C", str(REPO), "check-attr", "filter", "--cached", "--stdin", "-z"],
+        ["git", "-C", str(REPO), "check-attr", "filter", "--stdin", "-z"],
         input=ls.stdout, capture_output=True, timeout=60, env=env,
     )
     if check.returncode != 0:
-        return []
+        raise SystemExit("could not discover configured clean/process filters via check-attr")
     parts = check.stdout.split(b"\0")
     names: set[str] = set()
     for i in range(0, len(parts) - 2, 3):
@@ -146,15 +148,15 @@ def _discover_configured_clean_filters() -> list[str]:
 def _scrubbed_git_env() -> dict[str, str]:
     """Ambient environment with EVERY inherited ``GIT_*`` variable removed
     (a blanket strip, matching `tools/agent_bridge_contract_git.py`'s own
-    hardened environment -- a narrower allowlist could miss a behaviorful
-    variable like `GIT_TRACE`/`GIT_EXEC_PATH`). Forces a safe set:
+    hardened environment -- a narrower allowlist could miss a variable
+    like `GIT_TRACE`/`GIT_EXEC_PATH`). Forces a safe set:
     `GIT_OPTIONAL_LOCKS=0`, `GIT_NO_LAZY_FETCH=1`/
     `GIT_NO_REPLACE_OBJECTS=1`, disabled global/system config, and
-    `core.fsmonitor=false` plus every `filter.<name>.clean` from
-    `_discover_configured_clean_filters` forced to `cat` via
-    `GIT_CONFIG_COUNT`/`KEY_N`/`VALUE_N` -- without the latter two, a
-    configured fsmonitor hook OR clean filter would still execute
-    arbitrary host code during an ostensibly read-only probe."""
+    `core.fsmonitor=false` plus, for every name from
+    `_discover_configured_clean_filters`, BOTH `filter.<name>.clean`
+    forced to `cat` AND `filter.<name>.process` forced empty (a
+    `process` filter takes precedence over `clean` and still executes
+    host code even with `clean` alone neutralized, confirmed live)."""
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_OPTIONAL_LOCKS"] = "0"
@@ -163,7 +165,9 @@ def _scrubbed_git_env() -> dict[str, str]:
     env["GIT_CONFIG_GLOBAL"] = os.devnull
     env["GIT_CONFIG_NOSYSTEM"] = "1"
     overrides = [("core.fsmonitor", "false")]
-    overrides += [(f"filter.{name}.clean", "cat") for name in _discover_configured_clean_filters()]
+    for name in _discover_configured_clean_filters():
+        overrides.append((f"filter.{name}.clean", "cat"))
+        overrides.append((f"filter.{name}.process", ""))
     env["GIT_CONFIG_COUNT"] = str(len(overrides))
     for i, (key, value) in enumerate(overrides):
         env[f"GIT_CONFIG_KEY_{i}"] = key
@@ -186,11 +190,10 @@ def _per_instance_config(instance_label: str) -> tuple[Path, str]:
     isolated workspace instead of reusing (and accumulating state in) one
     fixed, shared volume. Returns the temp config path and the volume
     name it declares, so the caller can remove that exact volume at
-    teardown.
-
-    Written into a fresh temp DIRECTORY as literally ``devcontainer.json``
-    -- the devcontainer CLI rejects any ``--config`` path whose basename
-    isn't ``devcontainer.json`` or ``.devcontainer.json``."""
+    teardown. Written into a fresh temp DIRECTORY as literally
+    ``devcontainer.json`` -- the devcontainer CLI rejects any ``--config``
+    path whose basename isn't ``devcontainer.json`` or
+    ``.devcontainer.json``."""
     volume_name = f"{BASE_VOLUME_NAME}-{instance_label}"
     text = DEVCONTAINER_CONFIG.read_text()
     if BASE_VOLUME_NAME not in text:
@@ -263,14 +266,12 @@ def _tracked_paths(*, include_untracked: bool) -> list[str]:
     tracked files are the set contributors/CI already trust to keep
     secrets out of the repository. ``include_untracked=True`` (the
     wrapper's ``--include-untracked`` flag) additionally includes
-    untracked-but-not-gitignored files via ``--others --exclude-standard``,
-    for the opt-in case of testing new, uncommitted files.
+    untracked-but-not-gitignored files via ``--others --exclude-standard``.
 
-    Known, accepted residual exposure: this boundary is about which PATHS
-    are copied, not bytes -- a tracked path's CURRENT on-disk content is
-    copied (uncommitted edits included), not the last-committed blob, so a
-    secret pasted into an otherwise-tracked file and never committed is
-    still copied in.
+    Known, accepted residual exposure: a tracked path's CURRENT on-disk
+    content is copied (uncommitted edits included), not the
+    last-committed blob, so a secret pasted into an otherwise-tracked
+    file and never committed is still copied in.
     """
     args = ["git", "-C", str(REPO), "ls-files", "-z", "--cached"]
     if include_untracked:
@@ -333,13 +334,12 @@ def _warn_about_hidden_tracked_file_flags() -> None:
     whose index entry carries ``assume-unchanged`` or ``skip-worktree``.
     ``git status`` (and therefore ``_warn_about_dirty_tracked_files``) is
     NOT a fail-closed dirty-content check for these paths: both flags
-    instruct git to SUPPRESS reporting an on-disk difference for that
-    path, while ``_tracked_paths``/``_write_tar_of_repo`` still archive its
-    actual current bytes regardless. ``git ls-files -v`` marks a flagged
-    entry with a lowercase letter (assume-unchanged) or an uppercase ``S``
-    (skip-worktree); an ordinary entry is uppercase (``H``).
-
-    Fails CLOSED (raises) if ``git ls-files -v`` itself cannot be run."""
+    instruct git to SUPPRESS reporting an on-disk difference, while
+    ``_tracked_paths``/``_write_tar_of_repo`` still archive its actual
+    current bytes regardless. ``git ls-files -v`` marks a flagged entry
+    with a lowercase letter (assume-unchanged) or uppercase ``S``
+    (skip-worktree); an ordinary entry is uppercase (``H``). Fails
+    CLOSED (raises) if ``git ls-files -v`` itself cannot be run."""
     res = subprocess.run(
         ["git", "-C", str(REPO), "ls-files", "-v", "--cached"],
         capture_output=True, timeout=60, env=_scrubbed_git_env(),
@@ -415,14 +415,10 @@ def _resolve_base_ref(passthrough: list[str]) -> str:
     invocation will use, so ``_materialized_git_dir`` can include exactly
     that ref's object closure (not the whole repository's history) in the
     bundled snapshot. Falls back to ``tools/run-plugin-tests.py``'s own
-    ``--base`` default when it isn't present in ``passthrough`` -- mirroring
-    that runner's own argparse default, not guessing at a different one.
-    Mirrors argparse's own last-occurrence-wins behavior for a repeated
-    flag -- keeps scanning instead of returning on the first match, since
-    `run-plugin-tests.py`'s own argparse would use the LAST ``--base``.
-    Recognizes an unambiguous abbreviated form too (``--bas``, ``--ba``,
-    ...), since that runner's own argparse silently accepts one -- see
-    `_canonicalize_flag`."""
+    ``--base`` default when absent -- mirroring that runner's own
+    argparse default. Mirrors argparse's own last-occurrence-wins
+    behavior for a repeated flag. Recognizes an unambiguous abbreviated
+    form too (``--bas``, ``--ba``, ...) -- see `_canonicalize_flag`."""
     resolved = "origin/main"
     for i, arg in enumerate(passthrough):
         name, eq, value = arg.partition("=")
@@ -466,12 +462,11 @@ def _changed_mode_active(passthrough: list[str]) -> bool:
 
 def _git_rev_parse(ref: str) -> str | None:
     """Resolve ``ref`` to a commit sha via the scrubbed environment.
-    Returns ``None`` (rather than raising) when it doesn't resolve locally
-    -- this function's own contract is never to fail outright on an
-    unresolvable ref. Whether that's actually tolerable is the CALLER's
-    decision: `_materialized_git_dir` treats it as fatal (`SystemExit`)
-    when changed-selection mode is active, but tolerates it (falling back
-    to a `HEAD`-only bundle) otherwise.
+    Returns ``None`` (rather than raising) when it doesn't resolve
+    locally -- whether that's tolerable is the CALLER's decision:
+    `_materialized_git_dir` treats it as fatal when changed-selection
+    mode is active, but tolerates it (falling back to a `HEAD`-only
+    bundle) otherwise.
 
     Peels to ``ref^{commit}`` rather than resolving ``ref`` bare: plain
     ``rev-parse --verify`` accepts ANY object type, but the downstream
@@ -495,15 +490,14 @@ def _rewrite_base_to_resolved_sha(passthrough: list[str]) -> list[str]:
     default, ``origin/main``).
 
     A bundle clone never preserves a remote-tracking ref
-    (``refs/remotes/...``) as a named ref, whether it's named directly
-    (the implicit default) or via a ref-relative expression (e.g.
-    ``origin/dev~1``) -- EITHER resolves fine on the host but leaves the
-    in-container command with no working named ref to resolve against. A
-    bare SHA has no such problem. Without the append case, the single MOST
-    COMMON invocation (no ``--all``, no plugin names, no explicit
-    ``--base``) would have nothing to rewrite and silently run no suites.
-    Leaves ``passthrough`` unchanged when the resolved base doesn't
-    resolve locally at all (a separately-handled problem via
+    (``refs/remotes/...``) as a named ref -- named directly (the implicit
+    default) or via a ref-relative expression (e.g. ``origin/dev~1``) --
+    EITHER resolves fine on the host but leaves the in-container command
+    with no working named ref. A bare SHA has no such problem. Without the
+    append case, the single MOST COMMON invocation (no ``--all``, no
+    plugin names, no explicit ``--base``) would have nothing to rewrite
+    and silently run no suites. Leaves ``passthrough`` unchanged when the
+    base doesn't resolve locally (handled separately via
     `_materialized_git_dir`'s own fail-loud guard)."""
     resolved_sha = _git_rev_parse(_resolve_base_ref(passthrough))
     if resolved_sha is None:
@@ -566,18 +560,16 @@ def _materialized_git_dir(stack: contextlib.ExitStack, passthrough: list[str]) -
     bundle into a fresh directory -- the clone contains exactly the commits
     reachable from those two tips, nothing else. ``main`` rewrites
     ``--base``'s own passthrough VALUE to this same resolved commit's SHA
-    before the in-container command is assembled (see
-    `_rewrite_base_to_resolved_sha`), so the bundle clone needs no named
-    ref for it at all. The index is rebuilt from ``HEAD`` itself (``git
-    read-tree HEAD``) rather than copied from the host: the host's real
-    index can reference a staged blob unreachable from both ``HEAD`` and
-    the base ref, which the bundle would then be missing entirely -- a
-    copied index pointing at a missing object breaks `git diff`/`status`
-    outright. Staging state isn't preserved as "staged" inside the
-    container, but every modification is still visible as an ordinary
-    working-tree difference (`_tracked_paths` copies in the file's actual
-    CURRENT on-disk content regardless). As with every materialized copy,
-    ``config`` is replaced with a fresh, credential-free one
+    first (see `_rewrite_base_to_resolved_sha`), so the bundle clone needs
+    no named ref for it. The index is rebuilt from ``HEAD`` itself (``git
+    read-tree HEAD``) rather than copied: the host's real index can
+    reference a staged blob unreachable from both ``HEAD`` and the base
+    ref, which the bundle would then be missing -- a copied index pointing
+    at a missing object breaks `git diff`/`status` outright. Staging
+    state isn't preserved, but every modification is still visible as an
+    ordinary working-tree difference (`_tracked_paths` copies in the
+    file's actual CURRENT content regardless). As with every materialized
+    copy, ``config`` is replaced with a fresh, credential-free one
     (``_MINIMAL_GIT_CONFIG``) and ``hooks`` is dropped entirely."""
     tmp_dir = Path(tempfile.mkdtemp(prefix="devcontainer-test-isolation-git-"))
     stack.callback(shutil.rmtree, tmp_dir, ignore_errors=True)
@@ -670,14 +662,20 @@ def _write_tar_of_repo(dest: Path, passthrough: list[str], *, include_untracked:
     unless ``include_untracked``) untracked files are never included.
 
     ``git ls-files --cached`` still lists a path for an unstaged deletion,
-    so each path is checked with ``os.path.lexists`` (not a symlink-
-    following ``Path.exists()``) before archiving; an absent path is
-    silently skipped. ``git ls-files`` also lists an initialized
-    submodule as a ``160000``-mode path that is a real directory on disk
-    -- ``recursive=False`` below means it's still added as an empty
-    directory entry but its working tree contents are never copied
-    wholesale (no submodules exist today, but the guard must not regress
-    silently).
+    so each path is checked with ``os.path.lexists`` before archiving; an
+    absent path is silently skipped. An initialized submodule is a single
+    ``160000``-mode path that's a real directory on disk --
+    ``recursive=False`` means it's added as an empty directory entry but
+    its contents are never copied wholesale. A tracked path's own
+    ANCESTOR directory can be replaced with a symlink to outside
+    ``REPO`` -- confirmed live that ``lexists`` alone doesn't catch this
+    (it checks only the FINAL component's own link status; the OS still
+    follows an intermediate symlinked directory), so an external file's
+    real bytes would otherwise be archived under the tracked path's name.
+    Each path's PARENT directory (not the leaf, which may legitimately be
+    a tracked symlink stored as a safe link record) has its real path
+    checked against ``REPO``'s; fails closed rather than silently
+    skipping, since a replaced ancestor is itself an anomaly.
 
     Also warns (``_warn_about_dirty_tracked_files``,
     ``_warn_about_hidden_tracked_file_flags``) about an uncommitted
@@ -686,12 +684,22 @@ def _write_tar_of_repo(dest: Path, passthrough: list[str], *, include_untracked:
     """
     _warn_about_dirty_tracked_files()
     _warn_about_hidden_tracked_file_flags()
+    real_repo = Path(os.path.realpath(REPO))
     with tarfile.open(dest, mode="w") as tar, contextlib.ExitStack() as stack:
         tar.add(_materialized_git_dir(stack, passthrough), arcname=".git")
         for rel_path in _tracked_paths(include_untracked=include_untracked):
             abs_path = REPO / rel_path
-            if os.path.lexists(abs_path):
-                tar.add(abs_path, arcname=rel_path, recursive=False)
+            if not os.path.lexists(abs_path):
+                continue
+            real_parent = Path(os.path.realpath(abs_path.parent))
+            if real_parent != real_repo and real_repo not in real_parent.parents:
+                raise SystemExit(
+                    f"tracked path {rel_path!r} has an ancestor directory that "
+                    "resolves outside the repository root (replaced with a "
+                    "symlink) -- refusing to archive it rather than silently "
+                    "copy external content into the test-isolation container."
+                )
+            tar.add(abs_path, arcname=rel_path, recursive=False)
 
 
 def _populate_workspace(container_id: str, passthrough: list[str], *, include_untracked: bool) -> None:
@@ -703,13 +711,11 @@ def _populate_workspace(container_id: str, passthrough: list[str], *, include_un
     OWNER; `--cap-drop=ALL` means even root can't `chown`). Extraction then
     runs AS ``vscode``, not root, so the checkout ends up natively
     ``vscode``-owned -- matters since Git's "dubious ownership" check
-    inspects the working-tree ROOT's owner, and `CONTAINER_WORKSPACE`'s own
-    mountpoint stays root-owned for the container's whole lifetime; the
-    devcontainer spec's own `safe.directory` `containerEnv` exemption
-    covers that residual gap. The final permission-opening pass only
-    targets regular files and directories, never a symlink: `chmod` on a
-    symlink PATH dereferences it, which would either fail on a dangling
-    symlink or chmod whatever a LIVE symlink points at.
+    inspects the working-tree ROOT's owner, and the mountpoint stays
+    root-owned for the container's whole lifetime; the devcontainer
+    spec's own `safe.directory` exemption covers that gap. The final
+    permission-opening pass only targets regular files and directories,
+    never a symlink: `chmod` on a symlink PATH dereferences it.
     """
     chmod_root = subprocess.run(
         ["docker", "exec", "-u", "root", container_id,
@@ -796,11 +802,9 @@ def _cleanup_orphan(instance_label: str, volume_name: str) -> None:
     label, then removes the volume. Every subprocess call here is
     individually guarded against ``subprocess.SubprocessError``/``OSError``
     so one failing step never skips the rest, and this function itself
-    never raises -- it runs while an already-failing startup error is
-    propagating, and that original error must surface, not a secondary
-    cleanup failure. Every failure is still reported to stderr -- treating
-    a failed ``docker ps`` as "no orphan exists" would leave a partially
-    created container un-removable with no indication to the user."""
+    never raises -- an already-failing startup error must surface, not a
+    secondary cleanup failure. Every failure is still reported to
+    stderr."""
     container_ids: list[str] = []
     try:
         find = subprocess.run(
@@ -859,16 +863,12 @@ def _cleanup_signals_deferred():
     (``_tear_down``/``_cleanup_orphan``): RECORD receipt instead of acting
     immediately, restore the previous handlers once cleanup finishes, then
     raise `_TerminationRequested` if one was recorded AND no exception is
-    propagating. Plain ``signal.SIG_IGN`` would DISCARD a signal outright
-    (not defer it) -- for the ordinary teardown path, that would let
-    `main` silently return 0 for a cancelled run. Replaying unconditionally
-    could instead REPLACE a genuine failure already propagating, whether
-    already in flight when entered or raised by the cleanup BODY itself --
-    exactly the masking this wrapper's teardown logic elsewhere exists to
-    prevent. A single ``sys.exc_info()`` check after ``yield`` covers both
-    cases: Python sets it for the whole dynamic extent of an already-active
-    ``except``/``finally`` AND when an exception newly thrown into this
-    generator is still propagating."""
+    propagating. Plain ``signal.SIG_IGN`` would DISCARD a signal (not
+    defer it) -- for ordinary teardown, that would let `main` silently
+    return 0 for a cancelled run. Replaying unconditionally could instead
+    REPLACE a genuine failure already propagating, whether already in
+    flight at entry or raised by the cleanup BODY itself. A single
+    ``sys.exc_info()`` check after ``yield`` covers both cases."""
     received: list[int] = []
     previous = {
         sig: signal.signal(sig, lambda signum, frame: received.append(signum))

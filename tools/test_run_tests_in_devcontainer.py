@@ -97,12 +97,20 @@ def test_scrubbed_git_env_removes_repository_context_variables(monkeypatch) -> N
 def test_scrubbed_git_env_appends_discovered_clean_filter_overrides(monkeypatch) -> None:
     monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: ["lfs", "custom"])
     env = wrapper._scrubbed_git_env()
-    assert env["GIT_CONFIG_COUNT"] == "3"
+    assert env["GIT_CONFIG_COUNT"] == "5"
     assert env["GIT_CONFIG_KEY_0"] == "core.fsmonitor"
     assert env["GIT_CONFIG_KEY_1"] == "filter.lfs.clean"
     assert env["GIT_CONFIG_VALUE_1"] == "cat"
-    assert env["GIT_CONFIG_KEY_2"] == "filter.custom.clean"
-    assert env["GIT_CONFIG_VALUE_2"] == "cat"
+    # `filter.<name>.process` is a separate, higher-precedence protocol
+    # that still executes host code even with `.clean` neutralized --
+    # confirmed live -- so it must also be forced (to empty) for every
+    # discovered filter name, not just `.clean`.
+    assert env["GIT_CONFIG_KEY_2"] == "filter.lfs.process"
+    assert env["GIT_CONFIG_VALUE_2"] == ""
+    assert env["GIT_CONFIG_KEY_3"] == "filter.custom.clean"
+    assert env["GIT_CONFIG_VALUE_3"] == "cat"
+    assert env["GIT_CONFIG_KEY_4"] == "filter.custom.process"
+    assert env["GIT_CONFIG_VALUE_4"] == ""
 
 
 def test_discover_configured_clean_filters_finds_assigned_filter(tmp_path, monkeypatch) -> None:
@@ -126,6 +134,39 @@ def test_discover_configured_clean_filters_empty_on_no_assignments(tmp_path, mon
     _run_git(["git", "-C", str(repo), "commit", "-q", "-m", "initial"], check=True)
     monkeypatch.setattr(wrapper, "REPO", repo)
     assert wrapper._discover_configured_clean_filters() == []
+
+
+def test_discover_configured_clean_filters_honors_uncommitted_attributes_edit(tmp_path, monkeypatch) -> None:
+    # `--cached` would only ever see the COMMITTED `.gitattributes`
+    # assignment, silently missing an uncommitted edit that assigns a NEW
+    # filter -- confirmed live. Discovery must honor the actual
+    # WORKING-TREE `.gitattributes`, the same file a real `git status`/
+    # `diff` probe itself consults.
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / ".gitattributes").write_text("secret.bin filter=committed\n")
+    (repo / "secret.bin").write_text("hello")
+    _run_git(["git", "-C", str(repo), "add", "."], check=True)
+    _run_git(["git", "-C", str(repo), "commit", "-q", "-m", "initial"], check=True)
+    # Uncommitted edit -- reassigns the filter, never staged or committed.
+    (repo / ".gitattributes").write_text("secret.bin filter=uncommitted\n")
+    monkeypatch.setattr(wrapper, "REPO", repo)
+    names = wrapper._discover_configured_clean_filters()
+    assert names == ["uncommitted"]
+
+
+def test_discover_configured_clean_filters_fails_closed_on_subprocess_error(monkeypatch) -> None:
+    # Degrading a discovery failure to "no known filters to neutralize"
+    # would be exactly the false safety this probe exists to prevent --
+    # must fail loudly instead.
+    fake_result = mock.Mock(returncode=128, stdout=b"", stderr=b"fatal: not a git repository")
+    with mock.patch.object(wrapper.subprocess, "run", return_value=fake_result):
+        try:
+            wrapper._discover_configured_clean_filters()
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("expected SystemExit on a failed discovery subprocess")
 
 
 def test_clean_filter_neutralized_during_status_probe(tmp_path, monkeypatch) -> None:
@@ -157,6 +198,35 @@ def test_clean_filter_neutralized_during_status_probe(tmp_path, monkeypatch) -> 
     )
     assert "watched.txt" in status.stdout
     assert not marker.exists(), "clean filter ran despite the override -- neutralization failed"
+
+
+def test_process_filter_neutralized_during_status_probe(tmp_path, monkeypatch) -> None:
+    # A configured `filter.<name>.process` takes precedence over `.clean`
+    # and uses a separate (pkt-line) protocol -- confirmed live that it
+    # still executes host code during an ordinary `git status` even with
+    # `.clean` neutralized. `_scrubbed_git_env()` must force `.process`
+    # empty too.
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    marker = tmp_path / "process-ran.marker"
+    script = tmp_path / "fake-process-filter.sh"
+    script.write_text(f'#!/bin/bash\ntouch "{marker}"\nexit 1\n')
+    script.chmod(0o755)
+    (repo / ".gitattributes").write_text("watched.txt filter=probe\n")
+    (repo / "watched.txt").write_text("aaaa")
+    _run_git(["git", "-C", str(repo), "add", "."], check=True)
+    _run_git(["git", "-C", str(repo), "commit", "-q", "-m", "initial"], check=True)
+    _run_git(["git", "-C", str(repo), "config", "filter.probe.process", str(script)], check=True)
+    (repo / "watched.txt").write_text("bbbb")
+    monkeypatch.setattr(wrapper, "REPO", repo)
+    env = wrapper._scrubbed_git_env()
+    assert not marker.exists()
+    status = real_subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain"], capture_output=True, text=True, env=env,
+    )
+    assert "watched.txt" in status.stdout
+    assert status.returncode == 0
+    assert not marker.exists(), "process filter ran despite the override -- neutralization failed"
 
 
 def test_tracked_paths_defaults_to_cached_only_and_filters_excluded_prefixes(monkeypatch) -> None:
@@ -201,7 +271,8 @@ def test_tracked_paths_decodes_non_utf8_bytes_via_surrogateescape() -> None:
     assert os.fsencode(paths[0]) == non_utf8_name
 
 
-def test_tracked_paths_raises_on_git_failure() -> None:
+def test_tracked_paths_raises_on_git_failure(monkeypatch) -> None:
+    monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: [])
     fake_result = mock.Mock(returncode=128, stdout=b"", stderr=b"not a git repository")
     with mock.patch.object(wrapper.subprocess, "run", return_value=fake_result):
         try:
@@ -440,7 +511,8 @@ def test_git_rev_parse_returns_sha_on_success(monkeypatch) -> None:
     assert kwargs["env"] == wrapper._scrubbed_git_env()
 
 
-def test_git_rev_parse_returns_none_when_unresolvable() -> None:
+def test_git_rev_parse_returns_none_when_unresolvable(monkeypatch) -> None:
+    monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: [])
     fake_result = mock.Mock(returncode=128, stdout="", stderr="unknown revision")
     with mock.patch.object(wrapper.subprocess, "run", return_value=fake_result):
         assert wrapper._git_rev_parse("no-such-ref") is None
@@ -891,6 +963,46 @@ def test_write_tar_of_repo_includes_a_tracked_dangling_symlink(tmp_path: Path, m
     assert member.issym()
 
 
+def test_write_tar_of_repo_rejects_a_symlinked_ancestor_directory(tmp_path: Path, monkeypatch) -> None:
+    # `git ls-files` lists a path relative to the recorded tree structure
+    # -- if a tracked path's ANCESTOR directory has since been replaced on
+    # disk with a symlink pointing OUTSIDE the repo, `os.path.lexists` on
+    # the full path still reports True (it only checks the FINAL
+    # component's own link status; the OS transparently follows the
+    # symlinked ancestor to reach a REAL file living elsewhere) --
+    # confirmed live that this would otherwise silently archive an
+    # external file's real bytes under the tracked path's name. Must fail
+    # closed instead.
+    fake_git_dir = tmp_path / "fake-git"
+    fake_git_dir.mkdir()
+    (fake_git_dir / "HEAD").write_text("ref: refs/heads/main\n")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("not part of the checkout\n")
+    # "dir" is recorded in git history as a real tracked directory, but on
+    # THIS disk it has been replaced with a symlink pointing outside.
+    (repo / "dir").symlink_to(outside)
+
+    monkeypatch.setattr(wrapper, "_materialized_git_dir", lambda stack, passthrough: fake_git_dir)
+    monkeypatch.setattr(wrapper, "_tracked_paths",
+                         lambda *, include_untracked: ["dir/secret.txt"])
+    monkeypatch.setattr(wrapper, "REPO", repo)
+    monkeypatch.setattr(wrapper, "_warn_about_dirty_tracked_files", lambda: None)
+    monkeypatch.setattr(wrapper, "_warn_about_hidden_tracked_file_flags", lambda: None)
+
+    dest = tmp_path / "out.tar"
+    try:
+        wrapper._write_tar_of_repo(dest, [], include_untracked=False)
+    except SystemExit as exc:
+        assert "dir/secret.txt" in str(exc)
+        assert "outside the repository root" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit for a symlinked ancestor directory")
+
+
 def test_write_tar_of_repo_does_not_recurse_into_submodule_directory(tmp_path: Path, monkeypatch) -> None:
     # `git ls-files` lists an initialized submodule as a single path that
     # happens to be a real DIRECTORY on disk. `tarfile.add` recursively
@@ -1008,10 +1120,11 @@ def test_warn_about_dirty_tracked_files_does_not_warn_about_untracked_files(
     assert capsys.readouterr().err == ""
 
 
-def test_warn_about_dirty_tracked_files_fails_closed_when_status_itself_fails() -> None:
+def test_warn_about_dirty_tracked_files_fails_closed_when_status_itself_fails(monkeypatch) -> None:
     # A failed `git status` must never be silently treated as "clean" --
     # this check is the runtime mitigation for accidental secret exposure,
     # so an unknown dirty state must abort the snapshot, not proceed.
+    monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: [])
     fake_result = mock.Mock(returncode=128, stdout=b"", stderr=b"not a git repository")
     with mock.patch.object(wrapper.subprocess, "run", return_value=fake_result):
         try:
@@ -1046,7 +1159,8 @@ def test_warn_about_hidden_tracked_file_flags_silent_when_none_flagged() -> None
         wrapper._warn_about_hidden_tracked_file_flags()
 
 
-def test_warn_about_hidden_tracked_file_flags_fails_closed_when_ls_files_fails() -> None:
+def test_warn_about_hidden_tracked_file_flags_fails_closed_when_ls_files_fails(monkeypatch) -> None:
+    monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: [])
     fake_result = mock.Mock(returncode=128, stdout=b"", stderr=b"not a git repository")
     with mock.patch.object(wrapper.subprocess, "run", return_value=fake_result):
         try:

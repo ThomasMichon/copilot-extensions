@@ -1713,3 +1713,55 @@ works; `check-docs-consistency.py` and `check-effort-vision-structure.py`
 both pass. Docker cleanup (no leftover `test-isolation` volumes) and host
 `git status --short` reconfirmed clean of anything beyond this round's
 own diff.
+
+### 2026-10-03 — Review round 15 (twentieth pass): 2 HIGH findings addressed (process-filter + working-tree-attribute bypass, symlinked-ancestor archiving escape)
+A twentieth review pass of commit `85021d558` surfaced 2 new HIGH
+findings plus 5 restated (1 previously-missed MEDIUM about CI coverage
+already fixed, 2 MEDIUM already handled by existing per-invocation
+volume code, 2 LOW PR-metadata items already corrected in the PR body
+directly). HIGH: the previous pass's clean-filter neutralization had two
+remaining gaps, both confirmed live. First, `check-attr --cached` only
+consults the COMMITTED/staged `.gitattributes`, silently missing an
+uncommitted working-tree edit that assigns a brand-new filter -- fixed
+by dropping `--cached` so discovery honors the actual working-tree file,
+the same one a real `git status`/`diff` probe itself consults. Second,
+a configured `filter.<name>.process` (a separate, higher-precedence
+protocol) still executes host code during `git status` even with
+`.clean` neutralized -- confirmed live with a toy process-filter script
+(marker created, git prints protocol errors to stderr but `status`
+still exits 0). Fixed by also forcing `filter.<name>.process` empty for
+every discovered name. `_discover_configured_clean_filters` was also
+changed to FAIL CLOSED (raise `SystemExit`) on any subprocess failure
+rather than degrading to an empty list -- silently treating "couldn't
+determine" as "nothing to neutralize" would be exactly the false safety
+this probe exists to prevent.
+
+HIGH: a tracked path's own ANCESTOR directory can be replaced on disk
+with a symlink pointing outside `REPO` -- confirmed live that
+`os.path.lexists` on the full path doesn't catch this (it only checks
+the FINAL component's own link status; the OS still transparently
+follows an intermediate symlinked directory to reach a real file living
+elsewhere), so `_write_tar_of_repo` would otherwise archive an external
+file's real bytes under the tracked path's name. Fixed by checking each
+path's PARENT directory's resolved real path against `REPO`'s own real
+path before archiving (deliberately not the leaf itself, which may
+legitimately be a tracked symlink stored as a safe, non-dereferenced
+link record); fails closed with a named path on any escape, same
+pattern as the filter-discovery fix.
+
+Re-validated end-to-end: the full unit test suite (97 tests, including 5
+new regression tests -- working-tree-vs-`--cached` attribute discovery,
+fail-closed discovery on subprocess error, a real-git process-filter-
+neutralization-during-status regression mirroring the manual repro, and
+a real-git symlinked-ancestor-directory rejection) passes; 4 pre-existing
+tests that broadly mocked `wrapper.subprocess.run` to simulate a FAILED
+git call needed updating to also stub `_discover_configured_clean_filters`
+(the new fail-closed discovery call was itself tripping on their shared
+mocked failure response before the function under test's own logic ran).
+`check-module-size.py --changed-since origin/dev` passes right at the cap
+(1000 lines, after an aggressive docstring-condensing pass across ten
+functions); a fresh Docker-backed end-to-end run (`ai-attribution`, 98
+passed / 6 skipped) confirms the common case still works; `check-docs-
+consistency.py` and `check-effort-vision-structure.py` both pass. Docker
+cleanup (no leftover `test-isolation` volumes) and host `git status
+--short` reconfirmed clean of anything beyond this round's own diff.
