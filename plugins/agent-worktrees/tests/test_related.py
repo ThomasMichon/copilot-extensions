@@ -2132,15 +2132,19 @@ def test_effective_ai_attribution_discards_narrowing_override_from_an_untrusted_
     }
 
 
-def test_harness_entry_describing_a_different_registered_repo_is_trusted(
+def test_harness_entry_describing_a_different_repo_is_still_untrusted(
     monkeypatch,
 ):
-    """The positive case `_entry_trusted_for_policy_weakening` exists to
-    preserve: an operator's own control-plane config (read from a
-    "harness"-layer anchor, e.g. a facility-wide config repo) describing a
-    DIFFERENT, registered repo must still be trusted -- the whole point of
-    distinguishing self-entries from sibling-describing entries, rather
-    than blanket-excluding "harness"."""
+    """The exact gap round 6 of review caught: an earlier revision trusted
+    a "harness"-layer entry whenever its origin_anchor differed from the
+    DESCRIBED repo's own checkout, reasoning that meant "describing a
+    sibling, not itself." But that path-inequality alone never establishes
+    the "harness" anchor itself is operator-controlled -- an untrusted
+    launch repo A can commit a related.yaml entry describing some OTHER,
+    registered repo B (not A itself) with `audience: private`, and A's
+    path will always differ from B's. Confirms the entry stays untrusted
+    regardless of what it describes, since "harness" carries no positive
+    signal of operator authorship at all."""
     from agent_worktrees import repos as repos_mod
 
     monkeypatch.setattr(
@@ -2150,28 +2154,7 @@ def test_harness_entry_describing_a_different_registered_repo_is_trusted(
     )
     e = RelatedEntry(
         name="sibling-repo", audience="private", origin_layer="harness",
-        origin_anchor="/path/to/the/control-plane-config-repo",
-    )
-    assert related.effective_audience(e) == "private"
-
-
-def test_harness_entry_describing_itself_is_untrusted(monkeypatch):
-    """The negative case: a "harness"-layer entry whose origin_anchor
-    matches the DESCRIBED repo's own registered checkout -- i.e. the repo's
-    own tracked related.yaml contains a self-entry -- must stay untrusted,
-    even though the layer label alone is identical to the trusted sibling
-    case above."""
-    from agent_worktrees import repos as repos_mod
-
-    same_path = "/path/to/untrusted-repo"
-    monkeypatch.setattr(
-        repos_mod, "find_repo",
-        lambda name: SimpleNamespace(local_path=lambda plat=None: same_path)
-        if name == "untrusted-repo" else None,
-    )
-    e = RelatedEntry(
-        name="untrusted-repo", audience="private", origin_layer="harness",
-        origin_anchor=same_path,
+        origin_anchor="/path/to/an/untrusted/launch/repo",
     )
     assert related.effective_audience(e) == ""
 

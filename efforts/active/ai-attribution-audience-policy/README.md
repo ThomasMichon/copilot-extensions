@@ -179,16 +179,16 @@ Finished the two checklist items the stashed diff hadn't reached yet (the
 SKILL.md schema doc + `references/related.yaml` example, and tests covering
 round-trip, normalization, and the audience-keyed disclosure-policy
 resolution/override logic) and trimmed the ported docstrings for brevity so
-`related.py`'s growth (1717 -> 1867 lines, after five rounds of
+`related.py`'s growth (1717 -> 1850 lines, after six rounds of
 review-driven additions) stayed as small as reasonably possible -- still
 required a deliberate, reviewed widen of its shrink-only
 `module-size-baseline.json` entry (a sanctioned path per `CONTRIBUTING.md`'s
 own Code Style section, not a silent bypass). All `related`-module tests
-(190) plus the standard validation suite (`check-module-size`,
+(189) plus the standard validation suite (`check-module-size`,
 `check-docs-consistency`, `check-version-consistency`,
 `check-effort-vision-structure`) pass clean. **Phase 1 is done.**
 
-PR #5084's own review (5 rounds) caught real issues worth recording
+PR #5084's own review (6 rounds) caught real issues worth recording
 candidly: the first round found that every piece of ported documentation
 (this doc, the SKILL.md, `references/related.yaml`, and a `related.py`
 docstring) had inherited a "narrow-only, never widens" framing for the
@@ -278,6 +278,32 @@ harness entry is trusted) and the negative case (a self-describing one
 isn't) as dedicated tests, alongside the existing real-anchor-construction
 test, and corrected `SKILL.md`'s trust-boundary prose to describe the
 actual (self-vs-sibling) rule rather than a plain layer allowlist.
+
+The sixth round proved the fifth round's own "fix" was itself still
+exploitable, for a reason the path-comparison approach could never close:
+comparing the entry's origin against the *described* repo's checkout only
+rules out a target *describing itself* -- it says nothing about whether
+the "harness" anchor (whichever repo happens to be the current launch/
+base) is operator-controlled at all. An untrusted repo A can commit a
+`related.yaml` entry describing a completely different, registered repo B
+(never A itself) with `audience: private`; A's path will always differ
+from B's checkout, so the path-inequality check would wrongly call that
+"describing a sibling, trusted." The fifth round's whole framing -- "tell
+self-entries apart from sibling-describing entries" -- was solving a
+real but narrower problem than the one that actually matters: establishing
+that the *source* itself is operator-controlled, which path-comparison
+alone can never do for a layer ("harness") that by construction means
+"whichever repo you happen to be standing in." Reverted to the fourth
+round's blanket exclusion (`{"machine", "knowledge"}` only, no harness
+special-casing) -- this time keeping it, rather than treating it as an
+interim measure to refine away, since the refinement attempt is now
+proven not just incomplete but actively unsound. Documented the
+resulting functional limitation plainly in `SKILL.md` (a harness-level
+`related.yaml` cannot currently supply `private`/narrowing policy for
+anything) rather than leaving it to be rediscovered as a bug report.
+Replaced the now-invalid "sibling is trusted" test with one proving the
+exact round-6 attack (an untrusted harness entry describing a different
+repo) stays untrusted.
 
 ### 2026-09-19 - Kickoff
 Operator requested rework of `ai-attribution`'s disclosure default from

@@ -1159,60 +1159,43 @@ def effective_ownership(entry: RelatedEntry) -> str:
         return ""
 
 
-# Layers unconditionally trusted to weaken AI-attribution disclosure (claim
-# a `private` audience, or an override that turns a key OFF): "machine"
-# (the machine-local project root harness *setup* writes, never an
-# arbitrary repo checkout) and "knowledge" (the operator's own bound
-# personal knowledge repo). "harness" is NOT unconditionally trusted --
-# see :func:`_entry_trusted_for_policy_weakening` for why and how it's
-# still trusted in the one case that's actually safe. "plugin"/``""``/
-# "unknown" are never trusted (no positive evidence of operator
-# authorship). An untrusted entry can still WIDEN disclosure (claim
-# `public`, or an override that turns a key ON) -- only narrowing requires
-# this trust.
+# Layers trusted to weaken AI-attribution disclosure (claim a `private`
+# audience, or an override that turns a key OFF): "machine" (the
+# machine-local project root harness *setup* writes, never an arbitrary
+# repo checkout) and "knowledge" (the operator's own bound personal
+# knowledge repo). Both are independently, positively provisioned by the
+# operator -- their mere existence as a config source is itself evidence
+# of operator control.
+#
+# "harness" is deliberately NEVER trusted, even to describe a repo OTHER
+# than itself. An earlier revision tried path-comparing the entry's
+# origin against the *described* repo's own checkout (trusting a
+# "harness" entry whenever it describes a sibling, not itself) -- that
+# does correctly block a target's own self-entry, but doesn't establish
+# that the "harness" anchor itself is operator-controlled at all: per
+# ``state_root.config_source_anchors``, "harness" just means "whichever
+# repo happens to be the current launch/base anchor," so an untrusted
+# repo A can commit a `related.yaml` entry describing some OTHER
+# registered repo B (not itself) with `audience: private` -- the path
+# inequality (A != B) would wrongly call that trusted. There is currently
+# no positive signal in this layer that distinguishes "the operator's own
+# control-plane repo" from "an arbitrary repo that happens to be the
+# launch anchor," so it stays untrusted unconditionally until one exists.
+# "repository"/"plugin"/``""``/"unknown" are untrusted for the same
+# reason (no positive evidence of operator authorship). An untrusted
+# entry can still WIDEN disclosure (claim `public`, or an override that
+# turns a key ON) -- only narrowing requires this trust.
 _TRUSTED_FOR_POLICY_WEAKENING = frozenset({"machine", "knowledge"})
 
 
 def _entry_trusted_for_policy_weakening(entry: RelatedEntry) -> bool:
     """Whether ``entry`` may claim a disclosure-*weakening* value (a
     ``private`` audience, or an ``ai_attribution`` override that turns a
-    key off).
-
-    Unconditionally true for :data:`_TRUSTED_FOR_POLICY_WEAKENING` layers.
-    For ``"harness"`` -- per ``state_root.config_source_anchors``, this
-    just means "whichever repo happens to be the current launch/base
-    anchor," which is **either** the operator's own control-plane config
-    describing some *other* repo (legitimate -- an entirely normal way to
-    configure this whole system) **or** the literal target repo's own
-    tracked ``related.yaml`` describing *itself* (the attack this gate
-    exists to block: any contributor to an untrusted repo could otherwise
-    add a self-entry claiming `audience: private`) -- those two cases are
-    told apart by comparing the entry's ``origin_anchor`` against the
-    *described* repo's (``entry.name``'s) own registered checkout path.
-    Different paths -> describing a sibling, trusted. Same path -> a
-    self-entry, untrusted. If ``entry.name`` isn't even a registered repo,
-    there's no checkout path to compare against and no way to verify the
-    entry isn't self-describing, so this fails closed (untrusted) --
-    matching this whole effort's "when in doubt, require disclosure"
-    posture rather than risk a false negative. Any other layer
-    (``"repository"``, ``"plugin"``, ``""``, ``"unknown"``) is always
-    untrusted."""
-    if entry.origin_layer in _TRUSTED_FOR_POLICY_WEAKENING:
-        return True
-    if entry.origin_layer != "harness" or not entry.origin_anchor:
-        return False
-    from . import repos
-
-    reg = repos.find_repo(entry.name)
-    local_path = reg.local_path() if reg else None
-    if not local_path:
-        return False
-    try:
-        return os.path.abspath(str(entry.origin_anchor)) != os.path.abspath(
-            str(local_path)
-        )
-    except Exception:
-        return False
+    key off) -- true only for :data:`_TRUSTED_FOR_POLICY_WEAKENING`
+    layers. See that constant's own comment for why ``"harness"`` is
+    excluded even when it appears to describe a different repo than
+    itself."""
+    return entry.origin_layer in _TRUSTED_FOR_POLICY_WEAKENING
 
 
 def effective_audience(entry: RelatedEntry) -> str:
