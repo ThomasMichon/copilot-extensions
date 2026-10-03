@@ -149,9 +149,15 @@ class SessionForwards:
                 return True
             if self._local_factory is None:
                 return False
-            # By venue port: a dynamic local forward's host port is assigned.
-            wanted_local = {int(v) for v in (getattr(hold, "local_forwards", None) or {}).values()}
-            return not wanted_local <= set(local.get(cs, {}).values())
+            # Each requested forward must be up as asked: a fixed host port maps
+            # to exactly its venue port; a dynamic one (host 0, not yet
+            # assigned) needs some live forward to that venue port.
+            up = local.get(cs, {})
+            for host, venue in (getattr(hold, "local_forwards", None) or {}).items():
+                host, venue = int(host), int(venue)
+                if (venue not in up.values()) if host == 0 else (up.get(host) != venue):
+                    return True
+            return False
 
         lost = any(missing(cs, hold) for cs, hold in holds.items())
         stopped = await self._availability.stopped(holds, refresh=lost)

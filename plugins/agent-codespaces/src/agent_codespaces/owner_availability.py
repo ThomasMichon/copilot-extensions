@@ -31,8 +31,16 @@ log = logging.getLogger("agent-codespaces")
 LISTING_TTL_SECONDS = 60.0
 
 
+#: States that say nothing about the box (GitHub's own ``Unknown``, or a row
+#: without one): an indeterminate answer never gates a CodeSpace.
+_INDETERMINATE = frozenset({"", "unknown"})
+
+
 def _is_down(state: str | None) -> bool:
-    return state is not None and state.lower() != "available"
+    if state is None:
+        return False
+    s = state.strip().lower()
+    return s not in _INDETERMINATE and s != "available"
 
 
 class AvailabilityGate:
@@ -78,7 +86,7 @@ class AvailabilityGate:
             except Exception as exc:
                 log.debug("Connection Owner: listing CodeSpaces failed: %s", exc)
                 return set()
-            self._states = {str(cs.name): str(cs.state) for cs in rows}
+            self._states = {str(cs.name): str(getattr(cs, "state", None) or "") for cs in rows}
             self._listed_at = self._clock()
         states = self._states or {}
         down = {cs for cs in wanted if _is_down(states.get(cs))}

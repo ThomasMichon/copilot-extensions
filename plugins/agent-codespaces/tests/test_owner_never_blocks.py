@@ -117,6 +117,36 @@ async def test_the_listing_runs_off_the_event_loop():
     assert seen and seen[0] is not threading.main_thread()
 
 
+async def test_an_unknown_state_never_gates():
+    """GitHub's own ``Unknown`` (or a row with no state) is indeterminate: the
+    gate fails open, as for a failed listing."""
+    gate = oa.AvailabilityGate(Listing(a="Unknown", b="", c="Shutdown"))
+    assert await gate.stopped(["a", "b", "c"]) == {"c"}
+
+
+async def test_a_local_forward_counts_only_as_requested(store):
+    """A live forward on another host port (say the old dynamic ``49152:3000``
+    after an explicit ``8080:3000`` request) is not the requested one."""
+    listing = Listing(cs="Available")
+    s = sf.SessionForwards(lambda *a: FakeChannel(), local_factory=lambda *a: FakeChannel(),
+                           availability=oa.AvailabilityGate(listing))
+    relays = types.SimpleNamespace(active_codespaces=lambda: {"cs"})
+
+    def hold(local):
+        return {"cs": types.SimpleNamespace(daemon_port=None, reverse_forwards={}, local_forwards=local)}
+
+    s.active_local_forwards = lambda: {"cs": {49152: 3000}}
+    await s.usable(hold({8080: 3000}), relays)  # first read lists
+    calls = listing.calls
+    await s.usable(hold({8080: 3000}), relays)
+    assert listing.calls == calls + 1  # 8080 isn't up: re-listed before any rebuild
+    await s.usable(hold({0: 3000}), relays)  # a dynamic request is satisfied by any host port
+    assert listing.calls == calls + 1
+    s.active_local_forwards = lambda: {"cs": {8080: 3000}}
+    await s.usable(hold({8080: 3000}), relays)
+    assert listing.calls == calls + 1
+
+
 # -- the Owner -----------------------------------------------------------------
 
 def _owner(listing: Listing, relays: dict, daemons: dict) -> owner.ConnectionOwner:
