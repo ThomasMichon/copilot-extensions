@@ -1,34 +1,19 @@
 """Where a coverage baseline's correlation *pointer* lives on `main`, and
 how it is correlated.
 
-Realizes this effort's own 2026-10-01 Phase 0 storage/correlation decision
-(see `efforts/active/coverage-guided-ci/README.md`'s Journal) -- **revised
-2026-10-03** after that decision's first real end-to-end run (all 9
-enrolled plugins producing a baseline in the same promotion) hit a hard
-GitHub limit the original decision didn't anticipate: two plugins'
-(`agent-dispatch`, `agent-worktrees`) full per-line coverage JSON exceeded
-100MB, and `git push` outright refuses a commit containing them (see
-`ThomasMichon/copilot-extensions#5075`). The original decision's own
-reasoning (reuse the promotion pipeline's existing commit+tag correlation
-mechanism, never invent a second one) still holds -- it was only ever the
-*payload size*, not the *correlation mechanism*, that was wrong.
-
-**Current (hybrid) design:** `main`'s tree still carries one small, git-
-history-walkable **pointer** file per plugin at `baseline_path_on_main`
-(unchanged path/convention, unchanged consumer:
-`ancestor_resolution.resolve_nearest_baseline` keeps walking `main`'s own
-git history of this file exactly as Phase 2 already implemented and
-tested it -- nothing there needed to change). What changed is the
-pointer's **content**: it is no longer the full per-line coverage map,
+`main`'s tree carries one small, git-history-walkable **pointer** file per
+plugin at `baseline_path_on_main` -- never the full per-line coverage map,
 only `measured_commit` + `release_tag` + `asset` (a few hundred bytes,
 regardless of plugin suite size). The actual per-line coverage data is
-published as a **GitHub Release asset**, tagged independently of the
-promotion's own `main` tag -- see `release_tag_for` below -- so it never
-touches a git tree or a git push size limit at all. A reader resolves the
-nearest qualifying pointer via ordinary git history (unchanged, no network
-I/O), then fetches that generation's real coverage map from its Release
-asset (new network I/O, a separate explicit step -- Phase 3 wiring, not
-yet implemented here).
+published separately as a **GitHub Release asset**, tagged on the
+measured `dev` commit itself (see `release_tag_for`), decoupled from the
+promotion pipeline's own `main`-side tag. A reader resolves the nearest
+qualifying pointer via ordinary git history
+(`ancestor_resolution.resolve_nearest_baseline`, no network I/O), then
+fetches that generation's real coverage map from its Release asset (new
+network I/O, a separate explicit step -- Phase 3 wiring, not yet
+implemented here). See `efforts/active/coverage-guided-ci/README.md`'s own
+Journal for how and why this design was chosen (and later revised).
 
 This repo's existing `.github/release-pipeline-state.json` already records
 `last_promotion.dev_head` -- the `dev` commit each `main` promotion was

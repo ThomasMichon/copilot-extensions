@@ -691,13 +691,10 @@ jobs:
           fi
       - name: Publish coverage baselines as a GitHub Release (durable evidence for this dev commit)
         if: steps.decide.outputs.proceed == 'true'
-        # 2026-10-03: the full per-line coverage-baseline JSON for two
-        # plugins (`agent-dispatch`, `agent-worktrees`) exceeds GitHub's
-        # 100MB per-file git push limit outright -- confirmed live, the
-        # very first run with all 9 enrolled plugins producing a baseline
-        # (ThomasMichon/copilot-extensions#5075). The full payload is
-        # published here, as a Release asset, instead of ever entering a
-        # git tree; `promote_release.py`'s own
+        # The full per-line coverage-baseline JSON for a large plugin
+        # suite can exceed GitHub's 100MB per-file git push limit, so the
+        # full payload is published here, as a Release asset, instead of
+        # ever entering a git tree; `promote_release.py`'s own
         # `_write_coverage_baselines_into_scratch` checks in only a small
         # correlation POINTER (a few hundred bytes) referencing this
         # release -- see `tools/coverage_guided_selection/correlation.py`'s

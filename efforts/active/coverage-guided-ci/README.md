@@ -122,28 +122,23 @@ order.
       (the vision deliberately left this open; this effort makes the call).
       Must satisfy the vision's attribution-correctness Behavior: measured
       against `dev`'s own pre-vendor-materialization source form.
-      **Decided 2026-10-01, revised 2026-10-03:** a small correlation
-      **pointer** (`measured_commit` + `release_tag` + `asset`) is checked
-      into `main`, piggybacking on the promotion pipeline's own existing
+      **Current decision (see Journal for the full history, including a
+      2026-10-03 revision):** a small correlation **pointer**
+      (`measured_commit` + `release_tag` + `asset`) is checked into
+      `main`, piggybacking on the promotion pipeline's own existing
       commit-per-promotion + `promote-<timestamp>-<sha>` tag — this repo
       already has a trusted, audited correlation mechanism
       (`.github/release-pipeline-state.json`'s `last_promotion.dev_head`,
       recording the exact `dev` commit each `main` promotion was measured
       against). The full per-line coverage map itself is published
-      separately as a **GitHub Release asset**, tagged on the `dev` commit
-      it was measured against (`coverage-baselines-<dev_head[:12]>`) —
-      reversing the original decision's own rejection of a Release-asset
-      path, after that decision's first real end-to-end run hit a hard
-      wall it didn't anticipate: two plugins' (`agent-dispatch`,
-      `agent-worktrees`) full baseline JSON exceeded GitHub's 100MB
-      per-file git push limit outright
-      (`ThomasMichon/copilot-extensions#5075`). Attribution correctness is
-      unaffected either way: measurement happens against `dev`'s own source
-      form regardless of which branch/mechanism later stores the resulting
-      JSON, and Phase 2's already-merged `ancestor_resolution.py` keeps
-      working completely unchanged (it only ever walked `main`'s git
-      history of the small pointer file, never the payload). See this
-      entry's own Journal note for the fuller rationale.
+      separately as a **GitHub Release asset**, tagged on the `dev`
+      commit it was measured against (`coverage-baselines-<dev_head[:12]>`).
+      Attribution correctness is unaffected either way: measurement
+      happens against `dev`'s own source form regardless of which
+      branch/mechanism later stores the resulting JSON, and Phase 2's
+      already-merged `ancestor_resolution.py` works unchanged either way
+      (it only ever walks `main`'s git history of the small pointer file,
+      never the payload).
 - [x] Spike coverage collection inside `validate-and-promote.yml`'s existing
       `full`/`worktree-manager` jobs (no new job; instrument the existing
       one) and confirm the artifact it produces round-trips through the

@@ -436,24 +436,18 @@ def _write_coverage_baselines_into_scratch(
     for every ``*.json`` baseline file found in ``baselines_dir``, after
     verifying each one's own ``measured_commit`` matches ``dev_head``.
 
-    **2026-10-03 revision** (see `correlation.py`'s own module docstring
-    for the full rationale): this used to check the ENTIRE baseline
-    document -- including its full per-line coverage map -- into the
-    generated commit's tree. A real run with all 9 enrolled plugins
-    producing a baseline hit a hard wall: two plugins' full baseline JSON
-    exceeded GitHub's 100MB per-file push limit outright
-    (`ThomasMichon/copilot-extensions#5075`). The full per-line data is now
-    expected to **already be published** as a GitHub Release (one asset
-    per plugin, tag `_release_tag_for(dev_head)`) by the caller
-    (`validate-and-promote.yml`'s own "Publish coverage baselines" step)
-    BEFORE this function ever runs -- this function only ever commits a
-    pointer (`measured_commit` + `release_tag` + `asset`, a few hundred
-    bytes regardless of plugin suite size) referencing that already-
-    published release, never the payload itself. This script deliberately
-    does NOT verify the release actually exists (it has no `gh`/network
-    dependency anywhere else and this would be its only one) -- a
-    nonexistent release for a committed pointer would be a caller-side
-    ordering bug in the workflow, not something this pure git/tree-
+    The full per-line data is expected to **already be published** as a
+    GitHub Release (one asset per plugin, tag `_release_tag_for(dev_head)`)
+    by the caller (`validate-and-promote.yml`'s own "Publish coverage
+    baselines" step) BEFORE this function ever runs -- this function only
+    ever commits a pointer (`measured_commit` + `release_tag` + `asset`, a
+    few hundred bytes regardless of plugin suite size) referencing that
+    already-published release, never the payload itself. This script
+    deliberately does NOT verify the release actually exists (it has no
+    `gh`/network dependency anywhere else and this would be its only one)
+    -- a nonexistent release for a committed pointer would be a
+    caller-side ordering bug in the workflow, not something this pure
+    git/tree-
     building tool can meaningfully check locally.
 
     Call ``_seed_coverage_baselines_from_main`` first (see its own
@@ -491,6 +485,13 @@ def _write_coverage_baselines_into_scratch(
                 f"{dev_head!r} -- refusing to check in a mismatched baseline"
             )
         plugin = data.get("plugin") or src.stem
+        if plugin != src.stem:
+            raise PromotionError(
+                f"coverage baseline {src.name!r} embeds plugin {plugin!r}, "
+                f"which does not match its own file name -- refusing to "
+                f"write a pointer whose asset name would not match the "
+                f"file it was actually collected as"
+            )
         pointer = {
             "schema": "copilot-extensions.coverage-baseline-pointer",
             "plugin": plugin,
@@ -632,12 +633,11 @@ def promote(
     ``COVERAGE_BASELINES_DIR`` -- see
     ``_write_coverage_baselines_into_scratch``'s own docstring for the
     ``measured_commit`` consistency check this performs before accepting
-    any of them, and for the 2026-10-03 revision that moved the full
-    per-line data out to a GitHub Release asset the caller must publish
-    before calling this. Written only after the no-op content check
-    (alongside the pipeline state file), so a baseline update alone --
-    with no real `dev` content change -- never forces a vacuous
-    promotion."""
+    any of them, and for the full per-line data's own publication contract
+    (a GitHub Release asset the caller must publish before calling this).
+    Written only after the no-op content check (alongside the pipeline
+    state file), so a baseline update alone -- with no real `dev` content
+    change -- never forces a vacuous promotion."""
     dev_head = _rev_parse(dev_ref, cwd=repo)
     if dev_head is None:
         raise PromotionError(f"cannot resolve dev ref: {dev_ref!r}")

@@ -309,8 +309,8 @@ def test_promote_checks_in_a_matching_coverage_baseline(tmp_path: Path, repo: Pa
         ["show", f"{report['commit']}:{pr.COVERAGE_BASELINES_DIR}/demo-plugin.json"], repo
     )
     data = json.loads(checked_in)
-    # Only the small correlation pointer is checked in (2026-10-03 revision,
-    # #5075) -- never the full per-line coverage map, which could be
+    # Only the small correlation pointer is checked in -- never the full
+    # per-line coverage map, which could be
     # arbitrarily large.
     assert data["measured_commit"] == dev_head
     assert data["plugin"] == "demo-plugin"
@@ -339,6 +339,36 @@ def test_promote_refuses_a_coverage_baseline_measured_against_a_different_commit
     )
 
     with pytest.raises(pr.PromotionError, match="measured against"):
+        pr.promote(
+            repo=repo, dev_ref="dev", main_ref="main", push=False,
+            coverage_baselines_dir=baselines_dir,
+        )
+
+
+def test_promote_refuses_a_coverage_baseline_whose_plugin_field_mismatches_its_filename(
+    tmp_path: Path, repo: Path,
+):
+    """A baseline file named `<plugin>.json` whose embedded `plugin` field
+    names a DIFFERENT plugin must be rejected, not silently accepted and
+    checked in under a pointer whose `asset` name wouldn't match the file
+    it was actually collected as."""
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
+    dev_head = _commit(repo, "demo-plugin: a change")
+    _git(["checkout", "-q", "main"], repo)
+
+    baselines_dir = tmp_path / "baselines"
+    baselines_dir.mkdir()
+    (baselines_dir / "demo-plugin.json").write_text(
+        json.dumps({
+            "plugin": "some-other-plugin",  # mismatches the filename
+            "measured_commit": dev_head,
+            "tests": {}, "coverage": {},
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(pr.PromotionError, match="does not match its own file name"):
         pr.promote(
             repo=repo, dev_ref="dev", main_ref="main", push=False,
             coverage_baselines_dir=baselines_dir,
