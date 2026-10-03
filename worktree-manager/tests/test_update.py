@@ -192,6 +192,19 @@ def test_self_update_without_git_falls_back_to_tarball(monkeypatch, tmp_path):
     from worktree_manager import source_config as sc
     monkeypatch.setattr(self_install.shutil, "which", lambda name: None)
     monkeypatch.setattr(self_install, "local_bin", lambda: tmp_path / "localbin")
+    # Isolate the control-plane provider registry (matches
+    # test_self_install.py's _patch_provider_registry convention) -- this
+    # test exercises the real, unmocked self_install(), which writes a
+    # provider manifest keyed off this directory. Without this patch it
+    # falls through to the REAL ~/.agent-worktrees/control-plane-providers.d
+    # and overwrites the real worktree-manager registration with this
+    # test's own tmp_path-rooted values on any machine that runs this suite
+    # natively, leaving a stale registration that breaks Worktree Manager
+    # resolution long after the test run that caused it had finished.
+    monkeypatch.setattr(
+        self_install, "control_plane_providers_dir",
+        lambda: tmp_path / ".agent-worktrees" / "control-plane-providers.d",
+    )
     sc.set_source(repo="https://github.com/acme/widgets.git", ref="main", root=tmp_path)
     seen = {}
 

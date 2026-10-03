@@ -1,0 +1,9 @@
+{
+  "comment": "Repair a stale control-plane provider manifest without forcing a full reinstall, and fix the self_update test that was corrupting it on local runs (missing control_plane_providers_dir isolation).",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

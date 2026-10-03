@@ -281,6 +281,76 @@ def test_stale_provider_manifest_forces_repair(tmp_path, monkeypatch):
     assert payload["provider_root"] == str(root.resolve())
 
 
+def test_stale_provider_manifest_repair_never_touches_the_payload_slot(tmp_path, monkeypatch):
+    """Regression: a manifest-only repair (marker/slot/binstubs already
+    correct -- only the control-plane provider manifest is stale) must not
+    go through ``_copy_payload``. That path rmtrees the existing version
+    slot before recopying it, which fails with a PermissionError if any
+    OTHER running ``worktree-manager`` instance has that slot's venv open --
+    exactly the shape a routine repair should be safe to run under, not one
+    more way for it to fail.
+    """
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    registry = _patch_provider_registry(monkeypatch, tmp_path)
+    self_install(pd, root=root, dry_run=False)
+
+    manifest = registry / "worktree-manager.json"
+    manifest.write_text(
+        '{"schema_version":1,"provider":"worktree-manager","command":["C:/stale.cmd"],'
+        '"minimum_version":"0.1.0-dev21","provider_root":"C:/stale"}\n',
+        encoding="utf-8",
+    )
+
+    def _boom(*a, **k):
+        raise AssertionError("_copy_payload must not run for a manifest-only repair")
+
+    monkeypatch.setattr(si, "_copy_payload", _boom)
+
+    assert needs_install("1.2.3", root) is True
+    repaired = self_install(pd, root=root, dry_run=False)
+    assert repaired.action == "installed"
+    payload = __import__("json").loads(manifest.read_text(encoding="utf-8"))
+    assert payload["command"] != ["C:/stale.cmd"]
+    assert needs_install("1.2.3", root) is False
+
+
+def test_concurrent_manifest_repairs_do_not_race(tmp_path, monkeypatch):
+    """Regression: two writers racing _write_control_plane_provider_manifest
+    must not share a temp filename -- the loser used to raise
+    FileNotFoundError when os.replace() found the winner had already moved
+    the shared ``.tmp`` file out from under it.
+    """
+    import threading
+
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+
+    errors: list[BaseException] = []
+    start = threading.Barrier(2)
+
+    def _writer():
+        start.wait()
+        try:
+            si._write_control_plane_provider_manifest(pd, root=root)
+        except BaseException as exc:  # noqa: BLE001 -- capture to assert none occurred
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_writer) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    assert errors == []
+    manifest = si._control_plane_provider_manifest_path(pd, root=root)
+    assert manifest.is_file()
+    assert not si._control_plane_provider_manifest_is_stale(pd, root=root)
+
+
 def test_known_legacy_prerename_binstub_is_recognized_and_cleaned(tmp_path, monkeypatch):
     """The pre-rename ``worktree-manager`` plugin prototype (before it became
     agent-worktrees, commit ab0716e28..6512114be) shipped this exact

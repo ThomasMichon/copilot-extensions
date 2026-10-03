@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import subprocess
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -225,7 +226,12 @@ def _write_control_plane_provider_manifest(
 ) -> Path:
     path = _control_plane_provider_manifest_path(payload_dir, root=root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
+    # A unique per-writer temp name -- a concurrent repair (two
+    # worktree-manager instances independently detecting and fixing the
+    # same stale manifest) must not race on one shared ``.tmp`` file, where
+    # the loser's os.replace() would raise FileNotFoundError after the
+    # winner already moved it.
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     tmp.write_text(
         json.dumps(
             _expected_control_plane_provider_manifest(payload_dir, root=root),
@@ -317,13 +323,21 @@ def status(root: Path | None = None) -> SelfInstallStatus:
     )
 
 
-def needs_install(version: str, root: Path | None = None) -> bool:
+def _core_install_satisfied(version: str, root: Path | None = None) -> bool:
+    """Marker/slot/binstubs match ``version`` -- independent of the manifest."""
     r = root or default_root()
-    return not (
+    return (
         current_version(r) == version
         and version_slot(version, r).is_dir()
         and binstub_present() is not None
         and not _binstubs_are_stale()
+    )
+
+
+def needs_install(version: str, root: Path | None = None) -> bool:
+    r = root or default_root()
+    return not (
+        _core_install_satisfied(version, r)
         and not _control_plane_provider_manifest_is_stale(root=r)
     )
 
@@ -808,6 +822,16 @@ def self_install(
     if not needs_install(version, r):
         return SelfInstallResult(version=version, action="already-current", root=str(r),
                                  slot=str(slot), marker=version, cleaned=cleaned)
+    if _core_install_satisfied(version, r):
+        # Only the manifest is stale -- repair it directly rather than
+        # falling through to the lease-guarded _copy_payload below, which
+        # would pointlessly rmtree + recopy an already-good (possibly
+        # in-use) version slot.
+        _write_control_plane_provider_manifest(pd, root=r)
+        return SelfInstallResult(
+            version=version, action="installed", root=str(r), slot=str(slot),
+            marker=version, cleaned=cleaned,
+        )
     # Hold the cutover lease across BOTH the stale-passive reap AND
     # _copy_payload itself -- releasing it in between (or skipping it on a
     # busy timeout or missing dependency) would reopen the exact race this
