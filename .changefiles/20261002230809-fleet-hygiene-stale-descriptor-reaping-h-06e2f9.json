@@ -1,9 +1,0 @@
-{
-  "comment": "Fleet hygiene: stale-descriptor reaping, heartbeat liveness, bounded resources",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "dev"
-    }
-  ]
-}

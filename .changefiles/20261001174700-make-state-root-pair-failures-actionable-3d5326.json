@@ -1,9 +1,0 @@
-{
-  "comment": "Make state-root pair failures actionable from repository anchors",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "test_runtime_gate: derive venv site-packages path from layout instead of spawning a subprocess, fixing an intermittent failure specific to the coverage-baseline collection harness",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

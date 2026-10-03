@@ -1,9 +1,0 @@
-{
-  "comment": "Add 'registrar vocabulary' CLI (aggregates active declarations' filter-dimension values) and a '--criteria-json' flag on create/propose that merges a JSON array of tokens into --label.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "minor"
-    }
-  ]
-}

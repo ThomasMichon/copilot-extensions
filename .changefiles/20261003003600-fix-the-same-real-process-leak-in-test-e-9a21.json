@@ -1,9 +1,0 @@
-{
-  "comment": "Fix the same real-process leak (#5044) in test_e2e_delivery.py: all five real self_update(dry_run=False) calls in that file reached the real, unmocked mux-daemon cutover step, which can spawn a detached background OS process and leak a persistent Windows user-PATH mutation. Add a shared mock_cutover fixture (mirroring test_update.py's established mitigation) and apply it to every test in the file",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

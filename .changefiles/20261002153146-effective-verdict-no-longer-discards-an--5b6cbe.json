@@ -1,9 +1,0 @@
-{
-  "comment": "effective_verdict() no longer discards an APPROVED review on a raw commit-SHA mismatch unless the repo's own branch-protection policy actually dismisses stale reviews on push (copilot-extensions#2060); GitHub/Gitea repo-policy reads now populate dismiss_stale_reviews, and a confirmed-non-dismissing repo keeps a clean rebase's approval instead of requiring a fresh review.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

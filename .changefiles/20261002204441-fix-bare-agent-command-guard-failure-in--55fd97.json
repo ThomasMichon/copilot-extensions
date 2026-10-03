@@ -1,9 +1,0 @@
-{
-  "comment": "Fix bare-agent-command guard failure in cleaning-codespaces skill",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

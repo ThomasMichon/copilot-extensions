@@ -1,9 +1,0 @@
-{
-  "comment": "Recreate/remove a live fleet member whose discovered security profile has drifted from its fleet's current (non-restricted) containers.yaml config, instead of silently no-oping (up --recreate) or hard-refusing (rm).",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}

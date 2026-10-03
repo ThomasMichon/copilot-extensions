@@ -1,9 +1,0 @@
-{
-  "comment": "Fix marketplace guard failures in troubleshooting-agent-dispatch skill",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

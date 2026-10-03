@@ -1,9 +1,0 @@
-{
-  "comment": "repository-issue-loop: add rehearsal_mode to park fully-bound tasks as proposed until explicitly approved",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "dev"
-    }
-  ]
-}

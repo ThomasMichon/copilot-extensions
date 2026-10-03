@@ -1,9 +1,0 @@
-{
-  "comment": "Fix a live-session message's rendered `from=` (sender) to use the same resolvable worktree handle as `reply-to=`, instead of the raw `agent-worktrees get worktree-dir` filesystem path. The receiver's envelope previously showed a sender address that could never actually resolve as a send target, so an agent that naturally tried `send <from> \"...\"` (reply to whoever it looked like the message came from) failed, even though `reply-to` worked all along. Also add explicit reply-to routing guidance to ordinary (\"prompt\" kind) deliveries, matching the guidance notify/status-check messages already carried, so the receiver is told to use reply-to even when an explicit --sender override still diverges from it.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

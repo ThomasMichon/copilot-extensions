@@ -1,9 +1,0 @@
-{
-  "comment": "Fix async-cancellation race in verification-drain shutdown (coroutine awaiting asyncio.to_thread could return before the underlying thread finished, racing tmp_path teardown under coverage instrumentation); enroll in coverage-guided-ci Phase 1",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

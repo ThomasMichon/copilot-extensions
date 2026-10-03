@@ -1,9 +1,0 @@
-{
-  "comment": "doctor: report plugin-catalog alignment (coverage) alongside daemon health",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "dev"
-    }
-  ]
-}

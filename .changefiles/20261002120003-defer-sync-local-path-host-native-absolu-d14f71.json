@@ -1,9 +1,0 @@
-{
-  "comment": "Defer sync.local_path host-native absoluteness check until the final resolved sync.target is known, so a repo-shared facility value inapplicable to this machine's own target (e.g. a POSIX path read on a Windows ssh-target machine) no longer crashes the whole config load",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

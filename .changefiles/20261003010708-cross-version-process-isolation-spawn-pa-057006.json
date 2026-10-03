@@ -1,9 +1,0 @@
-{
-  "comment": "Cross-version process isolation: spawn_passive no longer pins cwd inside the target slot; terminate_mux_daemon_pid is identity-bound via zdd.diagnostics",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

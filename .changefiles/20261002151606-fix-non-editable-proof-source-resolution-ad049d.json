@@ -1,9 +1,0 @@
-{
-  "comment": "fix non-editable proof source resolution",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

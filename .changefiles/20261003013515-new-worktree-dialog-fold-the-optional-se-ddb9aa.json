@@ -1,9 +1,0 @@
-{
-  "comment": "New-worktree dialog: fold the optional seed prompt directly into ScopeDlgScreen (one dialog, not two) -- content stack header/Prompt/Additional options/Create-Cancel, three focus stops (prompt, list, buttons), Create still default. Retires the now-unused SeedPromptScreen.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "minor"
-    }
-  ]
-}

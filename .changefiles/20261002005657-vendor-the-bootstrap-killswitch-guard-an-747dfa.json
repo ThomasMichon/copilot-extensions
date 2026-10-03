@@ -1,9 +1,0 @@
-{
-  "comment": "Vendor the bootstrap-killswitch guard and call it from the sessionStart hook",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

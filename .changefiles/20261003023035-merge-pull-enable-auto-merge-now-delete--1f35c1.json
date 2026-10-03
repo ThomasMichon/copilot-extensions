@@ -1,9 +1,0 @@
-{
-  "comment": "merge_pull/enable_auto_merge now delete the source branch by default (delete_source_branch, honoring pr.delete_source_branch config), matching request_auto_complete's existing default",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "minor"
-    }
-  ]
-}

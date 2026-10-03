@@ -1,9 +1,0 @@
-{
-  "comment": "cleaning-codespaces/codespaces-lifecycle: strongly document that gh codespace list's gitStatus field only reflects the CodeSpace's own bound repo, not a sibling product-repo checkout under /workspaces/ -- use 'verify' (or a direct per-repo check) instead",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

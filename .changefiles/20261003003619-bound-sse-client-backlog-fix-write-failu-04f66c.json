@@ -1,9 +1,0 @@
-{
-  "comment": "Bound SSE client backlog, fix write-failure temp-file cleanup, propagate registry read errors",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "dev"
-    }
-  ]
-}
