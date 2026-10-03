@@ -57,8 +57,9 @@ For every candidate, report:
    at least one the raw field didn't flag as having unpushed work turned out
    to have a genuinely uncommitted file and an unpushed commit in its real
    sibling product-repo checkout. **Do not use that raw field, from
-   any repo-scoped `gh` or `agent-codespaces list` call, to decide dirty vs.
-   clean for a multi-repo workspace.** Use `<agent-codespaces catalog argv[0]>
+   any repo-scoped `gh` or `<agent-codespaces catalog argv[0]> list` call, to
+   decide dirty vs. clean for a multi-repo workspace.** Use
+   `<agent-codespaces catalog argv[0]>
    verify <name> --json` instead -- its cleanliness probe scans *every* git
    repo under `/workspaces/*` and aggregates `dirty`/`ahead`/
    `unpushed_branches` across all of them (see `cleanliness.py`'s
