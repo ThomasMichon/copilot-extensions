@@ -187,7 +187,17 @@ def _compile_internal_token(raw: dict, *, context: str) -> str:
             f"{context}: unknown field{plural} {sorted(unknown)!r} (expected one "
             f"of: {', '.join(sorted(_KNOWN_ENTRY_FIELDS))}) -- check for a typo"
         )
-    token = str(raw.get("token", "") or "").strip()
+    raw_token = raw.get("token")
+    if raw_token is None:
+        raise BlocklistParseError(f"{context}: missing required 'token' field")
+    if not isinstance(raw_token, str):
+        raise BlocklistParseError(
+            f"{context}: 'token' must be a string, got {raw_token!r} -- quote "
+            "it in YAML if it looks like a number, boolean, or null (e.g. "
+            "PyYAML parses an unquoted `yes`/`on`/`true` as a boolean), or "
+            "the authored identifier would silently go unenforced"
+        )
+    token = raw_token.strip()
     if not token:
         raise BlocklistParseError(f"{context}: missing required 'token' field")
     if "\n" in token or "\r" in token or ";" in token:

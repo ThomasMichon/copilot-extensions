@@ -264,6 +264,58 @@ def test_live_sweep_merges_into_load_identifier_data(repo: Path, monkeypatch: py
     assert reasons["swept-token"] == "swept reason"
 
 
+def test_live_sweep_rejects_non_list_entries(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 0
+        stdout = json.dumps({"error": None, "entries": "not-a-list"})
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    with pytest.raises(module.LiveSweepFailure):
+        module._load_live_sweep_identifiers()
+
+
+def test_live_sweep_rejects_non_mapping_entry(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 0
+        stdout = json.dumps({"error": None, "entries": ["not-a-mapping"]})
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    with pytest.raises(module.LiveSweepFailure):
+        module._load_live_sweep_identifiers()
+
+
+def test_live_sweep_rejects_entry_with_missing_or_non_string_token(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """A successful subprocess response of `{"entries": [{}]}` must fail
+    closed rather than silently producing an empty token that
+    `_load_identifier_data()` would just drop -- an empty/non-string token
+    means the live-sweep protocol itself is malformed, which the guard must
+    never silently accept."""
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 0
+        stdout = json.dumps({"error": None, "entries": [{}]})
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    with pytest.raises(module.LiveSweepFailure):
+        module._load_live_sweep_identifiers()
+
+
 def test_live_sweep_raises_on_nonzero_exit(repo: Path, monkeypatch: pytest.MonkeyPatch):
     module = _load_module(repo)
     monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)

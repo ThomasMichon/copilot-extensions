@@ -288,15 +288,38 @@ def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
             + (f" (exit {proc.returncode})" if proc.returncode != 0 else ""),
             [],
         )
-    pairs = [
-        (
-            "regex:" + e["token"][len("regex:"):]
-            if str(e.get("token", "")).lower().startswith("regex:")
-            else str(e.get("token", "")).lower(),
-            (str(e["reason"]).strip() or None) if e.get("reason") else None,
+    entries_raw = payload.get("entries")
+    if not isinstance(entries_raw, list):
+        raise LiveSweepFailure(
+            "agent-worktrees identifiers sweep failed: malformed --format "
+            f"json output ('entries' must be a list, got "
+            f"{type(entries_raw).__name__})",
+            [],
         )
-        for e in payload.get("entries", [])
-    ]
+    pairs: list[tuple[str, str | None]] = []
+    for idx, e in enumerate(entries_raw):
+        if not isinstance(e, dict):
+            raise LiveSweepFailure(
+                "agent-worktrees identifiers sweep failed: malformed "
+                f"--format json output (entry #{idx + 1} must be a mapping, "
+                f"got {type(e).__name__})",
+                pairs,
+            )
+        token = e.get("token")
+        if not isinstance(token, str) or not token.strip():
+            raise LiveSweepFailure(
+                "agent-worktrees identifiers sweep failed: malformed "
+                f"--format json output (entry #{idx + 1} has a missing or "
+                "non-string 'token')",
+                pairs,
+            )
+        reason = e.get("reason")
+        low = (
+            "regex:" + token[len("regex:"):]
+            if token.lower().startswith("regex:")
+            else token.lower()
+        )
+        pairs.append((low, (str(reason).strip() or None) if reason else None))
     if proc.returncode != 0:
         detail = payload.get("error") or (proc.stderr.strip() or "no details")
         raise LiveSweepFailure(

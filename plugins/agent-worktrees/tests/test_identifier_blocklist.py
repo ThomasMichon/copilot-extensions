@@ -116,6 +116,24 @@ def test_compile_internal_token_empty_token_raises():
         iblk._compile_internal_token({}, context="t")
 
 
+def test_compile_internal_token_rejects_non_string_token():
+    """PyYAML parses an unquoted `yes`/`on`/`true`/`123` as a non-string
+    scalar -- coercing it with str() would silently turn the authored
+    identifier into e.g. "True" and leave the intended term unenforced
+    while reporting a successful parse."""
+    with pytest.raises(iblk.BlocklistParseError, match="must be a string"):
+        iblk._compile_internal_token({"token": True}, context="t")
+    with pytest.raises(iblk.BlocklistParseError, match="must be a string"):
+        iblk._compile_internal_token({"token": 123}, context="t")
+
+
+def test_parse_blocklist_file_rejects_unquoted_boolean_token(tmp_path: Path):
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("entries:\n  - token: yes\n", encoding="utf-8")
+    with pytest.raises(iblk.BlocklistParseError, match="must be a string"):
+        iblk.parse_blocklist_file(f, "r", "public")
+
+
 def test_compile_internal_token_unknown_kind_raises():
     with pytest.raises(iblk.BlocklistParseError, match="unknown kind"):
         iblk._compile_internal_token({"token": "x", "kind": "bogus"}, context="t")
