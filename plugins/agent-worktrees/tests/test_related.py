@@ -2011,10 +2011,13 @@ def test_upsert_merges_audience_and_ai_attribution(tmp_path: Path):
 
 def test_effective_audience_never_derives():
     """Unlike effective_ownership, an unset audience must stay empty --
-    there is no derivation fallback to guess it from."""
+    there is no derivation fallback to guess it from. Uses a trusted
+    origin_layer so the policy-weakening trust gate (see the dedicated
+    "untrusted source" tests below) isn't what's under test here."""
     assert related.effective_audience(RelatedEntry(name="x")) == ""
     assert related.effective_audience(
-        RelatedEntry(name="x", audience="private")) == "private"
+        RelatedEntry(name="x", audience="private", origin_layer="knowledge")
+    ) == "private"
 
 
 def test_effective_ai_attribution_defaults_by_audience():
@@ -2030,29 +2033,30 @@ def test_effective_ai_attribution_defaults_by_audience():
     assert related.effective_ai_attribution(RelatedEntry(name="x")) == {
         "disclose_on_open": True, "disclose_on_reply": True,
     }
-    # private defaults both to False.
+    # private (trusted source) defaults both to False.
     assert related.effective_ai_attribution(
-        RelatedEntry(name="x", audience="private")) == {
+        RelatedEntry(name="x", audience="private", origin_layer="knowledge")
+    ) == {
         "disclose_on_open": False, "disclose_on_reply": False,
     }
 
 
 def test_effective_ai_attribution_override_is_per_key_and_verbatim():
-    # A public repo with only disclose_on_open overridden off keeps
-    # disclose_on_reply at its audience-derived default (True) -- the
-    # override is scoped to the key it names, not all-or-nothing.
+    # A public repo (trusted source) with only disclose_on_open overridden
+    # off keeps disclose_on_reply at its audience-derived default (True) --
+    # the override is scoped to the key it names, not all-or-nothing.
     e = RelatedEntry(
-        name="x", audience="public",
+        name="x", audience="public", origin_layer="knowledge",
         ai_attribution={"disclose_on_open": False},
     )
     assert related.effective_ai_attribution(e) == {
         "disclose_on_open": False, "disclose_on_reply": True,
     }
     # A present override key is honored verbatim, in either direction
-    # relative to the audience-derived default -- a private repo (default
-    # False/False) can still explicitly turn disclose_on_reply ON.
+    # relative to the audience-derived default -- a private, trusted repo
+    # (default False/False) can still explicitly turn disclose_on_reply ON.
     e2 = RelatedEntry(
-        name="x", audience="private",
+        name="x", audience="private", origin_layer="knowledge",
         ai_attribution={"disclose_on_reply": True},
     )
     assert related.effective_ai_attribution(e2) == {
@@ -2060,13 +2064,80 @@ def test_effective_ai_attribution_override_is_per_key_and_verbatim():
     }
 
 
-def test_show_json_surfaces_audience_and_resolved_attribution(tmp_path, monkeypatch):
-    """CLI-level proof for the Phase 2 consumer contract: `related show
-    --json` must carry both `audience`/`audience_explicit` and the resolved
-    `ai_attribution` policy, for every audience value including the
-    unclassified fail-open case -- not just the model-level helpers."""
+# ---------------------------------------------------------------------------
+# Untrusted sources must never be able to WEAKEN AI-attribution disclosure
+# (only an operator-controlled overlay layer can claim `private` or turn a
+# disclosure key off) -- they can still WIDEN it freely.
+# ---------------------------------------------------------------------------
+
+def test_effective_audience_discards_private_from_an_untrusted_source():
+    # origin_layer="" (the default -- no graft provenance at all) and
+    # origin_layer="repository" (a target's own tracked related.yaml) are
+    # both untrusted for this purpose.
+    assert related.effective_audience(
+        RelatedEntry(name="x", audience="private")) == ""
+    assert related.effective_audience(
+        RelatedEntry(name="x", audience="private", origin_layer="repository")
+    ) == ""
+    # A "plugin"-layer entry is also untrusted for policy-weakening.
+    assert related.effective_audience(
+        RelatedEntry(name="x", audience="private", origin_layer="plugin")
+    ) == ""
+    # public/internal from an untrusted source are fine either way --
+    # widening (or a no-op) is never a safety concern.
+    assert related.effective_audience(
+        RelatedEntry(name="x", audience="public", origin_layer="repository")
+    ) == "public"
+
+
+def test_effective_ai_attribution_discards_narrowing_override_from_an_untrusted_source():
+    # An untrusted repository-layer entry cannot turn disclose_on_open off
+    # for itself, even though a trusted source could.
+    e = RelatedEntry(
+        name="x", audience="public", origin_layer="repository",
+        ai_attribution={"disclose_on_open": False},
+    )
+    assert related.effective_ai_attribution(e) == {
+        "disclose_on_open": True, "disclose_on_reply": True,
+    }
+    # The same override from a trusted layer IS honored (contrast case).
+    e_trusted = RelatedEntry(
+        name="x", audience="public", origin_layer="harness",
+        ai_attribution={"disclose_on_open": False},
+    )
+    assert related.effective_ai_attribution(e_trusted) == {
+        "disclose_on_open": False, "disclose_on_reply": True,
+    }
+    # An untrusted source turning a key ON (widening) is still honored --
+    # only narrowing is gated.
+    e_widen = RelatedEntry(
+        name="x", audience="private", origin_layer="repository",
+        ai_attribution={"disclose_on_reply": True},
+    )
+    assert related.effective_ai_attribution(e_widen) == {
+        # audience itself was also discarded (untrusted "private" claim),
+        # so the baseline default is True/True; the explicit True override
+        # on disclose_on_reply is a no-op widening, not narrowing.
+        "disclose_on_open": True, "disclose_on_reply": True,
+    }
+
+
+def test_show_and_resolve_json_surface_audience_and_resolved_attribution(
+    tmp_path, monkeypatch
+):
+    """CLI-level proof for the Phase 2 consumer contract: both `related
+    show --json` and `related resolve --json` must carry `audience`
+    (`audience_explicit` for `show`) and the resolved `ai_attribution`
+    policy, for every audience value including the unclassified fail-open
+    case. Uses a trusted (`knowledge`-layer) anchor, since an untrusted
+    (`repository`-layer) source is covered separately below -- see
+    `test_effective_audience_discards_private_from_an_untrusted_source`
+    and its ai_attribution counterpart for that gate's own model-level
+    proof, and the `resolve`-path case here for the full CLI wiring."""
     from agent_worktrees import __main__ as m
     from agent_worktrees import related_cli as cli
+    from agent_worktrees import repos as repos_mod
+    from agent_worktrees import doctor as doctor_mod
 
     anchor = tmp_path / "repo"
     anchor.mkdir()
@@ -2077,11 +2148,23 @@ def test_show_json_surfaces_audience_and_resolved_attribution(tmp_path, monkeypa
             ai_attribution={"disclose_on_reply": True},
         ),
         "plain": RelatedEntry(name="plain"),  # unclassified
+        # An untrusted (repository-layer) source cannot claim private or
+        # narrow a key, even though it's the same raw YAML shape.
+        "untrusted_priv": RelatedEntry(
+            name="untrusted_priv", audience="private",
+            ai_attribution={"disclose_on_open": False},
+        ),
     })
     related.write_related(anchor, cfg)
+    trusted_anchor = related.config_contribution_anchor(anchor, "knowledge")
     monkeypatch.setattr(cli, "_related_anchor", lambda rest: str(anchor))
     monkeypatch.setattr(
-        cli, "_related_lookup_anchors", lambda rest, anc, name: ([anc], False)
+        cli, "_related_lookup_anchors",
+        lambda rest, anc, name: ([trusted_anchor], False),
+    )
+    monkeypatch.setattr(repos_mod, "find_repo", lambda name: None)
+    monkeypatch.setattr(
+        doctor_mod, "_read_projects", lambda: (_ for _ in ()).throw(Exception())
     )
 
     cases = {
@@ -2093,9 +2176,31 @@ def test_show_json_surfaces_audience_and_resolved_attribution(tmp_path, monkeypa
         captured: dict = {}
         monkeypatch.setattr(m, "_json_output", lambda payload: captured.update(payload))
         rc = cli.cmd_related_dispatch(["show", name, "--json"])
-        assert rc == 0
-        assert captured["audience"] == expected_audience
-        assert captured["ai_attribution"] == expected_policy
+        assert rc == 0, name
+        assert captured["audience"] == expected_audience, name
+        assert captured["ai_attribution"] == expected_policy, name
+
+        captured2: dict = {}
+        monkeypatch.setattr(m, "_json_output", lambda payload: captured2.update(payload))
+        rc = cli.cmd_related_dispatch(["resolve", name, "--json"])
+        assert rc == 0, name
+        assert captured2["audience"] == expected_audience, name
+        assert captured2["ai_attribution"] == expected_policy, name
+
+    # The untrusted (repository-layer) override from the SAME anchor path,
+    # un-tagged as a trusted contribution, must not weaken disclosure.
+    monkeypatch.setattr(
+        cli, "_related_lookup_anchors",
+        lambda rest, anc, name: ([anc], False),
+    )
+    captured3: dict = {}
+    monkeypatch.setattr(m, "_json_output", lambda payload: captured3.update(payload))
+    rc = cli.cmd_related_dispatch(["resolve", "untrusted_priv", "--json"])
+    assert rc == 0
+    assert captured3["audience"] == ""  # "private" claim discarded
+    assert captured3["ai_attribution"] == {
+        "disclose_on_open": True, "disclose_on_reply": True,
+    }
 
 
 # ---------------------------------------------------------------------------

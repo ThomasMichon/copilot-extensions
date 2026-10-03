@@ -179,16 +179,16 @@ Finished the two checklist items the stashed diff hadn't reached yet (the
 SKILL.md schema doc + `references/related.yaml` example, and tests covering
 round-trip, normalization, and the audience-keyed disclosure-policy
 resolution/override logic) and trimmed the ported docstrings for brevity so
-`related.py`'s growth (1717 -> 1797 lines, after two rounds of review-driven
-additions) stayed as small as reasonably possible -- still required a
-deliberate, reviewed widen of its shrink-only
+`related.py`'s growth (1717 -> 1826 lines, after three rounds of
+review-driven additions) stayed as small as reasonably possible -- still
+required a deliberate, reviewed widen of its shrink-only
 `module-size-baseline.json` entry (a sanctioned path per `CONTRIBUTING.md`'s
 own Code Style section, not a silent bypass). All `related`-module tests
-(185) plus the standard validation suite (`check-module-size`,
+(187) plus the standard validation suite (`check-module-size`,
 `check-docs-consistency`, `check-version-consistency`,
 `check-effort-vision-structure`) pass clean. **Phase 1 is done.**
 
-PR #5084's own review (2 rounds) caught real issues worth recording
+PR #5084's own review (3 rounds) caught real issues worth recording
 candidly: the first round found that every piece of ported documentation
 (this doc, the SKILL.md, `references/related.yaml`, and a `related.py`
 docstring) had inherited a "narrow-only, never widens" framing for the
@@ -206,6 +206,29 @@ output unconditionally hiding the audience/policy line for the unclassified
 case (it should read "unclassified," not vanish, since that case's
 resolved policy is still the real, fail-open `True`/`True`), and added the
 missing canonical `## Proposal` section this doc had skipped.
+
+The third round caught the most significant gap -- a genuine security hole,
+not a docs mismatch: `effective_audience`/`effective_ai_attribution` honored
+*whichever* grafted entry won, including a target repo's own tracked
+`related.yaml` (the `"repository"` origin layer). An untrusted repo could
+therefore add a self-entry claiming `audience: private` (or a narrowing
+`ai_attribution` override) to suppress its own AI-attribution disclosure --
+exactly the "never the target repo's own tracked config" risk this effort's
+own Guiding Intent named at kickoff, which the implementation had failed to
+actually enforce. Fixed by gating any disclosure-*weakening* claim (a
+`private` audience, or an override that turns a key off) behind a new
+`_TRUSTED_FOR_POLICY_WEAKENING` set (`harness`/`machine`/`knowledge` --
+the operator-controlled overlay layers `read_related_grafted` already
+tracks via `origin_layer`) -- an untrusted source can still *widen*
+disclosure freely, only narrowing requires operator-authored provenance.
+Added both model-level tests (an untrusted `private`/narrowing claim is
+discarded; the identical claim from a trusted layer is honored; widening
+from an untrusted source still works) and a CLI-level `resolve --json`
+assertion proving the same gate holds through the real dispatch path. Also
+updated the two schema docs the earlier rounds hadn't reached
+(`docs/config-reference.md`, `docs/configuration.md`) and added a
+`resolve --json`-level assertion alongside the existing `show --json` one,
+since the former is the actual Phase 2 consumer contract.
 
 ### 2026-09-19 - Kickoff
 Operator requested rework of `ai-attribution`'s disclosure default from

@@ -1159,10 +1159,30 @@ def effective_ownership(entry: RelatedEntry) -> str:
         return ""
 
 
+# Layers trusted to weaken AI-attribution disclosure (claim a `private`
+# audience, or an override that turns a key OFF). These are the
+# operator-controlled overlay layers (see ``read_related_grafted``'s own
+# docstring): the facility's shared harness baseline, a machine-specific
+# override, and the operator's bound personal knowledge repo. Deliberately
+# excludes ``"repository"`` (a target's own tracked, possibly-untrusted
+# related.yaml -- any contributor to that repo could otherwise add a
+# self-entry claiming `audience: private` to suppress disclosure about
+# itself) and ``"plugin"``/``""``/``"unknown"`` (no positive evidence of
+# operator authorship). An untrusted entry can still WIDEN disclosure (claim
+# `public`, or an override that turns a key ON) -- only narrowing requires
+# this trust.
+_TRUSTED_FOR_POLICY_WEAKENING = frozenset({"harness", "machine", "knowledge"})
+
+
 def effective_audience(entry: RelatedEntry) -> str:
     """The authoritative audience for an entry: its explicit value, or ``""``
     (unclassified) when unset -- unlike ``effective_ownership``, there is no
-    derivation fallback to guess it from."""
+    derivation fallback to guess it from. A ``private`` claim from a source
+    not in :data:`_TRUSTED_FOR_POLICY_WEAKENING` is discarded (treated as
+    unclassified) rather than honored -- an untrusted source must never be
+    able to assert the disclosure-exempt case for itself."""
+    if entry.audience == "private" and entry.origin_layer not in _TRUSTED_FOR_POLICY_WEAKENING:
+        return ""
     return entry.audience
 
 
@@ -1172,12 +1192,21 @@ def effective_ai_attribution(entry: RelatedEntry) -> dict[str, bool]:
     ``audience`` (``public``/``internal``/unclassified -> both True;
     ``private`` -> both False), then applies any explicit per-key
     ``ai_attribution`` override on the entry; a key absent from the override
-    stays at its audience-derived default."""
+    stays at its audience-derived default. An override that would turn a key
+    OFF is only honored from a source in
+    :data:`_TRUSTED_FOR_POLICY_WEAKENING` -- from any other source it is
+    discarded (the key stays at its audience-derived default), since an
+    untrusted entry must never be able to narrow disclosure for itself, only
+    widen it."""
     default = effective_audience(entry) != "private"
     resolved = {"disclose_on_open": default, "disclose_on_reply": default}
+    trusted = entry.origin_layer in _TRUSTED_FOR_POLICY_WEAKENING
     for key in ("disclose_on_open", "disclose_on_reply"):
         if key in entry.ai_attribution:
-            resolved[key] = bool(entry.ai_attribution[key])
+            value = bool(entry.ai_attribution[key])
+            if not trusted and value is False and resolved[key] is True:
+                continue
+            resolved[key] = value
     return resolved
 
 
