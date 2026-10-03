@@ -663,6 +663,120 @@ Round 2 (operator's response to that evaluation):
     machine is currently known to need this audit; closing rather than
     leaving an unfulfillable item open against a machine that doesn't exist.
 
+### Phase 7 — Vendorable-aware changefiles, auto-bump propagation, and placeholder versions on `dev`
+
+**Request (verbatim, 2026-10-02):** "For changefiles, we should do some
+hygiene. On both pre-push and CI, we want to check the diff against fresh
+dev, and ensure that the PR adds new changefiles only for the versionable
+things being impacted. There will need to be some cross-checking of
+vendorables, but perhaps we can handle that by making vendorables have their
+own "manifests" with need versioning, and then the aggregator will auto-bump
+any downstream plugin whose upstream venforable got bumped, too. Next, we
+need to remove the actual version values from al manifests in dev, or leave
+placeholders (0.0.0). We should also shut off any hook- or CI-based
+enforcement that would make agents keep editing those values. We only want
+changefiles and auto-bumps."
+
+**Context as of this entry** (research done before drafting this phase,
+PR #4954's investigation having just shown `check-changefile-presence.py`
+only caught under-coverage, never over-coverage, and never covered a
+vendorable's own identity):
+
+- `check-version-bump.py` is **already** retired from enforcement (no
+  pre-push/CI wiring); `check-changefile-presence.py` is the live guard, but
+  today it only catches a touched plugin/vendorable **missing** a
+  changefile entry (one direction) — it was never taught the reverse
+  (an added changefile naming something the diff never touched).
+- `check-version-consistency.py` is **still live** in both `tools/hooks/
+  pre-push` and `ci.yml` — this is the concrete hook/CI enforcement that
+  requires every version-bearing file to already agree, which in practice
+  is the thing that pressures an agent/human to hand-edit version fields
+  back into sync. This is the enforcement the Request's "shut off" asks to
+  remove.
+- A shared lib ("vendorable") has **no independent version/manifest/
+  changefile identity today** — `CONTRIBUTING.md` currently documents that a
+  vendorable change requires a changefile entry naming **every consuming
+  plugin individually** (the fan-out rule `check-version-bump.py`'s
+  `_vendored_consumers()` computes). `accumulate_bumps.py`'s ordinary
+  `compute()` path still requires each consumer to be named explicitly;
+  only its separate `--from-diff` mode does any fan-out, and that fan-out
+  computes the SET of consumers to charge — it does not give the vendorable
+  itself a bumped version other consumers derive from.
+- `promote_release.py` does not regenerate `.github/plugin/marketplace.json`
+  from scratch — it relies on `accumulate_bumps.py`'s incremental
+  `_write_marketplace_entry()` patch. Phase 6's 2026-09-24 Journal entry
+  already flagged `dev`'s `marketplace.json` as needing to become a
+  deliberately non-functional placeholder, generated fresh at promotion
+  time — **never implemented**, and this phase's placeholder-version work
+  is the natural place to finish it rather than opening a third effort for
+  the same category of change.
+
+**Plan (draft — open design points below need operator confirmation before
+implementation starts; everything else is a direct restatement/elaboration
+of the Request):**
+
+- [ ] Make `check-changefile-presence.py` (and the pre-push hook invoking
+      it) check the diff **both directions** against a freshly-fetched
+      `origin/dev` tip (never a possibly-stale local tracking ref): every
+      versionable thing the diff touches has a changefile naming it
+      (today's behavior, kept), **and** every changefile the diff adds
+      names only versionable things the SAME diff actually touches (new —
+      rejects an added changefile that over-claims, e.g. naming an
+      untouched plugin or stale vendorable).
+- [ ] _(agent-recommended elaboration of the Request's "manifests" idea)_
+      Give each vendorable its own lightweight version-bearing manifest
+      (shape TBD — see open question below) under `libs/<lib>/`, so
+      `tools/changefile.py add` can name the vendorable **itself** as the
+      versioned thing a PR touches, instead of requiring every one of its
+      consumers to be named individually.
+- [ ] Teach the aggregator (`accumulate_bumps.py`) that bumping a
+      vendorable's own manifest version auto-bumps every one of its
+      registered consumers too (real vendored copies and `uv`-editable
+      pointer consumers alike, per `check-vendored-libs-sync.py`'s existing
+      consumer map) — a consumer no longer needs its own separate
+      changefile entry for a vendorable-only change.
+- [ ] Replace real version values across `dev`'s manifests (`plugin.json`,
+      `pyproject.toml`, `.github/plugin/marketplace.json`, checked-in
+      `__version__`/`_FALLBACK_VERSION` source assignments — exact file set
+      TBD, see open question below) with a placeholder, and make
+      `promote_release.py` **generate** real versions and a real
+      `marketplace.json` fresh at promotion time from accumulated
+      changefiles, rather than incrementally patching an existing valid
+      file — this also finally closes Phase 6's still-open "`dev`
+      marketplace placeholder" item instead of leaving it a separate loose
+      end.
+- [ ] Retire `check-version-consistency.py`'s pre-push + CI enforcement
+      (the hook/CI check currently pressuring hand-edits to keep version
+      fields in sync) now that placeholders make cross-file version
+      agreement meaningless on `dev`. Confirm nothing else (docs
+      consistency, runbook-reference checks) assumes a real, comparable
+      version is already present on `dev` before this lands.
+- [ ] Update `CONTRIBUTING.md`'s "Release & Versioning" section to describe
+      the new model end to end: vendorable manifests, bidirectional
+      changefile correctness against fresh `dev`, placeholder versions, and
+      that only changefiles + the aggregator's auto-bump move a version
+      number now — no hook/CI path should ever again describe hand-editing
+      one.
+
+**Open design points needing operator confirmation before coding starts**
+(flagged per this effort's own review-gate convention — a genuine
+architecture decision, not a default to assume):
+
+1. **Placeholder exact form:** literal `"0.0.0"` in every version field, or
+   omit/null the field entirely where the file format allows it? The
+   Request names both as acceptable ("remove... or leave placeholders
+   (0.0.0)") but implementation needs one consistent choice per file type.
+2. **Vendorable manifest shape:** a minimal new `libs/<lib>/VENDOR_MANIFEST.json`
+   (name + version only), or extend the existing `pyproject.toml` version a
+   vendorable's `libs/<lib>/` directory already carries to be the
+   authoritative one `tools/changefile.py`/`accumulate_bumps.py` key off of
+   directly? Affects how much new file-format surface this phase adds vs.
+   reusing what's already there.
+3. **`check-version-consistency.py` fate:** deleted outright, or kept
+   disabled-but-present (e.g. for a future real-version-on-`main`
+   consistency check post-promotion), given `main` still needs a real,
+   internally-consistent version even once `dev` goes to placeholders?
+
 ## Validation Plan
 
 - [x] Generator run against current (pre-split) `main` reproduces the
