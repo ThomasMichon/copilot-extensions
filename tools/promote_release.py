@@ -420,16 +420,45 @@ def _seed_coverage_baselines_from_main(scratch: Path, main_head: str, *, repo: P
     return seeded
 
 
+def _release_tag_for(measured_commit: str) -> str:
+    """Mirrors `tools/coverage_guided_selection/correlation.py`'s own
+    `release_tag_for` -- duplicated here (not imported), same reasoning as
+    `COVERAGE_BASELINES_DIR` above. Keep both in sync if this ever changes.
+    """
+    return f"coverage-baselines-{measured_commit[:12]}"
+
+
 def _write_coverage_baselines_into_scratch(
     scratch: Path, baselines_dir: Path | None, *, dev_head: str
 ) -> list[str]:
-    """Copy every ``*.json`` baseline file from ``baselines_dir`` into the
-    scratch worktree's own ``COVERAGE_BASELINES_DIR``, verifying each one's
-    own ``measured_commit`` matches ``dev_head`` first.
+    """Write a small correlation **pointer** (never the full per-line
+    coverage map) into the scratch worktree's own ``COVERAGE_BASELINES_DIR``
+    for every ``*.json`` baseline file found in ``baselines_dir``, after
+    verifying each one's own ``measured_commit`` matches ``dev_head``.
+
+    **2026-10-03 revision** (see `correlation.py`'s own module docstring
+    for the full rationale): this used to check the ENTIRE baseline
+    document -- including its full per-line coverage map -- into the
+    generated commit's tree. A real run with all 9 enrolled plugins
+    producing a baseline hit a hard wall: two plugins' full baseline JSON
+    exceeded GitHub's 100MB per-file push limit outright
+    (`ThomasMichon/copilot-extensions#5075`). The full per-line data is now
+    expected to **already be published** as a GitHub Release (one asset
+    per plugin, tag `_release_tag_for(dev_head)`) by the caller
+    (`validate-and-promote.yml`'s own "Publish coverage baselines" step)
+    BEFORE this function ever runs -- this function only ever commits a
+    pointer (`measured_commit` + `release_tag` + `asset`, a few hundred
+    bytes regardless of plugin suite size) referencing that already-
+    published release, never the payload itself. This script deliberately
+    does NOT verify the release actually exists (it has no `gh`/network
+    dependency anywhere else and this would be its only one) -- a
+    nonexistent release for a committed pointer would be a caller-side
+    ordering bug in the workflow, not something this pure git/tree-
+    building tool can meaningfully check locally.
 
     Call ``_seed_coverage_baselines_from_main`` first (see its own
     docstring) so this only ever OVERLAYS this run's freshly collected
-    baselines on top of whatever `main` already has, never replaces the
+    pointers on top of whatever `main` already has, never replaces the
     whole directory.
 
     The promotion's own ``full`` matrix jobs already embed ``measured_commit``
@@ -461,9 +490,17 @@ def _write_coverage_baselines_into_scratch(
                 f"{measured_commit!r}, not this promotion's own dev head "
                 f"{dev_head!r} -- refusing to check in a mismatched baseline"
             )
+        plugin = data.get("plugin") or src.stem
+        pointer = {
+            "schema": "copilot-extensions.coverage-baseline-pointer",
+            "plugin": plugin,
+            "measured_commit": measured_commit,
+            "release_tag": _release_tag_for(measured_commit),
+            "asset": f"{plugin}.json",
+        }
         dest_dir.mkdir(parents=True, exist_ok=True)
         (dest_dir / src.name).write_text(
-            json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            json.dumps(pointer, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         written.append(src.stem)
     return written
@@ -589,14 +626,18 @@ def promote(
 
     ``coverage_baselines_dir``, when given, is a local directory of
     pre-collected ``<plugin>.json`` coverage-baseline files (see
-    ``coverage_guided_selection.baseline.collect_baseline``) that this
-    promotion checks into the generated commit's own tree at
+    ``coverage_guided_selection.baseline.collect_baseline``) this
+    promotion reads a small correlation **pointer** from and checks THAT
+    (never the full file) into the generated commit's own tree at
     ``COVERAGE_BASELINES_DIR`` -- see
     ``_write_coverage_baselines_into_scratch``'s own docstring for the
     ``measured_commit`` consistency check this performs before accepting
-    any of them. Written only after the no-op content check (alongside the
-    pipeline state file), so a baseline update alone -- with no real `dev`
-    content change -- never forces a vacuous promotion."""
+    any of them, and for the 2026-10-03 revision that moved the full
+    per-line data out to a GitHub Release asset the caller must publish
+    before calling this. Written only after the no-op content check
+    (alongside the pipeline state file), so a baseline update alone --
+    with no real `dev` content change -- never forces a vacuous
+    promotion."""
     dev_head = _rev_parse(dev_ref, cwd=repo)
     if dev_head is None:
         raise PromotionError(f"cannot resolve dev ref: {dev_ref!r}")

@@ -309,8 +309,15 @@ def test_promote_checks_in_a_matching_coverage_baseline(tmp_path: Path, repo: Pa
         ["show", f"{report['commit']}:{pr.COVERAGE_BASELINES_DIR}/demo-plugin.json"], repo
     )
     data = json.loads(checked_in)
+    # Only the small correlation pointer is checked in (2026-10-03 revision,
+    # #5075) -- never the full per-line coverage map, which could be
+    # arbitrarily large.
     assert data["measured_commit"] == dev_head
     assert data["plugin"] == "demo-plugin"
+    assert data["release_tag"] == f"coverage-baselines-{dev_head[:12]}"
+    assert data["asset"] == "demo-plugin.json"
+    assert "coverage" not in data
+    assert "tests" not in data
 
 
 def test_promote_refuses_a_coverage_baseline_measured_against_a_different_commit(
