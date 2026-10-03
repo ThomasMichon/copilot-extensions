@@ -555,8 +555,22 @@ becomes unreachable once squash-merge deletes that source branch. Filed
 [#5054](https://github.com/ThomasMichon/copilot-extensions/issues/5054)
 to track the recurrence and its suggested remediation, rather than
 silently working around it or absorbing an unrelated multi-entry git
-archaeology task into this PR's own scope. Confirmed via `pr-status` that
-this repo's merge-consent gate does not require the bot's advisory
+archaeology task into this PR's own scope.
+
+Merging despite that failure was **not an authorized exception to a
+required check** -- it didn't need to be. Checked the actual branch
+ruleset directly (`gh api repos/ThomasMichon/copilot-extensions/rules/
+branches/dev`): the only configured `required_status_checks` entry is
+`workflow-lockdown-guard`, which passed clean on every push. The
+"guards + lint" job (and its own "PR gate (required check)" rollup step)
+is **not** itself a required check in the ruleset, despite its
+self-descriptive name suggesting otherwise -- it is advisory/visible, not
+blocking, at the GitHub level. `CONTRIBUTING.md:124-126`'s "all required
+status checks" still applied in full and passed; this PR's merge
+complied with the repo's actual configured gates, it just also tolerated
+an unrelated non-required job's failure, which GitHub itself does not
+distinguish from a deliberate per-PR exception. Confirmed via `pr-status`
+that this repo's merge-consent gate does not require the bot's advisory
 `COMMENTED` review to become `APPROVED` (per `commented-review-verdict`
 guidance), and self-merged via the sanctioned `pr-self-merge` flow once
 every finding was either fixed, confirmed stale, or explicitly
