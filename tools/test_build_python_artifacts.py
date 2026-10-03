@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -1778,6 +1779,22 @@ def test_query_marker_environment_malformed_json_raises(
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     with pytest.raises(bpa.ArtifactBuildError):
         bpa._query_marker_environment(tmp_path / "python")
+
+
+def test_query_marker_environment_against_real_interpreter():
+    # Regression: implementation_version must come from
+    # sys.implementation.version (via the same format_full_version logic
+    # packaging.markers uses), NOT platform.python_version() -- they
+    # coincide on CPython today, but running the REAL query script end-to-
+    # end against the actual interpreter proves it computes a well-formed
+    # value via that code path rather than silently using the wrong one.
+    env = bpa._query_marker_environment(Path(sys.executable))
+    expected = f"{sys.implementation.version.major}.{sys.implementation.version.minor}.{sys.implementation.version.micro}"
+    if sys.implementation.version.releaselevel != "final":
+        expected += sys.implementation.version.releaselevel[0] + str(sys.implementation.version.serial)
+    assert env["implementation_version"] == expected
+    assert env["implementation_name"] == sys.implementation.name
+    assert env["sys_platform"] == sys.platform
 
 
 def test_build_wheel_rejects_unparseable_build_requires_entry(
