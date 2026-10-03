@@ -214,6 +214,7 @@ def create_app(
         from .run_waiter_wake import drain_run_waiter_wakes
 
         governance = LoopGovernance()
+        verification_stop_event = asyncio.Event()
         wake_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         verification_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         worktree_status_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
@@ -278,6 +279,7 @@ def create_app(
                     is_active=wake_is_active,
                     signal=verification_signal,
                     idle_interval=max(verification_interval, 5.0),
+                    stop_event=verification_stop_event,
                 )
             )
             if verification_interval > 0
@@ -762,11 +764,35 @@ def create_app(
                     except asyncio.CancelledError:
                         pass
                 if verification_task is not None:
-                    verification_task.cancel()
+                    # Cooperative stop, not cancel(): the drain loop's real
+                    # work runs via asyncio.to_thread, and cancelling a task
+                    # mid-to_thread only cancels the awaiting coroutine --
+                    # the underlying OS thread keeps running regardless, so
+                    # `await verification_task` would return before that
+                    # thread's own SQLite access is actually done (a real
+                    # race against e.g. a test's own temp-dir teardown; see
+                    # verification_drain.drain_verification_requests). Set
+                    # the stop event and wake the loop so it finishes its
+                    # current to_thread call and exits on its own; only
+                    # fall back to cancel() if it doesn't shut down quickly.
+                    verification_stop_event.set()
+                    if verification_signal.empty():
+                        try:
+                            verification_signal.put_nowait(None)
+                        except asyncio.QueueFull:
+                            pass
                     try:
-                        await verification_task
-                    except asyncio.CancelledError:
-                        pass
+                        await asyncio.wait_for(verification_task, timeout=10.0)
+                    except asyncio.TimeoutError:
+                        log.warning(
+                            "verification drain loop did not stop cooperatively "
+                            "within 10s; cancelling"
+                        )
+                        verification_task.cancel()
+                        try:
+                            await verification_task
+                        except asyncio.CancelledError:
+                            pass
                 if run_waiter_wake_task is not None:
                     run_waiter_wake_task.cancel()
                     try:

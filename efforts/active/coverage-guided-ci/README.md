@@ -148,8 +148,10 @@ order.
       collection (needed to resolve `agent-ssh`'s own vendored
       dependencies, unlike the dependency-free `ai-attribution` Phase 0
       pilot) and uploads the resulting baseline as a build artifact.
-      Expanding to the remaining 8 plugins in this matrix is the next
-      increment, not yet done.
+      **Expanded to all remaining 8 plugins across several follow-up
+      increments; completed 2026-10-02 (latest Journal entry) with
+      `agent-dispatch`'s enrollment -- the full 9-plugin matrix now
+      produces a real baseline.**
 - [x] Publish baselines **atomically**: since `validate-and-promote.yml` runs
       per-plugin suites as separate matrix jobs (plus `worktree-manager`
       separately), never persist per-job coverage results directly as a
@@ -295,6 +297,68 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-02 (latest) — Fixed `agent-dispatch`'s async-cancellation race; enrolled; Phase 1 complete (9/9)
+Operator asked to pursue `agent-dispatch` -- the last plugin blocked from
+the previous entry's own Phase 1 tally -- to completion.
+
+**Root cause, confirmed directly** (matches the previous entry's own
+characterization): `agent-dispatch`'s coordinator `lifespan()` teardown
+tore down its background verification-drain loop with plain
+`task.cancel()` + `await task`. That loop's real work (recovering/claiming
+verification requests, evaluating them) all runs through
+`asyncio.to_thread(...)`, and cancelling the *task* that is currently
+awaiting a `to_thread` call only cancels the awaiting coroutine --
+`asyncio`'s own cancellation propagates through the coroutine immediately,
+but the underlying OS thread keeps running the real, synchronous call to
+completion regardless (reproduced directly with a minimal
+`asyncio.to_thread`/`task.cancel()` script: `await task` returned ~0.9s
+before the thread's own "finished" print). Under normal (uninstrumented)
+execution, that orphaned thread's own SQLite open usually finishes before
+a test's own `tmp_path` fixture tears down its directory; under
+coverage-instrumented execution's much slower per-line tracing, the race
+widens enough that the thread loses, and the next test's own queue
+`_connect()` raises `sqlite3.OperationalError: unable to open database
+file` because the directory is already gone.
+
+**Fix:** replaced that one `task.cancel()` call with a cooperative
+`stop_event`: `drain_verification_requests` now checks it at each loop
+checkpoint between `to_thread` calls (and races it into its own idle
+`_wait`), so setting the event and awaiting the task lets the loop finish
+whatever synchronous DB call is currently in flight and exit **on its
+own** -- the awaited task only returns once that real work is actually
+done, closing the race rather than requiring a longer wait or a retry.
+`task.cancel()` remains available as an explicit last-resort fallback
+(with a bounded 10s wait) for a genuinely hung loop. Added two regression
+tests: one characterizing the original defect directly (`task.cancel()`
+returns before an in-flight `to_thread` call finishes), and one proving
+the `stop_event` fix (the awaited task only returns after that same
+in-flight call completes).
+
+**Verified directly, same bar as every other plugin this phase:** the
+real repro (`baseline.py` against `agent-dispatch/tests/test_coordinator.py`,
+`project_dir` mode) succeeded cleanly 3 consecutive runs (previously failed
+intermittently); the fix doesn't regress `run-plugin-tests.py`'s own full
+suite (3,799 tests, all 7 sub-suites green); and `baseline.py` against the
+plugin's **entire** test suite (174 source files) now collects a clean,
+complete baseline end to end with no `sqlite3.OperationalError`.
+
+`agent-dispatch` enrolled in this same change -- the `full` job's
+Coverage-baseline/Upload-coverage-baseline `if:` conditions and the
+`promote` job's matching enrolled-baseline hard-gate list both now include
+it, same two-line-list pattern as every prior enrollment this phase.
+
+**Phase 1 is now fully complete: 9 of 9 plugins enrolled** (`agent-ssh`,
+`agent-codespaces`, `agent-containers`, `agent-vault`, `agent-logger`,
+`agent-mcp`, `agent-bridge`, `agent-worktrees`, `agent-dispatch`) -- every
+plugin in the `full` job's matrix now produces a real coverage baseline at
+the promotion gate.
+
+**Not yet done:** Phase 2 (nearest-ancestor resolution), Phase 3
+(diff-scoped selection + coverage-debt/smoke fallback), Phase 4 (replacing
+`agent-worktrees`' own collect-only tier), and Phase 5 (generalizing beyond
+`agent-worktrees`) haven't started. Phase 1's completion is a real
+milestone, not the whole effort's.
 
 ### 2026-10-02 — Incident: `select.py` shadowed the stdlib, blocking every real promotion for ~3h
 Operator asked me to check whether this effort's own coverage-artifact work

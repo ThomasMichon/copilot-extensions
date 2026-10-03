@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
+import time
 
 import pytest
 
@@ -299,3 +301,84 @@ def test_verification_drain_retries_retryable_task_error(tmp_path, monkeypatch):
     assert request.status == "stale"
     assert request.attempts == 2
     assert queue.get(task_id).status == Status.COMPLETED
+
+
+def test_verification_drain_cancel_does_not_wait_for_in_flight_thread_work(tmp_path):
+    """Characterizes the race in aperture-labs#7895: ``Task.cancel()`` on a
+    loop blocked inside ``asyncio.to_thread`` returns as soon as the
+    cancellation propagates through asyncio -- it does NOT wait for the
+    underlying OS thread to finish the real (synchronous) call. Under slow
+    enough execution (e.g. coverage-instrumented test runs), a caller that
+    proceeds with cleanup the instant ``await task`` returns can race that
+    still-running thread.
+    """
+    queue = TaskQueue(tmp_path / "tasks.db")
+
+    thread_finished = threading.Event()
+    original_recover = queue.recover_inflight_verification_requests
+
+    def slow_recover(*args, **kwargs):
+        time.sleep(0.2)
+        result = original_recover(*args, **kwargs)
+        thread_finished.set()
+        return result
+
+    queue.recover_inflight_verification_requests = slow_recover
+
+    async def scenario():
+        task = asyncio.create_task(
+            drain_verification_requests(queue, _Bus(), interval=0.01)
+        )
+        await asyncio.sleep(0.05)  # let the loop enter the slow to_thread call
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        # The defect this test characterizes: cancellation already returned,
+        # but the background thread is still running the real DB call.
+        assert not thread_finished.is_set()
+        # Let the orphaned thread actually finish so it doesn't leak past the
+        # test (and to prove it does eventually complete on its own).
+        for _ in range(50):
+            if thread_finished.is_set():
+                break
+            time.sleep(0.02)
+        assert thread_finished.is_set()
+
+    asyncio.run(scenario())
+
+
+def test_verification_drain_stop_event_waits_for_in_flight_thread_work(tmp_path):
+    """Regression test for aperture-labs#7895: a cooperative ``stop_event``
+    must let the drain loop's current ``asyncio.to_thread`` call actually
+    finish before the awaited task returns, unlike ``task.cancel()`` (see
+    the companion characterization test above), so a caller can safely
+    proceed with cleanup (e.g. a temp-dir teardown) once the await returns.
+    """
+    queue = TaskQueue(tmp_path / "tasks.db")
+
+    thread_finished = threading.Event()
+    original_recover = queue.recover_inflight_verification_requests
+
+    def slow_recover(*args, **kwargs):
+        time.sleep(0.2)
+        result = original_recover(*args, **kwargs)
+        thread_finished.set()
+        return result
+
+    queue.recover_inflight_verification_requests = slow_recover
+
+    async def scenario():
+        stop_event = asyncio.Event()
+        task = asyncio.create_task(
+            drain_verification_requests(
+                queue, _Bus(), interval=0.01, stop_event=stop_event
+            )
+        )
+        await asyncio.sleep(0.05)  # let the loop enter the slow to_thread call
+        stop_event.set()
+        await task
+        assert thread_finished.is_set(), (
+            "await returned before the in-flight thread call finished"
+        )
+
+    asyncio.run(scenario())

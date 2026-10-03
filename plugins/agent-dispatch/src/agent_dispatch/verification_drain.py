@@ -31,20 +31,50 @@ async def drain_verification_requests(
     is_active: WakeActive | None = None,
     signal: asyncio.Queue[None] | None = None,
     idle_interval: float | None = None,
+    stop_event: asyncio.Event | None = None,
 ) -> None:
-    """Drain pending submitted-verification requests until cancelled."""
+    """Drain pending submitted-verification requests until cancelled.
+
+    ``stop_event``, when provided, lets a caller request a *cooperative*
+    stop instead of ``Task.cancel()``. Every synchronous DB call in this
+    loop runs via ``asyncio.to_thread``, and cancelling the task that is
+    currently awaiting one of those calls only cancels the *awaiting*
+    coroutine -- the underlying OS thread keeps running the real
+    (synchronous) call to completion regardless, racing against whatever the
+    caller does next (e.g. a test fixture tearing down the temp directory
+    the SQLite db lives in). Setting ``stop_event`` and awaiting this
+    coroutine to completion lets the loop finish its current ``to_thread``
+    call, notice the stop request at its next checkpoint, and return on its
+    own -- so by the time the await returns, no background thread is still
+    touching the queue. ``task.cancel()`` remains a legitimate last resort
+    for a hung/unresponsive loop.
+    """
     idle_interval = interval if idle_interval is None else idle_interval
 
+    def _stopping() -> bool:
+        return stop_event is not None and stop_event.is_set()
+
     async def _wait(delay: float) -> None:
-        if signal is None:
+        if _stopping():
+            return
+        if signal is None and stop_event is None:
             await asyncio.sleep(delay)
             return
+        waiters = [asyncio.ensure_future(asyncio.sleep(delay))]
+        if signal is not None:
+            waiters.append(asyncio.ensure_future(signal.get()))
+        if stop_event is not None:
+            waiters.append(asyncio.ensure_future(stop_event.wait()))
         try:
-            await asyncio.wait_for(signal.get(), timeout=delay)
-        except asyncio.TimeoutError:
-            pass
+            await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for waiter in waiters:
+                if not waiter.done():
+                    waiter.cancel()
 
     while True:
+        if _stopping():
+            return
         if is_active is not None:
             try:
                 active = await asyncio.to_thread(is_active)
@@ -54,10 +84,14 @@ async def drain_verification_requests(
             if not active:
                 await _wait(interval)
                 continue
+        if _stopping():
+            return
         await asyncio.to_thread(
             queue.recover_inflight_verification_requests,
             lease_seconds=delivery_lease,
         )
+        if _stopping():
+            return
         request = await asyncio.to_thread(
             queue.claim_due_verification_request,
             lease_seconds=delivery_lease,
