@@ -43,6 +43,7 @@ from agent_logger.sync.provenance import (
     windows_extended_path as _windows_extended_path,
 )
 from agent_logger.sync.targets.base import (
+    SESSION_INDEX_NAMES,
     DoctorResult,
     FleetSyncStatus,
     PushResult,
@@ -1405,6 +1406,11 @@ def _deferred_session_ids(locked_paths: list[Path]) -> tuple[str, ...]:
     return tuple(sorted(ids))
 
 
+def _index_deferred(locked_paths: list[Path]) -> bool:
+    """Whether a deferred (locked) path is a top-level index file."""
+    return any(len(rel.parts) == 1 and rel.name in SESSION_INDEX_NAMES for rel in locked_paths)
+
+
 class FilesystemTarget(Target):
     """Base for targets that publish to a local-or-mounted directory root."""
 
@@ -1622,6 +1628,7 @@ class FilesystemTarget(Target):
             excluded_roots=tuple(str(root) for root in detritus.roots),
             excluded_measurement_complete=detritus.measurement_complete,
             deferred_sessions=_deferred_session_ids(locked_paths),
+            index_deferred=_index_deferred(locked_paths),
         )
 
     def sync_status(self, machine: str) -> SyncStatus:
@@ -1638,10 +1645,17 @@ class FilesystemTarget(Target):
 
     def heartbeat(self, machine: str) -> None:
         """Re-stamp destination health metadata, no transfer -- see
-        ``agent_logger.sync.meta.heartbeat_sync_meta``."""
+        ``agent_logger.sync.meta.heartbeat_sync_meta``.
+
+        A no-op when the machine root doesn't already exist: a deleted
+        destination must never get a fresh "ok" heartbeat recreating an
+        empty directory and masking that its sessions are actually gone.
+        """
         try:
-            dest = _ensure_relative_directory(self._root(), Path(machine))
+            dest = _existing_relative_directory(self._root(), Path(machine))
         except OSError:
+            return
+        if dest is None:
             return
         heartbeat_sync_meta(dest, machine, self.name, _count_sessions(dest))
 

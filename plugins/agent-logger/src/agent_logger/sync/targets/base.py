@@ -247,6 +247,10 @@ class PushResult:
     #: session as synced, or an incomplete transfer gets permanently masked
     #: once the file unlocks without its size/mtime changing again.
     deferred_sessions: tuple[str, ...] = ()
+    #: Whether the global session-index files (``session-store.db`` and its
+    #: WAL/SHM) had at least one file deferred -- same reasoning as
+    #: ``deferred_sessions``, kept separate since the index is not a session.
+    index_deferred: bool = False
 
 
 @dataclass

@@ -1776,6 +1776,35 @@ def test_heartbeat_sync_meta_writes_fresh_when_nothing_exists(tmp_path: Path) ->
     assert payload["session_count"] == 3
 
 
+def test_filesystem_target_heartbeat_noop_for_missing_destination(
+    tmp_path: Path,
+) -> None:
+    """A deleted destination (never re-created by a heartbeat) must not get
+    a fresh 'ok' sync-meta.json -- that would mask the fact its sessions
+    are actually gone until the next full reconciliation."""
+    root = tmp_path / "hub"
+    target = LocalTarget({"path": str(root)})
+
+    target.heartbeat("machine")  # root doesn't exist at all yet
+
+    assert not (root / "machine").exists()
+
+
+def test_filesystem_target_heartbeat_refreshes_existing_destination(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "hub"
+    target = LocalTarget({"path": str(root)})
+    src = _make_source(tmp_path)
+    assert target.push(src, "machine").ok
+
+    target.heartbeat("machine")
+    from agent_logger.sync import meta
+
+    payload = meta.read_sync_meta(root / "machine")
+    assert payload is not None
+
+
 def test_sync_meta_tracks_and_resets_consecutive_partial_count(
     tmp_path: Path,
 ) -> None:

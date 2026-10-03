@@ -110,6 +110,16 @@ def test_resolve_db_path_uses_configured_value(tmp_path: Path) -> None:
     assert resolve_db_path(configured, tmp_path / "home") == Path(configured)
 
 
+def test_resolve_db_path_anchors_relative_value_to_home(tmp_path: Path) -> None:
+    """A relative db_path must resolve against home, not the process cwd --
+    a detached sync runs from a throwaway staging dir it deletes on exit
+    (see agent_logger.sync.spawn), so resolving against cwd there would
+    silently lose the tracker db after every detached run."""
+    home = tmp_path / "home"
+    assert resolve_db_path("tracker.db", home) == home / "tracker.db"
+    assert resolve_db_path("nested/tracker.db", home) == home / "nested" / "tracker.db"
+
+
 def test_resolve_db_path_defaults_under_home(tmp_path: Path) -> None:
     assert resolve_db_path(None, tmp_path) == tmp_path / "sync-state.db"
 
@@ -373,4 +383,24 @@ def test_reset_clears_index_signature(tmp_path: Path) -> None:
     tracker = ChangeTracker(tmp_path / "state.db")
     tracker.record_index(source)
     tracker.reset()
+    assert tracker.index_changed(source) is True
+
+
+def test_invalidate_index_forces_recheck(tmp_path: Path) -> None:
+    source = tmp_path / "copilot"
+    source.mkdir()
+    (source / "session-store.db").write_text("v1", encoding="utf-8")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_index(source)
+    assert tracker.index_changed(source) is False
+
+    tracker.invalidate_index()
+    assert tracker.index_changed(source) is True
+
+
+def test_invalidate_index_is_a_noop_when_nothing_recorded(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.invalidate_index()  # must not raise
+    source = tmp_path / "copilot"
+    source.mkdir()
     assert tracker.index_changed(source) is True

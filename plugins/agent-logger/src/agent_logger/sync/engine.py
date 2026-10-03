@@ -105,6 +105,10 @@ def _record_push_result(
     :meth:`~agent_logger.sync.change_tracker.ChangeTracker.snapshot_index`)
     whenever this push was unfiltered -- never recomputed after the fact,
     for the same before/after-the-transfer reason as session signatures.
+    If the index itself was deferred (``result.index_deferred``), any
+    stored index signature is invalidated instead, so the next run still
+    sees it as changed rather than trusting a snapshot that never actually
+    landed.
     """
     to_record = {
         sid: sig for sid, sig in snapshot.items() if sid not in result.deferred_sessions
@@ -112,8 +116,11 @@ def _record_push_result(
     tracker.record_signatures(to_record)
     if result.deferred_sessions:
         tracker.forget(result.deferred_sessions)
-    if unfiltered and index_snapshot is not None:
-        tracker.record_index_signature(index_snapshot)
+    if unfiltered:
+        if result.index_deferred:
+            tracker.invalidate_index()
+        elif index_snapshot is not None:
+            tracker.record_index_signature(index_snapshot)
 
 
 def _push_incremental(

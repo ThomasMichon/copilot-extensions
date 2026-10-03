@@ -184,10 +184,17 @@ def resolve_db_path(db_path_setting: str | None, home: Path) -> Path:
 
     Shared by the engine (single-config runs) and tenancy (per-tenant db
     naming, same pattern as ``chronicle.db_path``) so both agree on the
-    fallback without either owning the other's config resolution.
+    fallback without either owning the other's config resolution. A
+    relative *db_path_setting* is anchored to *home*, never the process cwd
+    -- a detached sync (see :mod:`agent_logger.sync.spawn`) runs from a
+    throwaway staging directory it deletes on exit, so resolving against cwd
+    there would silently lose the tracker db (and its full-sync marker)
+    after every detached run, forcing an unnecessary full reconciliation
+    each time.
     """
     if db_path_setting:
-        return Path(db_path_setting).expanduser()
+        path = Path(db_path_setting).expanduser()
+        return path if path.is_absolute() else home / path
     return home / "sync-state.db"
 
 
@@ -412,6 +419,16 @@ class ChangeTracker:
                 "INSERT INTO sync_meta (key, value) VALUES (?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (_INDEX_SIGNATURE_KEY, signature),
+            )
+
+    def invalidate_index(self) -> None:
+        """Discard any stored index signature -- used when the index itself
+        had a deferred (locked) file during a push, so a stale recorded
+        signature never masks the fact the index was NOT actually
+        transferred this pass; the next run re-detects it as changed."""
+        with _connect(self.db_path) as conn:
+            conn.execute(
+                "DELETE FROM sync_meta WHERE key = ?", (_INDEX_SIGNATURE_KEY,)
             )
 
     def reset(self) -> None:
