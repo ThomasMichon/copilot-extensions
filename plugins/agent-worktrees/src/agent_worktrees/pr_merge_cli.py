@@ -518,7 +518,17 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
                     "project; pass an explicit repo slug"
                 )
                 return 2
-        repo_cfg = config.default_repo
+        resolution = pr_config.resolve_repo_config_for_slug(config, args.repo)
+        if not resolution.resolved:
+            output.err(
+                f"pr-merge: {args.repo!r} is not a registered repo this "
+                "machine can resolve a PR binding for -- register it "
+                "(agent-worktrees repos add) or run this from a worktree "
+                "that already has it registered. Refusing to fall back to "
+                "the active project's own binding for a different repo."
+            )
+            return 2
+        repo_cfg = resolution.repo_config
         default_branch = repo_cfg.default_branch
         actor_flow = pr_config.resolve_actor_pr_flow(
             repo_cfg,

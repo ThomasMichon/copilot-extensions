@@ -1,0 +1,9 @@
+{
+  "comment": "pr-watch/pr-merge: resolve an explicitly-addressed foreign repo's own registered PR binding instead of silently using the active project's (foreign-repo-pr-operations, pull-requests vision Phase 2)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

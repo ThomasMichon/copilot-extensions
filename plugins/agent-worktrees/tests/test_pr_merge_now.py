@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import agent_worktrees.__main__ as m
 from agent_worktrees import config as cfg
+from agent_worktrees import pr_config
 from agent_worktrees import pr_contract as pc
 from agent_worktrees import providers as prov
 
@@ -110,6 +111,21 @@ def _config(prcfg):
         platform="linux",
         repo_name="repo",
         repos={"repo": repo},
+    )
+
+
+def _patch_same_repo_resolution(monkeypatch):
+    """These tests use a fake anchor with no real registry/remote, so
+    ``pr_config.resolve_repo_config_for_slug``'s normal registry-based
+    resolution can't find a match -- patch it to report the explicit slug
+    as the caller's own active repo, the way it would on a real checkout
+    whose registry/git remote actually resolves to that slug."""
+    monkeypatch.setattr(
+        pr_config,
+        "resolve_repo_config_for_slug",
+        lambda config, slug: pr_config.ForeignRepoResolution(
+            config.default_repo, config.repo_name, same_as_active=True
+        ),
     )
 
 
@@ -253,6 +269,7 @@ def test_dispatch_maintain_role_resolves_self_merge_once(monkeypatch):
         },
     )
     monkeypatch.setattr(cfg, "load_config", lambda path=None: _config(prcfg))
+    _patch_same_repo_resolution(monkeypatch)
 
     rc = m.cmd_pr_merge_dispatch(["o/r", "7", "--now"])
 
@@ -281,6 +298,7 @@ def test_dispatch_write_role_explicitly_disables_self_merge(monkeypatch):
         roles={"write": cfg.PRRoleOverride(merge_actor="")},
     )
     monkeypatch.setattr(cfg, "load_config", lambda path=None: _config(prcfg))
+    _patch_same_repo_resolution(monkeypatch)
 
     rc = m.cmd_pr_merge_dispatch(["o/r", "7", "--now"])
 
@@ -308,6 +326,7 @@ def test_dispatch_unknown_permission_uses_safe_base_profile(monkeypatch):
         },
     )
     monkeypatch.setattr(cfg, "load_config", lambda path=None: _config(prcfg))
+    _patch_same_repo_resolution(monkeypatch)
 
     rc = m.cmd_pr_merge_dispatch(["o/r", "7", "--now"])
 

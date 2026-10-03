@@ -272,7 +272,6 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
 
     try:
         config = cfg.load_config(Path(args.config) if args.config else None)
-        base_prcfg = config.default_repo.pr
         if args.repo is None:
             args.repo = _infer_active_repo_slug(config)
             if not args.repo:
@@ -281,12 +280,24 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                     "project; pass an explicit repo slug"
                 )
                 return 2
+        from . import pr_config
+        resolution = pr_config.resolve_repo_config_for_slug(config, args.repo)
+        if not resolution.resolved:
+            output.err(
+                f"pr-watch: {args.repo!r} is not a registered repo this "
+                "machine can resolve a PR binding for -- register it "
+                "(agent-worktrees repos add) or run this from a worktree "
+                "that already has it registered. Refusing to fall back to "
+                "the active project's own binding for a different repo."
+            )
+            return 2
+        repo_cfg = resolution.repo_config
+        base_prcfg = repo_cfg.pr
         prcfg = base_prcfg
         resolved_token = args.token
         if verb == "wait":
-            from . import pr_config
             actor_flow = pr_config.resolve_actor_pr_flow(
-                config.default_repo,
+                repo_cfg,
                 args.repo,
                 api_base=args.host,
                 token=resolved_token,
