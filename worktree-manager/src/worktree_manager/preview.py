@@ -77,6 +77,16 @@ _DEMO_PIVOT_MANIFEST: dict[str, object] = {
         "fields": [
             {"name": "title", "type": "text"},
             {"name": "prompt", "type": "textarea"},
+            # Phase B item 3: a live-sourced multichoice (options_command),
+            # mirroring agent-dispatch's own `criteria` field -- resolved
+            # off-thread via demo_pivot's harmless `vocabulary` verb.
+            {
+                "name": "criteria",
+                "type": "multichoice",
+                "options_command": [
+                    sys.executable, "-m", "worktree_manager.demo_pivot", "vocabulary",
+                ],
+            },
         ],
         "run": [sys.executable, "-m", "worktree_manager.demo_pivot", "create",
                 "{field.title}", "--prompt", "{field.prompt}"],

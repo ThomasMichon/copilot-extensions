@@ -502,10 +502,26 @@ real code, not assumption:
   - [x] Confirm behavior with "Bare" selected: no prompt screen is shown at
         all (nothing to seed). (`test_new_worktree_bare_skips_seed_prompt`,
         passing against the now-default-on `_SEED_PROMPT_ENABLED`.)
-- [ ] Phase B: from a live coordinator, use the Tasks pane's new "New
+- [~] Phase B: from a live coordinator, use the Tasks pane's new "New
       task…" action to hand-author a task; confirm it appears with the
       exact title/prompt/tags entered, immediately eligible for its
-      declared pool per the tags/criteria submitted.
+      declared pool per the tags/criteria submitted. **Partially validated
+      2026-10-02 (later session):** the GENERIC mechanism this depends on
+      -- `options_command`'s live subprocess resolution, the off-thread
+      `_run_bg` wiring, and the full Confirm -> `run_resolved` round trip --
+      was proven in a REAL terminal via `tmux` (not Pilot, not headless
+      capture): launched `worktree-manager picker --demo` in a fresh tmux
+      pane, drove it with `send-keys` (`]` switches pivot -- see the new
+      Journal entry for the full key map discovered this session), opened
+      the Demo Queue's "+ New test request…" dialog, confirmed the
+      `criteria` multichoice tab rendered the real, live-resolved vocabulary
+      (`recalibration`/`maintenance`/`audit`/`neurotoxin-safety` + `Other…`)
+      read back via `capture-pane`, and submitted through to the harmless
+      `demo_pivot.py` acknowledgment. **Still outstanding (keeps this item
+      unchecked):** this was the Demo Queue fixture, not `agent-dispatch`'s
+      own Tasks pivot against a REAL running coordinator -- that needs a
+      live `agent-dispatch` coordinator process with at least one active
+      registrar declaration, not available this session.
 - [x] Both phases: full `worktree-manager` + `agent-dispatch` test suites
       stay green (baseline: whatever the two packages' full-suite pass
       counts are at the time each phase's PR opens -- record them in that
@@ -1695,3 +1711,93 @@ available this session) and Phase A's own literal Picker end-to-end
 click-through both remain unchecked in the Validation Plan. Neither blocks
 landing this slice -- both are genuinely separate from what this session's
 code changes.
+
+### 2026-10-02 (later still) — Render verification + a genuine live-TTY click-through via tmux, for the options_command mechanism
+Resumed in a fresh worktree (the prior PR had already merged and its
+worktree was finalized). Operator asked specifically for preview renderings
+plus driving the flow through a real Mux-wrapped Picker launch, per this
+project's own "render early, render often" discipline and the precedent the
+2026-10-01 live-TTY session set.
+
+**Preview renderings.** Extended the official `--demo` fixture rather than
+building a one-off: `demo_pivot.py` gained a harmless `vocabulary` verb
+(`["recalibration","maintenance","audit","neurotoxin-safety"]`, mirroring
+`agent-dispatch registrar vocabulary`'s JSON-array contract) and
+`preview.py`'s `_DEMO_PIVOT_MANIFEST.create_action.fields` gained a matching
+`criteria` multichoice field with `options_command` pointing at it. Hit two
+real environment snags getting a screenshot at all, both worth recording
+since they'll bite the next person too:
+1. This fresh worktree needed FOUR separate `pip install -e .` passes
+   (`worktree-manager`, `plugins/agent-dispatch`, `libs/zdd`,
+   `libs/work-coalescing-singleton`, `plugins/agent-worktrees` --
+   `libs/lazy-cli-dispatch` is agent-worktrees' own transitive dependency)
+   before any of these modules would import at all -- a stale editable
+   install from a DIFFERENT, already-finalized worktree was silently
+   shadowing every one of them.
+2. `picker screenshot --demo` failed with "timed out waiting for setup
+   epoch 1 to finish" even at `--wait 15` -- reproduced this on the
+   UNMODIFIED base code too (confirmed it's not something this session's
+   edits caused). Root-caused by calling `_collect_setup_payload()`
+   directly: it genuinely completes in ~8s on this machine (consistent
+   with `_prewarm_machine_key_map`'s own documented "2+ seconds... more
+   registered repos" cost), comfortably within a widened timeout -- so the
+   CLI's hardcoded `_wait_for_initial_setup(timeout=5.0)` (not exposed by
+   any flag; `--wait` only controls the SEPARATE post-pivot-switch poll)
+   was just too tight for this specific machine's repo count, not a hang.
+   Worked around it with a small ad-hoc driver script (`_prepare()` +
+   `capture_async`/`capture_modal_async` called directly, `timeout`
+   widened via `_wait_for_initial_setup.__kwdefaults__["timeout"] = 40.0`
+   -- note `__kwdefaults__`, not `__defaults__`: `timeout` is keyword-only)
+   rather than touching the shipped CLI; discarded the script after use
+   (reproducible from this Journal entry, not worth keeping as a first-class
+   tool for a single-machine timing quirk).
+
+Captured two SVGs (-> PNG via `scripts/picker-snapshot/svg2png.mjs`,
+Node deps installed fresh in this worktree): the Demo Queue button row, and
+-- the one that actually matters for this feature -- the create dialog's
+Criteria tab showing the REAL, live-resolved vocabulary
+(`recalibration`/`maintenance`/`audit`/`neurotoxin-safety`) plus the
+auto-forced `Other…` fallback, rendered by the genuine compositor, not
+asserted only through `screen._q[i]["options"]` in a Pilot test.
+
+**Live-TTY click-through via tmux (the operator's explicit ask: "drive your
+own flow using Mux... so you can manipulate the TTY").** Cleared
+`PSMUX_SESSION` (this session's own shell is itself inside a psmux pane,
+same gotcha the 2026-10-01 entry already flagged), `tmux new-session -d`
+running the REAL `worktree-manager picker --demo` (not a capture/headless
+variant), then drove it with `send-keys`/`capture-pane` exactly as a human
+would. **New reusable key-map fact, not in the prior session's notes:**
+pivot switching is NOT Ctrl+Right (that's the MACHINE tab) and
+Ctrl+Shift+Right didn't reach the app over this terminal -- the reliable
+key is the bare bracket `]`/`[` (sent via `tmux send-keys -l` so tmux
+doesn't try to parse it as a named key), which the engine's own
+`_dispatch_key` wires as a global pivot-cycle shortcut regardless of
+focused zone. Landed on Demo Queue, `Enter` to focus the button row,
+`Enter` to open the dialog, typed a real title via `send-keys -l`,
+`Ctrl+Right` x2 to reach the Criteria tab -- and `capture-pane -p` read back
+the exact same four live options + `Other…` the screenshot showed, this
+time from an actual interactive terminal session, no test harness in the
+loop at all. A second, faster-paced attempt to also drive a full submit
+raced the dialog's own tab-advance timing (a classic multi-`send-keys`-
+with-fixed-sleep hazard, not a product bug) and landed an empty title on
+submission -- re-confirmed the ALREADY-PROVEN rendering was correct from
+the first, carefully-paced pass, and that the full Confirm ->
+`run_resolved` round trip still fires end-to-end (the harmless
+`demo_pivot.py` acknowledgment printed in the footer either way). Killed
+the tmux session cleanly after.
+
+**Tests:** `test_picker_preview_mode.py` gained 2 new cases
+(`test_main_vocabulary_verb_prints_a_json_array_of_strings`,
+`test_manifest_criteria_field_sources_options_from_the_vocabulary_verb`);
+all 18 in that file plus the full `create_action`-named test set across
+`test_pivots.py`/`test_pivot_registry.py`/`test_picker_tui.py` (28 tests)
+re-run clean after the fixture change.
+
+**Not done this session:** the live-coordinator (real `agent-dispatch`,
+not Demo Queue) click-through remains the one genuinely outstanding
+Validation Plan item -- it needs an actual running coordinator with at
+least one active registrar declaration, which this session didn't have
+available. Everything the GENERIC mechanism needs has now been proven at
+every tier this project recognizes (unit, Pilot/headless, rendered
+screenshot, and live interactive TTY) except that final live-coordinator
+tier.

@@ -1,0 +1,9 @@
+{
+  "comment": "Demo Queue --demo fixture: create_action gains a live-sourced 'criteria' field (options_command -> a new harmless demo_pivot vocabulary verb), render- and tmux-TTY-verifying the options_command mechanism PR #4991 shipped.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

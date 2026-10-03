@@ -268,3 +268,32 @@ class TestDemoPivotFixture:
         assert rc == 0
         out = capsys.readouterr().out
         assert "(untitled)" in out
+
+    def test_main_vocabulary_verb_prints_a_json_array_of_strings(self, capsys):
+        """Phase B item 3 (picker-new-session-prompt-and-composer): the
+        demo pivot's harmless ``vocabulary`` verb stands in for
+        ``agent-dispatch registrar vocabulary``'s JSON-array-of-strings
+        contract, so a --demo render can exercise create_action's
+        options_command path end to end."""
+        from worktree_manager import demo_pivot
+
+        rc = demo_pivot.main(["vocabulary"])
+
+        assert rc == 0
+        out = json.loads(capsys.readouterr().out)
+        assert out == demo_pivot._VOCABULARY
+        assert out and all(isinstance(v, str) and v for v in out)
+
+    def test_manifest_criteria_field_sources_options_from_the_vocabulary_verb(self):
+        """``_DEMO_PIVOT_MANIFEST``'s create_action declares a live-sourced
+        ``criteria`` field (mirroring agent-dispatch's own) so a --demo
+        render exercises the real options_command path, not just the
+        static text/textarea fields item 2's fixture already covered."""
+        fields = preview_mod._DEMO_PIVOT_MANIFEST["create_action"]["fields"]
+        by_name = {f["name"]: f for f in fields}
+        criteria = by_name["criteria"]
+        assert criteria["type"] == "multichoice"
+        assert criteria["options_command"][:3] == [
+            sys.executable, "-m", "worktree_manager.demo_pivot",
+        ]
+        assert criteria["options_command"][-1] == "vocabulary"
