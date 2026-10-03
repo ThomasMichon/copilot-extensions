@@ -58,13 +58,19 @@ changefiles and auto-bumps."
       names only versionable things the SAME diff actually touches (new —
       rejects an added changefile that over-claims, e.g. naming an
       untouched plugin or stale vendorable).
-- [ ] _(agent-recommended elaboration of the Request's "manifests" idea)_
-      Give each vendorable its own version identity by treating the version
+- [ ] Give each vendorable its own version identity by treating the version
       ALREADY declared in its canonical `libs/<lib>/pyproject.toml` as
       authoritative — no new manifest file type. `tools/changefile.py add`
       accepts the vendorable name directly (e.g. `--plugin ssh-manager`) as
       the versioned thing a PR touches, instead of requiring every one of
-      its consumers to be named individually.
+      its consumers to be named individually. Not every vendorable
+      `check-version-bump.py` already recognizes has a `pyproject.toml` —
+      `installer-engine` and `peer-launch` (`tools/check-version-bump.py:
+      222-237`) are non-Python vendorables with no such file at all. Define
+      an identity/exception for this class (e.g. a small marker or a
+      fallback to a version recorded elsewhere already) so reverse
+      changefile-coverage has a valid target for them too, rather than
+      silently excluding them from the new bidirectional guard.
 - [ ] Teach the aggregator (`accumulate_bumps.py`) that bumping a
       vendorable's own manifest version auto-bumps every one of its
       registered consumers too (real vendored copies and `uv`-editable
@@ -103,19 +109,40 @@ changefiles and auto-bumps."
       a stale marker that blocks every subsequent promotion via its own
       existing guard test.
 - [ ] `.github/plugin/marketplace.json` gets a genuinely **non-functional**
-      placeholder, not just `"0.0.0"` version fields inside an otherwise
-      valid catalog — a structurally valid marketplace with every version
-      at `"0.0.0"` is still something a live Copilot CLI could point at as
-      an install source, which does not satisfy Phase 6's own requirement
-      (see the effort README's Journal) for a deliberately non-installable
-      `dev` catalog. Replace its content with a shape the real marketplace
-      reader cannot parse as a valid catalog at all (e.g. missing the
-      schema's required top-level fields, or an explicit sentinel object in
-      their place), and make `promote_release.py` **generate** the real
-      `marketplace.json` fresh at promotion time from every plugin's own
-      manifest, rather than incrementally patching an existing valid file —
-      this finally closes Phase 6's still-open "`dev` marketplace
-      placeholder" item instead of leaving it a separate loose end.
+      placeholder on the CLI-facing install path, not just `"0.0.0"`
+      version fields inside an otherwise valid catalog — a structurally
+      valid marketplace with every version at `"0.0.0"` is still something
+      a live Copilot CLI could point at as an install source, which does
+      not satisfy Phase 6's own requirement (see the effort README's
+      Journal) for a deliberately non-installable `dev` catalog. This must
+      NOT simply delete the file's content, for two concrete reasons found
+      while drafting this item:
+      - **Catalog-only fields have no other source today.** At least one
+        entry (`agent-pull-requests`'s behaviorful `defaultEnabled: false`
+        in `.github/plugin/marketplace.json`) is not derivable from that
+        plugin's own `plugin.json`, and some catalog descriptions already
+        differ from their `plugin.json` counterpart. Define a canonical
+        source for every such catalog-only field (migrating it out of the
+        soon-to-be-sentinel file if needed) before the valid catalog is
+        replaced, and confirm the generated `main` snapshot preserves it
+        exactly.
+      - **Existing dev-side consumers require a valid, parseable catalog.**
+        `check-docs-consistency.py` and `check-runbook-references.py` both
+        load `marketplace.json` in required pre-push/CI today; a sentinel
+        with no `plugins` array produces an empty roster or an outright
+        JSON-parse crash, breaking every push/PR on `dev`, not just live
+        installs. The non-functional placeholder must be unusable
+        specifically as a **live install source** (e.g. missing the schema
+        fields the Copilot CLI's installer specifically requires) while
+        still giving every dev-side catalog consumer (docs-consistency,
+        runbook-references, and any other roster reader) a valid
+        authoritative plugin roster to read.
+      Make `promote_release.py` **generate** the real `marketplace.json`
+      fresh at promotion time from every plugin's own manifest plus the
+      preserved catalog-only fields, rather than incrementally patching an
+      existing valid file — this finally closes Phase 6's still-open "`dev`
+      marketplace placeholder" item instead of leaving it a separate loose
+      end.
 - [ ] Remove `check-version-consistency.py`'s pre-push + CI wiring against
       `dev` entirely — `dev` carries only `"0.0.0"` placeholders, so
       cross-file version agreement is meaningless there, closing the
@@ -175,6 +202,19 @@ changefiles and auto-bumps."
       vendorables it consumes) is bumped exactly once, at the single
       highest-precedence requested level — never double-incremented and
       never resolved to an arbitrary level.
+- [ ] A non-Python vendorable with no `pyproject.toml` (`installer-engine`,
+      `peer-launch`) has a working changefile target and participates in
+      reverse (over-coverage) checking the same as a `pyproject.toml`-backed
+      vendorable.
+- [ ] Every catalog-only field (e.g. `agent-pull-requests`'s
+      `defaultEnabled: false`) survives unchanged in the generated `main`
+      snapshot's `marketplace.json`, sourced from its new canonical location
+      rather than lost when the old file's content is replaced.
+- [ ] `check-docs-consistency.py` and `check-runbook-references.py` still
+      load a valid, non-empty plugin roster from `dev`'s
+      `marketplace.json` placeholder — confirm neither crashes nor silently
+      validates against an empty catalog, even though the same file is
+      simultaneously unusable as a live Copilot CLI install source.
 - [ ] A vendorable's version correctly continues from its last value shipped
       on `main` across repeated promotions (not from the `0.0.0` placeholder)
       — run at least two sequential promotions in the validation harness and

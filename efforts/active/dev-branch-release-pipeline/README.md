@@ -648,17 +648,17 @@ Round 2 (operator's response to that evaluation):
       (PRs #3623/#3627/#3628).
 - [x] Audit every machine's local `copilot-extensions` anchor checkout for
       the same stale-`default_branch: main` config-resolution hazard found
-      on `atlas-core` (Journal, 2026-09-25) — at minimum the second operator workstation,
-      already known to carry other stale-vs-`dev` state from the same
-      migration window.
+      on the leaked placeholder machine name (Journal, 2026-09-25) — at
+      minimum the second operator workstation, already known to carry other
+      stale-vs-`dev` state from the same migration window.
   - **Closed as not applicable, 2026-10-01** (operator-confirmed). Checked
-    `agent-bridge machines --all-projects` for a registered `atlas-core`
-    machine to drive this audit — not found in this harness's topology at
-    all (9 real machines registered, none named `atlas-core`). The operator
-    confirmed `atlas-core` was a placeholder/leaked name from private
-    downstream-repository config, not a real second harness-relevant workstation — the
-    prior Journal entry's reference to "this machine's (`atlas-core`)"
-    local anchor checkout was a misattribution, not evidence of a second
+    `agent-bridge machines --all-projects` for a registered machine under
+    that name to drive this audit — not found in this harness's topology at
+    all (9 real machines registered, none matching). The operator confirmed
+    it was a placeholder/leaked name from private downstream-repository
+    config, not a real second harness-relevant workstation — the
+    prior Journal entry's reference to "this machine's" local anchor
+    checkout was a misattribution, not evidence of a second
     real machine actually carrying the stale-config hazard. No real second
     machine is currently known to need this audit; closing rather than
     leaving an unfulfillable item open against a machine that doesn't exist.
@@ -2483,15 +2483,15 @@ this clone's tag namespace across linked worktrees, not a real
 determinism bug in the generator itself; deleted the resulting stray
 local-only tags.
 
-### 2026-10-01 — Closed the atlas-core audit item as not applicable (Phase 6)
+### 2026-10-01 — Closed the leaked-placeholder-machine-name audit item as not applicable (Phase 6)
 
 Attempted to drive the "audit every machine for the stale-`default_branch:
-main` hazard" item and found `atlas-core` was never a real registered
+main` hazard" item and found the named machine was never a real registered
 machine in this harness's topology (`agent-bridge machines --all-projects`
-lists 9 real machines, none named `atlas-core`). Operator confirmed
-`atlas-core` was a placeholder/leaked name from private downstream-
+lists 9 real machines, none matching). Operator confirmed
+it was a placeholder/leaked name from private downstream-
 repository config, not a real second harness-relevant workstation — the prior
-Journal entry's "this machine's (`atlas-core`)" phrasing was a
+Journal entry's "this machine's" phrasing was a
 misattribution. Closed the item rather than leaving it open against a
 machine that doesn't exist.
 
