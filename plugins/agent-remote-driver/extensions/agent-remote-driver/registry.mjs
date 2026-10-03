@@ -139,16 +139,26 @@ export function isStale(descriptor, { now = Date.now(), heartbeatTimeoutMs = DEF
 //      restoring the fresh descriptor exactly where it belongs.
 //
 // Exported (not just inlined into sweepStale's loop) so the TOCTOU fix
-// itself is independently testable.
-export function reapIfStillStale(path, snapshotDescriptor, opts = {}) {
+// itself is independently testable. `renameFn` (defaults to the real
+// `renameSync`) is injectable so a test can force a non-ENOENT claim
+// failure deterministically, without relying on platform-specific
+// permission APIs that behave inconsistently across POSIX and Windows.
+export function reapIfStillStale(path, snapshotDescriptor, opts = {}, renameFn = renameSync) {
   if (!isStale(snapshotDescriptor, opts)) return { removed: false, descriptor: snapshotDescriptor };
 
   const claimPath = `${path}.reap-claim.${process.pid}.${Date.now()}`;
   try {
-    renameSync(path, claimPath);
+    renameFn(path, claimPath);
   } catch (e) {
     if (e && e.code === "ENOENT") return { removed: false, descriptor: null }; // already gone -- another sweep won, or the owner exited cleanly
-    return { removed: false, descriptor: snapshotDescriptor }; // permission/other error -- never guess-delete
+    // A permission/other claim failure leaves us unable to confirm this
+    // entry's CURRENT state at all. `snapshotDescriptor` was already judged
+    // stale -- returning it here would make a failed reap attempt expose a
+    // known-stale descriptor as if it were live (sweepStale would add it to
+    // `kept`, and listLive()/bin/list-sessions.mjs would report and probe a
+    // dead endpoint). Report nothing usable instead: neither removed nor
+    // live, an honest "could not act on this entry."
+    return { removed: false, descriptor: null }; // permission/other error -- never guess-delete, never report as live either
   }
 
   const claimed = readDescriptorSafe(claimPath);
@@ -156,7 +166,7 @@ export function reapIfStillStale(path, snapshotDescriptor, opts = {}) {
     // The owner's own fresh write actually won the rename race above -- this
     // IS the live descriptor; put it back exactly where it belongs.
     try {
-      renameSync(claimPath, path);
+      renameFn(claimPath, path);
       return { removed: false, descriptor: claimed };
     } catch {
       // Something (almost certainly the owner's own next heartbeat) already
@@ -179,7 +189,51 @@ export function reapIfStillStale(path, snapshotDescriptor, opts = {}) {
   return { removed, descriptor: claimed };
 }
 
-// Removes every stale descriptor in `dir`. Best-effort: a file that
+// Matches an orphaned sidecar's name: an interrupted write's `.tmp` (see
+// discovery.mjs's writeDescriptorAtomic: `<name>.json.<pid>.<ts>.tmp`) or an
+// interrupted reap's claim file (see reapIfStillStale above:
+// `<name>.json.reap-claim.<pid>.<ts>`). Both carry the same bearer token as
+// the real descriptor they were derived from.
+const SIDECAR_RE = /\.json\.(?:\d+\.\d+\.tmp|reap-claim\.\d+\.\d+)$/;
+
+function listSidecarPaths(dir) {
+  let names;
+  try {
+    names = readdirSync(dir);
+  } catch (e) {
+    if (e && e.code === "ENOENT") return [];
+    throw e;
+  }
+  return names.filter((n) => SIDECAR_RE.test(n)).map((n) => join(dir, n));
+}
+
+// Removes orphaned sidecar files. `listDescriptorFiles` only ever looks at
+// `*.json` -- a crash exactly mid-`writeDescriptorAtomic` (between creating
+// the `.tmp` and its rename) or mid-`reapIfStillStale` (between claiming and
+// deleting/restoring) leaves one of these sidecars on disk with NOTHING in
+// this module ever sweeping it, since neither pattern is a bare `.json`
+// file. Both carry a bearer token, so an orphan left behind is a
+// credential-bearing file that would otherwise persist forever. A sidecar
+// is reaped only when its OWNING pid is dead (the same conservative "fail
+// toward keeping" posture as the rest of this module) -- while its owner is
+// still alive it may genuinely be mid-operation, not orphaned.
+export function sweepOrphanedSidecars(dir) {
+  const removed = [];
+  for (const path of listSidecarPaths(dir)) {
+    const descriptor = readDescriptorSafe(path);
+    if (descriptor && isProcessAlive(descriptor.pid)) continue; // may be genuinely mid-operation
+    try {
+      unlinkSync(path);
+      removed.push(path);
+    } catch {
+      /* already gone or in-use; fine either way */
+    }
+  }
+  return removed;
+}
+
+// Removes every stale descriptor in `dir`, AND any orphaned write/claim
+// sidecar (see sweepOrphanedSidecars above). Best-effort: a file that
 // disappears between listing and reaping (another sweep won the race, or
 // the session itself just exited cleanly) is not an error. Returns which
 // paths were removed vs kept, for logging/tests.
@@ -189,7 +243,7 @@ export function reapIfStillStale(path, snapshotDescriptor, opts = {}) {
 // made safe via an atomic claim-rename rather than a plain re-read-then-
 // unlink (which still has its own narrower race).
 export function sweepStale(dir, opts = {}) {
-  const removed = [];
+  const removed = sweepOrphanedSidecars(dir);
   const kept = [];
   for (const { path, descriptor } of listDescriptorFiles(dir)) {
     const result = reapIfStillStale(path, descriptor, opts);
@@ -198,8 +252,9 @@ export function sweepStale(dir, opts = {}) {
     } else if (result.descriptor) {
       kept.push({ path, descriptor: result.descriptor });
     }
-    // else: the entry vanished entirely (ENOENT on claim) -- nothing to
-    // report as kept, and it was never actually removed BY this call either.
+    // else: the entry vanished entirely (ENOENT on claim), or the claim
+    // itself failed for another reason -- nothing to report as kept, and
+    // it was never actually removed BY this call either.
   }
   return { removed, kept };
 }

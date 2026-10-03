@@ -525,3 +525,45 @@ impact statement.
 
 3 new `node --test` cases this round (64 total for the plugin, all
 passing).
+
+### 2026-10-03 (cont'd) — Fourth review round: a real "failed reap exposes stale as live" bug, plus sidecar sweeping
+
+Two more findings, both genuine:
+
+- **`reapIfStillStale` exposed a known-stale descriptor as live on a failed
+  claim.** When the atomic claim-rename itself failed for a reason other
+  than ENOENT (a permission/I/O error), the code fell back to returning the
+  original pre-claim snapshot — which had already been judged stale. That
+  snapshot then flowed into `sweepStale`'s `kept` list, so `listLive()` and
+  `bin/list-sessions.mjs` would report (and probe) a definitely-dead
+  endpoint as if it were real. Fixed: a failed claim (other than ENOENT) now
+  returns `descriptor: null` — reported nowhere, neither removed nor live,
+  an honest "could not act on this entry" rather than a false positive.
+- **Orphaned write/claim sidecars were never swept at all.** Neither a
+  `.tmp` file (an interrupted `writeDescriptorAtomic`) nor a `.reap-claim.*`
+  file (an interrupted `reapIfStillStale`) is a bare `.json` descriptor, so
+  the main sweep loop never looked at them — a crash at exactly the wrong
+  instant would leave one of these credential-bearing files on disk
+  forever. Added `sweepOrphanedSidecars`, now folded into every `sweepStale`
+  call: removes a sidecar once its owning pid is confirmed dead, leaves it
+  alone while the owner is still alive (may genuinely be mid-operation).
+
+7 new `node --test` cases this round (71 total for the plugin, all
+passing), including making `reapIfStillStale`'s rename function injectable
+specifically so the failed-claim branch is deterministically testable
+cross-platform, without relying on inconsistent POSIX/Windows permission
+APIs.
+
+**Explicitly accepted, not chased further:** the review's repeated
+"heartbeat lifecycle lacks automated test coverage" finding. The *generic*
+retry/signal/timer mechanics are now fully tested in `lifecycle.mjs`
+(round 2's extraction) — what remains untested is the specific wiring
+inside `extension.mjs` itself (e.g., "does the heartbeat tick actually call
+`writeDescriptor` with the current port/token"), which is entangled with
+that module's top-level `await joinSession(...)` side effect on import.
+Fully isolating it would mean restructuring `extension.mjs` into an
+importable `main()` that doesn't execute on module load — a larger change
+than this PR's scope, and not proportionate for a plugin that is
+`defaultEnabled: false` and has not yet been run against a single real
+`copilot` session (that gap is already named, separately, as this effort's
+next slice). Tracked here rather than re-attempted a fourth time.

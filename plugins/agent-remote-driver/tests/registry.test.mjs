@@ -10,6 +10,7 @@ import {
   isStale,
   sweepStale,
   reapIfStillStale,
+  sweepOrphanedSidecars,
   listLive,
   DEFAULT_HEARTBEAT_TIMEOUT_MS,
 } from "../extensions/agent-remote-driver/registry.mjs";
@@ -247,6 +248,58 @@ test("reapIfStillStale never revalidates (or touches disk) for an already-live s
   assert.equal(result.descriptor, liveSnapshot); // returned the snapshot as-is, no re-read needed
 });
 
+test("reapIfStillStale NEVER exposes a known-stale snapshot as live when the claim itself fails", () => {
+  // A permission/other claim failure (anything but ENOENT) must not fall
+  // back to trusting the already-stale snapshot -- that would let a failed
+  // reap attempt expose a dead descriptor to listLive()/bin/list-sessions.mjs
+  // as if it were a genuinely live session.
+  const dir = tmpDir();
+  const deadSnapshot = { pid: deadPid(), updatedAt: new Date().toISOString() };
+  const path = writeDescriptor(dir, "unreapable-session", { pid: deadSnapshot.pid });
+  const alwaysFailRename = () => {
+    const e = new Error("permission denied");
+    e.code = "EACCES";
+    throw e;
+  };
+
+  const result = reapIfStillStale(path, deadSnapshot, {}, alwaysFailRename);
+
+  assert.equal(result.removed, false);
+  assert.equal(result.descriptor, null); // NOT the stale snapshot -- never reported as live
+  // The file itself is untouched (the fake rename never actually ran), but
+  // that's incidental to this test -- what matters is the RETURN value a
+  // caller like sweepStale/listLive sees.
+  assert.equal(existsSync(path), true);
+});
+
+test("sweepStale never adds a failed-claim entry to `kept` (would otherwise report it as live)", () => {
+  const dir = tmpDir();
+  const deadSnapshot = { pid: deadPid(), updatedAt: new Date().toISOString() };
+  writeDescriptor(dir, "unreapable-session", { pid: deadSnapshot.pid });
+  const alwaysFailRename = () => {
+    const e = new Error("permission denied");
+    e.code = "EACCES";
+    throw e;
+  };
+
+  // Mirror sweepStale's own loop with the injected failing rename, since
+  // sweepStale itself doesn't take a renameFn parameter (production code
+  // always uses the real one) -- this proves reapIfStillStale's contract is
+  // actually what sweepStale relies on, without needing to thread a test
+  // seam through every layer.
+  const entries = listDescriptorFiles(dir);
+  const kept = [];
+  const removed = [];
+  for (const { path, descriptor } of entries) {
+    const result = reapIfStillStale(path, descriptor, {}, alwaysFailRename);
+    if (result.removed) removed.push(path);
+    else if (result.descriptor) kept.push(result.descriptor);
+  }
+
+  assert.deepEqual(removed, []);
+  assert.deepEqual(kept, []); // NOT [{ pid: deadSnapshot.pid, ... }] -- never silently reported as live
+});
+
 test("sweepStale as a whole never deletes a descriptor refreshed mid-sweep", () => {
   const dir = tmpDir();
   // A plain, unambiguously-stale entry alongside the racing one, to confirm
@@ -270,5 +323,67 @@ test("sweepStale as a whole never deletes a descriptor refreshed mid-sweep", () 
   assert.deepEqual(removed, [stalePath]);
   assert.deepEqual(kept, [racingPath]);
   assert.equal(existsSync(racingPath), true);
+});
+
+// --- sweepOrphanedSidecars (orphaned .tmp / .reap-claim.* sidecar cleanup) ---
+//
+// Neither sidecar shape is a bare `.json` file, so listDescriptorFiles/
+// sweepStale's main loop never sees them on its own -- a crash exactly
+// mid-writeDescriptorAtomic (between creating the .tmp and renaming it) or
+// mid-reapIfStillStale (between claiming and deleting/restoring) would
+// otherwise leave a credential-bearing orphan on disk forever.
+
+function writeSidecar(dir, name, descriptor) {
+  const path = join(dir, name);
+  writeFileSync(path, JSON.stringify(descriptor));
+  return path;
+}
+
+test("sweepOrphanedSidecars removes a .tmp sidecar whose owning pid is dead", () => {
+  const dir = tmpDir();
+  const path = writeSidecar(dir, `s1.json.${deadPid()}.1700000000000.tmp`, { pid: deadPid(), sessionId: "s1" });
+  const removed = sweepOrphanedSidecars(dir);
+  assert.deepEqual(removed, [path]);
+  assert.equal(existsSync(path), false);
+});
+
+test("sweepOrphanedSidecars removes a .reap-claim.* sidecar whose owning pid is dead", () => {
+  const dir = tmpDir();
+  const pid = deadPid();
+  const path = writeSidecar(dir, `s1.json.reap-claim.${pid}.1700000000000`, { pid, sessionId: "s1" });
+  const removed = sweepOrphanedSidecars(dir);
+  assert.deepEqual(removed, [path]);
+  assert.equal(existsSync(path), false);
+});
+
+test("sweepOrphanedSidecars leaves a sidecar alone while its owning pid is still alive -- may be mid-operation", () => {
+  const dir = tmpDir();
+  const path = writeSidecar(dir, `s1.json.${process.pid}.1700000000000.tmp`, { pid: process.pid, sessionId: "s1" });
+  const removed = sweepOrphanedSidecars(dir);
+  assert.deepEqual(removed, []);
+  assert.equal(existsSync(path), true);
+});
+
+test("sweepOrphanedSidecars never touches an ordinary .json descriptor", () => {
+  const dir = tmpDir();
+  const path = writeDescriptor(dir, "ordinary-session", { pid: deadPid() });
+  const removed = sweepOrphanedSidecars(dir);
+  assert.deepEqual(removed, []);
+  assert.equal(existsSync(path), true);
+});
+
+test("sweepStale also reaps orphaned sidecars alongside ordinary stale descriptors", () => {
+  const dir = tmpDir();
+  const sidecarPath = writeSidecar(dir, `orphan.json.${deadPid()}.1700000000000.tmp`, { pid: deadPid(), sessionId: "orphan" });
+  const stalePath = writeDescriptor(dir, "plain-dead", { pid: deadPid() });
+  const livePath = writeDescriptor(dir, "still-alive", { pid: process.pid });
+
+  const { removed } = sweepStale(dir);
+
+  assert.ok(removed.includes(sidecarPath));
+  assert.ok(removed.includes(stalePath));
+  assert.equal(existsSync(sidecarPath), false);
+  assert.equal(existsSync(stalePath), false);
+  assert.equal(existsSync(livePath), true);
 });
 

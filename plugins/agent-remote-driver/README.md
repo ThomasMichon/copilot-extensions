@@ -108,7 +108,14 @@ this plugin addresses both directly:
   any descriptor whose process is no longer alive. A crashed session (OOM,
   `SIGKILL`, host reboot) never gets to run its own cleanup -- the *next*
   session to start reaps it instead, so the directory stays bounded across a
-  long-running fleet with zero dedicated reaper process.
+  long-running fleet with zero dedicated reaper process. This also covers
+  orphaned write/claim **sidecars** (`sweepOrphanedSidecars`): a crash
+  exactly mid-write (between creating a `.tmp` file and renaming it into
+  place) or mid-reap (between claiming an entry and deleting/restoring it)
+  leaves a credential-bearing file that isn't a bare `.json` descriptor and
+  would otherwise never be swept by the main loop at all. A sidecar is
+  reaped only once its owning pid is confirmed dead -- while the owner is
+  still alive it may genuinely be mid-operation.
 - **Heartbeat-qualified liveness, not bare pid-liveness.** A dead process's
   pid can be recycled by an unrelated later process, so a bare
   `process.kill(pid, 0)` check alone is not trustworthy at fleet scale.
@@ -169,10 +176,15 @@ this plugin addresses both directly:
   the entry first -- an atomic `renameSync(path, claimPath)`, which cannot
   be interleaved with the owner's own atomic write -- then revalidates
   staleness against the claimed copy and only deletes (or restores it,
-  losing the claim race gracefully) based on that. The heartbeat rewrite
-  itself is also atomic (temp file + rename, `writeDescriptorAtomic`), so a
-  concurrent reader never observes a half-written descriptor mid-refresh in
-  the first place.
+  losing the claim race gracefully) based on that. A claim that fails for a
+  reason OTHER than the entry already being gone (a permission/I/O error)
+  never falls back to trusting the pre-claim snapshot either -- that
+  snapshot was already judged stale, so exposing it as "kept"/live on a
+  failed reap attempt would be worse than reporting nothing: a caller would
+  probe or report a definitely-dead endpoint as if it were real. The
+  heartbeat rewrite itself is also atomic (temp file + rename,
+  `writeDescriptorAtomic`), so a concurrent reader never observes a
+  half-written descriptor mid-refresh in the first place.
 - **Forward-compatible with a future heartbeat-protocol change.** A
   descriptor with NO `updatedAt` key at all (as opposed to one present but
   unparseable) is treated as pid-liveness-only, never reaped on heartbeat
