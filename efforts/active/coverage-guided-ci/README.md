@@ -346,6 +346,26 @@ future module added to this package needs a quick stdlib-name collision
 check before landing, not just a local test pass (the fast test suite *did*
 pass before this incident, since it only ever imports the package normally).
 
+### 2026-10-02 (yet later still) — Phase 1: enroll `agent-bridge`
+Operator chose `agent-bridge` next, out of the 3 remaining plugins.
+
+By far the largest plugin enrolled so far: 178 test files, 2993 collected
+tests, 8 sub-suites under the trusted `run-plugin-tests.py` runner's own
+chunking. A genuine proof point for the chunking fix the previous entry
+landed, not just a repeat of an already-small suite. Enrolled with the
+same generalized pilot-plugin-list pattern; no further code changes
+needed beyond the two-line list addition.
+
+**Verified directly:** `baseline.py` run against `agent-bridge`'s real
+suite collects a clean baseline end to end (2993 tests, 142 covered
+files) in one run, chunked into ~8 sequential pytest processes
+automatically. Fast unit suite (32 passed) re-confirmed unaffected.
+
+Phase 1 now covers 7 of 9 plugins. **Not yet done:** watching a real
+promotion land `agent-bridge`'s baseline on `main`; the operator's next
+choice of which plugin(s) to enroll from the 2 still remaining
+(`agent-dispatch`, `agent-worktrees`).
+
 ### 2026-10-02 (yet later) — `baseline.py` chunking fix; `agent-mcp` enrolled
 Operator asked to fix the scaling limitation from the previous entry
 directly (unblock `agent-mcp`) rather than continuing to the next
