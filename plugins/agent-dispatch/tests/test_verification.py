@@ -304,7 +304,7 @@ def test_verification_drain_retries_retryable_task_error(tmp_path, monkeypatch):
 
 
 def test_verification_drain_cancel_does_not_wait_for_in_flight_thread_work(tmp_path):
-    """Characterizes the race in aperture-labs#7895: ``Task.cancel()`` on a
+    """Characterizes a real async-cancellation race: ``Task.cancel()`` on a
     loop blocked inside ``asyncio.to_thread`` returns as soon as the
     cancellation propagates through asyncio -- it does NOT wait for the
     underlying OS thread to finish the real (synchronous) call. Under slow
@@ -348,7 +348,7 @@ def test_verification_drain_cancel_does_not_wait_for_in_flight_thread_work(tmp_p
 
 
 def test_verification_drain_stop_event_waits_for_in_flight_thread_work(tmp_path):
-    """Regression test for aperture-labs#7895: a cooperative ``stop_event``
+    """Regression test: a cooperative ``stop_event``
     must let the drain loop's current ``asyncio.to_thread`` call actually
     finish before the awaited task returns, unlike ``task.cancel()`` (see
     the companion characterization test above), so a caller can safely
