@@ -1120,6 +1120,24 @@ def test_warn_about_dirty_tracked_files_does_not_warn_about_untracked_files(
     assert capsys.readouterr().err == ""
 
 
+def test_warn_about_dirty_tracked_files_ignores_submodules(monkeypatch) -> None:
+    # `git status` recursively inspects an initialized submodule by
+    # default, which would consult a SUBMODULE-specific
+    # `filter.<name>.clean`/`.process` assignment that
+    # `_discover_configured_clean_filters` (superproject tracked paths
+    # only) never covers -- an ostensibly read-only probe executing
+    # unneutralized filter code. `--ignore-submodules=all` must always be
+    # passed; the snapshot never copies submodule contents anyway (see
+    # `_write_tar_of_repo`), so there's nothing useful to report there
+    # regardless.
+    monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: [])
+    fake_result = mock.Mock(returncode=0, stdout=b"")
+    with mock.patch.object(wrapper.subprocess, "run", return_value=fake_result) as run:
+        wrapper._warn_about_dirty_tracked_files()
+    args = run.call_args.args[0]
+    assert "--ignore-submodules=all" in args
+
+
 def test_warn_about_dirty_tracked_files_fails_closed_when_status_itself_fails(monkeypatch) -> None:
     # A failed `git status` must never be silently treated as "clean" --
     # this check is the runtime mitigation for accidental secret exposure,

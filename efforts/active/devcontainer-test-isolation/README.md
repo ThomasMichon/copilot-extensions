@@ -1917,3 +1917,30 @@ consistency.py` and `check-effort-vision-structure.py` both pass.
 Docker cleanup (no leftover `test-isolation` volumes) and host `git
 status --short` reconfirmed clean of anything beyond this round's own
 diff.
+
+### 2026-10-03 — Review round 15 (twenty-fifth pass): HIGH submodule-filter-bypass fixed
+A twenty-fifth review pass of commit `a917a9f44` confirmed the previous
+volume-reuse restated finding resolved, and surfaced 1 new HIGH: `git
+status` (`_warn_about_dirty_tracked_files`'s probe) recursively inspects
+any initialized submodule by default, but `_discover_configured_clean_
+filters` only discovers filter assignments from the SUPERPROJECT's own
+tracked paths -- a submodule-specific `filter.<name>.clean`/`.process`
+assignment is never neutralized by `_scrubbed_git_env`'s override set,
+so this ostensibly read-only warning probe could still execute
+unneutralized filter code if an initialized submodule configured one.
+Fixed by adding `--ignore-submodules=all` to the `git status` call --
+the snapshot never copies submodule contents anyway (confirmed earlier
+this round via the existing `_write_tar_of_repo` non-recursion
+regression test), so submodule state has nothing useful to report here
+regardless.
+
+Re-validated end-to-end: the full unit test suite (101 tests, including
+a new mock-based regression test asserting `--ignore-submodules=all` is
+always passed) passes; `check-module-size.py --changed-since origin/dev`
+passes right at the cap (1000 lines, yet another condensing pass across
+roughly a dozen functions); a fresh Docker-backed end-to-end run
+(`ai-attribution`, 98 passed / 6 skipped) confirms the common case still
+works; `check-docs-consistency.py` and `check-effort-vision-structure.py`
+both pass. Docker cleanup (no leftover `test-isolation` volumes) and
+host `git status --short` reconfirmed clean of anything beyond this
+round's own diff.

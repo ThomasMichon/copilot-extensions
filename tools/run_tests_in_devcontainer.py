@@ -96,12 +96,12 @@ EXCLUDED_TOP_LEVEL = {
 
 def _minimal_repo_selection_env() -> dict[str, str]:
     """A blanket ``GIT_*`` strip used only by
-    `_discover_configured_clean_filters`, which must run BEFORE
+    `_discover_configured_clean_filters`, which runs BEFORE
     `_scrubbed_git_env`'s own overrides exist. `check-attr` never invokes
-    a clean filter, but still needs the SAME non-filter protections:
-    `core.fsmonitor=false` (confirmed live that `GIT_OPTIONAL_LOCKS=0`
-    can make even read-only `ls-files`/`check-attr` consult a configured
-    hook), and `GIT_NO_LAZY_FETCH=1`/`GIT_NO_REPLACE_OBJECTS=1`."""
+    a clean filter, but still needs `core.fsmonitor=false` (confirmed
+    live that `GIT_OPTIONAL_LOCKS=0` can make even read-only probes
+    consult a configured hook) and `GIT_NO_LAZY_FETCH=1`/
+    `GIT_NO_REPLACE_OBJECTS=1`."""
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_OPTIONAL_LOCKS"] = "0"
@@ -143,14 +143,13 @@ def _discover_configured_clean_filters() -> list[str]:
 
 def _scrubbed_git_env() -> dict[str, str]:
     """Ambient environment with EVERY inherited ``GIT_*`` variable removed
-    (matching `tools/agent_bridge_contract_git.py`'s own hardened
-    environment). Forces a safe set: `GIT_OPTIONAL_LOCKS=0`,
-    `GIT_NO_LAZY_FETCH=1`/`GIT_NO_REPLACE_OBJECTS=1`, disabled
-    global/system config, `core.fsmonitor=false`, and for every name
-    from `_discover_configured_clean_filters` BOTH `filter.<name>.clean`
-    forced to `cat` AND `filter.<name>.process` forced empty (a
-    `process` filter still executes host code even with `clean` alone
-    neutralized, confirmed live)."""
+    (matching `tools/agent_bridge_contract_git.py`'s hardened env).
+    Forces `GIT_OPTIONAL_LOCKS=0`, `GIT_NO_LAZY_FETCH=1`/
+    `GIT_NO_REPLACE_OBJECTS=1`, disabled global/system config,
+    `core.fsmonitor=false`, and for every `_discover_configured_clean_
+    filters` name, both `filter.<name>.clean` forced to `cat` and
+    `filter.<name>.process` forced empty (confirmed live: `process`
+    still runs host code even with `clean` alone neutralized)."""
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_OPTIONAL_LOCKS"] = "0"
@@ -185,7 +184,7 @@ def _per_instance_config(instance_label: str) -> tuple[Path, str]:
     Returns the temp config path and the volume name, so the caller can
     remove that exact volume at teardown. Written into a fresh temp
     DIRECTORY as literally ``devcontainer.json`` -- the devcontainer CLI
-    rejects any ``--config`` path whose basename isn't that or
+    rejects any ``--config`` basename other than that or
     ``.devcontainer.json``."""
     volume_name = f"{BASE_VOLUME_NAME}-{instance_label}"
     text = DEVCONTAINER_CONFIG.read_text()
@@ -292,9 +291,16 @@ def _warn_about_dirty_tracked_files() -> None:
     with an uncommitted modification -- the tracked-files-only boundary
     is about which PATHS are copied, not which BYTES; a secret pasted
     into an otherwise-tracked file and never committed is still copied
-    in. Fails CLOSED (raises) if ``git status`` itself cannot be run."""
+    in. Fails CLOSED (raises) if ``git status`` itself cannot be run.
+    ``--ignore-submodules=all`` is required: ``git status`` otherwise
+    recursively inspects any initialized submodule, consulting a
+    SUBMODULE-specific `filter.<name>.clean`/`.process` assignment
+    `_discover_configured_clean_filters` never covers (superproject
+    tracked paths only). The snapshot never copies submodule contents
+    anyway (see `_write_tar_of_repo`)."""
     res = subprocess.run(
-        ["git", "-C", str(REPO), "status", "--porcelain=v1", "--untracked-files=no"],
+        ["git", "-C", str(REPO), "status", "--porcelain=v1", "--untracked-files=no",
+         "--ignore-submodules=all"],
         capture_output=True, timeout=30, env=_scrubbed_git_env(),
     )
     if res.returncode != 0:
@@ -323,12 +329,12 @@ def _warn_about_dirty_tracked_files() -> None:
 def _warn_about_hidden_tracked_file_flags() -> None:
     """Print a clear, explicit stderr warning naming every tracked file
     whose index entry carries ``assume-unchanged`` or ``skip-worktree``.
-    ``git status`` is NOT a fail-closed dirty-content check for these
-    paths: both flags suppress reporting an on-disk difference, while
-    the snapshot still archives its actual current bytes regardless.
-    ``git ls-files -v`` marks a flagged entry with a lowercase letter
-    (assume-unchanged) or uppercase ``S`` (skip-worktree); an ordinary
-    entry is uppercase (``H``). Fails CLOSED on a failed ``ls-files``."""
+    ``git status`` is NOT fail-closed for these paths: both flags
+    suppress reporting an on-disk difference, while the snapshot still
+    archives current bytes regardless. ``git ls-files -v`` marks a
+    flagged entry with a lowercase letter (assume-unchanged) or
+    uppercase ``S`` (skip-worktree); ordinary is uppercase (``H``). Fails
+    CLOSED on a failed ``ls-files``."""
     res = subprocess.run(
         ["git", "-C", str(REPO), "ls-files", "-v", "--cached"],
         capture_output=True, timeout=60, env=_scrubbed_git_env(),
@@ -385,11 +391,10 @@ _ALL_LONG_FLAGS = _VALUE_CONSUMING_FLAGS | _BARE_FLAGS
 
 
 def _canonicalize_flag(name: str) -> str:
-    """Resolve a bare (no ``=value`` suffix) long-flag token to its
-    canonical name via argparse's own unambiguous-prefix abbreviation
-    (e.g. ``--bas`` -> ``--base``) against `_ALL_LONG_FLAGS`. Without
-    this, an abbreviated flag would go unrecognized by
-    `_resolve_base_ref`/`_changed_mode_active`."""
+    """Resolve a bare long-flag token to its canonical name via
+    argparse's own unambiguous-prefix abbreviation (e.g. ``--bas`` ->
+    ``--base``) against `_ALL_LONG_FLAGS` -- without this, an abbreviated
+    flag goes unrecognized by `_resolve_base_ref`/`_changed_mode_active`."""
     if name in _ALL_LONG_FLAGS or not name.startswith("--") or len(name) <= 2:
         return name
     matches = [flag for flag in _ALL_LONG_FLAGS if flag.startswith(name)]
@@ -398,11 +403,10 @@ def _canonicalize_flag(name: str) -> str:
 
 def _resolve_base_ref(passthrough: list[str]) -> str:
     """Best-effort extraction of the ``--base`` value a passthrough
-    invocation will use, so ``_materialized_git_dir`` can include exactly
-    that ref's object closure in the bundled snapshot. Falls back to
-    ``tools/run-plugin-tests.py``'s own ``--base`` default when absent,
-    mirrors argparse's own last-occurrence-wins for a repeated flag, and
-    recognizes an unambiguous abbreviation too -- see `_canonicalize_flag`."""
+    invocation will use, so ``_materialized_git_dir`` includes exactly
+    that ref's closure. Falls back to the runner's own default when
+    absent, mirrors argparse's last-occurrence-wins, and recognizes an
+    abbreviation -- see `_canonicalize_flag`."""
     resolved = "origin/main"
     for i, arg in enumerate(passthrough):
         name, eq, value = arg.partition("=")
@@ -417,10 +421,10 @@ def _resolve_base_ref(passthrough: list[str]) -> str:
 
 def _changed_mode_active(passthrough: list[str]) -> bool:
     """Whether a ``tools/run-plugin-tests.py`` invocation with these
-    passthrough args will resolve its targets via ``changed_plugins()`` --
-    true for an explicit ``--changed``, AND for that runner's own default
-    (no ``--all``, no explicit plugin names). Only in this case does an
-    unresolvable ``--base`` actually matter."""
+    passthrough args resolves targets via ``changed_plugins()`` -- true
+    for an explicit ``--changed``, AND that runner's own default (no
+    ``--all``, no explicit plugin names). Only then does an unresolvable
+    ``--base`` matter."""
     has_all = False
     has_positional = False
     skip_next = False
@@ -444,14 +448,13 @@ def _changed_mode_active(passthrough: list[str]) -> bool:
 
 def _git_rev_parse(ref: str) -> str | None:
     """Resolve ``ref`` to a commit sha via the scrubbed environment.
-    Returns ``None`` (rather than raising) when it doesn't resolve
-    locally -- whether that's tolerable is the CALLER's decision:
-    `_materialized_git_dir` treats it as fatal when changed-selection
-    mode is active, but tolerates it otherwise. Peels to ``ref^{commit}``
-    rather than resolving ``ref`` bare: plain ``rev-parse --verify``
-    accepts ANY object type, but the downstream ``git diff
-    <base>...HEAD`` needs a commit-ish. ``--end-of-options`` keeps a ref
-    starting with ``-`` from being misread as a flag."""
+    Returns ``None`` (rather than raising) when unresolvable -- the
+    CALLER decides tolerance: `_materialized_git_dir` treats it as fatal
+    in changed-selection mode, tolerant otherwise. Peels to
+    ``ref^{commit}``: plain ``rev-parse --verify`` accepts ANY object
+    type, but the downstream diff needs a commit-ish.
+    ``--end-of-options`` keeps a ``-``-prefixed ref from misreading as a
+    flag."""
     res = subprocess.run(
         ["git", "-C", str(REPO), "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
         capture_output=True, text=True, timeout=30, env=_scrubbed_git_env(),
@@ -768,10 +771,9 @@ def _cleanup_orphan(instance_label: str, volume_name: str) -> None:
     container may have been created under this instance's id-label even
     though ``_bring_up`` never returned an id. Finds and removes it by
     label, then removes the volume. Every subprocess call is individually
-    guarded against ``subprocess.SubprocessError``/``OSError`` so one
-    failing step never skips the rest, and this function itself never
-    raises. Every call runs with ``start_new_session=True`` (see
-    `_tear_down`'s docstring for why)."""
+    guarded so one failing step never skips the rest, and this function
+    itself never raises. Every call runs with ``start_new_session=True``
+    (see `_tear_down`'s docstring)."""
     container_ids: list[str] = []
     try:
         find = subprocess.run(
@@ -839,19 +841,18 @@ def _cleanup_signals_deferred():
     propagating. Plain ``signal.SIG_IGN`` would DISCARD a signal (not
     defer it), letting `main` silently return 0 for a cancelled run;
     replaying unconditionally could instead REPLACE a genuine failure
-    already propagating -- a single ``sys.exc_info()`` check after
-    ``yield`` covers both.
+    already propagating -- a single ``sys.exc_info()`` check covers both.
 
     Installing/restoring TWO handlers isn't atomic -- a signal mid-swap
-    can still hit whichever OLD handler is still active for the second
-    one (confirmed live). ``pthread_sigmask`` blocks both for each swap,
+    can hit whichever OLD handler is still active for the second one
+    (confirmed live). ``pthread_sigmask`` blocks both for each swap,
     restoring the EXACT prior mask via ``SIG_SETMASK`` (never
-    ``SIG_UNBLOCK``, which would silently unblock a signal the caller
-    had deliberately kept blocked, confirmed live). A caller-pre-blocked
-    signal arriving during ``yield`` stays PENDING until unblocked --
-    unblocking only at the FINAL restore step would deliver it to the
-    already-restored OLD handler, bypassing the replay decision entirely
-    (confirmed live); exit therefore flushes first (brief ``SIG_UNBLOCK``
+    ``SIG_UNBLOCK``, which would silently unblock a caller-pre-blocked
+    signal, confirmed live). Such a signal arriving during ``yield``
+    stays PENDING until unblocked -- unblocking only at the FINAL
+    restore step would deliver it to the already-restored OLD handler,
+    bypassing the replay decision (confirmed live); exit therefore
+    flushes first (brief ``SIG_UNBLOCK``
     while `_record` is still installed), then restores handlers in their
     own separately-masked swap."""
     received: list[int] = []
@@ -894,12 +895,11 @@ def main(argv: list[str] | None = None) -> int:
     # Converts a SIGTERM into a normal raised exception so this
     # function's own try/finally cleanup runs -- see
     # `_TerminationRequested`'s docstring. SIGINT needs no equivalent
-    # handler for the FIRST signal (Python already raises
-    # `KeyboardInterrupt`) -- `_cleanup_signals_deferred` (used around the
-    # cleanup calls below) protects against a REPEAT of either signal
+    # handler (Python already raises `KeyboardInterrupt`) --
+    # `_cleanup_signals_deferred` protects against a REPEAT of either
     # during cleanup itself. The previous handler is restored in the
     # outer `finally` below, since `main` is also invoked in-process by
-    # this module's own tests (and any other programmatic caller).
+    # this module's own tests.
     previous_sigterm_handler = signal.signal(signal.SIGTERM, _raise_on_sigterm)
     try:
         ap = argparse.ArgumentParser(
