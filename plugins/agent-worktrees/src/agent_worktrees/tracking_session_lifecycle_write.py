@@ -110,23 +110,37 @@ def apply_session_link_succession(args: dict) -> dict:
 
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
-        # Idempotency: a retried call with the SAME explicit handoff_token
-        # that's already linked to this exact successor must not append a
-        # second "reassigned" entry -- ownership did not change, only the
-        # retry replayed an already-settled link (mirrors
-        # tracking_session_registration_write.py's own already_linked
-        # check for session_register's handoff_token branch). An
-        # auto-generated token (handoff_token is None) always names a
-        # genuinely fresh handoff, so no such check applies there.
-        already_linked = bool(
-            handoff_token
-            and any(
-                h.token == handoff_token
-                and h.state == "linked"
-                and h.successor == successor_id
-                for h in record.handoffs
+        # Idempotency: a retried call that's already linked to this exact
+        # successor must not append a second "reassigned" entry -- ownership
+        # did not change, only the retry replayed an already-settled link.
+        # `link_succession`'s `handed-off` branch creates/links a real
+        # handoff (`record.handoffs`), so an explicit handoff_token already
+        # linked there is the signal (mirrors session_register's own
+        # already_linked check) -- an auto-generated token (handoff_token is
+        # None) always names a genuinely fresh handoff, so no check applies.
+        # Every OTHER predecessor_state (e.g. "concluded") takes the direct
+        # branch instead, which never touches record.handoffs at all -- the
+        # signal there is the succession link itself already being in place.
+        if predecessor_state == "handed-off":
+            already_linked = bool(
+                handoff_token
+                and any(
+                    h.token == handoff_token
+                    and h.state == "linked"
+                    and h.successor == successor_id
+                    for h in record.handoffs
+                )
             )
-        )
+        else:
+            pred = record.session_entry(predecessor_id)
+            succ = record.session_entry(successor_id)
+            already_linked = bool(
+                pred is not None
+                and succ is not None
+                and pred.successor == successor_id
+                and pred.state == predecessor_state
+                and succ.predecessor == predecessor_id
+            )
         try:
             tracking.link_succession(
                 record,

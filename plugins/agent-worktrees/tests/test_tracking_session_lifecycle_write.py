@@ -198,6 +198,42 @@ def test_link_succession_feeds_claim_history_once_for_an_explicit_token_retry(
     assert [e["event"] for e in events] == ["reassigned"]
 
 
+def test_link_succession_feeds_claim_history_once_for_a_concluded_retry(
+    record_path,
+):
+    """The ``concluded`` (or any non-``handed-off``) ``predecessor_state``
+    takes `link_succession`'s direct branch, which never touches
+    ``record.handoffs`` at all -- idempotency there must be detected from
+    the succession link itself already being in place, not a handoff
+    token, or a retried call with the identical args duplicates the
+    "reassigned" entry even though ownership did not change again."""
+    from agent_worktrees import claim_history, obligations
+    from agent_worktrees.tracking import ResourceClaim
+
+    record = load_record(record_path)
+    record.sessions.append(SessionEntry("new", "2026-01-01T00:00:00"))
+    record.resources = [
+        ResourceClaim(kind="pr", ref="o/r#1", state=obligations.ACTIVE),
+    ]
+    save_record(record, record_path)
+
+    args = {
+        "worktree_id": "wt-1",
+        "yaml_path": str(record_path),
+        "predecessor": "solo",
+        "successor": "new",
+        "predecessor_state": "concluded",
+        "handoff_token": "token-1",
+    }
+    result1 = tracking_session_lifecycle_write.apply_session_link_succession(args)
+    assert result1["ok"] is True
+    result2 = tracking_session_lifecycle_write.apply_session_link_succession(args)
+    assert result2["ok"] is True
+
+    events = claim_history.history_for_ref("o/r#1")
+    assert [e["event"] for e in events] == ["reassigned"]
+
+
 def test_dispatch_reaches_session_conclude_through_a_live_daemon(record_path):
     """End-to-end: proves ``tracking_write.dispatch`` reaches
     ``apply_session_conclude`` via an actual ``CoalescingServer``, the
