@@ -228,26 +228,40 @@ def _trusted_index_hosts(env: dict) -> set[str]:
 
 def _effective_uv_toml_candidates(env: dict) -> list[Path]:
     """The uv.toml file(s) `uv` itself would actually read for index
-    config in this environment.
+    config in this environment, in `uv`'s own precedence order -- user-
+    level first, then system-level -- matching this repo's own
+    `install.ps1`/`install.sh` identical uv-config-discovery helpers
+    (`Test-UvConfiguredIndex` / `_ensure_uv_index`), rather than a
+    partial, user-level-only reimplementation.
 
     ``UV_CONFIG_FILE`` is EXCLUSIVE in `uv`'s own config resolution: when
-    set, `uv` reads ONLY that file and skips its normal project/user-level
-    discovery entirely (the same exclusivity this repo's own
-    `plugins/agent-worktrees/scripts/install.sh` already handles) -- so
-    this must mirror that explicitly, never additionally (or instead)
-    consult the user-level `uv.toml` path while `UV_CONFIG_FILE` is set,
-    which would check a file `uv` itself is NOT reading."""
+    set, `uv` reads ONLY that file and skips its normal project/user/
+    system discovery entirely -- so this must mirror that explicitly,
+    never additionally (or instead) consulting any of the other paths
+    below while `UV_CONFIG_FILE` is set, which would check a file `uv`
+    itself is NOT reading."""
     config_file = env.get("UV_CONFIG_FILE")
     if config_file:
         return [Path(config_file)]
     if sys.platform == "win32":
+        candidates = []
         appdata = env.get("APPDATA")
-        return [Path(appdata) / "uv" / "uv.toml"] if appdata else []
+        if appdata:
+            candidates.append(Path(appdata) / "uv" / "uv.toml")
+        programdata = env.get("PROGRAMDATA")
+        if programdata:
+            candidates.append(Path(programdata) / "uv" / "uv.toml")
+        return candidates
+    candidates = []
     xdg = env.get("XDG_CONFIG_HOME")
-    if xdg:
-        return [Path(xdg) / "uv" / "uv.toml"]
     home = env.get("HOME")
-    return [Path(home) / ".config" / "uv" / "uv.toml"] if home else []
+    if xdg:
+        candidates.append(Path(xdg) / "uv" / "uv.toml")
+    elif home:
+        candidates.append(Path(home) / ".config" / "uv" / "uv.toml")
+    candidates.append(Path("/etc/uv/uv.toml"))
+    candidates.append(Path("/etc/xdg/uv/uv.toml"))
+    return candidates
 
 
 def _effective_default_index_url(env: dict) -> str | None:
@@ -383,30 +397,38 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
         staging_venv_dir = Path(
             tempfile.mkdtemp(dir=venv_dir.parent, prefix=f".{venv_dir.name}.staging-")
         )
+        # Strip every ambient variable that could supply packages from
+        # somewhere other than the one validated URL below -- `--no-config`
+        # only disables config FILES; `uv` still honors these as
+        # environment-based package sources (UV_EXTRA_INDEX_URL/
+        # UV_FIND_LINKS are flat-file/extra-index sources independent of
+        # the default-index machinery entirely, confirmed common on this
+        # repo's own clean-room runners) or, for `UV_VENV_SEED`, as a way
+        # for `uv venv` itself to pre-install setuptools/wheel/pip from
+        # whatever ambient source it would otherwise use -- which the
+        # later bare `uv pip install setuptools wheel` could then leave
+        # untouched if it considers the unconstrained requirement already
+        # satisfied, silently bypassing the validated index entirely. Used
+        # for BOTH the `uv venv` and `uv pip install` calls below.
+        sanitized_env = dict(env)
+        for var in (
+            "UV_INDEX", "UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_CONFIG_FILE",
+            "UV_EXTRA_INDEX_URL", "UV_FIND_LINKS", "UV_VENV_SEED",
+        ):
+            sanitized_env.pop(var, None)
         try:
-            venv_cmd = ["uv", "venv", str(staging_venv_dir)]
+            venv_cmd = ["uv", "venv", "--no-config", str(staging_venv_dir)]
             if python:
                 venv_cmd += ["--python", python]
-            result = subprocess.run(venv_cmd, capture_output=True, text=True)
+            result = subprocess.run(
+                venv_cmd, capture_output=True, text=True, env=sanitized_env
+            )
             if result.returncode != 0:
                 raise ArtifactBuildError(
                     f"uv venv failed for toolchain venv {venv_dir}:\n"
                     f"{result.stdout}\n{result.stderr}"
                 )
             staging_venv_python = _venv_python_path(staging_venv_dir)
-            # Strip every ambient variable that could supply packages from
-            # somewhere other than the one validated URL below -- `--no-
-            # config` only disables config FILES; `uv` still honors these
-            # environment-based package sources (UV_EXTRA_INDEX_URL/
-            # UV_FIND_LINKS are flat-file/extra-index sources independent
-            # of the default-index machinery entirely, confirmed common on
-            # this repo's own clean-room runners).
-            install_env = dict(env)
-            for var in (
-                "UV_INDEX", "UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_CONFIG_FILE",
-                "UV_EXTRA_INDEX_URL", "UV_FIND_LINKS",
-            ):
-                install_env.pop(var, None)
             install = subprocess.run(
                 [
                     "uv", "pip", "install", "--no-config",
@@ -414,7 +436,7 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
                     "--python", str(staging_venv_python),
                     *_LOCKED_TOOLCHAIN_PACKAGES,
                 ],
-                capture_output=True, text=True, env=install_env,
+                capture_output=True, text=True, env=sanitized_env,
             )
             if install.returncode != 0:
                 raise ArtifactBuildError(
@@ -520,10 +542,30 @@ def _assert_toolchain_satisfies_build_requires(
     dependency through undetected. Package names are compared PEP 503-
     canonicalized (case-insensitive, `-`/`_`/`.` runs collapsed) since
     `Requirement.name` preserves the source's own literal spelling (e.g.
-    `Setuptools` must still match the locked `setuptools` entry)."""
-    from packaging.requirements import InvalidRequirement, Requirement
-    from packaging.utils import canonicalize_name
-    from packaging.version import InvalidVersion, Version
+    `Setuptools` must still match the locked `setuptools` entry).
+
+    Requires the third-party `packaging` library -- not declared as a
+    repo-wide dependency anywhere (this repo has no root `pyproject.toml`/
+    `requirements.txt`); today it is present only transitively via `pytest`
+    in CI/dev environments. A genuinely clean machine with just Python and
+    `uv` installed, running this CLI directly, will not have it -- this
+    fails closed with an actionable message rather than a bare
+    `ModuleNotFoundError` traceback. Declaring/bootstrapping it as a real
+    tool-level dependency (or performing this check inside the already-
+    governed-feed-sourced toolchain venv instead of this calling process)
+    is a deliberately named, not-yet-implemented follow-up."""
+    try:
+        from packaging.requirements import InvalidRequirement, Requirement
+        from packaging.utils import canonicalize_name
+        from packaging.version import InvalidVersion, Version
+    except ModuleNotFoundError as exc:
+        raise ArtifactBuildError(
+            "the 'packaging' library is required to verify "
+            "[build-system].requires against the locked toolchain, but is "
+            f"not importable in this environment ({exc}) -- install it "
+            "(e.g. `pip install packaging`) before running this tool "
+            "directly outside this repo's own CI/dev environment"
+        ) from exc
 
     locked_by_canonical_name = {
         canonicalize_name(name): version for name, version in toolchain.packages.items()
