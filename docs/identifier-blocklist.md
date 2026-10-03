@@ -189,6 +189,10 @@ if ($LASTEXITCODE -ne 0) {
   Write-Error "identifiers sweep failed (exit $LASTEXITCODE) -- aborting; fix the reported blocklist/configuration issue before provisioning."
   exit 1
 }
+if (-not $list -or ($list -join "").Trim() -eq "") {
+  Write-Error "identifiers sweep returned no entries -- aborting rather than replacing FORBIDDEN_IDS_WORK with an empty denylist. Confirm this is actually expected (e.g. no other repo has registered a blocklist yet) before provisioning by hand."
+  exit 1
+}
 ($list -join "`n") | & $aw repos gh ThomasMichon/copilot-extensions -- `
   secret set FORBIDDEN_IDS_WORK --repo ThomasMichon/copilot-extensions
 ```
@@ -196,7 +200,12 @@ if ($LASTEXITCODE -ne 0) {
 PowerShell does not stop a script on a native command's nonzero exit by
 default, so the explicit `$LASTEXITCODE` check above is required -- without
 it, an unresolved project or a malformed peer blocklist could silently
-replace a complete `FORBIDDEN_IDS_WORK` with an empty or partial one.
+replace a complete `FORBIDDEN_IDS_WORK` with an empty or partial one. A
+sweep that exits 0 with genuinely zero matched entries is a *separate*
+failure mode the exit-code check alone can't catch -- the empty-output
+guard above exists specifically for that case, since piping an empty
+string into `secret set` would otherwise silently wipe out the existing
+denylist.
 
 Rotate the secret any time a contributing repo's own
 `.identifier-blocklist/` content changes. Never print the swept list to a

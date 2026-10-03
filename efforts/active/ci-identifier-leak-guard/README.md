@@ -198,10 +198,13 @@ audience-exposure tier.
   (`identifier_blocklist_cli.py`), wired into `__main__`'s dispatch table.
 - [x] Wire `tools/check-no-internal-identifiers.py` to consume the live
   sweep as a fourth, best-effort identifier source (`agent-worktrees
-  identifiers sweep --format ci`, invoked with this repo as cwd so it
+  identifiers sweep --format json`, invoked with this repo as cwd so it
   auto-resolves as the sweep target) -- silently absent anywhere
   `agent-worktrees` isn't installed/registered, opt-out via
-  `COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP=1`. This automatically covers the
+  `COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP=1`. The JSON format (rather than
+  the CLI's own default `ci` text format) is used so a parse failure in one
+  peer repo's blocklist still surfaces whatever entries DID parse
+  successfully. This automatically covers the
   pre-push git hook AND `create-pr`/`push-changes` (both trigger the same
   `core.hooksPath` hook via their underlying `git push`) with no separate
   wiring.

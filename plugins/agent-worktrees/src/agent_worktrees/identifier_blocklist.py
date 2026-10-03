@@ -221,11 +221,17 @@ def _compile_internal_token(raw: dict, *, context: str) -> str:
     whole_word = _require_bool(raw, "whole_word", context=context)
     case_sensitive = _require_bool(raw, "case_sensitive", context=context)
 
-    if kind == "literal" and not whole_word and not case_sensitive:
+    if (
+        kind == "literal" and not whole_word and not case_sensitive
+        and not token.lower().startswith("regex:")
+    ):
         return token
 
     # Anything needing regex semantics (explicit `regex` kind, `whole_word`,
-    # or a case-sensitive literal) gets promoted to a regex token.
+    # a case-sensitive literal, or a literal token that happens to start
+    # with the reserved "regex:" marker -- returned verbatim, it would be
+    # misinterpreted by every downstream consumer as regex mode instead of
+    # the literal text the author wrote) gets promoted to a regex token.
     pattern = token if kind == "regex" else _re.escape(token)
     if whole_word:
         pattern = rf"\b{pattern}\b"

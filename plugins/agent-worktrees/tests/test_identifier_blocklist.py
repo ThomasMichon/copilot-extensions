@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -75,6 +76,16 @@ def test_compile_internal_token_plain_literal():
         iblk._compile_internal_token({"token": "legacy-system"}, context="t")
         == "legacy-system"
     )
+
+
+def test_compile_internal_token_literal_with_reserved_regex_prefix_is_escaped():
+    """A plain `literal` token that happens to start with the reserved
+    "regex:" marker must never be returned verbatim -- every downstream
+    consumer treats that prefix as regex mode, so `token: "regex:[abc]"`
+    returned as-is would match any of a/b/c instead of the literal text."""
+    token = iblk._compile_internal_token({"token": "regex:[abc]"}, context="t")
+    assert token == "regex:" + re.escape("regex:[abc]")
+    assert token == r"regex:regex:\[abc\]"
 
 
 def test_compile_internal_token_regex_kind():
