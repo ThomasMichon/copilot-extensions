@@ -763,6 +763,10 @@ jobs:
         # above), so `tools/promote_release.py` on `main` never performs
         # its own baseline validation here regardless -- there is no more
         # precise signal to gate on until the real fix (#5078) lands.
+        # `land == 'true'` IS still required, though: `promote_release.py`
+        # exits 0 for a `workflow_dispatch --push=false` dry run too (only
+        # the real push is skipped), and a dry run must never have the
+        # side effect of publishing a real Release.
         #
         # The full per-line coverage-baseline JSON for a large plugin
         # suite can exceed GitHub's 100MB per-file git push limit, so the
@@ -777,7 +781,7 @@ jobs:
         # actually lands. Idempotent: a retried run for the exact same
         # `DEV_SHA` uploads over (never duplicates) an already-published
         # release's assets.
-        if: steps.decide.outputs.proceed == 'true' && steps.promote.outcome == 'success'
+        if: steps.decide.outputs.proceed == 'true' && steps.promote.outputs.land == 'true'
         env:
           DEV_SHA: ${{ needs.gate.outputs.sha }}
         run: |
