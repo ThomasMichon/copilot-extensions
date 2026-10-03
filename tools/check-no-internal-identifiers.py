@@ -188,6 +188,29 @@ class LiveSweepFailure(Exception):
         self.pairs = pairs
 
 
+# Exact dispatcher error lines (agent-worktrees' own front_door_cli.py /
+# __main__.py) that mean "this install/checkout doesn't support `identifiers`
+# at all" -- a benign absence, not a configuration failure. Matched against
+# a FULL output line (after stripping any leading symbol/whitespace an
+# installed version's `output.err` may prepend), never a loose substring of
+# the entire stdout/stderr blob: a real malformed-blocklist error can
+# legitimately mention a repo path or embed raw YAML parser text, either of
+# which could otherwise coincidentally contain one of these phrases and get
+# misclassified as benign absence instead of failing the push.
+_BENIGN_ABSENCE_LINE_RE = re.compile(
+    r"^(?:Unknown subcommand: identifiers"
+    r"|Could not resolve a project(?: for 'identifiers')?\.)",
+)
+
+
+def _is_benign_absence(stdout: str, stderr: str) -> bool:
+    for raw_line in (stdout + "\n" + stderr).splitlines():
+        line = raw_line.strip().lstrip("✗⚠️").strip()
+        if _BENIGN_ABSENCE_LINE_RE.match(line):
+            return True
+    return False
+
+
 def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
     """Best-effort source 4: a locally registered ``agent-worktrees``' live
     cross-repo identifier-blocklist sweep, scoped to this repo as the sweep
@@ -235,29 +258,36 @@ def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
         )
     except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
         return []
-    if proc.returncode != 0 and any(
-        marker in proc.stderr or marker in proc.stdout
-        for marker in ("Unknown subcommand", "Could not resolve a project")
-    ):
+    if proc.returncode != 0 and _is_benign_absence(proc.stdout, proc.stderr):
         # An installed agent-worktrees that either predates the
         # `identifiers` command entirely, or whose cwd isn't a registered
         # project on this machine -- benign absence, not a configuration
-        # failure. (output.err prints to stdout, not stderr, so check both.)
+        # failure. Matched against the dispatcher's exact error lines (not a
+        # loose substring of the whole output), since a real malformed-
+        # blocklist error can legitimately include a repo path or YAML
+        # parser text that happens to contain one of these phrases.
         return []
     try:
-        payload = json.loads(proc.stdout) if proc.stdout.strip() else {}
+        payload = json.loads(proc.stdout) if proc.stdout.strip() else None
     except json.JSONDecodeError:
-        if proc.returncode == 0:
-            # Exit 0 with unparseable stdout should never happen from a
-            # well-behaved sweep; treat it the same as "nothing to report"
-            # rather than failing the push over a tooling quirk this guard
-            # can't diagnose.
-            return []
+        payload = None
+    if payload is None:
+        # Once a discovered sweep command has been invoked (i.e. it isn't
+        # one of the explicitly recognized benign-absence responses above),
+        # empty or unparseable stdout is itself a protocol failure -- fail
+        # closed rather than silently treating it as "nothing to report",
+        # regardless of exit code. A well-behaved `identifiers sweep
+        # --format json` always emits a full JSON payload (even an empty
+        # sweep reports `{"error": null, "entries": []}`), so anything else
+        # means something went wrong in a way this guard can't diagnose,
+        # and silently accepting it could disable the live denylist
+        # entirely without any visible signal.
         raise LiveSweepFailure(
-            "agent-worktrees identifiers sweep failed: could not parse its "
-            "--format json output as JSON",
+            "agent-worktrees identifiers sweep failed: its --format json "
+            "output was empty or not valid JSON"
+            + (f" (exit {proc.returncode})" if proc.returncode != 0 else ""),
             [],
-        ) from None
+        )
     pairs = [
         (
             "regex:" + e["token"][len("regex:"):]

@@ -351,7 +351,15 @@ def test_live_sweep_silently_ignores_timeout(repo: Path, monkeypatch: pytest.Mon
     assert module._load_live_sweep_identifiers() == []
 
 
-def test_live_sweep_silently_ignores_empty_output(repo: Path, monkeypatch: pytest.MonkeyPatch):
+def test_live_sweep_fails_closed_on_empty_output_with_exit_zero(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """Once a discovered sweep command has actually run (not one of the
+    explicitly recognized benign-absence responses), empty stdout on a
+    successful exit is itself a protocol failure -- a well-behaved sweep
+    always emits a full JSON payload, even for a genuinely empty result.
+    Silently treating this as "nothing to report" could disable the live
+    denylist with no visible signal."""
     module = _load_module(repo)
     monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
     monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
@@ -362,7 +370,55 @@ def test_live_sweep_silently_ignores_empty_output(repo: Path, monkeypatch: pytes
         stderr = ""
 
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
-    assert module._load_live_sweep_identifiers() == []
+    with pytest.raises(module.LiveSweepFailure):
+        module._load_live_sweep_identifiers()
+
+
+def test_live_sweep_fails_closed_on_malformed_json_with_exit_zero(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """Non-JSON stdout on a successful exit must also fail closed, not be
+    silently treated as an empty sweep."""
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 0
+        stdout = "not actually json"
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    with pytest.raises(module.LiveSweepFailure):
+        module._load_live_sweep_identifiers()
+
+
+def test_live_sweep_benign_absence_uses_exact_line_not_loose_substring(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """A real malformed-blocklist error that happens to mention a repo path
+    or embed YAML parser text containing one of the benign-absence phrases
+    (e.g. a peer repo literally named "could-not-resolve-a-project") must
+    still fail the push -- the detection matches an exact dispatcher error
+    line, not a loose substring anywhere in the whole output."""
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 1
+        stdout = json.dumps({
+            "error": (
+                "block-for-public.yaml entry #2: Could not resolve a project "
+                "reference in token pattern -- invalid regex"
+            ),
+            "entries": [],
+        })
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    with pytest.raises(module.LiveSweepFailure):
+        module._load_live_sweep_identifiers()
 
 
 def test_ci_loader_splits_first_pipe_only(repo: Path):

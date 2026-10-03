@@ -201,23 +201,6 @@ def _compile_internal_token(raw: dict, *, context: str) -> str:
         raise BlocklistParseError(
             f"{context}: unknown kind '{kind}' (expected 'literal' or 'regex')"
         )
-    if kind == "regex":
-        # A hand-authored pattern can be wrong in two ways a schema check
-        # alone can't catch: it may simply not compile, or it may compile
-        # but match the empty string -- which would flag every file in a
-        # scan, effectively blocking every push. Catch both here, where the
-        # source file and entry index are still available for the message,
-        # rather than letting a broken pattern surface downstream as an
-        # opaque regex error (or worse, silently over-match).
-        try:
-            compiled = _re.compile(token)
-        except _re.error as exc:
-            raise BlocklistParseError(f"{context}: invalid regex '{token}': {exc}") from exc
-        if compiled.match(""):
-            raise BlocklistParseError(
-                f"{context}: regex '{token}' matches the empty string, which "
-                "would flag every file -- narrow the pattern"
-            )
     whole_word = _require_bool(raw, "whole_word", context=context)
     case_sensitive = _require_bool(raw, "case_sensitive", context=context)
 
@@ -237,6 +220,28 @@ def _compile_internal_token(raw: dict, *, context: str) -> str:
         pattern = rf"\b{pattern}\b"
     if case_sensitive:
         pattern = f"(?-i:{pattern})"
+
+    # Validate the FINAL pattern -- after whole_word/case_sensitive wrapping,
+    # not the raw user-authored token in isolation -- with the exact flags
+    # the downstream consumer compiles with (re.IGNORECASE;
+    # check-no-internal-identifiers.py's `_compile_identifier_patterns`).
+    # Wrapping can turn an individually-valid token invalid: a hand-authored
+    # `kind: regex` token like "(?i)foo" compiles fine alone, but combined
+    # with `whole_word: true` becomes "\b(?i)foo\b" -- an inline flag no
+    # longer at the start of the pattern, which Python's re module rejects.
+    # Catching this here, with the source file and entry context still
+    # available, is far better than letting a broken pattern surface
+    # downstream as an opaque "global flags not at the start" error with no
+    # indication of which blocklist entry caused it.
+    try:
+        compiled = _re.compile(pattern, _re.IGNORECASE)
+    except _re.error as exc:
+        raise BlocklistParseError(f"{context}: invalid regex '{pattern}': {exc}") from exc
+    if compiled.match(""):
+        raise BlocklistParseError(
+            f"{context}: regex '{pattern}' matches the empty string, which "
+            "would flag every file -- narrow the pattern"
+        )
     return f"regex:{pattern}"
 
 

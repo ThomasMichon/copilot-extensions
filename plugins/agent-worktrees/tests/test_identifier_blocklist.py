@@ -256,6 +256,25 @@ def test_parse_blocklist_file_rejects_regex_matching_empty_string(tmp_path: Path
         iblk.parse_blocklist_file(f, "r", "public")
 
 
+def test_parse_blocklist_file_rejects_regex_invalid_only_after_whole_word_wrapping(
+    tmp_path: Path,
+):
+    """A regex token can compile fine on its own but become invalid once
+    whole_word wraps it in \\b...\\b boundaries -- e.g. an inline flag group
+    like (?i)foo is valid at the start of a pattern, but "\\b(?i)foo\\b" puts
+    it mid-pattern, which Python's re module rejects ("global flags not at
+    the start"). This must be caught at parse time (validating the FINAL
+    wrapped pattern), not surface downstream as an opaque regex error with
+    no indication of which blocklist entry caused it."""
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text(
+        "entries:\n  - token: '(?i)foo'\n    kind: regex\n    whole_word: true\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(iblk.BlocklistParseError, match="invalid regex"):
+        iblk.parse_blocklist_file(f, "r", "public")
+
+
 def test_parse_blocklist_file_accepts_valid_regex(tmp_path: Path):
     f = tmp_path / "block-for-public.yaml"
     f.write_text(r"entries:" "\n  - token: '\\bexample\\b'\n    kind: regex\n", encoding="utf-8")
