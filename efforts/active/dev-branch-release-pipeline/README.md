@@ -732,8 +732,21 @@ vendorable's own identity):
       vendorable's own manifest version auto-bumps every one of its
       registered consumers too (real vendored copies and `uv`-editable
       pointer consumers alike, per `check-vendored-libs-sync.py`'s existing
-      consumer map) — a consumer no longer needs its own separate
-      changefile entry for a vendorable-only change.
+      consumer map), AND keeps every one of the vendorable's own real
+      vendored copies (e.g. `plugins/agent-worktrees/libs/zdd/pyproject.toml`)
+      at the same version as its canonical manifest — preserving
+      `lib_bumps_from_diff()`'s existing real-copy-plus-canonical rewrite
+      (`tools/accumulate_bumps.py:480-520`), which `check-vendored-libs-sync.py`
+      already requires to agree. A consumer no longer needs its own
+      separate changefile entry for a vendorable-only change.
+- [ ] Define and implement one explicit coalescing rule for a consumer
+      reached by more than one bump request in the same release window —
+      its own explicit changefile entry, and/or transitive propagation from
+      one or more changed vendorables it consumes: gather every request for
+      that consumer first, apply only the single highest-precedence bump
+      type among them (reusing the existing `major > minor > patch > dev`
+      order), exactly once. Never double-increment a consumer reached
+      through two paths in the same run.
 - [ ] Extend `promote_release.py`'s `_seed_versions_from_main()` to also
       seed every vendorable's version from its last-shipped value on `main`
       before applying its next changefile — today it seeds only plugins and
@@ -743,13 +756,20 @@ vendorable's own identity):
       continuing the vendorable's real version history.
 - [ ] Replace real version values across `dev`'s manifests (`plugin.json`,
       `pyproject.toml`, `.github/plugin/marketplace.json`, checked-in
-      `__version__`/`_FALLBACK_VERSION` source assignments) with the
-      literal string `"0.0.0"`, and make `promote_release.py` **generate**
-      real versions and a real `marketplace.json` fresh at promotion time
-      from accumulated changefiles, rather than incrementally patching an
-      existing valid file — this also finally closes Phase 6's still-open
-      "`dev` marketplace placeholder" item instead of leaving it a separate
-      loose end.
+      `__version__`/`_FALLBACK_VERSION` source assignments, AND every other
+      hook-owned version literal — e.g. `plugins/ai-attribution/scripts/
+      emit-policy.sh`/`emit-policy.ps1`, which `tests/test_emit_policy.py`
+      requires to match `plugin.json`) with the literal string `"0.0.0"`,
+      and make `promote_release.py` **generate** real versions and a real
+      `marketplace.json` fresh at promotion time from accumulated
+      changefiles, rather than incrementally patching an existing valid
+      file — this also finally closes Phase 6's still-open "`dev`
+      marketplace placeholder" item instead of leaving it a separate loose
+      end. Inventory every hook/script that embeds a version literal
+      anywhere in the repo before implementation starts, not just the
+      surfaces `accumulate_bumps.py` already knows about today — a missed
+      one leaves a stale marker that blocks every subsequent promotion via
+      its own existing guard test.
 - [ ] Remove `check-version-consistency.py`'s pre-push + CI wiring against
       `dev` entirely — `dev` carries only `"0.0.0"` placeholders, so
       cross-file version agreement is meaningless there, closing the
@@ -919,7 +939,15 @@ vendorable's own identity):
       pointer consumers alike.
 - [ ] `accumulate_bumps.py` auto-bumps every registered consumer of a
       vendorable whose own changefile bumped it, with no consumer-specific
-      changefile entry required.
+      changefile entry required, AND keeps every one of that vendorable's
+      own real vendored copies at the same version as its canonical
+      manifest (not just the consumer plugins).
+- [ ] A consumer reached by two bump paths in the same release window (its
+      own explicit changefile entry plus transitive propagation from a
+      changed vendorable; or propagation from two different changed
+      vendorables it consumes) is bumped exactly once, at the single
+      highest-precedence requested level — never double-incremented and
+      never resolved to an arbitrary level.
 - [ ] A vendorable's version correctly continues from its last value shipped
       on `main` across repeated promotions (not from the `0.0.0` placeholder)
       — run at least two sequential promotions in the validation harness and
@@ -933,14 +961,20 @@ vendorable's own identity):
       invalid/duplicate fallback assignment, a missing version field or
       catalog entry, a real cross-surface mismatch) still fire against the
       materialized `main` snapshot, with the same fixture cases
-      `check-version-consistency.py`'s own test suite already covers today.
+      `check-version-consistency.py`'s own test suite already covers today
+      — including every hook-owned version literal (e.g. `ai-attribution`'s
+      `emit-policy.sh`/`emit-policy.ps1`), not just `plugin.json`/
+      `pyproject.toml`/`marketplace.json`.
 - [ ] `dev`'s own `plugin.json`/`pyproject.toml`/`marketplace.json`/source
-      `__version__` fields all read `"0.0.0"` after this phase lands, and
-      nothing on `dev` (docs-consistency/runbook-reference checks, the
-      Copilot CLI's own update-detection) misbehaves against that
-      placeholder.
+      `__version__` fields, AND every other hook-owned version literal
+      discovered during the pre-implementation inventory, all read
+      `"0.0.0"` after this phase lands, and nothing on `dev` (docs-
+      consistency/runbook-reference checks, existing guard tests like
+      `test_emit_policy.py`, the Copilot CLI's own update-detection)
+      misbehaves against that placeholder.
 
 ## Proposal
+
 
 _Pending — Phase 1 design work will produce concrete tool choices and
 generator contract details here or in a linked sub-doc._
