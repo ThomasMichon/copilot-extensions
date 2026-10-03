@@ -1880,3 +1880,40 @@ confirms the common case still works; `check-docs-consistency.py` and
 `check-effort-vision-structure.py` both pass. Docker cleanup (no
 leftover `test-isolation` volumes) and host `git status --short`
 reconfirmed clean of anything beyond this round's own diff.
+
+### 2026-10-03 — Review round 15 (twenty-fourth pass): MEDIUM pending-signal-bypass fixed
+A twenty-fourth review pass of commit `7664bdbb8` confirmed the previous
+pass's signal-mask-restoration fix resolved, and surfaced 1 "previously
+missed" MEDIUM against the prior round's own `pthread_sigmask` fix: a
+signal arriving while the CALLER had pre-blocked it (e.g. a pre-blocked
+`SIGTERM`) stays PENDING for as long as it remains blocked -- which,
+without care, is the ENTIRE `yield` body duration. Unblocking only at
+the final restore step (the previous fix's own structure) delivers that
+pending signal to the already-restored OLD handler, bypassing `_record`
+and the `received`-based replay decision entirely -- confirmed live with
+a real `os.kill` sent to self while `SIGTERM` was pre-blocked by the
+test, landing on the ORIGINAL (pre-existing) handler instead of
+triggering the expected `_TerminationRequested` replay. Fixed by adding
+a brief flush step (`SIG_UNBLOCK` then `SIG_SETMASK` back to whatever
+was active) BEFORE touching the handlers at all, so any such pending
+signal is delivered to `_record` -- still installed -- while there's
+still time for it to participate in the normal replay decision; the
+handler-restore swap itself keeps its own separate, atomic
+block/restore exactly as before.
+
+Re-validated end-to-end: the full unit test suite (100 tests, including
+a new real-signal regression test that pre-blocks `SIGTERM`, sends it to
+self during `yield`, and confirms it surfaces as `_TerminationRequested`
+via the ORIGINAL handler never firing) passes; the atomic-swap ordering
+test was updated for the new three-phase sigmask sequence (install
+swap, exit flush, restore swap); `check-module-size.py --changed-since
+origin/dev` passes right at the cap (1000 lines, yet another
+condensing pass -- this module has now hit the cap on effectively every
+substantive round this session and is a strong, repeatedly-confirmed
+candidate for an actual multi-module split as a Phase 2 follow-up); a
+fresh Docker-backed end-to-end run (`ai-attribution`, 98 passed / 6
+skipped) confirms the common case still works; `check-docs-
+consistency.py` and `check-effort-vision-structure.py` both pass.
+Docker cleanup (no leftover `test-isolation` volumes) and host `git
+status --short` reconfirmed clean of anything beyond this round's own
+diff.
