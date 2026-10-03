@@ -121,11 +121,15 @@ and fix how it is wired.
   its own**, out-of-band from any Copilot session, so the launcher never depends
   on a session to refresh the launcher.
 - **Presets** — a shareable configuration bundle a `<repo>-harness` plugin
-  carries **as part of its own payload** (related repos, account/identity
-  config, venue/CodeSpace settings), so adopting the plugin preconfigures the
-  whole work arrangement at once rather than assembling each piece by hand. A
-  preset is adopted the same way the plugin itself is — no separate
-  reference-resolution step to repeat.
+  carries **as part of its own payload** (related-repo declarations, venue/
+  CodeSpace product defaults, and more), so adopting the plugin preconfigures
+  the whole work arrangement at once rather than assembling each piece by
+  hand. A preset is adopted the same way the plugin itself is — no separate
+  reference-resolution step to repeat. It carries only portable, repo-neutral
+  defaults; account/identity configuration stays repo-owned and always wins
+  (the existing provider-config-is-the-floor precedence,
+  [`docs/patterns/codespace-repo-provenance.md`](../../docs/patterns/codespace-repo-provenance.md)),
+  never shipped in the plugin bundle itself.
 
 ## Features
 
@@ -229,13 +233,15 @@ offers to repair, so a machine can be brought back to turnkey without an agent.
 
 ### harness-plugin-onboard-presets
 Ingests a shareable preset **as part of a `<repo>-harness` plugin's own
-payload** — related-repo declarations, CodeSpace/venue support, and more —
-discovered and merged automatically, the same layered way CodeSpace config
-already merges a generic `config.yaml` across every adopted repo, to
-preconfigure related repos, accounts, and venue settings for a specific work
-arrangement in one step. A plugin-carried preset is adopted the same way the
-plugin itself is, with no separate reference-resolution step a human must
-remember to repeat.
+payload** — related-repo declarations, CodeSpace/venue product defaults, and
+more — discovered and merged automatically, the same layered way CodeSpace
+config already merges a generic `config.yaml` across every adopted repo, to
+preconfigure a specific work arrangement in one step. A plugin-carried preset
+is adopted the same way the plugin itself is, with no separate
+reference-resolution step a human must remember to repeat. It carries only
+portable, repo-neutral defaults — never account/identity configuration, which
+stays repo-owned and always takes precedence over anything a plugin bundle
+supplies.
 
 ## Behaviors
 
