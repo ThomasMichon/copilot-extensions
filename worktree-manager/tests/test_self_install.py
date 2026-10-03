@@ -318,6 +318,28 @@ def test_needs_install_rejects_a_slot_missing_the_module_launch_target(tmp_path,
     assert needs_install("1.2.3", root) is False
 
 
+def test_self_install_refuses_to_mark_complete_a_payload_missing_a_key_file(tmp_path, monkeypatch):
+    """A payload missing ``__main__.py`` (not caught by ``payload_version()``,
+    which only reads ``__init__.py``, nor by the ``pyproject.toml``-only
+    check ``self_update()`` performs on the fetched payload) must not be
+    marked complete, published as ``current-version``, or reported
+    ``action='installed'`` -- it would leave a slot ``_slot_is_complete()``
+    immediately rejects, with the binstub unable to launch it.
+    """
+    pd = _fake_payload(tmp_path, "1.2.3")
+    (pd / "src" / "worktree_manager" / "__main__.py").unlink()
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+
+    res = self_install(pd, root=root, dry_run=False)
+
+    assert res.action == "error"
+    assert "__main__.py" in (res.reason or "")
+    assert current_version(root) is None
+    assert not version_slot("1.2.3", root).exists()
+
+
 def test_copy_payload_oserror_is_normalized_to_a_clean_error_result(tmp_path, monkeypatch):
     """A bare ``OSError`` raised by ``shutil.rmtree``/``shutil.copytree``
     inside ``_copy_payload`` (most notably a Windows ``PermissionError``/

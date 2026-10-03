@@ -738,8 +738,15 @@ def _copy_payload_unsafe(payload_dir: Path, slot: Path) -> None:
             "anywhere in it could resolve outside the slot at runtime)"
         )
     _materialize_payload_pointers(payload_dir, slot)
+    missing = [rel for rel in _SLOT_KEY_FILES if not (slot / rel).is_file()]
+    if missing:
+        raise RuntimeError(
+            f"refusing to mark {slot} complete: payload is missing "
+            + ", ".join(missing)
+        )
     # Published only here, as the LAST step of a fully successful copy +
-    # materialization -- this is what proves the slot complete.
+    # materialization that has itself verified every _SLOT_KEY_FILES entry
+    # is present -- this is what proves the slot complete.
     _mark_slot_complete(slot)
 
 
