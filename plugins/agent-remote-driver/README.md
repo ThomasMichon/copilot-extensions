@@ -180,13 +180,14 @@ this plugin addresses both directly:
   the entry first -- an atomic `renameSync(path, claimPath)`, which cannot
   be interleaved with the owner's own atomic write -- then revalidates
   staleness against the claimed copy and only deletes (or restores it,
-  losing the claim race gracefully) based on that. A claim that fails for a
-  reason OTHER than the entry already being gone (a permission/I/O error)
-  never falls back to trusting the pre-claim snapshot either -- that
-  snapshot was already judged stale, so exposing it as "kept"/live on a
-  failed reap attempt would be worse than reporting nothing: a caller would
-  probe or report a definitely-dead endpoint as if it were real. The
-  heartbeat rewrite itself is also atomic (temp file + rename,
+  losing the claim race gracefully) based on that. Neither a failed CLAIM
+  (the rename to a claim path) nor a failed final DELETE (of the already-
+  claimed, already-confirmed-stale copy) ever falls back to trusting that
+  stale descriptor as a result -- a permission/I/O error at either step
+  reports nothing usable rather than exposing a known-dead entry as "kept"/
+  live, which would be worse than reporting nothing: a caller would probe
+  or report a definitely-dead endpoint as if it were real. The heartbeat
+  rewrite itself is also atomic (temp file + rename,
   `writeDescriptorAtomic`), so a concurrent reader never observes a
   half-written descriptor mid-refresh in the first place.
 - **Forward-compatible with a future heartbeat-protocol change.** A

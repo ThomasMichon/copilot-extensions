@@ -1,0 +1,9 @@
+{
+  "comment": "Never report a known-stale descriptor as live when the final reap delete fails",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "dev"
+    }
+  ]
+}

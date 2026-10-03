@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, readdirSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -270,6 +270,27 @@ test("reapIfStillStale NEVER exposes a known-stale snapshot as live when the cla
   // that's incidental to this test -- what matters is the RETURN value a
   // caller like sweepStale/listLive sees.
   assert.equal(existsSync(path), true);
+});
+
+test("reapIfStillStale NEVER exposes a known-stale descriptor as live when the FINAL delete (not just the claim) fails", () => {
+  // The claim-rename can succeed (we genuinely own the entry now) while the
+  // subsequent delete still fails for a real reason (permission/I/O). The
+  // already-confirmed-stale claimed descriptor must not be reported as live
+  // just because the actual unlink didn't work -- same bug class as the
+  // claim-failure case above, one step later in the same function.
+  const dir = tmpDir();
+  const deadSnapshot = { pid: deadPid(), updatedAt: new Date().toISOString() };
+  const path = writeDescriptor(dir, "undeletable-session", { pid: deadSnapshot.pid });
+  const alwaysFailUnlink = () => {
+    const e = new Error("permission denied");
+    e.code = "EACCES";
+    throw e;
+  };
+
+  const result = reapIfStillStale(path, deadSnapshot, {}, renameSync, alwaysFailUnlink);
+
+  assert.equal(result.removed, false);
+  assert.equal(result.descriptor, null); // NOT the stale claimed descriptor -- never reported as live
 });
 
 test("sweepStale never adds a failed-claim entry to `kept` (would otherwise report it as live)", () => {

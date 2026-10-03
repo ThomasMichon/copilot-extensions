@@ -598,3 +598,23 @@ triggered in between is expected, not evidence of a bug on its own.
 5 new `node --test` cases this round (73 total for the plugin, all
 passing), explicitly covering the filename-vs-content pid mismatch for both
 sidecar shapes.
+
+### 2026-10-03 (cont'd) — Sixth review round: the same failed-reap bug, one step later
+
+One more real instance of the class of bug fixed in round 4: that fix
+covered a failed CLAIM (the rename to `claimPath`), but the subsequent
+DELETE of the claimed file could also fail (permission/I/O) while still
+returning the already-confirmed-stale `claimed` descriptor — exposing it as
+live for the exact same reason, just one step later in the same function.
+Fixed identically: a failed unlink (anything but ENOENT) now returns
+`descriptor: null`, never the stale descriptor. Made `unlinkFn` injectable
+(alongside the existing `renameFn`) so this branch is deterministically
+testable too.
+
+1 new `node --test` case this round (74 total for the plugin, all passing).
+
+**Status at this point:** six review rounds, every genuinely new and
+actionable finding fixed with real code + tests; remaining open threads are
+either the explicitly-accepted `extension.mjs`-wiring test-coverage gap
+(documented above) or stale thread-tracking against already-updated
+PR-description/doc-impact/test-count content. Proceeding to merge.

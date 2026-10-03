@@ -139,11 +139,12 @@ export function isStale(descriptor, { now = Date.now(), heartbeatTimeoutMs = DEF
 //      restoring the fresh descriptor exactly where it belongs.
 //
 // Exported (not just inlined into sweepStale's loop) so the TOCTOU fix
-// itself is independently testable. `renameFn` (defaults to the real
-// `renameSync`) is injectable so a test can force a non-ENOENT claim
-// failure deterministically, without relying on platform-specific
-// permission APIs that behave inconsistently across POSIX and Windows.
-export function reapIfStillStale(path, snapshotDescriptor, opts = {}, renameFn = renameSync) {
+// itself is independently testable. `renameFn`/`unlinkFn` (default to the
+// real `renameSync`/`unlinkSync`) are injectable so a test can force a
+// non-ENOENT claim or delete failure deterministically, without relying on
+// platform-specific permission APIs that behave inconsistently across
+// POSIX and Windows.
+export function reapIfStillStale(path, snapshotDescriptor, opts = {}, renameFn = renameSync, unlinkFn = unlinkSync) {
   if (!isStale(snapshotDescriptor, opts)) return { removed: false, descriptor: snapshotDescriptor };
 
   const claimPath = `${path}.reap-claim.${process.pid}.${Date.now()}`;
@@ -177,16 +178,23 @@ export function reapIfStillStale(path, snapshotDescriptor, opts = {}, renameFn =
   }
 
   let removed = true;
+  let descriptor = claimed;
   try {
-    unlinkSync(claimPath);
+    unlinkFn(claimPath);
   } catch (e) {
     // The claim itself succeeded (we own this file now, under this unique
     // claim name), so an unlink failure here is a genuine, reportable
     // failure -- NOT "already gone" (nothing else knows this claimPath
-    // exists) and must not be reported as a successful reap.
+    // exists) and must not be reported as a successful reap. `claimed` was
+    // already confirmed stale above (that's why we're deleting it at all)
+    // -- returning it here on a FAILED delete would repeat the exact
+    // failed-reap-exposes-stale-as-live bug fixed earlier in this file for
+    // the claim step, just one step later: never report a known-stale
+    // descriptor as live just because deleting it didn't work.
     removed = e && e.code === "ENOENT";
+    if (!removed) descriptor = null;
   }
-  return { removed, descriptor: claimed };
+  return { removed, descriptor };
 }
 
 // Matches an orphaned sidecar's name AND captures its OWNER pid directly
