@@ -338,7 +338,14 @@ def _iter_mux_daemon_pids() -> set[int]:
             if _is_mux_daemon_cmdline(cmdline):
                 hits.add(pid)
         return hits
-    out = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True, text=True, timeout=5, check=False)  # noqa: S603
+    out = subprocess.run(  # noqa: S603
+        ["ps", "-eo", "pid=,args="],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+        env=_ps_env_without_width_override(),
+    )
     hits: set[int] = set()
     for line in (out.stdout or "").splitlines():
         parts = line.strip().split(None, 1)
@@ -352,6 +359,29 @@ def _iter_mux_daemon_pids() -> set[int]:
         if _is_mux_daemon_cmdline(cmdline):
             hits.add(pid)
     return hits
+
+
+def _ps_env_without_width_override() -> dict[str, str]:
+    """``os.environ`` with ``COLUMNS``/``LINES`` stripped.
+
+    ``ps -eo ...,args=`` truncates the unbounded ``args`` field to terminal
+    width -- and several ``ps`` implementations honor an inherited
+    ``$COLUMNS`` for this even when stdout is a pipe, not a real terminal
+    (confirmed: a long, genuine mux-daemon command line gets cut off mid-flag
+    under ``COLUMNS=80``, well before the ``-m worktree_manager mux-daemon
+    run`` tokens ``_is_mux_daemon_cmdline`` matches against). Some CI runners
+    export ``COLUMNS`` into every step's environment, which silently broke
+    real-process identity matching here -- not just the flaky-looking local
+    test, but the actual cutover/termination safety check in production
+    whenever a long enough installed path landed under a narrow inherited
+    ``COLUMNS``. Stripping both before calling ``ps`` makes this reliable
+    regardless of what the parent process's terminal/environment happened to
+    export.
+    """
+    env = dict(os.environ)
+    env.pop("COLUMNS", None)
+    env.pop("LINES", None)
+    return env
 
 
 def _terminate_mux_daemon_pid(pid: int, *, root: Path) -> bool:

@@ -507,12 +507,12 @@ def _wait_until_recognized_as_mux_daemon(pid: int, *, timeout: float = 5.0) -> b
     """Poll ``_iter_mux_daemon_pids`` until ``pid`` shows up or ``timeout``
     elapses.
 
-    A freshly ``Popen``'d child's ``execve`` (which replaces its command
-    line with the mux-daemon-shaped argv these tests assert against) is not
-    guaranteed to have completed the instant ``Popen`` returns -- only that
-    ``fork`` has. A single immediate check is a race that a fast/idle
-    machine always wins and a loaded CI runner sometimes doesn't; polling
-    briefly closes that race without weakening what's actually asserted.
+    The real root cause of this ever flaking (``ps``'s ``args`` field
+    getting silently truncated under an inherited ``$COLUMNS``, cutting off
+    the very tokens ``_is_mux_daemon_cmdline`` looks for) is fixed in
+    ``_iter_mux_daemon_pids`` itself. This poll is kept as cheap defense in
+    depth against ordinary fork/exec scheduling latency on a loaded
+    runner -- it does not weaken what's actually asserted.
     """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
