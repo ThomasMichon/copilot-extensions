@@ -531,9 +531,26 @@ win grows with build complexity.
   itself. 1 more unit test (107 total), running the real query script
   end-to-end against the actual interpreter to prove the computed value
   matches `sys.implementation.version` rather than `platform.python_version()`.
-  This slice has now gone through 6 automated review rounds, each finding
-  genuine, progressively narrower issues -- consistent with this effort's
-  own documented review history on its prior slice.
+- A seventh review round found `tools/build_python_artifacts.py` had grown
+  to 1,406 lines across this slice's rounds, exceeding
+  `tools/check-module-size.py`'s 1,000-line cap for new/unbaselined files
+  -- a real CI gate that would have failed this PR. Split the build-
+  toolchain-lock/governed-feed-trust logic (`ToolchainLock`,
+  `resolve_toolchain_lock`, the governed-feed trust gate, the marker-
+  environment query, and the build-requires enforcement helpers) into a
+  new `tools/build_toolchain_lock.py` module (485 lines), re-imported and
+  re-exported by `build_python_artifacts.py` (968 lines now) so its own
+  public API and every existing test's `bpa.<name>` access pattern stayed
+  unchanged. One real fix the split itself surfaced: `_governed_feed_configured`
+  is now called from inside `build_toolchain_lock.py`'s own module, so a
+  test that monkeypatched it via the `bpa` re-export no longer took effect
+  there (Python resolves a free variable via the DEFINING module's own
+  globals, not the importer's) -- updated the two affected tests to patch
+  the real defining module instead. Confirmed `tools/check-module-size.py`
+  now passes for this diff. This slice has now gone through 7 automated
+  review rounds, each finding genuine, progressively narrower issues --
+  consistent with this effort's own documented review history on its
+  prior slice.
 - Real smoke test (not just mocked unit tests): built `agent-bridge` (10
   wheels) then `agent-worktrees` (its own wheel + vendored libs) against
   the SAME `--toolchain-venv` -- both manifests recorded the identical
