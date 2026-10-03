@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import venv
 from pathlib import Path
 
@@ -30,21 +31,27 @@ def _copy_payload(tmp_path: Path, name: str) -> Path:
 
 
 def _site_packages(interpreter: Path) -> Path:
-    result = subprocess.run(
-        [
-            str(interpreter),
-            "-I",
-            "-X",
-            "utf8",
-            "-c",
-            "import sysconfig; print(sysconfig.get_path('purelib'))",
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=True,
-    )
-    return Path(result.stdout.strip())
+    """Resolve a just-created venv's site-packages directory from its
+    on-disk layout, without spawning the venv's own interpreter to ask.
+
+    `venv.EnvBuilder.create()` always builds a venv matching the invoking
+    (current) process's own Python version -- never cross-version -- so
+    this process's own ``sys.version_info`` is authoritative for a venv
+    this test just created; there is no need to introspect the child
+    interpreter at all. Avoiding that subprocess also sidesteps an
+    environment-specific interaction with this suite's own coverage/
+    pytest-cov instrumentation: an otherwise-identical child-interpreter
+    invocation (first via ``site.getsitepackages()`` filtering, then via
+    ``sysconfig.get_path('purelib')`` -- both tried and both failed
+    identically) was confirmed to fail unpredictably specifically inside
+    the promotion pipeline's "coverage baseline collection" harness
+    (`tools/coverage_guided_selection/baseline.py`), while the same tests
+    passed reliably in every plain (non-coverage-instrumented) run.
+    """
+    slot = interpreter.parent.parent
+    if os.name == "nt":
+        return slot / "Lib" / "site-packages"
+    return slot / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
 
 
 def _write_module(path: Path, module_name: str) -> None:
