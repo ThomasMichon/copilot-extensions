@@ -1,0 +1,9 @@
+{
+  "comment": "cleanliness probe: also scan the dotfiles checkout (/workspaces/.codespaces/.persistedshare/dotfiles), which bash's default non-dotglob /workspaces/* expansion silently skipped -- verified live that a dirty dotfiles checkout was invisible to the old probe",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

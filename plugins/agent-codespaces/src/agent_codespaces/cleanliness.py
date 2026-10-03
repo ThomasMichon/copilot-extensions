@@ -22,7 +22,16 @@ from __future__ import annotations
 import re
 import shlex
 from dataclasses import dataclass
+
+from . import config
 from ._ssh_retry import exec_with_retry
+
+#: The dotfiles checkout lives under a dot-prefixed directory
+#: (``/workspaces/.codespaces/...``), which bash's default (non-``dotglob``)
+#: pathname expansion never matches via ``/workspaces/*`` -- see
+#: :func:`probe_command`. Scanned as an explicit extra target, not discovered
+#: by the glob.
+_DEFAULT_EXTRA_GIT_DIRS: tuple[str, ...] = (config.DOTFILES_DIR,)
 
 #: Marker lines the probe emits (KEY=VALUE), parsed back into GitCleanliness.
 _MARK_KNOWN = "OBLIGATION_PROBE"
@@ -75,14 +84,19 @@ def at_rest(gc: GitCleanliness, *, in_flight: bool) -> bool:
     return is_git_clean(gc) and not in_flight
 
 
-def probe_command(workspace_glob: str = "/workspaces/*") -> str:
+def probe_command(
+    workspace_glob: str = "/workspaces/*",
+    *,
+    extra_dirs: tuple[str, ...] = _DEFAULT_EXTRA_GIT_DIRS,
+) -> str:
     """Shell command (run inside the CodeSpace) that emits cleanliness signals.
 
     Scans **every** git repo under ``workspace_glob`` (not just the first --
     a borrowed CodeSpace typically holds both the scaffold repo and the actual
     work repo, and unpushed work in *any* of them keeps the CodeSpace unsafe)
-    and prints ``OBLIGATION_PROBE=1`` plus the aggregated ``DIRTY`` /
-    ``AHEAD`` / ``UNPUSHED_BRANCHES`` KEY=VALUE lines:
+    **plus** every path in ``extra_dirs`` (default: just the dotfiles checkout,
+    :data:`config.DOTFILES_DIR`) and prints ``OBLIGATION_PROBE=1`` plus the
+    aggregated ``DIRTY`` / ``AHEAD`` / ``UNPUSHED_BRANCHES`` KEY=VALUE lines:
 
     * ``DIRTY``   -- ``1`` if **any** repo has uncommitted changes.
     * ``AHEAD``   -- total commits reachable from **HEAD** that exist on **no
@@ -104,12 +118,25 @@ def probe_command(workspace_glob: str = "/workspaces/*") -> str:
     override), never user input -- do **not** ``shlex.quote`` it, or the glob is
     single-quoted and never expands (which silently disabled the probe on every
     real CodeSpace).
+
+    ``extra_dirs`` exists because ``workspace_glob``'s bare ``*`` **cannot**
+    reach the dotfiles checkout even with ``nullglob``: the dotfiles clone
+    lives three levels under a dot-prefixed directory
+    (``/workspaces/.codespaces/.persistedshare/dotfiles``), and bash's default
+    (non-``dotglob``) pathname expansion never matches a name beginning with
+    ``.`` -- confirmed live: ``/workspaces/*/.git`` matched a sibling product
+    repo but silently skipped the dotfiles ``.git`` next to it. A missing
+    ``extra_dirs`` entry on a given box is not an error: the same
+    git-dir-not-found skip that already handles a non-repo glob match applies
+    here too.
     """
     # A single defensive bash pipeline: enumerate every repo, aggregate signals.
+    extra_targets = " ".join(f"{d}/.git" for d in extra_dirs)
+    scan_targets = f"{workspace_glob}/.git" + (f" {extra_targets}" if extra_targets else "")
     inner = (
         'shopt -s nullglob 2>/dev/null; '
         'found=0; dirty=0; ahead=0; nbr=0; '
-        f'for g in {workspace_glob}/.git; do '
+        f'for g in {scan_targets}; do '
         'd=$(dirname "$g"); '
         'git -C "$d" rev-parse --git-dir >/dev/null 2>&1 || continue; '
         'found=1; '
@@ -166,6 +193,7 @@ async def probe_cleanliness(
     name: str,
     *,
     workspace_glob: str = "/workspaces/*",
+    extra_dirs: tuple[str, ...] = _DEFAULT_EXTRA_GIT_DIRS,
     timeout: float = 30.0,
 ) -> GitCleanliness:
     """Run the cleanliness probe inside CodeSpace ``name`` over an SSH channel.
@@ -178,7 +206,8 @@ async def probe_cleanliness(
     """
     try:
         result = await exec_with_retry(
-            manager, name, probe_command(workspace_glob), timeout=timeout,
+            manager, name, probe_command(workspace_glob, extra_dirs=extra_dirs),
+            timeout=timeout,
         )
     except Exception:
         return GitCleanliness(known=False)
