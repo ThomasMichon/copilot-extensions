@@ -313,6 +313,38 @@ def test_accept_retry_does_not_duplicate_claim_history(handoff_world):
     assert [e["event"] for e in events] == ["released", "claimed"]
 
 
+def test_accept_records_claim_history_even_if_a_later_child_save_fails(
+    handoff_world, monkeypatch,
+):
+    """A review finding on the first version of this wiring: the consumer
+    claim is already durably saved before any child-ownership record save
+    -- a later child save failure (e.g. disk/lock contention) must not
+    permanently suppress the consumer's `claimed` event. On retry the ref
+    is already present, so `new_refs` would be empty and the event would
+    never re-fire if recording happened after the child saves instead."""
+    world = _setup_bundle(handoff_world)
+    worktree_ref = world["claims"][0].ref
+    pr_ref = world["claims"][1].ref
+    bundle = _offer(world, [worktree_ref, pr_ref])[0]
+
+    real_save = tracking.save_record
+
+    def _fail_on_child(record, path=None, **kwargs):
+        if path is not None and str(path) == str(world["child_path"]):
+            raise OSError("simulated child-record save failure")
+        return real_save(record, path, **kwargs)
+
+    monkeypatch.setattr(claim_handoffs.tracking, "save_record", _fail_on_child)
+
+    with pytest.raises(claim_handoffs.ClaimHandoffError):
+        claim_handoffs.accept(bundle.bundle_id, actor=world["consumer"], machine=MACHINE)
+
+    consumer = tracking.load_record(world["consumer_path"])
+    assert pr_ref in {c.ref for c in consumer.resources}
+    events = claim_history.history_for_ref(pr_ref)
+    assert [e["event"] for e in events] == ["released", "claimed"]
+
+
 def test_accept_moves_finalize_block_from_source_to_consumer(handoff_world, monkeypatch):
     world = _setup_bundle(handoff_world)
     refs = [claim.ref for claim in world["claims"]]

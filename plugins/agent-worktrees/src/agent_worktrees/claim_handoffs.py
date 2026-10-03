@@ -504,16 +504,16 @@ def _finish_accept_consumer_side(bundle: ClaimBundle, *, machine: str) -> ClaimB
                     child_records[child_path].owner_ref = bundle.consumer
 
             tracking.save_record(consumer_record, consumer_path, preserve_handoff_reservations=False)
+            # Before child saves -- a later failure there must never suppress this.
+            for snapshot in bundle.claims:
+                if snapshot["ref"] in new_refs:
+                    claim_history.record_bundle_transfer(
+                        snapshot, event="claimed", worktree_id=consumer_record.worktree_id,
+                        machine=consumer_record.machine, bundle_id=bundle.bundle_id,
+                        direction="from", counterpart=bundle.source,
+                    )
             for child_path, child_record in child_records.items():
                 tracking.save_record(child_record, Path(child_path), preserve_handoff_reservations=False)
-            for snapshot in bundle.claims:
-                if snapshot["ref"] not in new_refs:
-                    continue
-                claim_history.record_bundle_transfer(
-                    snapshot, event="claimed", worktree_id=consumer_record.worktree_id,
-                    machine=consumer_record.machine, bundle_id=bundle.bundle_id,
-                    direction="from", counterpart=bundle.source,
-                )
             return bundle
     except ClaimHandoffError:
         raise
