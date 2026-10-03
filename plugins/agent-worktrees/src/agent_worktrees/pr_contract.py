@@ -47,6 +47,11 @@ ALL_TRANSITIONS = (
     "approval_dismissed", # an approving review was dismissed (#225)
     "merged",             # the PR became merged
     "closed",             # the PR closed without merging
+    "pushed",             # the PR's head moved to a new commit (a genuine new
+                           # candidate -- not a review/merge-state signal, but
+                           # what a REVIEWER-side waiter needs: "is there new
+                           # content to look at", as opposed to an author's
+                           # verdict-shaped DEFAULT_UNTIL)
 )
 
 #: The actionable default: everything that needs the author's attention -- a
@@ -66,6 +71,18 @@ NONBLOCKING_DEFAULT_UNTIL = (
     "commented", "conflict", "mergeable",
     "checks_failed", "approval_dismissed", "merged", "closed",
 )
+
+#: The REVIEWER-side counterpart to :data:`DEFAULT_UNTIL`: a durably-assigned
+#: reviewer that already posted its verdict doesn't need an author's
+#: attention-shaped signal set (a verdict by someone else, a CI regression --
+#: none of that is actionable for the reviewer itself). It needs exactly one
+#: thing: "is there new content to look at" -- a genuine new head commit --
+#: plus the two terminal states that end the assignment outright. Intended
+#: for the *hibernate-the-wait* pattern (`agent-dispatch run --detach`): the
+#: reviewer suspends after posting a verdict and re-wakes only on one of
+#: these, never on a base-refresh rebase alone (handled programmatically by
+#: the merge gate, not a reason to re-review).
+REVIEWER_DEFAULT_UNTIL = ("pushed", "merged", "closed")
 
 #: Provider-neutral review state (uppercased) -> transition name.  A provider
 #: normalizes its own review vocabulary onto these three canonical states.
@@ -241,6 +258,10 @@ class Baseline:
     approved: bool | None = None
     """Whether the PR had an effective approval at arm time (#225). ``None`` =
     not yet known. A True->dismissed regression fires ``approval_dismissed``."""
+    head_sha: str = ""
+    """Arm-time head commit a ``pushed`` transition diffs against. ``""`` =
+    not yet known (adopted without firing, same convention as ``mergeable``/
+    ``checks_state``)."""
 
     @classmethod
     def from_snapshot(
@@ -258,12 +279,25 @@ class Baseline:
                     dismiss_stale_reviews=dismiss_stale_reviews,
                 ) == "APPROVED"
             ),
+            head_sha=snap.head_sha,
         )
 
     def to_cursor(self) -> str:
-        """Compact, opaque, ASCII cursor (machine-facing -- stays ASCII)."""
+        """Compact, opaque, ASCII cursor (machine-facing -- stays ASCII).
+
+        Three ``.``-separated segments at most: ``r{id}``, then ``{flags}``
+        (``m``/``c``, possibly empty), then ``h{head_sha}`` -- each only
+        present when needed, so a cursor minted before the ``pushed``
+        transition existed stays a valid 1- or 2-segment cursor and still
+        parses (:meth:`from_cursor` reads by position, not by sniffing
+        segment content)."""
         flags = ("m" if self.merged else "") + ("c" if self.closed else "")
-        return f"r{self.max_review_id}" + (f".{flags}" if flags else "")
+        out = f"r{self.max_review_id}"
+        if self.head_sha:
+            out += f".{flags}.h{self.head_sha}"
+        elif flags:
+            out += f".{flags}"
+        return out
 
     @classmethod
     def from_cursor(cls, cursor: str) -> Baseline:
@@ -276,15 +310,21 @@ class Baseline:
         s = cursor.strip()
         if not s:
             return cls()
-        flags = ""
-        if "." in s:
-            s, flags = s.split(".", 1)
+        parts = s.split(".")
+        s = parts[0]
+        flags = parts[1] if len(parts) > 1 else ""
+        head_sha = parts[2][1:] if len(parts) > 2 and parts[2].startswith("h") else ""
         s = s.lstrip("r") or "0"
         try:
             rid = int(s)
         except ValueError as exc:
             raise ValueError(f"invalid cursor: {cursor!r}") from exc
-        return cls(max_review_id=rid, merged="m" in flags, closed="c" in flags)
+        return cls(
+            max_review_id=rid,
+            merged="m" in flags,
+            closed="c" in flags,
+            head_sha=head_sha,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -365,6 +405,20 @@ def compute_events(
             )
             if not snap_approved and dismissed_approval:
                 events.append({"event": "approval_dismissed"})
+
+        # A genuine new head commit (#7890 follow-up: the reviewer-side
+        # hibernation wait's one actionable signal). Only meaningful while
+        # open + unmerged, same scoping as conflict/mergeable/checks_failed
+        # above. An unknown baseline (``""`` -- not yet known, e.g. a
+        # cursor-only re-arm) is adopted without firing, same convention as
+        # ``mergeable``/``checks_state``.
+        if (
+            baseline.head_sha
+            and snap.head_sha
+            and snap.head_sha != baseline.head_sha
+            and "pushed" in want
+        ):
+            events.append({"event": "pushed", "head_sha": snap.head_sha})
 
     if snap.merged and not baseline.merged and "merged" in want:
         events.append({"event": "merged"})

@@ -59,6 +59,31 @@ class TestCursor:
         with pytest.raises(ValueError):
             pc.Baseline.from_cursor("rXYZ")
 
+    def test_roundtrip_head_sha(self):
+        b = pc.Baseline(max_review_id=13, head_sha="abc123")
+        cursor = b.to_cursor()
+        assert cursor == "r13..habc123"
+        parsed = pc.Baseline.from_cursor(cursor)
+        assert parsed.max_review_id == 13
+        assert parsed.head_sha == "abc123"
+        assert parsed.merged is False and parsed.closed is False
+
+    def test_roundtrip_flags_and_head_sha_together(self):
+        b = pc.Baseline(max_review_id=5, merged=True, head_sha="deadbeef")
+        cursor = b.to_cursor()
+        assert cursor == "r5.m.hdeadbeef"
+        parsed = pc.Baseline.from_cursor(cursor)
+        assert parsed.max_review_id == 5
+        assert parsed.merged is True
+        assert parsed.head_sha == "deadbeef"
+
+    def test_pre_pushed_cursors_without_head_sha_still_parse(self):
+        """A cursor minted before the `pushed` transition existed is a valid
+        1- or 2-segment cursor; from_cursor must still parse it (reads by
+        position, not by sniffing segment content)."""
+        assert pc.Baseline.from_cursor("r13").head_sha == ""
+        assert pc.Baseline.from_cursor("r1246.mc").head_sha == ""
+
     def test_from_snapshot_high_water(self):
         snap = pc.PRSnapshot(
             reviews=(_rev(5, "APPROVED"), _rev(7, "COMMENT"), _rev(3, "PENDING")),
@@ -134,6 +159,39 @@ class TestComputeEvents:
         snap = pc.PRSnapshot(pr_state="closed", merged=False)
         events = pc.compute_events(pc.Baseline(), snap, pc.DEFAULT_UNTIL)
         assert [e["event"] for e in events] == ["closed"]
+
+    # --- "pushed" (aperture-labs#7890 follow-up: reviewer-side hibernation) --
+
+    def test_pushed_fires_on_new_head_sha(self):
+        base = pc.Baseline(head_sha="abc123")
+        snap = pc.PRSnapshot(pr_state="open", head_sha="def456")
+        events = pc.compute_events(base, snap, pc.REVIEWER_DEFAULT_UNTIL)
+        assert [e["event"] for e in events] == ["pushed"]
+        assert events[0]["head_sha"] == "def456"
+
+    def test_pushed_does_not_fire_on_unchanged_head(self):
+        base = pc.Baseline(head_sha="abc123")
+        snap = pc.PRSnapshot(pr_state="open", head_sha="abc123")
+        assert pc.compute_events(base, snap, pc.REVIEWER_DEFAULT_UNTIL) == []
+
+    def test_pushed_not_adopted_when_baseline_head_sha_unknown(self):
+        """An unknown baseline (`""`, e.g. a cursor minted before the
+        `pushed` transition existed) is adopted without firing -- same
+        convention as the `mergeable`/`checks_state` unknown-baseline case."""
+        base = pc.Baseline(head_sha="")
+        snap = pc.PRSnapshot(pr_state="open", head_sha="def456")
+        assert pc.compute_events(base, snap, pc.REVIEWER_DEFAULT_UNTIL) == []
+
+    def test_pushed_excluded_unless_requested(self):
+        base = pc.Baseline(head_sha="abc123")
+        snap = pc.PRSnapshot(pr_state="open", head_sha="def456")
+        assert pc.compute_events(base, snap, pc.DEFAULT_UNTIL) == []
+
+    def test_pushed_included_under_any(self):
+        base = pc.Baseline(head_sha="abc123")
+        snap = pc.PRSnapshot(pr_state="open", head_sha="def456")
+        events = pc.compute_events(base, snap, ("any",))
+        assert [e["event"] for e in events] == ["pushed"]
 
     # --- CI checks + approval dismissal regressions (#225) -----------------
 

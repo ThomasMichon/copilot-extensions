@@ -402,8 +402,35 @@ class Supervisor:
     # -- helpers -------------------------------------------------------------
 
     def _eligible(self, now: float) -> list[dict]:
-        """Queued, due tasks in the lane matching the label opt-in (oldest first)."""
-        tasks = self.client.list(repo=self.repo, status=Status.QUEUED, limit=200)
+        """Queued, due tasks in the lane matching the label opt-in (oldest first).
+
+        Fetches server-side PER OWN LABEL (when scoped to one or more labels)
+        rather than one broad, unfiltered, newest-first page: ``client.list``
+        truncates at ``limit`` (200) tasks-wide, newest first, across the
+        WHOLE coordinator -- every label/pool sharing it, not just this one.
+        With enough other pools' tasks queued at once (474 system-wide,
+        confirmed live), an older task in THIS lane falls off that shared
+        page and this supervisor never even sees it to attempt a claim --
+        regardless of how much free capacity its own lane has. A durably
+        assigned PR-review task sat `queued` with zero wakes for hours this
+        way (aperture-labs#7890 section 1) while its own 4-slot lane had
+        room. Querying per-label pushes the ``LIMIT`` down to the
+        coordinator's own `label=` filter (an indexed json_each EXISTS
+        clause), so the page this supervisor actually sees is scoped to its
+        own pool before truncation, not after.
+        """
+        if self.labels:
+            seen: dict[str, dict] = {}
+            for label in sorted(self.labels):
+                for t in self.client.list(
+                    repo=self.repo, status=Status.QUEUED, label=label, limit=200
+                ):
+                    seen[t["id"]] = t
+            tasks = list(seen.values())
+        else:
+            # No label restriction (a catch-all pool) -- nothing to scope the
+            # server-side query to; same broad page as before.
+            tasks = self.client.list(repo=self.repo, status=Status.QUEUED, limit=200)
         out: list[dict] = []
         for t in tasks:
             if (t.get("not_before") or 0) > now:
@@ -899,6 +926,14 @@ class Supervisor:
         from .spawn_cold_recovery import recover_stranded_cold_reservations as _r
 
         return _r(self)
+
+    def recover_stranded_releasing_reservations(self, *, now: float | None = None) -> int:
+        """See :func:`spawn_releasing_recovery.recover_stranded_releasing_reservations`."""
+        from .spawn_releasing_recovery import (
+            recover_stranded_releasing_reservations as _r,
+        )
+
+        return _r(self, now=now)
 
     def reconcile_reserving(self) -> int:
         """Recover pre-launch reservations after a supervisor interruption.
@@ -3490,6 +3525,7 @@ class Supervisor:
         self.cool_dormant_bodies()
         self.release_resumed_cold_tasks(now=now)
         self.recover_stranded_cold_reservations()
+        self.recover_stranded_releasing_reservations(now=now)
         if self.evaluator is not None:
             self.advance_via_evaluator()
         if self.heartbeat or self.publish_activity:
