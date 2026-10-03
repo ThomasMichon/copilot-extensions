@@ -253,6 +253,14 @@ def compute_file_remap(
         return FileRemapResult(status="unchanged")
 
     hunks = _parse_hunks(diff_text)
+    if not hunks:
+        # A nonempty diff with no parsed `@@` hunks at all -- e.g. a binary
+        # file ("Binary files ... differ", no textual hunks) or any other
+        # unified-diff shape this parser doesn't recognize. Treating this
+        # the same as "unchanged" would silently carry every old
+        # attribution forward across a real, unparsed change -- invalidate
+        # instead, exactly as if a hunk had replaced content.
+        return FileRemapResult(status="invalid")
     for old_start, old_len, new_start, new_len in hunks:
         if old_len > 0 and new_len > 0:
             return FileRemapResult(status="invalid")
@@ -359,10 +367,14 @@ def remap_or_invalidate_baseline(
         if remapped:
             new_coverage[file] = remapped
         else:
-            # Every covered line in this file was deleted outright --
-            # equivalent to invalidation (no attribution left to select
-            # from), but worth distinguishing in the report from a real
-            # content-replacement invalidation.
+            # Every covered line in this file ended up with no safely
+            # attributable new line -- each was either deleted outright or
+            # (per `remap_line`'s own asymmetric policy) preceded by an
+            # insertion. Either way there's nothing left to select from,
+            # so this is equivalent to invalidation; `invalidated` doesn't
+            # distinguish the reason per file (it's a flat filename list),
+            # only `remap_line`/`compute_file_remap`'s own return values
+            # carry that detail for a caller that needs it.
             invalidated.append(file)
 
     out = dict(baseline)

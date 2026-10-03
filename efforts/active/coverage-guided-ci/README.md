@@ -202,11 +202,11 @@ order.
       0's existing selector. `remap_line` itself is deliberately
       **asymmetric**: a line preceded only by deletions is safely
       remapped, but a line preceded by *any* insertion is dropped, never
-      remapped -- caught during this PR's own review before merge (see
-      Journal): a clean line-coordinate shift proves nothing about
+      remapped -- a clean line-coordinate shift proves nothing about
       execution, and inserted code can introduce new control flow that
       makes a previously-reached line unreachable even though its line
-      number translates perfectly.
+      number translates perfectly (see the Journal for how this was
+      found).
 - [x] Unit-test this against a constructed history with real intervening
       line insertions/deletions, not just a same-content forward-move case.
       **Done:** `tools/test_coverage_guided_selection.py`'s
@@ -396,12 +396,14 @@ content-replaced) plus a "the only covered line was itself deleted" edge
 case and a no-mutation check on the input baseline; a real multi-commit
 cumulative-remap case built entirely from deletions (baseline measured ->
 two separate real intervening deletion commits -> a fork-point commit
-that also deletes a line, with a hand-computed expected mapping); and,
-added during review, a direct regression test for the control-flow
-scenario above (inserting an early-exit guard clause before a covered
-line correctly drops that line's attribution rather than carrying it
-forward). Every git subprocess scrubs ambient repository-selection env
-vars. Full `tools/test_coverage_guided_selection.py` suite: 48 passed,
+that also deletes a line, with a hand-computed expected mapping); a
+direct regression test for the control-flow scenario above (inserting an
+early-exit guard clause before a covered line correctly drops that line's
+attribution rather than carrying it forward); and a binary-file-change
+case (a nonempty diff with no parsed `@@` hunks at all must invalidate,
+not pass through as "unchanged"). Every git subprocess scrubs ambient
+repository-selection env vars. Full
+`tools/test_coverage_guided_selection.py` suite: 49 passed,
 5 skipped (the pre-existing opt-in real-subprocess integration tests,
 unaffected). `ruff check --select F,E9` (this repo's actual required
 lint selection) clean.
@@ -413,6 +415,10 @@ It isn't -- inserting a new early `return`/guard clause before a
 previously-covered line shifts that line's position predictably while
 also making it unreachable for a test that used to execute it, and hunk
 lengths alone can't distinguish that case from a harmless insertion.
+Also caught: a nonempty diff with no parsed hunks at all (e.g. a binary
+file change) fell through to "remapped" with an empty hunk set, silently
+carrying every old attribution forward unchanged across a real, unparsed
+edit -- now invalidates instead.
 Fixed by making insertions asymmetric with deletions (see above) before
 this phase's own PR merged, not after.
 

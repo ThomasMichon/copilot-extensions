@@ -1010,8 +1010,7 @@ class TestComputeFileRemap:
         assert result.status == "unchanged"
 
     def test_pure_insertion_invalidates_lines_after_the_insertion_point(self, tmp_path):
-        """Regression test for a real soundness gap found in review: a
-        pure line-coordinate shift proves nothing about *execution* --
+        """A pure line-coordinate shift proves nothing about *execution* --
         inserted code can introduce new control flow (an early `return`,
         a new guard clause) that causes a test which used to reach a line
         to no longer reach it, even though the line number itself
@@ -1035,10 +1034,10 @@ class TestComputeFileRemap:
     def test_control_flow_changing_insertion_before_a_covered_line_is_invalidated(
         self, tmp_path,
     ):
-        """The concrete scenario review flagged: inserting an early guard
-        clause/return before a previously-covered line must not carry that
-        line's old attribution forward, even though the line number itself
-        maps cleanly to a new position."""
+        """Inserting an early guard clause/return before a
+        previously-covered line must not carry that line's old attribution
+        forward, even though the line number itself maps cleanly to a new
+        position."""
         repo = _init_repo(tmp_path)
         (repo / "f.py").write_text(
             "def handler(x):\n"
@@ -1146,6 +1145,20 @@ class TestComputeFileRemap:
         (repo / "a.txt").write_text("1\nNEW\n2\n3\n4\n5\n6\n7\nCHANGED\n9\n10\n")
         c2 = _commit(repo, "insert then replace")
         result = ar.compute_file_remap(repo, "a.txt", c1, c2)
+        assert result.status == "invalid"
+
+    def test_binary_file_change_with_no_parsed_hunks_is_invalid(self, tmp_path):
+        """A nonempty diff isn't always textual: a binary file change
+        produces `Binary files ... differ` with no `@@` hunks at all.
+        Treating "no hunks parsed" the same as "unchanged" would silently
+        carry every old attribution forward across a real, unparsed
+        change -- this must invalidate instead."""
+        repo = _init_repo(tmp_path)
+        (repo / "a.bin").write_bytes(b"\x00\x01\x02")
+        c1 = _commit(repo, "first")
+        (repo / "a.bin").write_bytes(b"\xff\xfe\xfd")
+        c2 = _commit(repo, "change binary content")
+        result = ar.compute_file_remap(repo, "a.bin", c1, c2)
         assert result.status == "invalid"
 
 
