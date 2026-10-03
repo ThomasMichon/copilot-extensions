@@ -259,7 +259,13 @@ The **Connection Owner** keeps the
 credential relay and the host-bridge forward alive while its mux session exists
 (checked from the host every couple of minutes, only after the
 launch confirmed the session; never by waking a stopped CodeSpace), up to a 24h
-cap, and both forwards follow a host bridge restart onto its new port. On the same
+cap, and both forwards follow a host bridge restart onto its new port. When a held
+CodeSpace stops (an idle timeout or GitHub's runtime limit), the Owner tears its
+forwards down and does not rebuild them until the CodeSpace is `Available` again
+(a rebuild would boot it back up). A rejoin (`copilot <name> --detach
+--copilot-arg=--resume=<id>`) starts it, and the Owner restores its forwards
+within one cycle. Its `gh` calls run off the loop that carries every forward, so
+one slow or stopped CodeSpace never stalls another CodeSpace's relay or bridge. On the same
 check it mirrors the running session's transcript to this host (whole lines, only
 what was appended) and pushes it into the agent-logger hub under
 `.codespaces-live/<name>` (its own namespace: the close-out capture below uses

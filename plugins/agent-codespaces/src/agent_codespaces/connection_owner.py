@@ -641,7 +641,6 @@ def claim_owner_singleton(interval: float) -> bool:
         return True
 
 
-
 def should_defer_to_owner(
     config: Any, *, no_relay: bool = False, env: Any | None = None
 ) -> bool:
@@ -773,7 +772,7 @@ class ConnectionOwner:
             return False
         channel = self._channels.get(codespace)
         if channel is None:
-            channel = self._factory(codespace)
+            channel = await asyncio.to_thread(self._factory, codespace)  # runs gh: off the loop
             self._channels[codespace] = channel
         if not channel.is_alive:
             try:
@@ -806,6 +805,7 @@ class ConnectionOwner:
         if self._sessions is not None:
             await self._sessions.probe(list_holds(self._ttl))
         holds = {h.codespace: h for h in list_holds(self._ttl)}
+        holds = await self._sessions.usable(holds, self) if self._sessions is not None else holds
         held = set(holds)
         for codespace in list(self._channels):
             if codespace not in held:

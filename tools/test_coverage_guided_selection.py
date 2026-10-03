@@ -325,6 +325,33 @@ class TestCorrelation:
         with pytest.raises(correlation.BaselineCorrelationError):
             correlation.require_measured_commit(baseline)
 
+    def test_release_tag_for_uses_the_full_measured_commit_not_a_prefix(self) -> None:
+        """A truncated prefix risks two distinct commits colliding on the
+        same release tag (silently overwriting an unrelated commit's
+        already-published baseline assets) -- the tag must embed the full
+        SHA."""
+        sha = "abc123def456abc123def456abc123def456abc"
+        assert correlation.release_tag_for(sha) == f"coverage-baselines-{sha}"
+
+    def test_release_tag_for_is_stable_for_the_same_commit(self) -> None:
+        sha = "f" * 40
+        assert correlation.release_tag_for(sha) == correlation.release_tag_for(sha)
+
+    def test_asset_name_for_matches_the_collection_step_artifact_name(self) -> None:
+        assert correlation.asset_name_for("agent-dispatch") == "agent-dispatch.json"
+
+    def test_build_pointer_embeds_the_release_tag_and_asset_name(self) -> None:
+        sha = "a" * 40
+        pointer = correlation.build_pointer("agent-worktrees", sha)
+        assert pointer["schema"] == correlation.POINTER_SCHEMA
+        assert pointer["plugin"] == "agent-worktrees"
+        assert pointer["measured_commit"] == sha
+        assert pointer["release_tag"] == correlation.release_tag_for(sha)
+        assert pointer["asset"] == "agent-worktrees.json"
+        # The pointer is a correlation index, never the payload -- no
+        # per-line coverage map should ever be embedded here.
+        assert "coverage" not in pointer
+
 
 class TestPlanChunks:
     """Fast, pure-function tests for `_plan_chunks` -- no real subprocess."""

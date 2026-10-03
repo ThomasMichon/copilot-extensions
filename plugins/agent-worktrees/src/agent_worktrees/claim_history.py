@@ -14,18 +14,47 @@ release paths. Every call site records history only AFTER its own save is
 durably confirmed -- never before, or a save failure could leave a false
 event for a mutation that never actually persisted.
 
+``worktree run``'s own PR-claim persistence path (``worktree_ops_cli.py``)
+is also wired (worktree-claims-transitive-finalization Phase 3b,
+2026-10-03): tracing its save semantics found **two** distinct append+save
+sites for a produced ``pr``-kind claim -- ``cmd_run``'s own
+``_finish_pending`` closure (the actual live site: it replaces the
+pending-``workdir`` placeholder with the real claim once the inner command
+returns) and ``_journal_run_claim`` (a separately-tested pure helper not
+currently called from ``cmd_run``'s own live flow, but sharing the exact
+same append+save shape, so left wired for parity rather than silently
+missing the ledger if it's ever reconnected or reused). Both record an
+``event="claimed"`` entry only after their own save is durably confirmed,
+and both follow the same idempotency contract ``pr_ops._ensure_pr_claim``
+established: a ref already an active ``pr`` claim before the mutation is
+a no-op reconciliation, not a fresh transition, so a repeat ``run``
+re-observing the same already-claimed PR never feeds a duplicate event.
+
+**Claim-handoff bundle transitions are wired**
+(worktree-claims-transitive-finalization Phase 3b, 2026-10-03):
+``claim_handoffs.py``'s own accept flow -- an explicit, deliberate transfer
+of a resource claim from one worktree to another, distinct from the
+implicit reassignment cases below -- feeds this ledger at its two genuine
+mutation sites: ``accept_source()`` (an ``event="released"`` entry on the
+SOURCE worktree, once its own claim removal is saved) and
+``_finish_accept_consumer_side()`` (an ``event="claimed"`` entry on the
+CONSUMER worktree, once its own claim addition is saved). Both carry a
+``note`` identifying the bundle id and the other side, so a bundle-driven
+transfer is distinguishable in the history from an ordinary claim/release.
+Only ``pr``-kind claims in a bundle feed this ledger (``claim_history`` is
+``pr``-kind only); a ``worktree``/``codespace``/``container``/``task``
+claim transferred by the same bundle is untouched. Gated on the actual
+transition happening (``accept_source`` short-circuits before its own
+save on an already-``accepted`` retry; the consumer side only records for
+refs genuinely newly added this call, matching every other idempotency
+guard in this module), so a retried/idempotent accept never double-records.
+Declining or cancelling a bundle is NOT fed here -- it only clears the
+source claim's reservation (``handoff_bundle``), the claim itself never
+changes worktree, so there is no reassignment to record.
+
 **Explicitly NOT yet covered by this slice** (tracked as a remaining
 follow-up, not silently dropped):
 
-- ``worktree run``'s own PR-claim persistence path (``worktree_ops_cli.py``)
-  -- a distinct, less-central mutation surface deferred for a follow-up
-  pass rather than wired in without fully tracing its own save semantics.
-- Claim-handoff bundle transitions (``claim_handoffs.py``'s offer/accept/
-  decline/cancel) -- an explicit, deliberate hand-off between worktrees is
-  real reassignment history this ledger should eventually include, but
-  wiring it in means touching that module's own intricate locked state
-  machine, deferred to keep this slice's blast radius to the already-
-  identified direct mutation call sites above.
 - **Implicit** reassignment: an agent-dispatch task redrive/reassignment
   after an error, or an agent-bridge session rebind to a worktree, both
   change "who is actually working this PR right now" without ever calling
@@ -179,6 +208,20 @@ def record_pr_event(ref: str, *, worktree_id: str, machine: str, event: str, not
         kind="pr", ref=ref, worktree_id=worktree_id, machine=machine,
         event=event, note=note,
     )
+
+
+def record_bundle_transfer(
+    snapshot: dict[str, str], *, event: str, worktree_id: str, machine: str,
+    bundle_id: str, direction: str, counterpart: str,
+) -> None:
+    """Convenience: ``record_pr_event`` for a claim-handoff bundle's own
+    transfer (worktree-claims-transitive-finalization Phase 3b) -- a
+    non-``pr`` claim transferred by the same bundle is a silent no-op."""
+    if snapshot.get("kind") != "pr":
+        return
+    note = f"transferred via claim-handoff bundle {bundle_id} {direction} {counterpart}"
+    record_pr_event(snapshot["ref"], worktree_id=worktree_id, machine=machine,
+                    event=event, note=note)
 
 
 def current_session_id() -> str | None:

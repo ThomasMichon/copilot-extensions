@@ -7,9 +7,8 @@ import json
 import types
 
 import agent_worktrees.__main__ as m
+from agent_worktrees import claim_history, state_root, tracking
 from agent_worktrees import config as cfg
-from agent_worktrees import state_root
-from agent_worktrees import tracking
 
 
 def _seed_owner(tmp_path, monkeypatch):
@@ -68,6 +67,64 @@ def test_run_success_replaces_pending_with_real_claim(
     assert m.cmd_run(_args()) == 0
     rec = tracking.load_record(path)
     assert [claim.ref for claim in rec.resources] == ["m/p/child"]
+
+
+def test_run_success_feeds_claim_history_for_a_pr_claim(
+        tmp_path, monkeypatch):
+    """worktree-claims-transitive-finalization Phase 3b: `run`'s own
+    live save site (`_finish_pending`, replacing the pending-ref
+    placeholder with the real claim) must feed the same append-only
+    ownership ledger `pr_ops.py` and the daemon claim verbs already feed,
+    for a produced `pr`-kind claim -- only after the save is confirmed."""
+    _seed_owner(tmp_path, monkeypatch)
+    payload = json.dumps({
+        "success": True, "pr_opened": True,
+        "pr": {"ref": "https://github.com/o/r/pull/9"},
+    })
+    monkeypatch.setattr(
+        m.subprocess, "run",
+        lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=payload))
+    assert m.cmd_run(_args()) == 0
+    events = claim_history.history_for_ref("https://github.com/o/r/pull/9")
+    assert [e["event"] for e in events] == ["claimed"]
+    assert events[0]["worktree_id"] == "owner" and events[0]["machine"] == "m"
+
+
+def test_run_repeat_success_on_same_active_pr_claim_does_not_duplicate_history(
+        tmp_path, monkeypatch):
+    """A retried/re-run `run` re-observing the same already-active PR claim
+    is a no-op reconciliation, not a fresh transition -- must feed exactly
+    one "claimed" event, never two (matches `pr_ops._ensure_pr_claim`'s own
+    idempotency contract)."""
+    _seed_owner(tmp_path, monkeypatch)
+    payload = json.dumps({
+        "success": True, "pr_opened": True,
+        "pr": {"ref": "https://github.com/o/r/pull/9"},
+    })
+    monkeypatch.setattr(
+        m.subprocess, "run",
+        lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=payload))
+    assert m.cmd_run(_args()) == 0
+    assert m.cmd_run(_args()) == 0
+    events = claim_history.history_for_ref("https://github.com/o/r/pull/9")
+    assert [e["event"] for e in events] == ["claimed"]
+
+
+def test_run_success_worktree_claim_does_not_feed_claim_history(
+        tmp_path, monkeypatch):
+    """A `worktree`-kind claim is outside claim_history's scope (`pr`-kind
+    only today) -- `run` producing one must never feed a spurious entry."""
+    path = _seed_owner(tmp_path, monkeypatch)
+    payload = json.dumps({
+        "worktree": {"id": "child", "machine": "m", "repo": "p"}
+    })
+    monkeypatch.setattr(
+        m.subprocess, "run",
+        lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=payload))
+    assert m.cmd_run(_args()) == 0
+    rec = tracking.load_record(path)
+    assert rec.resources[0].kind == "worktree"
+    assert claim_history.history_for_ref("m/p/child") == []
 
 
 def test_run_refuses_cross_machine_owner_before_creation(

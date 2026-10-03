@@ -17,8 +17,8 @@ from pathlib import Path
 
 import yaml
 
+from . import claim_history, tracking
 from . import config as cfg
-from . import tracking
 from .claim_handoff_accept_support import (
     acquire_bundle_fence,
     load_accept_bundle,
@@ -400,6 +400,12 @@ def accept_source(bundle_id: str, *, actor: str) -> ClaimBundle:
                 for snapshot in bundle.claims:
                     source_record.resources.remove(source_by_ref[snapshot["ref"]])
                 tracking.save_record(source_record, source_path, preserve_handoff_reservations=False)
+                for snapshot in bundle.claims:
+                    claim_history.record_bundle_transfer(
+                        snapshot, event="released", worktree_id=source_record.worktree_id,
+                        machine=source_record.machine, bundle_id=bundle.bundle_id,
+                        direction="to", counterpart=bundle.consumer,
+                    )
                 accepted = _bundle_state(bundle, "accepted")
                 bundles[index] = accepted
                 _save_registry(path, bundles)
@@ -484,11 +490,13 @@ def _finish_accept_consumer_side(bundle: ClaimBundle, *, machine: str) -> ClaimB
                                 f"cannot transfer {kind} lease {ref}: {exc}"
                             ) from exc
 
+            new_refs: list[str] = []
             for snapshot in bundle.claims:
                 if snapshot["ref"] not in consumer_by_ref:
                     transferred = _transferred_claim(snapshot, source=bundle.source)
                     tracking.add_resource_claim(consumer_record, transferred, save=False)
                     consumer_by_ref[transferred.ref] = transferred
+                    new_refs.append(snapshot["ref"])
                 if snapshot["kind"] == "worktree":
                     child_path = str(
                         _accept_child_path(snapshot, bundle_consumer=consumer_ref)
@@ -496,6 +504,14 @@ def _finish_accept_consumer_side(bundle: ClaimBundle, *, machine: str) -> ClaimB
                     child_records[child_path].owner_ref = bundle.consumer
 
             tracking.save_record(consumer_record, consumer_path, preserve_handoff_reservations=False)
+            # Before child saves -- a later failure there must never suppress this.
+            for snapshot in bundle.claims:
+                if snapshot["ref"] in new_refs:
+                    claim_history.record_bundle_transfer(
+                        snapshot, event="claimed", worktree_id=consumer_record.worktree_id,
+                        machine=consumer_record.machine, bundle_id=bundle.bundle_id,
+                        direction="from", counterpart=bundle.source,
+                    )
             for child_path, child_record in child_records.items():
                 tracking.save_record(child_record, Path(child_path), preserve_handoff_reservations=False)
             return bundle

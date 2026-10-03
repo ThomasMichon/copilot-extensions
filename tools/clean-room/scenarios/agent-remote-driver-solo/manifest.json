@@ -1,0 +1,26 @@
+{
+  "name": "agent-remote-driver-solo",
+  "description": "Tier-P F1 solo scenario: install ONLY agent-remote-driver on a fresh machine and prove its launch-time baseline-drivability contract end-to-end -- no agent-worktrees or agent-bridge installed in the venue, NO model turn submitted (genuinely credit-free: a bare interactive `copilot` session is kept alive under a pty via `script`, with no prompt ever typed). A live copilot session writes a discovery descriptor at ~/.copilot/remote-driver/sessions/<id>.json, the driver's HTTP surface (/health, /events, /send) answers over loopback with the descriptor's bearer token (never persisted unredacted), bin/list-sessions.mjs's aggregated view reflects the live session, and a SIGTERM cleanly removes the descriptor (installSignalCleanup). Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "curl", "script (util-linux/bsdutils, stock on Ubuntu)"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "none", "ado": "none" },
+  "base": "standalone",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions (or a container-local directory mounted with -HarnessMount for uncommitted-worktree validation)",
+    "CR_MARKETPLACE_NAME": "copilot-extensions"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-remote-driver",
+    "~/.copilot/remote-driver/sessions/<session-id>.json (while the session is live)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install ONLY agent-remote-driver" },
+    { "n": 2, "title": "live session writes a discovery descriptor (no model turn)" },
+    { "n": 3, "title": "drive the session over its HTTP surface (/health, /events, /send)" },
+    { "n": 4, "title": "bin/list-sessions.mjs aggregated view reflects the live session" },
+    { "n": 5, "title": "SIGTERM is handled cleanly and removes the discovery descriptor" }
+  ]
+}

@@ -42,6 +42,90 @@ def _resolve_repo_remote(config: cfg.Config, repo: cfg.RepoConfig) -> str:
     return ""
 
 
+@dataclass(frozen=True)
+class ForeignRepoResolution:
+    """The outcome of resolving a ``repo_slug`` to its OWN registered repo
+    config, independent of the caller's active project.
+
+    ``repo_config`` and ``repo_name`` are both empty/``None`` when
+    ``repo_slug`` could not be resolved to a registered repo at all --
+    callers must report that plainly (the ``foreign-target-resolves-honestly``
+    behavior in the ``pull-requests`` vision) rather than silently falling
+    back to their own project's binding.
+    """
+
+    repo_config: cfg.RepoConfig | None
+    repo_name: str = ""
+    same_as_active: bool = False
+
+    @property
+    def resolved(self) -> bool:
+        return self.repo_config is not None
+
+
+def resolve_repo_config_for_slug(
+    config: cfg.Config, repo_slug: str
+) -> ForeignRepoResolution:
+    """Resolve the :class:`~agent_worktrees.config.RepoConfig` that OWNS
+    ``repo_slug`` (``owner/name`` or ADO ``project/repo``), independent of the
+    caller's active project -- the primitive behind ``foreign-repo-pr-operations``
+    (see ``visions/plugins/agent-worktrees/pull-requests``).
+
+    Resolution order:
+
+    1. **Fast path** -- ``repo_slug`` matches the caller's own active
+       project's registered remote. Returns ``config.default_repo`` unchanged
+       (no extra config load, and identical behavior to before this
+       function existed).
+    2. **Foreign, registered** -- ``repo_slug`` matches a *different*
+       registered repo's remote. Loads **that repo's own** layered config via
+       :func:`agent_worktrees.config.load_project_config` (never inheriting
+       the caller's identity/config) and returns its ``default_repo``.
+    3. **Unregistered** -- no registered repo claims ``repo_slug``. Returns an
+       unresolved :class:`ForeignRepoResolution` (``repo_config=None``); the
+       caller must fail honestly rather than guess or fall back.
+
+    A target repo found in the registry but with **no PR binding this
+    machine can build** (anchor unresolvable, config load failure) is treated
+    the same as unregistered -- partial/best-effort binding would risk acting
+    under the wrong provider/policy, which is exactly what this function
+    exists to prevent.
+    """
+    from . import repos as repos_mod
+
+    try:
+        active_remote = _resolve_repo_remote(config, config.default_repo)
+    except Exception:
+        active_remote = ""
+    if active_remote and git_ops.slug_from_url(active_remote) == repo_slug:
+        return ForeignRepoResolution(
+            config.default_repo, config.repo_name, same_as_active=True
+        )
+
+    try:
+        entries = repos_mod.list_repos()
+    except Exception:
+        entries = []
+
+    for entry in entries:
+        if entry.name == config.repo_name:
+            continue  # already covered by the fast path above
+        if not entry.remote:
+            continue
+        if git_ops.slug_from_url(entry.remote) != repo_slug:
+            continue
+        try:
+            foreign_config = cfg.load_project_config(entry.name)
+        except Exception:
+            return ForeignRepoResolution(None)
+        resolved = foreign_config.repos.get(entry.name)
+        if resolved is None:
+            return ForeignRepoResolution(None)
+        return ForeignRepoResolution(resolved, entry.name)
+
+    return ForeignRepoResolution(None)
+
+
 def _profile_for_pr_config(prc: cfg.PRConfig):
     """Classify one already-resolved PR config (pure, no network)."""
     return pc.classify_pr_flow(

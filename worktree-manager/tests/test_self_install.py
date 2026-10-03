@@ -31,6 +31,7 @@ def _fake_payload(tmp: Path, version: str) -> Path:
     pkg = pd / "src" / "worktree_manager"
     pkg.mkdir(parents=True)
     (pkg / "__init__.py").write_text(f'__version__ = "{version}"\n')
+    (pkg / "__main__.py").write_text("")
     (pd / "pyproject.toml").write_text("[project]\nname='x'\n")
     return pd
 
@@ -259,6 +260,160 @@ def test_stale_legacy_binstub_content_forces_redeploy(tmp_path, monkeypatch):
     assert needs_install("1.2.3", root) is False
 
 
+def test_needs_install_rejects_an_empty_broken_slot(tmp_path, monkeypatch):
+    """Regression: a slot that exists but is EMPTY must not be mistaken for
+    a valid, already-current install just because ``current-version``
+    already names it and the directory exists. ``needs_install()`` must
+    verify the slot's actual runnable content, not merely that it exists.
+    """
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+    self_install(pd, root=root, dry_run=False)
+    assert needs_install("1.2.3", root) is False
+
+    # Simulate the on-disk corruption directly: marker + binstub still
+    # correct, but the slot's content is gone (e.g. an interrupted
+    # rmtree/copytree left an existing, empty directory behind).
+    slot = version_slot("1.2.3", root)
+    import shutil as _shutil
+    _shutil.rmtree(slot)
+    slot.mkdir(parents=True)
+    assert slot.is_dir() and not any(slot.iterdir())
+
+    assert needs_install("1.2.3", root) is True, (
+        "an empty slot must never be treated as a valid install"
+    )
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "installed"
+    assert (slot / "src" / "worktree_manager" / "__init__.py").exists()
+    assert needs_install("1.2.3", root) is False
+
+
+def test_needs_install_rejects_a_slot_missing_the_module_launch_target(tmp_path, monkeypatch):
+    """A slot can retain ``src/worktree_manager/__init__.py`` while still
+    missing another file the shipped binstubs need to launch (``uv run
+    --project <slot> python -m worktree_manager``, which also requires
+    ``pyproject.toml`` and ``__main__.py``) -- a partial recopy failure
+    need not empty the whole tree to leave it unlaunchable. Only checking
+    for one file would still mistake this for a valid install.
+    """
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+    self_install(pd, root=root, dry_run=False)
+    assert needs_install("1.2.3", root) is False
+
+    slot = version_slot("1.2.3", root)
+    (slot / "src" / "worktree_manager" / "__main__.py").unlink()
+    assert (slot / "src" / "worktree_manager" / "__init__.py").is_file()
+
+    assert needs_install("1.2.3", root) is True, (
+        "a slot missing its module launch target must never be treated as a valid install"
+    )
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "installed"
+    assert needs_install("1.2.3", root) is False
+
+
+def test_self_install_refuses_to_mark_complete_a_payload_missing_a_key_file(tmp_path, monkeypatch):
+    """A payload missing ``__main__.py`` (not caught by ``payload_version()``,
+    which only reads ``__init__.py``, nor by the ``pyproject.toml``-only
+    check ``self_update()`` performs on the fetched payload) must not be
+    marked complete, published as ``current-version``, or reported
+    ``action='installed'`` -- it would leave a slot ``_slot_is_complete()``
+    immediately rejects, with the binstub unable to launch it.
+    """
+    pd = _fake_payload(tmp_path, "1.2.3")
+    (pd / "src" / "worktree_manager" / "__main__.py").unlink()
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+
+    res = self_install(pd, root=root, dry_run=False)
+
+    assert res.action == "error"
+    assert "__main__.py" in (res.reason or "")
+    assert current_version(root) is None
+    assert not version_slot("1.2.3", root).exists()
+
+
+def test_copy_payload_oserror_is_normalized_to_a_clean_error_result(tmp_path, monkeypatch):
+    """A bare ``OSError`` raised by ``shutil.rmtree``/``shutil.copytree``
+    inside ``_copy_payload`` (most notably a Windows ``PermissionError``/
+    WinError 32 -- copilot-extensions#4999) must be normalized to the one
+    exception type ``self_install()`` catches at its boundary, so it
+    reports a clean ``action='error'`` result -- exactly like any other
+    recognized install failure -- instead of propagating uncaught and
+    skipping cleanup.
+    """
+    import shutil as _shutil
+
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+
+    real_copytree = _shutil.copytree
+
+    def _boom(*args, **kwargs):
+        raise PermissionError(
+            "[WinError 32] The process cannot access the file because it "
+            "is being used by another process"
+        )
+
+    monkeypatch.setattr(si.shutil, "copytree", _boom)
+
+    res = self_install(pd, root=root, dry_run=False)
+
+    assert res.action == "error"
+    assert "WinError 32" in (res.reason or "") or "being used" in (res.reason or "")
+    assert current_version(root) is None
+    assert not version_slot("1.2.3", root).exists(), (
+        "a failed copy must not leave a broken, empty slot behind"
+    )
+
+    # And a retry with the real implementation restored succeeds cleanly.
+    monkeypatch.setattr(si.shutil, "copytree", real_copytree)
+    res2 = self_install(pd, root=root, dry_run=False)
+    assert res2.action == "installed"
+    assert current_version(root) == "1.2.3"
+
+
+def test_marker_invalidation_permission_error_aborts_instead_of_proceeding(tmp_path, monkeypatch):
+    """A ``PermissionError`` invalidating a prior slot's completion marker
+    (e.g. the marker file itself is momentarily held open) must abort the
+    install rather than being swallowed and letting mutation proceed with
+    a stale marker still on disk. Only a genuinely absent marker
+    (``FileNotFoundError``) is the ordinary, ignorable case.
+    """
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+    self_install(pd, root=root, dry_run=False)
+    assert current_version(root) == "1.2.3"
+
+    real_unlink = Path.unlink
+
+    def _flaky_unlink(self, *a, **k):
+        if self.name == si._SLOT_COMPLETE_MARKER:
+            raise PermissionError(13, "Access is denied")
+        return real_unlink(self, *a, **k)
+
+    monkeypatch.setattr(Path, "unlink", _flaky_unlink)
+    # Force a reinstall of the SAME version so _copy_payload_unsafe's
+    # invalidation step actually runs against a marker that already exists.
+    monkeypatch.setattr(si, "_binstubs_are_stale", lambda: True)
+
+    res = self_install(pd, root=root, dry_run=False)
+
+    assert res.action == "error"
+    assert "Access is denied" in (res.reason or "")
+
+
 def test_stale_provider_manifest_forces_repair(tmp_path, monkeypatch):
     pd = _fake_payload(tmp_path, "1.2.3")
     root = tmp_path / "root"
@@ -349,6 +504,53 @@ def test_concurrent_manifest_repairs_do_not_race(tmp_path, monkeypatch):
     manifest = si._control_plane_provider_manifest_path(pd, root=root)
     assert manifest.is_file()
     assert not si._control_plane_provider_manifest_is_stale(pd, root=root)
+
+
+def test_replace_with_retry_recovers_from_a_transient_permission_error(tmp_path, monkeypatch):
+    """Deterministic coverage for ``_replace_with_retry``'s own retry loop:
+    a transient Windows ``PermissionError`` from ``os.replace()`` (the
+    exact failure mode ``test_concurrent_manifest_repairs_do_not_race``
+    exercises only probabilistically, via genuine thread contention) must
+    not fail the call -- it must retry until a later attempt succeeds.
+    """
+    src = tmp_path / "src.tmp"
+    dst = tmp_path / "dst"
+    src.write_text("content", encoding="utf-8")
+
+    real_replace = os.replace
+    calls: list[int] = []
+
+    def _flaky_replace(s, d):
+        calls.append(1)
+        if len(calls) == 1:
+            raise PermissionError(13, "Access is denied")
+        return real_replace(s, d)
+
+    monkeypatch.setattr(si.os, "replace", _flaky_replace)
+
+    si._replace_with_retry(src, dst)
+
+    assert len(calls) == 2, "must have retried exactly once after the transient failure"
+    assert dst.read_text(encoding="utf-8") == "content"
+    assert not src.exists()
+
+
+def test_replace_with_retry_reraises_after_exhausting_attempts(tmp_path, monkeypatch):
+    """A PermissionError that never clears must still surface to the caller
+    -- not be swallowed indefinitely -- once the bounded retry budget is
+    spent.
+    """
+    src = tmp_path / "src.tmp"
+    dst = tmp_path / "dst"
+    src.write_text("content", encoding="utf-8")
+
+    def _always_fails(s, d):
+        raise PermissionError(13, "Access is denied")
+
+    monkeypatch.setattr(si.os, "replace", _always_fails)
+
+    with pytest.raises(PermissionError):
+        si._replace_with_retry(src, dst, attempts=3, delay_s=0.0)
 
 
 def test_known_legacy_prerename_binstub_is_recognized_and_cleaned(tmp_path, monkeypatch):

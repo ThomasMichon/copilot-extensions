@@ -4370,6 +4370,177 @@ class TestPRStatusLive:
             "https://h/gitea",
         ) == ("head", "2026-01-01T00:01:00Z")
 
+    def test_tracked_pr_pushed_head_ignores_confirmation_state(
+        self, pr_repo, monkeypatch
+    ):
+        """``_tracked_pr_pushed_head`` answers "what did we just push?" --
+        unlike ``_tracked_pr_head_evidence``, it must return the recorded
+        head_sha even when the provider never independently confirmed it
+        (``head_observed_at``/``head_observed_api_base`` still blank). This is
+        the exact state a push leaves behind when the provider's PR object is
+        stuck stale (ThomasMichon/copilot-extensions#4949) -- the one case
+        where a pre-merge safety check (``--match-head-commit``) matters most.
+        """
+        from agent_worktrees import __main__ as main
+
+        config, wid, _wt, _ = pr_repo
+        pr_ops.set_pr(wid, number=7, state="open")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        tracked = rec.active_pr()
+        tracked.head_sha = "just-pushed-sha"
+        tracked.head_observed_at = ""
+        tracked.head_observed_api_base = ""
+        tracking.save_record(rec)
+
+        monkeypatch.setattr(main, "_infer_worktree_id_from_cwd", lambda config: wid)
+
+        assert main._tracked_pr_pushed_head(
+            config, rec.repo, 7, "gitea",
+        ) == "just-pushed-sha"
+
+    def test_tracked_pr_pushed_head_returns_empty_with_no_tracked_record(
+        self, pr_repo, monkeypatch
+    ):
+        from agent_worktrees import __main__ as main
+
+        config, _wid, _wt, _ = pr_repo
+        monkeypatch.setattr(main, "_infer_worktree_id_from_cwd", lambda config: None)
+
+        assert main._tracked_pr_pushed_head(config, "o/r", 7, "github") == ""
+
+    def test_tracked_pr_pushed_head_matches_repo_case_insensitively(
+        self, pr_repo, monkeypatch
+    ):
+        """GitHub (and most other provider) repo slugs are case-insensitive,
+        so an explicit ``Owner/Repo`` operand must still match a tracked
+        ``owner/repo`` record -- an exact string comparison would silently
+        omit the stale-head safeguard for the very PR it's meant to protect
+        (ThomasMichon/copilot-extensions#5034)."""
+        from agent_worktrees import __main__ as main
+
+        config, wid, _wt, _ = pr_repo
+        pr_ops.set_pr(wid, number=7, state="open")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.active_pr().head_sha = "just-pushed-sha"
+        tracking.save_record(rec)
+
+        monkeypatch.setattr(main, "_infer_worktree_id_from_cwd", lambda config: wid)
+
+        # rec.repo is lower-case ("o/r"); query with a differently-cased slug.
+        queried_repo = rec.repo.upper()
+        assert queried_repo != rec.repo
+        assert main._tracked_pr_pushed_head(
+            config, queried_repo, 7, "gitea",
+        ) == "just-pushed-sha"
+
+    def test_tracked_pr_pushed_head_falls_back_to_scanning_when_no_cwd_worktree(
+        self, pr_repo, monkeypatch
+    ):
+        """Mirrors a supported `--project <name> pr-merge <repo> <n> --now`
+        invocation from a neutral CWD: the process moves to the project's
+        anchor (never a tracked worktree), so CWD-based inference legitimately
+        finds nothing even though the project's tracking directory holds the
+        matching record under a different worktree's YAML file."""
+        from agent_worktrees import __main__ as main
+
+        config, wid, _wt, _ = pr_repo
+        pr_ops.set_pr(wid, number=7, state="open")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.active_pr().head_sha = "just-pushed-sha"
+        tracking.save_record(rec)
+
+        monkeypatch.setattr(main, "_infer_worktree_id_from_cwd", lambda config: None)
+
+        assert main._tracked_pr_pushed_head(
+            config, rec.repo, 7, "gitea",
+        ) == "just-pushed-sha"
+
+    def test_tracked_pr_pushed_head_falls_back_when_cwd_worktree_is_wrong_project(
+        self, pr_repo, monkeypatch
+    ):
+        """Mirrors a cross-project `--config <other>` invocation run from
+        INSIDE a different project's own worktree: CWD inference returns that
+        ambient worktree's id, which naturally has no record under the
+        explicitly supplied project's tracking directory -- this must still
+        fall through to the scan rather than returning '' outright."""
+        from agent_worktrees import __main__ as main
+
+        config, wid, _wt, _ = pr_repo
+        pr_ops.set_pr(wid, number=7, state="open")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.active_pr().head_sha = "just-pushed-sha"
+        tracking.save_record(rec)
+
+        monkeypatch.setattr(
+            main, "_infer_worktree_id_from_cwd",
+            lambda config: "some-other-projects-worktree-id",
+        )
+
+        assert main._tracked_pr_pushed_head(
+            config, rec.repo, 7, "gitea",
+        ) == "just-pushed-sha"
+
+    def test_tracked_pr_pushed_head_scan_fallback_refuses_ambiguous_match(
+        self, pr_repo, monkeypatch
+    ):
+        """Two tracked records claiming the same (repo, number, provider) is
+        a genuinely ambiguous state -- "no evidence" is the honest answer,
+        never a guess."""
+        from agent_worktrees import __main__ as main
+
+        config, wid, _wt, _ = pr_repo
+        pr_ops.set_pr(wid, number=7, state="open")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.active_pr().head_sha = "sha-one"
+        tracking.save_record(rec)
+
+        other_id = "test-wt-20260618-bbbb"
+        import copy
+        other = copy.deepcopy(rec)
+        other.worktree_id = other_id
+        other.prs = [
+            tracking.PRRecord(
+                repo=rec.repo, number=7, provider="gitea", head_sha="sha-two",
+            )
+        ]
+        tracking.save_record(other, cfg.tracking_dir() / f"{other_id}.yaml")
+
+        monkeypatch.setattr(main, "_infer_worktree_id_from_cwd", lambda config: None)
+
+        assert main._tracked_pr_pushed_head(config, rec.repo, 7, "gitea") == ""
+
+    def test_tracked_pr_pushed_head_refuses_ambiguous_even_when_cwd_matches(
+        self, pr_repo, monkeypatch
+    ):
+        """A CWD-derived record match must not short-circuit the ambiguity
+        check: if another tracked record claims the same (repo, number,
+        provider) with a *different* head_sha, that is still genuinely
+        ambiguous and must not resolve to the CWD record's (possibly stale)
+        value (ThomasMichon/copilot-extensions#5034)."""
+        from agent_worktrees import __main__ as main
+
+        config, wid, _wt, _ = pr_repo
+        pr_ops.set_pr(wid, number=7, state="open")
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.active_pr().head_sha = "stale-sha"
+        tracking.save_record(rec)
+
+        other_id = "test-wt-20260618-cccc"
+        import copy
+        other = copy.deepcopy(rec)
+        other.worktree_id = other_id
+        other.prs = [
+            tracking.PRRecord(
+                repo=rec.repo, number=7, provider="gitea", head_sha="fresh-sha",
+            )
+        ]
+        tracking.save_record(other, cfg.tracking_dir() / f"{other_id}.yaml")
+
+        # CWD inference points squarely at the stale record.
+        monkeypatch.setattr(main, "_infer_worktree_id_from_cwd", lambda config: wid)
+
+        assert main._tracked_pr_pushed_head(config, rec.repo, 7, "gitea") == ""
+
     def test_live_block_rejects_observation_from_other_endpoint(
         self, pr_repo, monkeypatch
     ):

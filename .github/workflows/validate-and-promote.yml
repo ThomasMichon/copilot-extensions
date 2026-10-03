@@ -713,29 +713,23 @@ jobs:
           # comparison), but it surfaced this real structural gap: nothing
           # here actually pinned promotion to what `gate` validated.
           DEV_SHA: ${{ needs.gate.outputs.sha }}
+          # `promote_release.py`'s own `measured_commit` consistency check
+          # (see `_write_coverage_baselines_into_scratch`) refuses any
+          # baseline not measured against this exact `DEV_SHA` -- a stale
+          # artifact from a superseded run can never be silently checked
+          # in by passing this directory, whether or not it's empty.
+          COVERAGE_BASELINES_DIR: coverage-baselines
         run: |
-          # NOTE (workflow-only main bootstrap, see PR #5085): this
-          # intentionally does NOT forward `--coverage-baselines-dir` to
-          # `tools/promote_release.py` on `main` -- `main`'s own copy of
-          # that script still checks the FULL per-line coverage map into
-          # the generated commit's tree, which is exactly what made two
-          # plugins' baseline JSON exceed GitHub's 100MB push limit (#5075).
-          # The real fix (a small pointer checked in instead, full payload
-          # published as a Release asset -- see the "Publish coverage
-          # baselines" step above) lives in `tools/promote_release.py` on
-          # `dev` (PR #5078), which this repo's own `main`-only bootstrap
-          # gate refuses to accept directly (workflow-files only -- see
-          # `main source gate`'s own script). Once dev's own fix promotes
-          # through this now-unblocked pipeline for real, this forwarding
-          # is restored atomically alongside it; until then, a promotion
-          # simply omits the git-committed pointer for this round (the
-          # Release asset above still publishes the real evidence).
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$PUSH_INPUT" = "false" ]; then
-            python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main
+            output=$(python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
+              --coverage-baselines-dir "$COVERAGE_BASELINES_DIR")
+            echo "$output"
             echo "land=false" >> "$GITHUB_OUTPUT"
           else
-            python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
-              --push --candidate-branch "$CANDIDATE_BRANCH"
+            output=$(python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
+              --push --candidate-branch "$CANDIDATE_BRANCH" \
+              --coverage-baselines-dir "$COVERAGE_BASELINES_DIR")
+            echo "$output"
             echo "land=true" >> "$GITHUB_OUTPUT"
             # Consumed changefiles are no longer swept off `dev` by this
             # run: `purge-consumed-changefiles.yml` does that once daily
@@ -747,41 +741,74 @@ jobs:
             # recorded promotion's `dev_head`, regardless of whether it's
             # still physically present on `dev`).
           fi
+          # `land`/exit-code-0 alone doesn't mean a baseline was actually
+          # validated and checked in this round: `promote_release.py`
+          # also exits 0 (printing a short message, never reaching its
+          # own coverage-baseline validation at all) for a paused
+          # pipeline, a stale/out-of-order candidate, AND a "no real dev
+          # content change" no-op -- every one of those must NOT authorize
+          # the next step to publish (and potentially --clobber) a
+          # Release's assets. `coverage-baseline-checked-in: <plugin>` is
+          # only ever printed once `_write_coverage_baselines_into_scratch`
+          # has itself already validated and written a pointer for that
+          # plugin -- the one precise signal this run actually produced
+          # real, validated baseline evidence.
+          if echo "$output" | grep -q '^  coverage-baseline-checked-in: '; then
+            echo "baselines_written=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "baselines_written=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Publish coverage baselines as a GitHub Release (durable evidence for this dev commit)
-        # Runs AFTER "Promote" (not before): on the dev-side fix
-        # (PR #5078) `promote_release.py`'s own validation is what checks
-        # a baseline's identity before accepting it -- publishing first
-        # risked a since-rejected upload silently overwriting an already-
-        # published, still-valid release's assets. This workflow-only
-        # bootstrap keeps the same ordering for consistency, even though
-        # `main`'s own `promote_release.py` doesn't yet perform that
-        # check itself (see the NOTE in the "Promote" step above).
+        # Runs AFTER "Promote" (not before): `promote_release.py`'s own
+        # `_write_coverage_baselines_into_scratch` is the one step that
+        # actually validates each baseline's `measured_commit` and
+        # `plugin` fields against this run's real `DEV_SHA` -- publishing
+        # (and potentially `--clobber`-ing an already-published release's
+        # assets) BEFORE that validation ran meant a run with invalid or
+        # mis-targeted baseline data could silently overwrite a prior,
+        # still-valid release's evidence before its own data was ever
+        # checked.
         #
-        # Gated on the "Promote" step's own outcome, NOT the more precise
-        # `baselines_written` signal the dev-side fix uses: this bootstrap
-        # never forwards `--coverage-baselines-dir` at all (see the NOTE
-        # above), so `tools/promote_release.py` on `main` never performs
-        # its own baseline validation here regardless -- there is no more
-        # precise signal to gate on until the real fix (#5078) lands.
-        # `land == 'true'` IS still required, though: `promote_release.py`
-        # exits 0 for a `workflow_dispatch --push=false` dry run too (only
-        # the real push is skipped), and a dry run must never have the
-        # side effect of publishing a real Release.
+        # Gated on `steps.promote.outputs.baselines_written` AND
+        # `steps.promote.outputs.land == 'true'` -- NOT merely the
+        # "Promote" step's own exit code. `promote_release.py` exits 0 for
+        # several paths that never reach baseline validation at all (a
+        # paused pipeline, a stale/out-of-order candidate, a "no real dev
+        # content change" no-op); `baselines_written` (the "Promote"
+        # step's own bash grepping its captured stdout for the
+        # `coverage-baseline-checked-in: <plugin>` line that function
+        # prints only once it has itself already validated and written a
+        # pointer) rules those out. But `_write_coverage_baselines_into_scratch`
+        # itself runs unconditionally whenever there IS a real content
+        # change -- including a `workflow_dispatch --push=false` **dry
+        # run**, which validates and writes a pointer into its own
+        # never-pushed scratch tree purely for reporting. `land` is false
+        # in exactly that case (see the "Promote" step above) -- requiring
+        # it too keeps this step from publishing a REAL Release (a side
+        # effect no dry run should ever have) off a report-only pass.
         #
         # The full per-line coverage-baseline JSON for a large plugin
         # suite can exceed GitHub's 100MB per-file git push limit, so the
         # full payload is published here, as a Release asset, instead of
-        # ever entering a git tree -- see
-        # `tools/coverage_guided_selection/correlation.py`'s module
-        # docstring for the full design.
+        # ever entering a git tree; `promote_release.py`'s own
+        # `_write_coverage_baselines_into_scratch` checks in only a small
+        # correlation POINTER (a few hundred bytes) referencing this
+        # release -- see `tools/coverage_guided_selection/correlation.py`'s
+        # module docstring for the full design.
         #
         # Tagged on `DEV_SHA` itself (via `release_tag_for`'s formula, not
         # the promotion's own eventual `main`-side tag) -- deliberately
         # decoupled from whether/when/how this `dev` commit's promotion
-        # actually lands. Idempotent: a retried run for the exact same
-        # `DEV_SHA` uploads over (never duplicates) an already-published
-        # release's assets.
-        if: steps.decide.outputs.proceed == 'true' && steps.promote.outputs.land == 'true'
+        # actually lands (a real post-merge `main` tag isn't knowable yet
+        # at this point in the job; see the "Tag the real post-merge
+        # commit" step below) -- the baseline evidence for a `dev` commit
+        # is a fact about that commit alone. Idempotent: a retried run for
+        # the exact same (now-validated) `DEV_SHA` uploads over (never
+        # duplicates) an already-published release's assets.
+        if: >-
+          steps.decide.outputs.proceed == 'true' &&
+          steps.promote.outputs.land == 'true' &&
+          steps.promote.outputs.baselines_written == 'true'
         env:
           DEV_SHA: ${{ needs.gate.outputs.sha }}
         run: |

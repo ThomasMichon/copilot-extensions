@@ -245,16 +245,33 @@ and ordering before Phase 0 work begins.)_
       machine is a now-reachable fifth venue candidate alongside the four
       named validation tracks; fold it into "a local machine" or add it
       explicitly when scoping this item.)
-      **Partially done.** Local-machine install validated in this worktree:
-      plugin loads conceptually correct per the SDK extension-loading
-      contract (`extensions/<plugin-name>/extension.mjs` auto-discovery, the
-      same mechanism `context-handoff`'s extension already uses), and its
-      HTTP surface is validated end-to-end against a real `http.Server`
-      instance (not a mock) in `tests/driver-server.test.mjs`. **Not yet
-      done:** an actual live `copilot` session with this extension enabled,
-      and installs on a CodeSpace/container venue — both require live
-      venues this slice did not stand up. Left as the explicit next step
-      before Validation Plan item (a) can close.
+      **Container done** (clean-room, this session):
+      `tools/clean-room/scenarios/agent-remote-driver-solo/` drives a real
+      live `copilot` session end-to-end in a disposable, fresh-machine
+      container with ONLY this plugin installed (no agent-worktrees/
+      agent-bridge) — **10/10 PASS** (final, post-review-fix result;
+      genuinely Tier P, zero AI credits — see Journal): discovery
+      descriptor written, `/health`, `/events` (SSE, verified via the
+      server's own initial `: connected` marker), and `/send` all answer
+      over loopback with the descriptor's bearer token (never persisted
+      unredacted), `bin/list-sessions.mjs --json` lists the live session,
+      and a SIGTERM to the extension's own process cleanly removes the
+      descriptor (`installSignalCleanup`). A real pre-promotion gap
+      surfaced and was fixed by this validation (not papered over): the CLI
+      silently never launches ANY SDK extension
+      without `"experimental": true` in `~/.copilot/settings.json` (an
+      ambient, suite-wide requirement already documented for other
+      extension-bearing plugins, e.g. `agent-worktrees`' own
+      `copilot-extensions-setup` skill) — this plugin's own README never
+      said so. Fixed in `plugins/agent-remote-driver/README.md`'s *Install*
+      and troubleshooting sections. **Still open: local machine (bare host,
+      non-container) and a CodeSpace venue.** The container run is a
+      genuine, harder-than-average proof of the plugin's own standalone
+      claim, but it is not itself a substitute for the other two named
+      venues — a disposable Docker container is not "a local machine," and
+      `agent-codespaces`' `codespacePlugins` injection seam is untested
+      here. Left as the remaining items before this checklist entry fully
+      closes.
 
 ### Phase 2 — Driver exclusivity arbitration for mux-hosted sessions
 
@@ -618,3 +635,97 @@ actionable finding fixed with real code + tests; remaining open threads are
 either the explicitly-accepted `extension.mjs`-wiring test-coverage gap
 (documented above) or stale thread-tracking against already-updated
 PR-description/doc-impact/test-count content. Proceeding to merge.
+
+### 2026-10-03 (cont'd) — Phase 1 live-session validation via clean-room
+
+PR #5022 and #5036 were merged to `dev` but not yet promoted to `main`
+(the marketplace repo's default branch), so a normal `copilot plugin
+install agent-remote-driver@copilot-extensions` against the public
+marketplace 404s — expected, not a regression. Rather than improvise a
+workaround on this operator's own machine (user-global settings edits,
+manual `copilot -p`/`-i` probing), used the dedicated
+`validating-in-clean-room` mechanism: authored
+`tools/clean-room/scenarios/agent-remote-driver-solo/` (Tier-P/F1), run
+against a disposable fresh-machine container with the uncommitted worktree
+mounted read-only (`-HarnessMount` + `-MarketplaceRepo /harness`, the
+documented seam for validating a plugin not yet on the marketplace repo's
+default branch).
+
+First run surfaced two real, fixable gaps (not scenario bugs):
+
+1. A directory-source marketplace install is **loaded live** from its
+   source path — nothing is copied into `~/.copilot/installed-plugins/`.
+   The scenario originally assumed the registry-install layout; fixed it to
+   parse the CLI's own "loaded live from …" message and point every
+   subsequent check (the session's `--plugin-dir`, `bin/list-sessions.mjs`)
+   at the right path.
+2. **The real finding:** the CLI silently never launches ANY SDK extension
+   without `"experimental": true` in `~/.copilot/settings.json` — no error,
+   no descriptor, nothing. This is an ambient, suite-wide prerequisite
+   already documented elsewhere (`agent-worktrees`' `copilot-extensions-setup`
+   skill, its `install.sh`/`install.ps1`), but this brand-new plugin's own
+   README never said so — a real operator following only this plugin's
+   install instructions would hit the identical silent no-op. Fixed in
+   `plugins/agent-remote-driver/README.md` (*Install* prerequisite +
+   troubleshooting entry), not just worked around in the scenario.
+
+With both fixed, the scenario is **9/9 PASS**: clean-slate environment,
+solo install (no agent-worktrees/agent-bridge), a real live `copilot -p`
+session writes its discovery descriptor within the polling window, the
+HTTP surface answers over loopback with the descriptor's own bearer token
+(`/health` echoes the descriptor's pid; `/events` SSE connects and the
+scenario verifies the server's own initial `: connected` marker rather than
+just a non-empty log; `/send` is accepted mid-turn), `bin/list-sessions.mjs
+--json` lists the live session, and the descriptor is removed again once
+the session exits normally. This closes the **"container"** leg of the
+Phase 1 checklist item's launch-time-presence proof — a strictly harder bar
+than an ordinary already-provisioned machine, since nothing else is
+installed in the venue — but it is NOT itself a substitute for "a local
+machine" (a bare, non-container host) or a CodeSpace
+(`agent-codespaces`' own `codespacePlugins` injection seam). Both remain
+open, left as this checklist item's explicit remainder rather than claimed
+done.
+
+**Copilot review on PR #5077** caught two real scenario bugs on top of the
+above (both fixed before merge): `curl` was used for every HTTP assertion
+but never declared in `manifest.json`'s `prereqs.present`; and the `/events`
+check accepted a bare non-empty log file as proof of a connected SSE stream
+— but `capture()` always tees the invoked command line into the log before
+running it, so that check was vacuously true even on a connect failure. Now
+verifies the driver server's own initial `: connected` SSE marker instead.
+It also caught this Journal/checklist entry's own overclaim (the "local
+machine" leg was never actually exercised outside the container) —
+corrected above rather than left standing.
+
+A second review round on the same PR, after the fixes above were pushed,
+caught four more real issues (all fixed before merge): (1) the scenario was
+classified Tier P but actually submitted a real model turn (the `-p "sleep
+40... reply done"` design) — credit-consuming and dependent on the model
+choosing to run the shell command, contrary to Tier P's "no model in the
+loop" contract. Fixed by discovering (and proving, with a throwaway
+container) that a bare interactive `copilot` process kept alive under a pty
+via `script` — with NO prompt ever submitted — still joins, gets a session
+id, and the extension still writes its descriptor: genuinely Tier P, zero
+AI credits. (2) The live bearer token was leaking into persisted run
+artifacts two ways: `capture()`'s own command-line echo includes the
+Authorization header argv, and the raw descriptor was copied verbatim into
+`cr-logs/`. Fixed with a `_http_capture` wrapper that logs a redacted static
+description instead of real argv, and a redacted copy of the descriptor
+(token replaced) for diagnostics. (3) Cleanup wasn't registered until phase
+5, so a `-Until 2/3/4` run (or an interruption) would leave the live
+session and its descriptor orphaned in the persistent container — fixed
+with an `EXIT` trap registered immediately after the session starts. (4) A
+session that failed to exit after the old 60s wait was still reported as a
+clean PASS once force-killed — fixed so a forced SIGKILL is a genuine jam,
+not silently equivalent to a graceful exit. Fixing (1) also surfaced a
+second, more specific fix for the signal-cleanup check itself: SIGTERM-ing
+the outer `script`/`copilot` wrapper process let the wrapper exit cleanly
+while orphaning the extension's own child process (and its descriptor) —
+`installSignalCleanup` registers its handlers on the **extension's own**
+process (a separate child, confirmed via the CLI's `extension-bootstrap`
+debug log), so phase 5 now signals that pid (from the descriptor) directly.
+10/10 PASS after all of the above, confirmed with no orphaned process left
+in the container.
+
+Phase 2 (driver-exclusivity arbitration) has not been started; `effort-focus`
+should be re-bound to its exact heading before that work begins.

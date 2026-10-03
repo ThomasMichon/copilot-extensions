@@ -1,6 +1,6 @@
 {
   "captured_from": {
-    "commit": "e4fa49fe5b3fe3f16043ddf8f77d606432a630d6",
+    "commit": "ce6d78236ff45f7e69fc1ea62ef6f6b1483914c6",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 20,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
