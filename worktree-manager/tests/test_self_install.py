@@ -136,17 +136,25 @@ def test_apply_reaps_stranded_cutover_passive_before_copying_payload(tmp_path, m
     assert not (slot / "stale-marker.txt").exists(), "the slot must be freshly recopied"
     assert (slot / "src" / "worktree_manager" / "__init__.py").exists()
     assert current_version(root) == "9.9.9"
-    # The breadcrumb must not be left lingering (non-terminal) once self_install
-    # has handled it -- nothing else in this path will ever resolve it.
-    assert breadcrumb.read_breadcrumb(routing_dir) is None
+    # The breadcrumb must be left ALONE (not cleared, not rewritten): it may
+    # still name an "old" endpoint that a later, full activate_after_update()
+    # -> recover_stale_cutover() needs to undrain. A later real cutover
+    # re-reading this same file simply finds the reaped pid no longer alive
+    # -- a clean no-op on its side -- so leaving it is always safe.
+    record = breadcrumb.read_breadcrumb(routing_dir)
+    assert record is not None
+    assert record["new_pid"] == stranded_pid
+    assert breadcrumb.is_stale(record)
 
 
-def test_apply_skips_reap_when_cutover_lock_is_busy(tmp_path, monkeypatch):
+def test_apply_defers_when_cutover_lock_is_busy(tmp_path, monkeypatch):
     """If another process genuinely holds the cutover lock (a real,
-    concurrent self_update()/activate_after_update() in flight), self_install
-    must never wait on it or disturb it -- it should fall straight through to
-    its pre-existing behavior (a plain rmtree of the slot, unaffected by the
-    busy lock) rather than hang."""
+    concurrent self_update()/activate_after_update() in flight),
+    self_install must never mutate the slot unprotected -- per
+    docs/patterns/graceful-daemon-cutover.md's "serialize cutover attempts
+    under one lease" rule, it must defer (report action="error") rather
+    than proceed with an unguarded rmtree/copy that a concurrent cutover's
+    own spawn_passive could race against."""
     import worktree_manager.mux_daemon_cutover as mdc
 
     pd = _fake_payload(tmp_path, "4.5.6")
@@ -161,8 +169,11 @@ def test_apply_skips_reap_when_cutover_lock_is_busy(tmp_path, monkeypatch):
 
     res = self_install(pd, root=root, dry_run=False)
 
-    assert res.action == "installed"
-    assert current_version(root) == "4.5.6"
+    assert res.action == "error"
+    assert "cutover" in res.reason
+    # Nothing must have been mutated: no marker, no slot.
+    assert current_version(root) is None
+    assert not version_slot("4.5.6", root).exists()
 
 
 def test_apply_is_idempotent_and_version_gated(tmp_path, monkeypatch):

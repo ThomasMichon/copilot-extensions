@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -480,3 +482,63 @@ def test_activate_after_update_same_version_second_caller_converges_without_spaw
 
     old.force_terminate()
     new.force_terminate()
+
+
+def _spawn_fake_mux_daemon_process(root: Path) -> subprocess.Popen:
+    """A REAL OS process whose command line matches both
+    ``_is_mux_daemon_cmdline`` (``-m worktree_manager mux-daemon run``) and
+    ``_cmdline_root``'s ``--root=`` parsing, but that only sleeps -- no real
+    worktree_manager import/execution is needed to prove the identity-match
+    contract against the genuine OS process table. The extra tokens after
+    ``-c <code>`` become ``sys.argv`` for the script, not reinterpreted by
+    the interpreter, so they show up verbatim in the process's real command
+    line exactly as a genuine ``spawn_passive``-launched daemon's would.
+    """
+    return subprocess.Popen(
+        [
+            sys.executable, "-c", "import time; time.sleep(30)",
+            "-m", "worktree_manager", "mux-daemon", "run",
+            f"--root={root}", "--listen-port=0", "--passive",
+        ],
+    )
+
+
+def test_terminate_mux_daemon_pid_accepts_a_matched_real_process():
+    """``_terminate_mux_daemon_pid`` must actually terminate a REAL process
+    that is both a genuine mux-daemon (by command-line shape) and bound to
+    the exact root being operated on -- not merely report success against a
+    stubbed-out terminator (the identity-bound safety net
+    docs/patterns/graceful-daemon-cutover.md requires a direct test for)."""
+    root = Path.home() / ".worktree-manager-test-identity-match"
+    proc = _spawn_fake_mux_daemon_process(root)
+    try:
+        assert proc.pid in mdc._iter_mux_daemon_pids(), (
+            "the real spawned process was not recognized as a mux-daemon -- "
+            "test setup invalid"
+        )
+        assert mdc._terminate_mux_daemon_pid(proc.pid, root=root) is True
+        assert proc.wait(timeout=10) is not None
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=10)
+
+
+def test_terminate_mux_daemon_pid_refuses_a_root_mismatched_real_process():
+    """A REAL, genuine mux-daemon process bound to a DIFFERENT root must be
+    refused, not terminated -- the owner-validation half of the identity
+    check (docs/patterns/graceful-daemon-cutover.md's "owner validation" is
+    not covered by identity-token matching alone)."""
+    its_root = Path.home() / ".worktree-manager-test-identity-owner"
+    other_root = Path.home() / ".worktree-manager-test-identity-other"
+    proc = _spawn_fake_mux_daemon_process(its_root)
+    try:
+        assert proc.pid in mdc._iter_mux_daemon_pids(), (
+            "the real spawned process was not recognized as a mux-daemon -- "
+            "test setup invalid"
+        )
+        assert mdc._terminate_mux_daemon_pid(proc.pid, root=other_root) is False
+        assert proc.poll() is None, "a root-mismatched process must never be killed"
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)

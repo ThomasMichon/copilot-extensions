@@ -1,0 +1,9 @@
+{
+  "comment": "self_install: reap a stranded cutover passive (under the shared cutover lease) before copying into a version slot, fixing a Windows PermissionError when a crashed self_update left a passive daemon's cwd pinned inside it.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
