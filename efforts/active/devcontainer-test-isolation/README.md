@@ -1854,3 +1854,29 @@ works; `check-docs-consistency.py` and `check-effort-vision-structure.py`
 both pass. Docker cleanup (no leftover `test-isolation` volumes) and
 host `git status --short` reconfirmed clean of anything beyond this
 round's own diff.
+
+### 2026-10-03 — Review round 15 (twenty-third pass): MEDIUM signal-mask restoration bug fixed
+A twenty-third review pass of commit `7b3e74e0c` confirmed the previous
+pass's reversed-semantics LOW finding resolved, and surfaced 1 new
+MEDIUM against the just-added `pthread_sigmask` fix itself: `SIG_UNBLOCK`
+unconditionally unblocks both signals regardless of what mask was
+active BEFORE this context manager touched it -- confirmed live that a
+caller who deliberately pre-blocked `SIGTERM` (or inherited it blocked)
+found it silently UNBLOCKED after `_cleanup_signals_deferred` returned,
+a real behavior change the caller never asked for. Fixed by capturing
+the mask `SIG_BLOCK` returns (the mask active immediately before that
+call) and restoring it EXACTLY via `SIG_SETMASK`, on both the install
+and the restore side, instead of unconditionally `SIG_UNBLOCK`ing.
+
+Re-validated end-to-end: the full unit test suite (99 tests, including
+a new real-signal regression test that pre-blocks `SIGTERM`, confirms
+it's still blocked after the context manager returns, and restores the
+test's own prior mask afterward) passes; the existing atomic-swap
+ordering test was updated to assert `SIG_SETMASK` (not `SIG_UNBLOCK`) at
+each boundary; `check-module-size.py --changed-since origin/dev` passes
+right at the cap (1000 lines, one more condensing pass); a fresh
+Docker-backed end-to-end run (`ai-attribution`, 98 passed / 6 skipped)
+confirms the common case still works; `check-docs-consistency.py` and
+`check-effort-vision-structure.py` both pass. Docker cleanup (no
+leftover `test-isolation` volumes) and host `git status --short`
+reconfirmed clean of anything beyond this round's own diff.

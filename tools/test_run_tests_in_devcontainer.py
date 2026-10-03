@@ -1501,8 +1501,10 @@ def test_cleanup_signals_deferred_blocks_signals_atomically_during_handler_swap(
     # `signal.signal()` calls would still hit whichever OLD handler is
     # still active for the second one, aborting entry before cleanup even
     # starts. `pthread_sigmask` must block BOTH signals for the entire
-    # swap (on both the install and the restore side), only unblocking
-    # once the full new/restored handler set is already in place.
+    # swap (on both the install and the restore side), restoring the
+    # EXACT prior mask via `SIG_SETMASK` afterward (never an
+    # unconditional `SIG_UNBLOCK`, which would silently unblock a signal
+    # the caller had deliberately kept blocked -- confirmed live).
     calls: list[tuple] = []
     real_sigmask = wrapper.signal.pthread_sigmask
     real_signal = wrapper.signal.signal
@@ -1520,20 +1522,38 @@ def test_cleanup_signals_deferred_blocks_signals_atomically_during_handler_swap(
         with wrapper._cleanup_signals_deferred():
             pass
     # Each handler swap (install, then restore) is bracketed by a BLOCK
-    # immediately before it and an UNBLOCK immediately after -- never a
-    # bare pair of `signal.signal()` calls with no surrounding mask.
+    # immediately before it and a SETMASK immediately after -- never a
+    # bare pair of `signal.signal()` calls with no surrounding mask, and
+    # never `SIG_UNBLOCK` (which ignores what was active beforehand).
     sigmask_calls = [c for c in calls if c[0] == "sigmask"]
     assert len(sigmask_calls) == 4
     assert [how for _, how in sigmask_calls] == [
-        wrapper.signal.SIG_BLOCK, wrapper.signal.SIG_UNBLOCK,
-        wrapper.signal.SIG_BLOCK, wrapper.signal.SIG_UNBLOCK,
+        wrapper.signal.SIG_BLOCK, wrapper.signal.SIG_SETMASK,
+        wrapper.signal.SIG_BLOCK, wrapper.signal.SIG_SETMASK,
     ]
     # The two `signal.signal()` calls for the install phase both land
-    # strictly between the first BLOCK and its matching UNBLOCK.
+    # strictly between the first BLOCK and its matching SETMASK.
     block_idx = calls.index(("sigmask", wrapper.signal.SIG_BLOCK))
-    unblock_idx = calls.index(("sigmask", wrapper.signal.SIG_UNBLOCK))
-    signal_calls_between = [c for c in calls[block_idx + 1:unblock_idx] if c[0] == "signal"]
+    setmask_idx = calls.index(("sigmask", wrapper.signal.SIG_SETMASK))
+    signal_calls_between = [c for c in calls[block_idx + 1:setmask_idx] if c[0] == "signal"]
     assert len(signal_calls_between) == 2
+
+
+def test_cleanup_signals_deferred_restores_a_pre_blocked_signal_mask() -> None:
+    # The exact regression this closes: `SIG_UNBLOCK` unconditionally
+    # unblocks both signals regardless of what the CALLER had set --
+    # confirmed live that a caller who deliberately pre-blocked SIGTERM
+    # found it silently UNBLOCKED after this context manager returned.
+    # `SIG_SETMASK` restoring the captured entry mask must leave a
+    # pre-blocked signal still blocked afterward.
+    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+    try:
+        with wrapper._cleanup_signals_deferred():
+            pass
+        current_mask = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+        assert signal.SIGTERM in current_mask
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
 
 
 def test_cleanup_signals_deferred_replays_a_signal_received_during_cleanup() -> None:

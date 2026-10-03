@@ -850,35 +850,35 @@ def _cleanup_signals_deferred():
     propagating. Plain ``signal.SIG_IGN`` would DISCARD a signal (not
     defer it) -- for ordinary teardown, that would let `main` silently
     return 0 for a cancelled run. Replaying unconditionally could instead
-    REPLACE a genuine failure already propagating, whether already in
-    flight at entry or raised by the cleanup BODY itself. A single
+    REPLACE a genuine failure already propagating. A single
     ``sys.exc_info()`` check after ``yield`` covers both cases.
 
     Installing (or restoring) TWO handlers isn't itself atomic -- a
     signal landing mid-swap would still hit whichever OLD handler is
-    still active for the second one (confirmed live), aborting entry
-    before cleanup starts. ``pthread_sigmask`` blocks both signals for
-    each swap, so any mid-swap signal queues until the FULL new/restored
-    set is already in place."""
+    still active for the second one (confirmed live). ``pthread_sigmask``
+    blocks both signals for each swap and restores the EXACT prior mask
+    via ``SIG_SETMASK`` afterward -- never ``SIG_UNBLOCK``, which would
+    silently unblock a signal the caller had deliberately kept blocked
+    (confirmed live)."""
     received: list[int] = []
 
     def _record(signum: int, frame: object) -> None:
         received.append(signum)
 
-    signal.pthread_sigmask(signal.SIG_BLOCK, _CLEANUP_DEFERRED_SIGNALS)
+    entry_mask = signal.pthread_sigmask(signal.SIG_BLOCK, _CLEANUP_DEFERRED_SIGNALS)
     try:
         previous = {sig: signal.signal(sig, _record) for sig in _CLEANUP_DEFERRED_SIGNALS}
     finally:
-        signal.pthread_sigmask(signal.SIG_UNBLOCK, _CLEANUP_DEFERRED_SIGNALS)
+        signal.pthread_sigmask(signal.SIG_SETMASK, entry_mask)
     try:
         yield
     finally:
-        signal.pthread_sigmask(signal.SIG_BLOCK, _CLEANUP_DEFERRED_SIGNALS)
+        pre_restore_mask = signal.pthread_sigmask(signal.SIG_BLOCK, _CLEANUP_DEFERRED_SIGNALS)
         try:
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
         finally:
-            signal.pthread_sigmask(signal.SIG_UNBLOCK, _CLEANUP_DEFERRED_SIGNALS)
+            signal.pthread_sigmask(signal.SIG_SETMASK, pre_restore_mask)
         if received and sys.exc_info()[0] is not None:
             print(
                 f"warning: received signal {received[0]} during cleanup, "
