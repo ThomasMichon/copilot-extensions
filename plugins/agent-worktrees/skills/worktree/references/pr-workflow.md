@@ -456,6 +456,41 @@ replaces the authored PR description.
 > the result carries a `pr_open_error`, or when `pr.auto_open` is off / no
 > provider creds are configured.
 
+> **Never run `create-pr`/`push-changes` for the same worktree from two
+> actors at once -- not even a delegated sub-agent "helping" with the exact
+> PR you're already driving.** `create-pr` squashes commits and rebases IN
+> PLACE on `worktree/{id}`'s own checkout; a second actor (a spawned sub-agent
+> given the same worktree path, or a second session bound to it) committing,
+> stashing, or pushing concurrently corrupts the other's in-flight edits
+> invisibly -- a mid-flight multi-step edit can land half-applied with no
+> error, and commits already safely pushed to an open PR can vanish from
+> `git log` the moment the other actor's own `create-pr` run rebases past
+> them, with nothing to suggest why. Confirmed live: a background sub-agent
+> mistakenly delegated the SAME repo/worktree (rather than its own,
+> independently created one) ran for 3+ hours alongside the delegating
+> session, pushing its own commits and `git stash`-ing the other session's
+> uncommitted work out of its way -- surfacing hours later as what looked
+> like a mysterious, unexplained loss of already-committed work. One worktree
+> checkout, one active git actor, always: give a delegated sub-agent doing
+> PR/git work its own freshly created worktree (`<catalog argv[0]> create
+> --json`), never the path you're concurrently editing in the same session.
+> If you suspect this already happened, `git reflog`/`git fsck --unreachable`
+> recovers a dropped commit; check `git stash list` for displaced work before
+> concluding anything is actually lost.
+
+> **A bare "failed to push some refs" from `create-pr` can hide the REAL
+> reason.** The error message is built from git's stderr plus (as of the
+> `agent-worktrees` push-failure-stdout fix) its stdout -- but a pre-push
+> hook's own check script commonly prints its failure detail (e.g. a
+> module-size-cap violation, a missing changefile) to stdout, not stderr, and
+> an older `agent-worktrees` build only ever surfaced stderr, silently
+> dropping that detail across every retry. If a push keeps failing with no
+> further detail even after one retry, don't keep guessing or retrying
+> blindly: run the repo's own pre-push hook script(s) directly (see
+> `tools/hooks/pre-push`, e.g. `python tools/check-module-size.py` or
+> `python tools/check-changefile-presence.py`) to see the exact, un-truncated
+> failure before trying again.
+
 > **`pr_label_error` -- PR opened, but a label didn't stick.** When `create-pr`
 > opens the PR but a configured label (e.g. `auto-merge` / `source:<machine>`)
 > could not be applied, the result carries `pr_label_error` (the PR still
