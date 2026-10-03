@@ -204,10 +204,10 @@ def test_the_daemon_logs_to_a_rotated_file(monkeypatch, tmp_path):
 
     monkeypatch.setenv("AGENT_CODESPACES_HOME", str(tmp_path))
     root = logging.getLogger()
-    before = list(root.handlers)
+    before, level = list(root.handlers), root.level
     try:
         path = owner_cli._attach_owner_log()
-        assert path == str(tmp_path / "logs" / "owner.log")
+        assert path == str((tmp_path / "logs" / "owner.log").resolve())
         assert owner_cli._attach_owner_log() == path  # idempotent: one handler
         added = [h for h in root.handlers if h not in before]
         assert len(added) == 1 and isinstance(added[0], RotatingFileHandler)
@@ -215,17 +215,52 @@ def test_the_daemon_logs_to_a_rotated_file(monkeypatch, tmp_path):
         logging.getLogger("ssh-manager.relay").warning("relay re-establishing")
         added[0].flush()
         assert "relay re-establishing" in (tmp_path / "logs" / "owner.log").read_text("utf-8")
+        # A relative AGENT_CODESPACES_HOME is the same file: still one handler.
+        monkeypatch.chdir(tmp_path.parent)
+        monkeypatch.setenv("AGENT_CODESPACES_HOME", tmp_path.name)
+        assert owner_cli._attach_owner_log() == path
+        assert len([h for h in root.handlers if h not in before]) == 1
     finally:
         for h in [h for h in root.handlers if h not in before]:
             root.removeHandler(h)
             h.close()
+        root.setLevel(level)
 
 
 def test_an_unopenable_owner_log_falls_back_to_stderr(monkeypatch, tmp_path, capsys):
+    import logging
+
     from agent_codespaces import owner_cli
 
     blocker = tmp_path / "logs"
     blocker.write_text("a file where the logs dir should be", "utf-8")
     monkeypatch.setenv("AGENT_CODESPACES_HOME", str(tmp_path))
+    level = logging.getLogger().level
     assert owner_cli._attach_owner_log() is None
+    assert logging.getLogger().level == level  # nothing changed when it can't log
     assert "logging to stderr only" in capsys.readouterr().err
+
+
+def test_only_the_owner_that_won_the_machine_logs_its_lifecycle(monkeypatch, caplog):
+    """A concurrent start that finds a live Owner must not log a start/stop
+    pair: the log would then show restarts that never happened."""
+    import asyncio
+    import logging
+    from types import SimpleNamespace
+
+    from agent_codespaces import owner_beacon
+
+    monkeypatch.setattr(owner, "claim_owner_singleton", lambda _interval: False)
+    with caplog.at_level(logging.INFO, logger="agent-codespaces"):
+        asyncio.run(owner.run_owner_daemon(SimpleNamespace(), interval=15.0))
+    lost = [r.getMessage() for r in caplog.records]
+    assert any("already live" in m for m in lost)
+    assert not any("Connection Owner started" in m or "stopping" in m for m in lost)
+    caplog.clear()
+    keeper = owner_beacon.BeaconKeeper(SimpleNamespace(active_codespaces=lambda: []), 15.0, lambda: None)
+    with caplog.at_level(logging.INFO, logger="agent-codespaces"):
+        keeper.start()
+        keeper.stop()
+    won = [r.getMessage() for r in caplog.records]
+    assert any("Connection Owner started" in m for m in won)
+    assert any("Connection Owner stopping" in m for m in won)

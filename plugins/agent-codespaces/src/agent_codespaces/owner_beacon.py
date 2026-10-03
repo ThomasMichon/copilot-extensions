@@ -95,9 +95,14 @@ class BeaconKeeper:
                 log.debug("Connection Owner beacon refresh failed: %s", exc)
 
     def start(self) -> None:
+        # Only the Owner that won the machine starts a keeper: its lifecycle
+        # records never count a losing concurrent start as a restart.
+        log.info("Connection Owner started (pid %s, interval %ss)", os.getpid(), self._interval)
         self._thread.start()
 
     def stop(self) -> None:
         self._stop.set()
         if self._thread.is_alive():
             self._thread.join(timeout=5)
+        log.info("Connection Owner stopping (pid %s%s)", os.getpid(),
+                 ", yielded to another Owner" if self.yielded else "")

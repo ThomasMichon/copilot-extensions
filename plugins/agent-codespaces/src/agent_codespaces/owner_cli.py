@@ -56,7 +56,7 @@ def _attach_owner_log() -> str | None:
     import logging
     from logging.handlers import RotatingFileHandler
 
-    path = owner_log_path()
+    path = owner_log_path().resolve()
     root = logging.getLogger()
     if any(isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", None) == str(path)
            for h in root.handlers):
@@ -188,10 +188,6 @@ def cmd_owner(args: argparse.Namespace) -> int:
         f"idle_shutdown_after={idle_shutdown_after}; log={log_path or 'stderr'}; Ctrl-C to stop)...",
         file=sys.stderr,
     )
-    import logging
-
-    logging.getLogger("agent-codespaces.owner").info(
-        "connection-owner starting (interval=%ss, idle_shutdown_after=%s)", interval, idle_shutdown_after)
     try:
         asyncio.run(
             run_owner_daemon(
@@ -200,5 +196,4 @@ def cmd_owner(args: argparse.Namespace) -> int:
         )
     except KeyboardInterrupt:
         pass
-    logging.getLogger("agent-codespaces.owner").info("connection-owner stopped")
     return 0

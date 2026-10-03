@@ -269,7 +269,12 @@ it lands whole, across Owner restarts and even after the session ends or the
 box stops (it never contacts the box for that); an Owner with nothing else to
 hold stays up to an hour to retry it, and the next Owner start resumes it after
 that. `delete` removes a CodeSpace's local mirror once its hub copy is current,
-then or on a later retry (`AGENT_CODESPACES_TRANSCRIPT_MIRROR=0` turns this off). Observe and steer it through agent-bridge
+then or on a later retry (`AGENT_CODESPACES_TRANSCRIPT_MIRROR=0` turns this off).
+The Owner usually runs headless, so it logs to
+`~/.agent-codespaces/logs/owner.log` (size-rotated; under
+`AGENT_CODESPACES_HOME` when set): its start and stop, every relay or forward
+re-establish, and every failed cycle. Read it first when a worker's credential
+relay or a forward drops. Observe and steer it through agent-bridge
 (`live-sessions resolve`, `result`, `send`, `ui`). A detached launch keeps the
 CodeSpace claim active; `--stop` settles it like any finished connection and
 deregisters the stopped session from the host bridge at once. When close-out
