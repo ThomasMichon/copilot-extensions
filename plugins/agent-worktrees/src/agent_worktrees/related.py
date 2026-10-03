@@ -301,17 +301,25 @@ def normalize_ownership(value: str | None) -> str:
 
     Only members of :data:`VALID_OWNERSHIP` are kept -- an unrecognized value
     normalizes to ``""`` (unclassified) so a typo never silently asserts a
-    wrong AI-attribution posture.
+    wrong AI-attribution posture. A non-string input (e.g. a YAML integer)
+    also normalizes to ``""`` rather than raising.
     """
-    v = (value or "").strip().lower()
+    if not isinstance(value, str):
+        return ""
+    v = value.strip().lower()
     return v if v in VALID_OWNERSHIP else ""
 
 
 def normalize_audience(value: str | None) -> str:
     """Lower-case/strip an audience value; drop anything outside
     :data:`VALID_AUDIENCE` to ``""`` (unclassified) rather than silently
-    asserting the disclosure-exempt ``private`` posture on a typo."""
-    v = (value or "").strip().lower()
+    asserting the disclosure-exempt ``private`` posture on a typo. A
+    non-string input (e.g. a YAML integer) also normalizes to ``""`` rather
+    than raising -- a single malformed entry must never break loading the
+    whole related config."""
+    if not isinstance(value, str):
+        return ""
+    v = value.strip().lower()
     return v if v in VALID_AUDIENCE else ""
 
 

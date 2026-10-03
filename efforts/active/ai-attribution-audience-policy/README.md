@@ -155,6 +155,10 @@ clearly another agent.
 - Phase 3: doc-only; no automated test surface (chat channels are outside the
   hook's reach) — reviewed for clarity only.
 
+## Proposal
+
+_Pending._
+
 ## Journal
 
 ### 2026-10-03 — Recovered from an abandoned worktree, Phase 1 completed and landed
@@ -172,16 +176,36 @@ hunks to their new home by hand rather than fighting the conflict in a stale,
 Confirmed the underlying ask was still live and un-duplicated: issue #2965
 still open, no later commit implements an equivalent `audience` axis.
 Finished the two checklist items the stashed diff hadn't reached yet (the
-SKILL.md schema doc + `references/related.yaml` example, and 9 new tests
-covering round-trip, normalization, and the audience-keyed disclosure-policy
+SKILL.md schema doc + `references/related.yaml` example, and tests covering
+round-trip, normalization, and the audience-keyed disclosure-policy
 resolution/override logic) and trimmed the ported docstrings for brevity so
-`related.py`'s growth (1717 -> 1786 lines) stayed as small as reasonably
-possible -- still required a deliberate, reviewed widen of its shrink-only
+`related.py`'s growth (1717 -> 1797 lines, after two rounds of review-driven
+additions) stayed as small as reasonably possible -- still required a
+deliberate, reviewed widen of its shrink-only
 `module-size-baseline.json` entry (a sanctioned path per `CONTRIBUTING.md`'s
 own Code Style section, not a silent bypass). All `related`-module tests
-(183) plus the standard validation suite (`check-module-size`,
+(185) plus the standard validation suite (`check-module-size`,
 `check-docs-consistency`, `check-version-consistency`,
 `check-effort-vision-structure`) pass clean. **Phase 1 is done.**
+
+PR #5084's own review (2 rounds) caught real issues worth recording
+candidly: the first round found that every piece of ported documentation
+(this doc, the SKILL.md, `references/related.yaml`, and a `related.py`
+docstring) had inherited a "narrow-only, never widens" framing for the
+`ai_attribution` override that the actual implementation (and the
+already-landed private-repo test) contradicts -- a present override key is
+honored verbatim in either direction, not capped to turning disclosure off.
+Corrected every occurrence rather than rationalizing the mismatch away. The
+second round caught a real robustness gap: `normalize_audience` (and the
+pre-existing, symmetric `normalize_ownership`) called `.strip()` on
+whatever YAML produced for that key, so a malformed `audience: 123` raised
+`AttributeError` and broke loading the *entire* related config, not just
+that one entry -- fixed with an `isinstance(value, str)` guard on both
+functions, plus a regression test. Also fixed the human-readable `resolve`
+output unconditionally hiding the audience/policy line for the unclassified
+case (it should read "unclassified," not vanish, since that case's
+resolved policy is still the real, fail-open `True`/`True`), and added the
+missing canonical `## Proposal` section this doc had skipped.
 
 ### 2026-09-19 - Kickoff
 Operator requested rework of `ai-attribution`'s disclosure default from

@@ -766,13 +766,12 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             print(f"  delegate: {resn.delegate_via}")
         print(f"  machine:  {current_machine or '(unknown)'}")
         _audience = related.effective_audience(entry)
-        if _audience:
-            _policy = related.effective_ai_attribution(entry)
-            print(
-                f"  audience: {_audience}  "
-                f"(AI-attribution: open={_policy['disclose_on_open']}, "
-                f"reply={_policy['disclose_on_reply']})"
-            )
+        _policy = related.effective_ai_attribution(entry)
+        print(
+            f"  audience: {_audience or 'unclassified'}  "
+            f"(AI-attribution: open={_policy['disclose_on_open']}, "
+            f"reply={_policy['disclose_on_reply']})"
+        )
         for n in resn.notes:
             output.warn(n)
         print()

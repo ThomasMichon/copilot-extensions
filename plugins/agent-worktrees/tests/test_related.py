@@ -1737,6 +1737,7 @@ def test_normalize_ownership_drops_unknown():
     assert related.normalize_ownership("  internal ") == "internal"
     assert related.normalize_ownership("public") == ""   # not in VALID_OWNERSHIP
     assert related.normalize_ownership(None) == ""
+    assert related.normalize_ownership(123) == ""  # non-string: never raises
 
 
 def test_read_drops_bogus_ownership(tmp_path: Path):
@@ -1949,6 +1950,22 @@ def test_normalize_audience_drops_unknown():
     assert related.normalize_audience("  private ") == "private"
     assert related.normalize_audience("owned") == ""  # not in VALID_AUDIENCE
     assert related.normalize_audience(None) == ""
+    assert related.normalize_audience(123) == ""  # non-string: never raises
+
+
+def test_read_drops_non_string_audience_without_breaking_the_whole_config(
+    tmp_path: Path,
+):
+    """A malformed `audience: 123` (a YAML integer) must not raise and must
+    not prevent the rest of the config from loading."""
+    related.related_path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    related.related_path(tmp_path).write_text(
+        "related:\n  x:\n    audience: 123\n  y:\n    audience: public\n",
+        encoding="utf-8",
+    )
+    cfg = related.read_related(tmp_path)
+    assert cfg.related["x"].audience == ""
+    assert cfg.related["y"].audience == "public"
 
 
 def test_read_drops_bogus_audience(tmp_path: Path):
