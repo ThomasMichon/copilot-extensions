@@ -128,10 +128,11 @@ def test_parse_blocklist_file_missing_returns_empty(tmp_path: Path):
     assert entries == []
 
 
-def test_parse_blocklist_file_malformed_yaml_returns_empty(tmp_path: Path):
+def test_parse_blocklist_file_malformed_yaml_raises(tmp_path: Path):
     f = tmp_path / "bad.yaml"
     f.write_text("entries: [unterminated", encoding="utf-8")
-    assert iblk.parse_blocklist_file(f, "r", "public") == []
+    with pytest.raises(iblk.BlocklistParseError):
+        iblk.parse_blocklist_file(f, "r", "public")
 
 
 def test_parse_blocklist_file_skips_non_mapping_entries(tmp_path: Path):
@@ -232,6 +233,30 @@ def test_sweep_ignores_repo_with_missing_local_dir(home: Path, tmp_path: Path):
     assert iblk.sweep("target") == []
 
 
+def test_sweep_excludes_target_from_source_discovery(home: Path, tmp_path: Path):
+    """A repo that just added its own blocklist must not immediately flag the
+    token inside that very file -- the target is never its own source."""
+    target_dir = tmp_path / "target"
+    target_dir.mkdir()
+    _write_blocklist(target_dir, "public", "entries:\n  - token: self-term\n")
+    repos.add_repo("target", str(target_dir), repo_class="worktree",
+                   visibility="public", plat="windows")
+
+    assert iblk.sweep("target") == []
+
+
+def test_sweep_propagates_malformed_blocklist_file(home: Path, tmp_path: Path):
+    source = tmp_path / "source"
+    source.mkdir()
+    _write_blocklist(source, "public", "entries: [unterminated")
+    repos.add_repo("source", str(source), repo_class="worktree", plat="windows")
+    repos.add_repo("target", str(tmp_path / "target"), repo_class="worktree",
+                   visibility="public", plat="windows")
+
+    with pytest.raises(iblk.BlocklistParseError):
+        iblk.sweep("target")
+
+
 # ---------------------------------------------------------------------------
 # render_ci_format()
 # ---------------------------------------------------------------------------
@@ -242,3 +267,58 @@ def test_render_ci_format_with_and_without_reason():
         iblk.BlocklistEntry(token="b", reason=None, source_repo="r", source_tier="public"),
     ]
     assert iblk.render_ci_format(entries) == "a|why\nb"
+
+
+def test_render_ci_format_escapes_regex_alternation_pipe():
+    entries = [
+        iblk.BlocklistEntry(
+            token=r"regex:foo|bar", reason=None, source_repo="r", source_tier="public",
+        ),
+    ]
+    assert iblk.render_ci_format(entries) == r"regex:foo||bar"
+
+
+def test_render_ci_format_promotes_literal_pipe_to_escaped_regex():
+    entries = [
+        iblk.BlocklistEntry(token="a|b", reason=None, source_repo="r", source_tier="public"),
+    ]
+    rendered = iblk.render_ci_format(entries)
+    assert rendered.startswith("regex:")
+    assert "||" in rendered
+
+
+def test_render_ci_format_sanitizes_reason_delimiters():
+    entries = [
+        iblk.BlocklistEntry(
+            token="a", reason="line one\nline two; more", source_repo="r", source_tier="public",
+        ),
+    ]
+    rendered = iblk.render_ci_format(entries)
+    assert "\n" not in rendered.split("|", 1)[1]
+    assert ";" not in rendered
+    assert rendered == "a|line one line two, more"
+
+
+def test_render_ci_format_round_trips_through_ci_loader():
+    """The exact scenario the review flagged: an authored regex alternation
+    must survive render -> the real CI loader's own parsing unchanged."""
+    import importlib.util
+    import sys as _sys
+
+    script = (
+        Path(__file__).resolve().parents[3] / "tools" / "check-no-internal-identifiers.py"
+    )
+    spec = importlib.util.spec_from_file_location("check_no_internal_identifiers", script)
+    module = importlib.util.module_from_spec(spec)
+    _sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    entries = [
+        iblk.BlocklistEntry(
+            token=r"regex:\b(foo|bar)\b", reason="Use generic | not internal",
+            source_repo="r", source_tier="public",
+        ),
+    ]
+    rendered = iblk.render_ci_format(entries)
+    pairs = module._load_ci_identifiers(rendered)
+    assert pairs == [(r"regex:\b(foo|bar)\b", "Use generic | not internal")]

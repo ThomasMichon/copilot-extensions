@@ -98,6 +98,17 @@ class BlocklistEntry:
     source_tier: str
 
 
+class BlocklistParseError(Exception):
+    """Raised when a ``.identifier-blocklist/`` file exists but fails to
+    parse as valid YAML.
+
+    This is deliberately NOT swallowed the way a missing/absent file is: a
+    typo'd YAML file would otherwise silently drop its entire denylist while
+    the sweep still exits successfully, which could provision an incomplete
+    CI secret with no visible signal that anything went wrong.
+    """
+
+
 def resolve_visibility_rank(entry: "repos_mod.RepoEntry | None") -> int:
     """Fail-safe exposure rank for *entry* -- unset/unknown => most exposed.
 
@@ -153,12 +164,22 @@ def _compile_internal_token(raw: dict) -> str:
 
 
 def parse_blocklist_file(path: Path, source_repo: str, tier: str) -> list[BlocklistEntry]:
-    """Parse one ``block-for-<tier>.yaml`` file into entries."""
+    """Parse one ``block-for-<tier>.yaml`` file into entries.
+
+    A missing file is a normal, silent no-op (not every repo carries every
+    tier). A file that exists but fails to parse as valid YAML raises
+    :class:`BlocklistParseError` instead of silently contributing nothing --
+    see that class's docstring for why.
+    """
     entries: list[BlocklistEntry] = []
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError):
+        text = path.read_text(encoding="utf-8")
+    except OSError:
         return entries
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise BlocklistParseError(f"{path}: invalid YAML ({exc})") from exc
 
     if isinstance(data, dict):
         raw_entries = data.get("entries", [])
@@ -188,8 +209,13 @@ def sweep(target: str | None) -> list[BlocklistEntry]:
 
     *target* names a registered repo; ``None`` resolves to maximum exposure
     (every tier applies) since an unresolvable target is the fail-safe case.
+    The target repo itself is excluded from source discovery -- the
+    convention is "what every *other* repo forbids", not self-reference,
+    and including it would let a repo's own newly-added blocklist file
+    immediately flag its own forbidden token inside that very file.
     Returns a deduplicated (by lowercased token + reason), deterministically
-    sorted list.
+    sorted list. Raises :class:`BlocklistParseError` if any discovered
+    blocklist file fails to parse -- never silently drops it.
     """
     target_entry = repos_mod.find_repo(target) if target else None
     target_rank = resolve_visibility_rank(target_entry)
@@ -199,6 +225,8 @@ def sweep(target: str | None) -> list[BlocklistEntry]:
 
     seen: dict[tuple[str, str | None], BlocklistEntry] = {}
     for repo_entry in repos_mod.list_repos():
+        if target_entry is not None and repo_entry.name == target_entry.name:
+            continue
         local = repo_entry.local_path()
         if not local:
             continue
@@ -219,9 +247,46 @@ def sweep(target: str | None) -> list[BlocklistEntry]:
     return sorted(seen.values(), key=lambda e: (e.token.lower(), e.source_repo))
 
 
+def _sanitize_ci_text(value: str) -> str:
+    """Strip characters the CI-format grammar treats as hard delimiters.
+
+    ``_load_ci_identifiers`` (the consumer, in
+    ``tools/check-no-internal-identifiers.py``) splits entries on any
+    newline or semicolon with no escape mechanism for either -- so a reason
+    (or a literal token) containing one would silently fragment into extra,
+    bogus lines. Neither character carries meaning worth preserving in this
+    context, so they are simply replaced with a space/comma.
+    """
+    return value.replace("\r", " ").replace("\n", " ").replace(";", ",")
+
+
+def _render_token_for_ci(token: str) -> str:
+    """Return a CI-format-safe token string.
+
+    The consumer's grammar only has an escape mechanism for a literal ``|``
+    inside a ``regex:``-prefixed token (double it to ``||``) -- a *plain*
+    literal token has no such escape at all (its separator scan is a bare
+    ``str.partition("|")``), so a literal token containing a ``|`` must be
+    promoted to an escaped regex token to survive the round trip at all.
+    """
+    if token.lower().startswith("regex:"):
+        pattern = token[len("regex:"):]
+        return "regex:" + pattern.replace("|", "||")
+    if "|" in token:
+        return "regex:" + _re.escape(token).replace("|", "||")
+    return token
+
+
 def render_ci_format(entries: list[BlocklistEntry]) -> str:
-    """Render entries as ``token|reason`` lines (CI-secret-ready format)."""
+    """Render entries as ``token|reason`` lines (CI-secret-ready format).
+
+    Both the token (escaping a literal ``|``, promoting to regex if needed)
+    and the reason (stripping hard delimiter characters) are made safe for
+    the consumer's line-oriented grammar before emission.
+    """
     lines = []
     for e in entries:
-        lines.append(f"{e.token}|{e.reason}" if e.reason else e.token)
+        token = _render_token_for_ci(e.token)
+        reason = _sanitize_ci_text(e.reason) if e.reason else None
+        lines.append(f"{token}|{reason}" if reason else token)
     return "\n".join(lines)

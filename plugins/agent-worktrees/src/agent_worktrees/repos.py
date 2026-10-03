@@ -54,7 +54,7 @@ _LEGACY_TYPE_MAP = {"project": "worktree", "repo": "reference"}
 # exposed. Backs the identifier-blocklist sweep (see
 # ``identifier_blocklist.py``): a repo declares its own exposure here
 # (machine-local, like every other registry fact), and any *other*
-# registered repo's ``.identifier-blocklist/block-for-<tier>.txt`` applies to
+# registered repo's ``.identifier-blocklist/block-for-<tier>.yaml`` applies to
 # it whenever its own visibility is at or above that tier's exposure.
 VALID_VISIBILITY = ("private", "internal", "public")
 # Exposure ordering, least to most visible. An unset/unknown visibility is

@@ -187,7 +187,8 @@ public checkout.
 This convention supersedes an earlier single-repo scheme (a hand-maintained
 `docs/identifier-leak-guard/forbidden-identifiers-work.txt` pipe-delimited
 file in one operator's harness repo, copy-pasted into the CI secret by hand).
-That file's content migrated into a `.identifier-blocklist/
+That file's content is slated to migrate into a `.identifier-blocklist/
 block-for-public.yaml` at that repo's own anchor root, in the new YAML
-schema above, once this cross-repo sweep mechanism existed to discover it
-generically.
+schema above, now that this cross-repo sweep mechanism exists to discover it
+generically -- tracked as the next slice of
+`efforts/active/ci-identifier-leak-guard`'s Phase 5, not yet complete.

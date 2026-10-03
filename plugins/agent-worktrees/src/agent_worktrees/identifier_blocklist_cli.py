@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import sys
+
 from . import config as cfg
 from . import identifier_blocklist as iblk
 from . import output, repos as repos_mod
+
+_VALID_FORMATS = ("ci", "json")
 
 
 def _core():
@@ -32,12 +36,48 @@ def _identifiers_usage() -> None:
     print("own audience-exposure tier ('repos set-visibility').")
     print()
     print("Commands:")
-    print("  sweep [--repo NAME] [--json]   Aggregate applicable blocklists")
-    print("        [--format ci]            token|reason lines (default; --json for")
-    print("                                 structured output)")
-    print("                                 NAME defaults to the active project")
+    print("  sweep [--repo NAME] [--format ci|json] [--json]")
+    print("                                 Aggregate applicable blocklists.")
+    print("                                 ci (default): token|reason lines.")
+    print("                                 --json / --format json: structured output.")
+    print("                                 NAME defaults to the active project.")
     print()
     print("See docs/identifier-blocklist.md for the full convention.")
+
+
+def _parse_sweep_args(rest: list[str]) -> tuple[str | None, str, str | None]:
+    """Parse ``sweep``'s own arguments strictly.
+
+    Returns ``(target, fmt, error)``. ``error``, when not ``None``, names
+    exactly what was wrong (missing value, unknown flag, unknown format) --
+    the caller must surface it and refuse to run, never silently fall back
+    to a default on malformed input.
+    """
+    target: str | None = None
+    fmt = "ci"
+    i = 0
+    while i < len(rest):
+        arg = rest[i]
+        if arg == "--repo":
+            if i + 1 >= len(rest):
+                return None, fmt, "--repo requires a value"
+            target = rest[i + 1]
+            i += 2
+            continue
+        if arg == "--format":
+            if i + 1 >= len(rest):
+                return None, fmt, "--format requires a value"
+            fmt = rest[i + 1]
+            i += 2
+            continue
+        if arg == "--json":
+            fmt = "json"
+            i += 1
+            continue
+        return None, fmt, f"unknown argument: {arg}"
+    if fmt not in _VALID_FORMATS:
+        return None, fmt, f"unknown --format '{fmt}' (expected one of: {', '.join(_VALID_FORMATS)})"
+    return target, fmt, None
 
 
 def cmd_identifiers_dispatch(argv: list[str]) -> int:
@@ -48,16 +88,20 @@ def cmd_identifiers_dispatch(argv: list[str]) -> int:
     sub, rest = argv[0], argv[1:]
 
     if sub == "sweep":
-        json_out = "--json" in rest
-        target = None
-        if "--repo" in rest:
-            idx = rest.index("--repo")
-            if idx + 1 < len(rest):
-                target = rest[idx + 1]
+        target, fmt, error = _parse_sweep_args(rest)
+        if error:
+            output.err(f"identifiers sweep: {error}")
+            _identifiers_usage()
+            return 1
         if target is None:
             target = cfg.active_project()
 
-        entries = iblk.sweep(target)
+        try:
+            entries = iblk.sweep(target)
+        except iblk.BlocklistParseError as exc:
+            output.err(f"identifiers sweep: {exc}")
+            return 1
+
         target_entry = repos_mod.find_repo(target) if target else None
         target_rank = iblk.resolve_visibility_rank(target_entry)
         resolved_visibility = next(
@@ -65,7 +109,7 @@ def cmd_identifiers_dispatch(argv: list[str]) -> int:
             "public",
         )
 
-        if json_out:
+        if fmt == "json":
             _core()._json_output(
                 {
                     "target": target,
@@ -85,10 +129,16 @@ def cmd_identifiers_dispatch(argv: list[str]) -> int:
             )
             return 0
 
+        # ci format: stdout must carry ONLY the token|reason lines (or
+        # nothing at all) -- this is meant to be piped straight into a
+        # consumer (the live guard, or `secret set`), so any diagnostic
+        # text on stdout would be parsed as a forbidden-identifier line.
+        # Route it to stderr instead, and emit nothing on stdout when empty.
         if not entries:
-            output.warn(
-                f"No applicable blocklist entries found for target "
-                f"'{target or '(unresolved)'}' (visibility={resolved_visibility})."
+            print(
+                f"identifiers sweep: no applicable blocklist entries found for "
+                f"target '{target or '(unresolved)'}' (visibility={resolved_visibility}).",
+                file=sys.stderr,
             )
             return 0
         print(iblk.render_ci_format(entries))
