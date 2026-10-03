@@ -1134,10 +1134,10 @@ def test_resolve_toolchain_lock_creates_venv_and_installs(
     def fake_run(cmd, **kwargs):  # noqa: ARG001
         calls.append(cmd)
         if cmd[:2] == ["uv", "venv"]:
-            # cmd[2] is the STAGING dir -- resolve_toolchain_lock builds
+            # cmd[3] is the STAGING dir -- resolve_toolchain_lock builds
             # there first and only renames into venv_dir after both steps
             # succeed.
-            staging_python = bpa._venv_python_path(Path(cmd[2]))
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
             staging_python.write_text("", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -1211,7 +1211,7 @@ def test_resolve_toolchain_lock_install_failure_raises(
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
-            staging_python = bpa._venv_python_path(Path(cmd[2]))
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
             staging_python.write_text("", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -1367,6 +1367,43 @@ def test_governed_feed_configured_via_user_uv_toml_default_index_posix(
     )
 
 
+def test_effective_uv_toml_candidates_windows_includes_programdata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: a system-level uv.toml (%PROGRAMDATA%) must also be
+    # discovered -- matching this repo's own install.ps1 precedent
+    # (Test-UvConfiguredIndex) -- not just the user-level %APPDATA% path.
+    monkeypatch.setattr(btl.sys, "platform", "win32")
+    candidates = btl._effective_uv_toml_candidates(
+        {"APPDATA": r"C:\Users\x\AppData\Roaming", "PROGRAMDATA": r"C:\ProgramData"}
+    )
+    assert Path(r"C:\ProgramData\uv\uv.toml") in candidates
+
+
+def test_governed_feed_configured_via_programdata_uv_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(bpa.sys, "platform", "win32")
+    uv_toml = tmp_path / "uv" / "uv.toml"
+    uv_toml.parent.mkdir(parents=True)
+    uv_toml.write_text('index-url = "https://example.internal/simple/"\n', encoding="utf-8")
+    assert bpa._governed_feed_configured(
+        env={"PROGRAMDATA": str(tmp_path), _TRUST_VAR: "example.internal"}
+    )
+
+
+def test_effective_uv_toml_candidates_posix_includes_system_paths(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Regression: /etc/uv/uv.toml and /etc/xdg/uv/uv.toml (system-level)
+    # must also be discovered -- matching this repo's own install.sh
+    # precedent (_ensure_uv_index), not just the user-level path.
+    monkeypatch.setattr(btl.sys, "platform", "linux")
+    candidates = btl._effective_uv_toml_candidates({"HOME": "/home/x"})
+    assert Path("/etc/uv/uv.toml") in candidates
+    assert Path("/etc/xdg/uv/uv.toml") in candidates
+
+
 def test_governed_feed_not_configured_via_supplemental_index_table_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1458,7 +1495,7 @@ def test_resolve_toolchain_lock_recovers_from_prior_interrupted_setup(
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
-            staging_python = bpa._venv_python_path(Path(cmd[2]))
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
             staging_python.write_text("", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -1491,7 +1528,7 @@ def test_resolve_toolchain_lock_leaves_no_staging_directory_behind(
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
-            staging_python = bpa._venv_python_path(Path(cmd[2]))
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
             staging_python.write_text("", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -1628,7 +1665,7 @@ def test_resolve_toolchain_lock_defers_to_winner(
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
-            staging_dir = Path(cmd[2])
+            staging_dir = Path(cmd[3])
             staging_python = bpa._venv_python_path(staging_dir)
             staging_python.parent.mkdir(parents=True, exist_ok=True)
             staging_python.write_text("", encoding="utf-8")
@@ -1669,7 +1706,7 @@ def test_resolve_toolchain_lock_raises_on_genuine_rename_failure(
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
-            staging_python = bpa._venv_python_path(Path(cmd[2]))
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
             staging_python.write_text("", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -1704,8 +1741,8 @@ def test_resolve_toolchain_lock_uses_unique_staging_dirs_per_call(
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
-            staging_dirs_seen.append(cmd[2])
-            staging_python = bpa._venv_python_path(Path(cmd[2]))
+            staging_dirs_seen.append(cmd[3])
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
             staging_python.write_text("", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -1748,7 +1785,7 @@ def test_resolve_toolchain_lock_pins_install_to_validated_index_only(
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
-            staging_python = bpa._venv_python_path(Path(cmd[2]))
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
             staging_python.parent.mkdir(parents=True, exist_ok=True)
             staging_python.write_text("", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -1997,6 +2034,31 @@ def test_build_wheel_rejects_unparseable_build_requires_entry(
         bpa.build_wheel(src_dir, tmp_path / "dist", toolchain=toolchain)
 
 
+def test_assert_toolchain_satisfies_build_requires_fails_closed_without_packaging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: on a genuinely clean machine missing the third-party
+    # `packaging` library (present today only transitively via pytest),
+    # this must fail closed with an actionable message, not a bare
+    # ModuleNotFoundError traceback.
+    src_dir = tmp_path / "src"
+    _write_build_system_requires(src_dir, ["setuptools>=60.0.0"])
+    toolchain = bpa.ToolchainLock(
+        tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
+    )
+
+    real_import = __import__
+
+    def blocking_import(name, *args, **kwargs):
+        if name.startswith("packaging"):
+            raise ModuleNotFoundError(f"No module named {name!r}")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", blocking_import)
+    with pytest.raises(bpa.ArtifactBuildError, match="packaging"):
+        btl._assert_toolchain_satisfies_build_requires(src_dir, toolchain)
+
+
 def test_build_wheel_skips_build_requires_check_without_toolchain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -2047,9 +2109,18 @@ def test_build_plugin_artifacts_resolves_own_toolchain_when_none_given(
     _write_pyproject(plugin_dir)
     out_dir = fake_repo / "dist"
     resolved_dirs: list[Path] = []
+    parent_existed_at_call: list[bool] = []
 
     def fake_resolve_toolchain_lock(venv_dir: Path, *, python=None):  # noqa: ARG001
         resolved_dirs.append(venv_dir)
+        # Regression: the path passed must itself NOT pre-exist (a real
+        # `tempfile.TemporaryDirectory()` creates ITS OWN directory
+        # immediately, but `resolve_toolchain_lock` publishes by renaming a
+        # staging dir ONTO this exact path -- Windows `Path.rename()`
+        # always fails onto an already-existing directory, even empty) --
+        # only its PARENT (the real temp-dir root) should already exist.
+        parent_existed_at_call.append(venv_dir.parent.is_dir())
+        assert not venv_dir.exists()
         return _FAKE_TOOLCHAIN
 
     def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
@@ -2065,5 +2136,6 @@ def test_build_plugin_artifacts_resolves_own_toolchain_when_none_given(
     manifest = bpa.build_plugin_artifacts("demo", out_dir=out_dir)
 
     assert len(resolved_dirs) == 1
+    assert parent_existed_at_call == [True]
     assert not resolved_dirs[0].exists()  # the disposable toolchain dir is cleaned up
     assert manifest["build_toolchain"]["lock_id"] == _FAKE_TOOLCHAIN.lock_id

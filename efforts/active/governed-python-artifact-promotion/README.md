@@ -327,8 +327,8 @@ install log was searched for every contacted host. Zero matches for
 (`fastapi`, `uvicorn`, `starlette`, `h11`, `wsproto`, `pyyaml`, `pydantic`,
 `pydantic-core`, `annotated-types`, `anyio`, `click`, `idna`,
 `typing-extensions`, `typing-inspection`, `agent-client-protocol`) resolved
-through `packagefeedproxy.microsoft.io`  its backing
-`*.pkgs.visualstudio.com` Azure Artifacts feed  `*.vsblob.vsassets.io`
+through `packagefeedproxy.microsoft.io` → its backing
+`*.pkgs.visualstudio.com` Azure Artifacts feed → `*.vsblob.vsassets.io`
 blob storage - the full governed chain, never a public index. The 9
 first-party vendored-lib names (`agent-ssh-manager`, etc., which do not
 exist on any public index) were also checked against the governed feed
@@ -538,7 +538,9 @@ win grows with build complexity.
   toolchain-lock/governed-feed-trust logic (`ToolchainLock`,
   `resolve_toolchain_lock`, the governed-feed trust gate, the marker-
   environment query, and the build-requires enforcement helpers) into a
-  new `tools/build_toolchain_lock.py` module (485 lines), re-imported and
+  new `tools/build_toolchain_lock.py` module (initially 485 lines, now
+  609 lines after subsequent review-round fixes; both files have stayed
+  under the cap throughout), re-imported and
   re-exported by `build_python_artifacts.py` (968 lines now) so its own
   public API and every existing test's `bpa.<name>` access pattern stayed
   unchanged. One real fix the split itself surfaced: `_governed_feed_configured`
@@ -600,7 +602,59 @@ win grows with build complexity.
   `packaging.utils.canonicalize_name` before lookup, and failing closed
   (not skipping) when an applicable requirement names an unlocked
   package. 6 more unit tests (113 total); re-verified for real against
-  `agent-bridge`. This slice has now gone through 9 automated review
+  `agent-bridge`.
+- A tenth review round found 6 more real issues, several genuinely
+  severe: (1) the default (no `--toolchain-venv`) CLI path passed
+  `tempfile.TemporaryDirectory()`'s own path directly to
+  `resolve_toolchain_lock`, but that directory already exists the moment
+  `TemporaryDirectory()` is constructed -- `resolve_toolchain_lock`
+  publishes by renaming a staging dir ONTO its given path, which POSIX may
+  allow onto an empty directory but Windows `Path.rename()` always
+  refuses outright. This meant the tool's own default, flag-less CLI usage
+  was completely broken on Windows -- never caught because every real
+  smoke test so far explicitly passed `--toolchain-venv`. Fixed by passing
+  a non-existent child (`toolchain_root / "venv"`) instead. (2) the `uv
+  venv` subprocess still inherited an ambient `UV_VENV_SEED`, which can
+  make `uv venv` itself pre-install `setuptools`/`wheel`/`pip` from
+  whatever ambient (unvalidated) source it would otherwise use -- the
+  later bare `uv pip install setuptools wheel` could then see the
+  unconstrained requirement already satisfied and leave that untouched,
+  silently bypassing the validated index entirely. Fixed by computing one
+  sanitized environment (now also stripping `UV_VENV_SEED`) and passing
+  `--no-config` to BOTH the `uv venv` and `uv pip install` calls, not just
+  install. (3) `_assert_toolchain_satisfies_build_requires` needs the
+  third-party `packaging` library, which this repo declares nowhere as a
+  real dependency (present today only transitively via `pytest`) -- a
+  genuinely clean machine running this CLI directly would hit a bare
+  `ModuleNotFoundError`. Resolved pragmatically for now: catches the
+  import failure and fails closed with an actionable message; declaring/
+  bootstrapping a real dependency (or performing this check inside the
+  already-governed toolchain venv instead) is named as a deliberately
+  deferred follow-up, not silently left unaddressed. (4)
+  `_effective_uv_toml_candidates` only ever checked the user-level
+  `uv.toml` path, missing system-level config entirely
+  (`%PROGRAMDATA%\uv\uv.toml` on Windows; `/etc/uv/uv.toml` and
+  `/etc/xdg/uv/uv.toml` on POSIX) -- a machine whose trusted governed
+  default is configured at one of those levels (this repo's own
+  `install.ps1`/`install.sh` already account for exactly these paths)
+  would be wrongly rejected as unconfigured; fixed by checking all of
+  them, in `uv`'s own precedence order. (5) this effort's own 113 trust/
+  concurrency/cross-platform regression tests were never wired into any
+  CI workflow, so they gated nothing; added a required
+  `tools/test_build_python_artifacts.py` step to `ci.yml`. (6) a
+  documentation-process finding: the Journal's own module-size record
+  (485 lines) had gone stale as later rounds grew the file further;
+  corrected to note both the original and current (609-line) sizes. Also
+  discovered and fixed, independent of review feedback: this Journal's
+  own directional-arrow corruption (flagged as already-resolved by
+  several prior review rounds) had actually been silently REINTRODUCED
+  by this session's own SSH-based file-fetch mechanism on at least one
+  later round -- traced to a lossy console-encoding path in the fetch
+  step, not the review tool's own staleness; repaired again and verified
+  via direct remote byte inspection (not just a visual re-read) this
+  time. 4 more unit tests (117 total); re-verified for real against
+  `agent-bridge` with the new sanitized-environment/system-config-path
+  fixes active. This slice has now gone through 10 automated review
   rounds, each finding genuine, progressively narrower issues --
   consistent with this effort's own documented review history on its
   prior slice.

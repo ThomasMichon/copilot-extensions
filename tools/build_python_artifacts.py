@@ -833,12 +833,19 @@ def build_plugin_artifacts(
 
     with contextlib.ExitStack() as stack:
         if toolchain is None:
-            toolchain_dir = Path(
+            # `TemporaryDirectory()` creates its own directory immediately,
+            # but `resolve_toolchain_lock` publishes via renaming a staging
+            # directory ONTO the path it's given -- POSIX may replace an
+            # empty directory, but Windows `Path.rename()` always fails
+            # when the destination already exists, even empty. Pass a
+            # non-existent child of the cleanup root instead, so the venv
+            # path itself never pre-exists.
+            toolchain_root = Path(
                 stack.enter_context(
                     tempfile.TemporaryDirectory(prefix="build-python-artifacts-toolchain-")
                 )
             )
-            toolchain = resolve_toolchain_lock(toolchain_dir, python=python)
+            toolchain = resolve_toolchain_lock(toolchain_root / "venv", python=python)
 
         def _build_and_verify(source_dir: Path) -> tuple[Path, dict, str]:
             wheel = build_wheel(

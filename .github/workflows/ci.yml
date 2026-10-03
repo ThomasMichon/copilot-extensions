@@ -223,7 +223,7 @@ jobs:
         # Every tracked, non-test source module must stay within its line-count
         # cap, or its grandfathered ceiling for pre-existing offenders -- the
         # componentization failure that let queue.py reach ~7,200 lines had no
-        # automated guard before this. See CONTRIBUTING.md § Code Style. Runs
+        # automated guard before this. See CONTRIBUTING.md  Code Style. Runs
         # unconditionally (push/workflow_dispatch too) so the full-tree state
         # this repo's own widen job and doc/watchdog tooling depend on is
         # never scoped away.
@@ -410,6 +410,12 @@ jobs:
         run: >-
           python tools/check-feed-neutrality.py &&
           python -m pytest -q tools/test_check_feed_neutrality.py
+      - name: Governed Python artifact build/toolchain-lock guard tests
+        # governed-python-artifact-promotion effort, Phase 2: build_python_artifacts.py
+        # + build_toolchain_lock.py's own trust-gate, concurrency, and
+        # build-requirement regressions -- a PR must not be able to silently
+        # regress these without a required check catching it.
+        run: python -m pytest -q tools/test_build_python_artifacts.py
       - name: Asyncio timeout handlers (Python 3.10 daemon)
         # The agent-bridge daemon venv is pinned to Python 3.10 (uv venv
         # --python 3.10), where asyncio.wait_for raises asyncio.TimeoutError --
