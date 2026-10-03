@@ -12,6 +12,7 @@ Two layers, tested separately per the module's own scope split:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 from types import SimpleNamespace
 
@@ -42,7 +43,16 @@ def _pr(**overrides: object) -> dict:
         "mergeable": "MERGEABLE",
         "mergeStateStatus": "CLEAN",
         "labels": {"nodes": []},
-        "commits": {"nodes": [{"commit": {"statusCheckRollup": None}}]},
+        "commits": {
+            "nodes": [
+                {
+                    "commit": {
+                        "committedDate": "2026-01-01T00:00:00Z",
+                        "statusCheckRollup": None,
+                    }
+                }
+            ]
+        },
         "reviewThreads": {"nodes": []},
     }
     base.update(overrides)
@@ -214,6 +224,26 @@ def test_multiple_holds_can_co_occur_independently():
 def test_revision_carries_head_and_base_sha():
     observation = observe_pr_state(_pr(headRefOid="abc123", baseRefOid="def456"))
     assert observation.revision == Revision(diff_hash="abc123", base_sha="def456")
+
+
+def test_observation_carries_last_commit_timestamp():
+    observation = observe_pr_state(_pr())
+    assert observation.last_commit_at == datetime(
+        2026, 1, 1, tzinfo=timezone.utc
+    ).timestamp()
+
+
+def test_invalid_last_commit_timestamp_raises():
+    with pytest.raises(GitHubPRObservationError, match="committedDate"):
+        observe_pr_state(
+            _pr(
+                commits={
+                    "nodes": [
+                        {"commit": {"committedDate": "not-a-date", "statusCheckRollup": None}}
+                    ]
+                }
+            )
+        )
 
 
 @pytest.mark.parametrize("missing_field", ["headRefOid", "baseRefOid"])

@@ -170,6 +170,7 @@ class TestDataModels:
         # Auto-complete completion defaults.
         assert pr.approval_required is True
         assert pr.allow_stale_approval is False
+        assert pr.dismiss_stale_reviews is None
         assert pr.squash is True
         assert pr.delete_source_branch is True
         assert pr.bypass_policy is False
@@ -445,6 +446,7 @@ class TestPRConfigParsing:
             "      automerge_label: auto-complete\n"
             "      approval_required: false\n"
             "      allow_stale_approval: true\n"
+            "      dismiss_stale_reviews: false\n"
             "      bypass_policy: true\n"
             "      bypass_reason: self-serve\n"
             "      squash: true\n"
@@ -456,6 +458,7 @@ class TestPRConfigParsing:
         assert pr.automerge_label == "auto-complete"
         assert pr.approval_required is False
         assert pr.allow_stale_approval is True
+        assert pr.dismiss_stale_reviews is False
         assert pr.bypass_policy is True
         assert pr.bypass_reason == "self-serve"
         assert pr.squash is True

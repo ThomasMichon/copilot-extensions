@@ -580,13 +580,25 @@ class GitHubProvider:
     def merge_pull(
         self, repo: str, number: int, *, squash: bool = True, admin: bool = False,
         api_base: str = "", token: str | None = None,
+        delete_source_branch: bool = True,
     ) -> str:
         """Directly merge PR ``number`` via ``gh pr merge``.
 
         The ``pr-merge <#> --now`` submitter-direct primitive. ``--squash`` keeps
         the non-interactive merge method explicit; ``--admin`` is used only when
-        the configured review is non-blocking. The source branch is deliberately
-        **not** deleted, so ``finalize`` can affirm the merge. Targets
+        the configured review is non-blocking. ``delete_source_branch`` (default
+        ``True``, matching :meth:`request_auto_complete`'s own default) passes
+        ``--delete-branch`` so the head branch is cleaned up on merge -- safe
+        because ``finalize``/``pr-complete`` verify a merged PR against the
+        tracked record's own ``pr.head_sha`` (fetched into the local object
+        database when the worktree pushed it), never by requiring the live
+        remote branch to still exist; a missing branch at finalize time is an
+        explicitly tested, ordinary precondition pass, not a special case this
+        caller needs to avoid creating. A repo whose own
+        ``delete_branch_on_merge`` setting is already on would delete the
+        branch regardless of this flag -- it is set explicitly here so every
+        repo this plugin merges into behaves the same way, not only ones that
+        happen to have that setting enabled. Targets
         ``authority_endpoint(api_base)`` (via ``GH_HOST``) so the merge always
         runs against the same host ``pr-merge --now``'s live permission gate
         just verified -- never a different ambient host.
@@ -597,6 +609,8 @@ class GitHubProvider:
             args.append("--squash")
         if admin:
             args.append("--admin")
+        if delete_source_branch:
+            args.append("--delete-branch")
         proc = run_cli(args, env=self._env(token, host=host))
         if proc.returncode != 0:
             return (
@@ -608,18 +622,24 @@ class GitHubProvider:
     def enable_auto_merge(
         self, repo: str, number: int, *, squash: bool = True,
         api_base: str = "", token: str | None = None,
+        delete_source_branch: bool = True,
     ) -> str:
         """Arm GitHub native auto-merge: ``gh pr merge <n> --squash --auto`` (#225).
 
         No ``--admin``: auto-merge waits on required checks rather than bypassing
-        them. The source branch is left in place so ``finalize`` can affirm the
-        eventual merge. Returns "" once auto-merge is armed (the PR is NOT yet
-        merged), or an error string so the caller falls back to a direct merge.
+        them. ``delete_source_branch`` (default ``True``) passes
+        ``--delete-branch`` so the head branch is cleaned up once the eventual
+        merge lands -- see :meth:`merge_pull`'s docstring for why this is safe
+        against ``finalize``/``pr-complete``. Returns "" once auto-merge is armed
+        (the PR is NOT yet merged), or an error string so the caller falls back
+        to an immediate :meth:`merge_pull`.
         """
         host = self.authority_endpoint(api_base)
         args = ["gh", "pr", "merge", str(number), "--repo", repo, "--auto"]
         if squash:
             args.append("--squash")
+        if delete_source_branch:
+            args.append("--delete-branch")
         proc = run_cli(args, env=self._env(token, host=host))
         if proc.returncode != 0:
             return (
@@ -765,13 +785,14 @@ class GitHubProvider:
 
         Two reads: ``gh api repos/<repo>`` (merge methods, native auto-merge,
         delete-branch-on-merge) and, best-effort, the default branch's
-        protection (required approving reviews, required status checks).
-        Both explicitly target ``authority_endpoint(api_base)`` rather than
-        gh's ambient default host -- required for ``viewer_permission`` to
-        describe the acting identity's access on *this* repo's real host.
-        Never raises: a failed settings read yields
-        ``RepoPolicy(supported=False, error=...)``; an unreadable/absent
-        protection leaves those fields ``None``.
+        protection (required approving reviews, required status checks,
+        ``dismiss_stale_reviews`` -- copilot-extensions#2060). Both target
+        ``authority_endpoint(api_base)`` rather than gh's ambient default
+        host -- required for ``viewer_permission`` to describe the acting
+        identity's access on *this* repo's real host. Never raises: a failed
+        settings read yields ``RepoPolicy(supported=False, error=...)``; an
+        unreadable protection response leaves those fields ``None`` (a
+        confirmed-absent protection reports ``dismiss_stale_reviews=False``).
         """
         from ..pr_contract import RepoPolicy
 
@@ -799,6 +820,7 @@ class GitHubProvider:
 
         req_reviews: int | None = None
         req_checks: bool | None = None
+        dismiss_stale_reviews: bool | None = None
         if default_branch:
             pproc = run_cli(
                 ["gh", "api", "--hostname", host,
@@ -815,11 +837,19 @@ class GitHubProvider:
                     if isinstance(rpr, dict):
                         cnt = rpr.get("required_approving_review_count")
                         req_reviews = int(cnt) if isinstance(cnt, int) else 0
+                        dsr = rpr.get("dismiss_stale_reviews")
+                        if isinstance(dsr, bool):
+                            dismiss_stale_reviews = dsr
+                    elif rpr is None:
+                        # Protection exists but required-review protection is
+                        # disabled -> no review rule to dismiss anything.
+                        req_reviews, dismiss_stale_reviews = 0, False
                     rsc = prot.get("required_status_checks")
                     req_checks = bool(rsc)
             elif "Not Found" in (pproc.stderr + pproc.stdout):
                 # No protection configured on the default branch -> nothing gates.
                 req_reviews, req_checks = 0, False
+                dismiss_stale_reviews = False
 
         return RepoPolicy(
             supported=True,
@@ -830,6 +860,7 @@ class GitHubProvider:
             delete_branch_on_merge=_b("delete_branch_on_merge"),
             required_approving_reviews=req_reviews,
             has_required_status_checks=req_checks,
+            dismiss_stale_reviews=dismiss_stale_reviews,
             viewer_permission=viewer_permission,
         )
 

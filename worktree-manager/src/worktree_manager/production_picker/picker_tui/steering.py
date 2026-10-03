@@ -135,7 +135,7 @@ class PivotCardScreen(ModalScreen[None]):
     native ``VerticalScroll`` owns scrolling once focused)."""
 
     CSS = """
-    PivotCardScreen { align: center middle; background: $background 55%; }
+    PivotCardScreen { align: center middle; background: $background; }
     PivotCardScreen > #card-frame {
         width: 92; height: auto; max-height: 90%;
         border: round #ffaf00; background: $surface; padding: 0 1;
@@ -302,7 +302,7 @@ class ResetConfirmScreen(ModalScreen[bool]):
     """
 
     CSS = """
-    ResetConfirmScreen { align: center middle; background: $background 55%; }
+    ResetConfirmScreen { align: center middle; background: $background; }
     ResetConfirmScreen > #reset-frame {
         width: 52; height: auto; border: round #ffaf00;
         background: $surface; padding: 1 2;
@@ -359,7 +359,7 @@ class SubmitErrorScreen(ModalScreen[None]):
     submission ever runs and which a failed submission never clears."""
 
     CSS = """
-    SubmitErrorScreen { align: center middle; background: $background 55%; }
+    SubmitErrorScreen { align: center middle; background: $background; }
     SubmitErrorScreen > #submit-error-frame {
         width: 68; height: auto; border: round #ff5f5f;
         background: $surface; padding: 1 2;

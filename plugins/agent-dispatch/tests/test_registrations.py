@@ -112,6 +112,19 @@ def test_register_evaluator_requires_explicit_ref(tmp_path):
         )
 
 
+def test_validate_registration_rejects_non_finite_reviewer_loop_stale_after_days():
+    with pytest.raises(RegistrationError, match="stale_after_days must be a number > 0"):
+        validate_registration(
+            RegistrationKind.EVALUATOR,
+            {
+                "repo": TEST_REPO,
+                "evaluator_ref": "review-loop",
+                "evaluator_spec": {},
+                "reviewer_loop": {"stale_after_days": math.nan},
+            },
+        )
+
+
 @pytest.mark.parametrize(
     "kind, spec, needle",
     [

@@ -39,14 +39,22 @@ daemon's existence through the plugin's own operation, but never talks to it
 directly, and still re-spawns a cold CLI process on every refresh instead.
 
 This effort's intent is to make the Picker's data-fetch path **capability-
-aware**: prefer the fastest channel a pivot can actually offer — a direct
-HTTP/SSE/WebSocket connection to a pivot's own live daemon when one is
-discoverable and reachable, degrading to the CLI's own streaming/NDJSON mode
-when no daemon exists, degrading further to the original one-shot JSON call
-only as the safety-net floor — and to make the Picker's own render path
-genuinely incremental (diff incoming state, write only the layout regions that
-actually changed) rather than redrawing more than it needs to on every update.
-This closes the loop opened by the render-perf investigations landed in the
+aware**: prefer the fastest channel a pivot's own CLI can actually offer,
+behind the CLI-owned client boundary the Picker already talks to — a CLI
+whose own `--stream`/`--subscribe` implementation internally relays its
+already-running daemon's live feed (direct HTTP/SSE to that daemon, chosen
+and owned entirely by the CLI, never by the Picker) when one is discoverable
+and reachable, degrading to the CLI's own poll-and-diff streaming mode when
+no daemon exists or isn't reachable, degrading further to the original
+one-shot JSON call only as the safety-net floor — and to make the Picker's
+own render path genuinely incremental (diff incoming state, write only the
+layout regions that actually changed) rather than redrawing more than it
+needs to on every update. The Picker itself never grows a new transport or a
+direct daemon connection of its own — see `phase-3-design.md` for the
+detailed rationale — staying inside the vision's stated engine boundary,
+"reaches each engine only by invoking its machine-readable CLI verbs,"
+`visions/picker/README.md:332-336`. This
+closes the loop opened by the render-perf investigations landed in the
 `worktrees-pivot-ux-overhaul` effort (2026-09-30): those fixed two *concrete*
 staleness/latency bugs, but both investigations surfaced the same underlying
 shape — a slow, synchronous, no-caching round trip standing in for a channel
@@ -265,36 +273,60 @@ is closest to a manifest-only change. Depends on Phase 0 — now unblocked.)_
       --stream` directly against this machine's live bridge daemon (21 real
       agents) — full `begin`/21×`row`/`done` envelope.
 
-### Phase 3 — CLI-relayed daemon fast path (the new capability, revised)
-_(Revised per Copilot review on #4764: the original shape — the Picker
-connecting directly to a pivot's daemon over HTTP, bypassing the CLI — directly
-contradicts the Picker vision's stated boundary, "reaches each engine **only by
-invoking its machine-readable CLI verbs**" (`visions/picker/README.md:332-336`).
-Rather than propose a vision change for this, the fast path stays **behind the
-CLI-owned client boundary** the reviewer suggested: the Picker still only ever
-invokes `list --stream`/`subscribe`; the SPEEDUP comes from that CLI's own
-`--stream` implementation choosing, internally, to relay its already-running
-daemon's live feed (e.g. `agent-dispatch`'s own `/events` SSE stream) through
-its stdout NDJSON instead of re-deriving the same data from scratch on each
-invocation — invisible to the Picker, which is unaffected by where the CLI's
-own implementation gets its data. This also resolves Phase 0's EOF/reconnect
-concern for the daemon-backed case specifically: the CLI process, not the
-Picker, owns reconnecting to its own daemon.)_
-- [ ] For agent-dispatch and agent-bridge (Phases 1-2 already proved the NDJSON
-      shape against their CLIs): change each plugin's own `--stream`
-      implementation to detect its daemon is live (the same discovery each
-      plugin's CLI already uses for its own non-Picker commands — e.g.
-      `~/.agent-bridge/active.json`) and relay the daemon's live feed through
-      stdout instead of a cold poll-and-diff loop, while keeping the exact
-      same NDJSON envelope shape the Picker already consumes.
-- [ ] Preserve graceful degradation **inside the CLI**: daemon unreachable →
-      the CLI's own existing poll-and-diff `--stream` implementation; CLI
-      doesn't support `--stream` at all → the Picker's own existing one-shot
-      JSON fallback (already built, see Context). The Picker-side fallback
-      chain does not grow a new rung; only the CLI's internal implementation
-      gains a faster data source.
-- [ ] Evaluate extending this pattern to other daemon-backed plugins only
-      after it lands for these two.
+### Phase 3 — CLI-relayed daemon fast path (the new capability)
+_(The fast path stays behind the
+CLI-owned client boundary — the Picker still only ever invokes
+`list --stream`/`subscribe`; the speedup comes from each CLI's own
+`--stream` implementation relaying its already-running daemon's live feed
+internally, invisible to the Picker. **Full detail is in a sibling
+document**
+(`efforts/README.md`'s "extract substantial phase designs" convention):
+[`phase-3-design.md`](phase-3-design.md). Summary: agent-dispatch and
+agent-bridge are not symmetric — agent-dispatch's coordinator already
+publishes a genuine roster-relevant event feed (`GET /events`) a CLI-side
+relay can consume directly; agent-bridge's daemon has no existing
+roster-change event stream, so its own fast path is a daemon-side cache
+(3b) first, with a roster-push SSE route (3c) deferred until 3b proves
+insufficient.)_
+
+- [ ] **3a — agent-dispatch relay** (full detail:
+      [phase-3-design.md](phase-3-design.md)): treat any `stream_events()`
+      event as a wake trigger for an immediate full re-fetch-and-diff, not
+      a per-event row transform. Covers: scope to the direct (non-delegated)
+      path only; an unbounded read timeout for the idle SSE connection; a
+      version-skew-gated ready-frame handshake closing the startup/reconnect
+      subscription gap (with a no-observable-barrier fallback to plain
+      polling for an old daemon); debounced, rate-limited event-woken
+      re-fetches with a trailing-dirty flag; a local no-network tick for
+      every purely clock-driven field (activity TTL, stalled-text,
+      recent-mins cutoff, relay-staleness); a single snapshot-owner lock
+      serializing every writer; and bounded-backoff reconnection with
+      fresh-client endpoint re-resolution. Every board-visible mutation
+      across `coordinator_tasks.py`, `mcp_http.py`, and
+      `coordinator_verification.py` needs at least one bus event (audited
+      as a standing, provisional requirement, not a closed list).
+- [ ] **3b — agent-bridge daemon-side cache** (land first; full detail:
+      [phase-3-design.md](phase-3-design.md)): move the per-call resolver
+      scan into the daemon as a background-refreshed, supervised cache;
+      `GET /api/v1/agents` becomes a cheap read for a healthy cache hit
+      only — forced/incomplete/uninitialized reads intentionally still
+      block on a real scan. Covers: last-known-good-per-namespace retention
+      with opportunistic single-flight refresh on any incomplete read (not
+      just an explicit `force_refresh`, which is protocol-gated); a
+      server-side, version-independent `503` contract (not a new response
+      field) for "nothing authoritative to serve" — covering both
+      pre-first-discovery startup and exhausted retries with no
+      last-known-good; a dynamic namespace set tracking
+      `refresh_provider_resolvers()`'s own add/remove/replace; and
+      single-flight-plus-generation-guarded concurrent refreshes.
+- [ ] **3c — agent-bridge roster-change SSE** (deferred; do not start
+      until 3b is shipped and measured insufficient): add a genuine
+      `GET /api/v1/agents/stream` daemon route pushing `delta`/`removed`
+      when the 3b cache detects a roster change, so the CLI can relay it
+      the same way 3a does for agent-dispatch — deferred because it
+      duplicates Phase 2's client-side diffing logic on the daemon side and
+      introduces the daemon-connection failure mode this phase's Validation
+      Plan gate is actually about.
 
 ### Phase 4 — Segment-level React-esque diffing in the Picker's own render path
 - [ ] Profile `_refresh_nf_segments()` (`engine_rendering.py`) against a
@@ -351,14 +383,77 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
       refresh latency (mirroring the `picker-reconcile-local` before/after
       methodology from 2026-09-30), plus a headless test proving the Picker
       repaints on a `delta`/`removed` envelope line without a poll tick.
-- [ ] **Phase 3 (design review gate):** each plugin's own daemon-relay change
-      must be reviewed before landing — it introduces a new internal failure
-      mode (the CLI's own daemon connection drops or misbehaves) that its
-      existing poll-and-diff path doesn't have. Validate that CLI-internal
-      degradation (daemon unreachable → existing poll-and-diff `--stream`
-      behavior) actually happens — kill the daemon mid-render and confirm the
-      Picker keeps getting data, just via the slower internal path, never a
-      frozen or crashed pivot.
+- [ ] **Phase 3 (design review gate):** 3a's agent-dispatch relay and 3b's
+      agent-bridge daemon-side cache each introduce their own new internal
+      failure modes beyond what the existing poll-and-diff/scan-per-call
+      paths have, and each needs its own acceptance test, not one shared
+      generic check:
+  - **3a:** kill the coordinator mid-render and confirm the relay degrades
+        to its existing poll-and-diff path (never a frozen or crashed
+        pivot), reconnects with bounded backoff once the coordinator comes
+        back (not permanently stuck on polling), and runs a full reconcile
+        on that reconnect; a test proving the ready frame (and any
+        other control frame `stream_events()` may gain) never reaches an
+        unrelated existing consumer of that same method, e.g.
+        `agent-dispatch watch`/`task_query_cli._cmd_watch()`, not just the
+        relay's own consumer; **deterministic concurrency regression
+        tests** for each race this design introduces — the ready-frame
+        handshake actually closing the startup subscription gap (not just
+        narrowing it), an event arriving during an in-flight fetch actually
+        producing exactly one trailing fetch (not zero, not a pile-up), and
+        the event-woken fetch / long reconcile / local recompute tick
+        writers actually serializing against each other without a
+        stale-overwrite — none of which a coordinator-kill test alone
+        exercises; **and the fallback-poller/reconnect handoff
+        specifically**: a deterministic test proving the current poll tick
+        finishes (with no next tick scheduled) and cannot publish after the
+        reconnect's promotion reconcile has already run — sharing the
+        snapshot-owner lock alone doesn't prove the quiescence ordering is
+        actually enforced.
+  - **3b:** a regression test per new failure mode the cache introduces —
+        recovery from an uninitialized namespace (never silently published
+        as complete), recovery from a hung/crashed background refresh task
+        (the freshness deadline actually marks it incomplete and an
+        opportunistic `GET` actually triggers a real rescan), a provider
+        added/removed **or replaced** at runtime (the cache's namespace set
+        actually tracks `refresh_provider_resolvers()`'s own membership
+        changes, and a same-namespace replacement actually invalidates the
+        prior generation's cache entry rather than serving the old
+        provider's stale agents as authoritative) — **plus a dedicated
+        deterministic test for the replacement-constructor-failure path
+        specifically** (the new resolver's construction fails: the old
+        resolver and its last-known-good cache entry must remain
+        authoritative, never a brief false-success gap, which the general
+        add/remove/replace test above doesn't exercise on its own) — **a
+        test proving the default (no `require_complete`) response shape is
+        completely unchanged from today even when the cache is badly
+        incomplete** (plain `agent-bridge agents`, and any other existing
+        caller, must keep seeing healthy rows plus `incomplete_namespaces`
+        for the rest, never a `503`, since the fail-closed contract below
+        is opt-in only) — competing concurrent refreshes of the same namespace (single-flight plus
+        generation-guarded publication actually prevents a stale-overwrite
+        and doesn't duplicate the scan), **daemon startup before any
+        namespace has ever been discovered, for a `require_complete`
+        caller** (the route responds `503`,
+        never a `200` with an empty-but-apparently-complete body),
+        **initial-scan retry exhaustion with nothing authoritative to
+        serve, for a `require_complete`-capable client** (the `503`
+        contract, verified against a new client only — an old client never
+        sends `require_complete` and must be verified separately to keep
+        its own unmodified default behavior, never a `503`, no matter how
+        incomplete the cache is), and
+        **`refresh_provider_resolvers()`'s own discovery-generation
+        expiring, for a `require_complete` caller** (the `503` fires even while every existing namespace
+        still has last-known-good data — never conditioned on namespace-
+        level staleness also being absent — and a discovery result that
+        reports a per-manifest construction failure, not only a raised
+        scan exception, must count as a failed attempt that does not
+        advance the generation), **and a zero-downtime daemon-generation
+        cutover** (a new generation is never promoted — or traffic routed
+        to it — before its own cache has completed a first authoritative
+        scan, or the retiring generation's cache state is transferred,
+        whichever this design implements; prove the cutover itself never
+        introduces a new `503` blip a pre-3b cutover wouldn't have had).
 - [ ] **Phase 4:** a regression test asserting only the expected segment(s)
       refresh for a given cause (cosmetic pulse vs. nav vs. reload vs. pivot
       switch), plus confirmation (via the same real-timer profiling method
@@ -768,3 +863,771 @@ output each raising with no fallback; the same non-zero-exit case still
 degrading gracefully through a fallback) plus one `AgentResolver`-level
 integration test using a real `CliNamespaceResolver` (not a test double)
 to close the loop the reviewer specifically asked for.
+
+### 2026-10-02 — Phase 3 design review: agent-dispatch and agent-bridge are not symmetric
+Read both daemons' actual SSE/event surfaces before writing any Phase 3 code,
+per this phase's own Validation Plan gate ("each plugin's own daemon-relay
+change must be reviewed before landing"). Finding: the Plan's framing (both
+plugins "already running a persistent daemon with its own SSE stream") is only
+half true for the specific feed a roster relay needs.
+
+- **agent-dispatch**: `DispatchClient.stream_events()` (`client.py:1103`,
+  `GET /events`) already yields the coordinator's real lifecycle event bus
+  (`EventBus.publish`/`subscribe`, `events.py`) -- `task.submitted`,
+  `task.completed`, `task.abandoned`, etc., each carrying the full task dict
+  under `"task"`. This is directly relayable: a CLI-side `--subscribe` loop
+  can consume it instead of polling.
+- **agent-bridge**: grepped every SSE route in the plugin
+  (`routes/live_sessions.py`, `routes/remote.py`, `routes/sessions.py`) --
+  all of them are **per-session** event logs (a represented live session's
+  own translated SDK events, or a remote-forwarded session's stream). There
+  is **no existing aggregate "the agent roster changed" feed** to relay.
+  Phase 2's `AgentResolver`/`CliNamespaceResolver` scan is a pure poll; the
+  daemon does not push roster deltas to anyone today.
+
+Revised the Phase 3 plan (above) into three parts instead of one undifferentiated
+checklist:
+- **3a (agent-dispatch):** relay `stream_events()` directly, filtered to
+  task-bearing events, re-using the *existing* row transform
+  (`_fetch_rows`/`_fetch_rows_direct`) so an event-sourced row can't drift
+  from a polled one in shape or filter semantics. Because `EventBus.subscribe()`
+  is a live, non-replay broadcast (nothing buffers an event published during a
+  dropped connection), this is paired with a **mandatory background full
+  reconcile** on a long interval (trust-but-verify, not a return to tight
+  polling) -- without it, a reconnect gap would silently and permanently desync
+  the board rather than self-heal on the next tick. Degradation on any stream
+  failure is literally Phase 1's existing poll-and-diff code, unmodified, not
+  a new third path.
+- **3b (agent-bridge, land first):** move the resolver scan into the daemon
+  as a background-refreshed in-memory cache; `GET /api/v1/agents` becomes an
+  O(1) cache read. No new failure mode (the HTTP call shape is unchanged),
+  and it is the one change both the real cost (N Pickers each separately
+  paying for a 4-10s CodeSpaces enumeration) and this effort's "CLI relays a
+  live feed" intent reduce to "CLI polls a now-cheap endpoint" -- a smaller,
+  safer slice than inventing a new SSE route first.
+- **3c (agent-bridge roster SSE, deferred):** only pursue a genuine
+  `GET /api/v1/agents/stream` push route -- which *would* introduce the new
+  daemon-connection failure mode this phase's Validation Plan gate is
+  actually about -- if 3b's measured win doesn't suffice. Scoping it out now
+  keeps this design review's surface area matched to what's actually being
+  built next, rather than pre-approving a daemon-push architecture that may
+  never be needed.
+
+No code changed in this session leg -- this is the design-review artifact
+itself (effort README revision), landed as its own reviewed PR per the gate's
+own wording ("must be reviewed before landing"), before any Phase 3
+implementation PR opens.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 1: four real gaps, all fixed
+Copilot's review on the design PR itself (the mechanism this phase's own gate
+calls for) found four genuine gaps the first draft missed -- all now folded
+into the 3a/3b plan above:
+
+- **High: delegated-machine boards would relay the wrong machine's events.**
+  `_run_stream()` also serves `--machine <peer>` boards via
+  `_fetch_rows_delegated()`; the local coordinator's `/events` only describes
+  *this* machine. Fixed by scoping the relay strictly to the
+  `_fetch_rows_direct()` case -- a delegated board keeps the unmodified
+  poll-and-diff loop, a hard boundary for this phase, not a follow-up gap.
+- **Medium: the relay would trip into its own fallback on every quiet
+  board.** `DispatchClient`'s single 10s timeout covers connect/read/write/
+  pool, and `/events` emits no heartbeat -- past 10s of coordinator quiet,
+  `stream_events()` would read-timeout and permanently downgrade to polling.
+  Fixed by requiring an unbounded read timeout specifically for this one
+  long-lived GET (an httpx per-call override), leaving the 10s default
+  untouched for every other short request the same client makes.
+- **Medium: activity-only updates would regress from a 2s to a 30-60s
+  cadence.** `POST /tasks/{id}/activity` publishes no bus event today
+  (`_guard()` called with no `event_type`), yet drives the board's `wt_live`
+  liveness flag and subtitle. Fixed by requiring a new `task.activity_updated`
+  event on that endpoint, the same `_guard(..., event_type)` pattern every
+  other mutating endpoint already uses -- keeps activity on the fast path
+  instead of carving out a slower-cadence exception for one field.
+- **Medium: an O(1) cache read would break the existing incomplete-roster
+  recovery contract.** `_fetch_complete_initial_rows()`'s bounded retry only
+  works today because each retried `GET /api/v1/agents` call is a real
+  re-scan; a pure cache read would return the same stale partial snapshot on
+  every retry until the background timer happened to fire, letting a new
+  subscriber publish an incomplete roster as authoritative. Fixed by
+  requiring the cache to retain last-known-good *per namespace* plus an
+  explicit `force_refresh` signal the retry loop sets to trigger an
+  immediate out-of-band re-scan of just the still-incomplete namespace(s) --
+  every other caller keeps the cheap unconditional cache read.
+
+All four replied-to inline with the concrete fix and the exact README lines
+revised, per this effort's established review-response convention (state the
+fix, don't just acknowledge).
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 2: five more gaps in the 3a/3b detail, all fixed
+Round 2 reviewed the round-1 fixes themselves and found deeper detail gaps in
+exactly the two areas round 1 touched -- a pattern worth naming: a fix that
+names the right mechanism (an event, a cache) still needs its *own* failure
+modes worked through before it's actually complete.
+
+- **3a -- every eventless mutation, not just the one round 1 found.** Audited
+  `coordinator_tasks.py`'s other `_guard()` call sites past `activity`:
+  `POST /tasks/{id}/heartbeat` also publishes nothing, yet
+  `lease_expires_at`/`updated_at` (which `_build()` uses for row sort order)
+  update on every heartbeat -- the same 2s-poll-observes-it,
+  reconcile-only-sees-it gap. Fixed by adding `task.heartbeat` alongside
+  `task.activity_updated`, and generalized the requirement: audit *every*
+  `_guard()` call in that file for a missing `event_type` before considering
+  3a's event coverage complete, rather than patching one field at a time as
+  review happens to surface each.
+- **3a -- the reconcile and the live stream can race.** If the background
+  reconcile fetches its snapshot just before a mutation, but the matching
+  event is consumed and applied just after that fetch and before the
+  reconcile's own diff/emit runs, the reconcile's stale view re-emits the
+  row's *old* state, visibly reverting a just-applied update until the next
+  reconcile pass. Fixed by a single snapshot-owner lock: the reconcile holds
+  one serialization guard across its whole fetch-diff-emit sequence, and any
+  event arriving while it's held is queued, never interleaved mid-reconcile.
+- **3b -- a stalled background scan is a new, silent-forever failure mode.**
+  Moving the resolver scan off the request path means a dead or hung
+  refresh task would leave every read serving an apparently-complete old
+  snapshot with no signal anything is wrong -- the current per-request scan
+  has no equivalent failure shape. Fixed by requiring the background task be
+  supervised (restarted on exit/hang, same standard every other long-lived
+  loop in this codebase is already held to) plus a per-namespace freshness
+  deadline: a namespace whose last successful scan is older than the
+  deadline reports as incomplete, the same signal a genuinely-failing
+  resolver already produces.
+- **3b -- "last-known-good" doesn't cover "never scanned yet."** The
+  previous design's last-known-good retention only handles a namespace that
+  has *previously* succeeded; during daemon warm-up a namespace with no
+  prior scan at all would read as an empty-but-apparently-complete cache,
+  defeating `_fetch_complete_initial_rows()`'s detection entirely. Fixed by
+  an explicit uninitialized-per-namespace state, always reported incomplete
+  until that namespace's first successful scan.
+- **3b -- `force_refresh` needs the repo's own protocol-version gate, and an
+  explicit reverse-skew story.** `force_refresh` is a new request parameter
+  with real server behavior, not an additive response field -- exactly the
+  case `protocol.py`'s own documented rule requires a `HTTP_PROTOCOL_VERSION`
+  bump for (unlike Phase 2's key-presence approach, which was correctly
+  exempt as tolerant-reader-only). Fixed by requiring the bump plus a
+  `BridgeClient.daemon_supports()` gate, following the file's own
+  `RELAY_INTERRUPT_PROTOCOL_VERSION` precedent -- and, separately, specified
+  that an **old CLI talking to a new daemon** (one that never sends
+  `force_refresh` at all) is covered by the freshness-deadline mechanism
+  above, not by the protocol gate: the deadline expiring makes the daemon
+  self-report a stuck namespace as incomplete regardless of what the caller
+  requested, so the old CLI's existing retry-on-incomplete logic still has
+  something real to react to.
+
+All five replied-to inline with the concrete fix and the exact README
+section revised, continuing the same review-response convention.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 3: timeless-prose violation + incomplete event-coverage scope
+Two findings:
+- **Timeless-prose violation in the Plan.** The Plan section had accumulated
+  "(round-1 review finding)"/"(round-2 review finding)" annotations directly
+  in its bullet text — `CONTRIBUTING.md`'s timeless-prose rule reserves
+  review-round history for the dated Journal, which already records all of
+  it. Fixed by stripping every such annotation from the Plan prose (8
+  occurrences across the Phase 3 section); the Journal entries above are
+  the sole place this review's history is recorded.
+- **Event-coverage audit was scoped to one file.** Round 2's "audit every
+  `_guard()` call" requirement only named `coordinator_tasks.py`. Two more
+  entry points mutate task state with no event at all: the MCP heartbeat
+  path (`mcp_http.py`'s own `_mutate(..., None)`) and the background
+  reconcilers (`coordinator_loops.py`'s liveness/cooldown/orphan/run-waiter
+  sweeps, `coordinator.py`'s run-waiter recovery) — the latter publish only
+  aggregate, no-`task`-payload count events, which the then-current design's
+  task-payload filter would have silently dropped as pure noise. Folded into
+  the broader requirement below (see round 4) once the relay's own event
+  model changed to no longer need task-identity-carrying events at all.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 4: the per-event-transform model itself had a gap no patch could close — redesigned 3a around a simpler model
+Round 4 found something more fundamental than a missing detail: the
+per-event row-transform model from rounds 1-3 **cannot correctly maintain a
+`--limit`-capped board** — `/tasks` applies `--limit` to the whole result
+set, not per task, so a single event's own payload can never tell the relay
+whether adding/removing that one task should displace or backfill another
+row. Patching this within the per-event-transform model would mean teaching
+the relay to reconstruct whole-set membership logic the daemon itself
+already owns — solving the same problem twice, in two places, with two
+chances to disagree.
+
+Redesigned 3a around a simpler model instead of patching this one bullet:
+**every event is now treated as a pure wake signal that triggers an
+immediate full `_fetch_rows_direct()` + `_diff_rows()` pass** — the exact
+same full-board re-fetch-and-diff the existing poll loop already performs
+correctly today, just woken by a real event instead of a timer. This single
+change collapses several findings at once rather than requiring four more
+patches:
+- **The `--limit`/membership problem disappears by construction** — a full
+  re-fetch always recomputes the true capped, newest-first set, the same
+  way the poll loop already handles additions, displacements, and backfills
+  today. No separate membership-maintenance logic to write or get wrong.
+- **The event-coverage bar drops from "needs task identity" to "needs to
+  exist at all"** — since the relay no longer parses event payloads into
+  rows, an aggregate count event (no `task` field) is just as good a wake
+  signal as a full lifecycle event. This resolves round 3's reconciler
+  concern directly: `coordinator_loops.py`'s/`coordinator.py`'s aggregate
+  events work fine as-is. Only the handful of mutation endpoints that
+  publish **nothing at all** today (`activity`, `heartbeat`,
+  `mcp_http.py`'s `_mutate(..., None)`) still need an event added — a much
+  smaller, purely mechanical fix than the earlier "carry correct task
+  identity" requirement.
+- **Debouncing becomes necessary** (new requirement): a burst of events must
+  coalesce into one pending re-fetch, not one re-fetch per event, to avoid
+  hammering the coordinator on a busy board.
+
+Two further, independent findings from the same round:
+- **Time-derived fields (the `activity` TTL expiry, the "stalled Nm" text)
+  change with no mutation and no event at all** — `_build()` derives them
+  from `time.time()` directly. Neither the event relay nor the 30-60s
+  reconcile would refresh them at a cadence close to today's. Fixed by a
+  separate, local, no-network recompute tick (comparable to today's 2s)
+  that only recalculates these display fields from already-cached
+  timestamps — never a daemon round-trip.
+- **3b's background refresh has its own concurrency race**: a periodic
+  scan, a forced scan, and concurrent initial-scan subscribers can all
+  target the same namespace at once; an earlier-started-but-slower scan
+  finishing after a later one would overwrite the newer result, and naive
+  concurrent triggering reintroduces the N-scan cost the cache exists to
+  remove. Fixed by per-namespace single-flight refresh (concurrent
+  callers await the one in-flight scan) plus generation-guarded publication
+  (a scan only publishes if its starting generation is still current).
+
+All three replied-to inline (one reply per thread; the `--limit` finding and
+the time-derived-fields finding and the concurrency finding each had a
+duplicate noted on a second line in the same file, addressed by the same
+single design change rather than two separate patches).
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 5: the new mechanisms from round 4 had their own two gaps
+Round 5 reviewed round 4's redesign itself and found two gaps in the
+mechanisms it introduced:
+
+- **The new time-derived recompute tick wasn't covered by the snapshot lock
+  round 4 added for the other writers.** It reads cached rows and emits
+  deltas just like the event-woken fetch and the reconcile do, so without
+  the same lock it can read a stale cached row while a full fetch is
+  concurrently publishing newer task state, then emit that stale row
+  afterward and revert non-time fields the tick never meant to touch.
+  Fixed by widening the snapshot-owner lock to cover all three writers —
+  the event-woken fetch, the long reconcile, and the recompute tick's own
+  read-recompute-diff-emit sequence all take the same lock now.
+- **Falling back to polling permanently on the very first SSE failure
+  contradicts this phase's own premise** (the CLI owns reconnecting to its
+  daemon) and means one transient blip disables the whole speedup for a
+  long-lived channel's remaining lifetime. Fixed by keeping poll-and-diff
+  as the *immediate* correctness fallback but adding bounded-backoff SSE
+  reconnect attempts in the background; a successful reconnect runs one
+  full reconcile (covering anything missed while on the fallback) before
+  resuming the event-woken relay, and only a genuinely exhausted retry
+  budget settles into permanent polling.
+
+Both replied-to inline with the concrete fix.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 6: reconnect identity, reverse-skew enforcement, and three carried-over gaps in unchanged code
+Round 6 found one more new gap in the round-5 reconnect fix, confirmed two
+findings from round 5 were still genuinely open (not yet fixed despite being
+replied-to — caught here because they'd stopped showing as newly-surfaced),
+and surfaced three further gaps in code the design hadn't touched yet:
+
+- **New: reconnecting must build a fresh client, not retry the stale one.**
+  A routine zero-downtime coordinator-generation cutover flips `active.json`
+  to a new bind/port; retrying the *same* `DispatchClient` instance can
+  never recover from that, since its base URL is fixed at construction.
+  Fixed by requiring each reconnect attempt to re-resolve the endpoint
+  (`_endpoint()`, the same logic the initial client already uses) and
+  construct a fresh client — reusing the exact pattern
+  `ResolvingDispatchClient` already exists for supervisors, rather than
+  inventing a second one.
+- **Confirmed still open from round 5: reverse skew needs an active
+  trigger, not just a passive report.** The freshness-deadline mechanism
+  only changes what a `GET` *reports*; an old CLI that never sends
+  `force_refresh` and only retries a few plain `GET`s 0.5s apart would keep
+  reading the same stale snapshot across all of them and publish it before
+  the background timer ever fires. Fixed by making any `GET` against an
+  incomplete/uninitialized/deadline-expired namespace opportunistically
+  join that namespace's single-flight refresh itself — `force_refresh`
+  becomes a pure "skip straight to it" optimization, not the only path that
+  can trigger a real rescan, which is what actually preserves reverse skew.
+- **Confirmed still open from round 5: the PR description's own 3a summary
+  was stale.** It still described the per-event-transform model round 4
+  replaced. Updated to describe the final wake-only-trigger design, per the
+  required Documentation-impact-matches-the-diff convention.
+- **Previously missed, in code untouched by this design so far — the
+  initial-subscription gap:** a mutation landing after the initial fetch
+  but before `stream_events()`'s subscription is actually live has no event
+  to consume — the same non-replay gap the reconnect path already handles.
+  Fixed by treating startup the same way: establish the subscription, then
+  immediately run one full reconcile before processing any of its events.
+- **Previously missed: the recent-mins cutoff is also a clock-only
+  transition.** `_build()` removes a terminal row once it ages past
+  `--recent-mins`, with no mutation or event involved — exactly the same
+  class of gap the activity-TTL/stalled-text fix already identified, just
+  a third instance of it. Folded into the same local recompute tick rather
+  than a separate mechanism.
+- **Previously missed: the agent-bridge namespace set is dynamic, not fixed
+  at daemon startup.** `refresh_provider_resolvers()` already adds,
+  replaces, and unregisters providers at runtime; the cache's namespace set
+  must track this on its own refresh cycle — a newly-registered namespace
+  enters as uninitialized, and an unregistered one is retired from the
+  cache outright, never left serving stale agents for a provider that no
+  longer exists.
+
+All six replied-to inline (three new threads; three confirmations/fixes on
+carried-over and previously-missed findings).
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 7: subscription-ack race, two more silent-mutation paths, stale Validation Plan
+Three more findings:
+- **Opening the SSE connection isn't proof the subscription is live.**
+  `/events` sends no initial frame, and `EventBus.subscribe()` only
+  registers its queue once the route's generator starts iterating — a
+  client can observe response headers before that registration happens, so
+  running the startup reconcile right after `stream_events()` returns can
+  still race the exact gap it's meant to close. Fixed by requiring the
+  route to emit an explicit ready frame right after queue registration,
+  and the client to wait for it, buffer events arriving from that point,
+  run the reconcile, then apply the buffered events on top — closing the
+  gap on both sides instead of just moving where it could happen.
+- **Two more mutation paths publish nothing:** `POST /recover` and MCP
+  `dispatch_recover` both call `queue.reconcile_liveness()` directly with
+  no event at all, despite being able to requeue/suspend/dead-letter rows.
+  Folded into the same "every mutation path needs at least one event"
+  requirement as the activity/heartbeat fix.
+- **The Phase 3 Validation Plan still only described the two-daemon-relay
+  shape this design abandoned for agent-bridge.** Killing a daemon mid-render
+  doesn't exercise 3b's actual new failure modes (an uninitialized
+  namespace, a hung refresh task, runtime provider add/remove, competing
+  concurrent refreshes) at all. Rewrote the Phase 3 Validation Plan entry
+  into 3a-specific and 3b-specific acceptance criteria matching what each
+  part of the redesigned plan actually introduces.
+
+All three replied-to inline.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 8: the recompute tick missed a fourth clock-only transition, and the buffer fix contradicted the wake-only model
+Two findings:
+- **The local recompute tick's "three clock-only transitions" framing was
+  incomplete.** `board_fields_for_task()` (`board_cli.py:470-480`) carries
+  its own relay-derived freshness/age fields that clear
+  `artifacts_summary`/`length_display` once the relay entry itself goes
+  stale (`worktree_status_relay.py`) — a fourth clock-only transition,
+  distinct from the task-timestamp-derived ones. Fixed by requiring the
+  cache to retain the **raw relay entry** alongside each cached row (the
+  rendered row alone doesn't carry enough to recompute this), and widening
+  the recompute tick to cover all four transitions, not three.
+- **Round 7's own fix ("apply the buffered events on top") quietly
+  contradicted the wake-only model it was supposed to fit into** — a
+  buffered event has no row-level state to "apply," since round 4 already
+  established every event is a content-free wake signal, not a transform
+  input. Fixed by making the correct behavior explicit: buffered events are
+  counted only, and if any landed during the reconcile window, schedule one
+  coalesced full re-fetch afterward through the same debounced wake path
+  ordinary events already use — not a second, inconsistent mechanism.
+
+Both replied-to inline.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 9: ready-frame version skew, trailing-fetch gap, provider-replacement cache staleness, a contradictory claim
+One new finding plus three previously-missed ones surfaced together:
+
+- **New: the ready-frame handshake itself needed version-skew handling.**
+  Waiting unboundedly for a frame an older coordinator will never send would
+  hang the relay forever (this design also removes the read timeout for
+  exactly this stream). Fixed by having the coordinator advertise ready-frame
+  support on `/health` (agent-dispatch has no existing protocol-version
+  module like agent-bridge's `protocol.py` — a minimal, purpose-built
+  capability signal was the right scope here, not importing that machinery);
+  the client only waits for the frame when the daemon advertises it, and
+  even then with a bounded timeout, never an indefinite one. The frame
+  itself is explicitly a control frame the relay filters out before it
+  reaches row/diff logic, never exposed as a task event to an unrelated
+  `watch` consumer.
+- **Previously missed: the debounce no-op was wrong for an event arriving
+  mid-fetch.** Coalescing a not-yet-started pending fetch is correct, but
+  silently no-op'ing an event that arrives *while* a fetch is already in
+  flight can lose it — that fetch may have already read the pre-mutation
+  snapshot. Fixed with a trailing-dirty flag: an event during an in-flight
+  fetch triggers exactly one more re-fetch immediately after, rather than
+  being coalesced away.
+- **Previously missed: the dynamic-namespace fix covered add/remove but not
+  same-namespace replacement.** `refresh_provider_resolvers()` can
+  unregister and re-register a provider under the *same* namespace; keeping
+  that namespace's last-known-good cache entry across the swap would let
+  the old provider's agents keep serving as authoritative if the new
+  resolver's first scan fails. Fixed by requiring a provider-generation
+  change (not just a namespace add/remove) to invalidate that namespace's
+  cache entry and reset it to uninitialized before the new resolver's first
+  scan.
+- **Previously missed: 3b's own intro claimed "no new failure mode," which
+  the design's own later bullets (and its own Validation Plan) contradict.**
+  Fixed by correcting the claim in both the README and the PR description to
+  describe what's actually true — no new HTTP-call-shape change for existing
+  callers, but real new failure modes in the background refresh itself,
+  addressed by the bullets that already follow it rather than claimed away.
+
+All four replied-to inline (one new thread; three on previously-missed
+findings in code this design had already touched by this round).
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 10: the ready-frame filter was scoped to the wrong layer, and a validation gap it itself created
+Two findings:
+- **Filtering the ready frame only in the relay's own consumer doesn't
+  protect every other caller of the same client method.**
+  `task_query_cli._cmd_watch()` already iterates `DispatchClient.
+  stream_events()` directly and would print the control frame as a task
+  event. Fixed by moving the filter into `stream_events()` itself — it
+  never yields a control frame to any caller by default — and exposing
+  readiness to the relay through a distinct, explicit signal rather than
+  relying on each caller to filter independently.
+- **The Validation Plan's 3b criterion didn't name the replacement case
+  round 9 just added to the Plan.** The design now explicitly treats
+  same-namespace provider replacement as distinct from add/remove (stale
+  serving risk), but the acceptance test list still only said
+  "added/removed." Fixed by naming replacement and its cache-invalidation
+  requirement explicitly in that same bullet, alongside a new 3a criterion
+  proving the ready frame never leaks to an unrelated existing consumer
+  like `agent-dispatch watch`.
+
+Both replied-to inline.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 11: a third eventless mutation, retry exhaustion as silent success, and no gate before any namespace exists at all
+One new high-severity finding plus two previously-missed:
+
+- **New, high: `GET /api/v1/agents` has no gate at all before provider
+  discovery has ever completed once.** The per-namespace uninitialized
+  state only protects a namespace the cache already knows about; production
+  startup serves a placeholder resolver with an **empty** namespace set
+  while `topology_ready` is false, and the route reads it with no readiness
+  check — a subscriber in that window gets a clean, authoritative-looking
+  empty roster, since there's nothing to mark incomplete when there are no
+  namespaces yet. Fixed by a **global** discovery-readiness flag, checked
+  before any per-namespace state, so the whole response reports incomplete
+  during that window rather than an empty one reporting complete.
+- **Previously missed: `POST /tasks/{id}/steer/take` is a third silent
+  mutation**, alongside activity/heartbeat/recover — it updates
+  `lease_expires_at`/`last_seen_at`/`updated_at` (board-sort-relevant) with
+  no event. Folded into the same requirement, and — since this is now the
+  *third* round an enumerated "complete" list of eventless mutations turned
+  out not to be — reframed the whole requirement as explicitly provisional:
+  require an audit of every `queue`-mutating route in both touched files,
+  not trust in the specific names listed.
+- **Previously missed: forced-rescan exhaustion can still silently become a
+  successful publish.** `_fetch_complete_initial_rows()` returns whatever
+  rows it has after its bounded retries regardless of outcome, with no
+  incomplete marker on the envelope at all — if every forced rescan
+  genuinely fails and there's no last-known-good, this design would still
+  publish that partial roster as the initial snapshot, exactly what the
+  uninitialized-state bullet exists to prevent. Required the exhausted-retry
+  path to either keep retrying under a different contract or carry an
+  explicit partial-snapshot marker, rather than defaulting to silent
+  success.
+
+All three replied-to inline (one new thread; two on previously-missed
+findings).
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 12: discovery failure itself needs the same treatment as never-discovered, retry exhaustion gets a committed contract, and two carried-over gaps
+One new high finding, a resolved-then-reopened one, a medium, a low, plus two previously-missed:
+
+- **New, high: `refresh_provider_resolvers()` swallowing its own failures
+  means ongoing discovery failure looks identical to success.** It already
+  swallows registry-scan and resolver-construction failures and returns
+  `None` on failure. After one successful discovery, a *provider-discovery*
+  failure (not an individual namespace's agent-scan failure) could leave
+  the cache refreshing the same old resolver set forever, reporting
+  complete even while removal/replacement discovery keeps failing. Fixed
+  by tracking discovery itself as its own generation/freshness state: a
+  failed discovery attempt never advances it, and that generation going
+  stale marks the *whole* cache incomplete — the same global treatment the
+  round-11 pre-first-discovery fix already uses, since ongoing failure
+  isn't meaningfully different from never having discovered at all.
+- **Resurfaced: the global discovery-readiness gate from round 11, now
+  folded into the discovery-generation fix above** rather than treated as
+  two separate mechanisms — a single generation/freshness concept covers
+  both "never discovered yet" and "discovery is failing now."
+- **Medium: the retry-exhaustion contract was left as an open either/or.**
+  Committed to one: **blocking, not a new partial-snapshot envelope** — a
+  Picker-visible partial marker would need Picker-side changes, which
+  contradicts this effort's own CLI-only vision boundary. The initial
+  fetch now withholds `begin` until discovery succeeds or a bounded,
+  generous ceiling elapses, then falls back to the existing topology-error
+  `error` frame convention — never silent success, never an unbounded
+  hang.
+- **Low: the 3b Validation Plan gate didn't name the newest failure modes.**
+  Added explicit acceptance criteria for pre-discovery startup, retry
+  exhaustion, and discovery-failure-after-success, alongside a parallel
+  addition of missing 3a concurrency regression tests (the ready-frame
+  handshake actually closing the gap, an in-flight-fetch event actually
+  producing one trailing fetch, and writer serialization actually
+  preventing a stale overwrite) that a coordinator-kill test alone never
+  exercised.
+- **Previously missed: the trailing-dirty fetch had no rate limit of its
+  own.** Sustained per-task event traffic could keep the dirty flag
+  continuously set, turning the relay into back-to-back full fetches worse
+  than the 2s poll this phase replaces. Fixed by subjecting the trailing
+  fetch to the same minimum-interval floor as the debounce window.
+
+All four discussion threads replied-to inline; the two carried-over
+findings addressed via the same content fixes described above.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 13: reverse-skew needed a server-side fix, the design moved to a sibling doc, and two more carried-over gaps
+Three new findings plus three previously-missed:
+
+- **Medium, new: the retry-exhaustion fix from round 12 only protected a
+  new client.** A new client's longer blocking ceiling lives in its own
+  updated code; an already-shipped old CLI has its own fixed three-retry
+  loop baked in and will never see that ceiling. A client-side fix cannot
+  retroactively protect an already-deployed old client. Fixed by making the
+  contract **server-side and version-independent**: when nothing
+  authoritative exists to serve, `GET /api/v1/agents` responds `503`
+  instead of a normal `200` — every caller's existing non-2xx error
+  handling already has to react to this, old or new, since it's not a new
+  failure shape to learn, just an existing one applied to a case that
+  previously returned a false-positive `200`.
+- **Low, new: "the whole response reports incomplete" wasn't a defined wire
+  contract.** The `503` fix above resolves this directly: "globally
+  incomplete" is now carried at the **HTTP status level**, not as a new
+  field or sentinel inside `incomplete_namespaces` — that field's existing
+  shape stays exactly what it already is, so this needs no protocol-version
+  bump and no new response schema.
+- **Low, new: this change had grown a substantial phase design directly
+  into the shared effort README**, against `efforts/README.md`'s own
+  "extract substantial phase designs into sibling documents" convention.
+  Fixed by moving the full 3a/3b/3c detail into a new sibling document,
+  [`phase-3-design.md`](phase-3-design.md), keeping only a concise
+  checklist and link here. The Journal (this section) stays in the shared
+  README, since it's chronological review history, not phase-design detail.
+- **Previously missed: the old-daemon fallback for the ready-frame
+  handshake didn't actually narrow anything.** `stream_events()` is a lazy
+  generator — calling it doesn't open the HTTP request until iteration
+  begins, so reconciling right after it "returns" happens before any
+  subscription attempt exists at all. Fixed by falling back to the
+  **unmodified Phase 1 poll-and-diff loop in its entirety** for an old
+  daemon, rather than claiming a narrowed (but actually unnarrowed) race.
+- **Previously missed: a third pair of eventless mutation paths** —
+  `POST /tasks/{id}/run-waiter/register` and the `verify-submitted` opt-in
+  in `coordinator_verification.py`, neither publishing despite updating
+  `updated_at`. Folded into the same provisional audit requirement,
+  expanded to name all three touched files explicitly.
+- **Previously missed: the O(1) cache-read claim was stated as a blanket
+  property**, contradicting the design's own later contract that forced/
+  incomplete/uninitialized reads intentionally block on a real scan. Fixed
+  by scoping the claim explicitly to a healthy, fresh cache hit.
+
+All findings addressed via the content fixes above (now partly in
+`phase-3-design.md`); the three new discussion threads replied-to inline.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 14: the 503 fix needed widening in two directions, ready-frame skew cut both ways, and the sibling doc inherited the timeless-prose problem it was meant to avoid
+Five findings, all in `phase-3-design.md` now that the design lives there:
+
+- **High: the fallback poller is a fourth snapshot writer that wasn't in
+  the serialization lock, and the reconnect handoff could race it.** It can
+  read stale state and publish it *after* a reconnect's reconcile already
+  published newer state unless it shares the same lock and is explicitly
+  quiesced before reconnect promotion runs, not just left running alongside
+  it. Fixed by adding the fallback poller to the shared snapshot-owner lock
+  and requiring its current tick to finish (with no next tick scheduled)
+  before the reconnect's promotion reconcile runs.
+- **Medium: the ready-frame fix only handled new-client-vs-old-daemon, not
+  the reverse.** A new daemon would still emit the ready frame to an
+  already-installed **old** `DispatchClient.stream_events()`, which parses
+  purely by `data:` prefix regardless of `event:` field — any SSE framing
+  trick an old parser might "structurally ignore" doesn't actually apply
+  here, so the control frame would leak straight into `agent-dispatch
+  watch` output. Fixed by making the frame **opt-in via the request itself**
+  (e.g. a query parameter only a new relay sends): an old client never asks
+  for it and therefore never receives it from any daemon, regardless of
+  daemon version — version skew resolved by what's requested, not by what
+  the daemon happens to be running.
+- **Medium: the 503 condition was narrower than the mixed-cache case.** A
+  namespace with last-known-good data alongside a *different*,
+  newly-added-or-replaced namespace still uninitialized after its own
+  joined scan fails would still return `200` under the prior wording.
+  Fixed by triggering `503` whenever **any** known namespace lacks an
+  authoritative value after a refresh attempt, not only the all-or-nothing
+  case.
+- **Medium: discovery-generation expiry needs to force `503`
+  independently**, not only as a fallback when namespace-level
+  last-known-good is also absent — a stale discovery generation means
+  additions/removals/replacements are unknown, and `incomplete_namespaces`
+  can't name a namespace that was never discovered, so even "existing
+  namespaces still look fine" isn't enough to call the roster complete.
+  Fixed by making discovery-generation expiry its own independent `503`
+  trigger.
+- **Low: the newly-extracted sibling doc immediately re-accumulated the
+  same PR/review-round chronology problem the extraction was meant to
+  solve.** Per `CONTRIBUTING.md`'s timeless-prose rule, that history
+  belongs only in this dated Journal. Fixed by rewriting
+  `phase-3-design.md`'s introduction to describe the design's current
+  state without "revised per review on #N" framing, at every location the
+  finding named.
+
+All five replied-to inline.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 15: validation-plan drift from the design doc, and a discovery-success signal that doesn't exist yet
+Three low-severity findings, all about keeping the Validation Plan and the
+design doc's own internals honest with each other:
+
+- **The Validation Plan didn't name the fallback-poller/reconnect handoff
+  test** round 14's fix actually requires — sharing a lock doesn't prove a
+  quiescence *ordering* is enforced without a dedicated deterministic test.
+  Added explicitly.
+- **The Validation Plan's 3b wording still conditioned the
+  discovery-generation `503` on "no last-known-good survives,"
+  contradicting round 14's own fix** in `phase-3-design.md`, which made
+  discovery-generation expiry an *independent* trigger. Reworded to match.
+- **`refresh_provider_resolvers()` has no observable success/failure signal
+  for "failed discovery must not advance the generation" to hook into at
+  all** — it returns `-> None` unconditionally on both its success path and
+  its `except Exception: return` failure path, and a per-manifest
+  resolver-construction exception inside the reconciliation loop is caught
+  and continued past silently, so even a "successful" scan can have quietly
+  dropped a namespace. Fixed by requiring the method itself to return an
+  explicit discovery-result distinguishing a raised scan, a completed scan
+  with one or more per-manifest construction failures, and a genuinely
+  clean pass — only the clean-pass case advances the generation.
+
+All three replied-to inline.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 16: a cutover gap 3b itself would introduce, a doc-generation duplication bug, and a stale Guiding Intent
+Three findings — one genuine new design gap, two documentation-quality bugs
+in this session's own output:
+
+- **Medium: 3b's background cache has no defined readiness/cutover seam.**
+  Today's daemon-generation promotion gate marks a new generation ready once
+  its resolvers are *constructed*, not once its cache has completed a first
+  authoritative scan — those stop being the same moment once the scan moves
+  to a background task. A zero-downtime cutover could therefore promote a
+  generation whose cache is still fully uninitialized right as the old,
+  warm-cache generation retires — a brand-new `503` blip this design itself
+  would introduce, not a pre-existing one. Fixed by requiring promotion
+  readiness to gate on cache warm-up (or an equivalent cache-state transfer
+  from the retiring generation), plus a dedicated Validation Plan cutover
+  test.
+- **Low: the Validation Plan's Phase 4 entry had been accidentally
+  duplicated with a truncated first copy** (an artifact of this session's
+  own earlier programmatic edit extracting the Phase 3 detail into the
+  sibling doc). Collapsed into the single complete item.
+- **Low: the Guiding Intent section still described the superseded
+  "direct HTTP/SSE/WebSocket to the daemon" hierarchy**, left over from
+  before Phase 3's own design review settled on the CLI-owned relay shape —
+  two incompatible guiding intents in the same effort. Updated to describe
+  the CLI-owned daemon relay this design actually implements, with a
+  pointer to `phase-3-design.md` for the full rationale.
+
+All three replied-to inline.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 17: replacement needed to be transactional, and the Guiding Intent fix itself broke the timeless-prose rule it was supposed to satisfy
+Two new findings, plus the round-16 Guiding Intent finding resurfacing
+because its own fix introduced the same class of problem:
+
+- **Medium: a same-namespace provider replacement's construction failure
+  still created an immediate, generation-independent gap.** Reconciliation
+  unregisters the old resolver *before* constructing the new one; if that
+  construction fails, the namespace disappears immediately while the
+  discovery generation (governed by its own, separate freshness deadline)
+  can stay "fresh" for a while longer — a false-success `200` missing that
+  namespace, until the deadline eventually catches up. The discovery-result
+  signal from round 15 doesn't close this specific window on its own.
+  Fixed by making replacement **transactional**: construct the new resolver
+  first, and only unregister the old one once construction succeeds — a
+  failed construction now leaves the previous resolver and its
+  last-known-good cache entry in place, never creating an immediate gap at
+  all, consistent with this design's "last-known-good over briefly serving
+  nothing" preference everywhere else.
+- **Low: round 16's own Guiding Intent fix reintroduced review chronology
+  into current-state prose** — "per Copilot review on this effort's own
+  plan PR #4764, confirmed and detailed further by Phase 3's own design
+  review" is exactly the timeless-prose violation the Plan section was
+  already cleaned of twice before (rounds 3 and 13). Fixed by keeping the
+  vision-boundary rationale and the sibling-document link, removing every
+  "per Copilot review"/"design review" phrase.
+
+Both replied-to inline; the resurfaced thread addressed by the same fix.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 18: transactional replacement needed its own test, and the freshness-deadline wording still contradicted the fail-closed contract in two places
+Two findings:
+- **Medium: the replacement-transactionality fix from round 17 had no
+  dedicated test.** The general add/remove/replace acceptance criterion
+  doesn't exercise the constructor-failure path specifically — an
+  implementation could still unregister the old resolver first and pass
+  that general test while briefly returning a false-success roster missing
+  the namespace. Added a dedicated deterministic test requirement for
+  exactly this path.
+- **Medium: two bullets in `phase-3-design.md` still described a
+  freshness-deadline-expired namespace as merely annotated in
+  `incomplete_namespaces` on an otherwise-normal `200`, contradicting the
+  fail-closed `503` contract settled two rounds ago.** An old client's
+  bounded retry loop would exhaust its attempts and accept that stale data
+  as if the annotation were just informational. Fixed both occurrences (the
+  background-refresh-task bullet and the uninitialized-namespace bullet) to
+  describe the same join-the-refresh-then-503-on-failure behavior
+  consistently, rather than promising a response shape the rest of the
+  design had already superseded.
+
+Both replied-to inline; the resurfaced Guiding Intent thread needed no
+further action (already addressed last round).
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 19: the fail-closed 503 contract was a breaking change for every existing caller
+One high finding, catching a real architectural mistake carried across
+several prior rounds:
+
+- **High: the endpoint-wide `503` contract (rounds 14-18) would have broken
+  every existing, non-streaming caller of `GET /api/v1/agents`.** That
+  endpoint today deliberately returns healthy namespaces' rows plus
+  `incomplete_namespaces` for the rest — the plain `agent-bridge agents`
+  command uses the same endpoint, and session targeting converts a client
+  error into an empty roster rather than surfacing it. Making the whole
+  endpoint fail closed the moment *any* namespace is incomplete would hide
+  every other, perfectly healthy namespace's agents from all of these
+  callers — a real regression, not the refinement it was framed as. Fixed
+  by making the fail-closed contract **opt-in via the request** (the same
+  pattern as the ready-frame fix): a dedicated, protocol-gated
+  `require_complete=true` parameter only the new client's
+  `_fetch_complete_initial_rows()` sends. Without it, the endpoint's
+  behavior is unchanged from today in every way, for every existing caller,
+  regardless of how incomplete the cache happens to be — every `503`
+  reference elsewhere in this design assumes `require_complete` was set.
+
+Replied-to inline; the resurfaced Guiding Intent thread needed no further
+action (already addressed in round 17).
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 20: the opt-in fix itself still had a contradiction, plus two documentation-quality slips
+Round 19's opt-in fix wasn't applied consistently everywhere it needed to be:
+
+- **High: a bullet written before the opt-in fix still described a failed
+  opportunistic refresh as unconditionally escalating to `503`, explicitly
+  motivated by an old client that (per the opt-in design) could never
+  trigger that escalation in the first place.** Fixed by splitting that
+  bullet into its two actual branches: without `require_complete` (every
+  existing caller's actual behavior), a failed refresh still serves
+  last-known-good (or nothing, if uninitialized) with the namespace merely
+  named in `incomplete_namespaces`, unchanged from Phase 2; with
+  `require_complete`, that same failure is what escalates to `503`. Fixed
+  the uninitialized-namespace bullet the same way.
+- **Medium: the 3b Validation Plan's retry-exhaustion test claimed
+  verification "against both an old and a new client," which is impossible
+  once `require_complete` is opt-in** — an old client never sends it and
+  can never observe the `503` path at all. Restricted that criterion to a
+  `require_complete`-capable client, with the old client's unchanged
+  default behavior verified as its own, separate criterion.
+- **Low: the Phase 3 Plan section's own intro still carried review
+  chronology** ("Revised per Copilot review on #4764," "Design reviewed
+  2026-10-02") — the same violation already fixed twice in
+  `phase-3-design.md` (rounds 3 and 13) had crept back into the README's
+  own summary paragraph. Removed.
+
+All replied-to inline.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 21: last-known-good retention was itself a default-behavior change
+One high finding: **retaining last-known-good as the default response's
+substitute for a failing namespace's rows is itself incompatible with "the
+default response is unchanged."** Today a failing namespace's scan is
+skipped entirely — `list_agents_async()` serves no rows for it, only lists
+it in `incomplete_namespaces` — and existing callers like
+`BridgeClient.list_agents()` already discard that field and just use
+whatever rows came back. Substituting stale last-known-good rows into that
+same default response would make those callers start treating gone/stale
+agents as currently live, which is a regression relative to today's
+"nothing for that namespace," not a compatible continuation of it. Fixed by
+scoping last-known-good to **internal cache state only** — what the
+recovery/opportunistic-refresh machinery and a `require_complete` caller's
+own distinct contract operate on — while the **default** response keeps
+skipping a failing namespace's rows exactly like today, in both places this
+design described the behavior (the initial-scan recovery bullet and the
+require_complete-split bullet).
+
+Replied-to inline; the resurfaced Guiding Intent thread needed no further
+action.

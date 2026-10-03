@@ -57,14 +57,16 @@ class _FakeProvider:
         self.review_gate_calls = []
 
     def merge_pull(self, repo, number, *, squash=True, admin=False,
-                   api_base="", token=None):
+                   api_base="", token=None, delete_source_branch=True):
         self.calls.append(dict(repo=repo, number=number, squash=squash,
-                               admin=admin))
+                               admin=admin,
+                               delete_source_branch=delete_source_branch))
         return self._err
 
     def enable_auto_merge(self, repo, number, *, squash=True,
-                          api_base="", token=None):
-        self.auto_calls.append(dict(repo=repo, number=number, squash=squash))
+                          api_base="", token=None, delete_source_branch=True):
+        self.auto_calls.append(dict(repo=repo, number=number, squash=squash,
+                                    delete_source_branch=delete_source_branch))
         return self._auto_err
 
     def request_auto_complete(
@@ -116,7 +118,7 @@ def test_now_self_merge_calls_merge_pull_squash_admin(monkeypatch, capsys):
     _patch_provider(monkeypatch, fake)
     rc = m._pr_merge_now(_args(), _prcfg(), _self_merge_flow(), apply=True)
     assert rc == 0
-    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True)]
+    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True)]
 
 
 def test_now_blocking_review_never_uses_admin_bypass(monkeypatch):
@@ -134,7 +136,7 @@ def test_now_blocking_review_never_uses_admin_bypass(monkeypatch):
     rc = m._pr_merge_now(_args(), _prcfg(), flow, apply=True)
     assert rc == 0
     assert fake.calls == [
-        dict(repo="o/r", number=7, squash=True, admin=False)
+        dict(repo="o/r", number=7, squash=True, admin=False, delete_source_branch=True)
     ]
 
 
@@ -257,7 +259,7 @@ def test_dispatch_maintain_role_resolves_self_merge_once(monkeypatch):
     assert rc == 0
     assert len(calls) == 1
     assert fake.calls == [
-        dict(repo="o/r", number=7, squash=True, admin=True),
+        dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True),
     ]
 
 
@@ -325,7 +327,7 @@ def test_prefer_auto_merge_arms_native_auto_merge(monkeypatch, capsys):
     rc = m._pr_merge_now(_args(json=True), _prcfg(prefer_auto_merge=True),
                          _self_merge_flow(), apply=True)
     assert rc == 0
-    assert fake.auto_calls == [dict(repo="o/r", number=7, squash=True)]
+    assert fake.auto_calls == [dict(repo="o/r", number=7, squash=True, delete_source_branch=True)]
     assert fake.calls == []  # no immediate merge
     out = _json.loads(capsys.readouterr().out.strip())
     assert out["action"] == "auto-merge"
@@ -342,7 +344,7 @@ def test_prefer_auto_merge_falls_back_to_direct_when_unsupported(monkeypatch):
                          _self_merge_flow(), apply=True)
     assert rc == 0
     assert fake.auto_calls  # attempted
-    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True)]
+    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True)]
 
 
 def test_prefer_auto_merge_off_merges_directly(monkeypatch):
@@ -353,7 +355,7 @@ def test_prefer_auto_merge_off_merges_directly(monkeypatch):
                          _self_merge_flow(), apply=True)
     assert rc == 0
     assert fake.auto_calls == []
-    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True)]
+    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True)]
 
 
 def test_prefer_auto_merge_dry_run_previews_auto(monkeypatch, capsys):
@@ -384,7 +386,7 @@ def test_bypassable_review_gate_skips_auto_merge_and_admin_bypasses(
                          _self_merge_flow(), apply=True)
     assert rc == 0
     assert fake.auto_calls == []  # never attempted -- would have queued forever
-    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True)]
+    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True)]
     out = _json.loads(capsys.readouterr().out.strip())
     assert out["action"] == "merge"
     assert out["applied"] is True
@@ -400,7 +402,7 @@ def test_non_bypassable_review_gate_still_arms_auto_merge(monkeypatch, capsys):
     rc = m._pr_merge_now(_args(json=True), _prcfg(prefer_auto_merge=True),
                          _self_merge_flow(), apply=True)
     assert rc == 0
-    assert fake.auto_calls == [dict(repo="o/r", number=7, squash=True)]
+    assert fake.auto_calls == [dict(repo="o/r", number=7, squash=True, delete_source_branch=True)]
     assert fake.calls == []
     out = _json.loads(capsys.readouterr().out.strip())
     assert out["action"] == "auto-merge"
@@ -414,7 +416,7 @@ def test_no_review_required_arms_auto_merge_as_before(monkeypatch, capsys):
     rc = m._pr_merge_now(_args(json=True), _prcfg(prefer_auto_merge=True),
                          _self_merge_flow(), apply=True)
     assert rc == 0
-    assert fake.auto_calls == [dict(repo="o/r", number=7, squash=True)]
+    assert fake.auto_calls == [dict(repo="o/r", number=7, squash=True, delete_source_branch=True)]
     assert fake.calls == []
     out = _json.loads(capsys.readouterr().out.strip())
     assert out["action"] == "auto-merge"
@@ -429,7 +431,7 @@ def test_unknown_bypassability_still_arms_auto_merge(monkeypatch):
     rc = m._pr_merge_now(_args(), _prcfg(prefer_auto_merge=True),
                          _self_merge_flow(), apply=True)
     assert rc == 0
-    assert fake.auto_calls == [dict(repo="o/r", number=7, squash=True)]
+    assert fake.auto_calls == [dict(repo="o/r", number=7, squash=True, delete_source_branch=True)]
     assert fake.calls == []
 
 
@@ -443,7 +445,7 @@ def test_bypassable_review_gate_not_consulted_when_prefer_auto_off(monkeypatch):
                          _self_merge_flow(), apply=True)
     assert rc == 0
     assert fake.review_gate_calls == []
-    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True)]
+    assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True, delete_source_branch=True)]
 
 
 def test_ado_self_merge_uses_native_completion(monkeypatch, capsys):

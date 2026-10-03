@@ -434,6 +434,19 @@ def resolve_tenant(
             "manifests_dir", str(home / f"chronicle-manifests-{tenant_id}")
         )
 
+    # Same namespacing for a source tenant's change-tracker db: multiple
+    # tenants push the same ~/.copilot to different targets, so each needs
+    # its own "what did I already sync" record (see agent_logger.sync.engine
+    # and agent_logger.sync.change_tracker). ``setdefault`` alone would leave
+    # an explicit ``db_path: null`` (a legitimate "unset" spelling, shown in
+    # the shipped config examples) in place, collapsing every such tenant
+    # onto the one shared default db -- treat null/empty the same as absent.
+    if "source" in roles:
+        change_tracking = dict(sync.get("change_tracking") or {})
+        if not change_tracking.get("db_path"):
+            change_tracking["db_path"] = str(home / f"sync-state-{tenant_id}.db")
+        sync["change_tracking"] = change_tracking
+
     data = _deep_merge(
         DEFAULTS,
         {"sync": sync, "chronicle": chronicle, "machine": {"name": machine}},

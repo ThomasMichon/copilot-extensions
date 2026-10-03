@@ -399,6 +399,34 @@ rhythm and the resolution target for its class of work. Extension is expected
 where a domain needs more, but the default is **reuse**: the same template is
 the engine behind a standing automated service and an on-demand instance alike.
 
+### extend-any-declaration
+Extension is not fenced to the plugin's own enumerated recipes: **any**
+already-resolved declaration — built-in or repo-authored, named or
+anonymous, direct or itself extension-derived — is a valid base to extend
+further. A consumer is never limited to the plugin's own archetypes, and
+chaining extension (a repo-local declaration extending a cross-repo one,
+extending a plugin-shipped recipe) is first-class, not a special case.
+
+An extending declaration's override values are not only scalars substituted
+into the base's template fields. A value may itself be a **script path** —
+code the consumer ships — that the **base's own emitter/evaluator engine
+invokes at a declared extension point** (a selection rule, a per-item
+filter, a verdict-application hook) instead of the declaration
+reimplementing the engine's loop shape from scratch. The base keeps
+ownership of the loop, the schedule, the suspend/resume rhythm, and the
+**contract** each hook must satisfy (what it receives, what it must return);
+the script owns only the domain-specific decision at that one point. This is
+what makes a genuinely new domain (a consumer polling its own internal
+state, not a forge) adoptable through extension instead of a wholly bespoke
+emitter.
+
+Extension is still optional, never mandatory: a domain whose shape fits no
+existing base, or one unwilling to be fenced by a base's loop contract,
+provides its **own full emitter and evaluator** directly (a direct
+`kind:`-only declaration, no extension at all) — the same no-template path
+that exists today. Extension is the preferred route *when* a close-enough
+base exists, never the only route.
+
 ### concise-event-then-charter-pull
 The seed handed to a freshly embodied worker is a **short, event-classified
 notification**, not an inlined instructional essay. A recipe already knows the
@@ -1072,9 +1100,27 @@ does **not** quietly undo it.
   proof (`agent-dispatch-worker-lifecycle-eval` / `-cpfail`) that a fresh agent
   actually honors the mechanical, tool-call-only completion contract and the
   fail-fast-on-control-plane-failure posture under literal mode.
+- Realization effort:
+  [`efforts/active/agent-dispatch-recipe-composability/`](../../../efforts/active/agent-dispatch-recipe-composability/)
+  realizes *extend-any-declaration*, building on
+  `agent-dispatch-recipe-library`'s `extends:` mechanism.
 
 ## Provenance
 
+- **2026-10-02** — Added *extend-any-declaration*: generalizes the
+  plugin-shipped `extends:` mechanism (which today only resolves against a
+  small set of named, plugin-shipped recipes, with scalar-only override
+  values) to let any already-resolved declaration serve as an extension
+  base, and to let an override value name a script path the base's own
+  engine invokes at a declared extension point. Surfaced by a private
+  cross-repo motivating consumer needing to poll its own internal REST API
+  for pending work items and convert results into dispatch tasks — a shape
+  no existing recipe fits, previously forcing a wholly bespoke
+  `command:`-backed emitter with no shared loop contract. Tracked by
+  `efforts/active/agent-dispatch-recipe-composability` (issue #4959);
+  builds on, rather than replaces, `agent-dispatch-recipe-library`'s
+  `extends:` resolution mechanism. Implementation not yet landed by this
+  revision.
 - **2026-09-30** — Added *emitter-command-receipts*: a command-emitter that
   authors tasks via `task_output=json` already computes the created-task
   list (dedup_key -> real task id) every tick, but it was never durably

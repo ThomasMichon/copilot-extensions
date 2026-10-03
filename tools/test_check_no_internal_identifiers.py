@@ -81,7 +81,15 @@ def _base_env() -> dict[str, str]:
 
     # Keep PATH/SYSTEMROOT so git + python resolve on every platform.
     keep = ("PATH", "SYSTEMROOT", "SystemRoot", "HOME", "USERPROFILE", "TEMP", "TMP")
-    return {k: v for k, v in os.environ.items() if k in keep}
+    env = {k: v for k, v in os.environ.items() if k in keep}
+    # Source 4 (the live agent-worktrees sweep) reads real machine state
+    # (repos.yaml, other repos' .identifier-blocklist/ files) -- disabled by
+    # default so these subprocess-driven tests stay deterministic and
+    # machine-independent regardless of what's actually installed/registered
+    # on the box running them. Tests that specifically exercise source 4
+    # override this.
+    env["COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP"] = "1"
+    return env
 
 
 def test_diff_scope_ignores_pre_existing_leak_in_untouched_file(repo: Path):
@@ -112,6 +120,7 @@ def test_load_identifier_data_merges_plain_and_ci_sources_without_duplicates(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ):
     module = _load_module(repo)
+    monkeypatch.setenv(module.LIVE_SWEEP_DISABLE_ENV, "1")
     home_dir = repo / "home"
     home_dir.mkdir()
     monkeypatch.setattr(module, "HOME_LIST", home_dir / ".agent-codespaces" / "forbidden-identifiers.txt")
@@ -129,7 +138,8 @@ def test_load_identifier_data_merges_plain_and_ci_sources_without_duplicates(
         encoding="utf-8",
     )
 
-    identifiers, reasons = module._load_identifier_data()
+    identifiers, reasons, live_sweep_error = module._load_identifier_data()
+    assert live_sweep_error is None
 
     assert identifiers == [
         LEAK,
@@ -143,6 +153,324 @@ def test_load_identifier_data_merges_plain_and_ci_sources_without_duplicates(
         "second-token": "why this matters",
         "caseonly": "reason that loses",
     }
+
+
+# ---------------------------------------------------------------------------
+# Source 4: the live agent-worktrees cross-repo sweep
+# ---------------------------------------------------------------------------
+
+def test_live_sweep_disabled_by_default_env_var(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.setenv(module.LIVE_SWEEP_DISABLE_ENV, "1")
+    # Even a "found" binary must not be invoked once disabled.
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+    called = []
+    monkeypatch.setattr(
+        module.subprocess, "run",
+        lambda *a, **k: called.append(1) or (_ for _ in ()).throw(AssertionError("should not run")),
+    )
+    assert module._load_live_sweep_identifiers() == []
+    assert called == []
+
+
+def test_live_sweep_absent_when_binary_not_found(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: None)
+    assert module._load_live_sweep_identifiers() == []
+
+
+def test_live_sweep_contributes_identifiers(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 0
+        stdout = json.dumps({
+            "error": None,
+            "entries": [
+                {"token": "swept-token", "reason": "swept reason"},
+                {"token": r"regex:\bSWEPT\b", "reason": None},
+            ],
+        })
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    result = module._load_live_sweep_identifiers()
+    assert result == [
+        ("swept-token", "swept reason"),
+        (r"regex:\bSWEPT\b", None),
+    ]
+
+
+def test_live_sweep_treats_unknown_subcommand_as_benign_absence(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """An installed agent-worktrees old enough to predate the `identifiers`
+    command entirely must be treated as absent, not a configuration
+    failure -- it rejects with the dispatcher's generic "Unknown
+    subcommand" error, same as any other unrecognized verb."""
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 1
+        stdout = "✗ Unknown subcommand: identifiers\n✗ Run 'agent-worktrees --help' for available commands.\n"
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    assert module._load_live_sweep_identifiers() == []
+
+
+def test_live_sweep_treats_unresolved_project_as_benign_absence(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """An installed agent-worktrees whose cwd isn't a registered project on
+    this machine must also be treated as absent, not a configuration
+    failure -- it rejects before subcommand dispatch with the generic
+    "Could not resolve a project" response."""
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 1
+        stdout = "Could not resolve a project for 'identifiers'. Context is discovered from the cwd.\n"
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    assert module._load_live_sweep_identifiers() == []
+
+
+def test_live_sweep_merges_into_load_identifier_data(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 0
+        stdout = json.dumps({
+            "error": None,
+            "entries": [{"token": "swept-token", "reason": "swept reason"}],
+        })
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    identifiers, reasons, live_sweep_error = module._load_identifier_data()
+    assert live_sweep_error is None
+    assert "swept-token" in identifiers
+    assert reasons["swept-token"] == "swept reason"
+
+
+def test_live_sweep_rejects_non_list_entries(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 0
+        stdout = json.dumps({"error": None, "entries": "not-a-list"})
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    with pytest.raises(module.LiveSweepFailure):
+        module._load_live_sweep_identifiers()
+
+
+def test_live_sweep_rejects_non_mapping_entry(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 0
+        stdout = json.dumps({"error": None, "entries": ["not-a-mapping"]})
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    with pytest.raises(module.LiveSweepFailure):
+        module._load_live_sweep_identifiers()
+
+
+def test_live_sweep_rejects_entry_with_missing_or_non_string_token(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """A successful subprocess response of `{"entries": [{}]}` must fail
+    closed rather than silently producing an empty token that
+    `_load_identifier_data()` would just drop -- an empty/non-string token
+    means the live-sweep protocol itself is malformed, which the guard must
+    never silently accept."""
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 0
+        stdout = json.dumps({"error": None, "entries": [{}]})
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    with pytest.raises(module.LiveSweepFailure):
+        module._load_live_sweep_identifiers()
+
+
+def test_live_sweep_raises_on_nonzero_exit(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 1
+        stdout = json.dumps({"error": "boom", "entries": []})
+        stderr = "boom"
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    with pytest.raises(module.LiveSweepFailure):
+        module._load_live_sweep_identifiers()
+
+
+def test_live_sweep_failure_preserves_partial_entries(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    """A broken peer repo's blocklist must not discard the entries a sweep
+    DID manage to parse before failing."""
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 1
+        stdout = json.dumps({
+            "error": "one peer repo's blocklist failed to parse",
+            "entries": [{"token": "still-valid", "reason": "a reason"}],
+        })
+        stderr = "one peer repo's blocklist failed to parse"
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    with pytest.raises(module.LiveSweepFailure) as excinfo:
+        module._load_live_sweep_identifiers()
+    assert excinfo.value.pairs == [("still-valid", "a reason")]
+
+
+def test_load_identifier_data_fails_loud_on_live_sweep_failure(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 1
+        stdout = json.dumps({
+            "error": "boom",
+            "entries": [{"token": "still-valid", "reason": "a reason"}],
+        })
+        stderr = "boom"
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    identifiers, reasons, live_sweep_error = module._load_identifier_data()
+    assert live_sweep_error is not None
+    # Partial entries are still included, even though the overall result
+    # must still be treated as a failure by the caller.
+    assert "still-valid" in identifiers
+
+
+def test_main_fails_the_push_on_live_sweep_failure(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+):
+    """`main()` must fail the push outright on a live-sweep failure, even
+    with zero real forbidden-identifier matches in the diff -- a broken
+    local blocklist configuration is never silently downgraded to a pass."""
+    module = _load_module(repo)
+    monkeypatch.setattr(
+        module, "_load_identifier_data",
+        lambda: ([], {}, "agent-worktrees identifiers sweep failed: boom"),
+    )
+    rc = module.main([])
+    assert rc == 1
+    assert "boom" in capsys.readouterr().out
+
+
+def test_live_sweep_silently_ignores_timeout(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    def _raise(*a, **k):
+        raise module.subprocess.TimeoutExpired(cmd="agent-worktrees", timeout=10)
+
+    monkeypatch.setattr(module.subprocess, "run", _raise)
+    assert module._load_live_sweep_identifiers() == []
+
+
+def test_live_sweep_fails_closed_on_empty_output_with_exit_zero(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """Once a discovered sweep command has actually run (not one of the
+    explicitly recognized benign-absence responses), empty stdout on a
+    successful exit is itself a protocol failure -- a well-behaved sweep
+    always emits a full JSON payload, even for a genuinely empty result.
+    Silently treating this as "nothing to report" could disable the live
+    denylist with no visible signal."""
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 0
+        stdout = "   \n"
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    with pytest.raises(module.LiveSweepFailure):
+        module._load_live_sweep_identifiers()
+
+
+def test_live_sweep_fails_closed_on_malformed_json_with_exit_zero(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """Non-JSON stdout on a successful exit must also fail closed, not be
+    silently treated as an empty sweep."""
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 0
+        stdout = "not actually json"
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    with pytest.raises(module.LiveSweepFailure):
+        module._load_live_sweep_identifiers()
+
+
+def test_live_sweep_benign_absence_uses_exact_line_not_loose_substring(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    """A real malformed-blocklist error that happens to mention a repo path
+    or embed YAML parser text containing one of the benign-absence phrases
+    (e.g. a peer repo literally named "could-not-resolve-a-project") must
+    still fail the push -- the detection matches an exact dispatcher error
+    line, not a loose substring anywhere in the whole output."""
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 1
+        stdout = json.dumps({
+            "error": (
+                "block-for-public.yaml entry #2: Could not resolve a project "
+                "reference in token pattern -- invalid regex"
+            ),
+            "entries": [],
+        })
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    with pytest.raises(module.LiveSweepFailure):
+        module._load_live_sweep_identifiers()
 
 
 def test_ci_loader_splits_first_pipe_only(repo: Path):

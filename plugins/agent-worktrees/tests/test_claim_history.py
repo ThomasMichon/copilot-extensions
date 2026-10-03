@@ -240,6 +240,117 @@ def test_release_all_resources_does_not_itself_feed_history(record_path):
     assert claim_history.history_for_ref("o/r#3") == []
 
 
+# ── Wiring: a context-handoff cutover feeds an *implicit* reassignment
+# (worktree-claims-transitive-finalization Phase 3b -- "an agent-bridge
+# session rebind to a worktree" changes who is actually working a PR right
+# now without any explicit claim verb ever firing) ──────────────────────
+
+def test_link_handoff_default_save_feeds_history_after_its_own_save(record_path):
+    """``link_handoff``'s default ``save=True`` is self-contained: it may
+    record_pr_claims_reassigned() itself, but only AFTER its own
+    ``save_record`` already confirmed."""
+    rec = tracking.load_record(record_path)
+    rec.sessions = [
+        tracking.SessionEntry("old-session", "t"),
+        tracking.SessionEntry("new-session", "t"),
+    ]
+    tracking.save_record(rec, record_path)
+    rec = tracking.load_record(record_path)
+    tracking.add_resource_claim(
+        rec,
+        tracking.ResourceClaim(kind="pr", ref="o/r#9", state=obligations.ACTIVE),
+        save=False,
+    )
+    tracking.open_handoff(rec, "old-session", "token", save=False)
+    tracking.save_record(rec, record_path)
+    rec = tracking.load_record(record_path)
+    tracking.link_handoff(rec, "token", "new-session")  # save=True (default)
+    events = claim_history.history_for_ref("o/r#9")
+    assert [e["event"] for e in events] == ["reassigned"]
+    assert events[0]["session_id"] == "new-session"
+    assert events[0]["worktree_id"] == "wt-claim"
+    assert "old-session -> new-session" in events[0]["note"]
+
+
+def test_link_handoff_save_false_never_feeds_history_itself(record_path):
+    """A ``save=False`` caller defers its own save (e.g. a batched daemon
+    verb transaction) -- ``link_handoff`` must NEVER record history before
+    the caller's own save is confirmed, mirroring
+    ``test_release_all_resources_does_not_itself_feed_history``. A save
+    failure (or the caller's whole transaction aborting after this call)
+    must never leave a false "reassigned" entry for a link that never
+    durably persisted; the caller owns calling
+    ``record_pr_claims_reassigned`` itself, once ITS OWN save confirms."""
+    rec = tracking.load_record(record_path)
+    rec.sessions = [
+        tracking.SessionEntry("old-session", "t"),
+        tracking.SessionEntry("new-session", "t"),
+    ]
+    tracking.add_resource_claim(
+        rec,
+        tracking.ResourceClaim(kind="pr", ref="o/r#9", state=obligations.ACTIVE),
+        save=False,
+    )
+    tracking.open_handoff(rec, "old-session", "token", save=False)
+    tracking.link_handoff(rec, "token", "new-session", save=False)
+    assert claim_history.history_for_ref("o/r#9") == []
+
+
+def test_record_pr_claims_reassigned_feeds_history_for_pr_kind_claims():
+    rec = tracking.WorktreeRecord(
+        worktree_id="wt-claim", branch="b", worktree_path="/tmp/wt-claim",
+        repo="r", machine="machine-x", platform="wsl",
+        started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
+        resume_count=0, title=None, status="active", completed_at=None,
+    )
+    rec.resources = [
+        tracking.ResourceClaim(kind="pr", ref="o/r#9", state=obligations.ACTIVE),
+    ]
+    tracking.record_pr_claims_reassigned(
+        rec,
+        predecessor_session_id="old-session",
+        successor_session_id="new-session",
+        note="context-handoff linked",
+    )
+    events = claim_history.history_for_ref("o/r#9")
+    assert [e["event"] for e in events] == ["reassigned"]
+    assert events[0]["session_id"] == "new-session"
+    assert events[0]["worktree_id"] == "wt-claim"
+    assert events[0]["machine"] == "machine-x"
+    assert "old-session -> new-session" in events[0]["note"]
+
+
+def test_record_pr_claims_reassigned_is_a_noop_with_no_active_pr_claim():
+    rec = tracking.WorktreeRecord(
+        worktree_id="wt-claim", branch="b", worktree_path="/tmp/wt-claim",
+        repo="r", machine="machine-x", platform="wsl",
+        started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
+        resume_count=0, title=None, status="active", completed_at=None,
+    )
+    tracking.record_pr_claims_reassigned(
+        rec, predecessor_session_id="old", successor_session_id="new", note="x",
+    )
+    assert claim_history.history_for_ref("o/r#9") == []
+
+
+def test_record_pr_claims_reassigned_ignores_a_released_pr_claim():
+    """Only a still-ACTIVE claim implies "someone is actively working this
+    PR" -- an already-released claim must not be reported as reassigned."""
+    rec = tracking.WorktreeRecord(
+        worktree_id="wt-claim", branch="b", worktree_path="/tmp/wt-claim",
+        repo="r", machine="machine-x", platform="wsl",
+        started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
+        resume_count=0, title=None, status="active", completed_at=None,
+    )
+    rec.resources = [
+        tracking.ResourceClaim(kind="pr", ref="o/r#9", state=obligations.RELEASED),
+    ]
+    tracking.record_pr_claims_reassigned(
+        rec, predecessor_session_id="old", successor_session_id="new", note="x",
+    )
+    assert claim_history.history_for_ref("o/r#9") == []
+
+
 def _git(*args: str, cwd: Path) -> str:
     return subprocess.run(
         ["git", *args], cwd=str(cwd), check=True,

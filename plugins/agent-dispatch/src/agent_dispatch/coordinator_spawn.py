@@ -69,6 +69,7 @@ class ReservationDetailBody(BaseModel):
     conclusion_state: str | None = None
     conclusion_detail: str | None = None
     claim_token: str | None = None
+    release_requested: bool = False
 
 
 class FailSpawnBody(ReservationDetailBody):
@@ -284,6 +285,7 @@ def register_spawn_routes(
                 claim_token=body.claim_token,
                 force=body.force,
                 confirmed_absent=body.confirmed_absent,
+                release_requested=body.release_requested,
             )
         )
         bus.publish({"type": "spawn.failed", "reservation": result})
@@ -310,6 +312,7 @@ def register_spawn_routes(
                 conclusion_state=body.conclusion_state,
                 conclusion_detail=body.conclusion_detail,
                 claim_token=body.claim_token,
+                release_requested=body.release_requested,
             )
         )
         bus.publish({"type": "spawn.settled", "reservation": result})

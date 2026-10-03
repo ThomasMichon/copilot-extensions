@@ -14,10 +14,26 @@ A denylist that *named* those strings would itself leak them, so the list is
      production by the ``FORBIDDEN_IDS_FACILITY`` / ``FORBIDDEN_IDS_WORK``
      repository secrets consumed by
      ``.github/workflows/identifier-leak-guard.yml``, which documents the
-     exact provisioning command).
+     exact provisioning command), and
+  4. a best-effort **live cross-repo sweep**, when a locally registered
+     ``agent-worktrees`` installation is discoverable: ``agent-worktrees
+     identifiers sweep --format json`` (run with this repo as cwd, so it
+     auto-resolves as the sweep target) aggregates every other locally
+     registered repo's own ``.identifier-blocklist/block-for-<tier>.yaml``
+     denylist, scoped to this repo's own registered audience-exposure tier.
+     The JSON format (rather than the CLI's own default ``ci`` text format)
+     is used so a parse failure in one peer repo's blocklist still carries
+     whatever entries DID parse successfully, for :class:`LiveSweepFailure`.
+     See ``plugins/agent-worktrees/src/agent_worktrees/identifier_blocklist.py``
+     for the mechanism and ``docs/identifier-blocklist.md`` for the
+     convention. This source is silently absent wherever ``agent-worktrees``
+     isn't installed or this repo isn't registered (a fresh clone, CI) --
+     never required, only additive on a machine that has it. Opt out with
+     ``COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP=1``.
 
-CI entries are case-insensitive literal substrings by default. Prefix a token
-with ``regex:`` to match a Python regular expression instead (for example
+CI entries (sources 3 and 4 share this grammar) are case-insensitive literal
+substrings by default. Prefix a token with ``regex:`` to match a Python
+regular expression instead (for example
 ``regex:\\bexample\\b|Standalone name -- use a generic placeholder``). The
 prefix is a matching mode, not part of the reported match. Double a regex
 alternation pipe (``||``) in the secret to distinguish it from the first
@@ -31,11 +47,16 @@ token, including a bare ``#`` on its own line, which matches almost any
 Markdown heading. Never paste a commented source file straight into
 ``COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI`` (or the secrets above) -- strip
 comments and blank lines first (e.g. ``grep -vE '^\\s*#|^\\s*$' file``).
+Source 4 never has this gotcha: it only ever reads its own generated
+``identifiers sweep`` output, never a hand-pasted file.
 
-With neither configured (a fresh clone / CI) there is nothing to enforce and
-the check is a no-op (exit 0) -- so it is safe to ship in the public repo. On
-your own machine, populate either source and wire this up as a git ``pre-push``
-hook; it then blocks a push that would leak any of your identifiers.
+With none of these configured (a fresh clone with no local ``agent-worktrees``
+registration, or CI with no secret) there is nothing to enforce and the check
+is a no-op (exit 0) -- so it is safe to ship in the public repo. On your own
+machine, populate one of sources 1/2/3 by hand, or simply register this repo
+with ``agent-worktrees`` (source 4) and let the live sweep do the work; wire
+this up as a git ``pre-push`` hook either way, and it blocks a push that would
+leak any of your identifiers.
 
 Scope: by default the guard only scans the files your push actually **changes**
 (``git diff --name-only <base>...HEAD``, base ``origin/main`` -- override via
@@ -63,6 +84,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -72,6 +94,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 HOME_LIST = Path.home() / ".agent-codespaces" / "forbidden-identifiers.txt"
 CI_LIST_ENV = "COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI"
+# Opt-out for source 4 (the live agent-worktrees sweep) -- also what keeps
+# this script's own tests deterministic/machine-independent (set by default
+# in their subprocess harness; see tools/test_check_no_internal_identifiers.py).
+LIVE_SWEEP_DISABLE_ENV = "COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP"
 
 # Files this guard must not flag for merely *implementing* the mechanism.
 SELF = {
@@ -148,7 +174,169 @@ def _load_ci_identifiers(raw: str) -> list[tuple[str, str | None]]:
     return pairs
 
 
-def _load_identifier_data() -> tuple[list[str], dict[str, str | None]]:
+class LiveSweepFailure(Exception):
+    """A configured live sweep (source 4) ran but failed -- as opposed to
+    simply being absent/not registered (which is never an error; see
+    ``_load_live_sweep_identifiers``'s docstring). Carries whatever
+    identifiers the sweep DID manage to parse via :attr:`pairs` before
+    failing, so a caller can still use them rather than discarding
+    everything a broken peer repo's blocklist didn't actually touch.
+    """
+
+    def __init__(self, message: str, pairs: list[tuple[str, str | None]]):
+        super().__init__(message)
+        self.pairs = pairs
+
+
+# Exact dispatcher error lines (agent-worktrees' own front_door_cli.py /
+# __main__.py) that mean "this install/checkout doesn't support `identifiers`
+# at all" -- a benign absence, not a configuration failure. Matched against
+# a FULL output line (after stripping any leading symbol/whitespace an
+# installed version's `output.err` may prepend), never a loose substring of
+# the entire stdout/stderr blob: a real malformed-blocklist error can
+# legitimately mention a repo path or embed raw YAML parser text, either of
+# which could otherwise coincidentally contain one of these phrases and get
+# misclassified as benign absence instead of failing the push.
+_BENIGN_ABSENCE_LINE_RE = re.compile(
+    r"^(?:Unknown subcommand: identifiers"
+    r"|Could not resolve a project(?: for 'identifiers')?\.)",
+)
+
+
+def _is_benign_absence(stdout: str, stderr: str) -> bool:
+    for raw_line in (stdout + "\n" + stderr).splitlines():
+        line = raw_line.strip().lstrip("✗⚠️").strip()
+        if _BENIGN_ABSENCE_LINE_RE.match(line):
+            return True
+    return False
+
+
+def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
+    """Best-effort source 4: a locally registered ``agent-worktrees``' live
+    cross-repo identifier-blocklist sweep, scoped to this repo as the sweep
+    target (auto-resolved from cwd by ``identifiers sweep``).
+
+    Absent anywhere this isn't installed/registered (a fresh clone, CI) --
+    a missing binary, a timeout, or any other environment-level failure to
+    even run the command is silently swallowed so this is purely additive,
+    never a new requirement. Set ``COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP=1``
+    to opt out entirely.
+
+    A sweep that DID run but failed (nonzero exit -- e.g. another locally
+    registered repo's ``.identifier-blocklist/`` file is malformed YAML) is
+    different: that is a genuinely broken *local configuration*, not mere
+    absence, so it is never silently swallowed. It raises
+    :class:`LiveSweepFailure`, which still carries whatever identifiers the
+    sweep DID manage to parse before failing, so a caller can use them
+    defensively while still treating the overall result as a failure. This
+    is why the sweep is invoked with ``--format json`` rather than the
+    default ``ci`` text format: the CI format is deliberately all-or-nothing
+    on failure (nothing at all on stdout, to avoid ever piping a silently
+    partial denylist into a consumer that might ignore the exit code), so
+    only the JSON diagnostic format actually carries the partially-parsed
+    entries this class promises.
+
+    One specific nonzero-exit case is NOT a configuration failure, though:
+    an installed ``agent-worktrees`` old enough to predate this feature
+    entirely rejects ``identifiers`` with its generic "Unknown subcommand"
+    dispatcher error -- that is absence (an unupdated install), not
+    breakage, so it is treated the same as the binary not existing at all.
+    Likewise, an installed-but-UNREGISTERED checkout (this repo's cwd isn't
+    adopted as an ``agent-worktrees`` project on this machine) is rejected
+    even earlier, before subcommand dispatch, with a generic "Could not
+    resolve a project" response -- also benign absence, not breakage.
+    """
+    if os.environ.get(LIVE_SWEEP_DISABLE_ENV, "").strip().lower() in ("1", "true", "yes"):
+        return []
+    exe = shutil.which("agent-worktrees")
+    if not exe:
+        return []
+    try:
+        proc = subprocess.run(
+            [exe, "identifiers", "sweep", "--format", "json"],
+            cwd=REPO, capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0 and _is_benign_absence(proc.stdout, proc.stderr):
+        # An installed agent-worktrees that either predates the
+        # `identifiers` command entirely, or whose cwd isn't a registered
+        # project on this machine -- benign absence, not a configuration
+        # failure. Matched against the dispatcher's exact error lines (not a
+        # loose substring of the whole output), since a real malformed-
+        # blocklist error can legitimately include a repo path or YAML
+        # parser text that happens to contain one of these phrases.
+        return []
+    try:
+        payload = json.loads(proc.stdout) if proc.stdout.strip() else None
+    except json.JSONDecodeError:
+        payload = None
+    if payload is None:
+        # Once a discovered sweep command has been invoked (i.e. it isn't
+        # one of the explicitly recognized benign-absence responses above),
+        # empty or unparseable stdout is itself a protocol failure -- fail
+        # closed rather than silently treating it as "nothing to report",
+        # regardless of exit code. A well-behaved `identifiers sweep
+        # --format json` always emits a full JSON payload (even an empty
+        # sweep reports `{"error": null, "entries": []}`), so anything else
+        # means something went wrong in a way this guard can't diagnose,
+        # and silently accepting it could disable the live denylist
+        # entirely without any visible signal.
+        raise LiveSweepFailure(
+            "agent-worktrees identifiers sweep failed: its --format json "
+            "output was empty or not valid JSON"
+            + (f" (exit {proc.returncode})" if proc.returncode != 0 else ""),
+            [],
+        )
+    entries_raw = payload.get("entries")
+    if not isinstance(entries_raw, list):
+        raise LiveSweepFailure(
+            "agent-worktrees identifiers sweep failed: malformed --format "
+            f"json output ('entries' must be a list, got "
+            f"{type(entries_raw).__name__})",
+            [],
+        )
+    pairs: list[tuple[str, str | None]] = []
+    for idx, e in enumerate(entries_raw):
+        if not isinstance(e, dict):
+            raise LiveSweepFailure(
+                "agent-worktrees identifiers sweep failed: malformed "
+                f"--format json output (entry #{idx + 1} must be a mapping, "
+                f"got {type(e).__name__})",
+                pairs,
+            )
+        token = e.get("token")
+        if not isinstance(token, str) or not token.strip():
+            raise LiveSweepFailure(
+                "agent-worktrees identifiers sweep failed: malformed "
+                f"--format json output (entry #{idx + 1} has a missing or "
+                "non-string 'token')",
+                pairs,
+            )
+        reason = e.get("reason")
+        low = (
+            "regex:" + token[len("regex:"):]
+            if token.lower().startswith("regex:")
+            else token.lower()
+        )
+        pairs.append((low, (str(reason).strip() or None) if reason else None))
+    if proc.returncode != 0:
+        detail = payload.get("error") or (proc.stderr.strip() or "no details")
+        raise LiveSweepFailure(
+            f"agent-worktrees identifiers sweep failed: {detail}", pairs,
+        )
+    return pairs
+
+
+def _load_identifier_data() -> tuple[list[str], dict[str, str | None], str | None]:
+    """Returns ``(identifiers, reasons, live_sweep_error)``.
+
+    ``live_sweep_error`` is ``None`` on success or benign absence of source
+    4, or a human-readable message when a configured live sweep failed --
+    the caller (``main``) must still fail the push when this is set, even
+    though ``identifiers``/``reasons`` already include whatever that sweep
+    DID manage to parse.
+    """
     ids: list[str] = []
     env = os.environ.get("COPILOT_EXTENSIONS_FORBIDDEN_IDS", "")
     ids += [s for s in (part.strip() for part in env.split(",")) if s]
@@ -163,17 +351,26 @@ def _load_identifier_data() -> tuple[list[str], dict[str, str | None]]:
     for ident, reason in _load_ci_identifiers(os.environ.get(CI_LIST_ENV, "")):
         ids.append(ident)
         ci_reasons.setdefault(ident, reason)
+    live_sweep_error: str | None = None
+    try:
+        sweep_pairs = _load_live_sweep_identifiers()
+    except LiveSweepFailure as exc:
+        sweep_pairs = exc.pairs
+        live_sweep_error = str(exc)
+    for ident, reason in sweep_pairs:
+        ids.append(ident)
+        ci_reasons.setdefault(ident, reason)
     # De-dupe literals case-insensitively without changing regex escapes.
     seen: dict[str, None] = {}
     for i in ids:
         token = "regex:" + i[6:] if i.lower().startswith("regex:") else i.lower()
         if token:
             seen.setdefault(token, None)
-    return list(seen), ci_reasons
+    return list(seen), ci_reasons, live_sweep_error
 
 
 def _load_identifiers() -> list[str]:
-    identifiers, _ = _load_identifier_data()
+    identifiers, _, _ = _load_identifier_data()
     return identifiers
 
 
@@ -421,7 +618,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.all and args.paths_file:
         parser.error("--all and --paths-file are mutually exclusive")
 
-    identifiers, reasons = _load_identifier_data()
+    identifiers, reasons, live_sweep_error = _load_identifier_data()
+    if live_sweep_error:
+        # A configured live sweep (source 4) ran but failed -- a genuinely
+        # broken local configuration (e.g. another registered repo's
+        # .identifier-blocklist/ is malformed YAML), never silently
+        # swallowed the way simple absence is. Fail the push loudly even
+        # though `identifiers` above may already include every entry that
+        # sweep DID manage to parse before failing.
+        print(f"Internal-identifier guard FAILED: {live_sweep_error}")
+        return 1
     if not identifiers:
         print(
             "no forbidden identifiers configured "

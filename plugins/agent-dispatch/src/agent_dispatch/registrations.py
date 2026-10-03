@@ -651,6 +651,8 @@ def validate_registration(kind: str, spec: dict) -> None:
     elif kind == RegistrationKind.EVALUATOR:
         if not spec:
             raise RegistrationError("evaluator registration needs a non-empty spec")
+        from .reviewer_loops import EvaluatorError, reviewer_loop_lifecycle_config
+
         eval_spec = spec.get("evaluator_spec")
         if eval_spec is None and not spec.get("evaluator"):
             raise RegistrationError(
@@ -671,6 +673,10 @@ def validate_registration(kind: str, spec: dict) -> None:
             raise RegistrationError(
                 "evaluator registration needs a non-empty 'evaluator_ref'"
             )
+        try:
+            reviewer_loop_lifecycle_config(spec)
+        except EvaluatorError as exc:
+            raise RegistrationError(str(exc)) from exc
         _validate_disposable_cli_labels(spec)
         _validate_idle_nudge_exempt_labels(spec)
         _validate_steering_disallowed_labels(spec)

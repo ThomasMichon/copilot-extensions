@@ -1,18 +1,19 @@
 # Architecture Overview
 
-How the 23 copilot-extensions plugins fit together — install topology,
+How the 24 copilot-extensions plugins fit together — install topology,
 runtimes, ports, and the credential relay. **Thirteen ship a runtime** (currently
 a `uv`-built venv under a plugin-owned root such as `~/.agent-*` or
 `~/.budget-guidance`, deployed by the plugin's own installer) plus generated
 payload-local agent commands and session command glossaries; compatibility
 management wrappers remain in `~/.local/bin` during the installation-cell
-migration. **Ten are payload-only** — `efforts` (skills), `visions`
+migration. **Eleven are payload-only** — `efforts` (skills), `visions`
 (skills), `context-handoff` (hook + session extension + skill), `customizing-copilot`
 (skills), `copilot-extensions-harness` (skills + static instruction projections),
 `wsl-setup` (skills), and
 `harness-knowledge` (skills), `ai-attribution` (hook + skill),
-`delegation-guidance` (hook + skill), and `agent-conduct-guidance`
-(instruction projection + skill) deploy entirely from the marketplace
+`delegation-guidance` (hook + skill), `agent-conduct-guidance`
+(instruction projection + skill), and `agent-remote-driver` (SDK extension)
+deploy entirely from the marketplace
 payload with no installer. For per-plugin internals, follow the links in each
 section.
 
@@ -50,6 +51,7 @@ section.
 | [ai-attribution](../plugins/ai-attribution/) | Ambient publication-policy hook + publication/setup skills | Marketplace payload (hooks + dependency-free scripts + skills/docs/examples) | The hook emits a concise payload-cwd-gated policy kernel at session start; setup reconciles the static fallback; detailed publication workflow loads on demand; no runtime to install |
 | [delegation-guidance](../plugins/delegation-guidance/) | **Deprecated** — no-op pointer at `agent-conduct-guidance` | Marketplace payload (README pointer only) | Ships no skills or instruction projections; kept installable so the name keeps resolving for existing adopters |
 | [agent-conduct-guidance](../plugins/agent-conduct-guidance/) | Consolidated ambient conduct-guidance modules (headless-process-spawn instruction projection + `spawning-headless-processes` skill; coordinator-first delegation instruction projection + `delegating-work` skill, migrated from `delegation-guidance`; scratch-space hygiene instruction projection + `using-scratch-space` skill) | Marketplace payload (static instruction projections + skills) | No `sessionStart` hook; each module's projection is a checked-in static fallback; detailed per-module skills load on demand; no runtime to install |
+| [agent-remote-driver](../plugins/agent-remote-driver/) | User-global SDK extension — baseline session drivability (attach/send/steer/abort) over a loopback HTTP surface, independent of agent-bridge | Marketplace payload (extension only) | Extension is auto-discovered from the enabled plugin's `extensions/` dir, same mechanism as `context-handoff`'s; no daemon, no runtime to install; not yet default-enabled (`cli-default-bridging` effort, pre-validation) |
 
 Every runtime plugin is itself a **Python package** — its `src/` package plus
 any vendored `libs/` — installed by its own `scripts/install.*` / `scripts/init.*`
@@ -118,7 +120,7 @@ flowchart TB
       AV["agent-vault/<br/>scripts • src"]
       AI["agent-index/<br/>scripts • src"]
       AK["agent-machines/<br/>scripts • src"]
-      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • copilot-extensions-harness/ • wsl-setup/ • harness-knowledge/ • ai-attribution/ • delegation-guidance/ (deprecated) • agent-conduct-guidance/<br/>(payload-only: skills / hooks / extension)"]
+      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • copilot-extensions-harness/ • wsl-setup/ • harness-knowledge/ • ai-attribution/ • delegation-guidance/ (deprecated) • agent-conduct-guidance/ • agent-remote-driver/<br/>(payload-only: skills / hooks / extension)"]
     end
     subgraph RT["Local runtimes"]
       RW["~/.agent-worktrees/<br/>versions/ • current-version • bin"]
@@ -174,7 +176,8 @@ flowchart TB
 
 > The `PO` node — `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
 > `copilot-extensions-harness`, `wsl-setup`, `harness-knowledge`, and
-> `ai-attribution`, `delegation-guidance`, and `agent-conduct-guidance` —
+> `ai-attribution`, `delegation-guidance`, `agent-conduct-guidance`, and
+> `agent-remote-driver` —
 > deploy entirely from the marketplace payload — no installer, no
 > `~/.agent-*` runtime, no binstub.
 
@@ -728,3 +731,4 @@ closed; umbrella dotfiles#1081.)*
 - ai-attribution [README](../plugins/ai-attribution/README.md) · [configuration](../plugins/ai-attribution/docs/configuration.md) · [setup](../plugins/ai-attribution/skills/ai-attribution-setup/SKILL.md) · [publication workflow](../plugins/ai-attribution/skills/ai-attribution/SKILL.md)
 - delegation-guidance [README](../plugins/delegation-guidance/README.md) — deprecated, see agent-conduct-guidance
 - agent-conduct-guidance [README](../plugins/agent-conduct-guidance/README.md) · [spawning-headless-processes skill](../plugins/agent-conduct-guidance/skills/spawning-headless-processes/SKILL.md) · [delegating-work skill](../plugins/agent-conduct-guidance/skills/delegating-work/SKILL.md) · [using-scratch-space skill](../plugins/agent-conduct-guidance/skills/using-scratch-space/SKILL.md)
+- agent-remote-driver [README](../plugins/agent-remote-driver/README.md)

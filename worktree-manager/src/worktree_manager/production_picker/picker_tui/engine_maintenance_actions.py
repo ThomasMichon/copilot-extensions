@@ -6,24 +6,28 @@ import threading
 
 from .engine_dialogs import ScopeDlgScreen
 from .engine_live_screens import ProgressScreen
-from .seed_prompt_screen import SeedPromptScreen
 
-# picker-new-session-prompt-and-composer Phase A: the prompt collected here
-# is persisted (`agent-worktrees create`/`resolve --new --seed`) and
-# delivered end-to-end: `engine_client.resolve_launch_plan()` forwards
-# `--seed`, and `launch-session.{ps1,sh}` call `agent-worktrees embody
-# --worktree-id` right after creating a worktree's FIRST live mux session,
-# triggering embody's own "already embodies this worktree" resume branch to
-# claim + deliver any pending seed. Not delivered for No Mux (direct launch,
-# no mux pane for embody to find) or Bare (no Copilot bootstrap at all) --
-# `_open_optmenu()` skips the prompt screen entirely for either.
+# picker-new-session-prompt-and-composer Phase A: the prompt collected in
+# the New-worktree dialog's own prompt field (``ScopeDlgScreen``'s
+# ``show_prompt``, folded in -- no separate screen) is persisted
+# (`agent-worktrees create`/`resolve --new --seed`) and delivered end-to-end:
+# `engine_client.resolve_launch_plan()` forwards `--seed`, and
+# `launch-session.{ps1,sh}` call `agent-worktrees embody --worktree-id`
+# right after creating a worktree's FIRST live mux session, triggering
+# embody's own "already embodies this worktree" resume branch to claim +
+# deliver any pending seed. Not delivered for No Mux (direct launch, no mux
+# pane for embody to find), Bare (no Copilot bootstrap at all), Anchor repo,
+# or a remote target (the engine's own resolve CLI rejects `--seed`
+# alongside `--base`/`--machine`) -- `_open_optmenu()` silently drops
+# whatever was typed for any of those instead of forwarding it to a launch
+# that could never deliver it.
 _SEED_PROMPT_ENABLED = True
 
 class PickerScreenMaintenanceActionsMixin:
     def _confirm_new_worktree(self, dlg, seed_prompt: str = ""):
-        """Confirmed New-worktree options (+ an optional seed prompt, gathered
-        by ``SeedPromptScreen`` beforehand -- see ``_open_optmenu``) -> the
-        launch decision (#88 F4)."""
+        """Confirmed New-worktree options (+ an optional seed prompt, read
+        straight off the SAME dialog's prompt field -- see
+        ``_open_optmenu``) -> the launch decision (#88 F4)."""
         on = {o["label"] for o in dlg["opts"] if o["on"]}
         tm, te = dlg["target"]
         self._decide({
@@ -444,32 +448,22 @@ class PickerScreenMaintenanceActionsMixin:
                "verb": "New worktree", "confirm": "Create",
                "prompt": f"Creates on {tm} {te} · options (none required):",
                "opts": opts}
+        # A remote target resolves via `--machine`, which the engine's own
+        # resolve CLI rejects alongside `--seed` -- the prompt field would
+        # be collected for nothing, so it is never even offered there (same
+        # reasoning `_SEED_PROMPT_ENABLED` documents for Anchor/Bare/No Mux,
+        # which ARE offered here since they're live checkboxes in this same
+        # dialog, not known until Confirm is pressed).
+        is_remote = (tm, te) != self.src.LOCAL
+        show_prompt = _SEED_PROMPT_ENABLED and not is_remote
+        scr = ScopeDlgScreen(dlg, show_prompt=show_prompt)
 
         def _after(confirmed):
             if not confirmed:
                 return
             on = {o["label"] for o in dlg["opts"] if o["on"]}
-            is_remote = (tm, te) != self.src.LOCAL
-            if (
-                not _SEED_PROMPT_ENABLED or "Bare" in on or "No Mux" in on
-                or "Anchor repo" in on or is_remote
-            ):
-                # A bare worktree gets no Copilot bootstrap at all -- nothing
-                # to seed. A No-Mux worktree launches Copilot directly,
-                # bypassing the mux pane `embody`'s delivery depends on
-                # entirely -- a typed prompt would be persisted as
-                # `pending_seed` and never delivered (or delivered
-                # unexpectedly later if a mux session is created
-                # afterward). Anchor-repo and remote-machine targets resolve
-                # via `--base`/`--machine`, and the engine's own `resolve`
-                # CLI rejects `--seed` alongside either -- forwarding a typed
-                # prompt there would fail the whole launch request. Skip the
-                # prompt screen for all four and behave exactly as before
-                # this screen existed.
-                self._confirm_new_worktree(dlg)
-                return
-
-            def _seeded(prompt: str) -> None:
-                self._confirm_new_worktree(dlg, seed_prompt=prompt)
-            self.app.push_screen(SeedPromptScreen(target=f"{tm} {te}"), _seeded)
-        self.app.push_screen(ScopeDlgScreen(dlg), _after)
+            seed_prompt = ""
+            if show_prompt and not ({"Anchor repo", "Bare", "No Mux"} & on):
+                seed_prompt = scr.seed_prompt
+            self._confirm_new_worktree(dlg, seed_prompt=seed_prompt)
+        self.app.push_screen(scr, _after)

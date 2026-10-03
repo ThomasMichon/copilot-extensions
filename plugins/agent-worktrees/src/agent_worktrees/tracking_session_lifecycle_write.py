@@ -110,6 +110,20 @@ def apply_session_link_succession(args: dict) -> dict:
 
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
+        # Idempotency + attribution: base this on the pre-call ownership
+        # head, not on whatever lineage metadata (handoff tokens,
+        # predecessor/successor fields) happens to already be in place --
+        # this is also a manual REPAIR surface, so those fields can lag or
+        # disagree with who actually, currently holds head. Only a head
+        # that genuinely changes (prior_head != successor_id) is a real
+        # reassignment; a replay that leaves the same session as head is
+        # always a no-op, however the lineage fields read. Falls back to
+        # the declared predecessor only when there was no prior head at all
+        # (a cold-start link); otherwise names whoever ACTUALLY held head
+        # before this call -- which may differ from the declared
+        # `predecessor_id` if head had already moved elsewhere by some
+        # other mechanism.
+        prior_head = record.resolved_head_session
         try:
             tracking.link_succession(
                 record,
@@ -122,6 +136,13 @@ def apply_session_link_succession(args: dict) -> dict:
         except tracking.SessionLifecycleError as exc:
             return {"error": "lifecycle", "message": str(exc)}
         tracking.save_record(record, yaml_path)
+        if prior_head != successor_id:
+            tracking.record_pr_claims_reassigned(
+                record,
+                predecessor_session_id=prior_head or predecessor_id,
+                successor_session_id=successor_id,
+                note="manual link-succession",
+            )
 
     record = tracking.load_record(yaml_path)
     pred = record.session_entry(predecessor_id)
@@ -251,6 +272,13 @@ def apply_resolve_handoff_successor(args: dict) -> dict:
         except tracking.SessionLifecycleError as exc:
             return {"error": "lifecycle", "message": str(exc)}
         tracking.save_record(record, yaml_path)
+        # Deliberately NOT tracking.record_pr_claims_reassigned() here: this
+        # verb links the handoff only to immediately conclude that same
+        # successor in the same transaction (a historical registration gap
+        # being closed out on an already-terminal worktree, never a live
+        # "someone is now actively working this" transition) -- recording a
+        # reassignment to a session simultaneously marked concluded would
+        # misrepresent the ledger, not inform it.
 
     record = tracking.load_record(yaml_path)
     return {

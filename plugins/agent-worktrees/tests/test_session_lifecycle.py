@@ -211,7 +211,7 @@ class TestTransitions:
     def test_link_succession_concluded_predecessor_activates_successor(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
-        """aperture-labs#7824 regression: the ``predecessor_state="concluded"``
+        """Downstream regression (a private repository's report): the ``predecessor_state="concluded"``
         branch (a predecessor with no real history, e.g. a manual repair) must
         activate the successor exactly like the default ``"handed-off"``
         branch does -- otherwise the freshly-written head transition is
@@ -232,7 +232,7 @@ class TestTransitions:
     def test_link_succession_concluded_cancels_yielded_successors_own_handoff(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
-        """aperture-labs#7824 regression: a successor that is itself
+        """Downstream regression (a private repository's report): a successor that is itself
         ``"yielded"`` (it opened its own handoff intent, never linked) is not
         terminal, so it still passes the terminal-successor guard above and
         gets activated -- but the pending handoff that made it yielded must
@@ -252,7 +252,7 @@ class TestTransitions:
     def test_link_succession_concluded_rejects_terminal_successor(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
-        """aperture-labs#7824 regression: the ``else`` branch must mirror
+        """Downstream regression (a private repository's report): the ``else`` branch must mirror
         ``link_handoff``'s terminal-successor guard -- never resurrect an
         explicitly ``"handed-off"``/``"concluded"`` successor and hand it
         head just because a manual-repair caller named it."""
@@ -454,7 +454,7 @@ class TestExactHandoffLedger:
     def test_yielded_session_can_reclaim_its_own_head_via_bind(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
-        """aperture-labs#7824 regression: a session whose own handoff intent
+        """Downstream regression (a private repository's report): a session whose own handoff intent
         was never formally linked to a successor ("yielded" -- itself a
         normal, expected state) must be able to reclaim its own head by
         rebinding itself, with no supported CLI path required beforehand."""
@@ -489,7 +489,7 @@ class TestExactHandoffLedger:
     def test_older_yielded_session_cannot_steal_head_from_newer_yielded_lineage(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
-        """aperture-labs#7824 regression: mirrors `cancel_handoff`'s
+        """Downstream regression (a private repository's report): mirrors `cancel_handoff`'s
         `predecessor_is_latest_head` guard. `resolved_head_session` hides
         EVERY yielded session, so without checking the raw latest head
         transition, an older yielded session could rebind and silently steal
@@ -1162,3 +1162,121 @@ class TestListSessionsEnvelopeHead:
         assert captured["sessions"][0]["interface"] == "unknown"
         assert captured["sessions"][0]["origin"] == "unknown"
         assert captured["sessions"][0]["provenance_conflict"] is True
+
+
+class TestDeadHeadReclaim:
+    """A head whose Copilot is gone never blocks the session running here."""
+
+    @staticmethod
+    def _dead(monkeypatch, *dead: str) -> None:
+        from agent_worktrees import tracking_session_registration_write as w
+
+        monkeypatch.setattr(w, "head_is_provably_dead", lambda sid: sid in dead)
+
+    def test_a_resumed_session_takes_over_a_dead_head(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        tracking.register_session("wt-1", "new")
+        assert load_record(tmp_tracking_dir / "wt-1.yaml").resolved_head_session == "old"
+        self._dead(monkeypatch, "old")
+        tracking.register_session("wt-1", "new")  # its resume's sessionStart
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.resolved_head_session == "new"
+        assert rec.replayed_head_transition.reason == "reclaim"
+
+    def test_a_live_head_is_never_displaced(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        tracking.register_session("wt-1", "new")
+        self._dead(monkeypatch)  # nothing is dead
+        tracking.register_session("wt-1", "new")
+        tracking.register_session("wt-1", "new", source="bind")
+        assert load_record(tmp_tracking_dir / "wt-1.yaml").resolved_head_session == "old"
+
+    def test_a_new_session_claims_a_dead_head(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        self._dead(monkeypatch, "old")
+        tracking.register_session("wt-1", "fresh")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.resolved_head_session == "fresh"
+        assert rec.replayed_head_transition.reason == "reclaim"
+
+    def test_bind_revives_a_handed_off_session_over_a_dead_head(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """The operator resumes an earlier orchestrator after a wrong
+        successor took the head and then died: the explicit bind wins."""
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "orchestrator")
+        tracking.register_session("wt-1", "stray")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        link_succession(rec, "orchestrator", "stray")
+        self._dead(monkeypatch, "stray")
+        tracking.register_session("wt-1", "orchestrator", source="bind")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.resolved_head_session == "orchestrator"
+        assert rec.session_entry("orchestrator").state == "active"
+
+    def test_a_resumed_handed_off_orchestrator_reclaims_at_session_start(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """No explicit bind needed: the original orchestrator's own resume
+        (its sessionStart registration) takes back a dead successor's head."""
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "orchestrator")
+        tracking.register_session("wt-1", "stray")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        link_succession(rec, "orchestrator", "stray")
+        self._dead(monkeypatch, "stray")
+        tracking.register_session("wt-1", "orchestrator")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.resolved_head_session == "orchestrator"
+        assert rec.replayed_head_transition.reason == "reclaim"
+
+    @pytest.mark.parametrize("states, expected", [
+        ([False], "dead"),  # its process is provably gone (or the PID was reused)
+        ([], "dead"),  # no lock left at all
+        ([True], "live"),
+        ([None], "unknown"),  # access denied / no process probe on this platform
+        ([False, None], "unknown"),
+        ([False, True], "live"),
+    ])
+    def test_session_liveness_only_says_dead_on_proof(self, tmp_path, monkeypatch, states, expected):
+        from agent_worktrees import session_liveness as sl
+        from agent_worktrees import sessions
+        from agent_worktrees.tracking_session_registration_write import head_is_provably_dead
+
+        monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
+        (tmp_path / "s1").mkdir()
+        answers = {}
+        for i, state in enumerate(states):
+            pid = 1000 + i
+            (tmp_path / "s1" / f"inuse.{pid}.lock").write_text("")
+            answers[pid] = state
+        monkeypatch.setattr(sl, "copilot_pid_state", lambda pid: answers[pid])
+        assert sl.session_liveness("s1") == expected
+        assert head_is_provably_dead("s1") is (expected == "dead")
+        assert sl.session_liveness("elsewhere") == "unknown"  # not on this machine
+        assert sl.session_liveness(None) == "unknown"
+
+    def test_an_unreadable_session_directory_is_unknown_never_dead(self, tmp_path, monkeypatch):
+        from agent_worktrees import session_liveness as sl
+        from agent_worktrees import sessions
+        from agent_worktrees.tracking_session_registration_write import head_is_provably_dead
+
+        monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
+        (tmp_path / "s1").mkdir()
+
+        def _denied(path):
+            raise PermissionError(13, "Access is denied", str(path))
+
+        monkeypatch.setattr(sl.os, "scandir", _denied)
+        assert sl.session_liveness("s1") == "unknown"
+        assert head_is_provably_dead("s1") is False

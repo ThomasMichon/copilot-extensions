@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import tempfile
+
 import pytest
 
+from agent_dispatch import payload
 from agent_dispatch.payload import BLOB_PREFIX, PayloadStore, is_blob_ref
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
@@ -33,6 +36,24 @@ def test_content_addressed_dedup(store):
 
 def test_distinct_content_distinct_refs(store):
     assert store.put("a") != store.put("b")
+
+
+def test_put_uses_exclusive_tempfile_creation(store, monkeypatch):
+    calls: list[tuple[str, str, str]] = []
+    original = tempfile.mkstemp
+
+    def fake_mkstemp(*, dir: str, prefix: str, suffix: str, text: bool = False):
+        calls.append((dir, prefix, suffix))
+        return original(dir=dir, prefix=prefix, suffix=suffix, text=text)
+
+    monkeypatch.setattr(payload.tempfile, "mkstemp", fake_mkstemp)
+
+    ref = store.put("same content")
+
+    assert is_blob_ref(ref)
+    assert calls
+    assert calls[0][0] == str(store.root)
+    assert calls[0][2] == ".tmp"
 
 
 def test_has_and_missing(store):

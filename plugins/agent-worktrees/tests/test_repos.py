@@ -167,6 +167,47 @@ def test_add_repo_no_agent_preserved_on_reregister(home: Path):
 
 
 # ---------------------------------------------------------------------------
+# visibility (audience-exposure tier)
+# ---------------------------------------------------------------------------
+
+def test_normalize_visibility_accepts_known_tiers():
+    assert repos.normalize_visibility("public") == "public"
+    assert repos.normalize_visibility("Internal") == "internal"
+    assert repos.normalize_visibility("PRIVATE") == "private"
+
+
+def test_normalize_visibility_rejects_unknown():
+    assert repos.normalize_visibility("secret") == ""
+    assert repos.normalize_visibility(None) == ""
+    assert repos.normalize_visibility("") == ""
+
+
+def test_add_repo_persists_visibility(home: Path):
+    repos.add_repo("r", "D:/Src/r", repo_class="worktree", visibility="public",
+                   plat="windows")
+    assert repos.find_repo("r").visibility == "public"
+
+
+def test_add_repo_visibility_roundtrips_through_registry(home: Path):
+    repos.add_repo("r", "D:/Src/r", repo_class="worktree", visibility="internal",
+                   plat="windows")
+    # Re-read from disk (not just the in-memory entry) to prove persistence.
+    reloaded = repos.find_repo("r")
+    assert reloaded.visibility == "internal"
+
+
+def test_add_repo_visibility_unset_by_default(home: Path):
+    repos.add_repo("r", "D:/Src/r", repo_class="worktree", plat="windows")
+    assert repos.find_repo("r").visibility == ""
+
+
+def test_add_repo_ignores_invalid_visibility(home: Path):
+    repos.add_repo("r", "D:/Src/r", repo_class="worktree", visibility="bogus",
+                   plat="windows")
+    assert repos.find_repo("r").visibility == ""
+
+
+# ---------------------------------------------------------------------------
 # add_repo merge semantics
 # ---------------------------------------------------------------------------
 
@@ -1284,6 +1325,67 @@ def test_add_repo_cli_explicit_flag_wins_over_inrepo_declaration(
     entry = repos.find_repo("some-other-repo")
     assert entry is not None
     assert entry.default_branch == "release"
+
+
+def test_add_repo_cli_accepts_visibility_flag(home: Path, tmp_path: Path):
+    from agent_worktrees import repos_cli
+
+    repo = tmp_path / "pub-repo"
+    repo.mkdir()
+    rc = repos_cli.cmd_repos_dispatch(
+        ["add", "pub-repo", str(repo), "--visibility", "public"]
+    )
+    assert rc == 0
+    assert repos.find_repo("pub-repo").visibility == "public"
+
+
+def test_add_repo_cli_rejects_invalid_visibility(home: Path, tmp_path: Path):
+    from agent_worktrees import repos_cli
+
+    repo = tmp_path / "bogus-repo"
+    repo.mkdir()
+    rc = repos_cli.cmd_repos_dispatch(
+        ["add", "bogus-repo", str(repo), "--visibility", "bogus"]
+    )
+    assert rc == 1
+    assert repos.find_repo("bogus-repo") is None
+
+
+def test_add_repo_cli_rejects_missing_visibility_value(home: Path, tmp_path: Path):
+    from agent_worktrees import repos_cli
+
+    repo = tmp_path / "missing-value-repo"
+    repo.mkdir()
+    rc = repos_cli.cmd_repos_dispatch(
+        ["add", "missing-value-repo", str(repo), "--visibility"]
+    )
+    assert rc == 1
+    assert repos.find_repo("missing-value-repo") is None
+
+
+def test_repos_set_visibility_cli(home: Path):
+    from agent_worktrees import repos_cli
+
+    repos.add_repo("r", "D:/Src/r", repo_class="worktree", plat="windows")
+    rc = repos_cli.cmd_repos_dispatch(["set-visibility", "r", "public"])
+    assert rc == 0
+    assert repos.find_repo("r").visibility == "public"
+
+
+def test_repos_set_visibility_cli_rejects_unknown_tier(home: Path):
+    from agent_worktrees import repos_cli
+
+    repos.add_repo("r", "D:/Src/r", repo_class="worktree", plat="windows")
+    rc = repos_cli.cmd_repos_dispatch(["set-visibility", "r", "bogus"])
+    assert rc == 1
+    assert repos.find_repo("r").visibility == ""
+
+
+def test_repos_set_visibility_cli_unknown_repo(home: Path):
+    from agent_worktrees import repos_cli
+
+    rc = repos_cli.cmd_repos_dispatch(["set-visibility", "nope", "public"])
+    assert rc == 1
 
 
 def test_sync_all_filters_to_named_repos_only(home: Path, tmp_path: Path):

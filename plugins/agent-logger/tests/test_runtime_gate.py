@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import venv
 from pathlib import Path
 
@@ -30,24 +31,23 @@ def _copy_payload(tmp_path: Path, name: str) -> Path:
 
 
 def _site_packages(interpreter: Path) -> Path:
-    result = subprocess.run(
-        [
-            str(interpreter),
-            "-I",
-            "-X",
-            "utf8",
-            "-c",
-            (
-                "import site; print(next(p for p in site.getsitepackages() "
-                "if p.endswith(('site-packages','dist-packages'))))"
-            ),
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=True,
-    )
-    return Path(result.stdout.strip())
+    """Resolve a just-created venv's site-packages directory from its
+    on-disk layout, without spawning the venv's own interpreter to ask.
+
+    `venv.EnvBuilder.create()` always builds a venv matching the invoking
+    (current) process's own Python version -- never cross-version -- so
+    this process's own ``sys.version_info`` is authoritative for a venv
+    this test just created; there is no need to introspect the child
+    interpreter at all. This also avoids spawning a nested interpreter
+    from inside this suite's own coverage/pytest-cov-instrumented run,
+    which this helper must stay compatible with (see the
+    coverage-baseline collection harness,
+    `tools/coverage_guided_selection/baseline.py`).
+    """
+    slot = interpreter.parent.parent
+    if os.name == "nt":
+        return slot / "Lib" / "site-packages"
+    return slot / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
 
 
 def _write_module(path: Path, module_name: str) -> None:
@@ -76,6 +76,65 @@ def _write_module(path: Path, module_name: str) -> None:
     )
 
 
+def _base_interpreter() -> Path | None:
+    """Resolve the REAL, non-venv root interpreter backing this process.
+
+    Building the fake-runtime venv via `venv.EnvBuilder().create()` directly
+    in-process derives its `pyvenv.cfg` "home" from the CURRENT interpreter
+    -- fine when the current interpreter is already a real installation, but
+    this suite also runs under `uv run --with coverage ...`, which executes
+    pytest from inside UV'S OWN ephemeral venv. Creating a venv-of-a-venv
+    from Python 3.10 (which predates CPython's venv-of-venv fix, gh-84559 /
+    `sys._base_executable`, added in 3.11) resolves "home" to that ephemeral
+    venv's OWN directory rather than chasing through to the real interpreter
+    -- the new venv's own python binary then fails to even bootstrap
+    (`ModuleNotFoundError: No module named 'encodings'`) the moment anything
+    queries it in a fresh process, because its recorded base no longer
+    (or never correctly) points at a real stdlib.
+
+    `sys.base_exec_prefix` is unaffected by this gap -- unlike
+    `sys.executable`, it is always the real top-level installation prefix
+    reported by the running interpreter regardless of venv nesting depth,
+    pre- or post-3.11 alike. Build the venv by spawning THAT real
+    interpreter's own `-m venv` rather than calling `EnvBuilder.create()`
+    against whichever interpreter happens to be running this test, so the
+    created venv's "home" always chases back to a real, stable installation.
+    Returns ``None`` (never raises) when no candidate binary is found, so
+    callers can fall back to the simpler in-process path for interpreters
+    that are not venv-nested in the first place.
+
+    On Windows, the interpreter lives directly under the installation root
+    (``<prefix>\\python.exe``), not under a ``Scripts`` subdirectory (that
+    holds installed console-script shims, never the interpreter itself) --
+    both are searched, in that order, since some layouts still place it
+    there. On Windows a single installation prefix only ever holds one
+    Python version, so `python.exe` there is unambiguous.
+
+    On POSIX, only the exact-version-pinned binary name
+    (``python{major}.{minor}``) is accepted -- never the generic `python3`/
+    `python` aliases, which could resolve to a DIFFERENT installed version
+    sharing the same `bin/` directory (e.g. a system Python alongside a
+    pyenv-managed one). `_site_packages()` derives the created venv's
+    site-packages path from *this process's own* `sys.version_info`; a
+    version-mismatched base interpreter would silently break that
+    computation. Falling back to in-process `EnvBuilder` (see the caller)
+    is strictly safer than guessing at an unpinned alias.
+    """
+    base = Path(sys.base_exec_prefix)
+    if os.name == "nt":
+        candidates = ["python.exe"]
+        search_dirs = [base, base / "Scripts"]
+    else:
+        candidates = [f"python{sys.version_info.major}.{sys.version_info.minor}"]
+        search_dirs = [base / "bin"]
+    for bin_dir in search_dirs:
+        for name in candidates:
+            candidate = bin_dir / name
+            if candidate.is_file():
+                return candidate
+    return None
+
+
 def _fake_runtime(runtime_root: Path) -> Path:
     slot = runtime_root / "versions" / "9.9.9"
     interpreter = (
@@ -84,7 +143,17 @@ def _fake_runtime(runtime_root: Path) -> Path:
         else slot / "bin" / "python"
     )
     if not interpreter.is_file():
-        venv.EnvBuilder(with_pip=False).create(slot)
+        base_python = _base_interpreter()
+        if base_python is not None:
+            subprocess.run(
+                [str(base_python), "-m", "venv", "--without-pip", str(slot)],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=_clean_subprocess_env(),
+            )
+        else:
+            venv.EnvBuilder(with_pip=False).create(slot)
     site_packages = _site_packages(interpreter)
     package = site_packages / "agent_logger"
     if package.exists():
@@ -112,6 +181,28 @@ def _fake_runtime(runtime_root: Path) -> Path:
         encoding="utf-8",
     )
     return interpreter
+
+
+#: Environment variables that redirect a Python interpreter's own module/
+#: path resolution (PYTHONHOME in particular makes a different interpreter
+#: unable to even bootstrap its `encodings` module, fataling before it runs
+#: any code at all). Stripped from every subprocess env this suite builds
+#: for the *target* (fake-runtime) interpreter: this process's own ambient
+#: values describe this test suite's interpreter, never the payload's.
+_PYTHON_REDIRECT_ENV_VARS = (
+    "PYTHONHOME",
+    "PYTHONPATH",
+    "VIRTUAL_ENV",
+    "__PYVENV_LAUNCHER__",  # macOS: redirects venv interpreter selection too
+)
+
+
+def _clean_subprocess_env() -> dict[str, str]:
+    """`os.environ.copy()`, minus the vars in `_PYTHON_REDIRECT_ENV_VARS`."""
+    env = os.environ.copy()
+    for name in _PYTHON_REDIRECT_ENV_VARS:
+        env.pop(name, None)
+    return env
 
 
 def _write_gate_stubs(payload: Path) -> None:
@@ -243,7 +334,7 @@ def test_payload_dispatch_uses_cell_scoped_runtime(
     context.write_text("{}\n", encoding="utf-8")
     runtime = _fake_runtime(cell_root)
     capture = tmp_path / f"{shell}-{command}.json"
-    env = os.environ.copy()
+    env = _clean_subprocess_env()
     profile = tmp_path / f"profile-{shell}-{command}"
     profile.mkdir()
     env.update(
@@ -307,7 +398,7 @@ def test_two_namespaced_cells_keep_runtime_artifacts_separate(tmp_path: Path) ->
     profile = tmp_path / "profile"
     profile.mkdir()
 
-    env_a = os.environ.copy()
+    env_a = _clean_subprocess_env()
     env_a.update(
         {
             "HOME": str(profile),
@@ -330,7 +421,7 @@ def test_two_namespaced_cells_keep_runtime_artifacts_separate(tmp_path: Path) ->
             ),
         }
     )
-    env_b = os.environ.copy()
+    env_b = _clean_subprocess_env()
     env_b.update(
         {
             "HOME": str(profile),
@@ -383,7 +474,7 @@ def test_cross_cell_context_mismatch_is_rejected(tmp_path: Path, shell: str) -> 
     context = cell_root / "install.json"
     context.parent.mkdir(parents=True)
     context.write_text("{}\n", encoding="utf-8")
-    env = os.environ.copy()
+    env = _clean_subprocess_env()
     profile = tmp_path / f"profile-mismatch-{shell}"
     profile.mkdir()
     env.update(

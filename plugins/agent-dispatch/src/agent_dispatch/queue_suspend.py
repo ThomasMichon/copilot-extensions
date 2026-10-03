@@ -27,15 +27,29 @@ task's own current owner once the monitor is due.
 
 from __future__ import annotations
 
+import math
+import logging
+from collections.abc import Iterator
+
 from .monitors import DEFAULT_SUSPEND_COOLDOWN_SECONDS, MonitorKind, suspend_monitor_columns
 from .queue_common import (
     PROGRESS_SUMMARY_MAX,
     Task,
+    _TASK_BULK_SELECT,
     _check_expected_status,
     _clip,
     _task_transition_spec,
 )
 from .queue_records import Status, TaskError
+from .pr_observation_store import observation_store_path
+from .reviewer_loops import (
+    active_reviewer_loop_lifecycle_configs,
+    reviewer_loop_deadline,
+    reviewer_loop_lifecycle_for_task,
+    reviewer_loop_runtime_scope,
+)
+
+log = logging.getLogger("agent-dispatch.queue-suspend")
 
 
 class QueueSuspendMixin:
@@ -201,3 +215,112 @@ class QueueSuspendMixin:
                 continue
             resumed += 1
         return resumed
+
+    def reconcile_reviewer_deadlines(self, *, now: float | None = None) -> int:
+        """Wake suspended reviewer tasks once their stale deadline elapses."""
+        ts = self._now(now)
+        current_machine, current_env = reviewer_loop_runtime_scope()
+        registrations = active_reviewer_loop_lifecycle_configs(
+            self,
+            current_machine=current_machine,
+            current_env=current_env,
+        )
+        if not registrations:
+            return 0
+        resumed = 0
+        for task in self._iter_suspended_reviewer_candidates():
+            try:
+                if (
+                    not task.owner
+                    or not task.evaluator_ref
+                    or task.resume_requested
+                    or task.wake_status in {"pending", "delivering"}
+                ):
+                    continue
+                config = reviewer_loop_lifecycle_for_task(
+                    registrations,
+                    repo=task.repo,
+                    evaluator_ref=task.evaluator_ref,
+                )
+                if config is None or config.stale_after_days is None:
+                    continue
+                deadline = reviewer_loop_deadline(
+                    {
+                        "task": {
+                            "payload_inline": self.read_payload(task),
+                            "payload_ref": task.payload_ref,
+                        }
+                    },
+                    stale_after_days=config.stale_after_days,
+                    observation_store_path=observation_store_path(self.db_path),
+                )
+                if deadline is None or not math.isfinite(deadline) or deadline > ts:
+                    continue
+                wakes = [
+                    wake
+                    for wake in self.list_run_waiter_wakes(task.id)
+                    if wake.status in {"pending", "delivering"}
+                ]
+                if wakes:
+                    continue
+                message = (
+                    f"Task {task.id}'s reviewer stale deadline elapsed while it was "
+                    "suspended. Re-check the change and resolve it instead of leaving "
+                    "the review parked."
+                )
+                result = self.supersede_run_waiter_with_wake(
+                    task.id,
+                    reason="reviewer stale deadline elapsed",
+                    message=message,
+                    sender="agent-dispatch-reviewer-loop",
+                    now=ts,
+                )
+                if result is None:
+                    self.resume(
+                        task.id,
+                        task.owner,
+                        wake_requested=True,
+                        wake_message=message,
+                        now=ts,
+                    )
+            except TaskError:
+                continue
+            except Exception:
+                log.warning(
+                    "reviewer stale reconcile skipped task %s after data/read failure",
+                    task.id,
+                    exc_info=True,
+                )
+                continue
+            resumed += 1
+        return resumed
+
+    def _iter_suspended_reviewer_candidates(
+        self, *, batch_size: int = 500
+    ) -> Iterator[Task]:
+        cursor: tuple[float, str] | None = None
+        with self._connect() as conn:
+            while True:
+                params: list[object] = [Status.SUSPENDED, batch_size]
+                cursor_clause = ""
+                if cursor is not None:
+                    params = [Status.SUSPENDED, cursor[0], cursor[0], cursor[1], batch_size]
+                    cursor_clause = (
+                        " AND (created_at < ? OR (created_at = ? AND id < ?))"
+                    )
+                rows = conn.execute(
+                    f"SELECT {_TASK_BULK_SELECT} FROM tasks"
+                    " WHERE status = ? AND require_verification = 1"
+                    " AND evaluator_ref IS NOT NULL"
+                    f"{cursor_clause}"
+                    " ORDER BY created_at DESC, id DESC LIMIT ?",
+                    params,
+                ).fetchall()
+                if not rows:
+                    break
+                for row in rows:
+                    yield Task._from_row(row)
+                tail = rows[-1]
+                cursor = (float(tail["created_at"]), str(tail["id"]))
+                if len(rows) < batch_size:
+                    break

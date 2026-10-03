@@ -1738,6 +1738,86 @@ def test_sync_meta_bounds_deferred_file_samples(tmp_path: Path) -> None:
     )
 
 
+def test_heartbeat_sync_meta_preserves_fields_only_touching_timestamp(
+    tmp_path: Path,
+) -> None:
+    from agent_logger.sync import meta
+
+    meta.write_sync_meta(
+        tmp_path,
+        "machine",
+        "local",
+        "partial",
+        session_count=5,
+        deferred_files=[f"path-{i}" for i in range(20)],
+    )
+    before = meta.read_sync_meta(tmp_path)
+    assert before["consecutive_partial_count"] == 1
+    assert before["deferred_file_count"] == 20
+
+    meta.heartbeat_sync_meta(tmp_path, "machine", "local", fallback_session_count=5)
+    after = meta.read_sync_meta(tmp_path)
+
+    # Only the timestamp may change -- status/counts/samples untouched.
+    assert after["status"] == "partial"
+    assert after["consecutive_partial_count"] == 1
+    assert after["deferred_file_count"] == 20
+    assert after["session_count"] == 5
+    assert after["last_sync_utc"] != "" and after["last_sync_utc"] is not None
+
+
+def test_heartbeat_sync_meta_writes_fresh_when_nothing_exists(tmp_path: Path) -> None:
+    from agent_logger.sync import meta
+
+    meta.heartbeat_sync_meta(tmp_path, "machine", "local", fallback_session_count=3)
+    payload = meta.read_sync_meta(tmp_path)
+    assert payload is not None
+    assert payload["status"] == "ok"
+    assert payload["session_count"] == 3
+
+
+def test_heartbeat_sync_meta_preserves_unreadable_metadata(tmp_path: Path) -> None:
+    """A malformed/unreadable sync-meta.json is a visible error signal --
+    a no-op heartbeat must never paper over it with a fresh 'ok' status."""
+    from agent_logger.sync import meta
+
+    meta_file = tmp_path / "sync-meta.json"
+    meta_file.write_bytes(b"\xff" * (meta.MAX_SYNC_META_BYTES + 100))
+
+    meta.heartbeat_sync_meta(tmp_path, "machine", "local", fallback_session_count=1)
+
+    assert meta_file.read_bytes() == b"\xff" * (meta.MAX_SYNC_META_BYTES + 100)
+
+
+def test_filesystem_target_heartbeat_noop_for_missing_destination(
+    tmp_path: Path,
+) -> None:
+    """A deleted destination (never re-created by a heartbeat) must not get
+    a fresh 'ok' sync-meta.json -- that would mask the fact its sessions
+    are actually gone until the next full reconciliation."""
+    root = tmp_path / "hub"
+    target = LocalTarget({"path": str(root)})
+
+    target.heartbeat("machine")  # root doesn't exist at all yet
+
+    assert not (root / "machine").exists()
+
+
+def test_filesystem_target_heartbeat_refreshes_existing_destination(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "hub"
+    target = LocalTarget({"path": str(root)})
+    src = _make_source(tmp_path)
+    assert target.push(src, "machine").ok
+
+    target.heartbeat("machine")
+    from agent_logger.sync import meta
+
+    payload = meta.read_sync_meta(root / "machine")
+    assert payload is not None
+
+
 def test_sync_meta_tracks_and_resets_consecutive_partial_count(
     tmp_path: Path,
 ) -> None:
@@ -2129,6 +2209,313 @@ def test_engine_dry_run_makes_no_dest(tmp_path: Path) -> None:
     cfg = _cfg(tmp_path / "home", src, dest)
     assert engine.run_sync(cfg, dry_run=True) == 0
     assert not dest.exists()
+
+
+def test_engine_run_sync_second_run_skips_push_when_unchanged(
+    monkeypatch, capsys, tmp_path: Path,
+) -> None:
+    """Change tracking is enabled by default: after a first (full) sync, a
+    second run with no local changes must not invoke the target's push at
+    all."""
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg) == 0
+    capsys.readouterr()
+
+    calls: list[object] = []
+    real_push = LocalTarget.push
+
+    def _tracking_push(self, *a, **k):
+        calls.append((a, k))
+        return real_push(self, *a, **k)
+
+    monkeypatch.setattr(LocalTarget, "push", _tracking_push)
+
+    assert engine.run_sync(cfg, verbose=True) == 0
+    assert calls == []
+    assert "no session changes detected" in capsys.readouterr().out
+
+
+def test_engine_run_sync_repushes_modified_session(tmp_path: Path) -> None:
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg) == 0
+    (src / "session-state" / "abc-123" / "events.jsonl").write_text(
+        '{"ts": 2}\n', encoding="utf-8"
+    )
+
+    assert engine.run_sync(cfg) == 0
+    machine_dir = next(dest.iterdir())
+    assert (
+        machine_dir / "session-state" / "abc-123" / "events.jsonl"
+    ).read_text(encoding="utf-8") == '{"ts": 2}\n'
+
+
+def test_engine_run_sync_full_flag_forces_reconciliation_detail(
+    capsys, tmp_path: Path,
+) -> None:
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg) == 0
+    capsys.readouterr()
+
+    assert engine.run_sync(cfg, full=True) == 0
+    assert "full reconciliation" in capsys.readouterr().out
+
+
+def test_engine_run_sync_change_tracking_disabled_pushes_every_run(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """``sync.change_tracking.enabled: false`` restores the pre-feature
+    behavior: every run pushes via the plain ``include`` set, with no
+    incremental skip and no segmented batching."""
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+    cfg._data["sync"]["change_tracking"] = {"enabled": False}
+
+    calls: list[object] = []
+    real_push = LocalTarget.push
+
+    def _tracking_push(self, *a, **k):
+        calls.append((a, k))
+        return real_push(self, *a, **k)
+
+    monkeypatch.setattr(LocalTarget, "push", _tracking_push)
+
+    assert engine.run_sync(cfg) == 0
+    assert len(calls) == 1
+    assert calls[0][0][-1] is None  # include=None, the legacy single-call shape
+
+    assert engine.run_sync(cfg) == 0
+    assert len(calls) == 2
+
+
+def test_engine_run_sync_batches_full_reconciliation(tmp_path: Path) -> None:
+    """A from-scratch full sync with more sessions than ``batch_size`` must
+    still land every session, split across multiple bounded pushes."""
+    src = tmp_path / "copilot"
+    for i in range(5):
+        sess = src / "session-state" / f"sess-{i}"
+        sess.mkdir(parents=True)
+        (sess / "events.jsonl").write_text(f'{{"ts": {i}}}\n', encoding="utf-8")
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+    cfg._data["sync"]["change_tracking"] = {"batch_size": 2}
+
+    assert engine.run_sync(cfg, verbose=True) == 0
+    machine_dir = next(dest.iterdir())
+    for i in range(5):
+        assert (
+            machine_dir / "session-state" / f"sess-{i}" / "events.jsonl"
+        ).is_file()
+
+
+def test_engine_run_sync_forgets_vanished_session_on_full_sync(
+    tmp_path: Path,
+) -> None:
+    import shutil
+
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg) == 0
+
+    from agent_logger.sync.change_tracker import ChangeTracker, resolve_db_path
+
+    tracker = ChangeTracker(resolve_db_path(cfg.sync_change_tracking["db_path"], cfg.home))
+    assert tracker.known_session_ids() == {"abc-123"}
+
+    shutil.rmtree(src / "session-state" / "abc-123")
+    assert engine.run_sync(cfg, full=True) == 0
+    assert tracker.known_session_ids() == set()
+
+
+def test_engine_run_sync_forces_full_when_destination_target_changes(
+    tmp_path: Path,
+) -> None:
+    """Changing the sync target/path after the tracker has already recorded
+    signatures against the old one must trigger a fresh full reconciliation,
+    not silently skip pushing to the new destination."""
+    src = _make_source(tmp_path)
+    dest_a = tmp_path / "dest-a"
+    cfg = _cfg(tmp_path / "home", src, dest_a)
+
+    assert engine.run_sync(cfg) == 0
+    assert (dest_a / next(dest_a.iterdir()).name / "session-state" / "abc-123").is_dir()
+
+    dest_b = tmp_path / "dest-b"
+    cfg._data["sync"]["targets"]["local"]["path"] = str(dest_b)
+
+    assert engine.run_sync(cfg) == 0
+    machine_dir = next(dest_b.iterdir())
+    assert (
+        machine_dir / "session-state" / "abc-123" / "events.jsonl"
+    ).is_file()
+
+
+def test_engine_run_sync_heartbeats_destination_on_no_change_skip(
+    tmp_path: Path,
+) -> None:
+    """A skipped (no-change) push must still refresh the destination's own
+    health metadata, or a routine health check reports a perfectly healthy,
+    unchanged destination as stale between full-reconciliation passes."""
+    from agent_logger.sync import meta
+
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg) == 0
+    machine_dir = next(dest.iterdir())
+    first_meta = meta.read_sync_meta(machine_dir)
+    assert first_meta is not None
+
+    import time as time_module
+
+    time_module.sleep(1.1)
+    assert engine.run_sync(cfg) == 0
+    second_meta = meta.read_sync_meta(machine_dir)
+    assert second_meta is not None
+    assert second_meta["last_sync_utc"] != first_meta["last_sync_utc"]
+
+
+def test_engine_run_sync_preserves_index_for_unfiltered_incremental_push(
+    tmp_path: Path,
+) -> None:
+    """An unfiltered incremental/segmented push must still eventually
+    refresh the global session-store.db index, even though any one call
+    only carries a transport-size batch of sessions."""
+    src = _make_source(tmp_path)
+    (src / "session-store.db").write_text("index-v1", encoding="utf-8")
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg) == 0
+    machine_dir = next(dest.iterdir())
+    assert (machine_dir / "session-store.db").read_text(encoding="utf-8") == "index-v1"
+
+    (src / "session-store.db").write_text("index-v2", encoding="utf-8")
+    (src / "session-state" / "abc-123" / "events.jsonl").write_text(
+        '{"ts": 2}\n', encoding="utf-8"
+    )
+    assert engine.run_sync(cfg) == 0
+    assert (machine_dir / "session-store.db").read_text(encoding="utf-8") == "index-v2"
+
+
+def test_engine_run_sync_pushes_index_only_change_with_no_session_changes(
+    tmp_path: Path,
+) -> None:
+    """An index-only change (no individual session touched) must still be
+    detected and pushed on the next incremental run, not silently skipped."""
+    src = _make_source(tmp_path)
+    (src / "session-store.db").write_text("index-v1", encoding="utf-8")
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg) == 0
+    machine_dir = next(dest.iterdir())
+    assert (machine_dir / "session-store.db").read_text(encoding="utf-8") == "index-v1"
+
+    (src / "session-store.db").write_text("index-v2-only", encoding="utf-8")
+    assert engine.run_sync(cfg) == 0
+    assert (
+        machine_dir / "session-store.db"
+    ).read_text(encoding="utf-8") == "index-v2-only"
+
+
+def test_engine_run_sync_full_pushes_index_only_source_with_no_sessions(
+    tmp_path: Path,
+) -> None:
+    """A full reconciliation must still carry an index-only source (zero
+    session directories) -- an empty batch list must not skip the index."""
+    src = tmp_path / "copilot"
+    src.mkdir()
+    (src / "session-store.db").write_text("index-only", encoding="utf-8")
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg, full=True) == 0
+    machine_dir = next(dest.iterdir())
+    assert (
+        machine_dir / "session-store.db"
+    ).read_text(encoding="utf-8") == "index-only"
+
+
+def test_engine_run_sync_resets_stale_signatures_on_identity_change(
+    tmp_path: Path,
+) -> None:
+    """A session unchanged since it was last synced to destination A must
+    still be pushed to a NEW destination B -- its stale, content-only
+    signature from A must not fool B's incremental check into skipping it."""
+    src = tmp_path / "copilot"
+    for name in ("x", "y"):
+        sess = src / "session-state" / name
+        sess.mkdir(parents=True)
+        (sess / "events.jsonl").write_text(f'{{"id": "{name}"}}\n', encoding="utf-8")
+    dest_a = tmp_path / "dest-a"
+    cfg = _cfg(tmp_path / "home", src, dest_a)
+    cfg._data["sync"]["repo_allowlist"] = []
+
+    assert engine.run_sync(cfg) == 0
+    assert (dest_a / next(dest_a.iterdir()).name / "session-state" / "y").is_dir()
+
+    dest_b = tmp_path / "dest-b"
+    cfg._data["sync"]["targets"]["local"]["path"] = str(dest_b)
+
+    # y's content never changes -- only the destination does.
+    assert engine.run_sync(cfg) == 0
+    machine_dir = next(dest_b.iterdir())
+    assert (machine_dir / "session-state" / "x").is_dir()
+    assert (machine_dir / "session-state" / "y").is_dir()
+
+
+def test_engine_run_sync_does_not_record_deferred_session_signature(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """A session with a deferred (locked) file during the push must not be
+    recorded as synced -- it must still show up as changed next run."""
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    from agent_logger.sync.targets.base import PushResult
+
+    real_push = LocalTarget.push
+    calls: list[set] = []
+
+    def _deferring_push(self, source, machine, include_sessions=None, *, batch_mode=False):
+        result = real_push(
+            self, source, machine, include_sessions, batch_mode=batch_mode
+        )
+        calls.append(include_sessions)
+        if len(calls) == 1:
+            return PushResult(
+                ok=True,
+                detail=result.detail,
+                file_count=result.file_count,
+                deferred_sessions=("abc-123",),
+            )
+        return result
+
+    monkeypatch.setattr(LocalTarget, "push", _deferring_push)
+
+    assert engine.run_sync(cfg) == 0  # first (full) pass "defers" abc-123
+
+    from agent_logger.sync.change_tracker import ChangeTracker, resolve_db_path
+
+    tracker = ChangeTracker(resolve_db_path(cfg.sync_change_tracking["db_path"], cfg.home))
+    assert tracker.changed_sessions(src) == {"abc-123"}
+
+    assert engine.run_sync(cfg) == 0  # second pass retries it, this time clean
+    assert tracker.changed_sessions(src) == set()
 
 
 def test_hub_compaction_fails_closed_when_tracked_lookup_unresolved(

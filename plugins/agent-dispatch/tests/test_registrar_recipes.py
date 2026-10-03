@@ -319,6 +319,443 @@ def test_resolve_extends_only_uses_scalar_overrides_for_substitution(tmp_path):
     assert resolved["spec"]["command"] == ["{forge}"]
 
 
+# -- resolve_extends: chaining (extend any already-resolved declaration) ------
+
+def test_resolve_extends_resolves_a_two_hop_chain(tmp_path, monkeypatch):
+    """A declaration may extend a repo-local recipe that itself extends a
+    `global:` recipe -- any already-resolved declaration is a valid base,
+    not only a named recipe directly."""
+    monkeypatch.setitem(
+        GLOBAL_RECIPES, "chain-fixture", {"kind": "supervised-lane", "owner": "global-owner"}
+    )
+    recipe_dir = tmp_path / "recipes"
+    recipe_dir.mkdir()
+    (recipe_dir / "mid.json").write_text(
+        json.dumps({"extends": "global:chain-fixture", "labels": ["mid-label"]}),
+        encoding="utf-8",
+    )
+    data = {"extends": "./recipes/mid.json", "name": "leaf"}
+
+    resolved = resolve_extends(data, base_dir=tmp_path)
+
+    assert "extends" not in resolved
+    assert resolved == {
+        "kind": "supervised-lane",
+        "owner": "global-owner",
+        "labels": ["mid-label"],
+        "name": "leaf",
+    }
+
+
+def test_resolve_extends_resolves_a_three_hop_chain_with_overrides_at_each_hop(
+    tmp_path,
+):
+    """Each hop's own override fields deep-merge in order -- the closest
+    (outermost) override wins on conflict, matching the single-hop
+    contract applied repeatedly."""
+    recipe_dir = tmp_path / "recipes"
+    recipe_dir.mkdir()
+    (recipe_dir / "root.json").write_text(
+        json.dumps({"kind": "supervised-lane", "owner": "root-owner", "concurrency": 1}),
+        encoding="utf-8",
+    )
+    (recipe_dir / "mid.json").write_text(
+        json.dumps(
+            {"extends": "./root.json", "owner": "mid-owner", "labels": ["mid"]}
+        ),
+        encoding="utf-8",
+    )
+    data = {"extends": "./recipes/mid.json", "owner": "leaf-owner"}
+
+    resolved = resolve_extends(data, base_dir=tmp_path)
+
+    assert resolved == {
+        "kind": "supervised-lane",
+        "owner": "leaf-owner",
+        "concurrency": 1,
+        "labels": ["mid"],
+    }
+
+
+def test_resolve_extends_chain_fills_placeholders_at_each_hop_in_order(tmp_path):
+    """Placeholder substitution isn't only a single-hop concern: an
+    intermediate hop and the leaf may each fill a *different* placeholder
+    in the root template, and recursive ordering must still apply each
+    hop's own scalar overrides before that hop's own merge runs."""
+    recipe_dir = tmp_path / "recipes"
+    recipe_dir.mkdir()
+    (recipe_dir / "root.json").write_text(
+        json.dumps(
+            {"kind": "emitter", "spec": {"command": ["review", "{repo}", "{reviewer}"]}}
+        ),
+        encoding="utf-8",
+    )
+    # mid.json extends root.json and fills {reviewer} from its own override
+    # -- {repo} is deliberately left for the leaf declaration to fill.
+    (recipe_dir / "mid.json").write_text(
+        json.dumps({"extends": "./root.json", "reviewer": "standing-bot"}),
+        encoding="utf-8",
+    )
+    data = {"extends": "./recipes/mid.json", "repo": "owner/name"}
+
+    resolved = resolve_extends(data, base_dir=tmp_path)
+
+    assert resolved["spec"]["command"] == ["review", "owner/name", "standing-bot"]
+
+
+def test_resolve_extends_chain_hop_resolves_nested_ref_against_its_own_directory(
+    tmp_path,
+):
+    """A cross-repo base's own repo-relative `extends:` ref must resolve
+    against **its own** directory, never the directory of whatever repo is
+    extending it -- the literal bug a single shared `base_dir` across every
+    hop would reproduce."""
+    repo_a = tmp_path / "repo-a"
+    repo_b = tmp_path / "repo-b"
+    repo_a.mkdir()
+    repo_b.mkdir()
+    # repo-b's own base.json -- only reachable relative to repo-b itself.
+    (repo_b / "base.json").write_text(
+        json.dumps({"kind": "supervised-lane", "owner": "repo-b-owner"}),
+        encoding="utf-8",
+    )
+    # repo-b's mid.json, extended cross-repo from repo-a, names a
+    # repo-relative ref that only resolves correctly against repo-b's own
+    # directory.
+    (repo_b / "mid.json").write_text(
+        json.dumps({"extends": "./base.json", "labels": ["from-repo-b"]}),
+        encoding="utf-8",
+    )
+    # A same-named decoy in repo-a: if the nested ref incorrectly resolved
+    # against repo-a (the *extending* repo's base_dir) instead of repo-b
+    # (mid.json's own directory), this decoy would be picked up instead,
+    # and the test would observe the wrong owner.
+    (repo_a / "base.json").write_text(
+        json.dumps({"kind": "supervised-lane", "owner": "WRONG-repo-a-decoy"}),
+        encoding="utf-8",
+    )
+    data = {"extends": str(repo_b / "mid.json")}
+
+    resolved = resolve_extends(data, base_dir=repo_a)
+
+    assert resolved == {
+        "kind": "supervised-lane",
+        "owner": "repo-b-owner",
+        "labels": ["from-repo-b"],
+    }
+
+
+def test_resolve_extends_global_chain_hop_resolves_against_plugin_payload_root(
+    tmp_path, monkeypatch
+):
+    """A `global:` recipe's own nested repo-relative `extends:` ref has no
+    on-disk file backing the `global:` ref itself to derive a directory
+    from -- it must resolve against the plugin's own attributed payload
+    root (`COPILOT_PLUGIN_ROOT`), never this module's own Python package
+    directory (several levels below the actual payload root)."""
+    plugin_root = tmp_path / "attributed-plugin-root"
+    plugin_root.mkdir()
+    (plugin_root / "nested-base.json").write_text(
+        json.dumps({"kind": "supervised-lane", "owner": "plugin-root-owner"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(
+        GLOBAL_RECIPES,
+        "nested-ref-fixture",
+        {"extends": "./nested-base.json", "labels": ["from-global"]},
+    )
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(plugin_root))
+
+    resolved = resolve_extends(
+        {"extends": "global:nested-ref-fixture"}, base_dir=tmp_path / "unrelated"
+    )
+
+    assert resolved == {
+        "kind": "supervised-lane",
+        "owner": "plugin-root-owner",
+        "labels": ["from-global"],
+    }
+
+
+def test_resolve_extends_rejects_a_cyclic_chain(tmp_path):
+    """A → B → A must raise a clear `RegistrarError` naming the chain,
+    never recurse forever / raise a bare `RecursionError`."""
+    recipe_dir = tmp_path / "recipes"
+    recipe_dir.mkdir()
+    a_path = recipe_dir / "a.json"
+    b_path = recipe_dir / "b.json"
+    a_path.write_text(json.dumps({"extends": "./b.json"}), encoding="utf-8")
+    b_path.write_text(json.dumps({"extends": "./a.json"}), encoding="utf-8")
+
+    with pytest.raises(RegistrarError, match="cyclic reference chain") as excinfo:
+        resolve_extends({"extends": "./recipes/a.json"}, base_dir=tmp_path)
+
+    # Lock down the diagnostic contract: the error must name the actual
+    # offending chain (a -> b -> a), not just a generic "cyclic" prefix --
+    # an implementation that stopped naming the refs would still match the
+    # loose "cyclic reference chain" pattern above but silently regress
+    # this.
+    message = str(excinfo.value)
+    assert str(a_path.resolve()) in message
+    assert str(b_path.resolve()) in message
+    assert message.index(str(a_path.resolve())) < message.index(str(b_path.resolve()))
+    assert message.count(str(a_path.resolve())) == 2
+
+
+def test_resolve_extends_rejects_an_acyclic_chain_beyond_the_max_depth(tmp_path):
+    """A long but never-repeating chain must still raise a clear
+    `RegistrarError` once it exceeds the depth guard -- never exhaust the
+    Python recursion limit with a bare `RecursionError` that would abort
+    the entire plugin's declaration scan (`_classify_declaration` only
+    catches `RegistrarError`)."""
+    from agent_dispatch.registrar_recipes import _MAX_CHAIN_DEPTH
+
+    recipe_dir = tmp_path / "recipes"
+    recipe_dir.mkdir()
+    chain_length = _MAX_CHAIN_DEPTH + 5
+    for i in range(chain_length):
+        next_ref = f"./hop-{i + 1}.json" if i + 1 < chain_length else None
+        body = {"extends": next_ref} if next_ref else {"kind": "supervised-lane"}
+        (recipe_dir / f"hop-{i}.json").write_text(json.dumps(body), encoding="utf-8")
+
+    with pytest.raises(RegistrarError, match="exceeds the maximum depth"):
+        resolve_extends({"extends": "./recipes/hop-0.json"}, base_dir=tmp_path)
+
+
+def test_resolve_extends_canonicalizes_an_absolute_symlinked_ref(tmp_path):
+    """An absolute ref that is itself a symlink must canonicalize to its
+    real target before deriving the next hop's base directory -- otherwise
+    a nested relative ref inside the symlinked document would incorrectly
+    resolve against the symlink's own (wrong) directory instead of the
+    real file's directory."""
+    repo_real = tmp_path / "repo-real"
+    repo_real.mkdir()
+    (repo_real / "base.json").write_text(
+        json.dumps({"kind": "supervised-lane", "owner": "real-repo-owner"}),
+        encoding="utf-8",
+    )
+    (repo_real / "mid.json").write_text(
+        json.dumps({"extends": "./base.json", "labels": ["from-real-repo"]}),
+        encoding="utf-8",
+    )
+    symlink_dir = tmp_path / "symlinked-elsewhere"
+    symlink_path = symlink_dir.parent / "mid-symlink.json"
+    symlink_path.symlink_to(repo_real / "mid.json")
+
+    resolved = resolve_extends(
+        {"extends": str(symlink_path)}, base_dir=tmp_path / "unrelated"
+    )
+
+    assert resolved == {
+        "kind": "supervised-lane",
+        "owner": "real-repo-owner",
+        "labels": ["from-real-repo"],
+    }
+
+
+def test_resolve_extends_absolutizes_a_base_emitter_cwd_against_its_own_directory(
+    tmp_path,
+):
+    """A declaration extending an ordinary cross-repo emitter with a
+    relative `spec.cwd` must run that emitter rooted in *its own*
+    directory, not the extending declaration's directory --
+    `read_declaration_file_set`'s own downstream path-rebase only rebases
+    against the outermost (leaf) file, so this must already be absolute by
+    the time this function returns."""
+    repo_a = tmp_path / "repo-a"
+    repo_b = tmp_path / "repo-b"
+    repo_a.mkdir()
+    repo_b.mkdir()
+    (repo_b / "base.json").write_text(
+        json.dumps({"kind": "emitter", "spec": {"cwd": ".", "command": ["./run.sh"]}}),
+        encoding="utf-8",
+    )
+    data = {"extends": str(repo_b / "base.json")}
+
+    resolved = resolve_extends(data, base_dir=repo_a)
+
+    assert resolved["spec"]["cwd"] == str(repo_b.resolve())
+
+
+def test_resolve_extends_absolutizes_cwd_only_after_an_outer_placeholder_fills_it(
+    tmp_path,
+):
+    """A base emitter's `cwd` may itself be a `{placeholder}` an outer
+    override supplies (e.g. an absolute `workdir` parameter) -- this must
+    be recognized as already-absolute once filled, never joined onto the
+    base's own directory as if it were still relative text. Absolutizing
+    before placeholder substitution would corrupt an absolute value into
+    `<base-dir>/<absolute-value>`; absolutizing before resolving at all
+    would instead leave a literal unresolved `{workdir}` joined onto the
+    base directory."""
+    recipe_dir = tmp_path / "recipes"
+    recipe_dir.mkdir()
+    (recipe_dir / "base.json").write_text(
+        json.dumps({"kind": "emitter", "spec": {"cwd": "{workdir}", "command": ["x"]}}),
+        encoding="utf-8",
+    )
+    absolute_workdir = str((tmp_path / "actual-workdir").resolve())
+    data = {"extends": "./recipes/base.json", "workdir": absolute_workdir}
+
+    resolved = resolve_extends(data, base_dir=tmp_path)
+
+    assert resolved["spec"]["cwd"] == absolute_workdir
+
+
+def test_resolve_extends_leaves_a_still_unresolved_cwd_placeholder_untouched(
+    tmp_path,
+):
+    """A `cwd` placeholder this level's own overrides don't supply (left
+    for a still-further outer hop) must be left completely alone -- never
+    guessed at as a relative path segment and joined onto this hop's own
+    directory, which would silently corrupt it instead of leaving it for
+    the eventual outer fill."""
+    recipe_dir = tmp_path / "recipes"
+    recipe_dir.mkdir()
+    (recipe_dir / "base.json").write_text(
+        json.dumps({"kind": "emitter", "spec": {"cwd": "{workdir}", "command": ["x"]}}),
+        encoding="utf-8",
+    )
+    data = {"extends": "./recipes/base.json"}
+
+    resolved = resolve_extends(data, base_dir=tmp_path)
+
+    assert resolved["spec"]["cwd"] == "{workdir}"
+
+
+def test_resolve_extends_preserves_cwd_origin_across_an_unresolved_inheritance_hop(
+    tmp_path,
+):
+    """A `cwd` placeholder may survive more than one hop: a root template
+    sets `cwd: "{workdir}"`, an intermediate hop extends it without
+    supplying `workdir`, and only the leaf finally does. The eventual
+    absolutize must use the **root template's own directory** (where the
+    field was written), never the intermediate hop's directory, even
+    though the intermediate hop is the one whose own base_dir would
+    otherwise be used if origin weren't tracked across the gap."""
+    root_dir = tmp_path / "root"
+    mid_dir = tmp_path / "mid"
+    root_dir.mkdir()
+    mid_dir.mkdir()
+    (root_dir / "base.json").write_text(
+        json.dumps({"kind": "emitter", "spec": {"cwd": "{workdir}", "command": ["x"]}}),
+        encoding="utf-8",
+    )
+    # The intermediate hop extends root's base but supplies no `workdir` of
+    # its own -- the placeholder passes through it unresolved.
+    (mid_dir / "middle.json").write_text(
+        json.dumps({"extends": str(root_dir / "base.json")}),
+        encoding="utf-8",
+    )
+    # The leaf finally supplies workdir -- itself a *relative* value, so
+    # the bug this test catches (resolving against mid_dir instead of
+    # root_dir) would still produce a plausible-looking (but wrong) path.
+    data = {"extends": str(mid_dir / "middle.json"), "workdir": "relative-workdir"}
+
+    resolved = resolve_extends(data, base_dir=tmp_path)
+
+    assert resolved["spec"]["cwd"] == str((root_dir / "relative-workdir").resolve())
+
+
+def test_resolve_extends_an_override_cwd_resets_inherited_origin_tracking(tmp_path):
+    """A hop's own override `spec.cwd` -- not inherited from its base --
+    must win outright (ordinary deep-merge precedence) and must not be
+    second-guessed by a still-pending inherited origin from deeper in the
+    chain; that origin tracking only ever applies to the *inherited*
+    value, never to a hop's own explicit replacement."""
+    recipe_dir = tmp_path / "recipes"
+    recipe_dir.mkdir()
+    (recipe_dir / "base.json").write_text(
+        json.dumps({"kind": "emitter", "spec": {"cwd": "{workdir}", "command": ["x"]}}),
+        encoding="utf-8",
+    )
+    own_dir = tmp_path / "own-cwd-dir"
+    own_dir.mkdir()
+    data = {
+        "extends": "./recipes/base.json",
+        "spec": {"cwd": str(own_dir)},
+    }
+
+    resolved = resolve_extends(data, base_dir=tmp_path)
+
+    assert resolved["spec"]["cwd"] == str(own_dir)
+
+
+def test_resolve_extends_converts_a_resolve_runtime_error_to_a_registrar_error(
+    tmp_path, monkeypatch
+):
+    """`Path.resolve()` raises `RuntimeError` for a symlink loop on some
+    Python versions -- this must surface as a `RegistrarError` (what
+    `_classify_declaration` actually catches), never an uncaught
+    `RuntimeError` that would abort the entire plugin's declaration scan.
+    Mocked rather than relying on real symlink-loop detection, which is
+    slow and platform/filesystem-dependent to trigger deterministically."""
+    original_resolve = Path.resolve
+
+    def _raise_runtime_error(self, *args, **kwargs):
+        if self.name == "a.json":
+            raise RuntimeError("Symlink loop from 'a.json'")
+        return original_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", _raise_runtime_error)
+
+    with pytest.raises(RegistrarError, match="could not be resolved to a path"):
+        resolve_extends({"extends": str(tmp_path / "a.json")}, base_dir=tmp_path)
+
+
+def test_resolve_extends_converts_a_resolve_os_error_to_an_indeterminate_error(
+    tmp_path, monkeypatch
+):
+    """`Path.resolve()` raises `OSError` for a symlink loop on newer Python
+    versions -- this is a transient-condition classification (indeterminate,
+    like `_load_recipe_document`'s own `OSError` handling), not a hard
+    invalidation of the whole declaration."""
+    from agent_dispatch.registrar_discovery import RegistrarIndeterminateError
+
+    original_resolve = Path.resolve
+
+    def _raise_os_error(self, *args, **kwargs):
+        if self.name == "a.json":
+            raise OSError("Too many levels of symbolic links")
+        return original_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", _raise_os_error)
+
+    with pytest.raises(RegistrarIndeterminateError, match="could not resolve recipe ref"):
+        resolve_extends({"extends": str(tmp_path / "a.json")}, base_dir=tmp_path)
+
+
+def test_resolve_extends_can_extend_an_arbitrary_direct_declaration(tmp_path):
+    """The base need not be authored specifically as a "recipe template" --
+    any valid declaration document is a valid base, including one that was
+    first written as an ordinary direct (non-`extends:`) declaration."""
+    recipe_dir = tmp_path / "recipes"
+    recipe_dir.mkdir()
+    # A plain, ordinary direct declaration -- no `extends:`, no placeholders,
+    # written exactly as a real standalone profile would be.
+    (recipe_dir / "ordinary.json").write_text(
+        json.dumps(
+            {
+                "kind": "supervised-lane",
+                "name": "ordinary-lane",
+                "labels": ["ordinary"],
+                "concurrency": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    data = {"extends": "./recipes/ordinary.json", "name": "specialized-lane"}
+
+    resolved = resolve_extends(data, base_dir=tmp_path)
+
+    assert resolved == {
+        "kind": "supervised-lane",
+        "name": "specialized-lane",
+        "labels": ["ordinary"],
+        "concurrency": 2,
+    }
+
+
 def test_substitute_placeholders_rejects_a_self_referential_mapping():
     """A YAML document's self-referential alias (a mapping that -- directly
     or transitively -- contains itself) must fail loud with a

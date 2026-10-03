@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import subprocess
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -225,7 +226,12 @@ def _write_control_plane_provider_manifest(
 ) -> Path:
     path = _control_plane_provider_manifest_path(payload_dir, root=root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
+    # A unique per-writer temp name -- a concurrent repair (two
+    # worktree-manager instances independently detecting and fixing the
+    # same stale manifest) must not race on one shared ``.tmp`` file, where
+    # the loser's os.replace() would raise FileNotFoundError after the
+    # winner already moved it.
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     tmp.write_text(
         json.dumps(
             _expected_control_plane_provider_manifest(payload_dir, root=root),
@@ -317,13 +323,21 @@ def status(root: Path | None = None) -> SelfInstallStatus:
     )
 
 
-def needs_install(version: str, root: Path | None = None) -> bool:
+def _core_install_satisfied(version: str, root: Path | None = None) -> bool:
+    """Marker/slot/binstubs match ``version`` -- independent of the manifest."""
     r = root or default_root()
-    return not (
+    return (
         current_version(r) == version
         and version_slot(version, r).is_dir()
         and binstub_present() is not None
         and not _binstubs_are_stale()
+    )
+
+
+def needs_install(version: str, root: Path | None = None) -> bool:
+    r = root or default_root()
+    return not (
+        _core_install_satisfied(version, r)
         and not _control_plane_provider_manifest_is_stale(root=r)
     )
 
@@ -494,6 +508,87 @@ def _find_any_symlink(tree: Path) -> Path | None:
         if entry.is_symlink():
             return entry
     return None
+
+
+class _CutoverLockBusy(Exception):
+    """A genuinely concurrent cutover holds the mux-daemon lock right now."""
+
+
+def _acquire_install_cutover_lease(root: Path):
+    """The shared mux-daemon cutover lease, held for the WHOLE slot mutation
+    below (reap + :func:`_copy_payload`).
+
+    Raises :class:`_CutoverLockBusy` both when the lock is genuinely held by
+    a live concurrent cutover elsewhere, AND when the cutover machinery
+    itself fails to import: an import failure does not prove no older mux
+    daemon or concurrent cutover exists, so this fails CLOSED (defers the
+    install) rather than silently proceeding unprotected. Per
+    ``docs/patterns/graceful-daemon-cutover.md``'s "serialize cutover
+    attempts under one lease" rule, a caller that cannot establish the
+    lease must defer rather than mutate the slot unprotected -- releasing
+    the lease before ``_copy_payload`` runs (or skipping it on a busy
+    timeout or missing dependency) would reopen the exact race this
+    closes: a concurrent cutover's ``spawn_passive`` could stand a new
+    passive up inside the very slot ``_copy_payload`` is about to
+    ``rmtree``.
+    """
+    try:
+        from . import mux_daemon_cutover
+    except Exception as exc:  # surfaced to the caller as a defer, not swallowed
+        raise _CutoverLockBusy(
+            f"mux-daemon cutover machinery is unavailable for {root}: {exc}"
+        ) from exc
+    try:
+        lease = mux_daemon_cutover._acquire_cutover_lock(root, timeout_s=5.0)
+    except Exception as exc:  # surfaced to the caller as a defer, not swallowed
+        raise _CutoverLockBusy(
+            f"a concurrent mux-daemon cutover holds the lock for {root}: {exc}"
+        ) from exc
+    return lease, mux_daemon_cutover
+
+
+def _reap_stranded_cutover_passive(root: Path, mux_daemon_cutover) -> None:
+    """Best-effort: clear a passive mux-daemon stranded by an aborted cutover.
+
+    Must be called ONLY while the caller already holds the cutover lease
+    from :func:`_acquire_install_cutover_lease` for the same ``root`` --
+    this performs no locking of its own.
+
+    ``mux_daemon_cutover.spawn_passive`` spawns a new version's mux-daemon
+    with its ``cwd`` pinned INSIDE the version slot being cut over to, so it
+    can be health-checked before promotion. If the orchestrator driving that
+    cutover (``self_update()`` -> ``activate_after_update()``) dies before
+    the passive is ever promoted or terminated -- a crash, a killed
+    terminal, an interrupted upgrade -- the passive lingers indefinitely,
+    its open ``cwd`` handle preventing that slot from ever being deleted on
+    Windows (``WinError 32``).
+
+    ``activate_after_update()`` already reaps exactly this (via the durable
+    cutover breadcrumb + :func:`mux_daemon_cutover._reap_abandoned_passive`)
+    -- but only when IT runs. A bare ``self_install(dry_run=False)`` (the
+    ``self-install`` CLI command, or any retry after a crashed self-update)
+    calls :func:`_copy_payload` directly and never goes through that
+    recovery, so a stranded passive pinned inside the slot about to be
+    ``rmtree``'d is never cleared first, and the delete fails.
+
+    This reuses the SAME breadcrumb-driven reap (never a new cwd-hunting
+    mechanism -- that would need a new OS-specific dependency this
+    deliberately dependency-free installer does not carry). Deliberately
+    does NOT touch the breadcrumb file itself (no clearing, no rewriting):
+    the SAME breadcrumb may still name an ``old`` endpoint that a later,
+    full ``activate_after_update()`` -> ``recover_stale_cutover()`` needs to
+    undrain -- clearing it here, even after a successful reap, would
+    silently discard that other half of recovery. Leaving the file
+    untouched is always safe: a later real cutover re-reads it and finds
+    the reaped pid simply no longer alive (a clean no-op on its side).
+    """
+    try:
+        from zdd import breadcrumb
+
+        record = breadcrumb.read_breadcrumb(mux_daemon_cutover.routing_dir(root))
+        mux_daemon_cutover._reap_abandoned_passive(root, record)
+    except Exception:  # noqa: BLE001, S110 -- reap is best-effort, never fatal to install
+        pass
 
 
 def _copy_payload(payload_dir: Path, slot: Path) -> None:
@@ -727,21 +822,58 @@ def self_install(
     if not needs_install(version, r):
         return SelfInstallResult(version=version, action="already-current", root=str(r),
                                  slot=str(slot), marker=version, cleaned=cleaned)
+    if _core_install_satisfied(version, r):
+        # Only the manifest is stale -- repair it directly rather than
+        # falling through to the lease-guarded _copy_payload below, which
+        # would pointlessly rmtree + recopy an already-good (possibly
+        # in-use) version slot.
+        _write_control_plane_provider_manifest(pd, root=r)
+        return SelfInstallResult(
+            version=version, action="installed", root=str(r), slot=str(slot),
+            marker=version, cleaned=cleaned,
+        )
+    # Hold the cutover lease across BOTH the stale-passive reap AND
+    # _copy_payload itself -- releasing it in between (or skipping it on a
+    # busy timeout or missing dependency) would reopen the exact race this
+    # closes: a concurrent cutover's spawn_passive could stand a new
+    # passive up inside the very slot _copy_payload is about to rmtree. A
+    # genuinely busy lock, or an unavailable cutover machinery, means this
+    # cannot be proven safe; defer rather than mutate the slot unprotected
+    # (docs/patterns/graceful-daemon-cutover.md).
     try:
-        _copy_payload(pd, slot)
-    except RuntimeError as e:
-        # _materialize_payload_pointers() raises when a vendor-pointer copy
-        # inside the payload can't be resolved/expanded -- _copy_payload
-        # has already copytree'd the payload into slot by that point, so a
-        # bare re-raise would leave a partially-populated, broken slot on
-        # disk that a later needs_install() version-existence check could
-        # mistake for a valid install and skip retrying. Remove it so a
-        # retry starts clean, and report the failure rather than crashing
-        # the caller (self_update's own contract is best-effort/non-fatal).
-        if slot.exists():
-            shutil.rmtree(slot, ignore_errors=True)
+        lease, mux_daemon_cutover = _acquire_install_cutover_lease(r)
+    except _CutoverLockBusy as exc:
         return SelfInstallResult(version=version, action="error", root=str(r),
-                                 slot=str(slot), reason=str(e), cleaned=cleaned)
+                                 slot=str(slot), reason=str(exc), cleaned=cleaned)
+    try:
+        # Re-check under the lease: a concurrent self_install()/self_update()
+        # could have finished installing (and even activated) this EXACT
+        # version while this call was waiting to acquire it -- without this
+        # recheck, we would blindly rmtree + recopy a slot that is now the
+        # live, already-active install, racing whatever is currently running
+        # out of it. The lock-free check above only proves the version was
+        # needed at that point in time, not that it still is now.
+        if not needs_install(version, r):
+            return SelfInstallResult(version=version, action="already-current", root=str(r),
+                                     slot=str(slot), marker=version, cleaned=cleaned)
+        _reap_stranded_cutover_passive(r, mux_daemon_cutover)
+        try:
+            _copy_payload(pd, slot)
+        except RuntimeError as e:
+            # _materialize_payload_pointers() raises when a vendor-pointer copy
+            # inside the payload can't be resolved/expanded -- _copy_payload
+            # has already copytree'd the payload into slot by that point, so a
+            # bare re-raise would leave a partially-populated, broken slot on
+            # disk that a later needs_install() version-existence check could
+            # mistake for a valid install and skip retrying. Remove it so a
+            # retry starts clean, and report the failure rather than crashing
+            # the caller (self_update's own contract is best-effort/non-fatal).
+            if slot.exists():
+                shutil.rmtree(slot, ignore_errors=True)
+            return SelfInstallResult(version=version, action="error", root=str(r),
+                                     slot=str(slot), reason=str(e), cleaned=cleaned)
+    finally:
+        lease.release()
     stubs = _deploy_binstubs()
     _write_marker(r, version)  # publish last, so the marker only names a ready slot
     _write_control_plane_provider_manifest(pd, root=r)

@@ -23,6 +23,24 @@
   ],
   "group_field": "group",
   "empty_hint": "No active or recently-finished tasks for this machine.",
+  "create_action": {
+    "label": "New task\u2026",
+    "fields": [
+      {"name": "title", "type": "text"},
+      {"name": "prompt", "type": "textarea"},
+      {
+        "name": "criteria",
+        "type": "multichoice",
+        "options_command": ["agent-dispatch", "registrar", "vocabulary", "--dim", "task-type", "--json"],
+        "allow_other": true
+      }
+    ],
+    "run": [
+      "agent-dispatch", "create", "{field.title}",
+      "--prompt", "{field.prompt}",
+      "--criteria-json", "{field.criteria}"
+    ]
+  },
   "actions": [
     {
       "key": "steer",

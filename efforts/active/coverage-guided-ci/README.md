@@ -148,8 +148,10 @@ order.
       collection (needed to resolve `agent-ssh`'s own vendored
       dependencies, unlike the dependency-free `ai-attribution` Phase 0
       pilot) and uploads the resulting baseline as a build artifact.
-      Expanding to the remaining 8 plugins in this matrix is the next
-      increment, not yet done.
+      **Expanded to all remaining 8 plugins across several follow-up
+      increments; completed 2026-10-02 (latest Journal entry) with
+      `agent-dispatch`'s enrollment -- the full 9-plugin matrix now
+      produces a real baseline.**
 - [x] Publish baselines **atomically**: since `validate-and-promote.yml` runs
       per-plugin suites as separate matrix jobs (plus `worktree-manager`
       separately), never persist per-job coverage results directly as a
@@ -176,15 +178,44 @@ order.
       -- a stale/mis-targeted artifact can never be silently checked in.
 
 ### Phase 2 — Nearest-ancestor resolution + attribution remap/invalidate
-- [ ] Given an arbitrary fork-point commit, resolve the newest baseline
+- [x] Given an arbitrary fork-point commit, resolve the newest baseline
       whose measured commit is an ancestor, per the vision's Feature.
-- [ ] Implement remap-or-invalidate: for files touched by commits between
+      **Done 2026-10-03:** `ancestor_resolution.resolve_nearest_baseline`
+      walks `main`'s own history of a plugin's checked-in baseline file
+      (newest generation first) and returns the first whose
+      `measured_commit` is a real ancestor of the fork point (via `git
+      merge-base --is-ancestor`), skipping any generation that doesn't
+      qualify rather than assuming the newest one always does.
+- [x] Implement remap-or-invalidate: for files touched by commits between
       the resolved baseline and the fork point, either translate line-level
       attribution through those commits' own diffs, or mark the file's
       attribution invalid (forcing it through the smoke fallback for that
-      file specifically).
-- [ ] Unit-test this against a constructed history with real intervening
+      file specifically). **Done:** `ancestor_resolution.compute_file_remap`
+      classifies each touched file's `--unified=0` diff as containing at
+      least one hunk that both removes and adds lines (content actually
+      changed -- invalidate the whole file) or as pure insertions/deletions
+      only (per-line remap, via `remap_line`); `remap_or_invalidate_baseline`
+      applies that per file across a whole baseline, dropping invalidated
+      files from the ``coverage`` map entirely -- which
+      `selection.select_tests` already treats as `no_baseline_entry`, so no
+      changes were needed there to make Phase 2's output usable by Phase
+      0's existing selector. `remap_line` itself is deliberately
+      **asymmetric**: a line preceded only by deletions is safely
+      remapped, but a line preceded by *any* insertion is dropped, never
+      remapped -- a clean line-coordinate shift proves nothing about
+      execution, and inserted code can introduce new control flow that
+      makes a previously-reached line unreachable even though its line
+      number translates perfectly (see the Journal for how this was
+      found).
+- [x] Unit-test this against a constructed history with real intervening
       line insertions/deletions, not just a same-content forward-move case.
+      **Done:** `tools/test_coverage_guided_selection.py`'s
+      `TestIsAncestor`/`TestResolveNearestBaseline`/
+      `TestComputeFileRemap`/`TestRemapOrInvalidateBaseline` build real git
+      histories via subprocess (temp repos, real commits) covering pure
+      insertion, pure deletion, content replacement, a mixed
+      insertion-then-replacement hunk set, and a full three-file
+      integration case.
 
 ### Phase 3 — Diff-scoped selection + coverage-debt / smoke fallback
 - [ ] Build the diff-scoped selector: PR diff + resolved baseline (with
@@ -296,6 +327,169 @@ _Pending review of this plan._
 
 ## Journal
 
+### 2026-10-03 — Phase 2: nearest-ancestor resolution + attribution remap/invalidate
+Operator asked to continue into the next phases now that Phase 1 is fully
+complete (9/9).
+
+Added `tools/coverage_guided_selection/ancestor_resolution.py`, the first
+piece of Phase 2:
+
+- **`resolve_nearest_baseline(repo_root, plugin, fork_commit, main_ref=...)`**
+  -- walks `main`'s own commit history of a plugin's checked-in baseline
+  file (`correlation.baseline_path_on_main`), newest generation first, and
+  returns the first whose embedded `measured_commit` is a real ancestor of
+  `fork_commit` (`git merge-base --is-ancestor`). Deliberately does not
+  assume the newest generation on `main` always qualifies -- a long-lived
+  PR branch's own fork point can sit behind the latest promotion, in which
+  case an older generation is the correct (and still valid) answer. Returns
+  `None` (not an error) when nothing qualifies, reserving a raised
+  `AncestorResolutionError` for a genuine git-plumbing failure (an
+  unreachable/invalid commit, a missing repo) -- the same "never silently
+  wrong, but 'nothing found' isn't an error" contract `selection.py`
+  already established in Phase 0.
+- **`compute_file_remap` / `remap_line` / `remap_or_invalidate_baseline`**
+  -- realize the Plan's remap-or-invalidate requirement. For each file the
+  resolved baseline covers, diffs it (`git diff --unified=0 --no-ext-diff
+  --no-textconv`) between the baseline's own `measured_commit` and the
+  fork point: a diff with even one hunk that genuinely replaces content
+  invalidates that file's attribution entirely, dropping it from the
+  resulting baseline's `coverage` map -- which `selection.select_tests`
+  already treats as `no_baseline_entry`, forcing that file's own smoke/
+  coverage-debt fallback for free. Otherwise (pure insertions/deletions
+  only), each covered line is remapped **asymmetrically**, not just
+  shifted by cumulative offset: a line preceded only by deletions
+  translates safely (a test that already reached it in the old code can't
+  be retroactively un-reached by removing unrelated code elsewhere), but a
+  line preceded by *any* insertion is dropped rather than remapped --
+  caught during review (see below): inserted code can introduce new
+  control flow (an early `return`, a new guard clause) that causes a
+  previously-reaching test to no longer reach it, and a clean
+  line-coordinate shift alone can't prove an insertion was
+  execution-neutral. No changes were needed to `selection.py` itself to
+  make Phase 2's output immediately usable by Phase 0's existing selector
+  -- confirmed by construction, not by assumption (see the integration
+  test below).
+- Uses `--unified=0` specifically because it makes "a hunk with both
+  nonzero old_len and nonzero new_len genuinely replaced content" a
+  reliable signal -- with default context lines, an insertion sitting next
+  to an unrelated unchanged line could otherwise look like it "replaced"
+  that context line. `--no-ext-diff --no-textconv` (added during review)
+  prevent `GIT_EXTERNAL_DIFF`/a configured textconv driver from
+  transforming this machine-readable output in a way `_parse_hunks`
+  wouldn't recognize, which could otherwise silently report "unchanged"
+  for a file that actually changed.
+
+**Verified directly, per the Plan's own explicit ask** ("unit-test against
+a constructed history with real intervening line insertions/deletions, not
+just a same-content forward-move case"): `tools/test_coverage_guided_selection.py`
+gained `TestIsAncestor`, `TestResolveNearestBaseline`,
+`TestComputeFileRemap`, and `TestRemapOrInvalidateBaseline` -- each builds
+a real, throwaway git repo via subprocess (actual commits, not mocked
+diffs) covering: a real ancestor/non-ancestor/self pair and an unreachable
+commit; the newest-qualifying-generation resolution case and the
+none-qualify case; pure insertion (and that lines after it are
+conservatively dropped, not shifted), pure deletion, content replacement,
+a mixed insertion-then-replacement hunk set (confirming the whole file
+invalidates, not just the replaced hunk's own range); a full three-file
+integration pass (one untouched, one deletion-shifted, one
+content-replaced) plus a "the only covered line was itself deleted" edge
+case and a no-mutation check on the input baseline; a real multi-commit
+cumulative-remap case built entirely from deletions (baseline measured ->
+two separate real intervening deletion commits -> a fork-point commit
+that also deletes a line, with a hand-computed expected mapping); a
+direct regression test for the control-flow scenario above (inserting an
+early-exit guard clause before a covered line correctly drops that line's
+attribution rather than carrying it forward); and a binary-file-change
+case (a nonempty diff with no parsed `@@` hunks at all must invalidate,
+not pass through as "unchanged"). Every git subprocess scrubs ambient
+repository-selection env vars. Full
+`tools/test_coverage_guided_selection.py` suite: 49 passed,
+5 skipped (the pre-existing opt-in real-subprocess integration tests,
+unaffected). `ruff check --select F,E9` (this repo's actual required
+lint selection) clean.
+
+**Caught during review (before merge):** the first version of this phase
+remapped a line through *any* pure insertion/deletion uniformly, treating
+a clean line-coordinate shift as proof an edit was execution-neutral.
+It isn't -- inserting a new early `return`/guard clause before a
+previously-covered line shifts that line's position predictably while
+also making it unreachable for a test that used to execute it, and hunk
+lengths alone can't distinguish that case from a harmless insertion.
+Also caught: a nonempty diff with no parsed hunks at all (e.g. a binary
+file change) fell through to "remapped" with an empty hunk set, silently
+carrying every old attribution forward unchanged across a real, unparsed
+edit -- now invalidates instead.
+Fixed by making insertions asymmetric with deletions (see above) before
+this phase's own PR merged, not after.
+
+**Not yet done:** wiring `ancestor_resolution` into a real caller (Phase 3's
+diff-scoped selector is the first consumer -- it needs a resolved,
+remapped baseline as an input, which this phase now provides but nothing
+yet calls for a real PR). Phase 3 (diff-scoped selection + coverage-debt /
+smoke fallback) is the next slice.
+
+### 2026-10-02 (latest) — Fixed `agent-dispatch`'s async-cancellation race; enrolled; Phase 1 complete (9/9)
+Operator asked to pursue `agent-dispatch` -- the last plugin blocked from
+the previous entry's own Phase 1 tally -- to completion.
+
+**Root cause, confirmed directly** (matches the previous entry's own
+characterization): `agent-dispatch`'s coordinator `lifespan()` teardown
+tore down its background verification-drain loop with plain
+`task.cancel()` + `await task`. That loop's real work (recovering/claiming
+verification requests, evaluating them) all runs through
+`asyncio.to_thread(...)`, and cancelling the *task* that is currently
+awaiting a `to_thread` call only cancels the awaiting coroutine --
+`asyncio`'s own cancellation propagates through the coroutine immediately,
+but the underlying OS thread keeps running the real, synchronous call to
+completion regardless (reproduced directly with a minimal
+`asyncio.to_thread`/`task.cancel()` script: `await task` returned ~0.9s
+before the thread's own "finished" print). Under normal (uninstrumented)
+execution, that orphaned thread's own SQLite open usually finishes before
+a test's own `tmp_path` fixture tears down its directory; under
+coverage-instrumented execution's much slower per-line tracing, the race
+widens enough that the thread loses, and the next test's own queue
+`_connect()` raises `sqlite3.OperationalError: unable to open database
+file` because the directory is already gone.
+
+**Fix:** replaced that one `task.cancel()` call with a cooperative
+`stop_event`: `drain_verification_requests` now checks it at each loop
+checkpoint between `to_thread` calls (and races it into its own idle
+`_wait`), so setting the event and awaiting the task lets the loop finish
+whatever synchronous DB call is currently in flight and exit **on its
+own** -- the awaited task only returns once that real work is actually
+done, closing the race rather than requiring a longer wait or a retry.
+`task.cancel()` remains available as an explicit last-resort fallback
+(with a bounded 10s wait) for a genuinely hung loop. Added two regression
+tests: one characterizing the original defect directly (`task.cancel()`
+returns before an in-flight `to_thread` call finishes), and one proving
+the `stop_event` fix (the awaited task only returns after that same
+in-flight call completes).
+
+**Verified directly, same bar as every other plugin this phase:** the
+real repro (`baseline.py` against `agent-dispatch/tests/test_coordinator.py`,
+`project_dir` mode) succeeded cleanly 3 consecutive runs (previously failed
+intermittently); the fix doesn't regress `run-plugin-tests.py`'s own full
+suite (3,799 tests, all 7 sub-suites green); and `baseline.py` against the
+plugin's **entire** test suite (174 source files) now collects a clean,
+complete baseline end to end with no `sqlite3.OperationalError`.
+
+`agent-dispatch` enrolled in this same change -- the `full` job's
+Coverage-baseline/Upload-coverage-baseline `if:` conditions and the
+`promote` job's matching enrolled-baseline hard-gate list both now include
+it, same two-line-list pattern as every prior enrollment this phase.
+
+**Phase 1 is now fully complete: 9 of 9 plugins enrolled** (`agent-ssh`,
+`agent-codespaces`, `agent-containers`, `agent-vault`, `agent-logger`,
+`agent-mcp`, `agent-bridge`, `agent-worktrees`, `agent-dispatch`) -- every
+plugin in the `full` job's matrix now produces a real coverage baseline at
+the promotion gate.
+
+**Not yet done:** Phase 2 (nearest-ancestor resolution), Phase 3
+(diff-scoped selection + coverage-debt/smoke fallback), Phase 4 (replacing
+`agent-worktrees`' own collect-only tier), and Phase 5 (generalizing beyond
+`agent-worktrees`) haven't started. Phase 1's completion is a real
+milestone, not the whole effort's.
+
 ### 2026-10-02 — Incident: `select.py` shadowed the stdlib, blocking every real promotion for ~3h
 Operator asked me to check whether this effort's own coverage-artifact work
 might have blocked the real `dev`→`main` promotion pipeline. It had.
@@ -345,6 +539,139 @@ named.
 future module added to this package needs a quick stdlib-name collision
 check before landing, not just a local test pass (the fast test suite *did*
 pass before this incident, since it only ever imports the package normally).
+
+### 2026-10-02 (final) — Root-caused and fixed `agent-worktrees`' coverage.py crash; enrolled; Phase 1 complete
+Operator asked to pursue the `agent-worktrees` blocker from the previous
+entry specifically (over the `agent-dispatch` one), rather than pausing.
+
+**Root cause, fully confirmed this time** (the previous entry's own
+"exact mechanism remains unconfirmed" is now resolved): `_DRIVER_SCRIPT`
+called `pytest.main(...)` **unguarded at module scope** -- no
+`if __name__ == "__main__":`. `agent-worktrees`' own
+`test_cleanup_revalidation_manual.py` spawns a real child process via
+`multiprocessing.get_context("spawn")` to test genuine cross-process
+file-lock contention. `spawn` bootstraps a brand-new interpreter that
+**re-imports the driver script as a plain module** (not as `__main__`) to
+reconstruct its pickled target -- and without the guard, that re-import
+re-executed `pytest.main(...)` unconditionally, which tripped Python's
+own multiprocessing bootstrap-safety check ("An attempt has been made to
+start a new process before the current process has finished its
+bootstrapping phase"), killing the spawned child before it ever ran its
+real target (confirmed directly: `holder.is_alive()` was `False` --
+the child died at bootstrap, not during its own work). The doomed
+re-execution's own half-started pytest-cov instance is what corrupted the
+real coverage SQLite data file the parent was still writing to
+(`coverage.exceptions.DataError: ... no such table: context` -- the
+previous entry's own symptom). Confirmed by first reproducing WITHOUT
+`--cov-context=test` (the internal coverage crash disappeared, replaced
+by the real, more legible `multiprocessing/spawn.py:140: RuntimeError`
+pointing straight at the missing guard).
+
+**Fix:** wrapped the driver script's entire body in
+`if __name__ == "__main__":`, exactly matching Python's own documented
+"Safe importing of main module" guidance for any script a
+`multiprocessing`-spawning test might re-import. Also fixed a related
+minor robustness gap the full-suite run surfaced: `collect_baseline`'s own
+`tempfile.TemporaryDirectory` lacked `ignore_cleanup_errors=True` (unlike
+`run-plugin-tests.py`'s own sandboxed-tempdir handling), so a lingering
+file handle left by a real spawned child could turn an already-successful
+collection into a raised `OSError` on cleanup, discarding a baseline that
+was already earned. Added it.
+
+**Verified directly:** `agent-worktrees`' full suite (265 test files, 11
+chunks) now collects cleanly end to end (6451 tests, 216 covered files).
+Re-verified every other enrolled plugin (`agent-ssh`, `agent-codespaces`,
+`agent-containers`, `agent-vault`, `agent-logger`, `agent-mcp`,
+`agent-bridge`) unaffected. Added a new real, opt-in integration test
+(`test_collect_baseline_survives_a_real_spawn_based_multiprocessing_child`)
+constructing a throwaway suite with a genuine `spawn`-context child,
+mirroring the real failure rather than just unit-testing the guard in
+isolation. Full fast unit suite (32 passed) and full opt-in integration
+suite (36 passed) both green.
+
+`agent-worktrees` enrolled in this same change.
+
+**Phase 1 is now substantively complete: 8 of 9 plugins enrolled.**
+`agent-ssh`, `agent-codespaces`, `agent-containers`, `agent-vault`,
+`agent-logger`, `agent-mcp`, `agent-bridge`, `agent-worktrees` -- every
+plugin except `agent-dispatch`. That one remains blocked on a distinct,
+already-tracked, genuine app-level async-cancellation race in its own
+shutdown path (cancelling an `asyncio.to_thread`-wrapped call doesn't
+actually stop the underlying thread, which can still complete real I/O
+after its own resource is torn down) -- confirmed its full suite passes
+cleanly under the trusted `run-plugin-tests.py` runner, so this is
+`agent-dispatch`'s own application-code fix to make, not a `baseline.py`
+tooling problem, and stays out of this effort's own scope.
+
+**Not yet done:** watching a real promotion land `agent-worktrees`' own
+baseline on `main`; `agent-dispatch`'s own fix (separate domain, tracked
+issue); Phase 2 (nearest-ancestor resolution) hasn't started.
+
+### 2026-10-02 (yet later still) — Phase 1: enroll `agent-bridge`
+Operator chose `agent-bridge` next, out of the 3 remaining plugins.
+
+By far the largest plugin enrolled so far: 178 test files, 2993 collected
+tests, 8 sub-suites under the trusted `run-plugin-tests.py` runner's own
+chunking. A genuine proof point for the chunking fix the previous entry
+landed, not just a repeat of an already-small suite. Enrolled with the
+same generalized pilot-plugin-list pattern; no further code changes
+needed beyond the two-line list addition.
+
+**Verified directly:** `baseline.py` run against `agent-bridge`'s real
+suite collects a clean baseline end to end (2993 tests, 142 covered
+files) in one run, chunked into ~8 sequential pytest processes
+automatically. Fast unit suite (32 passed) re-confirmed unaffected.
+
+Phase 1 now covers 7 of 9 plugins. **Not yet done:** watching a real
+promotion land `agent-bridge`'s baseline on `main`; the operator's next
+choice of which plugin(s) to enroll from the 2 still remaining
+(`agent-dispatch`, `agent-worktrees`).
+
+### 2026-10-02 (yet later) — `baseline.py` chunking fix; `agent-mcp` enrolled
+Operator asked to fix the scaling limitation from the previous entry
+directly (unblock `agent-mcp`) rather than continuing to the next
+unrelated plugin.
+
+**Root-caused the real failure mode precisely, not just the process-count
+theory from the previous entry.** Teaching `baseline.py` to chunk a large
+suite the same way `run-plugin-tests.py` does (`_plan_chunks`, splitting
+into sequential 25-file groups via the same `partition` helper, one pytest
+process per chunk, results merged via a new `_merge_chunk_results` --
+durations union plus a genuine per-line test-name union for any source
+file touched by tests from more than one chunk) changed the failure from a
+silent crash into real, readable pytest output -- which showed the actual
+cause: `OSError: AF_UNIX path too long`. `agent-mcp`'s own real-socket
+cutover tests create Unix-domain sockets under pytest's `tmp_path`
+fixture, and without an explicit `--basetemp`, that fixture nests under
+whatever `TMPDIR` `_subprocess_env`'s `isolated_environment` redirects to
+-- deep enough (`.../sandbox/tmp/pytest-of-<user>/pytest-<n>/...`) to
+exceed `AF_UNIX`'s 108-byte `sun_path` limit. `run-plugin-tests.py` never
+hits this because it always passes its own short, explicit `--basetemp`;
+`baseline.py` never did. Added the same explicit `--basetemp` (one per
+chunk, directly under the ephemeral collection tempdir, well short of the
+limit) to the driver script.
+
+**Verified directly**, not just reasoned about: `agent-mcp`'s full suite
+(634 tests, 48 covered files) now collects a clean baseline end to end.
+Re-ran every already-enrolled plugin (`agent-ssh`, `agent-codespaces`,
+`agent-containers`, `agent-vault`, `agent-logger`) after the change and
+all five still collect cleanly -- the single-chunk path for a suite within
+the limit is bit-for-bit the same invocation as before chunking existed.
+Added fast, mocked unit tests for `_plan_chunks` (small suite stays
+unsplit; a single file stays unsplit; a large suite splits into the
+expected bounded groups) and `_merge_chunk_results` (duration union;
+coverage-line union across chunks), plus a new real, opt-in
+end-to-end integration test that forces a tiny `max_files_per_chunk` and
+confirms a shared module's coverage is genuinely attributed to tests from
+every chunk, not just whichever one happened to run first.
+
+`agent-mcp` is now enrolled in this same change -- the whole point of the
+fix. Phase 1 now covers 6 of 9 plugins total.
+
+**Not yet done:** watching a real promotion land `agent-mcp`'s baseline
+(and the still-pending `agent-vault`/`agent-logger` ones) on `main`; the
+operator's next choice of which plugin(s) to enroll from the 3 still
+remaining (`agent-bridge`, `agent-dispatch`, `agent-worktrees`).
 
 ### 2026-10-02 (later still) — Phase 1: enroll `agent-vault` and `agent-logger`; `agent-mcp` deferred
 Operator chose the next three Phase 1 plugins out of the 6 remaining:

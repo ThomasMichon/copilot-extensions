@@ -176,6 +176,7 @@ def test_reviewer_loop_expands_to_stable_existing_primitives(tmp_path):
                 "kind": "reviewer-loop",
                 "repo": "github.com/example/project",
                 "task_label": "external-review",
+                "stale_after_days": 7,
                 "filters": {
                     "permit": {"machine": ["host-a", "host-b"]},
                     "reject": {"machine": ["retired"]},
@@ -232,6 +233,7 @@ def test_reviewer_loop_expands_to_stable_existing_primitives(tmp_path):
     assert source.filters.reject == {"machine": frozenset({"retired"})}
     assert evaluator.spec["repo"] == "github.com/example/project"
     assert evaluator.spec["evaluator_ref"] == "example-review-lifecycle"
+    assert evaluator.spec["reviewer_loop"] == {"stale_after_days": 7.0}
     assert evaluator.filters == source.filters
     assert workers.repos == "github.com/example/project"
     assert workers.labels == ("external-review", "review-inbox")

@@ -29,9 +29,20 @@ follow-up, not silently dropped):
 - **Implicit** reassignment: an agent-dispatch task redrive/reassignment
   after an error, or an agent-bridge session rebind to a worktree, both
   change "who is actually working this PR right now" without ever calling
-  any of this plugin's own claim verbs -- feeding those in requires
-  coordinating with those two plugins' own event/audit trails rather than
-  duplicating them blind, and is unstarted.
+  any of this plugin's own claim verbs. The agent-bridge session-rebind
+  half is wired (worktree-claims-transitive-finalization Phase 3b,
+  2026-10-02): every context-handoff cutover
+  (``tracking_lifecycle.link_handoff()``) now feeds an
+  ``event="reassigned"`` entry for every still-ACTIVE ``pr``-kind claim the
+  worktree holds, right alongside that function's own existing
+  predecessor/successor audit trail (``record.handoffs``) -- see
+  ``tracking_lifecycle.record_pr_claims_reassigned()``. The agent-dispatch
+  task-redrive half was investigated and found to have no live code path
+  to hook today (``dispatch_attempt`` is write-once at worktree creation;
+  the one related check, ``worktree_attribution.foreign_task_id``, is a
+  defensive reject of a stale carried worktree id, never an active
+  reassignment) -- still unstarted, and tracked only in the consuming
+  deployment's own private effort tracker, not here.
 - Remote-mirroring for converged repos (today this is a single machine-
   local file, same posture ``claim_handoffs.py`` itself started from).
 

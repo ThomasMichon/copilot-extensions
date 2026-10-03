@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-phase worktrees
 - **Created:** 2026-09-26
-- **Status:** Draft
+- **Status:** Done (archived 2026-10-02)
 - **Vision:** none yet, deliberately — this effort does not introduce a new
   architectural direction; it extends `dev-branch-release-pipeline`'s own
   already-active, still-vision-less design (that umbrella effort's own
@@ -3225,3 +3225,22 @@ _Pending._
   Validation Plan item in this effort is now checked off**. The effort may
   be ready for the operator to mark Done, but that status change itself is
   intentionally left to operator judgment rather than being flipped here.
+
+### 2026-10-02 — Operator closure: marked Done, archived
+
+- Operator confirmed every Plan phase and Validation Plan item is checked off
+  (independently re-verified: zero `[ ]` boxes remain anywhere in this
+  document) and directed closure.
+- `Status` set to `Done`. Moved from `efforts/active/vendor-pointer-generalization/`
+  to this archived location (`efforts/2026/10/02 vendor-pointer-generalization/`),
+  removed from `efforts/README.md`'s active effort index.
+- Final mechanism state for future reference: shared libs and the installer
+  engine use the `uv`-editable canonical-reference form (live `dev`-time
+  reference, `materialize_main.py`/`preview_release.py` copy-and-rewrite at
+  promotion); docs use the unrelated, unaffected file-pointer form; the
+  `src-passthrough` pointer kind is fully retired repo-wide (its last two
+  real users, `agent-worktrees`'s and `customizing-copilot`'s
+  `plugin-activation` copies, were both converted to full real
+  byte-vendored copies with enforced sync, issues #4788 and the 2026-10-01
+  retirement respectively). See `docs/patterns/vendor-pointer.md` for the
+  durable operator-facing description of both current forms.

@@ -37,6 +37,75 @@ def _transcript_mirror():
     return TranscriptMirror()
 
 
+#: The resident daemon's own log: it usually runs headless (a scheduled task
+#: or an on-demand detached start), where stderr goes nowhere, so a relay or
+#: forward re-establish would otherwise leave no trace to correlate a drop with.
+#: Rotated only when an Owner starts, never while one runs: two Owners overlap
+#: during a takeover (the old one writes until it sees the new beacon), and a
+#: mid-run rollover from either would lose records or fail its renames.
+OWNER_LOG_MAX_BYTES = 5 * 1024 * 1024
+OWNER_LOG_BACKUPS = 3
+
+
+def owner_log_path():
+    from .config import _runtime_dir
+
+    return _runtime_dir() / "logs" / "owner.log"
+
+
+def _rotate_at_start(path) -> None:
+    """Shift ``owner.log`` to ``.1`` (and on) when it's past the size cap. Best
+    effort: a predecessor still writing it (Windows refuses the rename) just
+    means this Owner appends and the next start rotates.
+
+    The active file is staged aside first, and the backups shift only once that
+    succeeded: a refused rename then leaves every backup where it was. The
+    shift moves only the backups below the first free slot (the oldest is
+    dropped when none is free), so a rotation interrupted part-way is finished
+    by the next start without overwriting a backup it already moved."""
+    import os
+
+    staged = path.with_name(f"{path.name}.rotating")
+    backups = [path.with_name(f"{path.name}.{n}") for n in range(1, OWNER_LOG_BACKUPS + 1)]
+    try:
+        if not staged.exists():
+            if path.stat().st_size < OWNER_LOG_MAX_BYTES:
+                return
+            os.replace(path, staged)
+        gap = next((i for i, b in enumerate(backups) if not b.exists()), len(backups) - 1)
+        for i in range(gap, 0, -1):
+            os.replace(backups[i - 1], backups[i])
+        os.replace(staged, backups[0])
+    except OSError:
+        pass
+
+
+def _attach_owner_log() -> str | None:
+    """Also log to ``logs/owner.log`` (append-only while running, rotated at
+    start); its path, or ``None`` when it can't be opened (the daemon still
+    runs, logging to stderr)."""
+    import logging
+
+    path = owner_log_path()
+    root = logging.getLogger()
+    try:
+        path = path.resolve()
+        if any(isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", None) == str(path)
+               for h in root.handlers):
+            return str(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _rotate_at_start(path)
+        handler = logging.FileHandler(path, mode="a", encoding="utf-8")
+    except (OSError, RuntimeError) as exc:  # RuntimeError: a symlink loop on Python < 3.13
+        print(f"connection-owner: can't open {path} ({exc}); logging to stderr only", file=sys.stderr)
+        return None
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    root.addHandler(handler)
+    if root.level == logging.NOTSET or root.level > logging.INFO:
+        root.setLevel(logging.INFO)
+    return str(path)
+
+
 def cmd_owner(args: argparse.Namespace) -> int:
     """Run the Connection Owner relay reconcile daemon (config-gated; default on).
 
@@ -144,9 +213,15 @@ def cmd_owner(args: argparse.Namespace) -> int:
         print(f"connection-owner: reconciled once; held={held}; active={active}")
         return 0
 
+    # The rotating log isn't safe across processes: only the Owner that wins
+    # the machine opens it (a losing concurrent start must never rotate it).
+    from .owner_beacon import on_owner_start
+
+    on_owner_start(_attach_owner_log)
     print(
         f"connection-owner: starting reconcile daemon (interval={interval}s; "
-        f"idle_shutdown_after={idle_shutdown_after}; Ctrl-C to stop)...",
+        f"idle_shutdown_after={idle_shutdown_after}; log={owner_log_path()} once it owns the machine; "
+        "Ctrl-C to stop)...",
         file=sys.stderr,
     )
     try:

@@ -85,6 +85,28 @@ class _SessionHostConnectionMixin:
             )
             if work_dir and not target.cwd:
                 target.cwd = work_dir
+            # local-cache-delivery-primacy Phase 2: refresh this worktree's
+            # gitignored *.local.instructions.md siblings before the
+            # Copilot CLI process is spawned below -- the one remaining
+            # local-spawn path create/resume/sessionStart don't already
+            # cover. Placed HERE (not at `start_session`'s own `target.
+            # type == "local"` entry) because a project-backed target's
+            # authoritative directory isn't known until `resolve_local_
+            # launch` resolves it above -- a project-backed `SpawnTarget(
+            # type="local", project=..., cwd=None)` would otherwise skip
+            # the refresh entirely, or refresh the wrong (non-authoritative)
+            # path if some other `cwd` happened to be set. `work_dir` is
+            # the exact directory `spawner.spawn()` below is about to
+            # launch into. refresh_local_cache is itself fully best-effort
+            # and never raises except a genuine cancellation (which must
+            # still propagate) -- the try/except here is defense in depth,
+            # so a render failure can never fail this spawn even if that
+            # callee contract were ever violated.
+            if work_dir and os.path.isdir(work_dir):
+                from .local_cache_refresh import refresh_local_cache
+
+                with contextlib.suppress(Exception):
+                    await refresh_local_cache(work_dir)
 
         with tracker.stage(ConnectStage.LAUNCH_ACP):
             # Tag the child's environment with its own bridge session id so a

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -480,3 +482,113 @@ def test_activate_after_update_same_version_second_caller_converges_without_spaw
 
     old.force_terminate()
     new.force_terminate()
+
+
+def _spawn_fake_mux_daemon_process(root: Path) -> subprocess.Popen:
+    """A REAL OS process whose command line matches both
+    ``_is_mux_daemon_cmdline`` (``-m worktree_manager mux-daemon run``) and
+    ``_cmdline_root``'s ``--root=`` parsing, but that only sleeps -- no real
+    worktree_manager import/execution is needed to prove the identity-match
+    contract against the genuine OS process table. The extra tokens after
+    ``-c <code>`` become ``sys.argv`` for the script, not reinterpreted by
+    the interpreter, so they show up verbatim in the process's real command
+    line exactly as a genuine ``spawn_passive``-launched daemon's would.
+    """
+    return subprocess.Popen(
+        [
+            sys.executable, "-c", "import time; time.sleep(30)",
+            "-m", "worktree_manager", "mux-daemon", "run",
+            f"--root={root}", "--listen-port=0", "--passive",
+        ],
+    )
+
+
+def _wait_until_recognized_as_mux_daemon(pid: int, *, timeout: float = 5.0) -> bool:
+    """Poll ``_iter_mux_daemon_pids`` until ``pid`` shows up or ``timeout``
+    elapses.
+
+    The real root cause of this ever flaking (``ps``'s ``args`` field
+    getting silently truncated under an inherited ``$COLUMNS``, cutting off
+    the very tokens ``_is_mux_daemon_cmdline`` looks for) is fixed in
+    ``_iter_mux_daemon_pids`` itself. This poll is kept as cheap defense in
+    depth against ordinary fork/exec scheduling latency on a loaded
+    runner -- it does not weaken what's actually asserted.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if pid in mdc._iter_mux_daemon_pids():
+            return True
+        time.sleep(0.05)
+    return pid in mdc._iter_mux_daemon_pids()
+
+
+def test_terminate_mux_daemon_pid_accepts_a_matched_real_process():
+    """``_terminate_mux_daemon_pid`` must actually terminate a REAL process
+    that is both a genuine mux-daemon (by command-line shape) and bound to
+    the exact root being operated on -- not merely report success against a
+    stubbed-out terminator (the identity-bound safety net
+    docs/patterns/graceful-daemon-cutover.md requires a direct test for)."""
+    root = Path.home() / ".worktree-manager-test-identity-match"
+    proc = _spawn_fake_mux_daemon_process(root)
+    try:
+        assert _wait_until_recognized_as_mux_daemon(proc.pid), (
+            "the real spawned process was not recognized as a mux-daemon -- "
+            "test setup invalid"
+        )
+        assert mdc._terminate_mux_daemon_pid(proc.pid, root=root) is True
+        assert proc.wait(timeout=10) is not None
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=10)
+
+
+def test_terminate_mux_daemon_pid_refuses_a_root_mismatched_real_process():
+    """A REAL, genuine mux-daemon process bound to a DIFFERENT root must be
+    refused, not terminated -- the owner-validation half of the identity
+    check (docs/patterns/graceful-daemon-cutover.md's "owner validation" is
+    not covered by identity-token matching alone)."""
+    its_root = Path.home() / ".worktree-manager-test-identity-owner"
+    other_root = Path.home() / ".worktree-manager-test-identity-other"
+    proc = _spawn_fake_mux_daemon_process(its_root)
+    try:
+        assert _wait_until_recognized_as_mux_daemon(proc.pid), (
+            "the real spawned process was not recognized as a mux-daemon -- "
+            "test setup invalid"
+        )
+        assert mdc._terminate_mux_daemon_pid(proc.pid, root=other_root) is False
+        assert proc.poll() is None, "a root-mismatched process must never be killed"
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)
+
+
+def test_spawn_passive_never_pins_cwd_inside_the_target_slot(tmp_path, monkeypatch):
+    """Cross-version process isolation invariant (copilot-extensions#4999,
+    #5053, docs/patterns/graceful-daemon-cutover.md): a spawned passive's
+    ``cwd`` must never be inside the version slot it serves. On Windows, a
+    process's cwd holds an open directory handle for the process's whole
+    lifetime -- pinning it to ``slot`` is what let a stranded (or merely
+    still-running) passive block every subsequent ``shutil.rmtree(slot)``
+    self-install attempt targeting that exact slot."""
+    root = tmp_path / "root"
+    slot = root / "versions" / "9.9.9-test"
+    (slot / "src").mkdir(parents=True)
+
+    captured: dict[str, object] = {}
+
+    class _FakePopen:
+        def __init__(self, argv, **kwargs):
+            captured["argv"] = argv
+            captured["kwargs"] = kwargs
+            self.pid = 123456
+
+    monkeypatch.setattr(mdc.subprocess, "Popen", _FakePopen)
+
+    mdc.spawn_passive(slot, root=root, port=54321)
+
+    cwd = captured["kwargs"]["cwd"]
+    assert cwd == str(root), "spawn_passive must launch from the stable root, not the slot"
+    assert not str(Path(cwd).resolve()).startswith(str(slot.resolve())), (
+        "spawn_passive's cwd must never be inside the target version slot"
+    )

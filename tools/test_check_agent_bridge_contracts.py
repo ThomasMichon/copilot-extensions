@@ -13,6 +13,7 @@ from typing import Any, Callable
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent / "check-agent-bridge-contracts.py"
+EVIDENCE_MODULE = Path(__file__).resolve().parent / "agent_bridge_contract_git.py"
 SCHEMA = (
     Path(__file__).resolve().parents[1]
     / "plugins"
@@ -199,6 +200,7 @@ def repo(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     (root / "tools").mkdir(parents=True)
     (root / "tools" / SCRIPT.name).write_bytes(SCRIPT.read_bytes())
+    (root / "tools" / EVIDENCE_MODULE.name).write_bytes(EVIDENCE_MODULE.read_bytes())
     _git(root, "init", "-q")
     _git(root, "config", "user.email", "test@example.com")
     _git(root, "config", "user.name", "Test")
@@ -299,6 +301,139 @@ def test_valid_registry_passes(repo: Path) -> None:
     assert "OK (2 contracts, 2 fixtures)" in result.stdout
 
 
+def test_unresolvable_commit_does_not_fail_validation(repo: Path) -> None:
+    """Regression test for copilot-extensions#5050 (recurrence of #2230): a
+    squash-merge discards every intermediate commit on a feature branch, so a
+    provenance/``captured_from`` entry's ``commit`` becomes permanently
+    unreachable through no fault of its content. The content-addressed
+    ``source_git_blob``/``source_sha256`` fields are the durable evidence;
+    an unresolvable commit must be a silently-skipped opportunistic check,
+    never a hard failure, as long as those fields are present and
+    well-formed."""
+    fake_commit = "f" * 40
+
+    def orphan_commit(data: dict[str, Any]) -> None:
+        for contract in data["contracts"]:
+            for provenance in contract["provenance"]:
+                provenance["commit"] = fake_commit
+
+    _mutate_registry(repo, orphan_commit)
+    for relative in (FIXTURE, HOST_FIXTURE):
+        path = repo / relative
+        fixture_data = json.loads(path.read_text(encoding="utf-8"))
+        fixture_data["captured_from"]["commit"] = fake_commit
+        _write(repo, relative, fixture_data)
+
+    def refresh_fixture_hashes(data: dict[str, Any]) -> None:
+        for contract in data["contracts"]:
+            for fixture_entry in contract["fixtures"]:
+                fixture_entry["sha256"] = _sha256(repo, fixture_entry["path"])
+
+    _mutate_registry(repo, refresh_fixture_hashes)
+
+    result = _run(repo)
+    assert result.returncode == 0, result.stderr
+    assert "OK (2 contracts, 2 fixtures)" in result.stdout
+
+
+def test_unresolvable_commit_with_mismatched_sha256_still_fails(repo: Path) -> None:
+    """Closes the gap flagged on #5062's review: an unresolvable commit must
+    not reduce ``source_sha256`` verification to format-only validation.
+    ``source_git_blob`` remains resolvable directly (by its own object id,
+    independent of the orphaned commit), so the checker must fall back to
+    hashing that blob's content and catch a ``source_sha256`` that disagrees
+    with it -- exactly the "arbitrary content hash passes" scenario the
+    review called out."""
+    fake_commit = "f" * 40
+
+    def orphan_commit_keep_blob(data: dict[str, Any]) -> None:
+        for contract in data["contracts"]:
+            for provenance in contract["provenance"]:
+                provenance["commit"] = fake_commit
+
+    _mutate_registry(repo, orphan_commit_keep_blob)
+
+    path = repo / FIXTURE
+    fixture_data = json.loads(path.read_text(encoding="utf-8"))
+    fixture_data["captured_from"]["commit"] = fake_commit
+    # source_git_blob is left pointing at the real, resolvable blob; only
+    # source_sha256 is corrupted -- this must still be caught via the
+    # direct-blob-resolution fallback, not silently skipped.
+    fixture_data["captured_from"]["source_sha256"] = "0" * 64
+    _write(repo, FIXTURE, fixture_data)
+
+    host_path = repo / HOST_FIXTURE
+    host_fixture_data = json.loads(host_path.read_text(encoding="utf-8"))
+    host_fixture_data["captured_from"]["commit"] = fake_commit
+    _write(repo, HOST_FIXTURE, host_fixture_data)
+
+    def refresh_fixture_hashes(data: dict[str, Any]) -> None:
+        for contract in data["contracts"]:
+            for fixture_entry in contract["fixtures"]:
+                fixture_entry["sha256"] = _sha256(repo, fixture_entry["path"])
+
+    _mutate_registry(repo, refresh_fixture_hashes)
+
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "source_sha256 is " + "0" * 64 in result.stderr
+    assert "direct blob" in result.stderr
+
+
+def test_unresolvable_commit_and_unresolvable_blob_skips_not_fails(repo: Path) -> None:
+    """When *neither* the commit nor the blob can be resolved, evidence has
+    genuinely run out -- this must stay a silent skip, not a hard failure.
+    This is a real, legitimate state for old registry entries (confirmed in
+    production: a historical blob can itself become unreachable once the
+    source file changes again after capture, even though the commit-is-
+    orphaned case alone is expected and already tolerated) -- the direct-
+    blob fallback must not regress that tolerance into a new hard failure."""
+    fake_commit = "f" * 40
+    fake_blob = "e" * 40
+
+    def orphan_commit_and_blob(data: dict[str, Any]) -> None:
+        for contract in data["contracts"]:
+            for provenance in contract["provenance"]:
+                provenance["commit"] = fake_commit
+                provenance["source_git_blob"] = fake_blob
+
+    _mutate_registry(repo, orphan_commit_and_blob)
+    for relative in (FIXTURE, HOST_FIXTURE):
+        path = repo / relative
+        fixture_data = json.loads(path.read_text(encoding="utf-8"))
+        fixture_data["captured_from"]["commit"] = fake_commit
+        fixture_data["captured_from"]["source_git_blob"] = fake_blob
+        _write(repo, relative, fixture_data)
+
+    def refresh_fixture_hashes(data: dict[str, Any]) -> None:
+        for contract in data["contracts"]:
+            for fixture_entry in contract["fixtures"]:
+                fixture_entry["sha256"] = _sha256(repo, fixture_entry["path"])
+
+    _mutate_registry(repo, refresh_fixture_hashes)
+
+    result = _run(repo)
+    assert result.returncode == 0, result.stderr
+    assert "OK (2 contracts, 2 fixtures)" in result.stdout
+
+
+def test_resolvable_commit_still_catches_real_mismatch(repo: Path) -> None:
+    """The opportunistic cross-check must still catch a genuine content
+    mismatch when the commit *is* resolvable -- the fix for #5050 relaxes
+    unresolvable history, not resolvable-but-wrong history."""
+
+    def mutation(data: dict[str, Any]) -> None:
+        http_contract = next(
+            c for c in data["contracts"] if c["id"] == "agent-bridge.http-wire"
+        )
+        http_contract["provenance"][0]["plugin_version"] = "9.9.9"
+
+    _mutate_registry(repo, mutation)
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "plugin_version is 9.9.9, actual 1.0.0" in result.stderr
+
+
 def test_capability_constant_mismatch_fails(repo: Path) -> None:
     """The capability-versions cross-check (``_HTTP_CAPABILITY_CONSTANTS``)
     must actually catch a registry value that disagrees with the production
@@ -334,7 +469,7 @@ def test_missing_provenance_commit_recovers_history_once(
             "fetch",
             "--quiet",
             "origin",
-            checker._MAIN_REFSPEC,
+            checker._eg._MAIN_REFSPEC,
         ):
             state["available"] = True
             return subprocess.CompletedProcess(args, 0, "", "")
@@ -344,13 +479,13 @@ def test_missing_provenance_commit_recovers_history_once(
             return subprocess.CompletedProcess(args, 0, "", "")
         raise AssertionError(f"unexpected git call: {args}")
 
-    monkeypatch.setattr(checker, "_git", fake_git)
-    checker._FETCH_RECOVERY_ATTEMPTED = False
+    monkeypatch.setattr(checker._eg, "git", fake_git)
+    checker._eg._FETCH_RECOVERY_ATTEMPTED = False
 
     assert checker._ensure_commit_available(commit) is True
     assert checker._ensure_commit_available(commit) is True
     assert calls.count(
-        ("fetch", "--quiet", "origin", checker._MAIN_REFSPEC)
+        ("fetch", "--quiet", "origin", checker._eg._MAIN_REFSPEC)
     ) == 1
 
 

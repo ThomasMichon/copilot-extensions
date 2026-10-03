@@ -1423,8 +1423,9 @@ class TestGitHubProvider:
 
     def test_merge_pull_squash_admin_builds_args(self, monkeypatch):
         # pr-merge --now: a submitter self-merge is a squash merge, admin past
-        # the non-blocking gate, and NEVER deletes the branch (so finalize can
-        # affirm the merge).
+        # the non-blocking gate, and deletes the branch by default (safe --
+        # finalize/pr-complete verify a merged PR against the tracked record's
+        # own head_sha, never the live remote branch).
         from agent_worktrees.providers import github
         captured = {}
 
@@ -1438,7 +1439,19 @@ class TestGitHubProvider:
         a = captured["args"]
         assert a[:5] == ["gh", "pr", "merge", "7", "--repo"]
         assert "--squash" in a and "--admin" in a
-        assert "--delete-branch" not in a
+        assert "--delete-branch" in a
+
+    def test_merge_pull_delete_source_branch_false_omits_flag(self, monkeypatch):
+        from agent_worktrees.providers import github
+        captured = {}
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.__setitem__("args", args), _proc())[1],
+        )
+        github.GitHubProvider().merge_pull(
+            "o/r", 7, squash=True, delete_source_branch=False,
+        )
+        assert "--delete-branch" not in captured["args"]
 
     def test_merge_pull_no_admin_omits_admin_flag(self, monkeypatch):
         from agent_worktrees.providers import github
@@ -1478,7 +1491,9 @@ class TestGitHubProvider:
 
     def test_enable_auto_merge_builds_auto_squash_no_admin(self, monkeypatch):
         # #225: native auto-merge is `--auto --squash`, never `--admin` (it must
-        # wait on required checks, not bypass them), and never deletes the branch.
+        # wait on required checks, not bypass them); deletes the branch by
+        # default once the eventual merge lands (same safety reasoning as
+        # merge_pull).
         from agent_worktrees.providers import github
         captured = {}
 
@@ -1492,7 +1507,19 @@ class TestGitHubProvider:
         a = captured["args"]
         assert a[:5] == ["gh", "pr", "merge", "7", "--repo"]
         assert "--auto" in a and "--squash" in a
-        assert "--admin" not in a and "--delete-branch" not in a
+        assert "--admin" not in a and "--delete-branch" in a
+
+    def test_enable_auto_merge_delete_source_branch_false_omits_flag(self, monkeypatch):
+        from agent_worktrees.providers import github
+        captured = {}
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.__setitem__("args", args), _proc())[1],
+        )
+        github.GitHubProvider().enable_auto_merge(
+            "o/r", 7, delete_source_branch=False,
+        )
+        assert "--delete-branch" not in captured["args"]
 
     def test_enable_auto_merge_honors_explicit_host(self, monkeypatch):
         from agent_worktrees.providers import github
@@ -1635,7 +1662,10 @@ class TestGitHubProvider:
             "delete_branch_on_merge": True,
         })
         prot_json = json.dumps({
-            "required_pull_request_reviews": {"required_approving_review_count": 1},
+            "required_pull_request_reviews": {
+                "required_approving_review_count": 1,
+                "dismiss_stale_reviews": True,
+            },
             "required_status_checks": {"contexts": ["ci"]},
         })
 
@@ -1651,6 +1681,29 @@ class TestGitHubProvider:
         assert pol.allow_auto_merge is True
         assert pol.required_approving_reviews == 1
         assert pol.has_required_status_checks is True
+        assert pol.dismiss_stale_reviews is True
+
+    def test_get_repo_policy_reads_dismiss_stale_reviews_false(self, monkeypatch):
+        # copilot-extensions#2060: a repo whose protection explicitly leaves
+        # dismiss_stale_reviews off must surface that confirmed False.
+        from agent_worktrees.providers import github
+
+        repo_json = json.dumps({"allow_squash_merge": True})
+        prot_json = json.dumps({
+            "required_pull_request_reviews": {
+                "required_approving_review_count": 1,
+                "dismiss_stale_reviews": False,
+            },
+        })
+
+        def fake(args, **kw):
+            if args[-1].endswith("/protection"):
+                return _proc(stdout=prot_json)
+            return _proc(stdout=repo_json)
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        pol = github.GitHubProvider().get_repo_policy("o/r", default_branch="main")
+        assert pol.dismiss_stale_reviews is False
 
     def test_get_repo_policy_no_protection_is_ungated(self, monkeypatch):
         from agent_worktrees.providers import github
@@ -1665,6 +1718,25 @@ class TestGitHubProvider:
         pol = github.GitHubProvider().get_repo_policy("o/r", default_branch="main")
         assert pol.required_approving_reviews == 0
         assert pol.has_required_status_checks is False
+        # No protection rule configured at all -> nothing dismisses anything.
+        assert pol.dismiss_stale_reviews is False
+
+    def test_get_repo_policy_protection_unreadable_leaves_dismiss_unknown(
+        self, monkeypatch,
+    ):
+        # A non-"Not Found" failure (e.g. a permission error) must NOT be
+        # read as a confirmed non-dismissing policy -- leave it unknown.
+        from agent_worktrees.providers import github
+        repo_json = json.dumps({"allow_squash_merge": True})
+
+        def fake(args, **kw):
+            if args[-1].endswith("/protection"):
+                return _proc(returncode=1, stderr="Forbidden")
+            return _proc(stdout=repo_json)
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        pol = github.GitHubProvider().get_repo_policy("o/r", default_branch="main")
+        assert pol.dismiss_stale_reviews is None
 
     def test_get_repo_policy_read_failure_unsupported(self, monkeypatch):
         from agent_worktrees.providers import github
@@ -1775,6 +1847,85 @@ class TestGitHubProvider:
             "o/r", api_base="https://gitea.example",
         )
         assert pol.supported is False
+
+    def test_get_repo_policy_gitea_reads_dismiss_stale_approvals(self, monkeypatch):
+        # copilot-extensions#2060: Gitea's branch_protections read is
+        # best-effort and only attempted when a default_branch is given.
+        from agent_worktrees.providers import gitea
+
+        repo_body = json.dumps({"allow_rebase": True})
+        prot_body = json.dumps({"dismiss_stale_approvals": True})
+
+        def fake(args, **kw):
+            url = args[args.index("-X") + 2]
+            if "/branch_protections/" in url:
+                return _proc(stdout=f"{prot_body}\n200")
+            return _proc(stdout=f"{repo_body}\n200")
+
+        monkeypatch.setattr(gitea, "run_cli", fake)
+        pol = gitea.GiteaProvider().get_repo_policy(
+            "o/r", default_branch="main",
+            api_base="https://gitea.example", token="tok",
+        )
+        assert pol.dismiss_stale_reviews is True
+
+    def test_get_repo_policy_gitea_no_protection_rule_is_ungated(self, monkeypatch):
+        from agent_worktrees.providers import gitea
+
+        repo_body = json.dumps({"allow_rebase": True})
+
+        def fake(args, **kw):
+            url = args[args.index("-X") + 2]
+            if "/branch_protections/" in url:
+                return _proc(stdout="not found\n404")
+            return _proc(stdout=f"{repo_body}\n200")
+
+        monkeypatch.setattr(gitea, "run_cli", fake)
+        pol = gitea.GiteaProvider().get_repo_policy(
+            "o/r", default_branch="main",
+            api_base="https://gitea.example", token="tok",
+        )
+        # No protection rule on that branch at all -> nothing dismisses.
+        assert pol.dismiss_stale_reviews is False
+
+    def test_get_repo_policy_gitea_protection_unreadable_leaves_dismiss_unknown(
+        self, monkeypatch,
+    ):
+        # A non-404 failure (e.g. a permission error) must not be read as a
+        # confirmed non-dismissing policy -- leave it unknown.
+        from agent_worktrees.providers import gitea
+
+        repo_body = json.dumps({"allow_rebase": True})
+
+        def fake(args, **kw):
+            url = args[args.index("-X") + 2]
+            if "/branch_protections/" in url:
+                return _proc(stdout="forbidden\n403")
+            return _proc(stdout=f"{repo_body}\n200")
+
+        monkeypatch.setattr(gitea, "run_cli", fake)
+        pol = gitea.GiteaProvider().get_repo_policy(
+            "o/r", default_branch="main",
+            api_base="https://gitea.example", token="tok",
+        )
+        assert pol.dismiss_stale_reviews is None
+
+    def test_get_repo_policy_gitea_without_default_branch_leaves_dismiss_unknown(
+        self, monkeypatch,
+    ):
+        # Binding-absent (no default_branch given) -> no protection read at
+        # all, same conservative "unknown" default as before this fix.
+        from agent_worktrees.providers import gitea
+
+        repo_body = json.dumps({"allow_rebase": True})
+
+        monkeypatch.setattr(
+            gitea, "run_cli", lambda args, **kw: _proc(stdout=f"{repo_body}\n200"),
+        )
+        pol = gitea.GiteaProvider().get_repo_policy(
+            "o/r", api_base="https://gitea.example", token="tok",
+        )
+        assert pol.dismiss_stale_reviews is None
 
     def test_get_repo_policy_honors_explicit_host(self, monkeypatch):
         # An explicit api_base (GHE) must be the host BOTH gh calls target --

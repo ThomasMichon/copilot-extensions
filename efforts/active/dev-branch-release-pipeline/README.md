@@ -2,11 +2,11 @@
 
 - **Slug:** `dev-branch-release-pipeline`
 - **Repo:** copilot-extensions
-- **Branch(es):** working branches off current `main` for Phase 1 tooling;
-  `dev` created 2026-09-23 (Phase 2, in progress — see Plan's sequencing note
-  before assuming it's "live").
+- **Branch(es):** `dev` is live and the normal contribution target
+  (promoted to `main` by the CI pipeline); Phase 7 work branches off `dev`
+  per the current contributor flow.
 - **Created:** 2026-09-22
-- **Status:** Done (2026-10-02)
+- **Status:** Active (reopened 2026-10-02 for Phase 7 — see Journal)
 - **Vision:** none yet for the pipeline itself — this effort may spawn a
   `visions/release-pipeline` entry once the design settles; revisit at
   Phase 2/3 boundary. It is, however, the named realization vehicle for the
@@ -648,20 +648,34 @@ Round 2 (operator's response to that evaluation):
       (PRs #3623/#3627/#3628).
 - [x] Audit every machine's local `copilot-extensions` anchor checkout for
       the same stale-`default_branch: main` config-resolution hazard found
-      on `atlas-core` (Journal, 2026-09-25) — at minimum the second operator workstation,
-      already known to carry other stale-vs-`dev` state from the same
-      migration window.
+      on the leaked placeholder machine name (Journal, 2026-09-25) — at
+      minimum the second operator workstation, already known to carry other
+      stale-vs-`dev` state from the same migration window.
   - **Closed as not applicable, 2026-10-01** (operator-confirmed). Checked
-    `agent-bridge machines --all-projects` for a registered `atlas-core`
-    machine to drive this audit — not found in this harness's topology at
-    all (9 real machines registered, none named `atlas-core`). The operator
-    confirmed `atlas-core` was a placeholder/leaked name from `aperture-labs`
+    `agent-bridge machines --all-projects` for a registered machine under
+    that name to drive this audit — not found in this harness's topology at
+    all (9 real machines registered, none matching). The operator confirmed
+    it was a placeholder/leaked name from private downstream-repository
     config, not a real second harness-relevant workstation — the
-    prior Journal entry's reference to "this machine's (`atlas-core`)"
-    local anchor checkout was a misattribution, not evidence of a second
+    prior Journal entry's reference to "this machine's" local anchor
+    checkout was a misattribution, not evidence of a second
     real machine actually carrying the stale-config hazard. No real second
     machine is currently known to need this audit; closing rather than
     leaving an unfulfillable item open against a machine that doesn't exist.
+
+### Phase 7 — Vendorable-aware changefiles, auto-bump propagation, and placeholder versions on `dev`
+
+Full design (Request, Context, Plan, Design points, Validation Plan):
+[`phase-7-vendorable-changefiles.md`](phase-7-vendorable-changefiles.md).
+
+- [ ] Changefile hygiene: bidirectional presence correctness against fresh
+      `dev`, vendorable-own version identity, aggregator auto-bump
+      propagation (to both consumers and real vendored copies), bump-
+      precedence coalescing, placeholder (`"0.0.0"`) version values with a
+      genuinely non-functional `dev` marketplace, and retiring
+      `check-version-consistency.py`'s `dev`-side enforcement in favor of a
+      post-generation promotion invariant. See the sibling doc for the full
+      checklist, design decisions, and validation matrix.
 
 ## Validation Plan
 
@@ -782,7 +796,13 @@ Round 2 (operator's response to that evaluation):
     correctly resulted in `promote` completing `success` with a graceful
     internal no-op, never a hard failure and never a false promotion.
 
+### Phase 7 validation
+
+Full validation matrix:
+[phase-7-vendorable-changefiles.md](phase-7-vendorable-changefiles.md#validation-plan).
+
 ## Proposal
+
 
 _Pending — Phase 1 design work will produce concrete tool choices and
 generator contract details here or in a linked sub-doc._
@@ -1811,7 +1831,7 @@ efforts' own PRs).
     *own* new logic and passed `main-gate` cleanly, unassisted — merged with
     a plain `gh pr merge --squash`, no `--admin` required, dogfooding the
     fix on its first real use.
-  - **Separately, root-cause layer**: this machine's (`atlas-core`) local
+  - **Separately, root-cause layer**: this machine's local
     **anchor checkout** of `copilot-extensions` was still sitting on an old,
     already-merged topic branch (`fix/efforts-completion-gate-owner-version-
     drift`) whose on-disk `.agent-worktrees/config.yaml` still read
@@ -2463,15 +2483,15 @@ this clone's tag namespace across linked worktrees, not a real
 determinism bug in the generator itself; deleted the resulting stray
 local-only tags.
 
-### 2026-10-01 — Closed the atlas-core audit item as not applicable (Phase 6)
+### 2026-10-01 — Closed the leaked-placeholder-machine-name audit item as not applicable (Phase 6)
 
 Attempted to drive the "audit every machine for the stale-`default_branch:
-main` hazard" item and found `atlas-core` was never a real registered
+main` hazard" item and found the named machine was never a real registered
 machine in this harness's topology (`agent-bridge machines --all-projects`
-lists 9 real machines, none named `atlas-core`). Operator confirmed
-`atlas-core` was a placeholder/leaked name from `aperture-labs` config,
-not a real second harness-relevant workstation — the prior
-Journal entry's "this machine's (`atlas-core`)" phrasing was a
+lists 9 real machines, none matching). Operator confirmed
+it was a placeholder/leaked name from private downstream-
+repository config, not a real second harness-relevant workstation — the prior
+Journal entry's "this machine's" phrasing was a
 misattribution. Closed the item rather than leaving it open against a
 machine that doesn't exist.
 
@@ -2554,6 +2574,39 @@ gate, a pause/revert rollback mechanism, the `main`→`dev` contributor-flow
 cutover (with a live migration guide and a pinned contributor announcement),
 and an extensive empirical validation record — all currently running in
 production with a 90%+ real-run success rate and zero rollbacks to date.
+
+### 2026-10-02 — Reopened: Phase 7, vendorable-aware changefiles + placeholder versions
+
+New operator request (verbatim, captured in Phase 7 above): changefile
+hygiene with bidirectional diff-correctness against fresh `dev`, vendorables
+getting their own version identity so a shared-lib PR doesn't need to name
+every consumer, aggregator auto-bump propagation to downstream consumers,
+placeholder (`"0.0.0"`) version values on `dev`, and retiring the
+hook/CI enforcement that currently pressures hand-edited version fields.
+**Reopening this effort rather than starting a new one** — Phase 7 is a
+direct continuation of the same changefile/version-accumulation system this
+effort already owns, including closing out Phase 6's still-open "`dev`
+marketplace placeholder" loose end.
+
+Submitted the Phase 7 plan for review (PR #4974) before any implementation,
+per this effort's own plan-before-code convention. The automated reviewer
+caught two real gaps before confirming: (1) the proposed promotion flow
+never seeds a vendorable's version from `main` before applying its next
+changefile, so an unchanged vendorable would regress to the `0.0.0`
+placeholder and restart its bump history from scratch every promotion —
+`_seed_versions_from_main()` needs a vendorable-seeding path added alongside
+its existing plugin/standalone-consumer seeding; (2) deleting
+`check-version-consistency.py` outright removes the only check that
+`accumulate_bumps.py`'s own `apply()` didn't silently drop a write (it
+currently ignores `_write_source_fallbacks()`/
+`_write_instruction_projection_owners()`'s return values) — resolved by
+closing that gap directly inside `accumulate_bumps.py` (fail closed on a
+dropped write) rather than resurrecting the old checker, since the
+underlying operator decision (no hook/CI enforcement pressuring hand-edited
+version fields) is about `dev`, not about the machine-generated `main`
+snapshot a human never touches. Both fixes folded into the Plan/Context
+above before this PR clears review.
+
 
 
 

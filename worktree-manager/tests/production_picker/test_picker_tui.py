@@ -4376,7 +4376,10 @@ def test_submenu_stop_starts_single_item_restart_run(monkeypatch):
 
 
 def test_new_worktree_decision_exits():
-    """New worktree… opens the options dialog; Create exits with a decision."""
+    """New worktree… opens the merged options+prompt dialog; Create exits
+    with a decision directly -- no second screen (Phase A, folded the
+    optional seed prompt into this one dialog's own content stack:
+    header -> prompt -> options -> buttons)."""
     src = _fixture_source()
 
     async def run():
@@ -4392,13 +4395,11 @@ def test_new_worktree_decision_exits():
             dlg = _scope_dlg(scr)
             assert dlg is not None
             from worktree_manager.production_picker.picker_tui.engine import FocusGroup
-            # optmenu opens focused on the Create button group (native focus).
+            # optmenu opens focused on the Create button group (native focus) --
+            # Create stays the default stop even with the prompt field present.
             assert dlg.query_one("#scope-buttons", FocusGroup).has_focus
             assert all(not o["on"] for o in dlg._dlg["opts"])
-            await pilot.press("enter")      # confirm Create, no options
-            await pilot.pause()
-            await pilot.press("enter")      # SeedPromptScreen: textarea -> buttons
-            await pilot.press("enter")      # activate Launch (blank prompt)
+            await pilot.press("enter")      # confirm Create, no options, blank prompt
             await pilot.pause()
         assert app.result is not None
         assert app.result["action"] == "new"
@@ -4412,15 +4413,67 @@ def test_new_worktree_decision_exits():
     asyncio.run(run())
 
 
-def test_new_worktree_bare_skips_seed_prompt(monkeypatch):
+def test_new_worktree_dialog_focus_stops_prompt_list_buttons():
+    """The merged dialog's content stack is header -> prompt -> options ->
+    buttons, with exactly three Tab stops (prompt box, options list,
+    buttons) -- Create is the default stop, and Tab cycles forward through
+    the other two and wraps. Enter from the prompt box jumps straight to
+    Create (not the options list) -- the prompt is almost always left blank
+    or typed-and-done, so the common "just launch" case shouldn't need an
+    extra Tab/Shift+Tab after it."""
+    from textual.widgets import SelectionList
+    from worktree_manager.production_picker.picker_tui.engine import FocusGroup
+    from worktree_manager.production_picker.picker_tui.field_widgets import (
+        _AutoExpandTextArea,
+    )
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 0
+            scr.btn_idx = 0
+            scr.sel = ("BTN", 0)
+            scr._activate()
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            buttons = dlg.query_one("#scope-buttons", FocusGroup)
+            prompt_box = dlg.query_one("#q-0", _AutoExpandTextArea)
+            options = dlg.query_one("#scope-opts", SelectionList)
+            assert buttons.has_focus          # default: Create
+            await pilot.press("tab")
+            assert prompt_box.has_focus       # wraps forward to the prompt box
+            await pilot.press("tab")
+            assert options.has_focus          # then the options list
+            await pilot.press("tab")
+            assert buttons.has_focus          # then back to the buttons
+
+            # Enter from the prompt box jumps straight to the button row,
+            # with Create highlighted -- not the options list.
+            prompt_box.focus()
+            await pilot.pause()
+            await pilot.press("enter")
+            assert buttons.has_focus
+            assert buttons._idx == 0
+
+    asyncio.run(run())
+
+
+def test_new_worktree_bare_drops_seed_prompt(monkeypatch):
     """#4778-ish (picker-new-session-prompt-and-composer Phase A item 3): a
     Bare worktree gets no Copilot bootstrap at all -- nothing to seed -- so
-    confirming Create with Bare selected must go straight to the launch
-    decision, never opening SeedPromptScreen. ``_SEED_PROMPT_ENABLED`` is on
-    by default now that both delivery seams (engine_client's --seed forward
-    + launch-session.{ps1,sh}'s post-create `embody` call) are closed; this
+    confirming Create with Bare checked must silently drop whatever was
+    typed into the SAME dialog's prompt box, never forwarding it toward a
+    launch that could never deliver it. ``_SEED_PROMPT_ENABLED`` is on by
+    default now that both delivery seams (engine_client's --seed forward +
+    launch-session.{ps1,sh}'s post-create `embody` call) are closed; this
     monkeypatch is now a no-op defensive pin, not a feature-gate override."""
     from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
+    from worktree_manager.production_picker.picker_tui.field_widgets import (
+        _AutoExpandTextArea,
+    )
     monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
     src = _fixture_source()
 
@@ -4434,13 +4487,15 @@ def test_new_worktree_bare_skips_seed_prompt(monkeypatch):
             scr._activate()
             await pilot.pause()
             dlg = _scope_dlg(scr)
+            dlg.query_one("#q-0", _AutoExpandTextArea).text = "fix the flaky test"
             labels = [o["label"] for o in dlg._dlg["opts"]]
             bare = labels.index("Bare")
-            await pilot.press("tab")
+            await pilot.press("tab")            # buttons -> prompt
+            await pilot.press("tab")            # prompt -> options
             for _ in range(bare):
                 await pilot.press("down")
             await pilot.press("space")          # toggle Bare on
-            await pilot.press("tab")
+            await pilot.press("tab")            # options -> buttons
             await pilot.press("enter")          # confirm Create
             await pilot.pause()
         assert app.result is not None
@@ -4451,14 +4506,17 @@ def test_new_worktree_bare_skips_seed_prompt(monkeypatch):
     asyncio.run(run())
 
 
-def test_new_worktree_no_mux_skips_seed_prompt(monkeypatch):
+def test_new_worktree_no_mux_drops_seed_prompt(monkeypatch):
     """A No-Mux worktree launches Copilot directly, bypassing the mux pane
     that `agent-worktrees embody`'s pending_seed delivery depends on
     entirely -- a typed prompt would be persisted but never delivered (or
     delivered unexpectedly later, if a mux session is created afterward).
-    Confirming Create with No Mux selected must go straight to the launch
-    decision, never opening SeedPromptScreen, mirroring the Bare path."""
+    Confirming Create with No Mux checked must silently drop it, mirroring
+    the Bare path."""
     from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
+    from worktree_manager.production_picker.picker_tui.field_widgets import (
+        _AutoExpandTextArea,
+    )
     monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
     src = _fixture_source()
 
@@ -4472,13 +4530,15 @@ def test_new_worktree_no_mux_skips_seed_prompt(monkeypatch):
             scr._activate()
             await pilot.pause()
             dlg = _scope_dlg(scr)
+            dlg.query_one("#q-0", _AutoExpandTextArea).text = "fix the flaky test"
             labels = [o["label"] for o in dlg._dlg["opts"]]
             no_mux = labels.index("No Mux")
-            await pilot.press("tab")
+            await pilot.press("tab")            # buttons -> prompt
+            await pilot.press("tab")            # prompt -> options
             for _ in range(no_mux):
                 await pilot.press("down")
             await pilot.press("space")          # toggle No Mux on
-            await pilot.press("tab")
+            await pilot.press("tab")            # options -> buttons
             await pilot.press("enter")          # confirm Create
             await pilot.pause()
         assert app.result is not None
@@ -4490,10 +4550,14 @@ def test_new_worktree_no_mux_skips_seed_prompt(monkeypatch):
 
 
 def test_new_worktree_seed_prompt_carries_through(monkeypatch):
-    """A typed prompt in the SeedPromptScreen that follows Create reaches the
-    launch decision's ``options["seed_prompt"]`` (``_SEED_PROMPT_ENABLED``
-    forced on -- see ``test_new_worktree_bare_skips_seed_prompt``)."""
+    """A typed prompt in the SAME dialog's prompt box reaches the launch
+    decision's ``options["seed_prompt"]`` when no incompatible option is
+    checked (``_SEED_PROMPT_ENABLED`` forced on -- see
+    ``test_new_worktree_bare_drops_seed_prompt``)."""
     from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
+    from worktree_manager.production_picker.picker_tui.field_widgets import (
+        _AutoExpandTextArea,
+    )
     monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
     src = _fixture_source()
 
@@ -4506,14 +4570,9 @@ def test_new_worktree_seed_prompt_carries_through(monkeypatch):
             scr.sel = ("BTN", 0)
             scr._activate()
             await pilot.pause()
+            dlg = _scope_dlg(scr)
+            dlg.query_one("#q-0", _AutoExpandTextArea).text = "fix the flaky test"
             await pilot.press("enter")          # confirm Create, no options
-            await pilot.pause()
-            from worktree_manager.production_picker.picker_tui.engine import SeedPromptScreen
-            seed_screen = app.screen
-            assert isinstance(seed_screen, SeedPromptScreen)
-            seed_screen._rec["primary"].text = "fix the flaky test"
-            await pilot.press("enter")          # textarea -> button row (Launch)
-            await pilot.press("enter")          # activate Launch
             await pilot.pause()
         assert app.result["action"] == "new"
         assert app.result["options"]["seed_prompt"] == "fix the flaky test"
@@ -4542,7 +4601,8 @@ def test_new_worktree_no_mux_option():
             labels = [o["label"] for o in dlg._dlg["opts"]]
             assert "No Mux" in labels
             nm = labels.index("No Mux")
-            await pilot.press("tab")            # Create button group -> options
+            await pilot.press("tab")            # Create button group -> prompt box
+            await pilot.press("tab")            # prompt box -> options
             options = dlg.query_one("#scope-opts", SelectionList)
             assert options.has_focus
             for _ in range(nm):
@@ -4553,8 +4613,8 @@ def test_new_worktree_no_mux_option():
             await pilot.press("enter")          # confirm Create
             await pilot.pause()
             # No Mux bypasses the mux pane `embody`'s delivery depends on
-            # entirely, so the seed-prompt screen is skipped -- this must
-            # go straight to the launch decision, same as Bare.
+            # entirely, so the (blank) prompt is dropped -- this must go
+            # straight to the launch decision, same as Bare.
         assert app.result["action"] == "new"
         assert app.result["options"]["no_mux"] is True
 
@@ -4577,15 +4637,13 @@ def test_new_worktree_ahp_option_defaults_off_and_toggles():
             labels = [o["label"] for o in dlg._dlg["opts"]]
             ahp = labels.index("AHP")
             assert dlg._dlg["opts"][ahp]["on"] is False
-            await pilot.press("tab")
+            await pilot.press("tab")            # buttons -> prompt
+            await pilot.press("tab")            # prompt -> options
             for _ in range(ahp):
                 await pilot.press("down")
             await pilot.press("space")
             await pilot.press("tab")
             await pilot.press("enter")
-            await pilot.pause()
-            await pilot.press("enter")      # SeedPromptScreen: textarea -> buttons
-            await pilot.press("enter")      # activate Launch (blank prompt)
             await pilot.pause()
         assert app.result["options"]["ahp"] is True
         assert app.result["options"]["no_mux"] is False
@@ -4611,7 +4669,8 @@ def test_new_worktree_modifiers_can_be_combined():
             labels = [o["label"] for o in dlg._dlg["opts"]]
             no_mux = labels.index("No Mux")
             ahp = labels.index("AHP")
-            await pilot.press("tab")
+            await pilot.press("tab")            # buttons -> prompt
+            await pilot.press("tab")            # prompt -> options
             for _ in range(no_mux):
                 await pilot.press("down")
             await pilot.press("space")
@@ -4622,7 +4681,7 @@ def test_new_worktree_modifiers_can_be_combined():
             await pilot.press("enter")
             await pilot.pause()
             # No Mux bypasses the mux pane `embody`'s delivery depends on
-            # entirely, so the seed-prompt screen is skipped here too.
+            # entirely, so the (blank) prompt is dropped here too.
         assert app.result["options"]["no_mux"] is True
         assert app.result["options"]["ahp"] is True
 
@@ -4630,6 +4689,9 @@ def test_new_worktree_modifiers_can_be_combined():
 
 
 def test_remote_new_worktree_options_hide_ahp():
+    """A remote target never composes the prompt field at all (its typed
+    text could never deliver -- the engine's resolve CLI rejects --seed
+    alongside --machine), not just drops it after the fact."""
     src = _fixture_source()
 
     async def run():
@@ -4643,6 +4705,7 @@ def test_remote_new_worktree_options_hide_ahp():
             assert dlg is not None
             labels = [o["label"] for o in dlg._dlg["opts"]]
             assert "AHP" not in labels
+            assert dlg._show_prompt is False
 
     asyncio.run(run())
 
@@ -4665,7 +4728,8 @@ def test_new_worktree_anchor_option_shows_selected_state():
             from textual.widgets import Static
             prompt = dlg.query_one("#scope-prompt", Static)
             assert "Selected: none" in prompt.render().plain
-            await pilot.press("tab")
+            await pilot.press("tab")            # buttons -> prompt box
+            await pilot.press("tab")            # prompt box -> options
             await pilot.press("space")
             await pilot.pause()
             assert dlg._dlg["opts"][0]["label"] == "Anchor repo"
@@ -4675,8 +4739,8 @@ def test_new_worktree_anchor_option_shows_selected_state():
             await pilot.press("enter")
             await pilot.pause()
             # Anchor resolves via `--base`, which the engine's own resolve
-            # CLI rejects alongside `--seed` -- the seed-prompt screen is
-            # skipped here too, same as Bare/No Mux.
+            # CLI rejects alongside `--seed` -- the (blank) prompt is
+            # dropped here too, same as Bare/No Mux.
         assert app.result["action"] == "new"
         assert app.result["options"]["anchor"] is True
         assert app.result["options"]["seed_prompt"] == ""
@@ -4686,9 +4750,11 @@ def test_new_worktree_anchor_option_shows_selected_state():
 
 def test_new_worktree_remote_target_skips_seed_prompt(monkeypatch):
     """A remote-machine target resolves via `--machine`, which the engine's
-    own resolve CLI also rejects alongside `--seed`. Confirming Create for a
-    remote target must go straight to the launch decision, never opening
-    SeedPromptScreen -- same class of gap as Anchor/Bare/No Mux."""
+    own resolve CLI also rejects alongside `--seed`. The prompt field is
+    never even composed for a remote target -- same class of gap as
+    Anchor/Bare/No Mux, closed earlier instead (at dialog-build time, not
+    confirm time) since remote-ness is already known before the dialog
+    opens."""
     from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
     monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
     src = _fixture_source()
@@ -4704,6 +4770,7 @@ def test_new_worktree_remote_target_skips_seed_prompt(monkeypatch):
             assert dlg is not None
             from worktree_manager.production_picker.picker_tui.engine import FocusGroup
             assert dlg.query_one("#scope-buttons", FocusGroup).has_focus
+            assert dlg._show_prompt is False
             await pilot.press("enter")          # confirm Create, no options
             await pilot.pause()
         assert app.result is not None
@@ -4747,6 +4814,10 @@ def test_scope_dialog_highlight_is_focus_gated():
             assert highlight_rgb() != AMBER
 
             # Tab into the list: focus arrives, the cursor highlight lights up.
+            # (The New-worktree dialog's prompt box is the first Tab-wrap stop
+            # now that it's folded into this same dialog -- two Tabs reach the
+            # options list: buttons -> prompt -> list.)
+            await pilot.press("tab")
             await pilot.press("tab")
             await pilot.pause()
             assert sl.has_focus is True
@@ -7653,6 +7724,33 @@ def _write_tasks_manifest_with_create(directory, *, confirm=False):
     (directory / "agent-dispatch.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
+def _write_tasks_manifest_with_dynamic_create(directory, *, options_py_expr):
+    """A Tasks manifest whose ``create_action`` has a ``criteria`` field
+    sourced from a live ``options_command`` (Phase B item 3): a short Python
+    one-liner standing in for ``agent-dispatch registrar vocabulary --json``,
+    so the test exercises the real subprocess-resolution + JSON-parsing path
+    without depending on agent-dispatch being installed."""
+    import json
+    manifest = {
+        "label": "Tasks",
+        "after": "Worktrees",
+        "list": [sys.executable],
+        "entry": {"id": "id", "title": "title"},
+        "empty_hint": "No proposed tasks.",
+        "create_action": {
+            "label": "New task",
+            "fields": [
+                {"name": "title", "type": "text"},
+                {"name": "criteria", "type": "multichoice",
+                 "options_command": [sys.executable, "-c", options_py_expr]},
+            ],
+            "run": [sys.executable, "create", "{field.title}",
+                    "--criteria-json", "{field.criteria}"],
+        },
+    }
+    (directory / "agent-dispatch.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
 class _FakeRuntime:
     def __init__(self, rows):
         self.rows = rows
@@ -8985,6 +9083,96 @@ def test_registered_pivot_create_action_opens_and_submits(tmp_path, monkeypatch)
                 "--prompt", "investigate and fix it",
             ]
             assert rt.invalidated is True
+
+    asyncio.run(run())
+
+
+def test_registered_pivot_create_action_resolves_dynamic_options(tmp_path, monkeypatch):
+    """Phase B item 3: a ``create_action`` field declaring ``options_command``
+    has its options resolved LIVE (off the render flow, via ``_run_bg``)
+    right before the modal opens -- the modal must not appear until the
+    subprocess result lands, and must then show those live values, not an
+    empty/static list."""
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui.engine import CreateActionScreen
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_tasks_manifest_with_dynamic_create(
+        d, options_py_expr="import json; print(json.dumps(['alpha', 'beta']))"
+    )
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [{"id": "t1", "title": "existing task"}]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            _seed_fake_tasks(scr, rows)
+            scr.htab = scr.htabs.index("Tasks")
+
+            scr.sel = ("BTN", 0)
+            await pilot.pause()
+            scr._activate()
+            # The subprocess runs off-thread -- give it a bounded number of
+            # pump cycles to land its call_from_thread callback, mirroring
+            # the project's existing _bg_threads-draining pattern. The
+            # deadline is deliberately wider than OPTIONS_COMMAND_TIMEOUT
+            # (5s) -- under full-suite CPU contention, spawning the child
+            # interpreter itself can approach that bound.
+            deadline = time.monotonic() + 15
+            while not isinstance(app.screen, CreateActionScreen) and time.monotonic() < deadline:
+                await pilot.pause()
+            assert isinstance(app.screen, CreateActionScreen)
+            screen = app.screen
+            criteria_field = next(q for q in screen._q if q["name"] == "criteria")
+            assert criteria_field["options"] == ["alpha", "beta"]
+
+    asyncio.run(run())
+
+
+def test_registered_pivot_create_action_dynamic_options_failure_degrades_to_free_text(
+    tmp_path, monkeypatch
+):
+    """A failing/empty ``options_command`` must never block the modal from
+    opening -- the field degrades to its forced ``allow_other`` free-text
+    fallback (empty ``options``), exactly the contract
+    ``pivot_create_action.parse_create_action`` establishes."""
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui.engine import CreateActionScreen
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_tasks_manifest_with_dynamic_create(
+        d, options_py_expr="import sys; sys.exit(1)"
+    )
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [{"id": "t1", "title": "existing task"}]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            _seed_fake_tasks(scr, rows)
+            scr.htab = scr.htabs.index("Tasks")
+
+            scr.sel = ("BTN", 0)
+            await pilot.pause()
+            scr._activate()
+            deadline = time.monotonic() + 15
+            while not isinstance(app.screen, CreateActionScreen) and time.monotonic() < deadline:
+                await pilot.pause()
+            assert isinstance(app.screen, CreateActionScreen)
+            screen = app.screen
+            criteria_field = next(q for q in screen._q if q["name"] == "criteria")
+            assert criteria_field["options"] == []
+            assert criteria_field["allow_other"] is True
 
     asyncio.run(run())
 

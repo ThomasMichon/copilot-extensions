@@ -50,6 +50,33 @@ VALID_CLASSES = ("reference", "singleton", "worktree", "knowledge")
 # Legacy ``type`` values mapped onto the new class taxonomy.
 _LEGACY_TYPE_MAP = {"project": "worktree", "repo": "reference"}
 
+# Audience-exposure tiers a repo's own content is visible to, least to most
+# exposed. Backs the identifier-blocklist sweep (see
+# ``identifier_blocklist.py``): a repo declares its own exposure here
+# (machine-local, like every other registry fact), and any *other*
+# registered repo's ``.identifier-blocklist/block-for-<tier>.yaml`` applies to
+# it whenever its own visibility is at or above that tier's exposure.
+VALID_VISIBILITY = ("private", "internal", "public")
+# Exposure ordering, least to most visible. An unset/unknown visibility is
+# treated as the *most* exposed tier at consumption time (fail toward
+# enforcing more blocklists, never fewer) -- see
+# ``identifier_blocklist.resolve_visibility_rank``.
+VISIBILITY_RANK = {name: rank for rank, name in enumerate(VALID_VISIBILITY)}
+
+
+def normalize_visibility(value: str | None) -> str:
+    """Coerce a raw visibility string to a valid tier, or ``""`` if unset.
+
+    Unlike :func:`normalize_class`, an unrecognized/absent value stays
+    ``""`` (distinguishable from a real tier) rather than silently
+    defaulting -- callers that need a fail-safe default (sweep enforcement)
+    apply one explicitly at the point of use.
+    """
+    if not value:
+        return ""
+    v = str(value).strip().lower()
+    return v if v in VALID_VISIBILITY else ""
+
 
 def normalize_class(value: str | None) -> str:
     """Coerce a raw class/type string to a valid management class.
@@ -98,6 +125,11 @@ class RepoEntry:
     # ON for worktree/singleton repos (you adopt them to work in them); OFF for
     # reference repos (read-only). `register`/`add --no-agent` forces it off.
     agent: bool = True
+    # Audience-exposure tier ("private"/"internal"/"public") -- see
+    # ``VALID_VISIBILITY`` above. Empty string means unset; resolve a
+    # fail-safe default via ``identifier_blocklist.resolve_visibility_rank``
+    # rather than assuming a bare empty string means "private".
+    visibility: str = ""
     paths: dict[str, str] = field(default_factory=dict)
     # paths keys: "windows", "wsl", "linux"
 
@@ -214,6 +246,7 @@ def read_registry() -> ReposRegistry:
                     account=str(entry.get("account", "") or ""),
                     copilot_account=str(entry.get("copilot_account", "") or ""),
                     agent=agent,
+                    visibility=normalize_visibility(entry.get("visibility")),
                     paths=paths,
                 )
 
@@ -274,6 +307,8 @@ def write_registry(registry: ReposRegistry) -> None:
                 lines.append(f"    tags: [{rendered}]")
             if entry.contributing:
                 lines.append(f"    contributing: {_quote(entry.contributing)}")
+            if entry.visibility:
+                lines.append(f"    visibility: {entry.visibility}")
             for plat in ("windows", "wsl", "linux"):
                 if plat in entry.paths:
                     lines.append(f"    {plat}: {_quote(entry.paths[plat])}")
@@ -758,6 +793,7 @@ def add_repo(
     contributing: str = "",
     account: str = "",
     agent: bool | None = None,
+    visibility: str = "",
     plat: str | None = None,
 ) -> RepoEntry:
     """Register a repo at a known path.  Merges with existing entry."""
@@ -785,6 +821,8 @@ def add_repo(
             existing.account = account
         if agent is not None:
             existing.agent = agent
+        if visibility:
+            existing.visibility = normalize_visibility(visibility)
         entry = existing
     else:
         entry = RepoEntry(
@@ -796,6 +834,7 @@ def add_repo(
             contributing=contributing,
             account=account,
             agent=agent if agent is not None else (repo_class != "reference"),
+            visibility=normalize_visibility(visibility),
             paths={plat: path},
         )
         registry.repos[name] = entry

@@ -198,6 +198,39 @@ def test_render_projection_includes_prefer_local_preamble(tmp_path: Path) -> Non
     )
 
 
+def test_render_projection_preamble_compares_marker_provenance_not_existence(
+    tmp_path: Path,
+) -> None:
+    """A local sibling must never be preferred by existence alone (a stale
+    sibling left by an earlier successful render could then outrank a
+    genuinely newer checked-in copy -- docs/patterns/worktree-scoped-
+    dynamic-guidance.md §2, `local-cache-delivery-primacy`'s own Journal).
+    The preamble must direct the reading agent to compare the markers'
+    own ``pluginVersion``, and on a tie compare ``templateSha256`` --
+    never whole-file bytes, which always differ by construction (only the
+    checked-in file carries this preamble at all), so a naive "content
+    differs" comparison would make the checked-in file win on *every*
+    equal-version tie -- the by-far most common steady-state case --
+    inverting the local-primary policy this effort exists to establish."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    specs, _unknown = projections._load_specs(
+        repo, [source], projections.Result(operation="test")
+    )
+
+    text = projections.render_projection(specs[0]).content.decode("utf-8")
+
+    assert "pluginVersion` and prefer whichever is newer" in text
+    assert "On a tie" in text
+    # Assert the version rule and both tie outcomes paired together, not
+    # merely present as independent keywords -- a reversed policy (match
+    # -> checked-in, differ -> local) would still satisfy bag-of-words
+    # keyword checks but must fail this one.
+    assert "matching means prefer local" in text
+    assert "differing means prefer this checked-in file" in text
+
+
 def test_render_projection_omits_preamble_for_local_cache_rendering(
     tmp_path: Path,
 ) -> None:
@@ -2635,6 +2668,28 @@ def test_customizing_copilot_ships_the_repo_wide_local_cache_catchall() -> None:
     text = rendered.content.decode("utf-8")
     assert ".github/instructions/**/*.local.instructions.md" in text
     assert "Their absence is not an error." in text
+    # Check the catch-all's own *raw template body* independently of the
+    # rendered output -- `render_projection()` always layers its own
+    # generic per-file preamble on top (even for a `skipLocalCache`
+    # source), and that preamble happens to use the same vocabulary
+    # (`pluginVersion`, `newer`, `templateSha256`, `tie`). Asserting only
+    # against `rendered.content` would therefore still pass even if the
+    # catch-all's own body reverted to the old existence-only rule --
+    # this must guard the catch-all's own precedence text specifically.
+    body = spec.template_content.decode("utf-8")
+    normalized = " ".join(body.split())
+    assert "pluginVersion` fields and prefer whichever is newer" in normalized
+    # Existence alone must never be the precedence signal (a stale
+    # sibling from an earlier successful render could otherwise outrank a
+    # genuinely newer checked-in copy -- see
+    # `local-cache-delivery-primacy`'s own Journal for the design
+    # history). Assert the exact fail-safe conditional, not independent
+    # keywords -- a reversed policy (match -> checked-in, differ ->
+    # local) would still satisfy bag-of-words checks but must fail here.
+    assert (
+        "prefer the checked-in file only if that hash differs too, "
+        "otherwise the local file stays authoritative"
+    ) in normalized
 
 
 def test_render_local_cache_honors_skip_local_cache(tmp_path: Path) -> None:

@@ -26,9 +26,8 @@ current checkout and cross-repo topology to your session-state folder (see
 - A `Generated related-repo briefings available this session -- read
   'files/related-briefings/<name>.md'` line, when present, lists related
   repos with a generated operating-guide skeleton in this session's own
-  state folder (computed fresh from the same config as the facts above).
-  Read the file for your current task; it composes with (never replaces) a
-  hand-authored `related doc` narrative when one exists.
+  state folder. Read it for your current task; it composes with (never
+  replaces) a hand-authored `related doc` narrative when one exists.
 
 ## A worktree's title is a theme, not an instruction
 
@@ -51,7 +50,7 @@ registered home. Instead:
 - `agent-worktrees related resolve <name>` -- how to work on it from here;
 - `agent-worktrees -p <name> create --json` -- your own worktree of it.
 
-Unregistered? Fix the registry (or ask the operator).
+Unregistered? Fix the registry or ask the operator.
 
 ## Diagnosing across entities (worktree, session, task, bridge, ...)
 
@@ -65,5 +64,5 @@ cat "$AW_ROOT/docs/entity-relationship-model.md"
 ```
 
 (PowerShell: same default under `$HOME\.copilot\installed-plugins\...`.) It
-maps each entity to its owning plugin and the current command for each
-traversal. `agent-bridge`/`agent-dispatch` ship the same copy.
+maps each entity to its owning plugin and current command.
+`agent-bridge`/`agent-dispatch` ship the same copy.

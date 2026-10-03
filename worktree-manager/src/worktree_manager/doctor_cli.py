@@ -6,6 +6,7 @@ import json
 
 from . import __version__, daemon_health
 from .core_install import core_status
+from .model import coverage
 from .prereqs import current_os, detect_baseline, missing
 from .self_install import status as self_status
 
@@ -33,12 +34,54 @@ def _prereq_line(s) -> str:
     return f"    {mark} {s.name.ljust(9)} {state}"
 
 
+def _alignment_blocking(cov) -> bool:
+    """Whether the plugin-alignment report should fail the doctor exit status.
+
+    A ``source_kind`` of ``"none"`` means no marketplace was reachable at all
+    (no checkout, remote fetch failed) — coverage can't be confirmed either
+    way, so it is not treated as drift.
+    """
+    return cov.source_kind != "none" and not cov.ok
+
+
+def _print_alignment(cov) -> None:
+    print("  plugin alignment:")
+    if cov.source_kind == "none":
+        print("    ○ no marketplace reachable — cannot confirm catalog coverage.")
+        print()
+        return
+    if cov.uncovered:
+        print("    ○ discovered but not in the authored catalog (inferred defaults):")
+        for n in cov.uncovered:
+            print(f"        - {n}")
+    if cov.phantom:
+        print("    ✗ in the authored catalog but not discovered (phantom/renamed):")
+        for n in cov.phantom:
+            print(f"        - {n}")
+    if cov.published_prereq_gaps:
+        print("    ✗ a plugin publishes a prereq the catalog does not carry:")
+        for plug, pr in cov.published_prereq_gaps:
+            print(f"        - {plug}: {pr}")
+    remote_note = (
+        " (membership only — published-prerequisite checks need a local "
+        "checkout and were skipped)"
+        if cov.source_kind == "remote"
+        else ""
+    )
+    if cov.ok and not cov.uncovered:
+        print(f"    ✓ every discovered plugin has an authored catalog entry; no drift{remote_note}.")
+    elif cov.ok:
+        print(f"    ✓ no errors (uncovered plugins are handled by inference){remote_note}.")
+    print()
+
+
 def cmd_doctor(rest: list[str]) -> int:
     apply_daemon_health = "--apply-daemon-health" in rest
     json_mode = "--json" in rest
     statuses = detect_baseline()
     core = core_status()
     daemon_report = daemon_health.doctor_report(apply=apply_daemon_health)
+    cov = coverage()
 
     if json_mode:
         selfst = self_status()
@@ -75,6 +118,13 @@ def cmd_doctor(rest: list[str]) -> int:
                         "root": str(selfst.root),
                     },
                     "daemon_health": daemon_report,
+                    "plugin_alignment": {
+                        "source_kind": cov.source_kind,
+                        "ok": cov.ok,
+                        "uncovered": list(cov.uncovered),
+                        "phantom": list(cov.phantom),
+                        "published_prereq_gaps": [list(g) for g in cov.published_prereq_gaps],
+                    },
                     "source": {
                         "repo": _sc.resolved_repo(),
                         "ref": _sc.resolved_ref(),
@@ -159,6 +209,8 @@ def cmd_doctor(rest: list[str]) -> int:
         print("    ✓ no abnormal cutover findings")
         print()
 
+    _print_alignment(cov)
+
     gaps = missing(statuses)
     if gaps or not core.installed:
         print("  → not fully set up. Run `worktree-manager setup` to see the plan "
@@ -166,4 +218,4 @@ def cmd_doctor(rest: list[str]) -> int:
     else:
         print("  ✓ prerequisites satisfied and the core is installed.")
     print()
-    return 0 if (not gaps and core.installed) else 1
+    return 0 if (not gaps and core.installed and not _alignment_blocking(cov)) else 1

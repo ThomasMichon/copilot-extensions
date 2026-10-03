@@ -1,11 +1,12 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/efforts/completion-gate.instructions.md","plugin":"efforts@copilot-extensions","pluginVersion":"0.1.3-dev1","renderedBytes":2322,"schema":"copilot-extensions.instruction-projection","sourceId":"completion-gate","template":"instructions/completion-gate.instructions.md","templateBytes":1622,"templateSha256":"226a1bb38c0cf86b3ad3ab0b314df9da13aa9f2f17d55a983abf513d4e32c54b","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/efforts/completion-gate.instructions.md","plugin":"efforts@copilot-extensions","pluginVersion":"0.1.3-dev1","renderedBytes":2376,"schema":"copilot-extensions.instruction-projection","sourceId":"completion-gate","template":"instructions/completion-gate.instructions.md","templateBytes":1622,"templateSha256":"226a1bb38c0cf86b3ad3ab0b314df9da13aa9f2f17d55a983abf513d4e32c54b","version":1} -->
 
-> If `completion-gate.local.instructions.md` exists here, prefer it -- it reflects
-> the currently installed payload; this file reflects the last
-> synced-and-reviewed state.
+> If `completion-gate.local.instructions.md` exists here, compare
+> `pluginVersion` and prefer whichever is newer. On a tie,
+> compare `templateSha256`: matching means prefer local;
+> differing means prefer this checked-in file.
 
 # Effort completion fallback
 

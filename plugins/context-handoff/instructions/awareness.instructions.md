@@ -14,13 +14,11 @@ worktree may chain many handoffs until the objective is done.
 If your first user turn looks like `<lead> | Resume: /consume-handoff to take
 over | Recovery: context-handoff <kind>:<id>`, it is a **handoff seed** (a
 "handoff prompt"): a locator, never the brief. Run `/consume-handoff` to load
-the real continuation before anything else. You may also be asked to prepare
-one near the end of a session.
+the real continuation before anything else.
 
 Whether a handoff cuts a successor over live or only stages a brief for a
 human: `mode` (`auto`/`manual-only`/`off`) in `.context-handoff/config.yaml`
-(or `~/.context-handoff/config.yaml`). Check it, or ask, before assuming
-either.
+(or `~/.context-handoff/config.yaml`). Check it or ask first.
 
 ## The commands, if the extension is loaded
 
@@ -43,7 +41,7 @@ Bundled CLI, needs only `node`. Every command except `help` accepts `--json`.
 | `sync-worktree` | Shared lock/rebase-safe sync (same as the force tier) |
 | `list-sessions` | Recorded handoff chain (needs `agent-worktrees`) |
 | `get-previous-session` | Recorded predecessor (needs `agent-worktrees`) |
-| `abort --locator "<kind>:<id>"` | Cancel before consumption (needs `agent-worktrees`, and `agent-dispatch` for a task) |
+| `abort --locator "<kind>:<id>"` | Cancel before consumption (needs `agent-worktrees`; `agent-dispatch` for a task) |
 
 ```bash
 CH_ROOT="${COPILOT_PLUGIN_ROOT:-$HOME/.copilot/installed-plugins/copilot-extensions/context-handoff}"

@@ -18,6 +18,7 @@ def _observation(diff_hash: str = "diff-1") -> PRObservation:
         mergeability=Mergeability.CLEAN,
         holds=frozenset(),
         revision=Revision(diff_hash=diff_hash, base_sha="base-1"),
+        last_commit_at=1234.0,
     )
 
 

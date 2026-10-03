@@ -63,6 +63,7 @@ _KNOWN_KEYS = frozenset(
         "allow_self_config_changes",
         "require_verification",
         "evaluator_ref",
+        "rehearsal_mode",
     }
 )
 _FORGE_KEYS = frozenset({"provider", "producer_login", "discovery_scope"})
@@ -355,6 +356,11 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         raise RegistrarError(
             "repository-issue-loop allow_self_config_changes: expected true/false"
         )
+    rehearsal_mode = data.get("rehearsal_mode", False)
+    if not isinstance(rehearsal_mode, bool):
+        raise RegistrarError(
+            "repository-issue-loop rehearsal_mode: expected true/false"
+        )
     def filters_payload(filters: Filters) -> dict[str, dict[str, list[str]]]:
         return {
             side: {
@@ -420,6 +426,7 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         "worker_guidance": guidance or "",
         "worker_identity": identity_name,
         "allow_self_config_changes": allow_self_config,
+        "rehearsal_mode": rehearsal_mode,
     }
 
 def expand_repository_issue_loop(data: Mapping[str, Any], *, repo_root: str | Path | None = None) -> tuple[ProfileDeclaration, ...]:
@@ -1409,8 +1416,12 @@ def run_tick(
                 for key in expected_keys
             )
             if fully_bound:
-                current = _approve_or_reread(client, proposed["id"])
-                action = "approved"
+                if config["rehearsal_mode"]:
+                    current = proposed
+                    action = "awaiting-manual-approval"
+                else:
+                    current = _approve_or_reread(client, proposed["id"])
+                    action = "approved"
             else:
                 current = _abandon_or_reread(
                     client,
@@ -1769,7 +1780,8 @@ def run_tick(
                     except Exception:
                         pass
             raise
-        task = _approve_or_reread(client, task["id"])
+        if not config["rehearsal_mode"]:
+            task = _approve_or_reread(client, task["id"])
     except Exception:
         if task is None and (
             not create_attempted or authoritative_absence

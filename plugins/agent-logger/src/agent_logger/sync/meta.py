@@ -10,9 +10,9 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
 
 SYNC_VERSION = "1.0.0"
 MAX_DEFERRED_FILE_SAMPLES = 10
@@ -85,6 +85,53 @@ def write_sync_meta(
     try:
         dest.mkdir(parents=True, exist_ok=True)
         tmp.write_text(meta, encoding="utf-8")
+        os.replace(tmp, meta_file)
+    except OSError:
+        pass
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def heartbeat_sync_meta(
+    dest: Path, machine: str, transport: str, fallback_session_count: int
+) -> None:
+    """Re-stamp an existing ``sync-meta.json``'s ``last_sync_utc`` IN PLACE,
+    touching no other field -- a no-change fast path still needs the
+    destination's own health metadata to reflect a just-verified-current
+    pass, or a routine health check would see only the last real *transfer*
+    (which may predate the periodic full-reconciliation window) and report a
+    healthy, unchanged destination as stale.
+
+    Deliberately does NOT round-trip through :func:`write_sync_meta`: that
+    function's own side effects (bumping ``consecutive_partial_count``,
+    truncating ``deferred_files``/``excluded_detritus_roots`` back down to
+    their sample caps) are meant for an actual new transfer attempt, not a
+    skip -- replaying them here would misclassify health (a bumped partial
+    streak with no new attempt) and silently shrink an already-bounded
+    sample list further each heartbeat. Falls back to a full
+    :func:`write_sync_meta` call only when no metadata exists yet at all
+    (first-ever heartbeat, nothing to preserve). A malformed/unreadable
+    existing file (:func:`read_sync_meta` raising, as opposed to returning
+    ``None`` for a genuinely missing one) is left untouched rather than
+    silently overwritten with a fresh "ok" status -- that visible error is
+    itself a signal worth preserving, not something a no-op heartbeat
+    should paper over.
+    """
+    try:
+        previous = read_sync_meta(dest)
+    except OSError:
+        return
+    if previous is None:
+        write_sync_meta(dest, machine, transport, "ok", fallback_session_count)
+        return
+    previous["last_sync_utc"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    meta_file = dest / "sync-meta.json"
+    tmp = meta_file.with_name(f".sync-meta.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(json.dumps(previous, indent=2), encoding="utf-8")
         os.replace(tmp, meta_file)
     except OSError:
         pass
