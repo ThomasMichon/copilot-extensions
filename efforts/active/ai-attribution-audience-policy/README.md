@@ -179,16 +179,16 @@ Finished the two checklist items the stashed diff hadn't reached yet (the
 SKILL.md schema doc + `references/related.yaml` example, and tests covering
 round-trip, normalization, and the audience-keyed disclosure-policy
 resolution/override logic) and trimmed the ported docstrings for brevity so
-`related.py`'s growth (1717 -> 1826 lines, after three rounds of
+`related.py`'s growth (1717 -> 1837 lines, after four rounds of
 review-driven additions) stayed as small as reasonably possible -- still
 required a deliberate, reviewed widen of its shrink-only
 `module-size-baseline.json` entry (a sanctioned path per `CONTRIBUTING.md`'s
 own Code Style section, not a silent bypass). All `related`-module tests
-(187) plus the standard validation suite (`check-module-size`,
+(188) plus the standard validation suite (`check-module-size`,
 `check-docs-consistency`, `check-version-consistency`,
 `check-effort-vision-structure`) pass clean. **Phase 1 is done.**
 
-PR #5084's own review (3 rounds) caught real issues worth recording
+PR #5084's own review (4 rounds) caught real issues worth recording
 candidly: the first round found that every piece of ported documentation
 (this doc, the SKILL.md, `references/related.yaml`, and a `related.py`
 docstring) had inherited a "narrow-only, never widens" framing for the
@@ -217,18 +217,45 @@ exactly the "never the target repo's own tracked config" risk this effort's
 own Guiding Intent named at kickoff, which the implementation had failed to
 actually enforce. Fixed by gating any disclosure-*weakening* claim (a
 `private` audience, or an override that turns a key off) behind a new
-`_TRUSTED_FOR_POLICY_WEAKENING` set (`harness`/`machine`/`knowledge` --
-the operator-controlled overlay layers `read_related_grafted` already
-tracks via `origin_layer`) -- an untrusted source can still *widen*
-disclosure freely, only narrowing requires operator-authored provenance.
-Added both model-level tests (an untrusted `private`/narrowing claim is
-discarded; the identical claim from a trusted layer is honored; widening
-from an untrusted source still works) and a CLI-level `resolve --json`
-assertion proving the same gate holds through the real dispatch path. Also
-updated the two schema docs the earlier rounds hadn't reached
-(`docs/config-reference.md`, `docs/configuration.md`) and added a
+`_TRUSTED_FOR_POLICY_WEAKENING` set -- an untrusted source can still
+*widen* disclosure freely, only narrowing requires operator-authored
+provenance. Added model-level tests (an untrusted `private`/narrowing
+claim is discarded; the identical claim from a trusted layer is honored;
+widening from an untrusted source still works) and a CLI-level
+`resolve --json` assertion proving the same gate holds through the real
+dispatch path. Also updated the two schema docs the earlier rounds hadn't
+reached (`docs/config-reference.md`, `docs/configuration.md`) and added a
 `resolve --json`-level assertion alongside the existing `show --json` one,
 since the former is the actual Phase 2 consumer contract.
+
+The fourth round caught that the third round's own fix was still
+bypassable on the *real* CLI path: it had trusted the `"harness"` layer
+(alongside `"machine"`/`"knowledge"`), reasoning it was one of
+`read_related_grafted`'s operator-controlled overlay layers. But
+`state_root.config_source_anchors` labels **whichever repo happens to be
+the current launch/base anchor** as `"harness"` *unconditionally* -- it
+carries no distinction between "the operator's own control-plane config,
+describing some other repo" (legitimate) and "the literal target repo's
+own tracked related.yaml, describing itself" (the exact attack the gate
+exists to block). A hand-built test anchor tagged `"knowledge"` proved the
+*model* was correct without proving the *real* anchor-construction path
+actually produced a safe label -- caught only because the reviewer insisted
+on a test through the real `_related_config_source_anchors` ->
+`state_root.config_source_anchors` chain rather than a manually-tagged
+anchor. Fixed by dropping `"harness"` from
+`_TRUSTED_FOR_POLICY_WEAKENING` entirely (now just
+`{"machine", "knowledge"}`) -- a deliberately conservative interim
+position: it can only ever fail *safe* (a legitimate harness-layer policy
+is ignored, falling back to disclose-by-default), never exploitably
+permissive, pending a future refinement that can actually distinguish
+"describing another repo" from "describing itself" (e.g. by comparing the
+entry's origin anchor against the described repo's own resolved checkout
+path) -- deliberately not attempted here, since that refinement needs
+context (which repo is being described) this model-level function doesn't
+have, and forcing one without that context risked repeating this exact
+mistake a third time. Added a test that drives the real anchor-
+construction chain end to end (not a hand-tagged anchor) to close the gap
+the reviewer actually found.
 
 ### 2026-09-19 - Kickoff
 Operator requested rework of `ai-attribution`'s disclosure default from

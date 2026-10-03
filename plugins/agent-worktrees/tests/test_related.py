@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -2079,6 +2080,13 @@ def test_effective_audience_discards_private_from_an_untrusted_source():
     assert related.effective_audience(
         RelatedEntry(name="x", audience="private", origin_layer="repository")
     ) == ""
+    # "harness" (whichever repo happens to be the current launch/base
+    # anchor -- state_root.config_source_anchors labels it this way
+    # unconditionally, with no distinction from a target's own self-entry)
+    # is also untrusted, conservatively, until that distinction exists.
+    assert related.effective_audience(
+        RelatedEntry(name="x", audience="private", origin_layer="harness")
+    ) == ""
     # A "plugin"-layer entry is also untrusted for policy-weakening.
     assert related.effective_audience(
         RelatedEntry(name="x", audience="private", origin_layer="plugin")
@@ -2102,7 +2110,7 @@ def test_effective_ai_attribution_discards_narrowing_override_from_an_untrusted_
     }
     # The same override from a trusted layer IS honored (contrast case).
     e_trusted = RelatedEntry(
-        name="x", audience="public", origin_layer="harness",
+        name="x", audience="public", origin_layer="knowledge",
         ai_attribution={"disclose_on_open": False},
     )
     assert related.effective_ai_attribution(e_trusted) == {
@@ -2120,6 +2128,40 @@ def test_effective_ai_attribution_discards_narrowing_override_from_an_untrusted_
         # on disclose_on_reply is a no-op widening, not narrowing.
         "disclose_on_open": True, "disclose_on_reply": True,
     }
+
+
+def test_harness_layer_from_the_real_anchor_construction_path_is_untrusted(
+    tmp_path, monkeypatch
+):
+    """Drives the REAL `_related_config_source_anchors` ->
+    `state_root.config_source_anchors` -> `config_contribution_anchor`
+    chain (not a hand-built anchor) to prove a target repo's own tracked
+    `related.yaml` -- which that real chain labels `"harness"` purely
+    because it's the current launch/base anchor, with no way to tell it
+    apart from the operator's own control-plane config -- cannot claim
+    `audience: private` for itself. This is the exact gap a prior round of
+    review caught: a hand-constructed test anchor doesn't prove the real
+    production path is actually gated."""
+    from agent_worktrees import related_cli as cli
+    from agent_worktrees import state_root
+
+    repo = tmp_path / "untrusted-target-repo"
+    repo.mkdir()
+    related.write_related(repo, RelatedConfig(related={
+        "untrusted-target-repo": RelatedEntry(
+            name="untrusted-target-repo", audience="private",
+        ),
+    }))
+    monkeypatch.setattr(
+        state_root, "config_source_anchors",
+        lambda *_a, **_k: [SimpleNamespace(anchor=str(repo), origin="harness")],
+    )
+    monkeypatch.setattr(related, "installed_plugin_related_anchors", lambda **_k: [])
+
+    anchors = cli._related_config_source_anchors(str(repo))
+    entry = related.get_related_grafted(anchors, "untrusted-target-repo")
+    assert entry.origin_layer == "harness"  # confirms the real path's own labeling
+    assert related.effective_audience(entry) == ""  # discarded, not "private"
 
 
 def test_show_and_resolve_json_surface_audience_and_resolved_attribution(

@@ -1160,18 +1160,29 @@ def effective_ownership(entry: RelatedEntry) -> str:
 
 
 # Layers trusted to weaken AI-attribution disclosure (claim a `private`
-# audience, or an override that turns a key OFF). These are the
-# operator-controlled overlay layers (see ``read_related_grafted``'s own
-# docstring): the facility's shared harness baseline, a machine-specific
-# override, and the operator's bound personal knowledge repo. Deliberately
-# excludes ``"repository"`` (a target's own tracked, possibly-untrusted
-# related.yaml -- any contributor to that repo could otherwise add a
-# self-entry claiming `audience: private` to suppress disclosure about
-# itself) and ``"plugin"``/``""``/``"unknown"`` (no positive evidence of
-# operator authorship). An untrusted entry can still WIDEN disclosure (claim
-# `public`, or an override that turns a key ON) -- only narrowing requires
-# this trust.
-_TRUSTED_FOR_POLICY_WEAKENING = frozenset({"harness", "machine", "knowledge"})
+# audience, or an override that turns a key OFF).
+#
+# Only "machine" (the machine-local project root harness *setup* writes,
+# never an arbitrary repo checkout) and "knowledge" (the operator's own
+# bound personal knowledge repo) qualify. "harness" is deliberately
+# EXCLUDED even though it is often operator-authored in practice: per
+# ``state_root.config_source_anchors``, "harness" just means "whichever
+# repo happens to be the current launch/base anchor" -- it carries no
+# distinction between "the operator's own control-plane config, describing
+# some OTHER repo" (legitimate) and "the literal target repo's own tracked
+# related.yaml, describing ITSELF" (the exact attack this gate exists to
+# block: any contributor to an untrusted repo could add a self-entry
+# claiming `audience: private`). Resolving that distinction needs knowing
+# whether the entry's origin and the described repo's own checkout are the
+# same path -- context this model-level function doesn't have -- so until
+# that refinement lands, "harness" is conservatively treated as untrusted.
+# This can only ever fail SAFE (a legitimate harness-layer policy is
+# ignored, falling back to the disclose-by-default posture), never
+# exploitably permissive. "plugin"/``""``/"unknown" are excluded for the
+# same reason (no positive evidence of operator authorship). An untrusted
+# entry can still WIDEN disclosure (claim `public`, or an override that
+# turns a key ON) -- only narrowing requires this trust.
+_TRUSTED_FOR_POLICY_WEAKENING = frozenset({"machine", "knowledge"})
 
 
 def effective_audience(entry: RelatedEntry) -> str:
