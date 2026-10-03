@@ -18,6 +18,14 @@ bpa = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(bpa)
 
 uer = bpa.uer  # the real uv_editable_ref module build_python_artifacts imports
+# The real build_toolchain_lock module -- cached in sys.modules as a side
+# effect of bpa's own `from build_toolchain_lock import ...` above. Needed
+# because a name like `_governed_feed_configured`, once imported into
+# `bpa`'s own namespace, is just a separate binding there: monkeypatching
+# `bpa._governed_feed_configured` would NOT affect `resolve_toolchain_lock`'s
+# own internal call to it, since that call resolves via THIS module's own
+# globals, not bpa's.
+btl = sys.modules["build_toolchain_lock"]
 
 # A fake, already-resolved toolchain lock shared by every end-to-end test
 # below -- passed explicitly to `build_plugin_artifacts`/`build_wheel` so
@@ -1104,8 +1112,10 @@ def _toolchain_query_stdout(packages: dict[str, str]) -> str:
 def _assume_governed_feed_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     """Most `resolve_toolchain_lock` tests below exercise something OTHER
     than the governed-feed gate itself -- bypass it so they aren't coupled
-    to this machine's/CI runner's real environment."""
-    monkeypatch.setattr(bpa, "_governed_feed_configured", lambda **_: True)
+    to this machine's/CI runner's real environment. Patches the REAL
+    defining module (`btl`), not the re-exported `bpa` alias -- see `btl`'s
+    own module-load comment above for why that distinction matters here."""
+    monkeypatch.setattr(btl, "_governed_feed_configured", lambda **_: True)
 
 
 def test_resolve_toolchain_lock_creates_venv_and_installs(
@@ -1414,7 +1424,7 @@ def test_resolve_toolchain_lock_refuses_when_no_governed_feed_configured(
     # Regression: with no configured governed feed at all, resolving the
     # toolchain must fail closed rather than let `uv pip install` silently
     # resolve setuptools/wheel from public PyPI.
-    monkeypatch.setattr(bpa, "_governed_feed_configured", lambda **_: False)
+    monkeypatch.setattr(btl, "_governed_feed_configured", lambda **_: False)
     calls: list[list[str]] = []
 
     def fake_run(cmd, capture_output, text):  # noqa: ARG001
