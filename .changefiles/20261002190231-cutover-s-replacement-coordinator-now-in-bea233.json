@@ -1,0 +1,9 @@
+{
+  "comment": "Cutover's replacement coordinator now inherits installed service.env (shared apply_service_env_overlay helper), fixing control_authority_not_configured after a zero-downtime cutover.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
