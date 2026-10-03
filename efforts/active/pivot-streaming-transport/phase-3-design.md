@@ -432,23 +432,29 @@ phase) is considered.
         namespace's `last_refreshed_at` plus a bound meaningfully larger
         than the normal refresh period, e.g. 3× the refresh interval) —
         past that deadline, the entry is internally treated as stale
-        (no longer eligible to be served as-is); and (c) **a stale entry is
-        never served silently and never merely annotated — any `GET` that
-        observes a namespace as incomplete, uninitialized, or past its
-        freshness deadline must itself opportunistically join that
-        namespace's single-flight refresh** (the same mechanism
-        `force_refresh` triggers explicitly) **and the outcome of that
-        refresh decides the response, not a plain `incomplete_namespaces`
-        annotation on an otherwise-normal `200`:** if the joined refresh
-        succeeds, serve the now-current value (and drop that namespace from
-        `incomplete_namespaces` entirely); if it fails, that namespace falls
-        under the same fail-closed `503` contract as any other "nothing
-        authoritative to serve" case defined above — a `200` response
-        never lists a namespace as merely "incomplete" while silently still
-        handing back its stale rows underneath that annotation, since an
-        old client's bounded retry loop would exhaust its attempts and
-        accept that stale/partial data as if `incomplete_namespaces` were
-        just informational.** Without (c), an **old CLI** that never sends `force_refresh` and only performs a
+        (no longer eligible to be served as fresh, though still eligible
+        as last-known-good under the default response shape below); and
+        (c) **a stale or incomplete entry is never silently served as if
+        nothing were wrong — any `GET` that observes a namespace as
+        incomplete, uninitialized, or past its freshness deadline must
+        itself opportunistically join that namespace's single-flight
+        refresh** (the same mechanism `force_refresh` triggers explicitly),
+        **and what happens after that refresh completes or fails depends
+        on whether the caller passed `require_complete` (see the dedicated
+        bullet above) — two distinct, deliberate branches, not one:**
+        without `require_complete` (the default, and every existing
+        caller's actual behavior), the response is unchanged from today
+        regardless of the refresh's outcome — a successful refresh updates
+        the served value and drops the namespace from
+        `incomplete_namespaces`; a failed refresh still serves whatever
+        last-known-good (or nothing, if uninitialized) is on hand, with the
+        namespace named in `incomplete_namespaces` exactly as it already
+        is in Phase 2. **With** `require_complete`, a failed refresh is what
+        escalates to the fail-closed `503` contract instead of a plain
+        `200`-with-annotation — this is the entire reason that parameter
+        exists, not a parallel, unconditional rule.
+        Without the opportunistic-join half of (c) — regardless of
+        `require_complete` — an **old CLI** that never sends `force_refresh` and only performs a
         few plain `GET`s 0.5s apart (`_fetch_complete_initial_rows()`'s
         existing retry shape) would keep reading the same stale snapshot
         across all of them and publish it before the background timer ever
@@ -457,7 +463,9 @@ phase) is considered.
         `force_refresh` a pure optimization (skip straight to refreshing
         instead of waiting to notice staleness) rather than the only path
         that can ever trigger a rescan, which is what actually preserves
-        reverse skew. **This same supervised-plus-freshness-deadline
+        reverse skew — orthogonal to, and composable with, the separate
+        `require_complete` decision about what the *response* ultimately
+        does with a refresh that still fails. **This same supervised-plus-freshness-deadline
         treatment applies to `refresh_provider_resolvers()` itself, not
         just to a namespace's agent scan — but the method as it stands
         today gives nothing to hook that treatment into:** it returns
@@ -534,14 +542,16 @@ phase) is considered.
         would have nothing to detect and would publish that gap as
         authoritative immediately. The cache therefore has an explicit
         **uninitialized** state per namespace (distinct from
-        last-known-good-but-currently-failing). Consistent with the
-        fail-closed contract above: a `GET` observing an uninitialized
-        namespace opportunistically joins its single-flight scan; if that
-        scan succeeds, serve the now-current value; if it's still
-        uninitialized afterward (namespace-level `503`, per "any known
-        namespace lacks an authoritative value" above), not a `200` that
-        merely lists it in `incomplete_namespaces` while silently handing
-        back nothing for it.
+        last-known-good-but-currently-failing). A `GET` observing an
+        uninitialized namespace opportunistically joins its single-flight
+        scan (same as any incomplete/stale namespace); if that
+        scan succeeds, serve the now-current value. If it's still
+        uninitialized afterward: without `require_complete`, the response
+        is `200` with that namespace named in `incomplete_namespaces` and
+        no rows for it — the current Phase 2 shape, unchanged; with
+        `require_complete`, this is exactly the "any known namespace lacks
+        an authoritative value" case above and escalates to the fail-closed
+        `503`.
   - [ ] **The namespace set itself is dynamic, not fixed at startup — and a
         same-namespace provider *replacement* is its own case, not covered
         by add/remove alone:** `refresh_provider_resolvers()`

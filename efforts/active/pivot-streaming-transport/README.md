@@ -273,14 +273,13 @@ is closest to a manifest-only change. Depends on Phase 0 — now unblocked.)_
       --stream` directly against this machine's live bridge daemon (21 real
       agents) — full `begin`/21×`row`/`done` envelope.
 
-### Phase 3 — CLI-relayed daemon fast path (the new capability, revised)
-_(Revised per Copilot review on #4764: the fast path stays behind the
+### Phase 3 — CLI-relayed daemon fast path (the new capability)
+_(The fast path stays behind the
 CLI-owned client boundary — the Picker still only ever invokes
 `list --stream`/`subscribe`; the speedup comes from each CLI's own
 `--stream` implementation relaying its already-running daemon's live feed
-internally, invisible to the Picker. Design reviewed 2026-10-02 per this
-phase's own Validation Plan gate — see the Journal for the full review
-history. **Full detail moved to a sibling document**
+internally, invisible to the Picker. **Full detail is in a sibling
+document**
 (`efforts/README.md`'s "extract substantial phase designs" convention):
 [`phase-3-design.md`](phase-3-design.md). Summary: agent-dispatch and
 agent-bridge are not symmetric — agent-dispatch's coordinator already
@@ -438,9 +437,11 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
         caller** (the route responds `503`,
         never a `200` with an empty-but-apparently-complete body),
         **initial-scan retry exhaustion with nothing authoritative to
-        serve, for a `require_complete` caller** (the same `503` contract, verified against both an old and
-        a new client — the fix is server-side and version-independent, not
-        a client-side blocking change only a new client would observe), and
+        serve, for a `require_complete`-capable client** (the `503`
+        contract, verified against a new client only — an old client never
+        sends `require_complete` and must be verified separately to keep
+        its own unmodified default behavior, never a `503`, no matter how
+        incomplete the cache is), and
         **`refresh_provider_resolvers()`'s own discovery-generation
         expiring, for a `require_complete` caller** (the `503` fires even while every existing namespace
         still has last-known-good data — never conditioned on namespace-
@@ -1582,3 +1583,30 @@ several prior rounds:
 
 Replied-to inline; the resurfaced Guiding Intent thread needed no further
 action (already addressed in round 17).
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 20: the opt-in fix itself still had a contradiction, plus two documentation-quality slips
+Round 19's opt-in fix wasn't applied consistently everywhere it needed to be:
+
+- **High: a bullet written before the opt-in fix still described a failed
+  opportunistic refresh as unconditionally escalating to `503`, explicitly
+  motivated by an old client that (per the opt-in design) could never
+  trigger that escalation in the first place.** Fixed by splitting that
+  bullet into its two actual branches: without `require_complete` (every
+  existing caller's actual behavior), a failed refresh still serves
+  last-known-good (or nothing, if uninitialized) with the namespace merely
+  named in `incomplete_namespaces`, unchanged from Phase 2; with
+  `require_complete`, that same failure is what escalates to `503`. Fixed
+  the uninitialized-namespace bullet the same way.
+- **Medium: the 3b Validation Plan's retry-exhaustion test claimed
+  verification "against both an old and a new client," which is impossible
+  once `require_complete` is opt-in** — an old client never sends it and
+  can never observe the `503` path at all. Restricted that criterion to a
+  `require_complete`-capable client, with the old client's unchanged
+  default behavior verified as its own, separate criterion.
+- **Low: the Phase 3 Plan section's own intro still carried review
+  chronology** ("Revised per Copilot review on #4764," "Design reviewed
+  2026-10-02") — the same violation already fixed twice in
+  `phase-3-design.md` (rounds 3 and 13) had crept back into the README's
+  own summary paragraph. Removed.
+
+All replied-to inline.
