@@ -180,15 +180,50 @@ def test_mis_registered_repos_rejects_empty_dot_git_directory(tmp_path: Path):
     assert "not a git checkout" in problems["dotfiles"]
 
 
-def test_mis_registered_repos_uses_exact_platform_not_fallback(tmp_path: Path, monkeypatch):
-    """A repo registered only under a *different* platform's key must be
-    treated as pathless on this platform, never inspected as if it were
-    this platform's own path (unlike ``build_repos()``'s deliberate
-    cross-platform fallback chain)."""
+def test_mis_registered_repos_expands_home_relative_path(tmp_path: Path, monkeypatch):
+    """A registered ``~/...`` path must be expanded the same way
+    ``agent-worktrees``' own ``RepoEntry.local_path()`` resolves it, not
+    treated as a literal ``~`` directory."""
+    import subprocess
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    repo = tmp_path / "src" / "dotfiles"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+
+    awt = tmp_path / ".agent-worktrees"
+    awt.mkdir()
+    (awt / "repos.yaml").write_text(
+        "schema_version: 1\n"
+        "repos:\n"
+        "  dotfiles:\n"
+        "    class: worktree\n"
+        "    windows: \"~/src/dotfiles\"\n"
+        "    linux: \"~/src/dotfiles\"\n"
+    )
+    assert mis_registered_repos(tmp_path) == []
+
+
+def test_mis_registered_repos_skips_when_git_probe_unavailable(tmp_path: Path, monkeypatch):
+    """An inconclusive probe (git missing/timing out) must not be reported
+    as proof of mis-registration -- `doctor`'s own prerequisite section
+    already covers git availability separately."""
     from worktree_manager import harness_state
 
     home = _make_home(tmp_path)
-    monkeypatch.setattr(harness_state, "_exact_platform_key", lambda: "macos")
+    monkeypatch.setattr(harness_state, "_is_real_git_checkout", lambda path: None)
+    assert mis_registered_repos(home) == []
+
+
+def test_mis_registered_repos_uses_exact_platform_not_fallback(tmp_path: Path, monkeypatch):
+    """A repo with no entry under *this* platform's key must be treated as
+    pathless, never resolved via a sibling platform's entry (unlike
+    ``build_repos()``'s deliberate cross-platform fallback chain)."""
+    from worktree_manager import harness_state
+
+    home = _make_home(tmp_path)
+    # `_make_home`'s `dotfiles` entry has no `wsl:` key at all.
+    monkeypatch.setattr(harness_state, "_exact_platform_key", lambda: "wsl")
     problems = dict(mis_registered_repos(home))
     assert "dotfiles" not in problems
 

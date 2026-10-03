@@ -331,12 +331,13 @@ def _exact_platform_key() -> str:
     uses) — ``mis_registered_repos()`` must only ever inspect the path a repo
     actually registered for *this exact* platform, never borrow a sibling
     platform's path and judge it as if it were this machine's own.
+
+    ``repos.yaml`` itself only ever carries ``windows``/``wsl``/``linux``
+    keys — agent-worktrees' own platform resolver maps macOS to ``linux``
+    too (there is no ``macos`` key), so this never returns anything else.
     """
     if os.name == "nt":
         return "windows"
-    import platform as _p
-    if _p.system() == "Darwin":
-        return "macos"
     try:
         with open("/proc/version") as f:
             if "microsoft" in f.read().lower():
@@ -346,7 +347,7 @@ def _exact_platform_key() -> str:
     return "linux"
 
 
-def _is_real_git_checkout(path: Path) -> bool:
+def _is_real_git_checkout(path: Path) -> bool | None:
     """Probe git itself rather than trust `.git`/``HEAD``+``objects`` markers.
 
     A marker-only check (a bare, possibly empty ``.git`` directory; a
@@ -356,6 +357,10 @@ def _is_real_git_checkout(path: Path) -> bool:
     of a working-tree checkout, with ambient ``GIT_*`` overrides cleared so
     an unrelated repo's env (``GIT_DIR``, ``GIT_WORK_TREE``) can't skew the
     probe.
+
+    Returns ``True``/``False`` when the probe ran conclusively, or ``None``
+    when git itself couldn't be probed (binary missing, timeout) — an
+    inconclusive probe must never be reported as proof of mis-registration.
     """
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     try:
@@ -364,18 +369,18 @@ def _is_real_git_checkout(path: Path) -> bool:
             capture_output=True, text=True, timeout=5, env=env,
         )
     except (OSError, subprocess.SubprocessError):
-        return False
-    if bare.returncode != 0:
-        return False
+        return None
     if bare.stdout.strip() == "true":
         return True
+    if bare.returncode != 0:
+        return False
     try:
         top = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
             capture_output=True, text=True, timeout=5, env=env,
         )
     except (OSError, subprocess.SubprocessError):
-        return False
+        return None
     if top.returncode != 0:
         return False
     try:
@@ -394,7 +399,9 @@ def mis_registered_repos(home_dir: Path | None = None) -> list[tuple[str, str]]:
     *this exact* platform is not itself flagged here (a legitimate
     reference-only entry can be pathless on a given machine, and another
     platform's entry is never a stand-in for this one); only a *registered
-    but wrong* path for this platform is a problem.
+    but wrong* path for this platform is a problem. A home-relative path
+    (``~/src/repo``) is expanded before checking, matching how
+    ``agent-worktrees`` itself resolves a registered path.
     """
     reg = repos_registry(home_dir)
     pkey = _exact_platform_key()
@@ -404,12 +411,16 @@ def mis_registered_repos(home_dir: Path | None = None) -> list[tuple[str, str]]:
         raw_path = entry.get(pkey)
         if not raw_path:
             continue
-        path = Path(raw_path)
+        path = Path(raw_path).expanduser()
         if not path.exists():
             problems.append((name, f"registered path does not exist: {raw_path}"))
             continue
-        if not _is_real_git_checkout(path):
+        is_checkout = _is_real_git_checkout(path)
+        if is_checkout is False:
             problems.append((name, f"registered path is not a git checkout: {raw_path}"))
+        # `None` means the probe itself couldn't run (git missing, timeout) --
+        # `doctor`'s own prerequisite section already reports git
+        # availability, so silently skip rather than report false drift.
     return problems
 
 
