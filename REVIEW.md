@@ -54,6 +54,28 @@ specifically when reviewing a pull request, not a replacement for them.
 - **Scope to the diff.** Review the code the PR actually changes. The repo
   carries pre-existing style debt — do **not** demand repo-wide cleanup or
   flag untouched code.
+- **Plan-stage effort docs are specifications, not implementations — don't
+  demand mechanism pre-validation.** A PR touching `efforts/**/README.md` or
+  a phase sub-doc precedes any code change; its job is to state
+  requirements and name a validation obligation, not to pre-solve every
+  downstream interaction a future implementation PR will actually exercise
+  against real tests. Flag a plan that is internally contradictory, that
+  omits a requirement whose absence would make the design unsound on its
+  face (a known invariant it would violate, a known failure mode with no
+  stated mitigation), or that defers a decision without naming the
+  validation obligation that will prove it was handled correctly once
+  implemented. Do **not** keep requesting a textual precedence analysis, a
+  specific algorithm, or a storage/retention policy be spelled out in prose
+  once the plan already (a) states the requirement, (b) rules out an
+  unsafe approach by name, and (c) carries a corresponding Validation Plan
+  item — that level of design is validated by the implementation's own
+  code and tests, not adjudicated sentence-by-sentence in a planning
+  document. (Observed pattern: ThomasMichon/copilot-extensions#4974 and
+  #4995 each reached 10+ review rounds on one plan-stage effort doc, each
+  round finding a genuinely real but increasingly narrow mechanism-level
+  gap — version-comparator precedence, snapshot retention, provenance-
+  capture plumbing — each appropriate for an implementation PR's own code
+  review, not a pre-code plan still being drafted.)
 - **Concrete over cosmetic.** Prefer flagging concrete violations of
   `AGENTS.md`'s and `CONTRIBUTING.md`'s standards over stylistic nitpicks.
 - **Lead with the highest-signal miss: the changefile requirement.** For any
