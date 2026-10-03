@@ -699,13 +699,13 @@ class ToolchainLock:
 
 
 _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS = ("UV_DEFAULT_INDEX", "UV_INDEX_URL")
-_PUBLIC_PYPI_HOSTS = {"pypi.org", "pypi.python.org"}
+_PUBLIC_PYPI_HOSTS = {"pypi.org", "pypi.python.org", "test.pypi.org"}
 
 
 def _is_public_pypi_url(url: str) -> bool:
-    """Whether ``url`` resolves to the public PyPI index itself -- a feed
-    configuration that NAMES this host, even explicitly, is never a
-    governed feed."""
+    """Whether ``url`` resolves to a public PyPI-family index (production
+    or Test PyPI) -- a feed configuration that NAMES one of these hosts,
+    even explicitly, is never a governed feed."""
     try:
         host = urllib.parse.urlsplit(url).hostname
     except ValueError:
@@ -713,11 +713,20 @@ def _is_public_pypi_url(url: str) -> bool:
     return (host or "").lower() in _PUBLIC_PYPI_HOSTS
 
 
-def _user_uv_toml_candidates(env: dict) -> list[Path]:
-    """The user-level `uv.toml` location(s) `uv` itself consults when no
-    project config overrides it -- computed from ``env`` (never the real
-    process environment directly) so this is independently testable
-    without touching a real `HOME`/`APPDATA`."""
+def _effective_uv_toml_candidates(env: dict) -> list[Path]:
+    """The uv.toml file(s) `uv` itself would actually read for index
+    config in this environment.
+
+    ``UV_CONFIG_FILE`` is EXCLUSIVE in `uv`'s own config resolution: when
+    set, `uv` reads ONLY that file and skips its normal project/user-level
+    discovery entirely (the same exclusivity this repo's own
+    `plugins/agent-worktrees/scripts/install.sh` already handles) -- so
+    this must mirror that explicitly, never additionally (or instead)
+    consult the user-level `uv.toml` path while `UV_CONFIG_FILE` is set,
+    which would check a file `uv` itself is NOT reading."""
+    config_file = env.get("UV_CONFIG_FILE")
+    if config_file:
+        return [Path(config_file)]
     if sys.platform == "win32":
         appdata = env.get("APPDATA")
         return [Path(appdata) / "uv" / "uv.toml"] if appdata else []
@@ -737,8 +746,8 @@ def _governed_feed_configured(*, env: dict | None = None) -> bool:
     proves the governed-feed-only contract holds. Only `UV_DEFAULT_INDEX`/
     `UV_INDEX_URL`, the legacy `index-url` key, or an `[[index]]` entry
     with `default = true` actually replace the default -- and even then,
-    a default explicitly pointed AT public PyPI itself does not count.
-    Deliberately reads configuration, never a hardcoded URL -- this
+    a default explicitly pointed AT a public PyPI-family host does not
+    count. Deliberately reads configuration, never a hardcoded URL -- this
     repository stays feed-neutral (see `tools/check-feed-neutrality.py`);
     only each machine's own local configuration ever names a real feed."""
     env = dict(os.environ) if env is None else env
@@ -746,7 +755,7 @@ def _governed_feed_configured(*, env: dict | None = None) -> bool:
         value = env.get(var)
         if value and not _is_public_pypi_url(value):
             return True
-    for candidate in _user_uv_toml_candidates(env):
+    for candidate in _effective_uv_toml_candidates(env):
         if not candidate.is_file():
             continue
         try:
@@ -834,10 +843,19 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             # venv into its real location via a single rename -- a retry
             # after any earlier failure never finds a partially built
             # venv_dir, since venv_dir never existed until this point.
-            if venv_dir.exists():
-                shutil.rmtree(venv_dir, ignore_errors=True)
+            # Never pre-delete an existing venv_dir: a concurrent caller
+            # sharing this same path may have already published its OWN
+            # complete venv (and may already be building against it) --
+            # clobbering it here would violate the "unchanged shared lock"
+            # promise and could break an in-flight build. If the rename
+            # itself fails because venv_dir now exists (we lost the race
+            # between our own absence check above and this point), defer
+            # to whichever publisher won and discard our own copy instead.
             venv_dir.parent.mkdir(parents=True, exist_ok=True)
-            staging_venv_dir.rename(venv_dir)
+            try:
+                staging_venv_dir.rename(venv_dir)
+            except OSError:
+                pass
         finally:
             if staging_venv_dir.exists():
                 shutil.rmtree(staging_venv_dir, ignore_errors=True)
@@ -877,6 +895,72 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return f"sha256:{h.hexdigest()}"
+
+
+def _read_build_system_requires(source_dir: Path) -> list[str]:
+    """``source_dir``'s own declared `[build-system].requires` list --
+    the constraints `uv build --no-build-isolation` can never satisfy
+    itself (isolation is precisely what would otherwise let it install a
+    different version), so a locked toolchain that doesn't meet them must
+    be caught before the build runs, not discovered as a build failure."""
+    pyproject = source_dir / "pyproject.toml"
+    try:
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise ArtifactBuildError(f"{pyproject}: could not read/parse: {exc}") from exc
+    build_system = data.get("build-system", {})
+    if not isinstance(build_system, dict):
+        raise ArtifactBuildError(f"{pyproject}: [build-system] is not a table")
+    requires = build_system.get("requires", [])
+    if not isinstance(requires, list) or not all(isinstance(r, str) for r in requires):
+        raise ArtifactBuildError(
+            f"{pyproject}: [build-system].requires is not a list of strings"
+        )
+    return requires
+
+
+def _assert_toolchain_satisfies_build_requires(
+    source_dir: Path, toolchain: ToolchainLock
+) -> None:
+    """Fails closed unless the locked toolchain's exact `setuptools`/
+    `wheel` versions satisfy every applicable constraint ``source_dir``
+    itself declares in `[build-system].requires` -- e.g. a lagging
+    governed feed resolving `setuptools` 83.x against a source that
+    declares `setuptools>=84.0.0`. `--no-build-isolation` means `uv build`
+    can never substitute a different version to satisfy this itself, so
+    this must be checked before the build runs, not discovered as a
+    mysterious build failure (or, worse, a successful build against a
+    toolchain the source's own manifest says is insufficient)."""
+    from packaging.requirements import InvalidRequirement, Requirement
+    from packaging.version import InvalidVersion, Version
+
+    for raw in _read_build_system_requires(source_dir):
+        try:
+            req = Requirement(raw)
+        except InvalidRequirement as exc:
+            raise ArtifactBuildError(
+                f"{source_dir}: unparseable [build-system].requires entry "
+                f"{raw!r}: {exc}"
+            ) from exc
+        if req.marker is not None and not req.marker.evaluate():
+            continue  # this constraint does not apply in this environment
+        locked = toolchain.packages.get(req.name)
+        if locked is None:
+            continue  # a requirement on a package this toolchain doesn't lock
+        try:
+            locked_version = Version(locked)
+        except InvalidVersion as exc:
+            raise ArtifactBuildError(
+                f"locked toolchain version {locked!r} for {req.name!r} is "
+                f"not a valid version: {exc}"
+            ) from exc
+        if not req.specifier.contains(locked_version, prereleases=True):
+            raise ArtifactBuildError(
+                f"{source_dir}: locked {req.name} {locked} does not satisfy "
+                f"its own declared build requirement {raw!r} -- refusing to "
+                "build with --no-build-isolation against an insufficient "
+                "pinned toolchain"
+            )
 
 
 def build_wheel(
@@ -921,6 +1005,8 @@ def build_wheel(
     invocation's own leftover wheel, which carries no in-progress
     ``reserved_names`` entry to collide with)."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    if toolchain is not None:
+        _assert_toolchain_satisfies_build_requires(source_dir, toolchain)
     with tempfile.TemporaryDirectory(prefix="build-python-artifacts-") as staging:
         staging_dir = Path(staging)
         cmd = ["uv", "build", "--wheel", "-o", str(staging_dir)]
