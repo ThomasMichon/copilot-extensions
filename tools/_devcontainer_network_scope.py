@@ -123,7 +123,20 @@ def disconnect_container_networks(container_id: str) -> None:
             "refusing to proceed with network potentially still reachable."
         )
     if network_mode == "none":
-        return  # already fully isolated -- nothing attached to disconnect
+        # `NetworkMode` reflects CREATION-time config, not live state -- a
+        # later `docker network connect` can attach a real network to a
+        # "none"-mode container while this field stays frozen at "none".
+        # Docker's own real shape for an untouched --network none
+        # container is exactly one entry keyed "none" -> {}; anything
+        # else means a network was attached after creation and must not
+        # be silently trusted as still isolated.
+        if networks != {"none": {}}:
+            raise SystemExit(
+                f"container {container_id} reports network mode 'none' but its attached "
+                f"networks are {networks!r}, not the expected {{'none': {{}}}} -- refusing "
+                "to assume it is still isolated."
+            )
+        return
     if not networks:
         raise SystemExit(
             f"container {container_id} reports network mode {network_mode!r} with no "

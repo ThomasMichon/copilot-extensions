@@ -2267,3 +2267,17 @@ silently trusted. Added dedicated unit tests for each new fail-closed
 path; all pass, along with module-size/docs-consistency/effort-vision-
 structure checks, and a fresh Docker-backed end-to-end run confirmed the
 real container's own `NetworkMode` is `bridge` (never a rejected mode).
+
+### 2026-10-03 — Review round 3 (PR #5095): none-mode shortcut closed
+A follow-up HIGH finding caught the `none`-mode fast path's own
+remaining gap: `HostConfig.NetworkMode` reflects CREATION-time config,
+not live state -- a later `docker network connect` can attach a real,
+reachable network to a "none"-mode container while this field stays
+frozen reporting `none`. The earlier fix only checked `network_mode ==
+"none"` and returned immediately; it now also verifies
+`NetworkSettings.Networks` is EXACTLY `{"none": {}}` (Docker's real
+shape for an untouched `--network none` container) before trusting it,
+matching the stricter check `agent-containers`' own `lifecycle.py`
+already applies. Added a regression test for a `none`-mode container
+reporting an unexpected extra network; all tests, module-size, and docs
+checks still pass.

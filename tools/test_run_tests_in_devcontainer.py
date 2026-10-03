@@ -1587,6 +1587,20 @@ def test_disconnect_container_networks_no_op_for_none_mode() -> None:
     assert run.call_count == 1  # only the inspect call -- nothing to disconnect
 
 
+def test_disconnect_container_networks_fails_closed_for_none_mode_with_extra_network() -> None:
+    # NetworkMode reflects CREATION-time config, not live state -- a later
+    # `docker network connect` can attach a real network to a
+    # "none"-mode container while this field stays frozen at "none".
+    inspect_result = mock.Mock(
+        returncode=0, stdout='none\t{"none": {}, "bridge": {}}', stderr="",
+    )
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result):
+        try:
+            wrapper._net_scope.disconnect_container_networks("abc123")
+        except SystemExit as exc:
+            assert "not the expected" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
 
 
 def test_tear_down_removes_container_then_volume_on_success() -> None:
