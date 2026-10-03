@@ -1,0 +1,9 @@
+{
+  "comment": "Doc-only: update effort path references after local-cache-delivery-primacy archival",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

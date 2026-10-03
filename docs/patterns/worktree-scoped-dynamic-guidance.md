@@ -267,7 +267,7 @@ scenario, given only a frozen snapshot) confirmed the preamble and the
 catch-all each independently drive an agent to the fresher
 `.local.instructions.md` content over a stale or absent checked-in file
 (see the effort README's own Journal for the scenarios and results).
-`efforts/active/local-cache-delivery-primacy` Phase 1 later replaced the
+`efforts/2026/10/03 local-cache-delivery-primacy` Phase 1 later replaced the
 existence-only precedence this proof covered with the marker-provenance
 comparison §2/§3 above describe, closing the stale-sibling gap that
 existence-only check left open. That same effort's Phase 2 landed the

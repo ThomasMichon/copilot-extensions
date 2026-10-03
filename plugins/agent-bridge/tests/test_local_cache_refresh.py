@@ -5,7 +5,7 @@ authoritative local ``work_dir`` and before ``spawner.spawn()`` actually
 launches the Copilot CLI process.
 
 See ``docs/patterns/worktree-scoped-dynamic-guidance.md`` and
-``efforts/active/local-cache-delivery-primacy`` Phase 2. This module invokes
+``efforts/2026/10/03 local-cache-delivery-primacy`` Phase 2. This module invokes
 customizing-copilot's own declared, versioned ``render-local-cache`` CLI
 (``manage-instruction-projections.py``) across a process boundary -- never
 importing that plugin's Python package -- per

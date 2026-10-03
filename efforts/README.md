@@ -12,7 +12,6 @@ that pattern to this repository.
 |--------|--------|--------------|
 | [Retire Dead-Letter Status](active/retire-dead-letter-status/README.md) | Draft | #4744 |
 | [Devcontainer Test Isolation](active/devcontainer-test-isolation/README.md) | Draft | #5040 |
-| [Local-Cache Delivery Primacy](active/local-cache-delivery-primacy/README.md) | Done; pending archive | #4925 |
 | [Pivot Streaming Transport & Render Performance](active/pivot-streaming-transport/README.md) | Active | #4762 |
 | [agent-dispatch Recipe Library](active/agent-dispatch-recipe-library/README.md) | Draft | #4691 |
 | [agent-dispatch Recipe Composability](active/agent-dispatch-recipe-composability/README.md) | In Progress | #4959 |

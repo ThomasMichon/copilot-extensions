@@ -7,7 +7,7 @@ launches the Copilot CLI process.
 This is the ``agent-bridge`` counterpart to
 ``agent_worktrees.local_cache_refresh`` (see
 ``docs/patterns/worktree-scoped-dynamic-guidance.md`` and
-``efforts/active/local-cache-delivery-primacy`` Phase 2): the same
+``efforts/2026/10/03 local-cache-delivery-primacy`` Phase 2): the same
 "render the worktree's gitignored ``*.local.instructions.md`` siblings
 before the agent reads anything" mechanism, pre-rendering a spawn-path
 ``agent-worktrees``/``agent-bridge`` itself drive, that `create`/`resume`/

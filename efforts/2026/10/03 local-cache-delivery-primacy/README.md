@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-phase worktrees
 - **Created:** 2026-10-02
-- **Status:** Done; pending archive
+- **Status:** Done
 - **Vision:** `visions/harness-guidance` -- vision-extending. Reframes
   `resilient-safety-boundary` (and the worktree-scoped dynamic guidance
   pattern it governs): the lifecycle-hook-rendered
