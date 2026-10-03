@@ -138,12 +138,12 @@ def cmd_identifiers_dispatch(argv: list[str]) -> int:
 
         # ci format: stdout must carry ONLY the token|reason lines (or
         # nothing at all) -- this is meant to be piped straight into a
-        # consumer (the live guard, or `secret set`), so any diagnostic
-        # text on stdout would be parsed as a forbidden-identifier line.
-        # Route all diagnostics to stderr instead, and emit nothing on
-        # stdout when there are no entries to report.
-        if entries:
-            print(iblk.render_ci_format(entries))
+        # consumer (the live guard, or `secret set`) that may well continue
+        # past this process's own nonzero exit (a native command's exit
+        # code is easy to ignore in a pipeline/script). On failure, emit
+        # NOTHING on stdout -- a partial denylist silently replacing a
+        # complete one is worse than an obviously-empty one -- and route
+        # every diagnostic to stderr instead.
         if parse_error:
             print(f"identifiers sweep: {parse_error}", file=sys.stderr)
             return 1
@@ -153,6 +153,8 @@ def cmd_identifiers_dispatch(argv: list[str]) -> int:
                 f"target '{target or '(unresolved)'}' (visibility={resolved_visibility}).",
                 file=sys.stderr,
             )
+            return 0
+        print(iblk.render_ci_format(entries))
         return 0
 
     output.err(f"Unknown identifiers subcommand: {sub}")

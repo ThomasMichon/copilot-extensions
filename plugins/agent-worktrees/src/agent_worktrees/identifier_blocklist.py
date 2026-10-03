@@ -146,6 +146,25 @@ def applicable_tiers(target_rank: int) -> list[str]:
     ]
 
 
+def _require_bool(raw: dict, key: str, *, context: str) -> bool:
+    """Strictly validate a boolean schema field.
+
+    A non-``bool`` value (e.g. the YAML string ``"false"``, or ``1``/``0``)
+    must never be silently coerced -- ``bool("false")`` is ``True`` in
+    Python, which would silently narrow matching (a mistyped
+    ``case_sensitive: "false"`` would be treated as ``case_sensitive:
+    true``) while reporting success.
+    """
+    if key not in raw:
+        return False
+    value = raw[key]
+    if not isinstance(value, bool):
+        raise BlocklistParseError(
+            f"{context}: '{key}' must be a boolean (true/false), got {value!r}"
+        )
+    return value
+
+
 def _compile_internal_token(raw: dict, *, context: str) -> str:
     """Resolve one YAML entry mapping to the internal token representation.
 
@@ -153,9 +172,10 @@ def _compile_internal_token(raw: dict, *, context: str) -> str:
     same shape :func:`render_ci_format` and every downstream consumer
     already understands. Raises :class:`BlocklistParseError` (naming
     *context*, typically ``<path> (entry #N)``) for a missing/empty
-    ``token`` field or an unrecognized ``kind`` -- a typo here (e.g.
-    ``kind: regxe``) must never silently fall back to a narrower, wrong
-    interpretation while reporting success.
+    ``token`` field, an unrecognized ``kind``, or a non-boolean
+    ``whole_word``/``case_sensitive`` value -- a typo here must never
+    silently fall back to a narrower, wrong interpretation while reporting
+    success.
     """
     token = str(raw.get("token", "") or "").strip()
     if not token:
@@ -165,8 +185,8 @@ def _compile_internal_token(raw: dict, *, context: str) -> str:
         raise BlocklistParseError(
             f"{context}: unknown kind '{kind}' (expected 'literal' or 'regex')"
         )
-    whole_word = bool(raw.get("whole_word", False))
-    case_sensitive = bool(raw.get("case_sensitive", False))
+    whole_word = _require_bool(raw, "whole_word", context=context)
+    case_sensitive = _require_bool(raw, "case_sensitive", context=context)
 
     if kind == "literal" and not whole_word and not case_sensitive:
         return token

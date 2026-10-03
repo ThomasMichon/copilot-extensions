@@ -208,6 +208,20 @@ def test_parse_blocklist_file_rejects_unknown_kind(tmp_path: Path):
         iblk.parse_blocklist_file(f, "r", "public")
 
 
+def test_parse_blocklist_file_rejects_non_boolean_whole_word(tmp_path: Path):
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("entries:\n  - token: x\n    whole_word: \"false\"\n", encoding="utf-8")
+    with pytest.raises(iblk.BlocklistParseError, match="'whole_word' must be a boolean"):
+        iblk.parse_blocklist_file(f, "r", "public")
+
+
+def test_parse_blocklist_file_rejects_non_boolean_case_sensitive(tmp_path: Path):
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("entries:\n  - token: x\n    case_sensitive: 1\n", encoding="utf-8")
+    with pytest.raises(iblk.BlocklistParseError, match="'case_sensitive' must be a boolean"):
+        iblk.parse_blocklist_file(f, "r", "public")
+
+
 def test_parse_blocklist_file_unreadable_raises_not_silent(tmp_path: Path, monkeypatch):
     """A permissions/IO error reading an EXISTING file must be surfaced, not
     treated the same as the file simply being absent."""

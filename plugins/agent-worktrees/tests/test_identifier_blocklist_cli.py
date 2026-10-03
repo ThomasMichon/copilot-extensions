@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -123,9 +124,14 @@ def test_sweep_malformed_blocklist_reports_error(home: Path, tmp_path: Path, cap
     assert captured.out == ""
 
 
-def test_sweep_malformed_blocklist_still_reports_valid_peer_entries(
+def test_sweep_malformed_blocklist_withholds_ci_stdout_entirely(
     home: Path, tmp_path: Path, capsys,
 ):
+    """The ci-format stream is all-or-nothing: a failure must never emit a
+    partial denylist on stdout, since a consumer piping it directly (e.g.
+    `secret set`) could silently replace a complete denylist with a partial
+    one. Partial results remain available via --format json for diagnostics
+    only (see test_sweep_json_format_includes_partial_entries_on_failure)."""
     broken = tmp_path / "broken"
     broken.mkdir()
     (broken / ".identifier-blocklist").mkdir()
@@ -147,5 +153,34 @@ def test_sweep_malformed_blocklist_still_reports_valid_peer_entries(
     rc = iblk_cli.cmd_identifiers_dispatch(["sweep", "--repo", "target"])
     assert rc == 1
     captured = capsys.readouterr()
-    assert captured.out.strip() == "still-valid"
+    assert captured.out == ""
     assert "invalid YAML" in captured.err
+
+
+def test_sweep_json_format_includes_partial_entries_on_failure(
+    home: Path, tmp_path: Path, capfd,
+):
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    (broken / ".identifier-blocklist").mkdir()
+    (broken / ".identifier-blocklist" / "block-for-public.yaml").write_text(
+        "entries: [unterminated", encoding="utf-8",
+    )
+    good = tmp_path / "good"
+    good.mkdir()
+    (good / ".identifier-blocklist").mkdir()
+    (good / ".identifier-blocklist" / "block-for-public.yaml").write_text(
+        "entries:\n  - token: still-valid\n", encoding="utf-8",
+    )
+    repos.add_repo("broken", str(broken), repo_class="worktree", plat="windows")
+    repos.add_repo("good", str(good), repo_class="worktree", plat="windows")
+    repos.add_repo("target", str(tmp_path / "target"), repo_class="worktree",
+                   visibility="public", plat="windows")
+    capfd.readouterr()  # discard add_repo's own "registered" confirmations
+
+    rc = iblk_cli.cmd_identifiers_dispatch(["sweep", "--repo", "target", "--format", "json"])
+    assert rc == 1
+    captured = capfd.readouterr()
+    payload = json.loads(captured.out)
+    assert "invalid YAML" in payload["error"]
+    assert [e["token"] for e in payload["entries"]] == ["still-valid"]

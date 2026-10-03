@@ -182,9 +182,18 @@ uses, rather than hand-copied from a separate private file:
 ```powershell
 $aw = "agent-worktrees"   # the exact argv[0] from your session command catalog
 $list = & $aw identifiers sweep --repo copilot-extensions
+if ($LASTEXITCODE -ne 0) {
+  Write-Error "identifiers sweep failed (exit $LASTEXITCODE) -- aborting; fix the reported blocklist/configuration issue before provisioning."
+  exit 1
+}
 ($list -join "`n") | & $aw repos gh ThomasMichon/copilot-extensions -- `
   secret set FORBIDDEN_IDS_WORK --repo ThomasMichon/copilot-extensions
 ```
+
+PowerShell does not stop a script on a native command's nonzero exit by
+default, so the explicit `$LASTEXITCODE` check above is required -- without
+it, an unresolved project or a malformed peer blocklist could silently
+replace a complete `FORBIDDEN_IDS_WORK` with an empty or partial one.
 
 Rotate the secret any time a contributing repo's own
 `.identifier-blocklist/` content changes. Never print the swept list to a
