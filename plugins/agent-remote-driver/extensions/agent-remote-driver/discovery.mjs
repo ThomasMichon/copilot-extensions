@@ -30,11 +30,16 @@ export function generateToken() {
 // The discovery descriptor's shape -- intentionally minimal. `driverVersion`
 // lets a future wire-protocol revision of this same extension distinguish
 // itself from an older sibling's descriptor without guessing from shape.
-export function buildDescriptor({ sessionId, pid, port, token, cwd, startedAt, driverVersion }) {
+// `updatedAt` is a heartbeat: extension.mjs refreshes it periodically while
+// the session is alive, so registry.mjs's staleness check has a second
+// signal beyond raw pid liveness (needed because a dead pid can be reused by
+// an unrelated later process -- see registry.mjs's isStale).
+export function buildDescriptor({ sessionId, pid, port, token, cwd, startedAt, updatedAt, driverVersion }) {
   if (!sessionId) throw new Error("buildDescriptor: sessionId is required");
   if (!Number.isInteger(pid) || pid <= 0) throw new Error("buildDescriptor: pid must be a positive integer");
   if (!Number.isInteger(port) || port <= 0) throw new Error("buildDescriptor: port must be a positive integer");
   if (!token) throw new Error("buildDescriptor: token is required");
+  const now = new Date().toISOString();
   return {
     version: 1,
     driverVersion: driverVersion || "0.1.0-dev1",
@@ -44,7 +49,8 @@ export function buildDescriptor({ sessionId, pid, port, token, cwd, startedAt, d
     port,
     token,
     cwd: cwd || null,
-    startedAt: startedAt || new Date().toISOString(),
+    startedAt: startedAt || now,
+    updatedAt: updatedAt || now,
   };
 }
 

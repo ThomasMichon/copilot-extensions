@@ -35,7 +35,8 @@ every subsequent `copilot` session on that machine/image write a small
   "port": 54321,
   "token": "<bearer token>",
   "cwd": "/path/to/checkout",
-  "startedAt": "2026-10-03T04:00:00.000Z"
+  "startedAt": "2026-10-03T04:00:00.000Z",
+  "updatedAt": "2026-10-03T04:00:30.000Z"
 }
 ```
 
@@ -89,13 +90,70 @@ Enable the plugin wherever it needs to be present at launch:
 }
 ```
 
-## What this plugin provides -- and what it doesn't
+## Fleet hygiene (many parallel sessions on one machine)
+
+A machine running a **fleet** of parallel agent sessions -- agent-dispatch
+workers, several worktrees, several CodeSpaces/containers, each with its own
+`copilot` process -- writes many descriptors into the same
+`~/.copilot/remote-driver/sessions/` directory. Two structural facts mean
+there is nothing for two sessions to **collide** over: each descriptor is
+named by the globally unique session id, and each server binds an
+OS-assigned ephemeral port (never fixed/shared/guessed). The real risk at
+fleet scale is **accumulation and runaway resource use**, not collision, and
+this plugin addresses both directly:
+
+- **Stale-descriptor reaping, no separate daemon required.** Every new
+  session sweeps the shared discovery directory at its own startup
+  (`extensions/agent-remote-driver/registry.mjs`'s `sweepStale`), removing
+  any descriptor whose process is no longer alive. A crashed session (OOM,
+  `SIGKILL`, host reboot) never gets to run its own cleanup -- the *next*
+  session to start reaps it instead, so the directory stays bounded across a
+  long-running fleet with zero dedicated reaper process.
+- **Heartbeat-qualified liveness, not bare pid-liveness.** A dead process's
+  pid can be recycled by an unrelated later process, so a bare
+  `process.kill(pid, 0)` check alone is not trustworthy at fleet scale.
+  Every live session refreshes its own descriptor's `updatedAt` every 30s;
+  a descriptor only counts as live when its pid exists **and** its heartbeat
+  is recent (default: 90s, 3x the refresh interval). This is the same class
+  of defense as `agent-codespaces`' Connection Owner process-birth-identity
+  beacon -- a genuine cross-platform birth-time check is a named follow-up,
+  not yet built (heartbeat freshness already closes the common case: a
+  crashed pid being reused within one heartbeat interval is exceedingly
+  unlikely).
+- **One aggregated view, not N consumer-side scans.** `bin/list-sessions.mjs`
+  sweeps + lists every live session in a single pass, with an optional,
+  bounded-concurrency `GET /health` confirmation per survivor (max 8
+  in-flight probes regardless of fleet size). A fleet controller should call
+  this instead of re-implementing its own directory walk + per-session
+  liveness guessing -- exactly the kind of duplicated-probe traffic that
+  turns into a connection storm against a large fleet.
+
+  ```bash
+  node plugins/agent-remote-driver/bin/list-sessions.mjs            # human-readable
+  node plugins/agent-remote-driver/bin/list-sessions.mjs --json      # machine-readable (tokens redacted)
+  node plugins/agent-remote-driver/bin/list-sessions.mjs --no-probe  # skip the /health confirmation
+  ```
+- **Bounded, non-looping failure modes.** `MAX_SSE_CLIENTS` (16) caps
+  concurrent `/events` subscribers per session -- a reconnect-storming or
+  misbehaving caller gets a `503`, never unbounded resource growth. The
+  driver server's own `listen()` is retried a bounded 3 times on a bind
+  race, then gives up and degrades silently (the session still runs exactly
+  as it would without the extension) -- it never retry-loops indefinitely.
+  A crash (`uncaughtException`/`unhandledRejection`) still runs descriptor
+  cleanup before the process exits, so a crashed session's own entry doesn't
+  linger as "discoverable" any longer than its next heartbeat-timeout window.
+
+
 
 **Provides:**
 - Launch-time baseline drivability (attach/send/steer/abort) for any
   `copilot` session this extension loads into.
 - A discovery descriptor any external process can read with no shared
   daemon, registry, or protocol dependency.
+- Fleet-scale hygiene: self-healing stale-descriptor reaping, heartbeat-
+  qualified liveness, bounded per-session resource limits, and a single
+  aggregation entry point (`bin/list-sessions.mjs`) -- see *Fleet hygiene*
+  above.
 
 **Does NOT provide (delegated elsewhere, or future phases of the same
 effort):**
@@ -110,9 +168,14 @@ effort):**
   the moment of attach; it does not replay history. A real mux
   (`tmux`/`psmux`) session's own scrollback already gives reattach/replay at
   the terminal layer -- this extension does not reinvent that.
-- **Any coordination, registration, or heartbeat logic.** That is
-  agent-bridge's own job if agent-bridge is present; this extension has no
-  opinion about who, if anyone, reads its discovery descriptor.
+- **Cross-platform process-identity verification.** Staleness uses pid
+  liveness + heartbeat freshness (see *Fleet hygiene*), not a true
+  birth-time check -- a pid reused by an unrelated process within one
+  heartbeat window (90s default) could theoretically produce a false
+  "still alive" read. Named, not silently assumed solved.
+- **Any coordination, registration, or heartbeat-to-a-third-party logic.**
+  That is agent-bridge's own job if agent-bridge is present; this extension
+  has no opinion about who, if anyone, reads its discovery descriptor.
 
 **Assumes:** a loopback-capable environment (the server binds
 `127.0.0.1` only) and a filesystem `~/.copilot/remote-driver/sessions/`
@@ -121,16 +184,23 @@ directory this process can create and write to.
 ## What's in this plugin
 
 - [`extensions/agent-remote-driver/extension.mjs`](extensions/agent-remote-driver/extension.mjs) --
-  the SDK-coupled glue: joins the session, writes/removes the discovery
-  descriptor, and forwards events to the driver server under the hot-potato
-  discipline (no blocking work on the CLI's own event loop).
+  the SDK-coupled glue: joins the session, writes/removes/refreshes the
+  discovery descriptor, sweeps fleet-wide stale descriptors at startup, and
+  forwards events to the driver server under the hot-potato discipline (no
+  blocking work on the CLI's own event loop).
 - [`extensions/agent-remote-driver/driver-server.mjs`](extensions/agent-remote-driver/driver-server.mjs) --
-  the dependency-free HTTP server (health/events/send/steer/abort), decoupled
-  from the SDK so it is directly unit-testable with a fake driver.
+  the dependency-free HTTP server (health/events/send/steer/abort, with a
+  bounded `MAX_SSE_CLIENTS`), decoupled from the SDK so it is directly
+  unit-testable with a fake driver.
 - [`extensions/agent-remote-driver/discovery.mjs`](extensions/agent-remote-driver/discovery.mjs) --
   pure helpers: descriptor path/shape, token generation, bearer-token
   verification.
-- [`tests/`](tests/) -- `node --test` coverage for both of the above.
+- [`extensions/agent-remote-driver/registry.mjs`](extensions/agent-remote-driver/registry.mjs) --
+  fleet hygiene: pid-liveness + heartbeat-qualified staleness, stale-descriptor
+  sweeping, and the aggregated live-session list.
+- [`bin/list-sessions.mjs`](bin/list-sessions.mjs) -- the one aggregation CLI
+  a fleet controller should use instead of its own directory scan + probes.
+- [`tests/`](tests/) -- `node --test` coverage for all of the above.
 
 ## Troubleshooting, contributing & issues
 
@@ -146,6 +216,13 @@ directory this process can create and write to.
 - **Two drivers stepped on each other's `/send`.** Expected today -- see
   *driver-exclusivity arbitration* above. Track
   `efforts/active/cli-default-bridging/README.md` Phase 2 for the fix.
+- **The discovery directory keeps growing / an entry outlives its session.**
+  Every new session self-heals this at its own startup (see *Fleet
+  hygiene*); it is not a sign of a leak by itself. If a specific entry
+  persists well past its heartbeat-timeout window (default 90s) with a
+  genuinely dead process, that is a real `registry.mjs` bug -- file it,
+  don't hand-delete the file as a workaround (another session's sweep would
+  have removed it on its own next startup).
 
 Contribute through this repo's normal worktree/PR flow (see
 [`CONTRIBUTING.md`](../../CONTRIBUTING.md)); file issues against

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createDriverServer } from "../extensions/agent-remote-driver/driver-server.mjs";
+import { createDriverServer, MAX_SSE_CLIENTS } from "../extensions/agent-remote-driver/driver-server.mjs";
 
 const TOKEN = "test-token-123";
 
@@ -131,6 +131,31 @@ test("GET /events streams fanned-out events as SSE", async () => {
       await reader.cancel();
     } catch {
       /* expected once aborted */
+    }
+  });
+});
+
+test("GET /events rejects a connection past MAX_SSE_CLIENTS with 503", async () => {
+  await withServer(async ({ base }) => {
+    const controllers = [];
+    const opens = [];
+    try {
+      // Open exactly MAX_SSE_CLIENTS connections -- all should succeed.
+      for (let i = 0; i < MAX_SSE_CLIENTS; i += 1) {
+        const controller = new AbortController();
+        controllers.push(controller);
+        const res = await authed(`${base}/events`, { signal: controller.signal });
+        opens.push(res);
+        assert.equal(res.status, 200, `connection ${i} should be accepted`);
+      }
+      // One more must be refused, not silently accepted or hung.
+      const over = await authed(`${base}/events`);
+      assert.equal(over.status, 503);
+      const body = await over.json();
+      assert.equal(body.ok, false);
+      assert.match(body.error, /too many concurrent/);
+    } finally {
+      for (const c of controllers) c.abort();
     }
   });
 });

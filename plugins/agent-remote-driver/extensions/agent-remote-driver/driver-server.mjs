@@ -16,11 +16,18 @@
 // concurrent callers. That is Phase 2's job (mux-native-driver-exclusivity,
 // see efforts/active/cli-default-bridging/README.md) -- not a gap introduced
 // here, but one this module does not attempt to close on its own.
+//
+// RESOURCE BOUNDS (fleet hygiene): MAX_SSE_CLIENTS caps concurrent /events
+// subscribers per session so a reconnect-storming or misbehaving caller
+// cannot exhaust this one session's file descriptors/memory -- a defensive
+// bound, independent of the fleet-wide discovery-file hygiene registry.mjs
+// provides.
 
 import { createServer } from "node:http";
 import { authorizes } from "./discovery.mjs";
 
 const MAX_BODY_BYTES = 1_000_000; // 1MB cap on a request body; avoids unbounded buffering
+export const MAX_SSE_CLIENTS = 16; // per-session cap on concurrent /events subscribers
 
 function sendJson(res, status, body) {
   const data = JSON.stringify(body);
@@ -95,6 +102,10 @@ export function createDriverServer(opts) {
       }
 
       if (req.method === "GET" && url.pathname === "/events") {
+        if (sseClients.size >= MAX_SSE_CLIENTS) {
+          sendJson(res, 503, { ok: false, error: `too many concurrent /events subscribers (max ${MAX_SSE_CLIENTS})` });
+          return;
+        }
         res.writeHead(200, {
           "content-type": "text/event-stream",
           "cache-control": "no-cache",
@@ -112,7 +123,7 @@ export function createDriverServer(opts) {
         sseClients.add(res);
         req.on("close", () => {
           sseClients.delete(res);
-          unsubscribe();
+          if (typeof unsubscribe === "function") unsubscribe();
         });
         return;
       }

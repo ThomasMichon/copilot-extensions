@@ -50,6 +50,27 @@ test("buildDescriptor produces the expected shape", () => {
   assert.equal(d.token, "tok");
   assert.equal(d.cwd, "/workspaces/example");
   assert.ok(d.startedAt);
+  assert.ok(d.updatedAt);
+});
+
+test("buildDescriptor defaults updatedAt to 'now' when not given, independent of a startedAt override", () => {
+  const before = Date.now();
+  const d = buildDescriptor({ sessionId: "s1", pid: 1, port: 1, token: "t", startedAt: "2026-01-01T00:00:00.000Z" });
+  assert.equal(d.startedAt, "2026-01-01T00:00:00.000Z");
+  assert.ok(Date.parse(d.updatedAt) >= before);
+});
+
+test("buildDescriptor lets updatedAt be refreshed independently of startedAt (heartbeat)", () => {
+  const d = buildDescriptor({
+    sessionId: "s1",
+    pid: 1,
+    port: 1,
+    token: "t",
+    startedAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:05:00.000Z",
+  });
+  assert.equal(d.startedAt, "2026-01-01T00:00:00.000Z");
+  assert.equal(d.updatedAt, "2026-01-01T00:05:00.000Z");
 });
 
 test("buildDescriptor rejects a missing sessionId/pid/port/token", () => {

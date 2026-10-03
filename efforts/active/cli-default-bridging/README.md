@@ -403,3 +403,41 @@ container + Dev Box, and only the local-machine design/unit-test layer is
 covered so far. Phase 2 (driver-exclusivity) and Phase 3 (escalation ladder)
 remain explicitly open and are named as such in the plugin's own README
 rather than silently assumed solved.
+
+### 2026-10-02 (cont'd) — Fleet-hygiene hardening (operator-requested)
+
+Operator flagged a real gap before this lands further: the design so far
+proved correctness for *one* session, not for a **fleet** of parallel
+sessions on the same machine (agent-dispatch workers, several worktrees,
+several CodeSpaces/containers). Added `extensions/agent-remote-driver/registry.mjs`
+and `bin/list-sessions.mjs`:
+
+- Collisions were already structurally impossible (session-id-named
+  descriptors, OS-assigned ephemeral ports) — the real risk was
+  **accumulation**: a crashed session never runs its own cleanup, orphaning
+  its descriptor. Fixed with self-healing reaping: every new session sweeps
+  the shared discovery directory at its own startup — no dedicated reaper
+  daemon.
+- Bare pid-liveness isn't trustworthy alone (pid reuse after a crash) — added
+  a heartbeat (`updatedAt`, refreshed every 30s) so staleness requires both a
+  dead pid AND (defensively) a stale heartbeat. A true cross-platform
+  birth-time check (mirroring `agent-codespaces`' Connection Owner
+  `owner_identity` pattern) is named as a follow-up, not yet built.
+- `bin/list-sessions.mjs` is the one aggregation entry point: sweep + list +
+  bounded-concurrency (max 8 in-flight) `/health` confirmation in a single
+  pass, so a fleet controller never re-implements its own per-session
+  scan/probe loop (the actual "process-bombing"/connection-storm risk at
+  fleet scale).
+- `driver-server.mjs` now caps concurrent `/events` subscribers
+  (`MAX_SSE_CLIENTS = 16`, `503` past the cap) and `extension.mjs`'s own
+  `listen()` is retried a bounded 3 times on a bind race before degrading
+  silently — never an unbounded retry loop. A crash
+  (`uncaughtException`/`unhandledRejection`) now runs descriptor cleanup
+  before exiting.
+
+20 new `node --test` cases (36 total for the plugin, all passing), covering
+real spawned-and-exited child processes for pid-liveness, a real
+`http.Server` for the SSE connection cap, and filesystem-backed sweep/reap
+scenarios including a 25-session synthetic fleet. README's *Fleet hygiene*
+section documents the design and the explicit limitation (pid-reuse edge
+case) rather than claiming it fully closed.
