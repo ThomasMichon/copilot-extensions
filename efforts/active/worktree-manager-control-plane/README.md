@@ -879,8 +879,10 @@ worktree-manager.
       re-resolution at idle boundaries → periodic sweep → validation),
       modeled on `agent-bridge`/`agent-dispatch`'s own drain/cutover
       conduct and `agent-worktrees`' existing cooldown-throttled resident
-      reaper. Not yet started — Phase 3 (client-side re-resolution) needs
-      scoping in `agent-worktrees` before the rest can land. Tracked as
+      reaper. Not yet started. Phase 1 (observability) is self-contained
+      and may land independently; only Phases 2-4 need Phase 3's
+      client-side re-resolution piece scoped in `agent-worktrees` first.
+      Tracked as
       [#5001](https://github.com/ThomasMichon/copilot-extensions/issues/5001).
 
 ### Phase 8 — Reconcile deferred backlog
