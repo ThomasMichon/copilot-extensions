@@ -70,6 +70,7 @@ import argparse
 import contextlib
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -696,6 +697,49 @@ class ToolchainLock:
         return "sha256:" + _hash_fields(*pairs)
 
 
+_GOVERNED_FEED_ENV_VARS = ("UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX")
+
+
+def _user_uv_toml_candidates(env: dict) -> list[Path]:
+    """The user-level `uv.toml` location(s) `uv` itself consults when no
+    project config overrides it -- computed from ``env`` (never the real
+    process environment directly) so this is independently testable
+    without touching a real `HOME`/`APPDATA`."""
+    if sys.platform == "win32":
+        appdata = env.get("APPDATA")
+        return [Path(appdata) / "uv" / "uv.toml"] if appdata else []
+    xdg = env.get("XDG_CONFIG_HOME")
+    if xdg:
+        return [Path(xdg) / "uv" / "uv.toml"]
+    home = env.get("HOME")
+    return [Path(home) / ".config" / "uv" / "uv.toml"] if home else []
+
+
+def _governed_feed_configured(*, env: dict | None = None) -> bool:
+    """Whether this machine declares SOME configured package index beyond
+    `uv`'s own implicit public-PyPI default -- checked via the environment
+    variables `uv` itself reads (`UV_INDEX_URL`/`UV_DEFAULT_INDEX`/
+    `UV_INDEX`) and the user-level `uv.toml` `uv` consults absent a project
+    override. Deliberately reads configuration, never a hardcoded URL --
+    this repository stays feed-neutral (see `tools/check-feed-neutrality.py`);
+    only each machine's own local configuration ever names a real feed."""
+    env = dict(os.environ) if env is None else env
+    if any(env.get(var) for var in _GOVERNED_FEED_ENV_VARS):
+        return True
+    for candidate in _user_uv_toml_candidates(env):
+        if not candidate.is_file():
+            continue
+        try:
+            data = tomllib.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            continue
+        if isinstance(data, dict) and (
+            data.get("index-url") or data.get("index") or data.get("default-index")
+        ):
+            return True
+    return False
+
+
 def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> ToolchainLock:
     """Resolves one pinned build-toolchain venv at ``venv_dir`` and returns
     its exact installed ``setuptools``/``wheel`` versions.
@@ -709,9 +753,19 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
     per process invocation: pass the same ``venv_dir`` (``--toolchain-venv``
     on the CLI) to every invocation in that run.
 
-    Never resolves from a public index: ``uv venv``/``uv pip install`` both
-    honor this machine's own governed-feed configuration (`uv.toml`),
-    exactly like every other `uv` invocation in this script."""
+    Never resolves from a public index: this call itself first verifies a
+    governed feed is actually configured (``_governed_feed_configured``),
+    failing closed rather than letting `uv venv`/`uv pip install` silently
+    resolve `setuptools`/`wheel` from public PyPI on a runner with no
+    governed-feed configuration at all."""
+    if not _governed_feed_configured():
+        raise ArtifactBuildError(
+            "no governed package feed is configured on this machine "
+            f"(checked {', '.join(_GOVERNED_FEED_ENV_VARS)} and the user-"
+            "level uv.toml) -- refusing to install the build toolchain, "
+            "which would otherwise silently resolve setuptools/wheel from "
+            "public PyPI"
+        )
     venv_python = _venv_python_path(venv_dir)
     if not venv_python.is_file():
         venv_cmd = ["uv", "venv", str(venv_dir)]

@@ -327,8 +327,8 @@ install log was searched for every contacted host. Zero matches for
 (`fastapi`, `uvicorn`, `starlette`, `h11`, `wsproto`, `pyyaml`, `pydantic`,
 `pydantic-core`, `annotated-types`, `anyio`, `click`, `idna`,
 `typing-extensions`, `typing-inspection`, `agent-client-protocol`) resolved
-through `packagefeedproxy.microsoft.io` → its backing
-`*.pkgs.visualstudio.com` Azure Artifacts feed → `*.vsblob.vsassets.io`
+through `packagefeedproxy.microsoft.io`  its backing
+`*.pkgs.visualstudio.com` Azure Artifacts feed  `*.vsblob.vsassets.io`
 blob storage - the full governed chain, never a public index. The 9
 first-party vendored-lib names (`agent-ssh-manager`, etc., which do not
 exist on any public index) were also checked against the governed feed
@@ -415,15 +415,29 @@ win grows with build complexity.
   it resolves its own disposable, single-invocation lock internally (still
   a real, pinned, non-isolated build -- just not shared with any other
   call) and tears down the disposable toolchain venv before returning.
-- 17 new unit tests (84 total now): `ToolchainLock` properties,
+- Also added `_governed_feed_configured`/`resolve_toolchain_lock`'s own
+  governed-feed-only enforcement (an automated review finding on this
+  slice's PR): without it, a runner with no configured package index at
+  all would let `uv pip install setuptools wheel` silently resolve from
+  public PyPI, violating the effort's explicit prohibition (umbrella issue
+  #4876). `resolve_toolchain_lock` now fails closed before ever invoking
+  `uv venv`/`uv pip install` unless `UV_INDEX_URL`/`UV_DEFAULT_INDEX`/
+  `UV_INDEX` is set or the user-level `uv.toml` declares an index --
+  reading configuration only, never a hardcoded feed URL (this repo stays
+  feed-neutral; see `tools/check-feed-neutrality.py`).
+- 20 new unit tests (84 total): `ToolchainLock` properties,
   `resolve_toolchain_lock` (venv creation + install, venv reuse/skip,
   venv/install/query failures, malformed-JSON and missing-package fail-
-  closed cases), `build_wheel`'s `--no-build-isolation`/`--python` command
-  construction when a toolchain is given (and that a stray `python=`
-  argument is ignored in that case), the generator-mismatch fail-closed
-  path, and the disposable-lock-resolution-and-cleanup path. All existing
-  tests updated to pass an explicit fake `ToolchainLock` so no unit test
-  invokes the real `resolve_toolchain_lock` (which shells out to `uv`).
+  closed cases, and the governed-feed-unconfigured refusal), the governed-
+  feed-detection helper itself (env-var and user-`uv.toml` paths, both
+  platforms, and a malformed-`uv.toml` fail-closed case), `build_wheel`'s
+  `--no-build-isolation`/`--python` command construction when a toolchain
+  is given (and that a stray `python=` argument is ignored in that case),
+  the generator-mismatch fail-closed path, and the disposable-lock-
+  resolution-and-cleanup path. All existing tests updated to pass an
+  explicit fake `ToolchainLock` (or stub the governed-feed check) so no
+  unit test invokes the real `resolve_toolchain_lock` (which shells out to
+  `uv`).
 - Real smoke test (not just mocked unit tests): built `agent-bridge` (10
   wheels) then `agent-worktrees` (its own wheel + vendored libs) against
   the SAME `--toolchain-venv` -- both manifests recorded the identical
