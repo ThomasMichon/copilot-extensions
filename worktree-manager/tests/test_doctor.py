@@ -81,7 +81,7 @@ def test_doctor_json_includes_daemon_health(monkeypatch, capsys):
         "phantom": [],
         "published_prereq_gaps": [],
     }
-    assert payload["repo_registration"] == {"ok": True, "problems": []}
+    assert payload["repo_registration"] == {"ok": True, "problems": [], "unknown": []}
 
 
 def test_doctor_apply_renders_daemon_actions(monkeypatch, capsys):
@@ -268,7 +268,7 @@ def test_doctor_fails_on_mis_registered_repo(monkeypatch, capsys):
     _patch_common(
         monkeypatch, doctor_cli, source_config,
         cov=_cov(),
-        repo_problems=[("moved-repo", "registered path does not exist: /tmp/gone")],
+        repo_problems=[("moved-repo", "missing", "registered path does not exist: /tmp/gone")],
     )
 
     assert wm.main(["doctor"]) == 1
@@ -281,5 +281,35 @@ def test_doctor_fails_on_mis_registered_repo(monkeypatch, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["repo_registration"] == {
         "ok": False,
-        "problems": [{"repo": "moved-repo", "detail": "registered path does not exist: /tmp/gone"}],
+        "problems": [
+            {"repo": "moved-repo", "status": "missing", "detail": "registered path does not exist: /tmp/gone"}
+        ],
+        "unknown": [],
     }
+
+
+def test_doctor_surfaces_inconclusive_repo_probe_without_failing(monkeypatch, capsys):
+    """An 'unknown' (git-probe-failed) finding must be visibly reported, but
+    must not fail doctor's exit status -- it isn't confirmed drift."""
+    from worktree_manager import doctor_cli, source_config
+
+    _patch_common(
+        monkeypatch, doctor_cli, source_config,
+        cov=_cov(),
+        repo_problems=[("flaky-repo", "unknown", "could not verify (git probe failed/unavailable): /src/flaky")],
+    )
+
+    assert wm.main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "could not verify (git probe failed/unavailable) — not treated as drift" in out
+    assert "flaky-repo: could not verify" in out
+
+    payload_rc = wm.main(["doctor", "--json"])
+    assert payload_rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["repo_registration"]["ok"] is True
+    assert payload["repo_registration"]["problems"] == []
+    assert payload["repo_registration"]["unknown"] == [
+        {"repo": "flaky-repo", "detail": "could not verify (git probe failed/unavailable): /src/flaky"}
+    ]
+

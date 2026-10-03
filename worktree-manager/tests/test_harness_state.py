@@ -133,9 +133,9 @@ def test_mis_registered_repos_flags_non_git_checkout(tmp_path: Path):
     # `git init`-ed — the fixture predates this check, so it's itself a
     # realistic "exists but isn't a git checkout" case.
     home = _make_home(tmp_path)
-    problems = dict(mis_registered_repos(home))
-    assert "dotfiles" in problems
-    assert "not a git checkout" in problems["dotfiles"]
+    problems = {name: (status, detail) for name, status, detail in mis_registered_repos(home)}
+    assert problems["dotfiles"][0] == "not-git"
+    assert "not a git checkout" in problems["dotfiles"][1]
     # `some-lib` has no registered path at all on this platform — pathless,
     # not mis-registered, so it must not be flagged.
     assert "some-lib" not in problems
@@ -155,8 +155,9 @@ def test_mis_registered_repos_flags_missing_path(tmp_path: Path):
     import shutil
 
     shutil.rmtree(tmp_path / "src" / "dotfiles")
-    problems = dict(mis_registered_repos(home))
-    assert "does not exist" in problems["dotfiles"]
+    problems = {name: (status, detail) for name, status, detail in mis_registered_repos(home)}
+    assert problems["dotfiles"][0] == "missing"
+    assert "does not exist" in problems["dotfiles"][1]
 
 
 def test_mis_registered_repos_accepts_bare_checkout(tmp_path: Path):
@@ -175,9 +176,9 @@ def test_mis_registered_repos_rejects_empty_dot_git_directory(tmp_path: Path):
     must not pass as a real checkout just because the marker exists."""
     home = _make_home(tmp_path)
     (tmp_path / "src" / "dotfiles" / ".git").mkdir()
-    problems = dict(mis_registered_repos(home))
-    assert "dotfiles" in problems
-    assert "not a git checkout" in problems["dotfiles"]
+    problems = {name: (status, detail) for name, status, detail in mis_registered_repos(home)}
+    assert problems["dotfiles"][0] == "not-git"
+    assert "not a git checkout" in problems["dotfiles"][1]
 
 
 def test_mis_registered_repos_expands_home_relative_path(tmp_path: Path, monkeypatch):
@@ -204,15 +205,18 @@ def test_mis_registered_repos_expands_home_relative_path(tmp_path: Path, monkeyp
     assert mis_registered_repos(tmp_path) == []
 
 
-def test_mis_registered_repos_skips_when_git_probe_unavailable(tmp_path: Path, monkeypatch):
-    """An inconclusive probe (git missing/timing out) must not be reported
-    as proof of mis-registration -- `doctor`'s own prerequisite section
-    already covers git availability separately."""
+def test_mis_registered_repos_surfaces_inconclusive_probe_separately(tmp_path: Path, monkeypatch):
+    """An inconclusive probe (git missing/timing out) must never be reported
+    as proof of mis-registration, but also must not be silently folded into
+    a clean report -- `doctor` needs to surface it as its own 'unknown'
+    status rather than claim full success."""
     from worktree_manager import harness_state
 
     home = _make_home(tmp_path)
     monkeypatch.setattr(harness_state, "_is_real_git_checkout", lambda path: None)
-    assert mis_registered_repos(home) == []
+    findings = mis_registered_repos(home)
+    problems = {name: (status, detail) for name, status, detail in findings}
+    assert problems["dotfiles"][0] == "unknown"
 
 
 def test_mis_registered_repos_uses_exact_platform_not_fallback(tmp_path: Path, monkeypatch):
@@ -224,7 +228,7 @@ def test_mis_registered_repos_uses_exact_platform_not_fallback(tmp_path: Path, m
     home = _make_home(tmp_path)
     # `_make_home`'s `dotfiles` entry has no `wsl:` key at all.
     monkeypatch.setattr(harness_state, "_exact_platform_key", lambda: "wsl")
-    problems = dict(mis_registered_repos(home))
+    problems = {name: (status, detail) for name, status, detail in mis_registered_repos(home)}
     assert "dotfiles" not in problems
 
 

@@ -47,12 +47,17 @@ own `ok` fields for the actual status.
 
 `doctor` also reports **repo registration**: whether every `repos.yaml` entry
 with a checkout path registered for this platform actually resolves to a real
-git checkout on disk (working tree or bare). A repo with no path registered
-for this platform at all is not flagged — it may legitimately be
-reference-only here — but a *registered yet missing or non-git* path is real
+git checkout on disk (working tree or bare, confirmed by probing git itself
+rather than trusting filesystem markers alone). A repo with no path
+registered for *this exact* platform at all is not flagged — it may
+legitimately be reference-only here, and another platform's own entry is
+never substituted for it. A *registered yet missing or non-git* path is real
 drift, surfaced the same way plugin-catalog alignment is: it fails `doctor`'s
 exit status in human-readable mode, and `--json` mode always exits `0`
-regardless (inspect `repo_registration.ok`).
+regardless (inspect `repo_registration.ok`). A repo whose checkout couldn't
+be verified at all (git itself unavailable or the probe timed out) is
+reported separately under `repo_registration.unknown` — visible, but never
+treated as confirmed drift.
 
 ## One-line bootstrap
 

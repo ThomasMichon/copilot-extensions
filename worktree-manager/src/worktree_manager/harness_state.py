@@ -389,23 +389,33 @@ def _is_real_git_checkout(path: Path) -> bool | None:
         return False
 
 
-def mis_registered_repos(home_dir: Path | None = None) -> list[tuple[str, str]]:
+def mis_registered_repos(home_dir: Path | None = None) -> list[tuple[str, str, str]]:
     """``repos.yaml`` entries whose registered checkout doesn't actually resolve.
 
     Read-only counterpart to a ``repos.yaml`` entry going stale (moved,
     renamed, or never actually checked out on this machine) — surfaced by
     ``worktree-manager doctor`` alongside plugin-catalog alignment. Each
-    result is ``(repo_name, problem)``. A repo without a path registered for
-    *this exact* platform is not itself flagged here (a legitimate
-    reference-only entry can be pathless on a given machine, and another
-    platform's entry is never a stand-in for this one); only a *registered
-    but wrong* path for this platform is a problem. A home-relative path
-    (``~/src/repo``) is expanded before checking, matching how
-    ``agent-worktrees`` itself resolves a registered path.
+    result is ``(repo_name, status, detail)`` where ``status`` is one of:
+
+    * ``"missing"`` — the registered path doesn't exist on disk.
+    * ``"not-git"`` — the path exists but doesn't resolve to a real git
+      checkout (confirmed by probing git itself).
+    * ``"unknown"`` — the git probe itself couldn't run (git missing,
+      timed out). This is **not** confirmed drift — `doctor`'s own
+      prerequisite section separately reports git availability — but it
+      must not be silently folded into a clean report either; the caller
+      decides how to surface it.
+
+    A repo without a path registered for *this exact* platform is not
+    itself flagged here (a legitimate reference-only entry can be pathless
+    on a given machine, and another platform's entry is never a stand-in
+    for this one). A home-relative path (``~/src/repo``) is expanded before
+    checking, matching how ``agent-worktrees`` itself resolves a registered
+    path.
     """
     reg = repos_registry(home_dir)
     pkey = _exact_platform_key()
-    problems: list[tuple[str, str]] = []
+    findings: list[tuple[str, str, str]] = []
     for name, entry in (reg.get("repos") or {}).items():
         entry = entry or {}
         raw_path = entry.get(pkey)
@@ -413,15 +423,18 @@ def mis_registered_repos(home_dir: Path | None = None) -> list[tuple[str, str]]:
             continue
         path = Path(raw_path).expanduser()
         if not path.exists():
-            problems.append((name, f"registered path does not exist: {raw_path}"))
+            findings.append((name, "missing", f"registered path does not exist: {raw_path}"))
             continue
         is_checkout = _is_real_git_checkout(path)
         if is_checkout is False:
-            problems.append((name, f"registered path is not a git checkout: {raw_path}"))
-        # `None` means the probe itself couldn't run (git missing, timeout) --
-        # `doctor`'s own prerequisite section already reports git
-        # availability, so silently skip rather than report false drift.
-    return problems
+            findings.append((name, "not-git", f"registered path is not a git checkout: {raw_path}"))
+        elif is_checkout is None:
+            findings.append((
+                name, "unknown",
+                f"could not verify (git probe failed/unavailable): {raw_path}",
+            ))
+    return findings
+
 
 
 def build_projects(home_dir: Path | None = None) -> list[ProjectInfo]:
