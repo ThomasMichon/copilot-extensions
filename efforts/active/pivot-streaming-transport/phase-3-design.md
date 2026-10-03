@@ -373,37 +373,47 @@ phase) is considered.
         code that will never see this design's longer blocking ceiling,
         since that ceiling lives in the *new* client's own
         `_fetch_complete_initial_rows()` — a new client's longer wait
-        cannot retroactively protect an old one. The fix therefore has to
-        be **server-side and version-independent**: when the daemon has
-        genuinely nothing authoritative to serve for **any known
-        namespace** — not only the narrower "no namespace anywhere has a
-        last-known-good value" case: a mixed cache (namespace A has
+        cannot retroactively protect an old one. **The fix must not change
+        the endpoint's default behavior for every other existing caller,
+        though:** `GET /api/v1/agents` today deliberately returns healthy
+        rows plus `incomplete_namespaces` for the rest, and this shape is
+        relied on well beyond the streaming relay — the plain
+        `agent-bridge agents` command uses the same endpoint, and session
+        targeting converts a client error into an empty roster rather than
+        surfacing it. An endpoint-wide `503` the moment *any* namespace is
+        incomplete would hide every other, perfectly healthy namespace's
+        agents from all of these existing callers — a real regression, not
+        a refinement. The fail-closed contract is therefore **opt-in via
+        the request, the same pattern as the ready-frame fix for
+        agent-dispatch**: a dedicated signal (e.g. `require_complete=true`,
+        protocol-gated the same way `force_refresh` is) that only the new
+        client's `_fetch_complete_initial_rows()` sends. Without that
+        signal, the endpoint's behavior is **completely unchanged** from
+        today — healthy namespaces' rows, `incomplete_namespaces` lists the
+        rest, never a `503`. **With** that signal, and only then: when the
+        daemon has genuinely nothing authoritative to serve for **any
+        known namespace** — not only the narrower "no namespace anywhere
+        has a last-known-good value" case: a mixed cache (namespace A has
         last-known-good, newly-added/replaced namespace B is still
         uninitialized after its own joined scan fails) must trigger this
         the same way, since an old client's bounded retry loop would
         otherwise still retrieve and accept A's rows as if the roster were
-        complete while B is silently missing. `GET /api/v1/agents` responds
-        with a **non-2xx status** (e.g. `503`) instead of a normal `200`
-        body whenever **any** known namespace lacks an authoritative value
-        after a refresh attempt (uninitialized, or last-known-good expired
-        past its freshness deadline with the opportunistic refresh also
-        failing) — not gated on the all-or-nothing case —
-        every caller's existing HTTP-error handling already has to react to
-        a non-2xx response somehow (old or new, since this is not a new
-        failure shape a client has to learn about, just an existing one
-        applied to a case that previously returned a false-positive `200`).
+        complete while B is silently missing — the endpoint responds with
+        a **non-2xx status** (e.g. `503`) instead of a normal `200` body.
         This also **directly defines the wire contract the global
         discovery-readiness gate needs** (see the uninitialized-state
-        bullet below): "globally incomplete" is carried at the **HTTP
-        status level** (`503`), not as a new field or sentinel inside
+        bullet below) **for a `require_complete` caller specifically**:
+        "globally incomplete" is carried at the **HTTP status level**
+        (`503`), not as a new field or sentinel inside
         `incomplete_namespaces` — that field's existing shape and meaning
         (a list of specific, currently-known incomplete namespace keys)
-        stays exactly what it already is, unchanged and untouched, so this
-        needs no protocol-version bump and no new response schema either;
-        a `200` response's `incomplete_namespaces` only ever names
-        namespaces that genuinely exist and are currently incomplete, and
-        a `503` is what covers "any known namespace has nothing
-        authoritative to report, or there is nothing to name yet at all."
+        stays exactly what it already is, unchanged and untouched for every
+        caller, opted-in or not. **Every other bullet below that mentions a
+        `503` response assumes the caller passed `require_complete`** — the
+        default, no-parameter behavior for every existing and future
+        caller that doesn't opt in is always today's Phase 2 shape (healthy
+        namespaces' rows plus `incomplete_namespaces` for the rest), never
+        a `503`, regardless of how incomplete the cache happens to be.
   - [ ] **A stalled or crashed refresh task must not serve a stale roster as
         complete forever, and the recovery can't be merely passive — and
         this applies to the provider-discovery scan itself, not only to an
@@ -556,23 +566,32 @@ phase) is considered.
         invalidated (discarding any in-flight scan against the old resolver
         and resetting to **uninitialized**) before the new resolver's first
         scan runs, exactly the same treatment as a brand-new namespace gets.
-  - [ ] **`force_refresh` is a protocol-gated capability, not an additive
-        response field:** unlike Phase 2's
+  - [ ] **`force_refresh` and `require_complete` are both protocol-gated
+        capabilities, not additive response fields:** unlike Phase 2's
         `incomplete_namespaces` (an additive, tolerant-reader *response*
         field correctly exempted from a version bump per `protocol.py`'s
-        own documented rule), `force_refresh` is a new **request** parameter
-        with real server behavior — exactly the case `protocol.py:13-19`
-        says must bump `HTTP_PROTOCOL_VERSION`. Bump it, add a
-        `FORCE_REFRESH_PROTOCOL_VERSION` constant (following the existing
-        `RELAY_INTERRUPT_PROTOCOL_VERSION`/`FAILED_ACP_HANDSHAKE_PROTOCOL_
-        VERSION` precedent in the same file), and gate the CLI's use of the
-        query param through `BridgeClient.daemon_supports()` so an old
-        daemon that doesn't understand the param is never sent it.
+        own documented rule), both are new **request** parameters with
+        real server behavior — exactly the case `protocol.py:13-19` says
+        must bump `HTTP_PROTOCOL_VERSION`. Bump it once for both (or add
+        separate constants if they ship in different generations), following
+        the existing `RELAY_INTERRUPT_PROTOCOL_VERSION`/
+        `FAILED_ACP_HANDSHAKE_PROTOCOL_VERSION` precedent in the same file,
+        and gate the CLI's use of either query param through
+        `BridgeClient.daemon_supports()` so an old daemon that doesn't
+        understand them is never sent them — an old daemon would otherwise
+        silently ignore an unrecognized `require_complete=true` and still
+        return its own old-shape response, which is itself harmless (the
+        new client's `_fetch_complete_initial_rows()` degrades to treating
+        a `200` from an old daemon the same way it always has).
         **Reverse skew** (an old CLI, with no knowledge of `force_refresh`
         at all, talking to a new cached daemon) is covered by the
         "incomplete GETs opportunistically join the refresh" requirement
         above, not by the protocol gate: an old CLI's retry loop just
-        repeats plain `GET`s, but any one of those `GET`s against an
+        repeats plain `GET`s (never sending `require_complete` either, so
+        it always gets the unchanged default `200`-with-
+        `incomplete_namespaces` shape — this is not a regression for that
+        caller, just the same behavior it already has today), but any one
+        of those `GET`s against an
         incomplete/uninitialized/stale namespace is now itself what
         triggers the real rescan — the daemon doesn't need the caller to
         know about `force_refresh` at all for the rescan to actually happen,

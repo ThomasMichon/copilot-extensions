@@ -425,18 +425,24 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
         specifically** (the new resolver's construction fails: the old
         resolver and its last-known-good cache entry must remain
         authoritative, never a brief false-success gap, which the general
-        add/remove/replace test above doesn't exercise on its own) —
-        competing concurrent refreshes of the same namespace (single-flight plus
+        add/remove/replace test above doesn't exercise on its own) — **a
+        test proving the default (no `require_complete`) response shape is
+        completely unchanged from today even when the cache is badly
+        incomplete** (plain `agent-bridge agents`, and any other existing
+        caller, must keep seeing healthy rows plus `incomplete_namespaces`
+        for the rest, never a `503`, since the fail-closed contract below
+        is opt-in only) — competing concurrent refreshes of the same namespace (single-flight plus
         generation-guarded publication actually prevents a stale-overwrite
         and doesn't duplicate the scan), **daemon startup before any
-        namespace has ever been discovered** (the route responds `503`,
+        namespace has ever been discovered, for a `require_complete`
+        caller** (the route responds `503`,
         never a `200` with an empty-but-apparently-complete body),
         **initial-scan retry exhaustion with nothing authoritative to
-        serve** (the same `503` contract, verified against both an old and
+        serve, for a `require_complete` caller** (the same `503` contract, verified against both an old and
         a new client — the fix is server-side and version-independent, not
         a client-side blocking change only a new client would observe), and
         **`refresh_provider_resolvers()`'s own discovery-generation
-        expiring** (the `503` fires even while every existing namespace
+        expiring, for a `require_complete` caller** (the `503` fires even while every existing namespace
         still has last-known-good data — never conditioned on namespace-
         level staleness also being absent — and a discovery result that
         reports a per-manifest construction failure, not only a raised
@@ -1552,3 +1558,27 @@ Two findings:
 
 Both replied-to inline; the resurfaced Guiding Intent thread needed no
 further action (already addressed last round).
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 19: the fail-closed 503 contract was a breaking change for every existing caller
+One high finding, catching a real architectural mistake carried across
+several prior rounds:
+
+- **High: the endpoint-wide `503` contract (rounds 14-18) would have broken
+  every existing, non-streaming caller of `GET /api/v1/agents`.** That
+  endpoint today deliberately returns healthy namespaces' rows plus
+  `incomplete_namespaces` for the rest — the plain `agent-bridge agents`
+  command uses the same endpoint, and session targeting converts a client
+  error into an empty roster rather than surfacing it. Making the whole
+  endpoint fail closed the moment *any* namespace is incomplete would hide
+  every other, perfectly healthy namespace's agents from all of these
+  callers — a real regression, not the refinement it was framed as. Fixed
+  by making the fail-closed contract **opt-in via the request** (the same
+  pattern as the ready-frame fix): a dedicated, protocol-gated
+  `require_complete=true` parameter only the new client's
+  `_fetch_complete_initial_rows()` sends. Without it, the endpoint's
+  behavior is unchanged from today in every way, for every existing caller,
+  regardless of how incomplete the cache happens to be — every `503`
+  reference elsewhere in this design assumes `require_complete` was set.
+
+Replied-to inline; the resurfaced Guiding Intent thread needed no further
+action (already addressed in round 17).
