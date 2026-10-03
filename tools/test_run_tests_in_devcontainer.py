@@ -1409,6 +1409,141 @@ def test_run_tests_invokes_devcontainer_exec_with_full_passthrough_args(tmp_path
     assert args[-5:] == ["python", "tools/run-plugin-tests.py", "agent-worktrees", "-k", "foo"]
 
 
+def test_is_list_only_detects_bare_list_flag() -> None:
+    assert wrapper._net_scope.is_list_only(["--list"], wrapper._canonicalize_flag) is True
+
+
+def test_is_list_only_detects_abbreviated_list_flag() -> None:
+    assert wrapper._net_scope.is_list_only(["--lis"], wrapper._canonicalize_flag) is True
+
+
+def test_is_list_only_false_for_other_passthrough() -> None:
+    canon = wrapper._canonicalize_flag
+    assert wrapper._net_scope.is_list_only(["agent-worktrees"], canon) is False
+    assert wrapper._net_scope.is_list_only(["--collect-only"], canon) is False
+    assert wrapper._net_scope.is_list_only([], canon) is False
+
+
+def test_prepare_dependencies_appends_prepare_only_when_absent(tmp_path: Path) -> None:
+    fake_result = mock.Mock(returncode=0)
+    config_path = tmp_path / "devcontainer.json"
+    config_path.write_text("{}")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=fake_result) as run:
+        wrapper._net_scope.prepare_dependencies(
+            "/usr/bin/devcontainer", wrapper.REPO, "abc123", config_path,
+            ["agent-worktrees"], wrapper._canonicalize_flag,
+        )
+    args = run.call_args.args[0]
+    assert args[-3:] == ["tools/run-plugin-tests.py", "agent-worktrees", "--prepare-only"]
+
+
+def test_prepare_dependencies_does_not_duplicate_an_explicit_prepare_only(tmp_path: Path) -> None:
+    fake_result = mock.Mock(returncode=0)
+    config_path = tmp_path / "devcontainer.json"
+    config_path.write_text("{}")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=fake_result) as run:
+        wrapper._net_scope.prepare_dependencies(
+            "/usr/bin/devcontainer", wrapper.REPO, "abc123", config_path,
+            ["agent-worktrees", "--prepare-only"], wrapper._canonicalize_flag,
+        )
+    args = run.call_args.args[0]
+    assert args.count("--prepare-only") == 1
+
+
+def test_prepare_dependencies_raises_on_nonzero_exit(tmp_path: Path) -> None:
+    fake_result = mock.Mock(returncode=1)
+    config_path = tmp_path / "devcontainer.json"
+    config_path.write_text("{}")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=fake_result):
+        try:
+            wrapper._net_scope.prepare_dependencies(
+                "/usr/bin/devcontainer", wrapper.REPO, "abc123", config_path,
+                ["agent-worktrees"], wrapper._canonicalize_flag,
+            )
+        except SystemExit as exc:
+            assert "dependency-preparation" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
+def test_strip_reinstall_removes_the_flag() -> None:
+    canon = wrapper._canonicalize_flag
+    result = wrapper._net_scope.strip_reinstall(["agent-worktrees", "--reinstall"], canon)
+    assert result == ["agent-worktrees"]
+
+
+def test_strip_reinstall_recognizes_abbreviated_flag() -> None:
+    canon = wrapper._canonicalize_flag
+    result = wrapper._net_scope.strip_reinstall(["agent-worktrees", "--reinst"], canon)
+    assert result == ["agent-worktrees"]
+
+
+def test_strip_reinstall_leaves_other_flags_untouched() -> None:
+    canon = wrapper._canonicalize_flag
+    passthrough = ["agent-worktrees", "--all", "-k", "foo"]
+    assert wrapper._net_scope.strip_reinstall(passthrough, canon) == passthrough
+
+
+def test_disconnect_container_networks_disconnects_every_attached_network() -> None:
+    inspect_result = mock.Mock(
+        returncode=0, stdout='{"bridge": {}, "test-isolation-net": {}}', stderr="",
+    )
+    disconnect_result = mock.Mock(returncode=0, stdout="", stderr="")
+    calls: list[list[str]] = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return inspect_result if args[1] == "inspect" else disconnect_result
+
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", side_effect=fake_run):
+        wrapper._net_scope.disconnect_container_networks("abc123")
+    disconnect_calls = [c for c in calls if c[1] == "network"]
+    assert len(disconnect_calls) == 2
+    disconnected_networks = {c[4] for c in disconnect_calls}
+    assert disconnected_networks == {"bridge", "test-isolation-net"}
+    for c in disconnect_calls:
+        assert c[:2] == ["docker", "network"]
+        assert "-f" in c
+
+
+def test_disconnect_container_networks_raises_on_inspect_failure() -> None:
+    inspect_result = mock.Mock(returncode=1, stdout="", stderr="no such container")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result):
+        try:
+            wrapper._net_scope.disconnect_container_networks("abc123")
+        except SystemExit as exc:
+            assert "no such container" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
+def test_disconnect_container_networks_raises_on_malformed_inspect_output() -> None:
+    inspect_result = mock.Mock(returncode=0, stdout="not json", stderr="")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result):
+        try:
+            wrapper._net_scope.disconnect_container_networks("abc123")
+        except SystemExit as exc:
+            assert "could not parse" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
+def test_disconnect_container_networks_raises_on_disconnect_failure() -> None:
+    inspect_result = mock.Mock(returncode=0, stdout='{"bridge": {}}', stderr="")
+    disconnect_result = mock.Mock(returncode=1, stdout="", stderr="not attached")
+
+    def fake_run(args, **kwargs):
+        return inspect_result if args[1] == "inspect" else disconnect_result
+
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", side_effect=fake_run):
+        try:
+            wrapper._net_scope.disconnect_container_networks("abc123")
+        except SystemExit as exc:
+            assert "not attached" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
 def test_tear_down_removes_container_then_volume_on_success() -> None:
     container_result = mock.Mock(returncode=0, stderr="")
     volume_result = mock.Mock(returncode=0, stderr="")
@@ -1547,6 +1682,9 @@ def test_main_installs_a_sigterm_handler(monkeypatch) -> None:
                          lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests",
                          lambda container_id, config_path, passthrough: 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
 
     signal_calls: list[tuple] = []
@@ -1575,6 +1713,9 @@ def test_main_restores_the_previous_sigterm_handler_after_returning(monkeypatch,
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-restore")
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
 
     sentinel_handler = lambda signum, frame: None
@@ -1600,6 +1741,9 @@ def test_main_installs_and_restores_a_sighup_handler(monkeypatch, tmp_path: Path
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-sighup")
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
 
     sentinel_handler = lambda signum, frame: None
@@ -1864,6 +2008,9 @@ def test_main_strips_double_dash_separator_anywhere_in_passthrough(monkeypatch) 
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests",
                          lambda container_id, config_path, passthrough: calls.append(passthrough) or 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
     monkeypatch.setattr(wrapper.shutil, "rmtree", lambda path, ignore_errors=False: None)
     # This test is about `--` stripping specifically -- base-rewriting has
@@ -1880,6 +2027,76 @@ def test_main_strips_double_dash_separator_anywhere_in_passthrough(monkeypatch) 
     rc = wrapper.main(["--all", "--", "-k", "some_filter"])
     assert rc == 0
     assert calls == [["--all", "-k", "some_filter"]]
+
+
+def test_main_prepares_dependencies_and_disconnects_networks_before_running_tests(monkeypatch) -> None:
+    order: list[str] = []
+
+    monkeypatch.setattr(wrapper, "_per_instance_config",
+                         lambda label: (Path("/tmp/fake-devcontainer-dir/devcontainer.json"), "fake-volume"))
+    monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
+    monkeypatch.setattr(wrapper, "_bring_up", lambda label, config_path: "container-1")
+    monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: order.append("prepare"))
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks",
+                         lambda container_id: order.append("disconnect"))
+    monkeypatch.setattr(wrapper, "_run_tests",
+                         lambda container_id, config_path, passthrough: order.append("run") or 0)
+    monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
+    monkeypatch.setattr(wrapper.shutil, "rmtree", lambda path, ignore_errors=False: None)
+
+    rc = wrapper.main(["agent-worktrees"])
+    assert rc == 0
+    assert order == ["prepare", "disconnect", "run"]
+
+
+def test_main_strips_reinstall_before_the_real_pass_after_preparing(monkeypatch) -> None:
+    # The prep pass already rebuilt the venv -- the real pass must reuse
+    # it, not delete and rebuild it again with no network left.
+    real_pass_args: list[list[str]] = []
+
+    monkeypatch.setattr(wrapper, "_per_instance_config",
+                         lambda label: (Path("/tmp/fake-devcontainer-dir/devcontainer.json"), "fake-volume"))
+    monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
+    monkeypatch.setattr(wrapper, "_bring_up", lambda label, config_path: "container-1")
+    monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
+    monkeypatch.setattr(
+        wrapper, "_run_tests",
+        lambda container_id, config_path, passthrough: real_pass_args.append(passthrough) or 0,
+    )
+    monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
+    monkeypatch.setattr(wrapper.shutil, "rmtree", lambda path, ignore_errors=False: None)
+
+    rc = wrapper.main(["agent-worktrees", "--reinstall"])
+    assert rc == 0
+    assert real_pass_args == [["agent-worktrees"]]
+
+
+def test_main_skips_dependency_preparation_and_disconnect_for_list_only(monkeypatch) -> None:
+    order: list[str] = []
+
+    monkeypatch.setattr(wrapper, "_per_instance_config",
+                         lambda label: (Path("/tmp/fake-devcontainer-dir/devcontainer.json"), "fake-volume"))
+    monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
+    monkeypatch.setattr(wrapper, "_bring_up", lambda label, config_path: "container-1")
+    monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: order.append("prepare"))
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks",
+                         lambda container_id: order.append("disconnect"))
+    monkeypatch.setattr(wrapper, "_run_tests",
+                         lambda container_id, config_path, passthrough: order.append("run") or 0)
+    monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
+    monkeypatch.setattr(wrapper.shutil, "rmtree", lambda path, ignore_errors=False: None)
+
+    rc = wrapper.main(["--list"])
+    assert rc == 0
+    assert order == ["run"]
+
 
 
 def test_main_tears_down_container_and_volume_unless_keep_is_passed(monkeypatch, tmp_path: Path) -> None:
@@ -1899,6 +2116,9 @@ def test_main_tears_down_container_and_volume_unless_keep_is_passed(monkeypatch,
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-2")
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(
         wrapper, "_tear_down",
         lambda container_id, volume_name: torn_down.append((container_id, volume_name)),
@@ -1938,6 +2158,9 @@ def test_main_defers_sigterm_during_the_teardown_call(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-sigterm")
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", fake_tear_down)
 
     previous_sigterm = signal.getsignal(signal.SIGTERM)
@@ -1975,6 +2198,9 @@ def test_main_propagates_a_signal_received_during_successful_teardown(monkeypatc
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-sigterm-success")
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", fake_tear_down)
 
     previous_sigterm = signal.getsignal(signal.SIGTERM)
@@ -2004,6 +2230,9 @@ def test_main_raises_teardown_failure_when_primary_path_succeeded(monkeypatch, t
     monkeypatch.setattr(wrapper, "_populate_workspace",
                          lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
 
     def failing_tear_down(container_id: str, volume_name: str) -> None:
         raise SystemExit("teardown failed: boom")
@@ -2037,6 +2266,9 @@ def test_main_preserves_primary_exception_when_teardown_also_fails(monkeypatch, 
 
     monkeypatch.setattr(wrapper, "_populate_workspace", failing_populate)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", failing_tear_down)
 
     # The PRIMARY failure must win -- a `_tear_down` failure in the
@@ -2067,6 +2299,9 @@ def test_main_preserves_nonzero_test_result_when_teardown_also_fails(monkeypatch
                          lambda container_id, passthrough, *, include_untracked: None)
     # A real test FAILURE (nonzero exit), not an exception.
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 7)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
 
     def failing_tear_down(container_id: str, volume_name: str) -> None:
         raise SystemExit("secondary teardown failure")

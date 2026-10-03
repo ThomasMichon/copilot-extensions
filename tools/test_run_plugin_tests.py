@@ -191,6 +191,48 @@ def test_guards_remain_available_without_heavy_admission(monkeypatch) -> None:
     assert runner.main(["alpha", "--guards"]) == 0
 
 
+def test_prepare_only_remains_available_without_heavy_admission(monkeypatch) -> None:
+    monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    monkeypatch.setattr(runner.shutil, "which", lambda _name: "uv")
+    monkeypatch.setattr(
+        runner,
+        "_acquire_admission",
+        lambda _wait: pytest.fail("a --prepare-only run must not take the heavy-test slot"),
+    )
+    monkeypatch.setattr(runner, "run_plugin", lambda *_args, **_kwargs: 0)
+
+    assert runner.main(["alpha", "--prepare-only"]) == 0
+
+
+def test_run_plugin_prepare_only_never_invokes_pytest(monkeypatch, tmp_path: Path) -> None:
+    """The whole point of `--prepare-only`: it must build/update the venv
+    and return WITHOUT ever importing a single test module or
+    `conftest.py` -- unlike `--collect-only`, which still runs pytest's
+    own collection (and therefore executes that module-level code)."""
+    monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    ensure_venv_calls: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        runner, "_ensure_venv",
+        lambda name, uv, *, reinstall: ensure_venv_calls.append((name, reinstall)) or Path("fake-py"),
+    )
+    monkeypatch.setattr(
+        runner, "run_contained",
+        lambda *_a, **_k: pytest.fail("--prepare-only must never invoke pytest"),
+    )
+
+    rc = runner.run_plugin(
+        "alpha", "uv",
+        reinstall=False, kexpr=None, limits=runner.Limits(
+            wall_seconds=60, max_processes=10, max_memory_mb=100,
+            max_temp_mb=100, poll_seconds=0.1,
+        ),
+        plugin_timeout=60.0, test_timeout=10.0, max_files_per_subsuite=25,
+        prepare_only=True,
+    )
+    assert rc == 0
+    assert ensure_venv_calls == [("alpha", False)]
+
+
 def test_host_state_requires_explicit_tier_opt_in(capsys) -> None:
     with pytest.raises(SystemExit) as exc:
         runner.main(["--allow-host-state"])
