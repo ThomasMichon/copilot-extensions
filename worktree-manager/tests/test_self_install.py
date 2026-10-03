@@ -89,6 +89,82 @@ def test_apply_installs_marker_slot_and_binstub(tmp_path, monkeypatch):
     assert payload["provider_root"] == str(root.resolve())
 
 
+def test_apply_reaps_stranded_cutover_passive_before_copying_payload(tmp_path, monkeypatch):
+    """A slot left occupied by an abandoned cutover passive (spawned by
+    ``mux_daemon_cutover.spawn_passive`` with its ``cwd`` pinned inside the
+    slot, then stranded when the orchestrator driving that cutover died
+    before promoting or terminating it) must be reaped via the existing
+    breadcrumb-driven recovery BEFORE ``_copy_payload`` tries to delete the
+    slot -- otherwise a bare ``self-install --apply`` can hit a Windows
+    ``PermissionError`` that only ``self_update()``'s own cutover path would
+    have cleared (the gap this test guards against regressing)."""
+    from zdd import breadcrumb
+
+    import worktree_manager.mux_daemon_cutover as mdc
+
+    pd = _fake_payload(tmp_path, "9.9.9")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+
+    # Pre-create the slot, as a crashed prior self-update attempt would have
+    # left it (payload already copied in, but never finalized/marked).
+    slot = version_slot("9.9.9", root)
+    slot.mkdir(parents=True)
+    (slot / "stale-marker.txt").write_text("from an aborted attempt")
+
+    # A non-terminal breadcrumb naming the stranded passive's pid -- exactly
+    # what spawn_passive + CutoverOrchestrator leave behind when the
+    # orchestrator dies before the passive is ever promoted or terminated.
+    stranded_pid = 999999
+    routing_dir = mdc.routing_dir(root)
+    breadcrumb.write_breadcrumb(
+        routing_dir, state="started", old=None, new_port=54321, new_pid=stranded_pid,
+    )
+
+    reaped: list[int] = []
+    monkeypatch.setattr(mdc, "_iter_mux_daemon_pids", lambda: {stranded_pid})
+    monkeypatch.setattr(
+        mdc, "_terminate_mux_daemon_pid",
+        lambda pid, *, root: (reaped.append(pid), True)[1],
+    )
+
+    res = self_install(pd, root=root, dry_run=False)
+
+    assert res.action == "installed"
+    assert reaped == [stranded_pid], "the stranded passive must be reaped before rmtree"
+    assert not (slot / "stale-marker.txt").exists(), "the slot must be freshly recopied"
+    assert (slot / "src" / "worktree_manager" / "__init__.py").exists()
+    assert current_version(root) == "9.9.9"
+    # The breadcrumb must not be left lingering (non-terminal) once self_install
+    # has handled it -- nothing else in this path will ever resolve it.
+    assert breadcrumb.read_breadcrumb(routing_dir) is None
+
+
+def test_apply_skips_reap_when_cutover_lock_is_busy(tmp_path, monkeypatch):
+    """If another process genuinely holds the cutover lock (a real,
+    concurrent self_update()/activate_after_update() in flight), self_install
+    must never wait on it or disturb it -- it should fall straight through to
+    its pre-existing behavior (a plain rmtree of the slot, unaffected by the
+    busy lock) rather than hang."""
+    import worktree_manager.mux_daemon_cutover as mdc
+
+    pd = _fake_payload(tmp_path, "4.5.6")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+
+    def _always_busy(root_arg, *, timeout_s=5.0, poll_s=0.2):
+        raise TimeoutError("mux-daemon cutover lock busy")
+
+    monkeypatch.setattr(mdc, "_acquire_cutover_lock", _always_busy)
+
+    res = self_install(pd, root=root, dry_run=False)
+
+    assert res.action == "installed"
+    assert current_version(root) == "4.5.6"
+
+
 def test_apply_is_idempotent_and_version_gated(tmp_path, monkeypatch):
     pd = _fake_payload(tmp_path, "1.2.3")
     root = tmp_path / "root"

@@ -496,6 +496,64 @@ def _find_any_symlink(tree: Path) -> Path | None:
     return None
 
 
+def _reap_stranded_cutover_passive(root: Path) -> None:
+    """Best-effort: clear a passive mux-daemon stranded by an aborted cutover.
+
+    ``mux_daemon_cutover.spawn_passive`` spawns a new version's mux-daemon
+    with its ``cwd`` pinned INSIDE the version slot being cut over to, so it
+    can be health-checked before promotion. If the orchestrator driving that
+    cutover (``self_update()`` -> ``activate_after_update()``) dies before
+    the passive is ever promoted or terminated -- a crash, a killed
+    terminal, an interrupted upgrade -- the passive lingers indefinitely,
+    its open ``cwd`` handle preventing that slot from ever being deleted on
+    Windows (``WinError 32``).
+
+    ``activate_after_update()`` already reaps exactly this (via the durable
+    cutover breadcrumb + :func:`mux_daemon_cutover._reap_abandoned_passive`)
+    -- but only when IT runs. A bare ``self_install(dry_run=False)`` (the
+    ``self-install`` CLI command, or any retry after a crashed self-update)
+    calls :func:`_copy_payload` directly and never goes through that
+    recovery, so a stranded passive pinned inside the slot about to be
+    ``rmtree``'d is never cleared first, and the delete fails.
+
+    This reuses the SAME breadcrumb-driven reap (never a new cwd-hunting
+    mechanism -- that would need a new OS-specific dependency this
+    deliberately dependency-free installer does not carry), under the same
+    cutover lock, so it is safe to call unconditionally: a short lock
+    timeout means a genuinely in-flight concurrent cutover elsewhere is
+    never disturbed -- this just falls through and lets ``_copy_payload``
+    behave exactly as it did before this existed.
+    """
+    try:
+        from zdd import breadcrumb
+
+        from . import mux_daemon_cutover
+    except Exception:  # noqa: BLE001 -- best-effort: cutover machinery unavailable
+        return
+    try:
+        lease = mux_daemon_cutover._acquire_cutover_lock(root, timeout_s=5.0)
+    except Exception:  # noqa: BLE001 -- lock busy/unavailable: a real cutover may
+        # be in flight elsewhere; never wait on it or disturb it from here.
+        return
+    try:
+        routing_dir = mux_daemon_cutover.routing_dir(root)
+        record = breadcrumb.read_breadcrumb(routing_dir)
+        mux_daemon_cutover._reap_abandoned_passive(root, record)
+        # Unlike activate_after_update() (which leaves a non-terminal
+        # breadcrumb for a later recover_stale_cutover() call to resolve),
+        # self_install() never runs that companion recovery -- nothing else
+        # in this code path will ever transition the breadcrumb to a
+        # terminal state. Clear it here so a stale breadcrumb doesn't keep
+        # forcing every future self_update() reconcile onto its slower,
+        # fully-locked path (see activate_after_update's lock-free fast-path
+        # gate on zdd.breadcrumb.is_stale()).
+        breadcrumb.clear_breadcrumb(routing_dir)
+    except Exception:  # noqa: BLE001, S110 -- reap is best-effort, never fatal to install
+        pass
+    finally:
+        lease.release()
+
+
 def _copy_payload(payload_dir: Path, slot: Path) -> None:
     if slot.exists():
         shutil.rmtree(slot)
@@ -727,6 +785,7 @@ def self_install(
     if not needs_install(version, r):
         return SelfInstallResult(version=version, action="already-current", root=str(r),
                                  slot=str(slot), marker=version, cleaned=cleaned)
+    _reap_stranded_cutover_passive(r)
     try:
         _copy_payload(pd, slot)
     except RuntimeError as e:
