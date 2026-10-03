@@ -43,9 +43,9 @@ contract is fixed, regardless of which repo you're addressing:
 - **The target repo is always an explicit argument** (`owner/name` or ADO
   `project/repo`), never inferred from "whichever repo's checkout I happen
   to be sitting in." Addressing a repo this way needs it **registered**
-  (`agent-worktrees repos add <name> <path> --remote <url>`) so its own
-  provider/token/policy can be resolved -- it does **not** need a local
-  worktree of it.
+  (`<agent-worktrees catalog argv[0]> repos add <name> <path> --remote <url>`)
+  so its own provider/token/policy can be resolved -- it does **not** need a
+  local worktree of it.
 
 ```
 <agent-worktrees catalog argv[0]> pr-watch wait owner/other-repo 42 --timeout 1

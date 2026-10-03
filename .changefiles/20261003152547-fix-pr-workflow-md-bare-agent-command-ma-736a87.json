@@ -1,0 +1,9 @@
+{
+  "comment": "fix pr-workflow.md bare-agent-command marketplace-isolation guard violation (introduced by #5096)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
