@@ -901,7 +901,8 @@ worktree-manager.
       config (related-repo declarations, CodeSpace/venue settings) as part
       of its payload, discovered/merged the same way `agent-codespaces`'
       `load_merged_config()` already layers per-repo
-      `.agent-codespaces/config.yaml` across adopted repos, with Worktree
+      `.copilot-extensions/agent-codespaces/config.yaml` across adopted
+      repos, with Worktree
       Manager eventually folding that merged result into its own
       `harness_state`/`doctor` surface. No design doc exists yet — that is
       the next real open item if this phase is picked up again.
@@ -1104,7 +1105,8 @@ claiming discipline alone.
   model Worktree Manager already consumes; separately,
   `plugins/agent-codespaces/src/agent_codespaces/config.py`'s
   `load_merged_config()` already layers and deep-merges a generic
-  `.agent-codespaces/config.yaml` across every *adopted* repo (including a
+  `.copilot-extensions/agent-codespaces/config.yaml` across every *adopted*
+  repo (including a
   `codespace_plugins:` list explicitly documented in-code as "same entry
   shape as a harness plugin's `codespacePlugins` manifest array"). The
   onboard-preset mechanism is the natural extension of both: a
@@ -1119,19 +1121,19 @@ claiming discipline alone.
   (§`git-referenced-presets` → §`harness-plugin-onboard-presets`, plus the
   `visions/README.md` one-line summary), and left a comment on issue
   [#358](https://github.com/ThomasMichon/copilot-extensions/issues/358)
-  pointing at this entry. **Also includes an unrelated fix-forward
-  commit** in the same PR: `plugins/agent-dispatch/skills/
-  troubleshooting-agent-dispatch/SKILL.md` had 15
-  `bare-agent-command` marketplace-isolation-guard findings (more than
-  issue [#5030](https://github.com/ThomasMichon/copilot-extensions/issues/5030)'s
-  originally-reported 7) failing the required `guards + lint`/`PR gate`
-  check on `origin/dev` itself, blocking this PR (and every other open PR
-  rebased past PR #5023) regardless of diff content. Rewrote every bare
-  `agent-dispatch`/`agent-bridge`/`agent-mcp` command reference to the
-  `<plugin> catalog argv[0]` convention the rest of the agent-dispatch
-  skills already use, rather than papering over the findings with
-  `marketplace-isolation: allow` exemption comments — verified via the full
-  `test_check_marketplace_isolation.py` suite (18/18) and `check-skills`.
+  pointing at this entry. **Correction to this entry's original draft:**
+  that draft claimed this PR itself fixed issue
+  [#5030](https://github.com/ThomasMichon/copilot-extensions/issues/5030)
+  (the `troubleshooting-agent-dispatch/SKILL.md` marketplace-isolation
+  `bare-agent-command` guard failures blocking `origin/dev`'s required
+  `guards + lint`/`PR gate` check). By the time this branch could rebase
+  cleanly, PRs #5037 and #5039 had already landed the real upstream fix —
+  this PR carries none of it, just a rebase onto it. The only actual
+  change this PR makes to that skill is a small, genuinely incremental
+  follow-up (flagged by this same review round): the "Before you start"
+  catalog-path note only resolved the `agent-dispatch` placeholder even
+  though the body already used `agent-bridge` and `agent-mcp` placeholders
+  too — extended the note to cover all three, with its own changefile.
 
 - **2026-10-02** — Added a genuine `## Participants` declaration (this
   effort predates that template convention and had none) solely so an

@@ -120,10 +120,12 @@ and fix how it is wired.
   plugin pipe) and *wraps* session launches, the app **keeps itself up to date on
   its own**, out-of-band from any Copilot session, so the launcher never depends
   on a session to refresh the launcher.
-- **Presets** — shareable, **Git-referenced** configuration bundles a user can
-  pull in to preconfigure a whole work arrangement at once (related repos,
-  account/identity config, venue/CodeSpace settings), rather than assembling each
-  by hand. A preset is a portable starting point, resolved by reference.
+- **Presets** — a shareable configuration bundle a `<repo>-harness` plugin
+  carries **as part of its own payload** (related repos, account/identity
+  config, venue/CodeSpace settings), so adopting the plugin preconfigures the
+  whole work arrangement at once rather than assembling each piece by hand. A
+  preset is adopted the same way the plugin itself is — no separate
+  reference-resolution step to repeat.
 
 ## Features
 
