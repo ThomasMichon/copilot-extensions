@@ -9,10 +9,14 @@ import types
 from pathlib import Path
 
 import pytest
-
 from agent_worktrees import __main__ as m
-from agent_worktrees import claim_handoff_accept_support
-from agent_worktrees import claim_handoffs, finalize, tracking
+from agent_worktrees import (
+    claim_handoff_accept_support,
+    claim_handoffs,
+    claim_history,
+    finalize,
+    tracking,
+)
 from agent_worktrees.lease_config import LeaseSettings
 from agent_worktrees.lease_store import GitLeaseStore
 
@@ -262,6 +266,53 @@ def test_accept_is_idempotent(handoff_world):
     assert {claim.ref for claim in consumer.resources} == {world["claims"][1].ref}
 
 
+def test_accept_feeds_claim_history_for_pr_claim(handoff_world):
+    """worktree-claims-transitive-finalization Phase 3b: an explicit
+    claim-handoff bundle accept is a genuine ownership transfer -- the
+    source worktree must get a "released" entry and the consumer worktree
+    a "claimed" entry for the transferred `pr`-kind claim, each only after
+    its own save confirms."""
+    world = _setup_bundle(handoff_world)
+    pr_ref = world["claims"][1].ref
+    bundle = _offer(world, [pr_ref])[0]
+
+    claim_handoffs.accept(bundle.bundle_id, actor=world["consumer"], machine=MACHINE)
+
+    events = claim_history.history_for_ref(pr_ref)
+    assert [e["event"] for e in events] == ["released", "claimed"]
+    released, claimed = events
+    assert released["worktree_id"] == "wt-source"
+    assert bundle.bundle_id in released["note"] and world["consumer"] in released["note"]
+    assert claimed["worktree_id"] == "wt-consumer"
+    assert bundle.bundle_id in claimed["note"] and world["source"] in claimed["note"]
+
+
+def test_accept_worktree_claim_does_not_feed_claim_history(handoff_world):
+    """A `worktree`-kind claim transferred by the same bundle is outside
+    claim_history's scope (`pr`-kind only) and must never feed an entry."""
+    world = _setup_bundle(handoff_world)
+    worktree_ref = world["claims"][0].ref
+    bundle = _offer(world, [worktree_ref])[0]
+
+    claim_handoffs.accept(bundle.bundle_id, actor=world["consumer"], machine=MACHINE)
+
+    assert claim_history.history_for_ref(worktree_ref) == []
+
+
+def test_accept_retry_does_not_duplicate_claim_history(handoff_world):
+    """A retried/idempotent accept call on an already-accepted bundle must
+    never double-record the transfer."""
+    world = _setup_bundle(handoff_world)
+    pr_ref = world["claims"][1].ref
+    bundle = _offer(world, [pr_ref])[0]
+
+    claim_handoffs.accept(bundle.bundle_id, actor=world["consumer"], machine=MACHINE)
+    claim_handoffs.accept(bundle.bundle_id, actor=world["consumer"], machine=MACHINE)
+
+    events = claim_history.history_for_ref(pr_ref)
+    assert [e["event"] for e in events] == ["released", "claimed"]
+
+
 def test_accept_moves_finalize_block_from_source_to_consumer(handoff_world, monkeypatch):
     world = _setup_bundle(handoff_world)
     refs = [claim.ref for claim in world["claims"]]
@@ -380,6 +431,11 @@ def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
     assert {claim.ref for claim in consumer.resources} == set(refs)
     assert child.owner_ref == world["consumer"]
     assert store.inspect("codespace", "octo-space").record.holder == world["consumer"]
+    pr_ref = next(c.ref for c in world["claims"] if c.kind == "pr")
+    events = claim_history.history_for_ref(pr_ref)
+    assert [e["event"] for e in events] == ["released", "claimed"]
+    assert events[0]["machine"] == remote_machine
+    assert events[1]["machine"] == MACHINE
 
 
 def test_accept_cross_machine_remote_failure_leaves_state_unchanged_and_no_live_fence(
