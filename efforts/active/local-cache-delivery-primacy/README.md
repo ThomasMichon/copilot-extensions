@@ -274,7 +274,18 @@ explicitly named follow-on slices; no other pre-session boundary besides
       mid-kill, then the cancellation re-raises -- a cancelled
       `start_session` (daemon shutdown, request teardown) never leaks the
       just-spawned resolver or render process, and cancellation still
-      propagates correctly.
+      propagates correctly. **Narrowed, not fully unconditional**: the
+      whole-tree guarantee above holds whenever an identity baseline was
+      established (Windows always; POSIX whenever `process_start_time`
+      resolved one at spawn time). When no baseline exists -- the
+      universal case on non-Linux POSIX today, or a sufficiently fast
+      POSIX leader-exit race -- `_kill_tree` fails closed (refuses the
+      group signal) with no diagnostic, and a surviving descendant can run
+      indefinitely, unobserved. **Deferred to
+      `ThomasMichon/copilot-extensions#5063`**: tracks making that skip at
+      least observable (a diagnostic) and considers whether a macOS
+      identity backend or a belt-and-suspenders timeout-based reap is
+      worth adding.
 - [x] Eligibility is **`target.type == "local"` only** -- never `"command"`
       (that shape also covers Codespaces, containers, elevated relays, and
       other providers, often with no `target.cwd` at all; see
@@ -425,9 +436,11 @@ explicitly named follow-on slices; no other pre-session boundary besides
       (discovery mechanism, generic; real-render correctness, via a
       relaxed timeout) are. Re-deriving Phase 7's own clean-room proof a
       second time for a different trigger path would not close this
-      narrower gap either, so it is accepted as a known, bounded
-      limitation of this Phase's own test coverage rather than claimed
-      closed.
+      narrower gap either. **Deferred to
+      `ThomasMichon/copilot-extensions#5061`**: proving a real render
+      actually completes within the production `LOCAL_SPAWN_MAX_TIMEOUT_S`
+      budget (not just that the budget arithmetic is correct) remains
+      unproven and is tracked there rather than claimed closed.
 - [x] **Stale-sibling-boot negative-proof, version-ordering case**: a
       `.local.instructions.md` sibling rendered from an older installed
       payload, left in place while the *checked-in* projection is
@@ -560,7 +573,9 @@ before I needed to open a dedicated fix PR for it myself -- confirmed via
 With Phase 2 merged, every Plan and Validation Plan item above is
 resolved or explicitly scoped-closed/deferred to a tracked issue
 (`#4960` for Phase 1's Scenario D gap, `#5054` for the unrelated CI
-infra recurrence) -- **this effort is Done.**
+infra recurrence, `#5061` for the still-unproven production-budget
+spawn-path render, and `#5063` for the silent/unbounded descendant
+cleanup on a missing identity baseline) -- **this effort is Done.**
 
 ### 2026-10-02 (cont.) -- Phase 1 landed: vision/pattern reframing + the stale-sibling fix
 Picked up immediately after the plan PR (#4926) merged, per `planning-
