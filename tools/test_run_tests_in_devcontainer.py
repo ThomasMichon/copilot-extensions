@@ -1587,6 +1587,39 @@ def test_main_restores_the_previous_sigterm_handler_after_returning(monkeypatch,
         signal.signal(signal.SIGTERM, previous)
 
 
+def test_main_installs_and_restores_a_sighup_handler(monkeypatch, tmp_path: Path) -> None:
+    # SIGHUP also terminates the process by default on Linux (e.g. a
+    # closed SSH/terminal session), bypassing every `finally` block just
+    # like the unhandled-SIGTERM case this wrapper already closed --
+    # confirmed this was previously missing entirely.
+    config_path = tmp_path / "cfgdir-sighup" / "devcontainer.json"
+    config_path.parent.mkdir()
+    config_path.write_text("{}")
+    monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
+    monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
+    monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-sighup")
+    monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
+    monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
+
+    sentinel_handler = lambda signum, frame: None
+    previous = signal.signal(signal.SIGHUP, sentinel_handler)
+    try:
+        wrapper.main(["agent-worktrees"])
+        assert signal.getsignal(signal.SIGHUP) is sentinel_handler
+    finally:
+        signal.signal(signal.SIGHUP, previous)
+
+
+def test_raise_on_sighup_raises_termination_requested() -> None:
+    try:
+        wrapper._raise_on_sigterm(signal.SIGHUP, None)
+    except wrapper._TerminationRequested as exc:
+        assert "SIGHUP" in str(exc) or str(int(signal.SIGHUP)) in str(exc)
+    else:
+        raise AssertionError("expected _TerminationRequested")
+
+
 def test_cleanup_signals_deferred_records_signals_instead_of_ignoring_them(monkeypatch) -> None:
     # `SIG_IGN` would DISCARD a signal outright (nothing delivered or
     # queued later) -- this context manager must instead install a
@@ -1651,18 +1684,18 @@ def test_cleanup_signals_deferred_blocks_signals_atomically_during_handler_swap(
         wrapper.signal.SIG_UNBLOCK, wrapper.signal.SIG_SETMASK,
         wrapper.signal.SIG_BLOCK, wrapper.signal.SIG_SETMASK,
     ]
-    # The two `signal.signal()` calls for the INSTALL phase both land
+    # The three `signal.signal()` calls for the INSTALL phase all land
     # strictly between the first BLOCK and its matching SETMASK.
     block_idx = calls.index(("sigmask", wrapper.signal.SIG_BLOCK))
     setmask_idx = calls.index(("sigmask", wrapper.signal.SIG_SETMASK))
     signal_calls_between = [c for c in calls[block_idx + 1:setmask_idx] if c[0] == "signal"]
-    assert len(signal_calls_between) == 2
-    # The two RESTORE `signal.signal()` calls land strictly between the
+    assert len(signal_calls_between) == 3
+    # The three RESTORE `signal.signal()` calls land strictly between the
     # SECOND BLOCK (the restore swap's own) and its matching SETMASK.
     restore_block_idx = len(calls) - 1 - calls[::-1].index(("sigmask", wrapper.signal.SIG_BLOCK))
     restore_setmask_idx = len(calls) - 1 - calls[::-1].index(("sigmask", wrapper.signal.SIG_SETMASK))
     restore_signal_calls = [c for c in calls[restore_block_idx + 1:restore_setmask_idx] if c[0] == "signal"]
-    assert len(restore_signal_calls) == 2
+    assert len(restore_signal_calls) == 3
 
 
 def test_cleanup_signals_deferred_restores_a_pre_blocked_signal_mask() -> None:

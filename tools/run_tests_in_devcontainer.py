@@ -55,8 +55,7 @@ REPO = Path(__file__).resolve().parents[1]
 # user an empty workspace (only this wrapper ever populates it).
 DEVCONTAINER_CONFIG = REPO / ".devcontainer" / "test-isolation" / "devcontainer.json"
 CONTAINER_WORKSPACE = "/workspaces/copilot-extensions"
-#: Must match the devcontainer spec's ``remoteUser``/``containerUser``.
-REMOTE_USER = "vscode"
+REMOTE_USER = "vscode"  #: matches the devcontainer spec's remoteUser/containerUser
 
 # Must match the literal volume name baked into the devcontainer spec's
 # ``workspaceMount`` -- ``_per_instance_config`` rewrites this to a
@@ -103,8 +102,8 @@ def _minimal_repo_selection_env() -> dict[str, str]:
     `_discover_configured_clean_filters`, before `_scrubbed_git_env`'s
     overrides exist. `check-attr` never invokes a clean filter, but
     still needs `core.fsmonitor=false` (confirmed `GIT_OPTIONAL_LOCKS=0`
-    can make read-only probes consult a hook) and
-    `GIT_NO_LAZY_FETCH=1`/`GIT_NO_REPLACE_OBJECTS=1`."""
+    can make read-only probes consult a hook) and `GIT_NO_LAZY_FETCH=1`/
+    `GIT_NO_REPLACE_OBJECTS=1`."""
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_OPTIONAL_LOCKS"] = "0"
@@ -182,12 +181,11 @@ def _devcontainer_exe() -> str:
 
 def _per_instance_config(instance_label: str) -> tuple[Path, str]:
     """Write a copy of ``DEVCONTAINER_CONFIG`` with its workspace volume
-    name made unique to this invocation, so each run gets its own fresh,
-    isolated workspace instead of reusing one fixed, shared volume.
-    Returns the temp config path and volume name, so the caller can
-    remove that volume at teardown. Written as literally
-    ``devcontainer.json`` -- the devcontainer CLI rejects any other
-    ``--config`` basename."""
+    name made unique to this invocation, so each run gets its own fresh
+    volume instead of reusing one fixed, shared one. Returns the temp
+    config path and volume name, so the caller can remove that volume
+    at teardown. Written as literally ``devcontainer.json`` -- the
+    devcontainer CLI rejects any other ``--config`` basename."""
     volume_name = f"{BASE_VOLUME_NAME}-{instance_label}"
     text = DEVCONTAINER_CONFIG.read_text()
     if BASE_VOLUME_NAME not in text:
@@ -203,10 +201,9 @@ def _per_instance_config(instance_label: str) -> tuple[Path, str]:
 
 def _create_bounded_volume(volume_name: str) -> None:
     """Create the per-invocation workspace volume up front, size-bounded
-    and tmpfs-backed (not Docker's unbounded default) -- see
-    ``WORKSPACE_VOLUME_SIZE``. Creating it explicitly first means
-    ``devcontainer up`` just reuses this one instead of implicitly
-    creating an unbounded one."""
+    and tmpfs-backed -- see ``WORKSPACE_VOLUME_SIZE``. ``devcontainer
+    up`` then just reuses this one instead of implicitly creating an
+    unbounded default."""
     res = subprocess.run(
         [
             "docker", "volume", "create",
@@ -377,8 +374,8 @@ _ALL_LONG_FLAGS = _VALUE_CONSUMING_FLAGS | _BARE_FLAGS
 
 
 def _canonicalize_flag(name: str) -> str:
-    """Resolve a bare long-flag token to its canonical name via
-    argparse's unambiguous-prefix abbreviation against `_ALL_LONG_FLAGS`."""
+    """Resolve an abbreviated long-flag token to its canonical form via
+    `_ALL_LONG_FLAGS`."""
     if name in _ALL_LONG_FLAGS or not name.startswith("--") or len(name) <= 2:
         return name
     matches = [flag for flag in _ALL_LONG_FLAGS if flag.startswith(name)]
@@ -442,9 +439,8 @@ def _reject_resource_overrides_exceeding_container_ceilings(passthrough: list[st
 
 
 def _resolve_base_ref(passthrough: list[str]) -> str:
-    """Best-effort extraction of the ``--base`` value for
-    ``_materialized_git_dir``'s object closure. Falls back to the
-    runner's default when absent."""
+    """Best-effort extraction of ``--base`` for
+    ``_materialized_git_dir``'s closure; falls back to the default."""
     resolved = "origin/main"
     for i, arg in enumerate(passthrough):
         name, eq, value = arg.partition("=")
@@ -458,9 +454,9 @@ def _resolve_base_ref(passthrough: list[str]) -> str:
 
 
 def _changed_mode_active(passthrough: list[str]) -> bool:
-    """Whether an invocation resolves targets via ``changed_plugins()``
-    -- true for ``--changed``, AND the runner's default (no ``--all``,
-    no plugin names)."""
+    """Whether targets resolve via ``changed_plugins()`` -- true for
+    ``--changed``, AND the runner's default (no ``--all``, no plugin
+    names)."""
     has_all = False
     has_positional = False
     skip_next = False
@@ -840,16 +836,17 @@ def _raise_on_sigterm(signum: int, frame: object) -> None:
     raise _TerminationRequested(f"received signal {signum}")
 
 
-# `SIGINT` (Ctrl-C) already becomes `KeyboardInterrupt` via Python's own
-# default handling -- only `SIGTERM` needs `_raise_on_sigterm` above. Both
-# still need deferring during cleanup itself (`_cleanup_signals_deferred`),
-# so a REPEAT signal mid-cleanup can't interrupt it partway.
-_CLEANUP_DEFERRED_SIGNALS = (signal.SIGINT, signal.SIGTERM)
+# `SIGINT` already becomes `KeyboardInterrupt` via Python's own default
+# handling -- `SIGTERM` and `SIGHUP` (e.g. a closed SSH/terminal session,
+# also terminating by default on Linux) both need `_raise_on_sigterm`
+# instead. All three still need deferring during cleanup itself, so a
+# REPEAT signal mid-cleanup can't interrupt it partway.
+_CLEANUP_DEFERRED_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
 
 @contextlib.contextmanager
 def _cleanup_signals_deferred():
-    """Defer both `_CLEANUP_DEFERRED_SIGNALS` for a cleanup step
+    """Defer every `_CLEANUP_DEFERRED_SIGNALS` signal for a cleanup step
     (``_tear_down``/``_cleanup_orphan``): RECORD receipt instead of acting
     immediately, restore the previous handlers once cleanup finishes, then
     raise `_TerminationRequested` if one was recorded AND no exception is
@@ -857,13 +854,14 @@ def _cleanup_signals_deferred():
     `main` return 0 for a cancelled run; replaying unconditionally could
     REPLACE a genuine failure already propagating.
 
-    Installing/restoring TWO handlers isn't atomic -- a signal mid-swap
-    can hit whichever OLD handler is active for the second one (confirmed
-    live). ``pthread_sigmask`` blocks both for each swap, restoring the
-    EXACT prior mask via ``SIG_SETMASK`` (never ``SIG_UNBLOCK``, which
-    would unblock a caller-pre-blocked signal, confirmed live). Such a
-    pending signal would otherwise be delivered to the already-restored
-    OLD handler at the final unmask, bypassing the replay decision
+    Installing/restoring multiple handlers isn't atomic -- a signal
+    mid-swap can hit whichever OLD handler is active for a not-yet-
+    swapped one (confirmed live). ``pthread_sigmask`` blocks all of them
+    for each swap, restoring the EXACT prior mask via ``SIG_SETMASK``
+    (never ``SIG_UNBLOCK``, which would unblock a caller-pre-blocked
+    signal, confirmed live). Such a pending signal would otherwise be
+    delivered to the already-restored OLD handler at the final unmask,
+    bypassing the replay decision
     (confirmed live); exit flushes it to `_record` first, then restores
     handlers in their own separately-masked swap."""
     received: list[int] = []
@@ -900,12 +898,13 @@ def _cleanup_signals_deferred():
 
 
 def main(argv: list[str] | None = None) -> int:
-    # Converts SIGTERM into a normal raised exception so this function's
-    # own try/finally cleanup runs -- see `_TerminationRequested`.
-    # SIGINT needs no equivalent handler (Python already raises
-    # `KeyboardInterrupt`); the previous handler is restored below,
-    # since `main` is also invoked in-process by this module's tests.
+    # Converts SIGTERM/SIGHUP into a raised exception so this function's
+    # own try/finally cleanup runs -- see `_TerminationRequested`. SIGINT
+    # needs no handler (Python raises `KeyboardInterrupt`); previous
+    # handlers are restored below, since `main` is invoked in-process by
+    # this module's tests.
     previous_sigterm_handler = signal.signal(signal.SIGTERM, _raise_on_sigterm)
+    previous_sighup_handler = signal.signal(signal.SIGHUP, _raise_on_sigterm)
     try:
         ap = argparse.ArgumentParser(
             description=(
@@ -993,6 +992,7 @@ def main(argv: list[str] | None = None) -> int:
             shutil.rmtree(config_path.parent, ignore_errors=True)
     finally:
         signal.signal(signal.SIGTERM, previous_sigterm_handler)
+        signal.signal(signal.SIGHUP, previous_sighup_handler)
 
 
 

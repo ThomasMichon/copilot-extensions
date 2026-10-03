@@ -2050,3 +2050,39 @@ proceeding to drive this PR through to merge per the repo's
 `pr-self-merge` flow (`COMMENTED` is this reviewer's normal non-blocking
 verdict shape; this identity holds Maintainer bypass rights for the
 required-review rule).
+
+### 2026-10-03 — Review round 15 (twenty-ninth pass): MEDIUM SIGHUP leak fixed
+A twenty-ninth review pass of commit `af3320d68` surfaced 1 "previously
+missed" MEDIUM: `SIGHUP` also terminates the process by default on
+Linux (e.g. a closed SSH/terminal session), bypassing every `finally`
+block the same way an unhandled `SIGTERM` would -- but only `SIGTERM`
+had been converted to a catchable exception, leaving `SIGHUP` able to
+leak a live container and volume. Fixed by extending the exact same
+treatment to `SIGHUP`: added it to `_CLEANUP_DEFERRED_SIGNALS` (so a
+repeat during cleanup itself is still deferred/recorded, not just the
+first one), and installed/restored a second `_raise_on_sigterm` handler
+for it in `main()` alongside the existing `SIGTERM` one.
+
+Confirmed live end-to-end: started a real (non-`--keep`) wrapper run in
+the background, sent it a real `SIGHUP` a few seconds in (while
+`_run_tests`'s `docker exec` subprocess was still running), confirmed
+the traceback shows `_TerminationRequested: received signal 1` (SIGHUP)
+propagating through the normal exception path rather than the process
+dying silently, and confirmed via `docker ps`/`docker volume ls`
+afterward that its container and volume were correctly torn down
+(the one leftover volume/container found was the unrelated, intentional
+`--keep` artifact from an earlier manual validation run this same
+round, cleaned up separately).
+
+Re-validated end-to-end: the full unit test suite (112 tests, including
+2 new regression tests -- `_raise_on_sigterm` raising for `SIGHUP`
+specifically, and `main()` installing/restoring a `SIGHUP` handler same
+as `SIGTERM`; updated the existing atomic-swap-ordering test's install/
+restore call-count assertions for the now-three-signal set) passes;
+`check-module-size.py --changed-since origin/dev` passes right at the
+cap (1000 lines, yet another condensing pass); a fresh Docker-backed
+end-to-end run (`ai-attribution`, 98 passed / 6 skipped) confirms the
+common case still works; `check-docs-consistency.py` and
+`check-effort-vision-structure.py` both pass. Docker cleanup (no
+leftover `test-isolation` volumes/containers) and host `git status
+--short` reconfirmed clean of anything beyond this round's own diff.
