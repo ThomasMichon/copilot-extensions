@@ -38,15 +38,11 @@ def _site_packages(interpreter: Path) -> Path:
     (current) process's own Python version -- never cross-version -- so
     this process's own ``sys.version_info`` is authoritative for a venv
     this test just created; there is no need to introspect the child
-    interpreter at all. Avoiding that subprocess also sidesteps an
-    environment-specific interaction with this suite's own coverage/
-    pytest-cov instrumentation: an otherwise-identical child-interpreter
-    invocation (first via ``site.getsitepackages()`` filtering, then via
-    ``sysconfig.get_path('purelib')`` -- both tried and both failed
-    identically) was confirmed to fail unpredictably specifically inside
-    the promotion pipeline's "coverage baseline collection" harness
-    (`tools/coverage_guided_selection/baseline.py`), while the same tests
-    passed reliably in every plain (non-coverage-instrumented) run.
+    interpreter at all. This also avoids spawning a nested interpreter
+    from inside this suite's own coverage/pytest-cov-instrumented run,
+    which this helper must stay compatible with (see the
+    coverage-baseline collection harness,
+    `tools/coverage_guided_selection/baseline.py`).
     """
     slot = interpreter.parent.parent
     if os.name == "nt":
