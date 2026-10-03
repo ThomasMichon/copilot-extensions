@@ -665,6 +665,53 @@ def _venv_python_path(venv_dir: Path) -> Path:
     return venv_dir / "bin" / "python"
 
 
+#: A stdlib-only script (no third-party imports, since the locked
+#: toolchain venv only ever has `setuptools`/`wheel` installed) that
+#: reports the same keys `packaging.markers.default_environment()` would,
+#: queried by running it THROUGH the locked interpreter itself -- so a
+#: PEP 508 marker evaluates against the actually-locked Python, never
+#: whatever process happens to be running this tool.
+_MARKER_ENV_QUERY_SCRIPT = (
+    "import json, os, platform, sys\n"
+    "print(json.dumps({\n"
+    "    'implementation_name': sys.implementation.name,\n"
+    "    'implementation_version': platform.python_version(),\n"
+    "    'os_name': os.name,\n"
+    "    'platform_machine': platform.machine(),\n"
+    "    'platform_release': platform.release(),\n"
+    "    'platform_system': platform.system(),\n"
+    "    'platform_version': platform.version(),\n"
+    "    'python_full_version': platform.python_version(),\n"
+    "    'platform_python_implementation': platform.python_implementation(),\n"
+    "    'python_version': '.'.join(platform.python_version_tuple()[:2]),\n"
+    "    'sys_platform': sys.platform,\n"
+    "}))\n"
+)
+
+
+def _query_marker_environment(python_exe: Path) -> dict:
+    """Queries ``python_exe`` itself for its own PEP 508 marker-environment
+    values -- never assumed from the process running this script, which
+    may be a different Python than ``--python`` locked into the toolchain
+    venv."""
+    result = subprocess.run(
+        [str(python_exe), "-c", _MARKER_ENV_QUERY_SCRIPT],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise ArtifactBuildError(
+            f"could not query marker environment from {python_exe}:\n"
+            f"{result.stdout}\n{result.stderr}"
+        )
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise ArtifactBuildError(
+            f"{python_exe}: marker-environment query produced non-JSON "
+            f"output: {exc}"
+        ) from exc
+
+
 class ToolchainLock:
     """A resolved, pinned build toolchain (exact ``setuptools``/``wheel``
     versions) installed into one dedicated venv, meant to be reused --
@@ -678,6 +725,7 @@ class ToolchainLock:
     def __init__(self, venv_python: Path, packages: dict[str, str]):
         self.venv_python = venv_python
         self.packages = packages
+        self._marker_environment: dict | None = None
 
     @property
     def generator(self) -> str:
@@ -686,6 +734,20 @@ class ToolchainLock:
         build actually used the pinned venv rather than silently falling
         back to some other setuptools reachable on `PATH`."""
         return f"setuptools ({self.packages['setuptools']})"
+
+    @property
+    def marker_environment(self) -> dict:
+        """The PEP 508 environment-marker dict for THIS locked toolchain's
+        own interpreter (``venv_python``) -- queried directly from that
+        interpreter (never assumed from whatever process happens to be
+        running this tool), so a constraint like `python_version < "3.0"`
+        evaluates against the interpreter actually locked, even when
+        ``--python`` selected a different one than this process's own.
+        Queried once and cached -- the locked venv's interpreter never
+        changes for the lifetime of this ``ToolchainLock``."""
+        if self._marker_environment is None:
+            self._marker_environment = _query_marker_environment(self.venv_python)
+        return self._marker_environment
 
     @property
     def lock_id(self) -> str:
@@ -700,6 +762,13 @@ class ToolchainLock:
 
 _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS = ("UV_DEFAULT_INDEX", "UV_INDEX_URL")
 _PUBLIC_PYPI_HOSTS = {"pypi.org", "pypi.python.org", "test.pypi.org"}
+#: Affirmative trust policy for `resolve_toolchain_lock`'s governed-feed
+#: gate (see `_governed_feed_configured`'s own docstring): a comma-
+#: separated allowlist of hostnames the MACHINE explicitly asserts are its
+#: own governed feed. Never committed/hardcoded here -- this repo stays
+#: feed-neutral (`tools/check-feed-neutrality.py`); only a machine's own
+#: local environment ever populates this.
+_TRUSTED_INDEX_HOSTS_ENV_VAR = "BUILD_PYTHON_ARTIFACTS_TRUSTED_INDEX_HOSTS"
 
 
 def _is_public_pypi_url(url: str) -> bool:
@@ -711,6 +780,18 @@ def _is_public_pypi_url(url: str) -> bool:
     except ValueError:
         return False
     return (host or "").lower() in _PUBLIC_PYPI_HOSTS
+
+
+def _url_host(url: str) -> str | None:
+    try:
+        return urllib.parse.urlsplit(url).hostname
+    except ValueError:
+        return None
+
+
+def _trusted_index_hosts(env: dict) -> set[str]:
+    raw = env.get(_TRUSTED_INDEX_HOSTS_ENV_VAR, "")
+    return {h.strip().lower() for h in raw.split(",") if h.strip()}
 
 
 def _effective_uv_toml_candidates(env: dict) -> list[Path]:
@@ -737,24 +818,19 @@ def _effective_uv_toml_candidates(env: dict) -> list[Path]:
     return [Path(home) / ".config" / "uv" / "uv.toml"] if home else []
 
 
-def _governed_feed_configured(*, env: dict | None = None) -> bool:
-    """Whether this machine's `uv` configuration actually selects a non-
-    public DEFAULT index -- not merely "some index is configured somewhere".
-    `UV_INDEX` (plural) and a plain `[[index]]` table without `default =
-    true` only add a SUPPLEMENTAL index; `uv` still falls back to public
-    PyPI for anything the supplemental index doesn't resolve, so neither
-    proves the governed-feed-only contract holds. Only `UV_DEFAULT_INDEX`/
+def _effective_default_index_url(env: dict) -> str | None:
+    """The URL of the index `uv` would actually use as its DEFAULT in this
+    environment, or ``None`` if nothing replaces `uv`'s own implicit
+    public-PyPI default. `UV_INDEX` (plural) and a plain `[[index]]` table
+    without `default = true` only add a SUPPLEMENTAL index -- `uv` still
+    falls back to public PyPI for anything the supplemental index doesn't
+    resolve, so neither is the effective default. Only `UV_DEFAULT_INDEX`/
     `UV_INDEX_URL`, the legacy `index-url` key, or an `[[index]]` entry
-    with `default = true` actually replace the default -- and even then,
-    a default explicitly pointed AT a public PyPI-family host does not
-    count. Deliberately reads configuration, never a hardcoded URL -- this
-    repository stays feed-neutral (see `tools/check-feed-neutrality.py`);
-    only each machine's own local configuration ever names a real feed."""
-    env = dict(os.environ) if env is None else env
+    with `default = true` actually replace it."""
     for var in _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS:
         value = env.get(var)
-        if value and not _is_public_pypi_url(value):
-            return True
+        if value:
+            return value
     for candidate in _effective_uv_toml_candidates(env):
         if not candidate.is_file():
             continue
@@ -765,17 +841,44 @@ def _governed_feed_configured(*, env: dict | None = None) -> bool:
         if not isinstance(data, dict):
             continue
         index_url = data.get("index-url")
-        if isinstance(index_url, str) and index_url and not _is_public_pypi_url(index_url):
-            return True
+        if isinstance(index_url, str) and index_url:
+            return index_url
         indexes = data.get("index")
         if isinstance(indexes, list):
             for entry in indexes:
                 if not isinstance(entry, dict) or entry.get("default") is not True:
                     continue
                 url = entry.get("url")
-                if isinstance(url, str) and url and not _is_public_pypi_url(url):
-                    return True
-    return False
+                if isinstance(url, str) and url:
+                    return url
+    return None
+
+
+def _governed_feed_configured(*, env: dict | None = None) -> bool:
+    """Whether `uv`'s EFFECTIVE DEFAULT index in this environment is both
+    (a) not a public PyPI-family host, AND (b) affirmatively trusted by
+    this machine's own explicit policy (`_TRUSTED_INDEX_HOSTS_ENV_VAR`).
+
+    This is an ALLOWLIST, deliberately -- a prior revision inferred
+    governance from "not one of a few known public hostnames", which would
+    silently accept an arbitrary untrusted index (e.g. a public mirror
+    under a different hostname) as "governed" just because it isn't named
+    `pypi.org`. Nothing is trusted unless this machine's own environment
+    affirmatively lists it: with no trust policy configured at all, this
+    always fails closed, even if SOME non-public-looking index happens to
+    be configured as the default. Deliberately reads configuration, never
+    a hardcoded URL or hostname -- this repository stays feed-neutral (see
+    `tools/check-feed-neutrality.py`); only each machine's own local
+    configuration ever names its real, trusted feed."""
+    env = dict(os.environ) if env is None else env
+    trusted_hosts = _trusted_index_hosts(env)
+    if not trusted_hosts:
+        return False
+    url = _effective_default_index_url(env)
+    if not url or _is_public_pypi_url(url):
+        return False
+    host = _url_host(url)
+    return host is not None and host.lower() in trusted_hosts
 
 
 def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> ToolchainLock:
@@ -791,11 +894,13 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
     per process invocation: pass the same ``venv_dir`` (``--toolchain-venv``
     on the CLI) to every invocation in that run.
 
-    Never resolves from a public index: this call itself first verifies a
-    governed, non-public DEFAULT index is actually configured
+    Never resolves from an untrusted index: this call itself first
+    verifies the effective default index is both non-public AND
+    affirmatively trusted by this machine's own explicit policy
     (``_governed_feed_configured``), failing closed rather than letting
     `uv venv`/`uv pip install` silently resolve `setuptools`/`wheel` from
-    public PyPI on a runner with no governed-feed configuration at all.
+    an unverified index on a runner with no trust policy configured at
+    all.
 
     Built in a staging directory and published into ``venv_dir`` only via
     an atomic rename AFTER both `uv venv` and `uv pip install` succeed --
@@ -807,11 +912,13 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
     recover)."""
     if not _governed_feed_configured():
         raise ArtifactBuildError(
-            "no governed, non-public default package feed is configured "
-            "on this machine (checked UV_DEFAULT_INDEX/UV_INDEX_URL and "
-            "the user-level uv.toml's index-url / [[index]] default=true) "
-            "-- refusing to install the build toolchain, which would "
-            "otherwise silently resolve setuptools/wheel from public PyPI"
+            "no affirmatively trusted governed package feed is configured "
+            "on this machine (checked uv's effective default index -- "
+            "UV_DEFAULT_INDEX/UV_INDEX_URL or the user-level uv.toml's "
+            "index-url / [[index]] default=true -- against the explicit "
+            f"trust policy in {_TRUSTED_INDEX_HOSTS_ENV_VAR}) -- refusing "
+            "to install the build toolchain, which would otherwise "
+            "silently resolve setuptools/wheel from an unverified index"
         )
     venv_python = _venv_python_path(venv_dir)
     if not venv_python.is_file():
@@ -942,7 +1049,9 @@ def _assert_toolchain_satisfies_build_requires(
                 f"{source_dir}: unparseable [build-system].requires entry "
                 f"{raw!r}: {exc}"
             ) from exc
-        if req.marker is not None and not req.marker.evaluate():
+        if req.marker is not None and not req.marker.evaluate(
+            environment=toolchain.marker_environment
+        ):
             continue  # this constraint does not apply in this environment
         locked = toolchain.packages.get(req.name)
         if locked is None:

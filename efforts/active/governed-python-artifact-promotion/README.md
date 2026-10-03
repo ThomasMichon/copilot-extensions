@@ -490,6 +490,33 @@ win grows with build complexity.
   tests (100 total) covering all four fixes. Re-verified for real:
   `agent-bridge` still builds correctly end-to-end with the full set of
   checks active.
+- A fifth review round found 2 more real issues: the governed-feed check
+  was a DENYLIST (reject only `pypi.org`/`pypi.python.org`/`test.pypi.org`,
+  accept anything else), which would silently treat an arbitrary untrusted
+  index (e.g. a public mirror under a different hostname) as "governed"
+  just because it isn't one of those three names -- fixed by replacing it
+  with an ALLOWLIST: a new, machine-local-only
+  `BUILD_PYTHON_ARTIFACTS_TRUSTED_INDEX_HOSTS` environment variable (a
+  comma-separated hostname list) is now the sole source of trust --
+  nothing is considered governed unless this machine's own environment
+  affirmatively lists its host, even if the effective default index looks
+  perfectly reasonable. **This is a breaking operational change**: any
+  machine that was relying on this tool must now also set this variable
+  to its own governed feed's hostname, or every `resolve_toolchain_lock`
+  call fails closed. Also, `_assert_toolchain_satisfies_build_requires`
+  evaluated PEP 508 markers via `Marker.evaluate()` with no `environment`
+  argument, which evaluates against the Python process running this
+  SCRIPT, not the interpreter actually locked into `toolchain.venv_python`
+  -- if `--python` ever selects a different interpreter, a conditional
+  build requirement could be skipped or enforced incorrectly. Fixed by
+  adding `ToolchainLock.marker_environment` (cached, queried once via a
+  tiny stdlib-only script run THROUGH `toolchain.venv_python` itself,
+  returning the same keys `packaging.markers.default_environment()` would)
+  and passing it to every `Marker.evaluate(environment=...)` call. 8 more
+  unit tests (106 total). Re-verified for real (with the new trust-policy
+  variable set to this machine's actual governed-feed host) that
+  `agent-bridge` still builds correctly, and confirmed the tool now fails
+  closed with a clear error when that variable is unset.
 - Real smoke test (not just mocked unit tests): built `agent-bridge` (10
   wheels) then `agent-worktrees` (its own wheel + vendored libs) against
   the SAME `--toolchain-venv` -- both manifests recorded the identical
