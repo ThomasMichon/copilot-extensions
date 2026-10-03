@@ -1,0 +1,9 @@
+{
+  "comment": "Add troubleshooting-agent-dispatch sidecar skill (stalled lanes, dead-lettered tasks, the release_requested carried-session bug, stuck excludes/holds, missing logs) and update docs/spawn-supervisor.md with the release_requested mechanics and the new coordinator/supervisor log files, both from the #4978/#4990 investigation.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
