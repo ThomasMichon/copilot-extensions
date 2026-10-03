@@ -1,0 +1,9 @@
+{
+  "comment": "pr-merge --now: pass the locally tracked pushed head as GitHub's --match-head-commit, so a stale PR-object read (confirmed: can persist 15+ min on a cross-fork PR) can never silently merge the wrong commit",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

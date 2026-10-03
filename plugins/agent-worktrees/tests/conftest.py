@@ -446,7 +446,9 @@ def pr_repo(tmp_path: Path, monkeypatch):
         )},
     )
 
-    monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda: tracking_d)
+    monkeypatch.setattr(
+        "agent_worktrees.config.tracking_dir", lambda name=None: tracking_d
+    )
     # pr_ops helpers that are called without an explicit ``config`` fall back to
     # ``cfg.load_config()``, which resolves the on-disk config for the active
     # project. In tests there is no active project, so pin load_config to this

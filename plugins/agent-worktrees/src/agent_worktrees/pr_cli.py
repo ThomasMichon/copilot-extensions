@@ -122,6 +122,123 @@ def _infer_active_github_slug(config: cfg.Config) -> str | None:
     return git_ops.slug_from_url(remote)
 
 
+def _tracked_pr_pushed_head(
+    config: cfg.Config,
+    repo: str,
+    number: int,
+    provider: str,
+) -> str:
+    """Return the locally recorded head_sha from the most recent push, even if
+    the provider never independently confirmed it.
+
+    Distinct from :func:`_tracked_pr_head_evidence`, which only returns a value
+    once the provider's own ``observe_head`` has matched it (evidence suitable
+    for *trusting* the provider). This one answers a narrower, pre-merge
+    safety question instead: "what did we ourselves just push?" -- so
+    ``pr-merge --now`` can hand it to the provider's merge call as
+    ``--match-head-commit`` and let the provider's own merge endpoint refuse
+    rather than silently merge a stale head the PR object hasn't caught up to
+    yet (ThomasMichon/copilot-extensions#4949). Returns "" (no safety check
+    applied) when no tracked record applies -- never a reason to block a merge
+    outright by itself.
+
+    Resolves the tracking path against the **supplied** ``config.repo_name``
+    (never the ambient active project) so `` pr-merge --config <other>``
+    looks up the right project's tracking record instead of silently missing
+    it and disabling the safeguard.
+
+    Always scans **every** tracked worktree record in that project -- never
+    returns early on a CWD-derived record's match alone. A CWD match is a
+    useful hint for *which* record to prefer, but it is not proof that no
+    *other* record claims the same ``(repo, number, provider)`` with a
+    different (possibly staler) ``head_sha``; returning the CWD record's
+    value without checking the rest would let a stale record silently win
+    and hand ``--match-head-commit`` the very stale value this safeguard
+    exists to catch (ThomasMichon/copilot-extensions#5034). A
+    neutral CWD (a supported ``--project <name> pr-merge <repo> <n> --now``
+    invocation moves the process to the project's **anchor**, never a
+    tracked worktree, so CWD inference returns nothing there) and a
+    cross-project ``--config <other>`` invocation run from *inside a
+    different project's own worktree* are both handled the same way: the
+    full-scan result is authoritative regardless of what CWD inference
+    found.
+    """
+    tracking_dir = cfg.tracking_dir(getattr(config, "repo_name", None))
+    try:
+        worktree_id = _core()._infer_worktree_id_from_cwd(config)
+    except Exception:
+        # No active project/worktree context (e.g. called outside a managed
+        # repo, or from a test driving the dispatcher directly) is a normal,
+        # unguarded condition for this helper -- fall back to "no evidence"
+        # rather than letting resolution failure block an otherwise-eligible
+        # merge.
+        worktree_id = None
+    cwd_match = ""
+    if worktree_id:
+        try:
+            record = tracking.load_record(
+                tracking_dir / f"{_core()._resolve_worktree_id(worktree_id)}.yaml"
+            )
+        except Exception:
+            record = None
+        if record is not None:
+            cwd_match = _find_tracked_pr_head(record, repo, number, provider)
+    # Scan every record in this project's tracking directory for an
+    # unambiguous match. More than one record claiming the same
+    # (repo, number, provider) with *different* head_sha values is a
+    # genuinely ambiguous state this helper should never guess through;
+    # "no evidence" (and thus no safety check) is the honest answer in
+    # that case -- even when one of the disagreeing records is the one
+    # CWD inference happened to point at.
+    try:
+        candidates = sorted(tracking_dir.glob("*.yaml"))
+    except Exception:
+        return cwd_match
+    matches: set[str] = set()
+    for path in candidates:
+        try:
+            record = tracking.load_record(path)
+        except Exception:
+            continue
+        found = _find_tracked_pr_head(record, repo, number, provider)
+        if found:
+            matches.add(found)
+    if len(matches) == 1:
+        return next(iter(matches))
+    if matches:
+        # More than one distinct head_sha claimed for the same PR -- refuse
+        # to guess, regardless of whether cwd_match is one of them.
+        return ""
+    # The full scan found nothing (e.g. tracking_dir.glob matched no files,
+    # or every record failed to load) -- fall back to whatever the CWD
+    # record itself yielded, if anything.
+    return cwd_match
+
+
+def _find_tracked_pr_head(
+    record: tracking.WorktreeRecord, repo: str, number: int, provider: str,
+) -> str:
+    """Return the recorded head_sha of ``record``'s PR matching
+    ``(repo, number, provider)``, or "" if none does.
+
+    Compares ``repo`` case-insensitively: GitHub (and most other provider)
+    repository slugs are case-insensitive, so an explicit ``Owner/Repo``
+    operand must still match a tracked ``owner/repo`` record -- an exact
+    string comparison would silently miss that match and omit the
+    stale-head safeguard for the very PR it's meant to protect.
+    """
+    repo_lower = repo.lower()
+    for pr in record.prs:
+        target_repo = pr.repo or record.repo
+        if (
+            pr.number == number
+            and target_repo.lower() == repo_lower
+            and (pr.provider or provider) == provider
+        ):
+            return pr.head_sha
+    return ""
+
+
 def _tracked_pr_head_evidence(
     config: cfg.Config,
     repo: str,
