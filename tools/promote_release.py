@@ -439,19 +439,21 @@ def _write_coverage_baselines_into_scratch(
     for every ``*.json`` baseline file found in ``baselines_dir``, after
     verifying each one's own ``measured_commit`` matches ``dev_head``.
 
-    The full per-line data is expected to **already be published** as a
-    GitHub Release (one asset per plugin, tag `_release_tag_for(dev_head)`)
-    by the caller (`validate-and-promote.yml`'s own "Publish coverage
-    baselines" step) BEFORE this function ever runs -- this function only
-    ever commits a pointer (`measured_commit` + `release_tag` + `asset`, a
-    few hundred bytes regardless of plugin suite size) referencing that
-    already-published release, never the payload itself. This script
-    deliberately does NOT verify the release actually exists (it has no
-    `gh`/network dependency anywhere else and this would be its only one)
-    -- a nonexistent release for a committed pointer would be a
-    caller-side ordering bug in the workflow, not something this pure
+    The full per-line data is published **separately**, as a GitHub
+    Release (one asset per plugin, tag `_release_tag_for(dev_head)`), by
+    the caller (`validate-and-promote.yml`'s own "Publish coverage
+    baselines" step) -- but only AFTER this function (and the rest of a
+    real promotion) has already succeeded, never before: publishing
+    first would risk a since-rejected (mismatched `measured_commit`/
+    `plugin`) baseline's upload silently overwriting an already-published,
+    still-valid release's assets before its own data was ever checked.
+    This function itself has no `gh`/network dependency and does NOT
+    verify the release actually exists at the point it runs -- a pointer
+    committed ahead of its own release momentarily resolving to nothing
+    is expected and transient (the caller publishes the release in the
+    very next step of the same job), not a correctness gap this pure
     git/tree-
-    building tool can meaningfully check locally.
+    building tool needs to check locally.
 
     Call ``_seed_coverage_baselines_from_main`` first (see its own
     docstring) so this only ever OVERLAYS this run's freshly collected
@@ -637,10 +639,11 @@ def promote(
     ``_write_coverage_baselines_into_scratch``'s own docstring for the
     ``measured_commit`` consistency check this performs before accepting
     any of them, and for the full per-line data's own publication contract
-    (a GitHub Release asset the caller must publish before calling this).
-    Written only after the no-op content check (alongside the pipeline
-    state file), so a baseline update alone -- with no real `dev` content
-    change -- never forces a vacuous promotion."""
+    (a GitHub Release asset the caller publishes separately, only AFTER
+    this promotion itself succeeds). Written only after the no-op content
+    check (alongside the pipeline state file), so a baseline update alone
+    -- with no real `dev` content change -- never forces a vacuous
+    promotion."""
     dev_head = _rev_parse(dev_ref, cwd=repo)
     if dev_head is None:
         raise PromotionError(f"cannot resolve dev ref: {dev_ref!r}")
