@@ -128,11 +128,13 @@ related:
 - **`ai_attribution`** -- an optional per-repo override of the
   `audience`-derived disclosure policy, consumed by the `ai-attribution`
   plugin: `disclose_on_open` (bool) and `disclose_on_reply` (bool), each
-  defaulting to the audience-derived value when omitted. An override can
-  only narrow disclosure (turn it OFF for a case the operator has
-  consciously decided doesn't need it, e.g. opening issues/PRs in a repo
-  they maintain directly) -- it never widens disclosure beyond what the
-  audience already requires.
+  defaulting to the audience-derived value when omitted. A key that *is*
+  present is honored verbatim -- it can turn disclosure OFF for a case the
+  operator has consciously decided doesn't need it (e.g. opening issues/PRs
+  in a repo they maintain directly), or explicitly ON for a `private` repo
+  that still needs it in one direction (e.g. still disclosing on replies) --
+  in either direction relative to the audience-derived default; a key that's
+  *absent* from the override simply stays at that default.
 - **`primary`** -- the default repo (used by `related resolve` with no name).
 
 ## CLI

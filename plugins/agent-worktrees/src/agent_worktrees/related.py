@@ -173,8 +173,11 @@ class RelatedEntry:
     # derived automatically; empty means "unclassified."
     audience: str = ""
     # Per-repo AI-attribution overrides for the ``ai-attribution`` plugin:
-    # ``disclose_on_open``/``disclose_on_reply`` (bool, default True each),
-    # defaulting to the audience-derived policy when absent.
+    # ``disclose_on_open``/``disclose_on_reply`` (bool). Each key absent from
+    # this dict falls back to the audience-derived default (see
+    # ``effective_ai_attribution``); a present key is honored verbatim in
+    # either direction (can turn disclosure off *or* on relative to that
+    # default), not restricted to narrowing.
     ai_attribution: dict[str, Any] = field(default_factory=dict)
     # Plugins this control plane side-loads when delegating work to the related
     # repo (the *related-repo* plugin lane -- distinct from a CodeSpace's own

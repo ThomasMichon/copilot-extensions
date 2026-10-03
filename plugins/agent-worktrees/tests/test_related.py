@@ -2020,9 +2020,10 @@ def test_effective_ai_attribution_defaults_by_audience():
     }
 
 
-def test_effective_ai_attribution_override_narrows_only_the_stated_key():
+def test_effective_ai_attribution_override_is_per_key_and_verbatim():
     # A public repo with only disclose_on_open overridden off keeps
-    # disclose_on_reply at its audience-derived default (True).
+    # disclose_on_reply at its audience-derived default (True) -- the
+    # override is scoped to the key it names, not all-or-nothing.
     e = RelatedEntry(
         name="x", audience="public",
         ai_attribution={"disclose_on_open": False},
@@ -2030,10 +2031,9 @@ def test_effective_ai_attribution_override_narrows_only_the_stated_key():
     assert related.effective_ai_attribution(e) == {
         "disclose_on_open": False, "disclose_on_reply": True,
     }
-    # A private repo with disclose_on_reply explicitly turned ON keeps the
-    # explicit widening (the per-entry override is honored verbatim; the
-    # "never widens beyond audience" rule is about *default behavior* when a
-    # key is absent, not a cap on an operator's own explicit choice).
+    # A present override key is honored verbatim, in either direction
+    # relative to the audience-derived default -- a private repo (default
+    # False/False) can still explicitly turn disclose_on_reply ON.
     e2 = RelatedEntry(
         name="x", audience="private",
         ai_attribution={"disclose_on_reply": True},
@@ -2041,6 +2041,44 @@ def test_effective_ai_attribution_override_narrows_only_the_stated_key():
     assert related.effective_ai_attribution(e2) == {
         "disclose_on_open": False, "disclose_on_reply": True,
     }
+
+
+def test_show_json_surfaces_audience_and_resolved_attribution(tmp_path, monkeypatch):
+    """CLI-level proof for the Phase 2 consumer contract: `related show
+    --json` must carry both `audience`/`audience_explicit` and the resolved
+    `ai_attribution` policy, for every audience value including the
+    unclassified fail-open case -- not just the model-level helpers."""
+    from agent_worktrees import __main__ as m
+    from agent_worktrees import related_cli as cli
+
+    anchor = tmp_path / "repo"
+    anchor.mkdir()
+    cfg = RelatedConfig(related={
+        "pub": RelatedEntry(name="pub", audience="public"),
+        "priv": RelatedEntry(
+            name="priv", audience="private",
+            ai_attribution={"disclose_on_reply": True},
+        ),
+        "plain": RelatedEntry(name="plain"),  # unclassified
+    })
+    related.write_related(anchor, cfg)
+    monkeypatch.setattr(cli, "_related_anchor", lambda rest: str(anchor))
+    monkeypatch.setattr(
+        cli, "_related_lookup_anchors", lambda rest, anc, name: ([anc], False)
+    )
+
+    cases = {
+        "pub": ("public", {"disclose_on_open": True, "disclose_on_reply": True}),
+        "priv": ("private", {"disclose_on_open": False, "disclose_on_reply": True}),
+        "plain": ("", {"disclose_on_open": True, "disclose_on_reply": True}),
+    }
+    for name, (expected_audience, expected_policy) in cases.items():
+        captured: dict = {}
+        monkeypatch.setattr(m, "_json_output", lambda payload: captured.update(payload))
+        rc = cli.cmd_related_dispatch(["show", name, "--json"])
+        assert rc == 0
+        assert captured["audience"] == expected_audience
+        assert captured["ai_attribution"] == expected_policy
 
 
 # ---------------------------------------------------------------------------

@@ -59,9 +59,9 @@ related:
     # Optional per-repo AI-attribution override, consumed by the
     # ai-attribution plugin. Both keys default to the audience-derived
     # policy (true for public/internal/unclassified, false for private) when
-    # omitted; an explicit value here only ever narrows disclosure (turns it
-    # OFF for a case the operator has consciously decided doesn't need it),
-    # never widens it beyond what the audience already requires.
+    # omitted; a key that IS present is honored verbatim -- off or on,
+    # relative to that default -- e.g. turning disclosure off here for a
+    # repo the operator opens issues/PRs in directly.
     ai_attribution:
       disclose_on_open: false             # e.g. the operator opens issues/PRs here directly
       disclose_on_reply: true             # but still discloses when replying to others' threads

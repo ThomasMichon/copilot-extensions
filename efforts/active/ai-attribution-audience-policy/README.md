@@ -88,10 +88,12 @@ clearly another agent.
   posture as `ownership`). **Landed**: `related.py`.
 - [x] Add an optional per-repo attribution override block, e.g.
   `ai_attribution: { disclose_on_open: bool, disclose_on_reply: bool }`
-  (default true/true) for the open-vs-reply distinction. **Landed**:
+  for the open-vs-reply distinction. **Landed**:
   `_parse_ai_attribution`/`effective_ai_attribution` in `related.py` --
-  derives from `audience` (public/internal/unclassified -> both True,
-  private -> both False), narrowed by any explicit per-key override.
+  defaults derive from `audience` (public/internal/unclassified -> both
+  True, private -> both False); a present per-key override is honored
+  verbatim (either direction relative to that default), an absent key
+  stays at the audience-derived default.
 - [x] Round-trip YAML read/write, `related resolve --json` surfaces both.
   **Landed**: `write_related`/`_parse_related_file`/`upsert_related` in
   `related.py`; `related_cli.py`'s `list --json`, `show --json`, and
@@ -104,11 +106,14 @@ clearly another agent.
 - [x] Tests: parsing, normalization (bad values dropped, not asserted),
   round-trip write, `resolve --json` output shape. **Landed**:
   `tests/test_related.py`'s new "Audience + AI-attribution override"
-  section (9 tests) -- round-trip, normalization drops unknown values,
-  `_parse_ai_attribution` drops unknown keys/non-bool values, no-audience
-  emits nothing, upsert merges, `effective_audience` never derives (unlike
-  ownership), `effective_ai_attribution`'s audience-keyed defaults and
-  per-key override narrowing.
+  section (9 model-level tests, plus a CLI-level test asserting
+  `resolve --json`'s `audience`/`ai_attribution` fields across audience
+  values including the unclassified fail-open case) -- round-trip,
+  normalization drops unknown values, `_parse_ai_attribution` drops
+  unknown keys/non-bool values, no-audience emits nothing, upsert merges,
+  `effective_audience` never derives (unlike ownership),
+  `effective_ai_attribution`'s audience-keyed defaults and verbatim
+  per-key override (either direction, not narrow-only).
 
 ### Phase 2 — `ai-attribution`: consume audience instead of ownership-only
 - [ ] Hook logic (bash/powershell) resolves the target's `audience` +
