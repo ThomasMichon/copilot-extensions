@@ -31,10 +31,63 @@ network I/O of its own and never writes anything.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+
+#: Ambient Git repository-selection variables that must never leak into a
+#: subprocess here -- if the calling environment has e.g. `GIT_DIR` or
+#: `GIT_WORK_TREE` set (from a wrapping script, another git operation in
+#: progress, or a test harness), it silently overrides our own explicit
+#: `cwd`, so history/diff/merge-base could come from an entirely different
+#: repository than the one we were asked about. Mirrors
+#: `agent_worktrees.git_ops._REPOSITORY_CONTEXT_ENV` (this module
+#: deliberately doesn't import that plugin-internal module -- this package
+#: is dependency-free by design, deployable in any plugin's own ephemeral
+#: venv -- so the list is kept in sync by hand, not by import).
+_REPOSITORY_CONTEXT_ENV = frozenset({
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_CONFIG",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_DIR",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    "GIT_GRAFT_FILE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_INTERNAL_SUPER_PREFIX",
+    "GIT_NAMESPACE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_PREFIX",
+    "GIT_QUARANTINE_PATH",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_SHALLOW_FILE",
+    "GIT_WORK_TREE",
+})
+
+
+def scrubbed_git_env() -> dict[str, str]:
+    """Ambient environment with every repository-selection variable removed.
+
+    A caller supplies its target repository explicitly via `cwd=`/`-C` --
+    any of these inherited variables would override that silently.
+    """
+    env = os.environ.copy()
+    for name in list(env):
+        upper = name.upper()
+        if (
+            upper in _REPOSITORY_CONTEXT_ENV
+            or upper.startswith("GIT_CONFIG_KEY_")
+            or upper.startswith("GIT_CONFIG_VALUE_")
+        ):
+            env.pop(name, None)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
 
 
 class AncestorResolutionError(RuntimeError):
@@ -44,6 +97,7 @@ class AncestorResolutionError(RuntimeError):
 def _git(args: list[str], *, cwd: Path) -> str:
     proc = subprocess.run(
         ["git", *args], cwd=cwd, capture_output=True, text=True, check=False,
+        env=scrubbed_git_env(),
     )
     if proc.returncode != 0:
         raise AncestorResolutionError(
@@ -63,6 +117,7 @@ def is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
     proc = subprocess.run(
         ["git", "merge-base", "--is-ancestor", ancestor, descendant],
         cwd=repo_root, capture_output=True, text=True, check=False,
+        env=scrubbed_git_env(),
     )
     if proc.returncode not in (0, 1):
         raise AncestorResolutionError(
@@ -103,13 +158,23 @@ def resolve_nearest_baseline(
     from . import correlation
 
     path = correlation.baseline_path_on_main(plugin)
-    log_output = _git(["log", "--format=%H", main_ref, "--", path], cwd=repo_root)
+    # --diff-filter=d excludes revisions where this commit's own change to
+    # `path` was a deletion -- the file genuinely doesn't exist at such a
+    # revision, which is a normal, expected case (not a plumbing failure)
+    # that would otherwise make `git show <rev>:<path>` fail for a reason
+    # indistinguishable from a real corruption/plumbing error below.
+    log_output = _git(
+        ["log", "--format=%H", "--diff-filter=d", main_ref, "--", path],
+        cwd=repo_root,
+    )
     revisions = [line.strip() for line in log_output.splitlines() if line.strip()]
     for rev in revisions:
-        try:
-            content = _git(["show", f"{rev}:{path}"], cwd=repo_root)
-        except AncestorResolutionError:
-            continue
+        # Every logged revision is guaranteed (by --diff-filter=d above) to
+        # have `path` present, so a `git show` failure here is a genuine
+        # plumbing problem (object corruption, a GC'd/unreachable commit)
+        # and must propagate as AncestorResolutionError, never be silently
+        # swallowed into "this generation doesn't qualify, keep looking."
+        content = _git(["show", f"{rev}:{path}"], cwd=repo_root)
         try:
             candidate = json.loads(content)
         except json.JSONDecodeError:

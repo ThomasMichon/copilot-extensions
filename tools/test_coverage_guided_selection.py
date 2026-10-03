@@ -859,7 +859,15 @@ def test_collect_baseline_survives_a_real_spawn_based_multiprocessing_child(
 
 
 def _run_git(args: list, cwd: Path) -> subprocess.CompletedProcess:
-    env = dict(os.environ)
+    # Scrub ambient Git repository-selection variables (GIT_DIR,
+    # GIT_WORK_TREE, etc.) before layering on test author identity --
+    # otherwise a runner/harness that happens to set one of these isolates
+    # these "independent" throwaway test repos a lot less than their own
+    # fresh `tmp_path` cwd implies, since such a variable silently overrides
+    # `cwd` for every git invocation below. Matches the production
+    # convention in `ancestor_resolution.scrubbed_git_env` /
+    # `agent_worktrees.git_ops`.
+    env = ar.scrubbed_git_env()
     env.update({
         "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
         "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com",
@@ -1026,6 +1034,51 @@ class TestComputeFileRemap:
         assert ar.remap_line(2, result.hunks) is None  # deleted
         assert ar.remap_line(3, result.hunks) is None  # deleted
         assert ar.remap_line(4, result.hunks) == 2
+
+    def test_cumulative_shift_across_several_real_intervening_commits(self, tmp_path):
+        """The Validation Plan's own required shape: baseline measured here
+        -> several real, separate line-shifting commits -> fork point.
+        `compute_file_remap` diffs directly between the two endpoints
+        (never walking or applying each intervening commit one at a time),
+        so this also confirms that approach produces the same cumulative
+        result a step-by-step replay would."""
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n2\n3\n4\n5\n")
+        baseline_commit = _commit(repo, "baseline measured here")
+
+        # Commit 2: insert one line after old line 1.
+        (repo / "a.txt").write_text("1\nINSERTED_A\n2\n3\n4\n5\n")
+        _commit(repo, "intervening commit 1: insert after line 1")
+
+        # Commit 3: insert two more lines after what is now line 4 (old
+        # line 3) -- a second, independent real commit, not folded into
+        # commit 2's own diff.
+        (repo / "a.txt").write_text(
+            "1\nINSERTED_A\n2\n3\nINSERTED_B\nINSERTED_C\n4\n5\n"
+        )
+        _commit(repo, "intervening commit 2: insert two more lines")
+
+        # Commit 4 (the fork point): delete what was originally old line 5.
+        (repo / "a.txt").write_text(
+            "1\nINSERTED_A\n2\n3\nINSERTED_B\nINSERTED_C\n4\n"
+        )
+        fork_commit = _commit(repo, "fork point: delete the old last line")
+
+        result = ar.compute_file_remap(repo, "a.txt", baseline_commit, fork_commit)
+        assert result.status == "remapped"
+
+        # Hand-computed expected mapping from the baseline's old line
+        # numbers (1-5) to the fork point's new line numbers, reflecting
+        # the CUMULATIVE effect of all three intervening commits combined:
+        # old 1 -> new 1 ("1"); old 2 -> new 3 ("2", shifted +1 by
+        # INSERTED_A); old 3 -> new 4 ("3", shifted +1); old 4 -> new 7
+        # ("4", shifted +1 then +2 by INSERTED_B/INSERTED_C); old 5 was
+        # deleted in the fork-point commit -> None.
+        assert ar.remap_line(1, result.hunks) == 1
+        assert ar.remap_line(2, result.hunks) == 3
+        assert ar.remap_line(3, result.hunks) == 4
+        assert ar.remap_line(4, result.hunks) == 7
+        assert ar.remap_line(5, result.hunks) is None
 
     def test_content_replacement_is_invalid(self, tmp_path):
         repo = _init_repo(tmp_path)
