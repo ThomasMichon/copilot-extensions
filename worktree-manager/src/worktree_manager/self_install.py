@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -174,23 +175,24 @@ def version_slot(version: str, root: Path | None = None) -> Path:
 
 
 def _slot_is_complete(slot: Path) -> bool:
-    """``True`` only when ``slot`` holds an actually-runnable payload copy.
-
-    ``needs_install()`` previously asked only ``slot.is_dir()`` -- true for
-    an EXISTING BUT EMPTY directory too, which is exactly what a
-    ``_copy_payload()`` failure partway through ``shutil.rmtree``/
-    ``shutil.copytree`` (a Windows ``PermissionError``/WinError 32 from a
-    slot still held open by another process's cwd -- copilot-extensions#4999)
-    can leave behind: the ``current-version`` marker already (from a prior,
-    genuinely successful install) names this exact version, so a later
-    ``needs_install()`` call silently treated the now-broken, empty slot as
-    a valid, already-current install forever -- ``worktree-manager`` then
-    fails every subsequent run with ``No module named worktree_manager``.
-    Checking for the one file that matters at runtime (the package entry
-    point ``_copy_payload`` must have copied in) catches that corruption
-    immediately instead of only after the crash it causes.
+    """``True`` only when ``slot`` holds every file the shipped binstubs
+    actually need to launch (``uv run --project <slot> python -m
+    worktree_manager``): ``pyproject.toml`` (the `uv` project root),
+    ``src/worktree_manager/__init__.py`` (the package entry point), and
+    ``src/worktree_manager/__main__.py`` (the ``-m`` module target).
+    Directory existence alone proves nothing -- a slot can exist, and even
+    partially survive a failed ``_copy_payload()`` recopy, while still
+    missing one of these and remaining unlaunchable (``No module named
+    worktree_manager`` or an equivalent failure at run time).
     """
-    return (slot / "src" / "worktree_manager" / "__init__.py").is_file()
+    return all(
+        (slot / rel).is_file()
+        for rel in (
+            "pyproject.toml",
+            "src/worktree_manager/__init__.py",
+            "src/worktree_manager/__main__.py",
+        )
+    )
 
 
 def _binstub_files() -> list[str]:
@@ -261,8 +263,36 @@ def _write_control_plane_provider_manifest(
         + "\n",
         encoding="utf-8",
     )
-    os.replace(tmp, path)
+    _replace_with_retry(tmp, path)
     return path
+
+
+def _replace_with_retry(src: Path, dst: Path, *, attempts: int = 10, delay_s: float = 0.01) -> None:
+    """``os.replace(src, dst)``, retrying a transient Windows
+    ``PermissionError`` (``ERROR_ACCESS_DENIED``, errno 13).
+
+    POSIX ``rename()`` is atomic even when two processes/threads target the
+    same ``dst`` concurrently -- exactly one call wins and the other simply
+    sees its own replace succeed with no error either way. Windows'
+    underlying ``MoveFileEx`` can instead briefly deny one of two truly
+    concurrent replacements of the same destination (observed in practice:
+    two callers each committing their own uniquely-named temp file onto the
+    same manifest path at once). The content is identical in that case --
+    both writers computed the same expected manifest -- so retrying after a
+    short backoff until this call's own replace succeeds (another
+    concurrent winner having already published equivalent content is not a
+    failure) is correct, not merely a cosmetic swallow.
+    """
+    last: PermissionError | None = None
+    for _ in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as e:
+            last = e
+            time.sleep(delay_s)
+    assert last is not None
+    raise last
 
 
 def binstub_present() -> Path | None:
@@ -623,21 +653,15 @@ def _copy_payload(payload_dir: Path, slot: Path) -> None:
         # OSError -- most notably a Windows PermissionError (WinError 32)
         # when the slot directory is still held open by another process's
         # cwd (a stranded OR still-legitimately-running mux-daemon pinned
-        # there -- see copilot-extensions#4999). shutil.rmtree's own
-        # (non-``ignore_errors``) tree walk removes files as it goes, so a
-        # failure partway through can leave the slot an EXISTING, mostly or
-        # fully EMPTIED directory on disk -- and an uncaught OSError here
-        # would propagate straight out of self_install() (which, like
-        # _materialize_payload_pointers' own boundary below, only catches
-        # RuntimeError), skipping its established "remove the broken slot,
-        # report action='error'" cleanup entirely. Previously a later
-        # needs_install() check asked only ``version_slot(...).is_dir()`` --
-        # true for an empty directory too -- so that broken, empty slot
-        # would then be silently treated as a valid install forever (see
-        # the paired ``_slot_is_complete`` fix). Normalizing to RuntimeError
-        # here (the same boundary _materialize_payload_pointers already
-        # uses for its own unexpected failures) routes this through
-        # self_install()'s existing cleanup-and-report path instead.
+        # there -- see copilot-extensions#4999). self_install() only
+        # catches RuntimeError at its boundary (matching
+        # _materialize_payload_pointers' own boundary below), so any
+        # filesystem failure here must be normalized to that type for
+        # self_install()'s cleanup-and-report ("best-effort slot removal,
+        # report action='error'") to run instead of this exception
+        # escaping uncaught (``_slot_is_complete`` is what then lets a
+        # later run detect and repair a slot that cleanup could not fully
+        # remove).
         raise RuntimeError(f"copying payload into {slot} failed: {e}") from e
 
 

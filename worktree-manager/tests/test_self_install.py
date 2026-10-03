@@ -31,6 +31,7 @@ def _fake_payload(tmp: Path, version: str) -> Path:
     pkg = pd / "src" / "worktree_manager"
     pkg.mkdir(parents=True)
     (pkg / "__init__.py").write_text(f'__version__ = "{version}"\n')
+    (pkg / "__main__.py").write_text("")
     (pd / "pyproject.toml").write_text("[project]\nname='x'\n")
     return pd
 
@@ -260,14 +261,10 @@ def test_stale_legacy_binstub_content_forces_redeploy(tmp_path, monkeypatch):
 
 
 def test_needs_install_rejects_an_empty_broken_slot(tmp_path, monkeypatch):
-    """Regression: a slot that exists but is EMPTY (the aftermath of a
-    ``_copy_payload`` failure partway through ``shutil.rmtree``/
-    ``shutil.copytree`` -- copilot-extensions#4999, a Windows
-    PermissionError from a slot still held open by another process's cwd)
-    must not be mistaken for a valid, already-current install just because
-    ``current-version`` already names it and the directory exists.
-    Presence-only (``is_dir()``) idempotency checking hid exactly this
-    corruption forever; the slot's actual runnable content must be checked.
+    """Regression: a slot that exists but is EMPTY must not be mistaken for
+    a valid, already-current install just because ``current-version``
+    already names it and the directory exists. ``needs_install()`` must
+    verify the slot's actual runnable content, not merely that it exists.
     """
     pd = _fake_payload(tmp_path, "1.2.3")
     root = tmp_path / "root"
@@ -276,9 +273,9 @@ def test_needs_install_rejects_an_empty_broken_slot(tmp_path, monkeypatch):
     self_install(pd, root=root, dry_run=False)
     assert needs_install("1.2.3", root) is False
 
-    # Simulate the exact on-disk corruption: marker + binstub still correct,
-    # but the slot's content is gone (an interrupted rmtree/copytree left an
-    # existing, empty directory behind).
+    # Simulate the on-disk corruption directly: marker + binstub still
+    # correct, but the slot's content is gone (e.g. an interrupted
+    # rmtree/copytree left an existing, empty directory behind).
     slot = version_slot("1.2.3", root)
     import shutil as _shutil
     _shutil.rmtree(slot)
@@ -294,18 +291,41 @@ def test_needs_install_rejects_an_empty_broken_slot(tmp_path, monkeypatch):
     assert needs_install("1.2.3", root) is False
 
 
+def test_needs_install_rejects_a_slot_missing_the_module_launch_target(tmp_path, monkeypatch):
+    """A slot can retain ``src/worktree_manager/__init__.py`` while still
+    missing another file the shipped binstubs need to launch (``uv run
+    --project <slot> python -m worktree_manager``, which also requires
+    ``pyproject.toml`` and ``__main__.py``) -- a partial recopy failure
+    need not empty the whole tree to leave it unlaunchable. Only checking
+    for one file would still mistake this for a valid install.
+    """
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+    self_install(pd, root=root, dry_run=False)
+    assert needs_install("1.2.3", root) is False
+
+    slot = version_slot("1.2.3", root)
+    (slot / "src" / "worktree_manager" / "__main__.py").unlink()
+    assert (slot / "src" / "worktree_manager" / "__init__.py").is_file()
+
+    assert needs_install("1.2.3", root) is True, (
+        "a slot missing its module launch target must never be treated as a valid install"
+    )
+    res = self_install(pd, root=root, dry_run=False)
+    assert res.action == "installed"
+    assert needs_install("1.2.3", root) is False
+
+
 def test_copy_payload_oserror_is_normalized_to_a_clean_error_result(tmp_path, monkeypatch):
-    """Regression: ``shutil.rmtree``/``shutil.copytree`` inside
-    ``_copy_payload`` can themselves raise a bare ``OSError`` (most notably
-    a Windows ``PermissionError``/WinError 32 -- copilot-extensions#4999).
-    Previously only ``RuntimeError`` was caught at this boundary, so an
-    ``OSError`` propagated straight out of ``self_install()`` uncaught --
-    skipping its established "remove the broken slot, report
-    action='error'" cleanup and leaving a broken slot on disk that a later
-    ``needs_install()`` call could (before the paired ``_slot_is_complete``
-    fix) mistake for a valid install. ``self_install()`` must instead
-    report a clean ``action='error'`` result, exactly like any other
-    recognized install failure.
+    """A bare ``OSError`` raised by ``shutil.rmtree``/``shutil.copytree``
+    inside ``_copy_payload`` (most notably a Windows ``PermissionError``/
+    WinError 32 -- copilot-extensions#4999) must be normalized to the one
+    exception type ``self_install()`` catches at its boundary, so it
+    reports a clean ``action='error'`` result -- exactly like any other
+    recognized install failure -- instead of propagating uncaught and
+    skipping cleanup.
     """
     import shutil as _shutil
 

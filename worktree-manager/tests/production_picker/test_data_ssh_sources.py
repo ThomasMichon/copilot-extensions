@@ -26,14 +26,13 @@ from worktree_manager.production_picker.picker_tui import (
 def _abs_exe(name: str) -> str:
     """A platform-correct absolute executable path for test fixtures.
 
-    ``provider_sources``'s own real validation (``os.path.isabs(command) or
-    re.match(r"^[A-Za-z]:[\\/]", command)``) rejects a hardcoded POSIX-style
-    ``"/bin/<name>"`` literal on Windows: ``os.path.isabs`` there is False
-    for a drive-less rooted path, so fixtures using one unconditionally
-    were silently invalid on Windows and masked the actual behavior each
-    test meant to exercise. ``os.path.abspath`` resolves against the
-    current drive on Windows (producing a real ``X:\\...`` absolute path)
-    and is a no-op prefix-join on POSIX, so this is absolute on either.
+    ``provider_sources``'s own validation requires ``os.path.isabs(command)
+    or re.match(r"^[A-Za-z]:[\\/]", command)``. ``os.path.isabs`` is False
+    on Windows for a drive-less rooted path like ``"/bin/<name>"``, so a
+    fixture needs a path that is genuinely absolute on the current
+    platform. ``os.path.abspath`` resolves against the current drive on
+    Windows (producing a real ``X:\\...`` absolute path) and is a no-op
+    prefix-join on POSIX, so this is absolute on either.
     """
     return os.path.abspath(os.path.join(os.sep, "bin", name))
 

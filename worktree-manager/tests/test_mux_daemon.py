@@ -1333,14 +1333,11 @@ def test_live_mapping_republished_on_a_backstop_cadence_without_a_restart(
         daemon_result["rc"] = mux_daemon.run_daemon_foreground(
             tmp_path,
             poll_interval_s=0.01,
-            # 60 iterations (matching the sibling restart-republish test's own
-            # bound just above) already gives the 0.05s backstop cadence ~12
-            # chances to fire -- far more than the 2 observations this test
-            # needs. A much larger bound here previously made the daemon
-            # thread's own per-iteration file-I/O overhead (write_lock_data +
-            # read_lock_data every loop, independent of poll_interval_s) the
-            # dominant cost on a slower filesystem, occasionally outrunning
-            # even this test's already-"generous" 15s thread.join below.
+            # 60 iterations keeps the daemon's own per-iteration file I/O
+            # (write_lock_data + read_lock_data every loop, independent of
+            # poll_interval_s) bounded, while still giving the 0.05s
+            # backstop cadence ~12 chances to fire -- far more than the 2
+            # observations this test needs.
             max_iterations=60,
             # Same lock/generation the whole run -- only the backstop cadence
             # (never a generation change) can explain a second observation.

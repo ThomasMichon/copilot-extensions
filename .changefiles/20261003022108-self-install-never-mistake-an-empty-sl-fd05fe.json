@@ -1,5 +1,5 @@
 {
-  "comment": "self_install: never mistake an empty, broken version slot for a valid install, and never leave one behind. needs_install() now checks the slot actually contains the package entry point (not just is_dir()), and _copy_payload() normalizes a bare OSError (e.g. a Windows PermissionError/WinError 32 from shutil.rmtree/copytree hitting a still-open cwd handle) into the same RuntimeError boundary self_install() already cleans up on -- closing the gap where a crashed/partial reinstall left current-version pointing at an empty slot (No module named worktree_manager) on every subsequent run.",
+  "comment": "self_install: never mistake a broken version slot (missing pyproject.toml/__init__.py/__main__.py) for a valid install, and best-effort clean up one that's left behind. needs_install() now checks the slot actually contains every file the binstubs need to launch (not just is_dir()), and _copy_payload() normalizes a bare OSError (e.g. a Windows PermissionError/WinError 32 from shutil.rmtree/copytree hitting a still-open cwd handle) into the same RuntimeError boundary self_install() already cleans up on -- closing the gap where a crashed/partial reinstall left current-version pointing at a broken slot (No module named worktree_manager) on every subsequent run.",
   "changes": [
     {
       "plugin": "worktree-manager",
@@ -7,3 +7,4 @@
     }
   ]
 }
+
