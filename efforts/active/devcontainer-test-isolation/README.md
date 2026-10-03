@@ -1667,3 +1667,49 @@ common case still works; `check-docs-consistency.py` and
 `git status --short` reconfirmed clean of anything beyond this round's
 own diff.
 
+
+### 2026-10-03 — Review round 15 (nineteenth pass): 1 finding addressed (lazy-fetch protection for the clean-filter discovery probe), 2 restated findings confirmed already fixed, PR metadata corrected
+A nineteenth review pass of commit `6a73a47c7` surfaced 6 open findings,
+4 resolved since last review. HIGH (new): the previous pass's new
+`_minimal_repo_selection_env()` (used only by
+`_discover_configured_clean_filters`'s `ls-files`/`check-attr` calls)
+omitted `GIT_NO_LAZY_FETCH=1`/`GIT_NO_REPLACE_OBJECTS=1` -- in a partial
+clone, resolving a missing cached `.gitattributes` blob during that
+probe could fetch objects into the real host checkout, the same class
+of gap `_scrubbed_git_env` already closes for every other host-side git
+call. Fixed by adding both to `_minimal_repo_selection_env()` too.
+
+Two MEDIUM findings (workspace-volume reuse breaking isolation, and no
+size bound on the workspace volume) were confirmed, on inspection, to
+already be addressed by existing code the reviewer can't see acting on
+the static devcontainer.json it reviews: `_per_instance_config` already
+rewrites the literal `workspaceMount` volume name to a unique
+`<name>-<instance-label>` for every invocation (removed at that same
+invocation's teardown), and `_create_bounded_volume` already creates
+that per-invocation volume as a size-bounded tmpfs mount before
+`devcontainer up` ever touches it. Added an explicit comment to
+`workspaceMount` in the devcontainer spec itself noting this runtime
+rewrite, since the file's own literal volume name otherwise reads as a
+single shared, unbounded volume with no visible evidence of either
+protection. One MEDIUM finding (`tools/test_run_tests_in_devcontainer.py`
+not collected by required CI) was likewise confirmed already fixed --
+`.github/workflows/ci.yml`'s `test-runner-linux` job already lists it
+explicitly; no code change needed. Two LOW findings were PR-description-
+only: the description still named the pre-move `.devcontainer/
+devcontainer.json` path and a stale "59 unit tests" figure (now 93) --
+fixed by editing the PR body directly (Changes and Validation sections)
+rather than any code change.
+
+Re-validated end-to-end: the full unit test suite (93 tests, unchanged
+by this pass's fix since it only affects a path already covered by
+existing clean-filter/fsmonitor regression tests) passes; `check-module-
+size.py --changed-since origin/dev` passes right at the cap (1000 lines,
+after another docstring-condensing pass -- three function docstrings
+trimmed to make room: `_materialized_git_dir`, `_populate_workspace`,
+`_cleanup_signals_deferred`); devcontainer.json's own JSONC-stripped
+syntax re-validated; a fresh Docker-backed end-to-end run
+(`ai-attribution`, 98 passed / 6 skipped) confirms the common case still
+works; `check-docs-consistency.py` and `check-effort-vision-structure.py`
+both pass. Docker cleanup (no leftover `test-isolation` volumes) and host
+`git status --short` reconfirmed clean of anything beyond this round's
+own diff.

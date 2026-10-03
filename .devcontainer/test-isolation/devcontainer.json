@@ -37,7 +37,13 @@
   // `plugins/agent-containers/src/agent_containers/devcontainer_launch.py`)
   // after the container is up, so the host checkout is only ever READ,
   // never mutated, by anything that happens inside the container
-  // afterward.
+  // afterward. The literal volume name below is a TEMPLATE, never used
+  // as-is: `_per_instance_config` rewrites it to a unique
+  // `<name>-<instance-label>` for every invocation (via a temp copy of
+  // this file, never editing this checked-in one), and the wrapper
+  // removes that exact volume at teardown -- so concurrent/successive
+  // runs each get their own fresh, isolated workspace, never a reused
+  // or shared one.
   "workspaceMount": "source=copilot-extensions-test-isolation-ws,target=/workspaces/copilot-extensions,type=volume",
   "workspaceFolder": "/workspaces/copilot-extensions",
 

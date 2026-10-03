@@ -97,15 +97,18 @@ def _minimal_repo_selection_env() -> dict[str, str]:
     """A blanket ``GIT_*`` strip used only by
     `_discover_configured_clean_filters`, which must run BEFORE
     `_scrubbed_git_env`'s own clean-filter overrides exist. `check-attr`
-    never invokes a clean filter, so none is needed here -- but
-    `core.fsmonitor=false` IS still forced: confirmed live that even a
-    read-only `ls-files`/`check-attr` pair can still consult a configured
-    fsmonitor hook once `GIT_OPTIONAL_LOCKS=0` prevents a cached index
-    refresh, so discovery needs the same neutralization as the final
-    probe."""
+    never invokes a clean filter, but this is still a host-side Git probe
+    needing the SAME non-filter protections `_scrubbed_git_env` applies:
+    `core.fsmonitor=false` (confirmed live that `GIT_OPTIONAL_LOCKS=0`
+    can make even read-only `ls-files`/`check-attr` consult a configured
+    hook), and `GIT_NO_LAZY_FETCH=1`/`GIT_NO_REPLACE_OBJECTS=1` (a
+    partial clone's missing cached `.gitattributes` blob could otherwise
+    fetch objects into the real checkout)."""
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_OPTIONAL_LOCKS"] = "0"
+    env["GIT_NO_LAZY_FETCH"] = "1"
+    env["GIT_NO_REPLACE_OBJECTS"] = "1"
     env["GIT_CONFIG_COUNT"] = "1"
     env["GIT_CONFIG_KEY_0"] = "core.fsmonitor"
     env["GIT_CONFIG_VALUE_0"] = "false"
@@ -568,15 +571,14 @@ def _materialized_git_dir(stack: contextlib.ExitStack, passthrough: list[str]) -
     ref for it at all. The index is rebuilt from ``HEAD`` itself (``git
     read-tree HEAD``) rather than copied from the host: the host's real
     index can reference a staged blob unreachable from both ``HEAD`` and
-    the base ref (a staged-but-uncommitted change), which the bundle would
-    then be missing entirely -- a copied index pointing at a missing
-    object breaks `git diff`/`status` outright. Rebuilding from `HEAD`
-    means staging state isn't preserved as "staged" inside the container,
-    but every modification is still visible as an ordinary working-tree
-    difference, since `_tracked_paths` copies in the file's actual CURRENT
-    on-disk content regardless. As with every materialized copy, ``config``
-    is replaced with a fresh, credential-free one (``_MINIMAL_GIT_CONFIG``)
-    and ``hooks`` is dropped entirely."""
+    the base ref, which the bundle would then be missing entirely -- a
+    copied index pointing at a missing object breaks `git diff`/`status`
+    outright. Staging state isn't preserved as "staged" inside the
+    container, but every modification is still visible as an ordinary
+    working-tree difference (`_tracked_paths` copies in the file's actual
+    CURRENT on-disk content regardless). As with every materialized copy,
+    ``config`` is replaced with a fresh, credential-free one
+    (``_MINIMAL_GIT_CONFIG``) and ``hooks`` is dropped entirely."""
     tmp_dir = Path(tempfile.mkdtemp(prefix="devcontainer-test-isolation-git-"))
     stack.callback(shutil.rmtree, tmp_dir, ignore_errors=True)
     bundle_file = tmp_dir / "snapshot.bundle"
@@ -700,15 +702,14 @@ def _populate_workspace(container_id: str, passthrough: list[str], *, include_un
     ``chmod`` opens up its empty PERMISSION bits first (root remains the
     OWNER; `--cap-drop=ALL` means even root can't `chown`). Extraction then
     runs AS ``vscode``, not root, so the checkout ends up natively
-    ``vscode``-owned -- matters beyond writability, since modern Git's
-    "dubious ownership" check inspects the working-tree ROOT's owner, and
-    `CONTAINER_WORKSPACE`'s own mountpoint stays root-owned regardless for
-    the container's whole lifetime; `.devcontainer/test-isolation/devcontainer.json`'s own
-    `safe.directory` `containerEnv` exemption covers that residual gap.
-    The final permission-opening pass only targets regular files and
-    directories, never a symlink: `chmod` on a symlink PATH dereferences
-    it, which would either fail on a dangling symlink or chmod whatever a
-    LIVE symlink points at, possibly outside the workspace volume.
+    ``vscode``-owned -- matters since Git's "dubious ownership" check
+    inspects the working-tree ROOT's owner, and `CONTAINER_WORKSPACE`'s own
+    mountpoint stays root-owned for the container's whole lifetime; the
+    devcontainer spec's own `safe.directory` `containerEnv` exemption
+    covers that residual gap. The final permission-opening pass only
+    targets regular files and directories, never a symlink: `chmod` on a
+    symlink PATH dereferences it, which would either fail on a dangling
+    symlink or chmod whatever a LIVE symlink points at.
     """
     chmod_root = subprocess.run(
         ["docker", "exec", "-u", "root", container_id,
@@ -862,11 +863,10 @@ def _cleanup_signals_deferred():
     (not defer it) -- for the ordinary teardown path, that would let
     `main` silently return 0 for a cancelled run. Replaying unconditionally
     could instead REPLACE a genuine failure already propagating, whether
-    already in flight when entered (the caller mid-handling an exception)
-    or raised by the cleanup BODY itself -- exactly the masking this
-    wrapper's teardown logic elsewhere exists to prevent. A single
-    ``sys.exc_info()`` check after ``yield`` covers both cases: Python
-    sets it for the whole dynamic extent of an already-active
+    already in flight when entered or raised by the cleanup BODY itself --
+    exactly the masking this wrapper's teardown logic elsewhere exists to
+    prevent. A single ``sys.exc_info()`` check after ``yield`` covers both
+    cases: Python sets it for the whole dynamic extent of an already-active
     ``except``/``finally`` AND when an exception newly thrown into this
     generator is still propagating."""
     received: list[int] = []
