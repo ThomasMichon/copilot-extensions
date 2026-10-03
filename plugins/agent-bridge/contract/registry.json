@@ -37,6 +37,9 @@
           "0.4.0-dev435",
           "0.4.0-dev447",
           "0.4.0-dev502",
+          "0.4.0-dev536",
+          "0.4.0-dev537",
+          "0.4.0-dev549",
           "0.4.0-dev551",
           "0.4.1-dev2",
           "0.4.1-dev3"
@@ -182,19 +185,19 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-16/health.json",
-          "sha256": "908d4a8f042916bebb21f4dc014fbeb99810fa1a52e52dd1e1a45394c2e840a9",
+          "sha256": "3d9feaee4cf8aa209a37635ed62869e63b9607608e183c875289e8ed3d451e67",
           "role": "historical",
           "generation": 16
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-17/health.json",
-          "sha256": "6ceb1ed7c8959291f1da921823b8de0d70a0c2624822b9e9afc18efa9cbf2291",
+          "sha256": "1032663e5ca117fdfab9ff1b43143a75a0d6d21c2c499102d1deb4080747d064",
           "role": "previous generation-17 health response",
           "generation": 17
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-18/health.json",
-          "sha256": "f439c462b13d86dc93257afb7ac8eb94614f523b5004c2b3c215747504046dca",
+          "sha256": "711ca6cc2a983be1a0a0c128023d69834b0afbbf23d43e3ac105bf7bc7a16a7b",
           "role": "previous generation-18 health response",
           "generation": 18
         }
@@ -449,8 +452,8 @@
           "capture_method": "Read production constants and serialize representative models from this exact source revision; HTTP_PROTOCOL_VERSION bumped to 16 (agent-bridge-cold-resume Phase 3, #6744): POST /api/v1/sessions no longer honors 'reclaim' now that create's session-lifecycle head-guard bypass is removed."
         },
         {
-          "commit": "ddee20b34f175d386f911ccdd348881091fb7355",
-          "plugin_version": "0.4.0-dev502",
+          "commit": "746497cad3285619203e2f54f9d092f14814d5df",
+          "plugin_version": "0.4.0-dev536",
           "generation": 16,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
           "source_git_blob": "597419228aa8d66fc18d954aa8e889c303ecec86",
@@ -481,8 +484,8 @@
           "capture_method": "Validate and serialize representative session-create request and response models; re-attested for the generation-16 bump (#6744) alongside the StartSessionRequest.reclaim removal already captured in this file's prior generation-15 entry."
         },
         {
-          "commit": "ddee20b34f175d386f911ccdd348881091fb7355",
-          "plugin_version": "0.4.0-dev502",
+          "commit": "8b32427bd8c949f074c7b5d967da15c97b0e2158",
+          "plugin_version": "0.4.0-dev537",
           "generation": 17,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
           "source_git_blob": "597419228aa8d66fc18d954aa8e889c303ecec86",
@@ -537,8 +540,8 @@
           "capture_method": "Serialize the reviewed protocol version + capability table; re-attested for the generation-18 bump (HTTP_PROTOCOL_VERSION 17 -> 18, adding remote_session_copilot_args)."
         },
         {
-          "commit": "ddee20b34f175d386f911ccdd348881091fb7355",
-          "plugin_version": "0.4.0-dev502",
+          "commit": "8b8e97be60ba8746adaa6f176c26a52067b163c7",
+          "plugin_version": "0.4.0-dev549",
           "generation": 18,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
           "source_git_blob": "597419228aa8d66fc18d954aa8e889c303ecec86",
@@ -585,8 +588,8 @@
           "capture_method": "Serialize the reviewed protocol version + capability table; re-attested for the generation-19 bump (HTTP_PROTOCOL_VERSION 18 -> 19, adding live_session_mode for POST /live-sessions/{id}/mode and its /controls poll)."
         },
         {
-          "commit": "ddee20b34f175d386f911ccdd348881091fb7355",
-          "plugin_version": "0.4.0-dev502",
+          "commit": "cc0859a35f43b6a58fd87cd6f71f02a3b04e6a9c",
+          "plugin_version": "0.4.0-dev551",
           "generation": 19,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
           "source_git_blob": "597419228aa8d66fc18d954aa8e889c303ecec86",
