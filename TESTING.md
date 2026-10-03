@@ -62,7 +62,8 @@ python tools/run-plugin-tests.py agent-dispatch \
 Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
 than repeatedly importing file groups that contain no selected tests.
 
-Potentially heavy runs (everything except `--guards` and `--collect-only`) also
+Potentially heavy runs (everything except `--guards`, `--collect-only`, and
+`--prepare-only`) also
 take one host-wide admission lease shared by every checkout and worktree. A
 second run fails fast and names the live holder instead of competing for CPU,
 memory, and process slots. Use a bounded wait when joining an existing queue is
@@ -115,11 +116,17 @@ already-small, single-contract files is not required.
 runner above that additionally runs it inside a hardened, ephemeral
 devcontainer (`.devcontainer/test-isolation/devcontainer.json`, a named alternate config -- never the canonical `.devcontainer/devcontainer.json` root path, which would let a direct "Reopen in Container" pick up an empty, wrapper-only workspace by accident) -- a real OS-level
 filesystem/privilege boundary on top of (not instead of) the turn-key
-runner's own process-level containment. **Networking is NOT yet part of
-that boundary** -- the container keeps Docker's default bridge network with
-full outbound reach (a known, named, open design gap; see the effort
-README's Phase 1 journal), so a test can still open ordinary sockets and
-reach external or host/LAN services. The filesystem/privilege boundary
+runner's own process-level containment. **Networking is now part of that
+boundary for the real test run**: the wrapper first runs a dependency-
+preparation pass (`--prepare-only`, which drives the same venv-install path
+a real run would WITHOUT ever importing a single test module or
+`conftest.py` -- deliberately not `--collect-only`, which still runs
+pytest's own collection and would execute that module-level code with
+network access) while the container still
+has its default outbound reach, then disconnects the container from every
+attached network before running the real, now network-disconnected test
+pass -- a test can no longer open an ordinary socket to an external or
+host/LAN service during actual execution. The filesystem/privilege boundary
 exists for the case the turn-key runner cannot cover on its own: a buggy or
 adversarial test that escapes process-level containment via an absolute
 path write or a privilege a job object doesn't restrict. See
@@ -165,15 +172,17 @@ rejected outright (see below). The wrapper:
    and NOT untracked files either: this repository has no blanket
    `.gitignore` rule for `.env`-style config or arbitrary credential
    filenames, so an untracked-but-not-ignored secret file sitting in the
-   working tree would otherwise still be copied into a container that then
-   has outbound network access. Pass `--include-untracked` to additionally
+   working tree would otherwise still be copied into a container that has
+   outbound network access during its dependency-preparation pass. Pass
+   `--include-untracked` to additionally
    include untracked-but-not-gitignored files (e.g. to test a new,
    not-yet-committed file) -- a deliberate, explicit opt-in, never the
    default. `.git` is handled separately and deliberately minimally: rather
    than copying the real git database wholesale (which would carry every
    branch, stash, reflog, and unreachable object -- local-only content
    having nothing to do with the plugin suite being run, into a container
-   that can still reach the network), a `git bundle` containing only the
+   that can still reach the network during its dependency-preparation
+   pass), a `git bundle` containing only the
    object closure of `HEAD` and the `--changed` diff base (`--base`, or
    that runner's own
    `origin/main` default when `--base` isn't passed) is built and cloned
@@ -197,8 +206,17 @@ rejected outright (see below). The wrapper:
    contaminated calling environment can't silently redirect it to the wrong
    repository. The host checkout is only ever **read**, never mutated, by
    anything that happens afterward inside the container.
-3. Runs `tools/run-plugin-tests.py` inside the container via
-   `devcontainer exec` and propagates its exit code.
+3. Resolves every targeted plugin's venv dependencies first (a
+   `--prepare-only` pass -- never imports test code -- run with the
+   container's default outbound network reach), then disconnects the
+   container from every attached network, strips a passed-through
+   `--reinstall` (the prep pass already rebuilt the venv; the real pass
+   must reuse it, not rebuild it with no network left), then runs
+   `tools/run-plugin-tests.py` for real inside the now
+   network-disconnected container via `devcontainer exec` and
+   propagates its exit code. A request for only `--list` (which never
+   touches a venv) skips both the preparation pass and the network
+   disconnect.
 4. Tears the container AND its per-invocation volume down afterward (pass
    `--keep` to leave both running for debugging); a failed removal raises
    rather than silently reporting success, and a failed `devcontainer up`
@@ -210,10 +228,10 @@ The container itself runs with every Linux capability dropped
 only `/tmp`, `/run`, `$HOME`, and the size-bounded workspace volume
 writable, and hard resource ceilings (14 GiB memory with no extra swap, 4
 CPUs, a 512-process PID limit) -- no Docker socket is ever mounted in.
-Outbound networking is currently left at Docker's default bridge (a known,
-named, open design gap -- see the effort README's Phase 1 journal);
-everything else above has been validated against a real container, not
-merely asserted.
+Outbound networking is available only during the dependency-preparation
+pass above; the real pytest run is fully network-disconnected (see step 3) --
+everything above has been validated against a real container, not merely
+asserted.
 
 Because the workspace is a fresh copy rather than the live checkout, an
 uncommitted MODIFICATION to a tracked file is included (the copy reads the

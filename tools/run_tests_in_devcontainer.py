@@ -4,17 +4,17 @@
 Phase 1 of the ``devcontainer-test-isolation`` effort
 (``efforts/active/devcontainer-test-isolation/README.md``): invokes the
 ``.devcontainer/test-isolation/devcontainer.json`` spec and runs
-``tools/run-plugin-tests.py`` *inside* it, for a real OS-level filesystem/
-privilege boundary on top of (not instead of) that runner's existing
-process-level containment. Networking is NOT (yet) part of that boundary
--- the container keeps Docker's default bridge with full outbound reach
-(a known, named, open design gap; see the effort README's journal).
+``tools/run-plugin-tests.py`` *inside* it, a real OS-level filesystem/
+privilege boundary atop that runner's process-level containment. Phase 2
+scoped networking too: deps resolve with network reach
+(``--prepare-only``), then every network disconnects before the real
+test pass.
 
 This is a deliberately separate, opt-in wrapper -- it never replaces
 ``run-plugin-tests.py`` for contributors who aren't using the devcontainer,
 and it never mounts the host checkout into the container. Everything the
 container's test run sees is a point-in-time COPY: the host checkout is
-only ever read from, never written to, by anything this script spawns.
+only ever read, never written to, by anything this script spawns.
 
 Usage::
 
@@ -24,11 +24,11 @@ Usage::
 
 Everything after the recognized flags below (or a literal ``--`` anywhere in
 the remaining arguments) passes through to ``tools/run-plugin-tests.py``
-inside the container, with one normalization (``--base`` rewritten to its
-resolved commit SHA) and three exceptions: ``--allow-host-state`` is
-rejected outright, ``--admission-wait``'s host-wide lease loses its
-cross-process coordination inside the container, and a resource-limit
-override above the container's own fixed ceiling is rejected outright.
+inside the container, with two normalizations (``--base`` rewritten to its
+resolved SHA; ``--reinstall`` applied to the prep pass then stripped from
+the real pass) and three exceptions: ``--allow-host-state`` is rejected,
+``--admission-wait``'s host-wide lease loses cross-process coordination
+in-container, and an over-ceiling resource-limit override is rejected.
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ import tarfile
 import tempfile
 import uuid
 from pathlib import Path
+import _devcontainer_network_scope as _net_scope
 
 REPO = Path(__file__).resolve().parents[1]
 # A NAMED alternate config (``.devcontainer/<name>/devcontainer.json``),
@@ -144,14 +145,12 @@ def _discover_configured_clean_filters() -> list[str]:
 
 
 def _scrubbed_git_env() -> dict[str, str]:
-    """Ambient environment with EVERY inherited ``GIT_*`` variable
-    removed (matching `agent_bridge_contract_git.py`'s hardened env).
-    Forces `GIT_OPTIONAL_LOCKS=0`, `GIT_NO_LAZY_FETCH=1`/
-    `GIT_NO_REPLACE_OBJECTS=1`, disabled global/system config,
-    `core.fsmonitor=false`, and for every `_discover_configured_clean_
-    filters` name, both `.clean` forced to `cat` and `.process` forced
-    empty (confirmed live: `process` runs host code even with `clean`
-    alone neutralized)."""
+    """Ambient environment with EVERY inherited ``GIT_*`` variable removed (matching
+    `agent_bridge_contract_git.py`'s hardened env). Forces `GIT_OPTIONAL_LOCKS=0`,
+    `GIT_NO_LAZY_FETCH=1`/`GIT_NO_REPLACE_OBJECTS=1`, disabled global/system config,
+    `core.fsmonitor=false`, and for every `_discover_configured_clean_filters` name, both
+    `.clean` forced to `cat` and `.process` forced empty (`process` runs host code even
+    with `clean` alone neutralized)."""
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_OPTIONAL_LOCKS"] = "0"
@@ -180,12 +179,11 @@ def _devcontainer_exe() -> str:
 
 
 def _per_instance_config(instance_label: str) -> tuple[Path, str]:
-    """Write a copy of ``DEVCONTAINER_CONFIG`` with its workspace volume
-    name made unique to this invocation, so each run gets its own fresh
-    volume instead of reusing one fixed, shared one. Returns the temp
-    config path and volume name, so the caller can remove that volume
-    at teardown. Written as literally ``devcontainer.json`` -- the
-    devcontainer CLI rejects any other ``--config`` basename."""
+    """Write a copy of ``DEVCONTAINER_CONFIG`` with its workspace volume name made unique
+    to this invocation, so each run gets its own fresh volume instead of reusing one fixed,
+    shared one. Returns the temp config path and volume name, so the caller can remove that
+    volume at teardown. Written as literally ``devcontainer.json`` -- the devcontainer CLI
+    rejects any other ``--config`` basename."""
     volume_name = f"{BASE_VOLUME_NAME}-{instance_label}"
     text = DEVCONTAINER_CONFIG.read_text()
     if BASE_VOLUME_NAME not in text:
@@ -247,17 +245,14 @@ def _bring_up(instance_label: str, config_path: Path) -> str:
 
 
 def _tracked_paths(*, include_untracked: bool) -> list[str]:
-    """Repo-relative paths of files the snapshot should contain --
-    deliberately NOT every file physically present under ``REPO``. Default
-    (``include_untracked=False``) is git-TRACKED files only: there's no
-    blanket `.gitignore` rule for `.env`-style config, so an untracked-
-    but-not-ignored secret file would otherwise be copied into a
-    container with outbound network access. ``include_untracked=True``
-    (the wrapper's ``--include-untracked`` flag) additionally includes
-    untracked-but-not-gitignored files. Known residual exposure: a
-    tracked path's CURRENT on-disk content is copied, not the last-
-    committed blob, so an uncommitted secret in an otherwise-tracked
-    file is still copied in."""
+    """Repo-relative paths of files the snapshot should contain -- deliberately NOT every file
+    physically present under ``REPO``. Default (``include_untracked=False``) is git-TRACKED
+    files only: there's no blanket `.gitignore` rule for `.env`-style config, so an untracked-
+    but-not-ignored secret file would otherwise be copied into a container with outbound network
+    access. ``include_untracked=True`` (the wrapper's ``--include-untracked`` flag) additionally
+    includes untracked-but-not-gitignored files. Known residual exposure: a tracked path's
+    CURRENT on-disk content is copied, not the last-committed blob, so an uncommitted secret in
+    an otherwise-tracked file is still copied in."""
     args = ["git", "-C", str(REPO), "ls-files", "-z", "--cached"]
     if include_untracked:
         args += ["--others", "--exclude-standard"]
@@ -316,12 +311,10 @@ def _warn_about_dirty_tracked_files() -> None:
 
 
 def _warn_about_hidden_tracked_file_flags() -> None:
-    """Print a clear, explicit stderr warning naming every tracked file
-    whose index entry carries ``assume-unchanged`` or ``skip-worktree``:
-    both suppress ``git status`` reporting an on-disk difference, while
-    the snapshot still archives current bytes. ``git ls-files -v`` marks
-    a flagged entry with a lowercase letter or uppercase ``S``; ordinary
-    is uppercase ``H``. Fails CLOSED on a failed ``ls-files``."""
+    """Warns on every tracked file whose index entry carries
+    ``assume-unchanged``/``skip-worktree`` (suppresses ``git status``
+    reporting an on-disk diff while the snapshot still archives current
+    bytes). Fails CLOSED on a failed ``ls-files``."""
     res = subprocess.run(
         ["git", "-C", str(REPO), "ls-files", "-v", "--cached"],
         capture_output=True, timeout=60, env=_scrubbed_git_env(),
@@ -346,7 +339,7 @@ def _warn_about_hidden_tracked_file_flags() -> None:
         "assume-unchanged/skip-worktree flag -- `git status` will NOT report "
         "an on-disk modification for them, but their CURRENT (possibly "
         "locally customized) content is still copied into the "
-        "test-isolation container, which has outbound network access:",
+        "test-isolation container, which has outbound network access during dependency preparation:",
         file=sys.stderr,
     )
     for path in flagged:
@@ -367,7 +360,8 @@ _VALUE_CONSUMING_FLAGS = frozenset({
 # `_VALUE_CONSUMING_FLAGS` above, same reason.
 _BARE_FLAGS = frozenset({
     "--all", "--changed", "--reinstall", "--guards", "--collect-only",
-    "--list", "--pre-push", "--allow-explicit-tiers", "--allow-host-state",
+    "--prepare-only", "--list", "--pre-push", "--allow-explicit-tiers",
+    "--allow-host-state",
 })
 
 _ALL_LONG_FLAGS = _VALUE_CONSUMING_FLAGS | _BARE_FLAGS
@@ -386,13 +380,12 @@ def _reject_resource_overrides_exceeding_container_ceilings(passthrough: list[st
     """Reject a `--max-memory-mb`/`--max-processes`/`--max-temp-mb`
     combination this wrapper's container can't honor -- a third exception
     alongside `--allow-host-state`/`--admission-wait`. Resolves each
-    flag's LAST occurrence (matching argparse semantics, so an earlier
-    unsafe value superseded by a safe one is never wrongly rejected) and,
-    for any not given, the inner runner's own default. Checks
-    `--max-processes` against a REDUCED ceiling, and memory+temp
-    COMBINED against a reduced memory ceiling: `/tmp` is memory-backed
-    tmpfs sharing the SAME cgroup, so two individually-safe values can
-    together still exceed it."""
+    flag's LAST occurrence (matching argparse semantics) and, for any not
+    given, the inner runner's own default. Checks `--max-processes`
+    against a REDUCED ceiling, and memory+temp COMBINED against a reduced
+    memory ceiling: `/tmp` is memory-backed tmpfs sharing the SAME
+    cgroup, so two individually-safe values can together still exceed
+    it."""
     requested = {"--max-memory-mb": None, "--max-processes": None, "--max-temp-mb": None}
     for i, arg in enumerate(passthrough):
         name, eq, value_str = arg.partition("=")
@@ -684,15 +677,13 @@ def _write_tar_of_repo(dest: Path, passthrough: list[str], *, include_untracked:
 
 
 def _populate_workspace(container_id: str, passthrough: list[str], *, include_untracked: bool) -> None:
-    """Copy a point-in-time snapshot of the host checkout into the
-    container's workspace VOLUME (never a host bind). A freshly created
-    Docker volume is root-owned, so a one-off root ``chmod`` opens its
-    empty PERMISSION bits first (root remains OWNER; `--cap-drop=ALL`
-    blocks `chown`). Extraction runs AS ``vscode``, so Git's "dubious
-    ownership" check (which inspects the working-tree ROOT's owner)
-    passes -- the mountpoint stays root-owned for the container's
-    lifetime; the devcontainer spec's `safe.directory` exemption covers
-    that gap. The permission pass skips symlinks (`chmod` dereferences)."""
+    """Copy a point-in-time snapshot of the host checkout into the container's workspace
+    VOLUME (never a host bind). A freshly created Docker volume is root-owned, so a one-off
+    root ``chmod`` opens its empty PERMISSION bits first (root remains OWNER; `--cap-drop=ALL`
+    blocks `chown`). Extraction runs AS ``vscode``, so Git's "dubious ownership" check (which
+    inspects the working-tree ROOT's owner) passes -- the mountpoint stays root-owned for the
+    container's lifetime; the devcontainer spec's `safe.directory` exemption covers that gap.
+    The permission pass skips symlinks (`chmod` dereferences)."""
     chmod_root = subprocess.run(
         ["docker", "exec", "-u", "root", container_id,
          "chmod", "0777", CONTAINER_WORKSPACE],
@@ -964,6 +955,15 @@ def main(argv: list[str] | None = None) -> int:
                 _create_bounded_volume(volume_name)
                 container_id = _bring_up(instance_label, config_path)
                 _populate_workspace(container_id, passthrough, include_untracked=ns.include_untracked)
+                # Phase 2 networking split -- skipped for `--list`.
+                if not _net_scope.is_list_only(passthrough, _canonicalize_flag):
+                    _net_scope.prepare_dependencies(
+                        _devcontainer_exe(), REPO, container_id, config_path, passthrough, _canonicalize_flag,
+                    )
+                    _net_scope.disconnect_container_networks(container_id)
+                    # The prep pass rebuilt the venv(s); --reinstall here
+                    # would rebuild again with no network left.
+                    passthrough = _net_scope.strip_reinstall(passthrough, _canonicalize_flag)
                 result = _run_tests(container_id, config_path, passthrough)
                 primary_failed = result != 0
             except BaseException:

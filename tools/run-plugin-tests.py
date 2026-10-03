@@ -298,11 +298,23 @@ def run_plugin(
     max_files_per_subsuite: int,
     guards: bool = False,
     collect_only: bool = False,
+    prepare_only: bool = False,
     allow_explicit_tiers: bool = False,
     allow_host_state: bool = False,
 ) -> int:
     if not _has_suite(name):
         print(f"[SKIP] {name}: no test suite")
+        return 0
+    if prepare_only:
+        # Builds/updates the venv ONLY -- never imports a single test
+        # module or conftest.py, unlike `--collect-only` (which still
+        # runs pytest's own collection, executing module-level code and
+        # collection hooks). This is the mode a network-enabled
+        # "dependency preparation" pass can safely run before network
+        # access is removed for the real test pass.
+        print(f"[RUN ] {name}: preparing venv only (--prepare-only) ...")
+        _ensure_venv(name, uv, reinstall=reinstall)
+        print(f"[PASS] {name} (prepared)")
         return 0
     label = "collect-only" if collect_only else ("guard tests" if guards else "pytest")
     state_mode = "host state (explicit opt-in)" if allow_host_state else "isolated state"
@@ -405,6 +417,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--collect-only", dest="collect_only", action="store_true",
                     help="build the venv and collect tests but do not run them "
                          "(cheap import/collection smoke)")
+    ap.add_argument("--prepare-only", dest="prepare_only", action="store_true",
+                    help="build/update the venv(s) ONLY -- never imports a single test "
+                         "module or conftest.py (unlike --collect-only, which still runs "
+                         "pytest's own collection); for a network-enabled dependency-"
+                         "preparation pass ahead of a network-disconnected real run")
     ap.add_argument(
         "--admission-wait",
         type=float,
@@ -496,7 +513,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     lease: SingleInstance | None = None
-    needs_admission = not args.guards and not args.collect_only
+    needs_admission = not args.guards and not args.collect_only and not args.prepare_only
     if needs_admission:
         if args.admission_wait:
             print(f"Waiting up to {args.admission_wait:g}s for the host test slot ...")
@@ -526,6 +543,7 @@ def main(argv: list[str] | None = None) -> int:
                     max_files_per_subsuite=args.max_files_per_sub_suite,
                     guards=args.guards,
                     collect_only=args.collect_only,
+                    prepare_only=args.prepare_only,
                     allow_explicit_tiers=args.allow_explicit_tiers,
                     allow_host_state=args.allow_host_state,
                 )

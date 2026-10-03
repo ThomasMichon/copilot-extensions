@@ -4,7 +4,7 @@
 - **Repo:** ThomasMichon/copilot-extensions
 - **Branch(es):** TBD (one per phase)
 - **Created:** 2026-10-02
-- **Status:** Active (Phase 1 done; Phase 2 in progress -- CI-lane decided, networking-scope and admission-lease closures still landing via separate PRs)
+- **Status:** Active (Phase 1 done; Phase 2 in progress -- CI-lane decided, networking-scope closed, admission-lease closure still landing via separate PR)
 - **Vision:** [`test-portfolio`](../../../visions/test-portfolio/README.md)'s
   containment boundary and host-safe-default behaviors; relates to, without
   changing, [`agent-containers`](../../../visions/plugins/agent-containers/README.md)'s
@@ -310,17 +310,12 @@ verbatim ask.
       and stays `noexec`). **Networking scoping is split into its own item
       below, not folded into this one** -- see that item for why it's still
       open.
-- [ ] Scope networking to what tests actually require, rather than leaving
-      the default bridge's full outbound reach. **Still open, a deliberate,
-      named residual gap**: left at Docker's default bridge network with
-      full outbound reach, because dependency resolution (`uv sync`,
-      invoked transparently inside `tools/run-plugin-tests.py`) and the
-      test run itself currently share one process/container lifetime and
-      have not yet been split into a network-enabled "prime the venv
-      cache" pass and a network-disconnected "run pytest" pass. A future
-      iteration could add that split (e.g. `docker network disconnect
-      bridge <container>` between the two passes); the Validation Plan
-      below tracks it as open rather than silently leaving it unaddressed.
+- [x] Scope networking to what tests actually require, rather than leaving
+      the default bridge's full outbound reach. **Closed in Phase 2**: see
+      Phase 2's own "Close the networking residual gap" Plan item for the
+      implementation (a network-enabled dependency-preparation pass,
+      then every network disconnected before the real test pass) and its
+      live validation.
 - [x] Decide how this devcontainer spec is invoked for Linux test execution
       specifically -- a new `tools/run-plugin-tests.py` mode, a separate
       wrapper script, or direct `devcontainer exec` -- and how it relates to
@@ -397,10 +392,32 @@ verbatim ask.
       worth it for a boundary CI's own containment doesn't need, but a
       future contributor hitting a real regression here should know
       automated coverage stops at the unit level.
-- [ ] Close the networking residual gap flagged in Phase 1's second item
+- [x] Close the networking residual gap flagged in Phase 1's second item
       (split dependency-resolution and test-execution into separate
       network-enabled/network-disconnected passes), or explicitly decide
       the added complexity isn't worth it yet and record that decision.
+      **Closed, split implemented.** `tools/run_tests_in_devcontainer.py`
+      now runs a dependency-preparation pass first (a new
+      `run-plugin-tests.py` `--prepare-only` mode -- the same
+      `_ensure_venv` install path a real run uses, but it NEVER imports a
+      single test module or `conftest.py`, unlike `--collect-only`, which
+      still runs pytest's own collection and would execute that
+      module-level code with network access), then disconnects the
+      container from every attached network (read live via `docker
+      inspect`, not a hardcoded "bridge" assumption) before running the
+      real, now network-disconnected test pass -- stripping a
+      passed-through `--reinstall` first, since the prep pass already
+      rebuilt the venv(s) and the real pass must reuse them, not rebuild
+      with no network left. A bare `--list` request skips both steps,
+      since it never builds a venv. The new logic
+      (`is_list_only`/`prepare_dependencies`/`strip_reinstall`/
+      `disconnect_container_networks`) was factored into a new sibling
+      module, `tools/_devcontainer_network_scope.py`, to keep the main
+      wrapper under its 1000-line cap. Live-validated against real
+      Docker (`ai-attribution`, 98 passed / 6 skipped): confirmed via
+      `docker inspect` that the container's `NetworkSettings.Networks`
+      is empty during the real pass, and that a DNS lookup from inside
+      the container fails outright.
 - [ ] Close the host-wide admission-lease residual gap: `--admission-wait`
       coordinates against a lease stored under `$HOME`/`XDG_CACHE_HOME`,
       which is a fresh tmpfs per container invocation, so concurrent
@@ -436,10 +453,11 @@ verbatim ask.
       own `ai-attribution` end-to-end runs), an accepted, now explicitly
       documented coverage tradeoff (see the paired Plan item above), not
       an unaddressed gap.
-- [ ] Phase 2 (or a later revision of Phase 1): the networking residual gap
+- [x] Phase 2 (or a later revision of Phase 1): the networking residual gap
       is either closed (network-disconnected test-execution pass) or
       explicitly re-affirmed as an accepted, documented tradeoff rather than
-      left open indefinitely.
+      left open indefinitely. **Closed** -- see the paired Plan item above
+      for the implementation and live validation.
 - [ ] Phase 2: the host-wide admission-lease residual gap is either closed
       (a real host-side lease mechanism) or explicitly re-affirmed as an
       accepted, documented tradeoff.
@@ -450,10 +468,11 @@ Phase 1 delivered `.devcontainer/test-isolation/devcontainer.json` (the hardened
 workspace-volume-backed spec) and `tools/run_tests_in_devcontainer.py` (the
 opt-in wrapper that brings it up, populates it, and runs
 `tools/run-plugin-tests.py` inside it), both live-validated end-to-end
-against a real plugin suite. Phase 2's CI-lane question is now decided (no
-lane, an accepted coverage tradeoff recorded above); the networking-scope
-and admission-lease residual gaps remain open, each landing as its own
-follow-up PR.
+against a real plugin suite. Phase 2's CI-lane question is decided (no
+lane, an accepted coverage tradeoff recorded above) and the networking-
+scope residual gap is closed; the host-wide admission-lease residual gap
+remains open, landing as its own follow-up PR.
+
 
 ## Journal
 
@@ -2154,3 +2173,125 @@ rewritten. `check-docs-consistency.py` and
 `check-effort-vision-structure.py` both still pass. Umbrella issue #5040
 still needs a matching update (tracked separately, not blocking this
 PR's merge).
+
+### 2026-10-03 — Phase 2 item 2: networking-scope gap closed, live-validated
+Implemented the split Phase 1 deliberately deferred: dependency
+resolution now gets its own network-enabled pass
+(`tools/run_tests_in_devcontainer.py` runs `run-plugin-tests.py
+--collect-only` -- the same `_ensure_venv` venv-install path a real run
+uses, but it only imports test modules rather than executing them, so no
+second, duplicated install path was needed in that module), then every
+network the container is attached to is disconnected (read live via
+`docker inspect` rather than assuming a fixed name like "bridge" -- not
+a stable devcontainer-CLI contract) before the real, now
+network-disconnected test pass runs. A bare `--list` request skips both
+steps, since it never builds a venv in the first place.
+
+The new logic (`is_list_only`/`prepare_dependencies`/
+`disconnect_container_networks`) was factored into a new sibling module,
+`tools/_devcontainer_network_scope.py` (thin, dependency-injected
+functions -- no circular import with the main wrapper), rather than
+grown inline: the main wrapper was already at its 1000-line cap with
+zero headroom, and this is the same "this module will keep needing
+condensing" dynamic the Phase 1 journal already flagged. Several
+pre-existing docstrings in the main wrapper were also tightened
+(unchanged meaning, fewer lines) to make room alongside the genuinely
+new code.
+
+Live-validated against real Docker (`ai-attribution`, both the default
+run and a `--keep` run): the default run showed the expected two-pass
+shape (`collect-only` prep, 104 tests collected; then the real run, 98
+passed / 6 skipped) with clean teardown afterward (`docker ps -a`/
+`docker volume ls` showed nothing left). The `--keep` run confirmed the
+boundary itself, not just the shape: `docker inspect -f
+'{{json .NetworkSettings.Networks}}'` on the still-running container
+returned `{}` (no attached network at all), and `docker exec <id> sh -c
+"getent hosts pypi.org"` failed outright from inside it -- the real test
+pass genuinely has no outbound reach. Unit tests
+(`tools/test_run_tests_in_devcontainer.py`) grew to 124 (all passing),
+covering the new split's flag-detection, prep/disconnect subprocess
+shapes, and `main()`'s wiring/ordering (prepare -> disconnect -> run,
+skipped for `--list`); `check-module-size.py`, `check-docs-consistency.py`,
+and `check-effort-vision-structure.py` all pass. `TESTING.md` and this
+README both updated to describe the closed gap instead of the open one.
+Next up: the host-wide admission-lease residual gap (Phase 2's third and
+final item), as its own PR.
+
+### 2026-10-03 — Review round 1 (PR #5095): real --prepare-only mode, --reinstall fix
+A review of commit `11fb81829` surfaced 5 findings, all addressed.
+Two were substantive bugs in the implementation itself, not documentation:
+(1) **the dependency-preparation pass used `--collect-only`, which still
+runs pytest's own collection** -- that IMPORTS every test module and
+`conftest.py` and executes their module-level code/collection hooks,
+with network access, before the disconnect ever runs. A buggy or
+adversarial test could open a socket or exfiltrate copied workspace data
+during that import, directly undermining this effort's own stated
+boundary ("regardless of what a buggy or adversarial test actually
+does"). Fixed with a genuine fix, not a doc caveat: added a new
+`--prepare-only` mode to `tools/run-plugin-tests.py` itself that calls
+only `_ensure_venv` and returns, never touching pytest or importing a
+single test file; the wrapper's prep pass now uses that instead.
+(2) **`--reinstall` was forwarded unchanged to the real (post-disconnect)
+pass** -- since the prep pass already rebuilt the venv, the real pass
+receiving `--reinstall` again would delete that freshly-built venv in
+`_ensure_venv` and try to reinstall it with no network left. Fixed with
+a new `strip_reinstall` helper that removes `--reinstall` from the real
+pass's passthrough once the prep pass has used it.
+The remaining 3 findings were documentation-only: the original Phase 1
+Plan item (the networking-scoping line) was still unchecked and said
+"Still open" even though Phase 2 had already closed it -- updated to
+match; two identifier mentions were wrong (`_prepare_dependencies`/
+`_disconnect_container_networks` instead of the actual
+`prepare_dependencies`/`disconnect_container_networks` in a devcontainer.json
+comment, and `_is_list_only` instead of `is_list_only` in this README) --
+both corrected. `TESTING.md` and this README's own Phase 2 item 2
+description updated to describe `--prepare-only`, not `--collect-only`
+(the historical Journal entry above is left as an accurate record of
+what was done at the time, not rewritten). Unit tests, module-size,
+docs-consistency, and effort-vision-structure checks all re-confirmed
+passing after the fix.
+
+### 2026-10-03 — Review round 2 (PR #5095): fail-closed network-mode check
+A HIGH-severity finding caught that `disconnect_container_networks` read
+an empty `NetworkSettings.Networks` map as "nothing to disconnect,
+already isolated" -- but Docker can report that same empty map for a
+namespace-sharing mode (`--network host`, `--network container:<id>`)
+where the container still has real network access, the same pattern
+this repo's own `agent-containers` restricted-fleet check
+(`lifecycle.py:411-429`) already treats as uninspectable and rejects.
+Fixed by also reading `HostConfig.NetworkMode`: a `host`/`container:<id>`
+mode is now rejected outright, `none` is a legitimate no-op (Docker's
+real shape there is `{"none": {}}`, never truly empty), and any OTHER
+mode reporting zero attached networks is now rejected too rather than
+silently trusted. Added dedicated unit tests for each new fail-closed
+path; all pass, along with module-size/docs-consistency/effort-vision-
+structure checks, and a fresh Docker-backed end-to-end run confirmed the
+real container's own `NetworkMode` is `bridge` (never a rejected mode).
+
+### 2026-10-03 — Review round 3 (PR #5095): none-mode shortcut closed
+A follow-up HIGH finding caught the `none`-mode fast path's own
+remaining gap: `HostConfig.NetworkMode` reflects CREATION-time config,
+not live state -- a later `docker network connect` can attach a real,
+reachable network to a "none"-mode container while this field stays
+frozen reporting `none`. The earlier fix only checked `network_mode ==
+"none"` and returned immediately; it now also verifies
+`NetworkSettings.Networks` is EXACTLY `{"none": {}}` (Docker's real
+shape for an untouched `--network none` container) before trusting it,
+matching the stricter check `agent-containers`' own `lifecycle.py`
+already applies. Added a regression test for a `none`-mode container
+reporting an unexpected extra network; all tests, module-size, and docs
+checks still pass.
+
+### 2026-10-03 — Review round 4 (PR #5095): none-mode key-only match, doc polish
+The `none`-mode comparison from round 3 was itself still too strict: it
+compared the WHOLE `EndpointSettings` value to `{}`, but a legitimate
+`--network none` container's "none" entry still carries real (non-empty)
+endpoint metadata -- only the NETWORK KEY is the actual isolation
+invariant, matching `agent-containers`' own check exactly. Fixed to
+compare `set(networks.keys())` against `{"none"}` instead of the whole
+dict. Also documented `--reinstall`'s normalization in the module's own
+passthrough-contract docstring (a previously-missed finding) and added
+a regression test for a `none`-mode container with real endpoint
+metadata attached. All tests, module-size, and docs-consistency checks
+still pass; a fresh Docker-backed end-to-end run confirmed the fix
+doesn't disturb the common case.
