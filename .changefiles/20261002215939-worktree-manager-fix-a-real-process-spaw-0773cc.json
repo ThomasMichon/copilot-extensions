@@ -1,0 +1,9 @@
+{
+  "comment": "worktree-manager: fix a real-process spawn race in the mux-daemon identity-match tests (poll instead of asserting immediately)",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
