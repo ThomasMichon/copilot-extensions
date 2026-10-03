@@ -113,12 +113,17 @@ def heartbeat_sync_meta(
     streak with no new attempt) and silently shrink an already-bounded
     sample list further each heartbeat. Falls back to a full
     :func:`write_sync_meta` call only when no metadata exists yet at all
-    (first-ever heartbeat, nothing to preserve).
+    (first-ever heartbeat, nothing to preserve). A malformed/unreadable
+    existing file (:func:`read_sync_meta` raising, as opposed to returning
+    ``None`` for a genuinely missing one) is left untouched rather than
+    silently overwritten with a fresh "ok" status -- that visible error is
+    itself a signal worth preserving, not something a no-op heartbeat
+    should paper over.
     """
     try:
         previous = read_sync_meta(dest)
     except OSError:
-        previous = None
+        return
     if previous is None:
         write_sync_meta(dest, machine, transport, "ok", fallback_session_count)
         return

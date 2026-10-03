@@ -1776,6 +1776,19 @@ def test_heartbeat_sync_meta_writes_fresh_when_nothing_exists(tmp_path: Path) ->
     assert payload["session_count"] == 3
 
 
+def test_heartbeat_sync_meta_preserves_unreadable_metadata(tmp_path: Path) -> None:
+    """A malformed/unreadable sync-meta.json is a visible error signal --
+    a no-op heartbeat must never paper over it with a fresh 'ok' status."""
+    from agent_logger.sync import meta
+
+    meta_file = tmp_path / "sync-meta.json"
+    meta_file.write_bytes(b"\xff" * (meta.MAX_SYNC_META_BYTES + 100))
+
+    meta.heartbeat_sync_meta(tmp_path, "machine", "local", fallback_session_count=1)
+
+    assert meta_file.read_bytes() == b"\xff" * (meta.MAX_SYNC_META_BYTES + 100)
+
+
 def test_filesystem_target_heartbeat_noop_for_missing_destination(
     tmp_path: Path,
 ) -> None:
