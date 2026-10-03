@@ -68,19 +68,24 @@ verify the path exists and is a git repo (or clone/create it first). The
 configurator writes the pointer and fragments for the names/paths it is given; it
 does not prove that a missing checkout is valid.
 
-## 1. Decide the knowledge repo (ask, don't assume)
+## 1. Confirm the knowledge repo
 
-Ask the operator (use the ask-user affordance) for the knowledge repo, offering
-three ways:
+Use the ask-user affordance with the consuming harness's documented
+conventional candidate preselected. Repeat that harness's short explanation of
+when the default is appropriate. If the harness supplies no candidate, ask
+without inventing one.
 
 | Option | What you need | Then |
 |--------|---------------|------|
-| **Use an existing local checkout** | its path | verify it's a git repo |
-| **Clone an existing remote** | the remote URL + where to clone | `git clone <url> <path>` |
-| **Create a new one** | a name (+ owner/visibility) | create it (below) and clone |
+| **Use the harness default** | its registered or local checkout | verify it is the intended private repo |
+| **Use another repo or provider (advanced)** | its path or remote URL | verify or clone it |
+| **Create a new private repo** | a name (+ owner/visibility) | create it (below) and clone |
 
-Do **not** hardcode or guess a name -- the whole point is that a fork/other
-operator chooses their own.
+For the default, resolve the exact repo named by the consuming harness. If it
+does not resolve, ask for its existing checkout or clone URL; do not silently
+create a repository. The advanced option is for operators who already maintain
+a separate state home, such as a dedicated private GitHub repo or another
+provider. Do not infer that exception from an unrelated checkout.
 
 ### Creating a new knowledge repo (option 3)
 
@@ -106,8 +111,8 @@ issues:
 ```
 
 The current harness issue workflow supports GitHub routing. A non-GitHub
-knowledge origin (for example Azure DevOps) is valid for state, but it cannot be
-the implicit target of `gh issue` commands.
+knowledge origin (for example an Azure DevOps developer repo) is valid for
+state, but it cannot be the implicit target of `gh issue` commands.
 
 ## 2. Register and write the machine-local binding
 

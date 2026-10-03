@@ -1,0 +1,9 @@
+{
+  "comment": "Add private state binding to the canonical control-harness setup flow.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

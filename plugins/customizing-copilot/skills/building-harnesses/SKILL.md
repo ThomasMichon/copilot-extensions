@@ -6,8 +6,8 @@ description: >
   harness"), or audit ("make sure my repo follows best practices"). Routes to and
   drives the opinionated Control-Harness Runbook: repo structure, repo-scoped
   plugin registration, agent-worktrees adoption, AGENTS.md + connective-tissue
-  skills, SSH/agent-bridge, Picker validation, efforts/visions, skill/agent
-  review, and agent-mcp delegation.
+  skills, private state binding, SSH/agent-bridge, Picker validation,
+  efforts/visions, skill/agent review, and agent-mcp delegation.
   Trigger phrases include:
   - 'build my harness'
   - 'build out my harness'
@@ -49,8 +49,9 @@ The runbook is the source of truth. Read it before acting.
 
 - **Opinionated — the harness itself:** repo structure, repo-scoped plugin
   registration, agent-worktrees adoption of the harness + related repos,
-  `AGENTS.md` + connective-tissue skills, SSH + agent-bridge, Picker validation,
-  efforts + visions, skill/agent review, agent-mcp + MCP delegation.
+  `AGENTS.md` + connective-tissue skills, private state binding, SSH +
+  agent-bridge, Picker validation, efforts + visions, skill/agent review,
+  authenticated MCP delegation.
 - **Unopinionated — the product:** target repo structure, where product code
   lives (don't force this repo's product organization onto a *related* repo, and
   don't copy a related repo's product in — but a harness may itself be a monorepo
@@ -68,6 +69,8 @@ opinionated one, apply the opinion and move on.
 2. Register repo-scoped plugins in `.github/copilot/settings.json` (skill:
    `installing-plugins`), restart, deploy runtimes (skill:
    `copilot-extensions-setup`).
+2a. Bind the private state home using the consuming harness's documented
+    conventional candidate (skill: `harness-knowledge:binding-knowledge`).
 3. Adopt the harness + register/link related target repos (skills:
    `agent-worktrees:agent-worktrees-repos`, `agent-worktrees:agent-worktrees-related`, `agent-worktrees:working-cross-repo`).
 4. `AGENTS.md` + connective-tissue skills (skills: `authoring-skills`,
@@ -87,8 +90,10 @@ opinionated one, apply the opinion and move on.
 ## Curate the plugin set
 
 The suite is large; enable the tier the harness needs, not all of it. Minimum:
-`agent-worktrees` + `customizing-copilot`. Recommended default adds `efforts`,
-`visions`, `agent-bridge`, `context-handoff`. Everything else is opt-in by
+`agent-worktrees` + `customizing-copilot`. Recommended default adds
+`harness-knowledge`, `efforts`, `visions`, `agent-bridge`, and
+`context-handoff`. The consuming harness supplies the preselected private-state
+candidate; this generic skill never names one. Everything else is opt-in by
 substrate/need. The runbook's "Recommended plugin set" table is the curation
 seam.
 

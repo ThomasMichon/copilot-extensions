@@ -1,0 +1,9 @@
+{
+  "comment": "Make knowledge binding a normal setup phase with private dotfiles preselected and advanced alternatives explicit.",
+  "changes": [
+    {
+      "plugin": "harness-knowledge",
+      "type": "patch"
+    }
+  ]
+}

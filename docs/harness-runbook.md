@@ -64,17 +64,19 @@ These are the load-bearing conventions. Apply them. Each maps to a phase.
 1. **Repo structure** for the harness itself — [Phase 1](#phase-1--repo-structure).
 2. **Repo-scoped plugin registration** via `.github/copilot/settings.json` +
    experimental mode — [Phase 2](#phase-2--register-repo-scoped-plugins).
-3. **Adopting the harness and its related target repos with agent-worktrees** —
+3. **A bound private state home** selected through the consuming harness's
+   documented default — [Phase 2a](#phase-2a--bind-the-private-state-home).
+4. **Adopting the harness and its related target repos with agent-worktrees** —
    [Phase 3](#phase-3--adopt-the-harness-and-related-repos).
-4. **`AGENTS.md` + "connective-tissue" skills** that bind the generic plugin
+5. **`AGENTS.md` + "connective-tissue" skills** that bind the generic plugin
    skills to *this* repo — [Phase 4](#phase-4--agentsmd-and-connective-tissue-skills).
-5. **SSH mesh + agent-bridge topology** — [Phase 5](#phase-5--ssh-and-agent-bridge).
-6. **End-to-end validation through the Picker** —
+6. **SSH mesh + agent-bridge topology** — [Phase 5](#phase-5--ssh-and-agent-bridge).
+7. **End-to-end validation through the Picker** —
    [Phase 6](#phase-6--validate-end-to-end-with-the-picker).
-7. **efforts + visions to guide change** — [Phase 7](#phase-7--enable-efforts-and-visions).
-8. **rubber-duck + customizing-copilot to validate skills and agents** —
+8. **efforts + visions to guide change** — [Phase 7](#phase-7--enable-efforts-and-visions).
+9. **rubber-duck + customizing-copilot to validate skills and agents** —
    [Phase 8](#phase-8--validate-skills-and-agents).
-9. **agent-mcp + delegating MCP handling to sub-agents** —
+10. **agent-mcp + delegating MCP handling to sub-agents** —
    [Phase 9](#phase-9--agent-mcp-and-mcp-delegation).
 
 ### Unopinionated — leave these to the operator
@@ -127,6 +129,7 @@ after the table. You will encode the choice in
 |--------|------|-------------|
 | `agent-worktrees` | **Core** | Always. Session isolation + repo adoption + the Picker. Install first. |
 | `customizing-copilot` | **Core** | Always. Teaches authoring skills, sub-agents, MCP servers, plugin installs. Payload-only. |
+| `harness-knowledge` | **Recommended** | The harness keeps personal state outside its shared control repo. Payload-only. |
 | `efforts` | **Recommended** | The harness plans stretches of work. Payload-only. |
 | `visions` | **Recommended** | The harness keeps a north-star and derives efforts from the delta. Payload-only. |
 | `agent-bridge` | **Recommended** | More than one machine/agent, or you want inter-agent sends. |
@@ -139,7 +142,7 @@ after the table. You will encode the choice in
 | `agent-vault` | **Optional** | The harness fetches secrets (API keys, SSH keys, credentials) from a local KeePassXC-backed store instead of hardcoding, committing, or env-exporting them. |
 
 **Minimum viable harness:** `agent-worktrees` + `customizing-copilot`.
-**Recommended default:** add `efforts`, `visions`, `agent-bridge`,
+**Recommended default:** add `harness-knowledge`, `efforts`, `visions`, `agent-bridge`,
 `context-handoff`. Everything else is opt-in by substrate/need.
 
 > **The two not tiered above are special-purpose, not general-harness picks.**
@@ -172,6 +175,7 @@ below invoke them in order.
 | Skill | Scope | What it does |
 |-------|-------|--------------|
 | `copilot-extensions-setup` | install · machine-local | Deploy/refresh the **agent-worktrees + agent-bridge** runtimes (venv + binstub + service) after a payload update |
+| `binding-knowledge` | bind · machine-local + repo registration | Bind the harness to its private state home after Phase 2 enables the plugin |
 | `agent-vault-setup` | install · machine-local | Install/update the **agent-vault** runtime + the `vault-askpass` SUDO_ASKPASS helper |
 | `session-sync-setup` | install · machine-local | Deploy **agent-logger**'s `session-sync` task/timer and its target |
 | `codespaces-setup` | adopt · repo | Work out of the box on standard CodeSpaces; add a supplementary `.agent-codespaces/config.yaml` only for repos that deviate (adopt, credential-relay sources) |
@@ -181,7 +185,7 @@ below invoke them in order.
 | `create-setup-script` | scaffold · repo | Generate an ACP-safe `tools/setup/setup.{ps1,sh}` (Phase 1) |
 | `context-handoff-setup` | verify · no install | Troubleshoot the context-handoff **extension** (it needs no install — just the plugin enabled + experimental mode on) |
 
-> Payload-only plugins (`efforts`, `visions`, `context-handoff`,
+> Payload-only plugins (`harness-knowledge`, `efforts`, `visions`, `context-handoff`,
 > `customizing-copilot`, `harness-*`, `wsl-setup`) have **no runtime to install** —
 > their "setup" is enabling the plugin, then scaffolding/adoption where applicable.
 > Only the runtime plugins carry an install/update setup skill.
@@ -275,6 +279,7 @@ Write `.github/copilot/settings.json`, declaring the marketplace and the
   "enabledPlugins": {
     "agent-worktrees@copilot-extensions": true,
     "customizing-copilot@copilot-extensions": true,
+    "harness-knowledge@copilot-extensions": true,
     "efforts@copilot-extensions": true,
     "visions@copilot-extensions": true,
     "agent-bridge@copilot-extensions": true,
@@ -305,12 +310,39 @@ plugins also need a venv + binstub deployed once. Split by installer:
   skill (not covered by `copilot-extensions-setup`).
 - **agent-dispatch** — deploy via its own `scripts/init.*` / the
   **`agent-dispatch:agent-dispatch`** skill.
-- **Payload-only** (`customizing-copilot`, `efforts`, `visions`,
+- **Payload-only** (`customizing-copilot`, `harness-knowledge`, `efforts`, `visions`,
   `context-handoff`) — nothing to deploy beyond being enabled.
 
 **Done when:** `.github/copilot/settings.json` lists the chosen set, the session
 has been restarted so the skills are live, `agent-worktrees --version` works,
 and (if enabled) `agent-bridge version` works.
+
+---
+
+## Phase 2a — Bind the private state home
+
+**Opinionated:** a stateless harness binds a separate private state home during
+normal setup. The consuming harness owns the conventional candidate and its
+rationale; this generic runbook does not name one.
+
+After the Phase 2 restart, invoke **`harness-knowledge:binding-knowledge`**.
+Present the consuming harness's documented candidate as the preselected choice.
+Tell an operator who does not already recognize a reason to choose differently
+to keep that default. Offer another existing checkout, remote/provider, or new
+private repo as the advanced path.
+
+The selection must still be confirmed. Never infer an exception from an
+unrelated checkout, and never silently create a repository when the default
+candidate cannot be resolved.
+
+Require the binding result to report both canonical
+`registration.status: ready` and `state_root.status: ready` before setup
+continues. The concrete name and path remain machine-local rather than being
+committed into the shared harness.
+
+**Done when:** `agent-worktrees state-root --json` reports the selected private
+state home as bound and the binding skill confirms its canonical
+`class: worktree` registration.
 
 ---
 
