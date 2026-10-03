@@ -108,6 +108,17 @@ changefiles and auto-bumps."
       `accumulate_bumps.py` already knows about today — a missed one leaves
       a stale marker that blocks every subsequent promotion via its own
       existing guard test.
+- [ ] Extend `accumulate_bumps.py`'s generation path to write the real
+      computed version into every one of those inventoried nonstandard
+      surfaces too, not just the standard ones `apply()` already handles
+      today (JSON/TOML fields, Python fallbacks, marketplace entries,
+      instruction-projection owners). Without this, a hook-owned literal
+      like `emit-policy.sh`/`emit-policy.ps1` stays at `"0.0.0"` after
+      generation while `plugin.json` moves on, and that plugin's own
+      existing guard test (`test_emit_policy.py`) fails every subsequent
+      promotion — the retained post-generation structural invariant (above)
+      only catches this if generation is actually taught to write the
+      value first.
 - [ ] `.github/plugin/marketplace.json` gets a genuinely **non-functional**
       placeholder on the CLI-facing install path, not just `"0.0.0"`
       version fields inside an otherwise valid catalog — a structurally
@@ -224,6 +235,11 @@ changefiles and auto-bumps."
       `_write_source_fallbacks()`/`_write_instruction_projection_owners()`
       failing) fails the promotion run closed, rather than silently
       producing an inconsistent generated snapshot on `main`.
+- [ ] A real promotion of `ai-attribution` (or any plugin with a hook-owned
+      nonstandard version literal) writes the real computed version into
+      that literal too, and `test_emit_policy.py`'s own existing guard
+      passes against the generated `main` snapshot — not just the standard
+      `plugin.json`/`pyproject.toml` surfaces.
 - [ ] The refactored post-generation structural validations (non-literal/
       invalid/duplicate fallback assignment, a missing version field or
       catalog entry, a real cross-surface mismatch) still fire against the
