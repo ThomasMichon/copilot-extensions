@@ -1100,9 +1100,17 @@ def _toolchain_query_stdout(packages: dict[str, str]) -> str:
     return json.dumps(packages)
 
 
+def _assume_governed_feed_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Most `resolve_toolchain_lock` tests below exercise something OTHER
+    than the governed-feed gate itself -- bypass it so they aren't coupled
+    to this machine's/CI runner's real environment."""
+    monkeypatch.setattr(bpa, "_governed_feed_configured", lambda **_: True)
+
+
 def test_resolve_toolchain_lock_creates_venv_and_installs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
     venv_python = bpa._venv_python_path(venv_dir)
     calls: list[list[str]] = []
@@ -1134,6 +1142,7 @@ def test_resolve_toolchain_lock_creates_venv_and_installs(
 def test_resolve_toolchain_lock_reuses_existing_venv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    _assume_governed_feed_configured(monkeypatch)
     # Regression: a second call with the SAME venv_dir (the mechanism a
     # caller uses to share one toolchain lock across several plugins in
     # one promotion run) must not re-create or re-install -- only read
@@ -1164,6 +1173,8 @@ def test_resolve_toolchain_lock_reuses_existing_venv(
 def test_resolve_toolchain_lock_venv_creation_failure_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    _assume_governed_feed_configured(monkeypatch)
+
     def fake_run(cmd, capture_output, text):  # noqa: ARG001
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="no governed feed")
 
@@ -1175,6 +1186,7 @@ def test_resolve_toolchain_lock_venv_creation_failure_raises(
 def test_resolve_toolchain_lock_install_failure_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
     venv_python = bpa._venv_python_path(venv_dir)
 
@@ -1193,6 +1205,7 @@ def test_resolve_toolchain_lock_install_failure_raises(
 def test_resolve_toolchain_lock_query_nonzero_exit_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
     venv_python = bpa._venv_python_path(venv_dir)
     venv_python.parent.mkdir(parents=True, exist_ok=True)
@@ -1209,6 +1222,7 @@ def test_resolve_toolchain_lock_query_nonzero_exit_raises(
 def test_resolve_toolchain_lock_query_malformed_json_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
     venv_python = bpa._venv_python_path(venv_dir)
     venv_python.parent.mkdir(parents=True, exist_ok=True)
@@ -1225,6 +1239,7 @@ def test_resolve_toolchain_lock_query_malformed_json_raises(
 def test_resolve_toolchain_lock_missing_package_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    _assume_governed_feed_configured(monkeypatch)
     # Regression: a locked venv genuinely missing one of the two required
     # packages (e.g. a previous partial/failed install) must fail closed
     # rather than record an incomplete toolchain lock.
@@ -1241,6 +1256,80 @@ def test_resolve_toolchain_lock_missing_package_raises(
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     with pytest.raises(bpa.ArtifactBuildError):
         bpa.resolve_toolchain_lock(venv_dir)
+
+
+# --- governed-feed enforcement ------------------------------------------
+
+
+def test_governed_feed_configured_via_env_var():
+    assert bpa._governed_feed_configured(env={"UV_INDEX_URL": "https://example.internal/simple/"})
+    assert bpa._governed_feed_configured(env={"UV_DEFAULT_INDEX": "https://example.internal/simple/"})
+    assert bpa._governed_feed_configured(env={"UV_INDEX": "https://example.internal/simple/"})
+
+
+def test_governed_feed_not_configured_with_empty_env():
+    assert not bpa._governed_feed_configured(env={})
+
+
+def test_governed_feed_configured_via_user_uv_toml_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(bpa.sys, "platform", "win32")
+    uv_toml = tmp_path / "uv" / "uv.toml"
+    uv_toml.parent.mkdir(parents=True)
+    uv_toml.write_text('index-url = "https://example.internal/simple/"\n', encoding="utf-8")
+    assert bpa._governed_feed_configured(env={"APPDATA": str(tmp_path)})
+
+
+def test_governed_feed_not_configured_when_uv_toml_has_no_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(bpa.sys, "platform", "win32")
+    uv_toml = tmp_path / "uv" / "uv.toml"
+    uv_toml.parent.mkdir(parents=True)
+    uv_toml.write_text('# no index configured here\n', encoding="utf-8")
+    assert not bpa._governed_feed_configured(env={"APPDATA": str(tmp_path)})
+
+
+def test_governed_feed_configured_via_user_uv_toml_posix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(bpa.sys, "platform", "linux")
+    uv_toml = tmp_path / "uv" / "uv.toml"
+    uv_toml.parent.mkdir(parents=True)
+    uv_toml.write_text('index-url = "https://example.internal/simple/"\n', encoding="utf-8")
+    assert bpa._governed_feed_configured(env={"XDG_CONFIG_HOME": str(tmp_path)})
+
+
+def test_governed_feed_not_configured_ignores_malformed_uv_toml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # A malformed uv.toml must never be silently treated as "configured" --
+    # fail closed the same as "absent".
+    monkeypatch.setattr(bpa.sys, "platform", "win32")
+    uv_toml = tmp_path / "uv" / "uv.toml"
+    uv_toml.parent.mkdir(parents=True)
+    uv_toml.write_text("not = [valid toml", encoding="utf-8")
+    assert not bpa._governed_feed_configured(env={"APPDATA": str(tmp_path)})
+
+
+def test_resolve_toolchain_lock_refuses_when_no_governed_feed_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: with no configured governed feed at all, resolving the
+    # toolchain must fail closed rather than let `uv pip install` silently
+    # resolve setuptools/wheel from public PyPI.
+    monkeypatch.setattr(bpa, "_governed_feed_configured", lambda **_: False)
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa.resolve_toolchain_lock(tmp_path / "toolchain-venv")
+    assert calls == []  # never even attempted `uv venv`/`uv pip install`
 
 
 # --- build_wheel with a locked toolchain --------------------------------
