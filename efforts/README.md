@@ -11,6 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Retire Dead-Letter Status](active/retire-dead-letter-status/README.md) | Draft | #4744 |
+| [ai-attribution Audience-Based Disclosure Policy](active/ai-attribution-audience-policy/README.md) | Active (Phase 1 done) | #2965 |
 | [Devcontainer Test Isolation](active/devcontainer-test-isolation/README.md) | Draft | #5040 |
 | [Pivot Streaming Transport & Render Performance](active/pivot-streaming-transport/README.md) | Active | #4762 |
 | [agent-dispatch Recipe Library](active/agent-dispatch-recipe-library/README.md) | Draft | #4691 |
@@ -61,7 +62,7 @@ that pattern to this repository.
 | [Worktree Manager Control Plane](active/worktree-manager-control-plane/README.md) | Active | #352 |
 | [agent-index Engine Daemon](active/agent-index-engine-daemon/README.md) | Active | See effort |
 | [Vendored Installer Engine](active/vendored-installer-engine/README.md) | Draft | See effort |
-| [Pull-Request Capability](active/pull-request-capability/README.md) | Draft | #2691, #2699, #2700 |
+| [Pull-Request Capability](active/pull-request-capability/README.md) | Active (Phase 2 landed) | #2691, #2699, #2700 |
 | [Module Componentization Discipline](active/module-componentization-discipline/README.md) | Active | #2805 |
 | [Componentization Campaign Auto-Worker](active/componentization-campaign-auto-worker/README.md) | Draft | #3372 |
 | [Authoritative Write-Through Daemon](active/agent-worktrees-authoritative-daemon/README.md) | Active | #3761 |

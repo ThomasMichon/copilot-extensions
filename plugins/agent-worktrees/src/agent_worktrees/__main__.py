@@ -5975,7 +5975,7 @@ def _load_full_command_surface() -> None:
     global _restart_status_monitor, _restore_before_resume, _revalidate_cleanup_safety, _run_backfill, _run_machine_menu, _run_new_picker, _run_picker_housekeeping, _run_reciprocal_backfill
     global _run_system_menu, _runtime_superseded, _self_entry_present, _session_role, _slot_superseded, _slugify, _spawn_detached, _spawn_status_updater
     global _start_picker_monitor_root, _status_monitor_enabled, _status_segment_json, _succession_header, _sweep_orphans_on_exit, _sync_one_record, _system_cleanup, _system_pause
-    global _system_status, _system_update, _system_worktrees_browse, _tracked_pr_head_evidence, _try_machine_handoff, _uninstall_one_plugin_payload, _update_flags
+    global _system_status, _system_update, _system_worktrees_browse, _tracked_pr_head_evidence, _tracked_pr_pushed_head, _try_machine_handoff, _uninstall_one_plugin_payload, _update_flags
     global _update_modules, _update_one_plugin_payload, _update_registered_plugins, _valid_monitor_session, _validate_machine_registry, _validate_profile_assignment_config, _warm_list_cache_for_active_project, _windowless_python
     global auto_clean_enabled, claims_cli, cleanup_gc_cli, cmd_accounts_dispatch, cmd_anchor_check, cmd_attribution_audit, cmd_backfill_sessions, cmd_bind_nudge
     global cmd_bind_session, cmd_claimant_liveness, cmd_claims, cmd_cleanup, cmd_codename_lookup, cmd_conclude_disposable, cmd_conclude_session, cmd_config_migrate
@@ -6050,6 +6050,7 @@ def _load_full_command_surface() -> None:
     _pr_watch_usage = pr_cli._pr_watch_usage
     _pr_parse_repo = pr_cli._pr_parse_repo
     _tracked_pr_head_evidence = pr_cli._tracked_pr_head_evidence
+    _tracked_pr_pushed_head = pr_cli._tracked_pr_pushed_head
     _classify_pr_operands = pr_cli._classify_pr_operands
     _pr_watch_review_blocking = pr_cli._pr_watch_review_blocking
     cmd_pr_watch_dispatch = pr_cli.cmd_pr_watch_dispatch

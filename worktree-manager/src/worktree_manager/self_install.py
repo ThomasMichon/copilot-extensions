@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -173,6 +174,67 @@ def version_slot(version: str, root: Path | None = None) -> Path:
     return (root or default_root()) / VERSIONS_DIR / version
 
 
+_SLOT_COMPLETE_MARKER = ".install-complete"
+_SLOT_KEY_FILES = (
+    "pyproject.toml",
+    "src/worktree_manager/__init__.py",
+    "src/worktree_manager/__main__.py",
+)
+
+
+def _invalidate_slot_completion(slot: Path) -> None:
+    """Remove ``slot``'s completion marker, if any, before any mutation of
+    ``slot`` begins. A slot is proven complete only by this marker having
+    been published as the LAST step of a fully successful
+    ``_copy_payload_unsafe()`` -- invalidating it first (rather than
+    relying on the mutation that follows to remove it, which can itself
+    fail partway through) guarantees no stale marker from a slot's
+    previous occupant can ever survive an interrupted rebuild of the same
+    path and be mistaken for proof that the NEW content is complete.
+
+    Only a missing marker (the ordinary case: no prior install, or one
+    already invalidated) is swallowed. Any OTHER failure -- a
+    ``PermissionError`` from the marker still being held open, most
+    notably -- must propagate rather than let mutation proceed with a
+    stale marker still in place: ``_copy_payload``'s own boundary
+    normalizes it to the one exception type ``self_install()`` catches,
+    aborting the install instead of silently risking exactly the
+    stale-proof-of-completeness state this marker exists to prevent.
+    """
+    try:
+        (slot / _SLOT_COMPLETE_MARKER).unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _mark_slot_complete(slot: Path) -> None:
+    (slot / _SLOT_COMPLETE_MARKER).write_text("", encoding="utf-8")
+
+
+def _slot_is_complete(slot: Path) -> bool:
+    """``True`` only when ``slot`` is proven complete by its own marker --
+    published solely as the last step of a fully successful payload copy
+    and pointer materialization -- AND still carries the key files the
+    shipped binstubs need to launch (``uv run --project <slot> python -m
+    worktree_manager``: ``pyproject.toml``, ``src/worktree_manager/
+    __init__.py``, and ``src/worktree_manager/__main__.py``).
+
+    The marker alone proves the install completed; it does not prove the
+    slot hasn't been damaged since (a file removed by something outside
+    this module's control after a genuinely successful install). The key
+    files remain a cheap, independent second check against that later
+    damage. Directory existence, or any subset of files present without
+    the marker, proves nothing: a slot can exist, and even partially
+    survive a failed ``_copy_payload()`` recopy (one that imports or
+    materialized libraries it depends on at runtime may still be missing),
+    while still being unlaunchable (``No module named worktree_manager``
+    or an equivalent failure at run time).
+    """
+    return (slot / _SLOT_COMPLETE_MARKER).is_file() and all(
+        (slot / rel).is_file() for rel in _SLOT_KEY_FILES
+    )
+
+
 def _binstub_files() -> list[str]:
     if os.name == "nt":
         return ["worktree-manager.cmd", "worktree-manager.ps1", "worktree-manager"]
@@ -241,8 +303,36 @@ def _write_control_plane_provider_manifest(
         + "\n",
         encoding="utf-8",
     )
-    os.replace(tmp, path)
+    _replace_with_retry(tmp, path)
     return path
+
+
+def _replace_with_retry(src: Path, dst: Path, *, attempts: int = 10, delay_s: float = 0.01) -> None:
+    """``os.replace(src, dst)``, retrying a transient Windows
+    ``PermissionError`` (``ERROR_ACCESS_DENIED``, errno 13).
+
+    POSIX ``rename()`` is atomic even when two processes/threads target the
+    same ``dst`` concurrently -- exactly one call wins and the other simply
+    sees its own replace succeed with no error either way. Windows'
+    underlying ``MoveFileEx`` can instead briefly deny one of two truly
+    concurrent replacements of the same destination (observed in practice:
+    two callers each committing their own uniquely-named temp file onto the
+    same manifest path at once). The content is identical in that case --
+    both writers computed the same expected manifest -- so retrying after a
+    short backoff until this call's own replace succeeds (another
+    concurrent winner having already published equivalent content is not a
+    failure) is correct, not merely a cosmetic swallow.
+    """
+    last: PermissionError | None = None
+    for _ in range(attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as e:
+            last = e
+            time.sleep(delay_s)
+    assert last is not None
+    raise last
 
 
 def binstub_present() -> Path | None:
@@ -328,7 +418,7 @@ def _core_install_satisfied(version: str, root: Path | None = None) -> bool:
     r = root or default_root()
     return (
         current_version(r) == version
-        and version_slot(version, r).is_dir()
+        and _slot_is_complete(version_slot(version, r))
         and binstub_present() is not None
         and not _binstubs_are_stale()
     )
@@ -592,6 +682,34 @@ def _reap_stranded_cutover_passive(root: Path, mux_daemon_cutover) -> None:
 
 
 def _copy_payload(payload_dir: Path, slot: Path) -> None:
+    try:
+        _copy_payload_unsafe(payload_dir, slot)
+    except RuntimeError:
+        # Already our one normalized, self_install()-caught boundary type --
+        # re-raise as-is (don't re-wrap).
+        raise
+    except OSError as e:
+        # shutil.rmtree(slot)/shutil.copytree() can themselves raise a bare
+        # OSError -- most notably a Windows PermissionError (WinError 32)
+        # when the slot directory is still held open by another process's
+        # cwd (a stranded OR still-legitimately-running mux-daemon pinned
+        # there -- see copilot-extensions#4999). self_install() only
+        # catches RuntimeError at its boundary (matching
+        # _materialize_payload_pointers' own boundary below), so any
+        # filesystem failure here must be normalized to that type for
+        # self_install()'s cleanup-and-report ("best-effort slot removal,
+        # report action='error'") to run instead of this exception
+        # escaping uncaught (``_slot_is_complete`` is what then lets a
+        # later run detect and repair a slot that cleanup could not fully
+        # remove).
+        raise RuntimeError(f"copying payload into {slot} failed: {e}") from e
+
+
+def _copy_payload_unsafe(payload_dir: Path, slot: Path) -> None:
+    # Invalidate completion FIRST, before any mutation -- see
+    # _invalidate_slot_completion's own docstring for why this must not be
+    # left to the rmtree below (which can itself fail partway through).
+    _invalidate_slot_completion(slot)
     if slot.exists():
         shutil.rmtree(slot)
     if payload_dir.is_symlink():
@@ -629,6 +747,16 @@ def _copy_payload(payload_dir: Path, slot: Path) -> None:
             "anywhere in it could resolve outside the slot at runtime)"
         )
     _materialize_payload_pointers(payload_dir, slot)
+    missing = [rel for rel in _SLOT_KEY_FILES if not (slot / rel).is_file()]
+    if missing:
+        raise RuntimeError(
+            f"refusing to mark {slot} complete: payload is missing "
+            + ", ".join(missing)
+        )
+    # Published only here, as the LAST step of a fully successful copy +
+    # materialization that has itself verified every _SLOT_KEY_FILES entry
+    # is present -- this is what proves the slot complete.
+    _mark_slot_complete(slot)
 
 
 # ── legacy artifact recognition + cleanup ────────────────────────────────

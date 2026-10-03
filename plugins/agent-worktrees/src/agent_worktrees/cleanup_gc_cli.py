@@ -62,6 +62,19 @@ def add_parsers(sub) -> None:
     p.add_argument("--include-conversations", action="store_true", help="Also reap conversation-only worktrees (no commits but the session held turns); implies --include-unused")
     p.add_argument("--reconcile-prs", action="store_true", help="Refresh tracked PR state from the provider before deciding (heals stale 'open' PRs merged externally)")
     p.add_argument("--max-age-days", type=int, default=7)
+    p.add_argument(
+        "--lease-gc", action="store_true",
+        help="Also squash released lease refs (refs/agent-worktrees/leases/v1) past "
+             "--lease-retention-days to a minimal 2-commit history; opt-in (network + "
+             "force-push to the lease store)")
+    p.add_argument(
+        "--lease-retention-days", type=int, default=30,
+        help="Age (since release) past which a released lease ref is eligible for "
+             "--lease-gc (default 30)")
+    p.add_argument(
+        "--lease-kind", default=None,
+        help="With --lease-gc: restrict to one lease kind (codespace/container/task/...); "
+             "default every kind")
     p = sub.add_parser("sweep-managed", help="Machine-readable managed-worktree leak sweep for external control planes")
     p.add_argument("--dry-run", action="store_true", help="Report what would be removed without removing anything")
     p.add_argument("--json", action="store_true", help="Emit the managed sweep result as JSON")
@@ -676,11 +689,19 @@ def cmd_gc(args: argparse.Namespace) -> int:
          Service-safe (positive launcher-signature only). Skip with
          ``--no-reap-shells`` (copilot-extensions #102).
       5. ``git worktree prune`` to drop stale registrations.
+      6. **Lease-ref squash** (opt-in, ``--lease-gc``) -- collapses each
+         RELEASED cross-machine lease ref (``refs/agent-worktrees/leases/v1``)
+         past ``--lease-retention-days`` (default 30) to a minimal 2-commit
+         history, so its per-acquire/renew/release chain stops growing
+         forever. Never deleted, never touches a live/stale ``leased`` ref.
+         Network + force-push to the lease store; skipped entirely unless
+         ``--lease-gc`` is passed, and a silent no-op (not an error) when no
+         lease store is configured for this project.
 
     Idempotent: a second run right after the first finds nothing to do.
 
-    ``--json`` reports the managed + orphan + shell sweeps (machine-readable);
-    the tracked reap runs in text mode.
+    ``--json`` reports the managed + orphan + shell + lease sweeps
+    (machine-readable); the tracked reap runs in text mode.
     """
     from . import gc as gc_mod
 
@@ -739,26 +760,63 @@ def cmd_gc(args: argparse.Namespace) -> int:
     if not dry:
         git_ops.prune_worktrees(cwd=repo.anchor)
 
+    # 6. Lease-ref squash (opt-in, network + force-push to the lease store).
+    lease_gc = _run_lease_gc(args) if getattr(args, "lease_gc", False) else None
+
     if json_mode:
-        print(
-            json.dumps(
-                {
-                    "dry_run": dry,
-                    "repo": config.repo_name,
-                    "managed": managed,
-                    "orphans": orphans,
-                    "shells": shells,
-                },
-                indent=2,
-            )
-        )
+        payload = {
+            "dry_run": dry,
+            "repo": config.repo_name,
+            "managed": managed,
+            "orphans": orphans,
+            "shells": shells,
+        }
+        if lease_gc is not None:
+            payload["lease_gc"] = lease_gc
+        print(json.dumps(payload, indent=2))
         return 0
     if do_managed:
         _print_gc_managed(managed, dry)
     _print_gc_orphans(orphans, dry)
     if do_shells:
         _print_gc_shells(shells, dry)
+    if lease_gc is not None:
+        _print_gc_lease(lease_gc, dry)
     return 0
+
+
+def _run_lease_gc(args: argparse.Namespace) -> dict[str, object]:
+    """Squash stale released lease refs (step 6 of ``gc``), degrading to a
+    reported no-op when no lease store is configured for this project --
+    this sweep is opt-in and must never fail an otherwise-successful ``gc``.
+    """
+    from . import lease_config
+    from .lease_store import GitLeaseStore
+
+    try:
+        settings = lease_config.load_lease_settings()
+    except lease_config.ConfigError as exc:
+        return {"available": False, "squashed": [], "error": str(exc)}
+    store = GitLeaseStore(settings)
+    squashed = store.squash_stale(
+        retention_days=getattr(args, "lease_retention_days", 30),
+        kind=getattr(args, "lease_kind", None),
+        dry_run=getattr(args, "dry_run", False),
+    )
+    return {"available": True, "squashed": squashed}
+
+
+def _print_gc_lease(lease_gc: dict[str, object], dry: bool) -> None:
+    if not lease_gc.get("available"):
+        return
+    squashed = lease_gc.get("squashed") or []
+    verb = "Would squash" if dry else "Squashed"
+    if not squashed:
+        print(f"{verb} 0 stale lease ref(s).")
+        return
+    print(f"{verb} {len(squashed)} stale lease ref(s):")
+    for entry in squashed:
+        print(f"  · {entry['ref']} ({entry['old_oid'][:10]})")
 
 
 def cmd_sweep_managed(args: argparse.Namespace) -> int:

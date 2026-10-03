@@ -846,9 +846,6 @@ worktree-manager.
       smaller opt-out-toggle cleanup this supersedes).
 
 ### Phase 7 — Health, updating & presets (Ongoing)
-- [ ] `doctor`/validation breadth, plugin updating & alignment, and
-      git-referenced presets. Closes installer §`health-doctoring-and-validation`,
-      §`plugin-updating-and-alignment`, §`git-referenced-presets`.
 - [x] **Stranded cutover passive blocking a bare `self-install`.** A passive
       mux-daemon left behind by a crashed/interrupted `self_update()`
       (`spawn_passive` pins its `cwd` inside the version slot being cut
@@ -884,6 +881,31 @@ worktree-manager.
       client-side re-resolution piece scoped in `agent-worktrees` first.
       Tracked as
       [#5001](https://github.com/ThomasMichon/copilot-extensions/issues/5001).
+- [ ] `doctor`/validation breadth: plugin-catalog alignment (coverage)
+      reporting landed (PR #4986), covering unmet-plugin-prerequisite/
+      cross-plugin-drift detection. The governing vision
+      (installer §`health-doctoring-and-validation`) also covers missing
+      prerequisites, stale/broken binstubs, and mis-registered repos — doctor
+      already reports the prereq/core-install/binstub pieces from earlier
+      phases, but a dedicated mis-registered-repos check remains open, so
+      this item stays unchecked.
+- [ ] Plugin updating & alignment: largely covered already (`worktree-manager
+      update` + `agent-worktrees update`/`reconcile-plugins`); remains open
+      only for whatever further cross-plugin alignment surfacing doctor/
+      configurator work turns up. Closes installer
+      §`plugin-updating-and-alignment`.
+- [ ] **Harness-plugin onboard presets.** Closes installer
+      §`harness-plugin-onboard-presets` (revised in place from the earlier
+      §`git-referenced-presets`, see the 2026-10-03 Journal entry for the
+      supersession history): a `<repo>-harness` plugin ships its own onboard
+      config (related-repo declarations, CodeSpace/venue settings) as part
+      of its payload, discovered/merged the same way `agent-codespaces`'
+      `load_merged_config()` already layers per-repo
+      `.copilot-extensions/agent-codespaces/config.yaml` across adopted
+      repos, with Worktree
+      Manager eventually folding that merged result into its own
+      `harness_state`/`doctor` surface. No design doc exists yet — that is
+      the next real open item if this phase is picked up again.
 
 ### Phase 8 — Reconcile deferred backlog
 
@@ -1063,6 +1085,55 @@ claiming discipline alone.
   git-referenced presets (installer §`git-referenced-presets`, tracked by
   issue #358) remains fully undesigned — the next natural slice if this
   phase is picked up again.
+
+- **2026-10-03** — Operator direction: the installer §`git-referenced-presets`
+  vision item (a human ingesting a shareable config bundle by explicit Git
+  reference) is **superseded**, not merely deferred — revised in place to
+  §`harness-plugin-onboard-presets` in the same PR as this entry
+  (`visions/installer/README.md`, per this repo's cross-repo-sequencing
+  rule: the vision update lands before any further realization work). The
+  real direction is a `<repo>-harness` plugin shipping its own onboard
+  "preset" — related-repo declarations, CodeSpace/venue support, and more
+  — as part of its own plugin payload, picked up automatically rather than
+  ingested by reference. Investigated the existing substrate this would
+  build on (no code named "preset" exists yet — this is a forward design, not
+  something already implemented under a different name):
+  `worktree-manager/src/worktree_manager/harness_state.py`'s
+  `build_state()`/`build_repos()`/`build_projects()` already sweep the
+  registered-projects manifest (`~/.agent-worktrees/{repos,projects}.yaml`)
+  plus each repo's own `enabledPlugins` into a read-only "checkout layout"
+  model Worktree Manager already consumes; separately,
+  `plugins/agent-codespaces/src/agent_codespaces/config.py`'s
+  `load_merged_config()` already layers and deep-merges a generic
+  `.copilot-extensions/agent-codespaces/config.yaml` across every *adopted*
+  repo (including a
+  `codespace_plugins:` list explicitly documented in-code as "same entry
+  shape as a harness plugin's `codespacePlugins` manifest array"). The
+  onboard-preset mechanism is the natural extension of both: a
+  `<repo>-harness` plugin's own payload carries the equivalent default
+  config, discovered/merged the same layered way, with Worktree Manager
+  eventually folding that merged result into its own `harness_state`/
+  `doctor` surface. No design doc exists for this yet (not even a stub) —
+  it is the real next open item for anyone picking up presets, replacing
+  (not just updating) the original git-ref-ingestion framing. Updated the
+  Phase 7 checklist above to reflect the supersession, revised the
+  governing installer vision in place
+  (§`git-referenced-presets` → §`harness-plugin-onboard-presets`, plus the
+  `visions/README.md` one-line summary), and left a comment on issue
+  [#358](https://github.com/ThomasMichon/copilot-extensions/issues/358)
+  pointing at this entry. **Correction to this entry's original draft:**
+  that draft claimed this PR itself fixed issue
+  [#5030](https://github.com/ThomasMichon/copilot-extensions/issues/5030)
+  (the `troubleshooting-agent-dispatch/SKILL.md` marketplace-isolation
+  `bare-agent-command` guard failures blocking `origin/dev`'s required
+  `guards + lint`/`PR gate` check). By the time this branch could rebase
+  cleanly, PRs #5037 and #5039 had already landed the real upstream fix —
+  this PR carries none of it, just a rebase onto it. The only actual
+  change this PR makes to that skill is a small, genuinely incremental
+  follow-up (flagged by this same review round): the "Before you start"
+  catalog-path note only resolved the `agent-dispatch` placeholder even
+  though the body already used `agent-bridge` and `agent-mcp` placeholders
+  too — extended the note to cover all three, with its own changefile.
 
 - **2026-10-02** — Added a genuine `## Participants` declaration (this
   effort predates that template convention and had none) solely so an

@@ -65,6 +65,19 @@ curl -s -H "Authorization: Bearer $token" -H 'content-type: application/json' \
 
 ### Install
 
+**Prerequisite: `"experimental": true`.** The Copilot CLI gates *all* SDK
+extension loading on this one flag (an ambient, suite-wide requirement --
+see e.g. `agent-worktrees`' `copilot-extensions-setup` skill), not something
+specific to this plugin. Without it, `enabledPlugins` and
+`extraKnownMarketplaces` resolve and the plugin shows as installed, but its
+`extensions/agent-remote-driver/extension.mjs` is silently never launched --
+no discovery descriptor, no error. Set it once per machine in
+`~/.copilot/settings.json`:
+
+```json
+{ "experimental": true }
+```
+
 Enable the plugin wherever it needs to be present at launch:
 
 - **A local machine or Dev Box image:** add it to the **user-global**
@@ -265,8 +278,11 @@ directory this process can create and write to.
 
 ## Troubleshooting, contributing & issues
 
-- **No discovery descriptor appears for a session.** Confirm the plugin is
-  actually enabled at the scope that session loaded from (`~/.copilot/settings.json`
+- **No discovery descriptor appears for a session.** Confirm
+  `"experimental": true` is set in `~/.copilot/settings.json` -- the CLI
+  silently never launches ANY SDK extension without it (no error either; see
+  *Install* above). Then confirm the plugin is actually enabled at the scope
+  that session loaded from (`~/.copilot/settings.json`
   for a plain local launch; the venue's own injected user settings for a
   CodeSpace/container) -- extensions do not load retroactively into an
   already-running session, and this one does not auto-load in ACP mode

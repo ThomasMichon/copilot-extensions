@@ -206,11 +206,16 @@ class MockPRProvider:
     def merge_pull(
         self, repo: str, number: int, *, squash: bool = True, admin: bool = False,
         api_base: str = "", token: str | None = None,
-        delete_source_branch: bool = True,
+        delete_source_branch: bool = True, expected_head_sha: str = "",
     ) -> str:
         pr = self._get(repo, number)
         if pr.merged:
             return f"mock: PR {repo}#{number} is already merged."
+        if expected_head_sha and pr.head_sha != expected_head_sha:
+            return (
+                f"mock: PR {repo}#{number} head {pr.head_sha!r} does not match "
+                f"--match-head-commit {expected_head_sha!r}"
+            )
         pr.merged = True
         pr.state = "closed"
         pr.updated_at = _now()
@@ -231,9 +236,15 @@ class MockPRProvider:
     def enable_auto_merge(
         self, repo: str, number: int, *, squash: bool = True,
         api_base: str = "", token: str | None = None,
-        delete_source_branch: bool = True,
+        delete_source_branch: bool = True, expected_head_sha: str = "",
     ) -> str:
-        self._get(repo, number).auto_merge_armed = True
+        pr = self._get(repo, number)
+        if expected_head_sha and pr.head_sha != expected_head_sha:
+            return (
+                f"mock: PR {repo}#{number} head {pr.head_sha!r} does not match "
+                f"--match-head-commit {expected_head_sha!r}"
+            )
+        pr.auto_merge_armed = True
         return ""
 
     def get_repo_policy(

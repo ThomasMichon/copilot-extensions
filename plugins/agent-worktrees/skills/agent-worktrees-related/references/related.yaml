@@ -29,14 +29,42 @@ related:
     # repo-local marketplaces both work when installed on the dispatch host.
     plugins:
       - { source: example-web-agent@example-marketplace }
-    # Ownership posture (drives e.g. the AI-attribution decision). Derived ONCE
-    # at registration from the operator's own gh account logins + the remote,
-    # then authoritative; an explicit value always wins over the derivation.
+    # Ownership posture: contribution/authority (who maintains it, who
+    # reviews it) -- NOT the AI-attribution axis (see `audience` below for
+    # that). Derived ONCE at registration from the operator's own gh account
+    # logins + the remote, then authoritative; an explicit value always wins
+    # over the derivation.
     #   owned    -- operator wholly owns it (own gh namespace, or marked so)
     #   internal -- org-internal, not owned (e.g. an enterprise ADO org repo)
-    #   external -- public/external, not owned (authored increments get attribution)
+    #   external -- public/external, not owned
     ownership: external
     owner: octocat                        # resolving operator account login (optional)
+    # Audience: who can read what gets published here -- the axis that
+    # drives the AI-attribution decision, orthogonal to `ownership` above (an
+    # operator-owned repo can still be `public`; a third-party repo could be
+    # a `private` invited-collaborator-only fork). Never derived
+    # automatically -- set explicitly when it matters; omitted means
+    # "unclassified" and consumers judge the target themselves rather than
+    # silently assuming the disclosure-exempt case.
+    #   public    -- visible on the public internet. Disclosure applies by
+    #                default.
+    #   internal  -- org-internal (enterprise ADO, internal Gitea): visible to
+    #                coworkers/org members, not the public internet.
+    #                Disclosure applies by default, same as public.
+    #   private   -- not visible beyond the operator (and explicitly invited
+    #                collaborators). Disclosure is not required, but this
+    #                must be a positive, verified classification -- never a
+    #                default assumed in the absence of evidence.
+    audience: public
+    # Optional per-repo AI-attribution override, consumed by the
+    # ai-attribution plugin. Both keys default to the audience-derived
+    # policy (true for public/internal/unclassified, false for private) when
+    # omitted; a key that IS present is honored verbatim -- off or on,
+    # relative to that default -- e.g. turning disclosure off here for a
+    # repo the operator opens issues/PRs in directly.
+    ai_attribution:
+      disclose_on_open: false             # e.g. the operator opens issues/PRs here directly
+      disclose_on_reply: true             # but still discloses when replying to others' threads
   copilot-extensions:
     role: tooling
     summary: "Source of the plugins this control plane drives."

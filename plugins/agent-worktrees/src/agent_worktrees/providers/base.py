@@ -216,7 +216,7 @@ class PRProvider(Protocol):
     def merge_pull(
         self, repo: str, number: int, *, squash: bool = True, admin: bool = False,
         api_base: str = "", token: str | None = None,
-        delete_source_branch: bool = True,
+        delete_source_branch: bool = True, expected_head_sha: str = "",
     ) -> str:
         """Directly merge a PR **now** (the submitter-direct merge primitive).
 
@@ -233,13 +233,21 @@ class PRProvider(Protocol):
           ``--delete-branch``: safe because ``finalize``/``pr-complete`` verify a
           merged PR against the tracked record's own ``pr.head_sha``, never by
           requiring the live remote branch to still exist.
-        - **gitea / azure-devops** are unsupported today (return a message).
+          When ``expected_head_sha`` is given, passes it as
+          ``--match-head-commit`` so GitHub's own merge endpoint refuses rather
+          than silently merging if its view of the PR's head has not caught up
+          with a just-pushed commit (ThomasMichon/copilot-extensions#4949: the
+          PR object's reported head can lag the real branch ref by minutes on a
+          cross-fork PR, and a bare ``gh pr merge <n>`` has no way to know).
+        - **gitea / azure-devops** are unsupported today (return a message);
+          ``expected_head_sha`` is accepted but has no effect there.
 
         Returns "" on success, or a human-readable error string. ``--now`` is only
         offered where the repo's flow profile is ``pr-self-merge``; other profiles
         refuse with a reminder before ever calling this.
         """
         ...
+
 
     def request_auto_complete(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
@@ -266,7 +274,7 @@ class PRProvider(Protocol):
     def enable_auto_merge(
         self, repo: str, number: int, *, squash: bool = True,
         api_base: str = "", token: str | None = None,
-        delete_source_branch: bool = True,
+        delete_source_branch: bool = True, expected_head_sha: str = "",
     ) -> str:
         """Enable the provider's **native CI-gated auto-merge** on a PR (#225).
 
@@ -279,6 +287,11 @@ class PRProvider(Protocol):
           must wait on the checks, not bypass them). ``delete_source_branch``
           (default ``True``) passes ``--delete-branch``, same safety reasoning as
           :meth:`merge_pull`.
+          ``expected_head_sha``, like :meth:`merge_pull`'s, is passed as
+          ``--match-head-commit``: since auto-merge (the default,
+          ``prefer_auto_merge=True``) can complete immediately rather than
+          only arm, it must enforce the same expected-head check as the
+          direct merge path.
         - **gitea / azure-devops** are unsupported here today (they merge via
           their own consent/auto-complete flow); they return a message so the
           caller falls back to a direct merge.

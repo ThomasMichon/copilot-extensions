@@ -402,11 +402,12 @@ class AzureDevOpsProvider:
     def merge_pull(
         self, repo: str, number: int, *, squash: bool = True, admin: bool = False,
         api_base: str = "", token: str | None = None,
-        delete_source_branch: bool = True,
+        delete_source_branch: bool = True, expected_head_sha: str = "",
     ) -> str:
         """Not implemented: direct merge (pr-merge --now) is GitHub-only today."""
         from .base import _unsupported_merge
-        _ = (repo, number, squash, admin, api_base, token, delete_source_branch)
+        _ = (repo, number, squash, admin, api_base, token, delete_source_branch,
+             expected_head_sha)
         return _unsupported_merge(self.name)
 
     def request_review(
@@ -421,11 +422,12 @@ class AzureDevOpsProvider:
     def enable_auto_merge(
         self, repo: str, number: int, *, squash: bool = True,
         api_base: str = "", token: str | None = None,
-        delete_source_branch: bool = True,
+        delete_source_branch: bool = True, expected_head_sha: str = "",
     ) -> str:
         """Not implemented: ADO uses native auto-complete via request_auto_complete."""
         from .base import _unsupported_auto_merge
-        _ = (repo, number, squash, api_base, token, delete_source_branch)
+        _ = (repo, number, squash, api_base, token, delete_source_branch,
+             expected_head_sha)
         return _unsupported_auto_merge(self.name)
 
     def get_repo_policy(

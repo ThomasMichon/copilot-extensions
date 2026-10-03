@@ -40,3 +40,15 @@ journaling your own)? Walk the claim in the other direction instead: see the
 **`tracing-claimant-graphs`** skill to resolve the PR's originating worktree
 back to its root owner and check whether that owner is still live before
 commenting, reviewing, or opening a competing PR.
+
+## Checking or merging an EXISTING foreign PR needs no claim -- just a claimant CWD
+
+The claim-journaling above is for a PR *you open* in another repo (a new
+obligation this worktree now owns). Merely **checking status on, or merging,
+an already-open** PR in a foreign repo is lighter weight: `pr-watch`/
+`pr-merge <owner/name> <pr>` read/act on a PR that already exists -- no new
+claim to journal. What they do still require is a **claimant**: run them from
+your own worktree (never an untracked directory or the target's own
+checkout), so there is always a traceable owner behind the operation. See
+`pr-workflow.md`'s *Addressing a foreign repo* section for the full contract
+and its refusal behavior when CWD doesn't qualify.

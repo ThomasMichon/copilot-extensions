@@ -122,22 +122,33 @@ order.
       (the vision deliberately left this open; this effort makes the call).
       Must satisfy the vision's attribution-correctness Behavior: measured
       against `dev`'s own pre-vendor-materialization source form.
-      **Decided 2026-10-01:** the baseline is checked into `main`,
-      piggybacking on the promotion pipeline's own existing
+      **Current decision (see Journal for the full history, including a
+      2026-10-03 revision):** a small correlation **pointer**
+      (`measured_commit` + `release_tag` + `asset`) is checked into
+      `main`, piggybacking on the promotion pipeline's own existing
       commit-per-promotion + `promote-<timestamp>-<sha>` tag — this repo
       already has a trusted, audited correlation mechanism
       (`.github/release-pipeline-state.json`'s `last_promotion.dev_head`,
       recording the exact `dev` commit each `main` promotion was measured
-      against) rather than needing to invent a GitHub-Release-asset path
-      with no existing analog in this pipeline. Attribution correctness is
-      unaffected either way: measurement happens against `dev`'s own source
-      form regardless of which branch later stores the resulting JSON. See
-      this entry's own Journal note for the fuller rationale and the
-      rejected alternative (a GitHub Release asset tied to the same tag).
-- [ ] Spike coverage collection inside `validate-and-promote.yml`'s existing
+      against). The full per-line coverage map itself is published
+      separately as a **GitHub Release asset**, tagged on the `dev`
+      commit it was measured against (`coverage-baselines-<dev_head>`).
+      Attribution correctness is unaffected either way: measurement
+      happens against `dev`'s own source form regardless of which
+      branch/mechanism later stores the resulting JSON, and Phase 2's
+      already-merged `ancestor_resolution.py` works unchanged either way
+      (it only ever walks `main`'s git history of the small pointer file,
+      never the payload).
+- [x] Spike coverage collection inside `validate-and-promote.yml`'s existing
       `full`/`worktree-manager` jobs (no new job; instrument the existing
       one) and confirm the artifact it produces round-trips through the
-      chosen storage/correlation mechanism.
+      chosen storage/correlation mechanism. **Mechanism spiked and unit-
+      tested** (`tools/test_promote_release.py::test_promote_checks_in_a_matching_coverage_baseline`
+      confirms the pointer-only round-trip); **real pipeline confirmation
+      still open** — the first actual `validate-and-promote.yml` dispatch
+      with all 9 enrolled plugins producing a baseline (run `37112726450`)
+      is what surfaced the 100MB blocker this very entry reverses, so a
+      fresh real run against this fix is still needed once it lands.
 
 ### Phase 1 — Baseline generation + correlation at the promotion gate
 - [x] Instrument the promotion gate's full-suite run to emit a durable,
@@ -326,6 +337,101 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-03 — Phase 0 storage/correlation decision reversed: hybrid pointer + Release asset
+Reopens and revises the 2026-10-01 Phase 0 storage/correlation decision
+below ("check into `main`") after its first real end-to-end exercise hit a
+hard wall that decision didn't anticipate.
+
+**What happened:** driving this effort's own pipeline-health follow-up
+(after fixing an unrelated `agent-logger` coverage-baseline collection bug,
+PR #5056), a manual `validate-and-promote.yml` dispatch against `dev`'s tip
+was the first run ever to have all 9 enrolled plugins actually produce a
+coverage baseline in the same promotion. All 9 `full - <plugin>` coverage-
+baseline-collection jobs succeeded — but the "Promote dev -> main" job's
+own `git push` failed outright:
+
+```
+remote: error: File .github/coverage-baselines/agent-dispatch.json is 145.33 MB; this exceeds GitHub's file size limit of 100.00 MB
+remote: error: File .github/coverage-baselines/agent-worktrees.json is 115.24 MB; this exceeds GitHub's file size limit of 100.00 MB
+remote: error: GH001: Large files detected.
+remote: pre-receive hook declined
+```
+
+This was invisible until now because `agent-logger`'s own (separately
+broken, #5056-fixed) baseline collection had always failed the promotion
+gate's "enrolled plugin missing a baseline" check first, long before
+`promote_release.py` ever got far enough to attempt pushing the complete
+9-plugin baseline set. Filed as `ThomasMichon/copilot-extensions#5075`.
+
+**Why not just enable Git LFS and keep the original design as-is?**
+Considered, but LFS changes every consumer's clone/checkout cost
+(LFS-tracked files are fetched on `git clone`/`checkout` by default unless
+every consumer configures smudge filtering, which this repo's own
+contributors/CI runners would then all need to opt into) for data that, by
+this effort's own Phase 2/3 design, only a correlation-resolution step
+ever actually needs to read — baking that cost into every ordinary clone of
+`main` for all time is a worse trade than decoupling the payload from the
+git tree entirely.
+
+**Decision (hybrid, not a full migration):** split the single baseline
+document the original decision checked into `main` into two pieces:
+- A tiny **pointer** (`measured_commit`, `release_tag`, `asset` — a few
+  hundred bytes regardless of plugin suite size) still checked into
+  `main`'s own tree at the exact same path
+  (`.github/coverage-baselines/<plugin>.json`), via the exact same
+  commit+tag correlation mechanism the original decision chose. This
+  preserves that decision's own real insight (reuse the pipeline's
+  existing, trusted correlation mechanism rather than inventing a second
+  one) and -- critically -- means Phase 2's already-merged, already-
+  reviewed `ancestor_resolution.resolve_nearest_baseline` (PR #5049) needs
+  **zero code changes**: it only ever walked `main`'s git history of this
+  file via `git log`/`git show`, and a pointer is just as walkable as a
+  full baseline was.
+- The full per-line coverage map itself, published as a **GitHub Release**
+  asset (one asset per plugin), tagged on the measured `dev` commit itself
+  (`coverage-baselines-<dev_head>` — deliberately NOT the promotion's
+  own eventual `main`-side tag, whose name isn't knowable until after a
+  real post-merge squash-merge; see `tools/promote_release.py`'s own
+  `candidate_branch` docstring for why that's a separate, later-known
+  value). Published the moment collection succeeds, independent of
+  whether/when/how that `dev` commit's own promotion actually lands.
+- No Git LFS, no new token scope (`gh release create`/`upload` already
+  work under the existing `APERTURE_RELEASE_TOKEN`'s `Contents: Read and
+  write` grant — Releases are a `Contents` API surface), and no change to
+  an ordinary `git clone`'s size at all: Release assets are never part of
+  a repo's object database.
+
+**What actually changed:**
+- `tools/coverage_guided_selection/correlation.py` — rewritten module
+  docstring; added `release_tag_for`, `asset_name_for`, `build_pointer`,
+  `POINTER_SCHEMA`. `baseline_path_on_main` and `require_measured_commit`
+  are unchanged (both are schema-agnostic about what's at that path, by
+  design).
+- `tools/promote_release.py` — `_write_coverage_baselines_into_scratch`
+  now writes `build_pointer`'s small document instead of the full
+  collected baseline; `_seed_coverage_baselines_from_main` is unchanged
+  (it already just copies forward whatever was previously committed,
+  verbatim, regardless of content size).
+- `.github/workflows/validate-and-promote.yml` — new "Publish coverage
+  baselines as a GitHub Release" step, right after the existing "Verify
+  enrolled coverage baselines were actually collected" gate and before the
+  "Promote" step, using the exact same `release_tag_for` formula
+  (duplicated by hand in bash, same convention this file already uses for
+  `COVERAGE_BASELINES_DIR`).
+- Tests: `tools/test_promote_release.py`'s existing coverage-baseline
+  tests updated to assert the pointer shape (and the explicit absence of
+  a `coverage`/`tests` key); new `TestCorrelation` cases for the four new
+  `correlation.py` functions. `ancestor_resolution.py`'s own
+  `TestResolveNearestBaseline` suite needed **no changes at all** — it
+  already only ever asserted on `measured_commit`, never on a `coverage`
+  key being present.
+- **Not yet done** (genuinely new work, not regressed by this reversal):
+  the actual "fetch the full coverage map from its Release asset once a
+  pointer is resolved" step is Phase 3 wiring that was never built yet
+  either way (nothing in production reads `ResolvedBaseline.baseline`'s
+  `coverage` key today) — this reversal doesn't block or complicate that,
+  since the resolution step it builds on is unchanged.
 
 ### 2026-10-03 — Phase 2: nearest-ancestor resolution + attribution remap/invalidate
 Operator asked to continue into the next phases now that Phase 1 is fully
