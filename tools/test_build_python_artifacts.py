@@ -1452,6 +1452,11 @@ def test_build_wheel_with_toolchain_uses_no_build_isolation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     out_dir = tmp_path / "dist"
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools>=60"]\n', encoding="utf-8"
+    )
     toolchain = bpa.ToolchainLock(
         tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
     )
@@ -1465,11 +1470,211 @@ def test_build_wheel_with_toolchain_uses_no_build_isolation(
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     # A `python` argument must be ignored once a toolchain is given -- the
     # toolchain's own venv_python is the only interpreter used.
-    bpa.build_wheel(tmp_path / "src", out_dir, python="/some/other/python", toolchain=toolchain)
+    bpa.build_wheel(src_dir, out_dir, python="/some/other/python", toolchain=toolchain)
 
     assert "--no-build-isolation" in seen_cmd
     assert str(toolchain.venv_python) in seen_cmd
     assert "/some/other/python" not in seen_cmd
+
+
+# --- UV_CONFIG_FILE exclusivity ------------------------------------------
+
+
+def test_governed_feed_uv_config_file_is_exclusive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: UV_CONFIG_FILE disables uv's normal config discovery --
+    # a governed user-level uv.toml must NOT be consulted once it's set,
+    # even though it exists and would otherwise satisfy the gate.
+    monkeypatch.setattr(bpa.sys, "platform", "win32")
+    user_uv_toml = tmp_path / "appdata" / "uv" / "uv.toml"
+    user_uv_toml.parent.mkdir(parents=True)
+    user_uv_toml.write_text('index-url = "https://example.internal/simple/"\n', encoding="utf-8")
+    explicit_config = tmp_path / "explicit-uv.toml"
+    explicit_config.write_text("# no index configured here\n", encoding="utf-8")
+    assert not bpa._governed_feed_configured(
+        env={"APPDATA": str(tmp_path / "appdata"), "UV_CONFIG_FILE": str(explicit_config)}
+    )
+
+
+def test_governed_feed_uv_config_file_governed_is_honored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(bpa.sys, "platform", "win32")
+    explicit_config = tmp_path / "explicit-uv.toml"
+    explicit_config.write_text(
+        'index-url = "https://example.internal/simple/"\n', encoding="utf-8"
+    )
+    assert bpa._governed_feed_configured(env={"UV_CONFIG_FILE": str(explicit_config)})
+
+
+# --- Test PyPI is treated as public --------------------------------------
+
+
+def test_governed_feed_not_configured_when_default_index_is_test_pypi():
+    assert not bpa._governed_feed_configured(
+        env={"UV_DEFAULT_INDEX": "https://test.pypi.org/simple"}
+    )
+
+
+# --- resolve_toolchain_lock concurrent-publisher race --------------------
+
+
+def test_resolve_toolchain_lock_defers_to_winner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: if another process publishes a complete venv at the same
+    # venv_dir between our own absence check and our own publish, we must
+    # NOT delete/replace that live venv -- discard our own staging copy
+    # and let the (now-existing) destination stand.
+    _assume_governed_feed_configured(monkeypatch)
+    venv_dir = tmp_path / "toolchain-venv"
+    sentinel = venv_dir / "WINNER"
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        if cmd[:2] == ["uv", "venv"]:
+            staging_dir = Path(cmd[2])
+            staging_python = bpa._venv_python_path(staging_dir)
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
+            # Simulate a concurrent publisher winning the race: publish a
+            # complete, marked venv at the real destination BEFORE this
+            # call's own staging -> venv_dir rename happens.
+            winner_python = bpa._venv_python_path(venv_dir)
+            winner_python.parent.mkdir(parents=True, exist_ok=True)
+            winner_python.write_text("", encoding="utf-8")
+            sentinel.write_text("winner", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.resolve_toolchain_lock(venv_dir)
+
+    # The "winner"'s venv must still be standing untouched -- our own
+    # losing publisher must never have deleted/replaced it.
+    assert sentinel.is_file()
+
+
+# --- build-system.requires enforcement against the locked toolchain -----
+
+
+def _write_build_system_requires(source_dir: Path, requires: list[str]) -> None:
+    source_dir.mkdir(parents=True, exist_ok=True)
+    requires_toml = ", ".join(json.dumps(r) for r in requires)
+    (source_dir / "pyproject.toml").write_text(
+        f"[build-system]\nrequires = [{requires_toml}]\n", encoding="utf-8"
+    )
+
+
+def test_build_wheel_rejects_toolchain_below_declared_build_requires(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    src_dir = tmp_path / "src"
+    _write_build_system_requires(src_dir, ["setuptools>=90.0.0"])
+    toolchain = bpa.ToolchainLock(
+        tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
+    )
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        raise AssertionError("uv build must never run once the pre-check fails")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa.build_wheel(src_dir, tmp_path / "dist", toolchain=toolchain)
+
+
+def test_build_wheel_accepts_toolchain_meeting_declared_build_requires(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    src_dir = tmp_path / "src"
+    _write_build_system_requires(src_dir, ["setuptools>=60.0.0", "wheel"])
+    toolchain = bpa.ToolchainLock(
+        tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
+    )
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.build_wheel(src_dir, tmp_path / "dist", toolchain=toolchain)  # must not raise
+
+
+def test_build_wheel_ignores_build_requires_for_packages_outside_toolchain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # A requirement on a package this toolchain doesn't lock (e.g. a
+    # project-specific build backend) is out of scope for this check.
+    src_dir = tmp_path / "src"
+    _write_build_system_requires(src_dir, ["some-other-backend>=999.0.0"])
+    toolchain = bpa.ToolchainLock(
+        tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
+    )
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.build_wheel(src_dir, tmp_path / "dist", toolchain=toolchain)  # must not raise
+
+
+def test_build_wheel_ignores_build_requires_with_inapplicable_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # A constraint gated behind an environment marker that doesn't apply
+    # here must be skipped, not enforced.
+    src_dir = tmp_path / "src"
+    _write_build_system_requires(
+        src_dir, ['setuptools>=999.0.0; python_version < "3.0"']
+    )
+    toolchain = bpa.ToolchainLock(
+        tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
+    )
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.build_wheel(src_dir, tmp_path / "dist", toolchain=toolchain)  # must not raise
+
+
+def test_build_wheel_rejects_unparseable_build_requires_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    src_dir = tmp_path / "src"
+    _write_build_system_requires(src_dir, ["not a valid requirement!!!"])
+    toolchain = bpa.ToolchainLock(
+        tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
+    )
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        raise AssertionError("uv build must never run once the pre-check fails")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa.build_wheel(src_dir, tmp_path / "dist", toolchain=toolchain)
+
+
+def test_build_wheel_skips_build_requires_check_without_toolchain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Unaffected baseline: without a toolchain (the direct-callers / low-
+    # level isolated-build path), no pyproject.toml is needed at all --
+    # this check must only engage when a toolchain is actually given.
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.build_wheel(tmp_path / "src", tmp_path / "dist")  # must not raise
 
 
 # --- build_plugin_artifacts hermeticity verification --------------------

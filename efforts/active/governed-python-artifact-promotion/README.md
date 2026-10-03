@@ -457,6 +457,39 @@ win grows with build complexity.
   updated to pass an explicit fake `ToolchainLock` (or stub the governed-
   feed check) so no unit test invokes the real `resolve_toolchain_lock`
   (which shells out to `uv`).
+- A fourth review round found 4 more real issues against this same slice:
+  (1) the governed-feed check's user-level `uv.toml` fallback ignored
+  `UV_CONFIG_FILE`'s EXCLUSIVITY in `uv`'s own config resolution -- when
+  set, `uv` reads ONLY that exact file, skipping its normal discovery
+  entirely (the same exclusivity `plugins/agent-worktrees/scripts/install.sh`
+  already handles) -- so a governed user-level `uv.toml` that `uv` itself
+  is NOT reading could still satisfy the gate; fixed by making
+  `_effective_uv_toml_candidates` resolve to exactly `[UV_CONFIG_FILE]`
+  when set, never additionally the user-level path. (2) the public-host
+  blocklist omitted `test.pypi.org`, so `UV_DEFAULT_INDEX=https://test.pypi.org/simple`
+  passed the gate despite being a public hosted index; fixed by adding it
+  alongside `pypi.org`/`pypi.python.org`. (3) `resolve_toolchain_lock`'s
+  "publish via rename" step unconditionally deleted any pre-existing
+  `venv_dir` first -- two concurrent invocations sharing the same
+  `--toolchain-venv` path could both pass the initial absence check, and
+  the second would then delete the first's ALREADY-published, possibly
+  in-use venv; fixed by never pre-deleting the destination and instead
+  catching the `OSError` a rename onto an existing non-empty directory
+  raises, discarding the losing publisher's own staging copy and
+  deferring to whichever publisher's venv is already there. (4) installing
+  bare `setuptools`/`wheel` names enforced no relationship to any specific
+  source's own declared `[build-system].requires` floor -- a lagging
+  governed feed could resolve a version below what a source itself
+  declares it needs (e.g. `setuptools>=84.0.0`), and `--no-build-isolation`
+  can never substitute a different version to compensate; fixed by
+  `_assert_toolchain_satisfies_build_requires` (using `packaging.requirements`/
+  `packaging.version`, already a dependency used elsewhere in `tools/`),
+  checked in `build_wheel` before every build when a toolchain is given,
+  evaluating applicable environment markers and failing closed on an
+  unparseable requirement or an insufficient locked version. 10 more unit
+  tests (100 total) covering all four fixes. Re-verified for real:
+  `agent-bridge` still builds correctly end-to-end with the full set of
+  checks active.
 - Real smoke test (not just mocked unit tests): built `agent-bridge` (10
   wheels) then `agent-worktrees` (its own wheel + vendored libs) against
   the SAME `--toolchain-venv` -- both manifests recorded the identical
