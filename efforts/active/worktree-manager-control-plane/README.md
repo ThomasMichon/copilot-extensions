@@ -932,6 +932,47 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-03** — Claimed and landed a bounded Phase 7 slice: extended
+  `worktree-manager doctor` to run `model.coverage()` and report
+  plugin-catalog alignment (uncovered/phantom/published-prereq-gap)
+  alongside the existing mux-daemon-health report, in both human-readable
+  and `--json` output — closing part of the "doctor/validation breadth"
+  wording (installer §`health-doctoring-and-validation`). Landed as PR
+  [#4986](https://github.com/ThomasMichon/copilot-extensions/pull/4986)
+  after **four** Copilot review submissions (three "changes recommended" /
+  "needs a closer look" rounds, then an approval that still carried one
+  open low-severity finding). Findings and disposition: (1) initial round
+  flagged both the "no catalog drift" success message being wrong when
+  only non-blocking uncovered plugins were present, and missing
+  published-prereq-gap regression coverage — both fixed (message now
+  matches `plugins --reconcile`'s existing ok/uncovered distinction; added
+  the gap-rendering/exit-status test); (2) second round flagged a manual
+  version bump conflicting with this repo's changefile-only release
+  workflow for PRs into `dev` — reverted (`check-changefile-presence.py`
+  replaced `check-version-bump.py` for this path per `ci.yml`); that round
+  also re-surfaced the still-open documentation finding from round one;
+  (3) third round, after README docs were added, flagged that a clean
+  report under remote discovery (no local checkout) implied full
+  validation when `coverage()` actually skips the published-prerequisite
+  check entirely without a checkout — qualified as membership-only, with a
+  regression test; (4) the approval still listed "add the required
+  Documentation impact statement to the PR description" as an open
+  low-severity finding (CONTRIBUTING.md's required-before-opening
+  statement, not the README content itself, which was already in place) —
+  addressed by editing the PR description before merge. Validation:
+  targeted `test_doctor.py` (8/8 after the fixes), full `worktree-manager`
+  suite (1407 passed, the same 9 pre-existing Windows
+  symlink-privilege/daemon-race failures noted in the prior session's
+  entry, 4 skipped, 1 deselected known flake), `ruff`, install-contract,
+  version-consistency, and changefile-presence checks all green. Phase 7
+  remains open — `doctor` plugin-alignment is one slice of "doctor/
+  validation breadth, plugin updating & alignment, and git-referenced
+  presets"; plugin updating/alignment already has `worktree-manager
+  update` + `agent-worktrees update`/`reconcile-plugins`, and
+  git-referenced presets (installer §`git-referenced-presets`, tracked by
+  issue #358) remains fully undesigned — the next natural slice if this
+  phase is picked up again.
+
 - **2026-10-02** — Added a genuine `## Participants` declaration (this
   effort predates that template convention and had none) solely so an
   agent-worktrees worktree could durably bind to this effort via
