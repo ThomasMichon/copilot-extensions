@@ -191,10 +191,19 @@ def _invalidate_slot_completion(slot: Path) -> None:
     fail partway through) guarantees no stale marker from a slot's
     previous occupant can ever survive an interrupted rebuild of the same
     path and be mistaken for proof that the NEW content is complete.
+
+    Only a missing marker (the ordinary case: no prior install, or one
+    already invalidated) is swallowed. Any OTHER failure -- a
+    ``PermissionError`` from the marker still being held open, most
+    notably -- must propagate rather than let mutation proceed with a
+    stale marker still in place: ``_copy_payload``'s own boundary
+    normalizes it to the one exception type ``self_install()`` catches,
+    aborting the install instead of silently risking exactly the
+    stale-proof-of-completeness state this marker exists to prevent.
     """
     try:
         (slot / _SLOT_COMPLETE_MARKER).unlink()
-    except OSError:
+    except FileNotFoundError:
         pass
 
 

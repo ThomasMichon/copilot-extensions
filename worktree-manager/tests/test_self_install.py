@@ -382,6 +382,38 @@ def test_copy_payload_oserror_is_normalized_to_a_clean_error_result(tmp_path, mo
     assert current_version(root) == "1.2.3"
 
 
+def test_marker_invalidation_permission_error_aborts_instead_of_proceeding(tmp_path, monkeypatch):
+    """A ``PermissionError`` invalidating a prior slot's completion marker
+    (e.g. the marker file itself is momentarily held open) must abort the
+    install rather than being swallowed and letting mutation proceed with
+    a stale marker still on disk. Only a genuinely absent marker
+    (``FileNotFoundError``) is the ordinary, ignorable case.
+    """
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+    self_install(pd, root=root, dry_run=False)
+    assert current_version(root) == "1.2.3"
+
+    real_unlink = Path.unlink
+
+    def _flaky_unlink(self, *a, **k):
+        if self.name == si._SLOT_COMPLETE_MARKER:
+            raise PermissionError(13, "Access is denied")
+        return real_unlink(self, *a, **k)
+
+    monkeypatch.setattr(Path, "unlink", _flaky_unlink)
+    # Force a reinstall of the SAME version so _copy_payload_unsafe's
+    # invalidation step actually runs against a marker that already exists.
+    monkeypatch.setattr(si, "_binstubs_are_stale", lambda: True)
+
+    res = self_install(pd, root=root, dry_run=False)
+
+    assert res.action == "error"
+    assert "Access is denied" in (res.reason or "")
+
+
 def test_stale_provider_manifest_forces_repair(tmp_path, monkeypatch):
     pd = _fake_payload(tmp_path, "1.2.3")
     root = tmp_path / "root"
