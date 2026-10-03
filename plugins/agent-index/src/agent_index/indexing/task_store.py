@@ -55,12 +55,28 @@ class TaskStatus(StrEnum):
     QUEUED = "queued"
     PROCESSING = "processing"
     COMPLETE = "complete"
+    PARTIAL = "partial"
     FAILED = "failed"
     CANCELLED = "cancelled"
     INTERRUPTED = "interrupted"
 
 
-TERMINAL = {TaskStatus.COMPLETE, TaskStatus.FAILED, TaskStatus.CANCELLED, TaskStatus.INTERRUPTED}
+# PARTIAL is terminal but NOT unconditionally "succeeded": the worker ran to
+# completion without crashing/cancelling, but one or more of its requested
+# sources individually failed (see ``result_stats.sources_failed``) -- the run
+# as a whole "ended", not cleanly. Distinguishing it from COMPLETE closes a
+# real masking gap: a single-source task whose one source fails used to
+# report plain ``complete`` with 0 chunks stored, indistinguishable from a
+# genuinely clean run without inspecting ``result_stats`` by hand (bit twice
+# in the same corpus-fidelity session: #4948's git:X:commits bug and #5004's
+# github:X:issues/:pulls bug both hid behind this exact ambiguity).
+TERMINAL = {
+    TaskStatus.COMPLETE,
+    TaskStatus.PARTIAL,
+    TaskStatus.FAILED,
+    TaskStatus.CANCELLED,
+    TaskStatus.INTERRUPTED,
+}
 
 
 @dataclass
