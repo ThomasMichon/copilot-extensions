@@ -517,9 +517,18 @@ def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | 
             return None
     with tracking._RecordLock(rec_path, require_sidecar=True):
         record = tracking.load_record(rec_path)
+        # Idempotency contract matches `pr_ops._ensure_pr_claim`: capture
+        # whether this ref is already an active `pr` claim BEFORE mutating
+        # -- `add_resource_claim` reuses a matching ref rather than
+        # duplicating it, so a repeat `run` observing the same already-
+        # claimed PR must never feed a spurious second "claimed" event.
+        already_active = claim.kind == "pr" and any(
+            c.ref == claim.ref and c.kind == "pr" and c.state == obligations.ACTIVE
+            for c in record.resources
+        )
         tracking.add_resource_claim(record, claim, save=False)
         tracking.save_record(record, rec_path)
-    if claim.kind == "pr":
+    if claim.kind == "pr" and not already_active:
         # worktree-claims-transitive-finalization Phase 3b: feed this
         # mutation into the same append-only ownership ledger `pr_ops.py`
         # and the daemon claim verbs already feed, after the save above
@@ -620,9 +629,19 @@ def cmd_run(args: argparse.Namespace) -> int:
                 owner_record.resources = [
                     item for item in owner_record.resources if item.ref != pending_ref
                 ]
+                # Idempotency contract matches `pr_ops._ensure_pr_claim`:
+                # capture whether this ref is already an active `pr` claim
+                # BEFORE mutating -- a repeat `run` observing the same
+                # already-claimed PR must never feed a spurious second
+                # "claimed" event.
+                already_active = claim.kind == "pr" and any(
+                    item.ref == claim.ref and item.kind == "pr"
+                    and item.state == obligations.ACTIVE
+                    for item in owner_record.resources
+                )
                 tracking.add_resource_claim(owner_record, claim, save=False)
                 tracking.save_record(owner_record, owner_path)
-            if claim.kind == "pr":
+            if claim.kind == "pr" and not already_active:
                 # worktree-claims-transitive-finalization Phase 3b: this is
                 # the actual live save site for `run`'s produced PR claim
                 # (the pending-ref placeholder above is replaced with the

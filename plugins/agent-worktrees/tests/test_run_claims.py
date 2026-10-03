@@ -157,6 +157,22 @@ class TestJournalRunClaim:
         assert claim_history.history_for_ref(
             "anomalous-potato/copilot-extensions/wt-B") == []
 
+    def test_repeat_journal_of_same_active_pr_claim_does_not_duplicate_history(
+            self, tmp_path: Path, monkeypatch):
+        """A repeat `run` re-observing the same already-active PR claim
+        (e.g. a retried/re-run command) is a no-op reconciliation, not a
+        fresh transition -- must feed exactly one "claimed" event, never
+        two (matches `pr_ops._ensure_pr_claim`'s own idempotency
+        contract)."""
+        self._make_caller(tmp_path, monkeypatch)
+        owner_ref = "anomalous-potato/test-chamber/wt-A#s1"
+        out = json.dumps({"success": True, "pr_opened": True,
+                          "pr": {"ref": "https://github.com/o/r/pull/42"}})
+        m._journal_run_claim(owner_ref, out)
+        m._journal_run_claim(owner_ref, out)
+        events = claim_history.history_for_ref("https://github.com/o/r/pull/42")
+        assert [e["event"] for e in events] == ["claimed"]
+
     def test_missing_caller_record_is_noop(self, tmp_path: Path, monkeypatch):
         monkeypatch.setattr("agent_worktrees.config.tracking_dir",
                             lambda: tmp_path)

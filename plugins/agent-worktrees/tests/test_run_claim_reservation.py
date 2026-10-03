@@ -90,6 +90,26 @@ def test_run_success_feeds_claim_history_for_a_pr_claim(
     assert events[0]["worktree_id"] == "owner" and events[0]["machine"] == "m"
 
 
+def test_run_repeat_success_on_same_active_pr_claim_does_not_duplicate_history(
+        tmp_path, monkeypatch):
+    """A retried/re-run `run` re-observing the same already-active PR claim
+    is a no-op reconciliation, not a fresh transition -- must feed exactly
+    one "claimed" event, never two (matches `pr_ops._ensure_pr_claim`'s own
+    idempotency contract)."""
+    _seed_owner(tmp_path, monkeypatch)
+    payload = json.dumps({
+        "success": True, "pr_opened": True,
+        "pr": {"ref": "https://github.com/o/r/pull/9"},
+    })
+    monkeypatch.setattr(
+        m.subprocess, "run",
+        lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=payload))
+    assert m.cmd_run(_args()) == 0
+    assert m.cmd_run(_args()) == 0
+    events = claim_history.history_for_ref("https://github.com/o/r/pull/9")
+    assert [e["event"] for e in events] == ["claimed"]
+
+
 def test_run_success_worktree_claim_does_not_feed_claim_history(
         tmp_path, monkeypatch):
     """A `worktree`-kind claim is outside claim_history's scope (`pr`-kind

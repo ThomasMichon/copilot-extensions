@@ -24,7 +24,11 @@ returns) and ``_journal_run_claim`` (a separately-tested pure helper not
 currently called from ``cmd_run``'s own live flow, but sharing the exact
 same append+save shape, so left wired for parity rather than silently
 missing the ledger if it's ever reconnected or reused). Both record an
-``event="claimed"`` entry only after their own save is durably confirmed.
+``event="claimed"`` entry only after their own save is durably confirmed,
+and both follow the same idempotency contract ``pr_ops._ensure_pr_claim``
+established: a ref already an active ``pr`` claim before the mutation is
+a no-op reconciliation, not a fresh transition, so a repeat ``run``
+re-observing the same already-claimed PR never feeds a duplicate event.
 
 **Explicitly NOT yet covered by this slice** (tracked as a remaining
 follow-up, not silently dropped):
