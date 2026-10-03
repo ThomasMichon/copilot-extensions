@@ -723,34 +723,39 @@ of the Request):**
       names only versionable things the SAME diff actually touches (new —
       rejects an added changefile that over-claims, e.g. naming an
       untouched plugin or stale vendorable).
-- [ ] _(agent-recommended elaboration of the Request's "manifests" idea)_
-      Give each vendorable its own lightweight version-bearing manifest
-      (shape TBD — see open question below) under `libs/<lib>/`, so
-      `tools/changefile.py add` can name the vendorable **itself** as the
-      versioned thing a PR touches, instead of requiring every one of its
-      consumers to be named individually.
+- [ ] _(agent-recommended elaboration of the Request's "manifests" idea;
+      shape decided 2026-10-02, operator-confirmed)_ Give each vendorable
+      its own version identity by treating the version ALREADY declared in
+      its canonical `libs/<lib>/pyproject.toml` as authoritative — no new
+      manifest file type. `tools/changefile.py add` accepts the vendorable
+      name directly (e.g. `--plugin ssh-manager`) as the versioned thing a
+      PR touches, instead of requiring every one of its consumers to be
+      named individually.
 - [ ] Teach the aggregator (`accumulate_bumps.py`) that bumping a
       vendorable's own manifest version auto-bumps every one of its
       registered consumers too (real vendored copies and `uv`-editable
       pointer consumers alike, per `check-vendored-libs-sync.py`'s existing
       consumer map) — a consumer no longer needs its own separate
       changefile entry for a vendorable-only change.
-- [ ] Replace real version values across `dev`'s manifests (`plugin.json`,
+- [ ] _(exact form decided 2026-10-02, operator-confirmed: literal "0.0.0")_
+      Replace real version values across `dev`'s manifests (`plugin.json`,
       `pyproject.toml`, `.github/plugin/marketplace.json`, checked-in
-      `__version__`/`_FALLBACK_VERSION` source assignments — exact file set
-      TBD, see open question below) with a placeholder, and make
-      `promote_release.py` **generate** real versions and a real
-      `marketplace.json` fresh at promotion time from accumulated
-      changefiles, rather than incrementally patching an existing valid
-      file — this also finally closes Phase 6's still-open "`dev`
-      marketplace placeholder" item instead of leaving it a separate loose
-      end.
-- [ ] Retire `check-version-consistency.py`'s pre-push + CI enforcement
-      (the hook/CI check currently pressuring hand-edits to keep version
-      fields in sync) now that placeholders make cross-file version
-      agreement meaningless on `dev`. Confirm nothing else (docs
-      consistency, runbook-reference checks) assumes a real, comparable
-      version is already present on `dev` before this lands.
+      `__version__`/`_FALLBACK_VERSION` source assignments) with the
+      literal string `"0.0.0"`, and make `promote_release.py` **generate**
+      real versions and a real `marketplace.json` fresh at promotion time
+      from accumulated changefiles, rather than incrementally patching an
+      existing valid file — this also finally closes Phase 6's still-open
+      "`dev` marketplace placeholder" item instead of leaving it a separate
+      loose end.
+- [ ] _(fate decided 2026-10-02, operator-confirmed: delete outright)_
+      Delete `check-version-consistency.py` and its pre-push + CI wiring
+      entirely — now that `dev` carries only `"0.0.0"` placeholders,
+      cross-file version agreement is meaningless there, and
+      `accumulate_bumps.py`'s promotion-time write is the only path that
+      still needs internal consistency (which it already guarantees by
+      construction — it writes every surface itself). Confirm nothing else
+      (docs consistency, runbook-reference checks) assumes a real,
+      comparable version is already present on `dev` before this lands.
 - [ ] Update `CONTRIBUTING.md`'s "Release & Versioning" section to describe
       the new model end to end: vendorable manifests, bidirectional
       changefile correctness against fresh `dev`, placeholder versions, and
@@ -758,24 +763,16 @@ of the Request):**
       number now — no hook/CI path should ever again describe hand-editing
       one.
 
-**Open design points needing operator confirmation before coding starts**
-(flagged per this effort's own review-gate convention — a genuine
-architecture decision, not a default to assume):
+**Open design points — resolved 2026-10-02 (operator-confirmed):**
 
-1. **Placeholder exact form:** literal `"0.0.0"` in every version field, or
-   omit/null the field entirely where the file format allows it? The
-   Request names both as acceptable ("remove... or leave placeholders
-   (0.0.0)") but implementation needs one consistent choice per file type.
-2. **Vendorable manifest shape:** a minimal new `libs/<lib>/VENDOR_MANIFEST.json`
-   (name + version only), or extend the existing `pyproject.toml` version a
-   vendorable's `libs/<lib>/` directory already carries to be the
-   authoritative one `tools/changefile.py`/`accumulate_bumps.py` key off of
-   directly? Affects how much new file-format surface this phase adds vs.
-   reusing what's already there.
-3. **`check-version-consistency.py` fate:** deleted outright, or kept
-   disabled-but-present (e.g. for a future real-version-on-`main`
-   consistency check post-promotion), given `main` still needs a real,
-   internally-consistent version even once `dev` goes to placeholders?
+1. **Placeholder exact form:** literal `"0.0.0"` in every version field
+   (not omitted/null) — simplest, keeps every field present and parseable.
+2. **Vendorable manifest shape:** reuse the version already declared in
+   `libs/<lib>/pyproject.toml` as authoritative — no new manifest file type.
+3. **`check-version-consistency.py` fate:** deleted outright (not kept
+   disabled-but-present) — `accumulate_bumps.py`'s promotion-time write
+   already guarantees internal consistency by construction, since it writes
+   every surface itself; a separate checker has nothing left to catch.
 
 ## Validation Plan
 
