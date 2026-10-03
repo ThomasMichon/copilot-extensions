@@ -48,10 +48,14 @@ artifact set's identity folds together:
   on the same `artifact_id`.
 
 **Manifest schema note (version 2):** ``build_toolchain`` is a structured
-record (``{"packages": {"setuptools": "...", "wheel": "..."}, "lock_id":
-"sha256:..."}``) describing the one locked toolchain every wheel in the
-set was built against -- not schema version 1's ad hoc list of per-wheel
-``Generator:`` strings gathered after the fact.
+record (``{"packages": {"setuptools": "...", "wheel": "...", "packaging":
+"..."}, "lock_id": "sha256:..."}``) describing the one locked toolchain
+every wheel in the set was built against -- not schema version 1's ad hoc
+list of per-wheel ``Generator:`` strings gathered after the fact.
+``packaging`` is locked alongside ``setuptools``/``wheel`` so this tool's
+own ``[build-system].requires`` verification can run inside the locked,
+governed-feed-sourced venv rather than depending on ``packaging`` being
+importable in whatever process runs this tool.
 
 Usage::
 
@@ -90,6 +94,7 @@ from build_toolchain_lock import (  # noqa: E402
     _venv_python_path,
     _TRUSTED_INDEX_HOSTS_ENV_VAR,
     resolve_toolchain_lock,
+    sanitize_subprocess_env,
 )
 
 try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
@@ -697,7 +702,9 @@ def build_wheel(
         elif python:
             cmd += ["--python", python]
         cmd.append(str(source_dir))
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, env=sanitize_subprocess_env()
+        )
         if result.returncode != 0:
             raise ArtifactBuildError(
                 f"uv build failed for {source_dir}:\n{result.stdout}\n{result.stderr}"

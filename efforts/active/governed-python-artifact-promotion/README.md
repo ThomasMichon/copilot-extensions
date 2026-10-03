@@ -672,6 +672,54 @@ win grows with build complexity.
   closure resolution/lag-tolerant selection; and the trust/publication
   contract (attestation, GitHub Release channel). **Next:** pick up one of
   those as the next Phase 2 slice.
+- An eleventh review round found 6 more issues, closing out the
+  deliberately-deferred `packaging`-dependency gap for real this time: (1)
+  **HIGH:** the final `uv build --no-build-isolation` call (and, less
+  severely, the toolchain version/marker-environment queries) inherited
+  the caller's ambient `PYTHONPATH`/`PYTHONHOME` -- the locked venv
+  interpreter still honors those variables, so an ambient module could
+  shadow the locked `setuptools` even though the manifest claims the
+  locked venv was authoritative. Fixed with a single shared
+  `sanitize_subprocess_env()` helper, applied to every subprocess that
+  invokes a specific interpreter directly (the build itself, both
+  toolchain queries, and venv creation/install). (2) **HIGH:** a shared
+  `--toolchain-venv`'s reuse check (`venv_python.is_file()`) proved only
+  that an interpreter existed, not that it came from the currently
+  validated governed index -- a stale venv built under a prior/different
+  trust policy would be silently reused and trusted forever. Fixed by
+  publishing a provenance marker (`.governed-feed-provenance.json`,
+  recording the validated index URL) atomically alongside the venv at
+  publish time; reuse now verifies an EXACT match, and quarantines
+  (never deletes) any unmarked or mismatched venv aside before rebuilding
+  from the currently-validated index, exactly as if it had never existed.
+  (3) `--no-config` does not suppress `UV_CONSTRAINT`/`UV_OVERRIDE`
+  (main install) or `UV_BUILD_CONSTRAINT` (source-distribution build
+  dependencies) -- any could redirect the locked packages to a direct URL
+  regardless of `--index-url`; added to the stripped-variable set. (4)
+  closed the deliberately-deferred `packaging`-dependency gap named in
+  round 10: rather than declaring/bootstrapping it as a real tool-level
+  dependency, `packaging` is now itself one of this toolchain's own
+  locked packages (`_LOCKED_TOOLCHAIN_PACKAGES` gained a third entry), and
+  `_assert_toolchain_satisfies_build_requires`'s actual parsing/comparison
+  now runs as a subprocess THROUGH the locked toolchain's own interpreter
+  (a new `_BUILD_REQUIRES_CHECK_SCRIPT`) rather than importing `packaging`
+  in the calling process at all -- a genuinely clean machine with just
+  Python and `uv` installed now has no dependency gap, closed rather than
+  pragmatically worked around. (5) the no-governed-feed-configured error
+  message named only the user-level `uv.toml`, even though round 10 had
+  already added system-level config-path checking -- updated to mention
+  both. (6) a stray control character in `ci.yml` (introduced, ironically,
+  by this session's own SSH-fetch-and-rewrite of that file while adding
+  the round-10 CI step -- the same lossy-fetch issue already identified
+  and worked around for this Journal) had silently replaced the intended
+  section symbol (`CONTRIBUTING.md § Code Style`) in a code comment;
+  repaired and verified via direct codepoint inspection. 7 more unit
+  tests (124 total, all passing); real smoke tests re-verified against
+  `agent-bridge`/`agent-worktrees`/`agent-vault`: the shared-`--toolchain-
+  venv` reuse path now confirms matching provenance before reporting the
+  identical `lock_id`, and the default no-`--toolchain-venv` CLI path
+  (the round-10 Windows fix) still succeeds end-to-end with `packaging`
+  now present in the recorded `build_toolchain.packages`.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 
