@@ -1,0 +1,9 @@
+{
+  "comment": "Parse Git subcommands before classifying anchor writes",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

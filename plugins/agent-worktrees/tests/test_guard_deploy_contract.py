@@ -66,6 +66,7 @@ def test_all_installers_deploy_every_py_hook():
         "statelessness_guard.py",
         "cross_repo_guard.py",
         "anchor_write_guard.py",
+        "anchor_shell_parser.py",
         "pr_supersede_guard.py",
         "nudge_status.py",
         "bind_nudge.py",
@@ -80,6 +81,10 @@ def test_all_installers_deploy_every_py_hook():
         for g in scripts:
             if g not in text:
                 missing.append(f"{name} does not deploy {g}")
+        if text.find("anchor_shell_parser.py") > text.find("anchor_write_guard.py"):
+            missing.append(
+                f"{name} deploys anchor_shell_parser.py after its importer"
+            )
     assert not missing, (
         "python hook(s) wired in hooks.json but not deployed by an "
         "installer (they would silently no-op):\n  " + "\n  ".join(missing))
