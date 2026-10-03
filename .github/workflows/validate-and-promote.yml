@@ -752,21 +752,29 @@ jobs:
           # comparison), but it surfaced this real structural gap: nothing
           # here actually pinned promotion to what `gate` validated.
           DEV_SHA: ${{ needs.gate.outputs.sha }}
-          # `promote_release.py`'s own `measured_commit` consistency check
-          # (see `_write_coverage_baselines_into_scratch`) refuses any
-          # baseline not measured against this exact `DEV_SHA` -- a stale
-          # artifact from a superseded run can never be silently checked
-          # in by passing this directory, whether or not it's empty.
-          COVERAGE_BASELINES_DIR: coverage-baselines
         run: |
+          # NOTE (workflow-only main bootstrap, see PR #5085): this
+          # intentionally does NOT forward `--coverage-baselines-dir` to
+          # `tools/promote_release.py` on `main` -- `main`'s own copy of
+          # that script still checks the FULL per-line coverage map into
+          # the generated commit's tree, which is exactly what made two
+          # plugins' baseline JSON exceed GitHub's 100MB push limit (#5075).
+          # The real fix (a small pointer checked in instead, full payload
+          # published as a Release asset -- see the "Publish coverage
+          # baselines" step above) lives in `tools/promote_release.py` on
+          # `dev` (PR #5078), which this repo's own `main`-only bootstrap
+          # gate refuses to accept directly (workflow-files only -- see
+          # `main source gate`'s own script). Once dev's own fix promotes
+          # through this now-unblocked pipeline for real, this forwarding
+          # is restored atomically alongside it; until then, a promotion
+          # simply omits the git-committed pointer for this round (the
+          # Release asset above still publishes the real evidence).
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$PUSH_INPUT" = "false" ]; then
-            python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
-              --coverage-baselines-dir "$COVERAGE_BASELINES_DIR"
+            python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main
             echo "land=false" >> "$GITHUB_OUTPUT"
           else
             python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
-              --push --candidate-branch "$CANDIDATE_BRANCH" \
-              --coverage-baselines-dir "$COVERAGE_BASELINES_DIR"
+              --push --candidate-branch "$CANDIDATE_BRANCH"
             echo "land=true" >> "$GITHUB_OUTPUT"
             # Consumed changefiles are no longer swept off `dev` by this
             # run: `purge-consumed-changefiles.yml` does that once daily
