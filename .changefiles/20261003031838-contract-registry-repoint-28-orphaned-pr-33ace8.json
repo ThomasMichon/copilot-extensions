@@ -1,0 +1,9 @@
+{
+  "comment": "contract registry: repoint 28 orphaned pre-squash provenance commits to their reachable squash-merge equivalents (verified via blob-hash match); remove 4 ghost entries whose content never actually landed on dev (recurrence of #2230, tracked in #5050/#5054)",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

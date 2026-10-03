@@ -1,7 +1,7 @@
 {
   "captured_from": {
-    "commit": "4313805d12a1c70f379321bae6af51be7b4a3696",
-    "plugin_version": "0.4.1-dev3",
+    "commit": "e0e8924659ae27b22ba69d2fd48a5bdf0b4bf1ba",
+    "plugin_version": "0.4.1-dev2",
     "protocol_generation": 19,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
     "source_git_blob": "0376764246259993a910c18c6fe386474ebefa45",
