@@ -416,16 +416,25 @@ back to the bare runner above when Docker/the devcontainers CLI isn't
 available. See `TESTING.md` § *Optional devcontainer-based isolation* for
 the full mechanics.
 
-**Skip the wrapper if your own session is already running inside a
-container** (an `agent-containers` dispatched worker, a CI job container,
-etc. — check for `/.dockerenv`, `/run/.containerenv`, or a `docker`/
-`kubepods`/`containerd`/`lxc`/`libpod` tag in `/proc/1/cgroup`, the same
-markers `agent-dispatch`'s own `netinfo._in_container()` uses). Nesting a
-second container inside the first is redundant — the outer container is
-already the real OS-level boundary a fix needs — and commonly isn't even
-possible without privileged Docker-in-Docker access the outer container
-was deliberately never granted. The bare runner's process-level
-containment is the correct, sufficient choice there.
+**A container marker alone is not sufficient reason to skip the wrapper.**
+Being inside *some* container (an `agent-containers` dispatched worker, a
+generic CI job container, etc. — detectable via `/.dockerenv`,
+`/run/.containerenv`, or a `docker`/`kubepods`/`containerd`/`lxc`/`libpod`
+tag in `/proc/1/cgroup`, the same markers `agent-dispatch`'s own
+`netinfo._in_container()` uses) does **not** prove that container supplies
+the wrapper's own test-execution boundary — a generic dev/CI container may
+still bind-mount the live host checkout, expose a Docker socket or live
+credentials, or allow unrestricted outbound network, all weaker than the
+hardened, network-disconnected boundary `.devcontainer/test-isolation/
+devcontainer.json` actually provides. Only fall back to the bare runner's
+process-level containment when either: nested Docker-in-Docker genuinely
+isn't available there (the common case — most dispatched/CI containers
+don't expose a working Docker daemon/socket to begin with, so the wrapper
+simply can't run), or the outer container's own isolation has been
+independently verified equivalent (hardened, no Docker-socket/credential/
+live-checkout exposure, network-restricted) to that same bar. Otherwise,
+still prefer the wrapper — don't skip it just because you happen to be in
+a container.
 
 **Per-plugin coverage** — what each plugin's suite exercises — lives in
 `TESTING.md` § *Per-plugin coverage*, not here (that enumeration drifts as
