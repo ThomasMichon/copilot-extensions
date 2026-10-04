@@ -1,0 +1,9 @@
+{
+  "comment": "Point contributing guidance at the devcontainer-isolated test runner after a bug fix (AGENTS.md + contributing-to-copilot-extensions skill), closing the discoverability gap from devcontainer-test-isolation Phase 2",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}
