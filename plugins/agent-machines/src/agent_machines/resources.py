@@ -113,9 +113,24 @@ Runner = Callable[[list[str]], RunOutcome]
 
 
 def default_runner(argv: list[str], timeout: int = DEFAULT_TIMEOUT) -> RunOutcome:
-    """Run a package-manager command (argv list, never a shell string)."""
+    """Run a package-manager command (argv list, never a shell string).
+
+    ``argv[0]`` is resolved through :func:`shutil.which` before exec. On
+    Windows, ``CreateProcess`` only auto-appends ``.exe`` to an unqualified
+    command name -- unlike ``shutil.which()``, it does not consult
+    ``PATHEXT`` -- so a manager binary that only exists as a ``.cmd``/``.bat``
+    shim (a real, observed shape: Windows package-manager wrappers and
+    test/CI stand-ins are commonly batch files) fails to launch with
+    ``FileNotFoundError: [WinError 2]`` even though the same name resolves
+    fine interactively. Passing the fully resolved, extension-qualified path
+    lets Windows's batch-file CreateProcess handling (an automatic
+    ``%ComSpec% /c``) take over correctly. Falls back to the bare name if
+    resolution fails, preserving the prior behavior (and error) for a
+    genuinely missing binary.
+    """
+    resolved = shutil.which(argv[0]) or argv[0]
     proc = subprocess.run(  # noqa: S603 - argv list, manager binary resolved via which()
-        argv,
+        [resolved, *argv[1:]],
         capture_output=True,
         encoding="utf-8",
         errors="replace",

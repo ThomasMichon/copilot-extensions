@@ -382,12 +382,12 @@ below — read it before starting any Phase 3 work).
       confirm the evaluator's schema/marker check.
 
 ### Phase 6 — Named recipe: issue-reproducer (Request item d)
-- [ ] Ship a global recipe: attempts reproduction via relevant strategies,
+- [x] Ship a global recipe: attempts reproduction via relevant strategies,
       attaches evidence + a comment, tags reproducible/not-reproducible
       (a "strike" marker on the not-reproducible path).
-- [ ] Reuse Phase 2's backlog-provider adapters (same filterable-issue-list
+- [x] Reuse Phase 2's backlog-provider adapters (same filterable-issue-list
       shape as Phase 5).
-- [ ] Tests: a reproducible and a not-reproducible fixture outcome, each
+- [x] Tests: a reproducible and a not-reproducible fixture outcome, each
       confirmed via the evaluator's evidence/tag check.
 
 ### Phase 7 — Named recipe: effort-builder (Request item e)
@@ -1070,3 +1070,61 @@ suite green (3743 passed, 23 skipped, the one known flake above).
     sub-suite here; rerunning with `--timeout 600 --plugin-timeout 2400`
     completed green with no code changes, confirming a local timing-budget
     issue rather than a Phase 5 regression.
+
+### 2026-10-03 — Phase 6: issue-reproducer named recipe landed
+- Added a sixth built-in global recipe template,
+  `global:issue-reproducer`, as another `repository-issue-loop`
+  parameterization (`registrar_recipes.py`): common backlog-loop defaults
+  (`exclude_labels`, headless pool body) plus a new built-in
+  `worker_identity: issue-reproducer`, `require_verification: true`, a
+  shared opaque `evaluator_ref: issue-reproducer`, and a recipe-specific
+  `task_contract` that turns the created task into a bounded reproduction
+  lane rather than the default implement-through-merge contract.
+- Added the built-in worker identity
+  `agent_dispatch/identities/issue-reproducer.identity.md`. Its charter is
+  the shared/generic half only: attempt reproduction via whatever
+  strategies the repository/stack makes available, record durable evidence
+  of what was actually tried, keep reproducible bugs active with the
+  repository's reproducible marker(s), and apply the repository's
+  not-reproducible + strike-marker convention on the bounded failure path.
+- **Shared-vs-consumer evaluator split (same pattern as Phase 5):** the
+  shipped recipe fixes the global lifecycle contract (`require_verification`
+  + `evaluator_ref`) but does **not** hardcode any one repository's exact
+  evidence/comment schema, reproducible/not-reproducible tag names, or
+  strike-marker vocabulary. Those remain consumer-specific and are enforced
+  by the consuming repo's own trusted evaluator registration under
+  `evaluator_ref: issue-reproducer` (repo-scoped or `all_repos`, as that
+  consumer chooses).
+- Reused the existing provider-neutral issue-list emitter exactly as Phase 6
+  required: no new listing code was added. The new recipe resolves to
+  ordinary `kind: repository-issue-loop`, so it automatically uses the same
+  forge adapters Phase 2 already established for that loop
+  (GitHub/Azure DevOps today; Gitea remains the deferred stub and is still
+  validation-rejected, unchanged here).
+- Tests added:
+  - `test_registrar_recipes.py`: `global:issue-reproducer` resolves end to
+    end, stamps the expected verification fields, and the built-in identity
+    resolves.
+  - `test_repository_issue_loops.py`: an `extends: global:issue-reproducer`
+    declaration drives all the way through the generic
+    repository-issue-loop tick path against a fixture issue, proving the
+    named recipe reuses the existing issue-list emitter and emits the
+    reproduction-specific task contract.
+  - `test_verification.py`: a fixture trusted script evaluator keyed by
+    `issue-reproducer` confirms both a reproducible outcome and a
+    not-reproducible-with-strike outcome only when the selected issue has
+    durable reproduction evidence plus the expected outcome markers; a
+    missing-strike not-repro outcome stays submitted.
+- Documentation updated: `plugins/agent-dispatch/README.md` now lists
+  `global:issue-reproducer` alongside the other shipped global recipes and
+  documents the same shared-recipe / consumer-evaluator adoption split as
+  `global:backlog-triager`.
+- Validation:
+  - focused Phase 6 tests: **157 passed**
+  - full `agent-dispatch` suite: **passed** via
+    `python tools/run-plugin-tests.py agent-dispatch --timeout 600 --plugin-timeout 2400`
+  - local note: the default 300s per-sub-suite wall-clock budget in
+    `tools/run-plugin-tests.py` again proved too tight for one deep Windows
+    sub-suite here; the longer-timeout rerun completed green with no code
+    changes, confirming a local timing-budget issue rather than a Phase 6
+    regression.

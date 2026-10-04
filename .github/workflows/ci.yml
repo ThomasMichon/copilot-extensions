@@ -258,6 +258,8 @@ jobs:
         run: python -m pytest -q tools/test_check_no_sibling_tracking_writes.py
       - name: Module health watchdog tests
         run: python -m pytest -q tools/test_module_health_watchdog.py
+      - name: Stale branch sweep tests
+        run: python -m pytest -q tools/test_sweep_stale_branches.py
       - name: CI failure watchdog tests
         # promotion-failure-reactive-fix-agent effort, Phase 1: the
         # detect+dedup reporting logic validate-and-promote.yml's own

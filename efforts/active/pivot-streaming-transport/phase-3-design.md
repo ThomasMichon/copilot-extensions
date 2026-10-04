@@ -63,6 +63,17 @@ phase) is considered.
         fixed 2s poll this phase exists to reduce. The dirty bit persists
         across a throttled wait; it never causes an update to be dropped,
         only delayed to the next allowed tick.
+
+        **Implementation note:** the shipped relay satisfies the "never
+        drop a mid-fetch event" requirement without a separate dirty-bit
+        field — its single control loop's reader thread simply leaves a
+        mid-fetch event unread on its queue until the current fetch's loop
+        iteration finishes, so it is picked up as an ordinary wake on the
+        very next iteration. The functional behavior (coalesce a burst,
+        never drop a mid-fetch event, rate-limit the trailing fetch) is
+        identical; only the mechanism differs. See the "serialize every
+        writer" bullet below for the same note on that requirement's own
+        mechanism.
   - [ ] **Close the gap between the initial snapshot and the subscription
         actually being live — and prove it's actually live, not just that
         the HTTP response started:** a mutation that lands after the
@@ -270,6 +281,32 @@ phase) is considered.
         degraded path) all take the same lock; a trigger arriving while
         another writer holds it queues (coalescing with any already-pending
         debounced wake) rather than running concurrently.
+
+        **Implementation note:** the shipped relay (`board_relay.py`)
+        satisfies this requirement by construction instead of with an
+        explicit lock object: a **single** control loop
+        (`run_relay`/`_drive`) is the only thread that ever calls any
+        writer — the event-woken re-fetch, the long reconcile, and the
+        local recompute tick all run one-at-a-time inside that same loop,
+        so there is never more than one writer active, with no lock to
+        acquire, hold, or forget. The fallback poller (next bullet) is the
+        one writer that genuinely runs on its own schedule outside that
+        loop (concurrently with reconnect attempts) — it is still never
+        racing a connected-channel writer, since the two states
+        (event-loop-active vs. reconnecting-and-polling) are mutually
+        exclusive in `_drive`'s own iterative state machine, never both
+        active at once. The debounce/trailing-fetch requirement above is
+        likewise satisfied without a separate boolean flag: an event
+        arriving while a fetch is in flight is simply left unread on the
+        reader thread's queue until the control loop's current iteration
+        finishes, so it is naturally picked up on the very next iteration
+        — the same trailing-fetch behavior, achieved by the queue itself
+        rather than a dedicated dirty bit. See `board_relay.py`'s own
+        module docstring for the full rationale; a dedicated regression
+        test (`test_event_loop_serializes_every_writer_never_running_
+        concurrently` in `test_board_relay.py`) proves the maximum
+        concurrent writer count is 1 even when the event wake and both
+        timers are made to fall due together.
   - [ ] **A transient SSE failure degrades to polling temporarily, not
         permanently, and reconnecting means a genuinely fresh client, not a
         retried stale one — and the fallback poller itself is a writer that
@@ -302,6 +339,13 @@ phase) is considered.
         problem `ResolvingDispatchClient` (`client.py:1112`) already exists
         to solve for long-running supervisors; this reconnect reuses that
         exact pattern rather than inventing a second one.
+
+        **Implementation note:** the shipped relay's fallback poller
+        (`_reconnect_loop`) needs no explicit "quiesce" step either, for
+        the same construction reason as above — it is never running at the
+        same time as the event loop in the first place (`_drive`'s state
+        machine hands control to exactly one of them at a time), so there
+        is nothing to quiesce before the promotion reconcile runs.
 - [ ] **3b — agent-bridge daemon-side cache (land first; smaller than the
       agent-dispatch relay, no new HTTP-call-shape change, though it does
       introduce its own new failure modes around the background refresh

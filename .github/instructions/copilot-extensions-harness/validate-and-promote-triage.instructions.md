@@ -1,7 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/copilot-extensions-harness/validate-and-promote-triage.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.6-dev1","renderedBytes":2291,"schema":"copilot-extensions.instruction-projection","sourceId":"validate-and-promote-triage","template":"instructions/validate-and-promote-triage.instructions.md","templateBytes":1451,"templateSha256":"89bebb09582d19588a2e7d2635b2bd2e8db911aef71d2728a333e2e8d02a86bd","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/copilot-extensions-harness/validate-and-promote-triage.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.7-dev1","renderedBytes":2291,"schema":"copilot-extensions.instruction-projection","sourceId":"validate-and-promote-triage","template":"instructions/validate-and-promote-triage.instructions.md","templateBytes":1451,"templateSha256":"89bebb09582d19588a2e7d2635b2bd2e8db911aef71d2728a333e2e8d02a86bd","version":1} -->
 
 > If `validate-and-promote-triage.local.instructions.md` exists here, compare
 > `pluginVersion` and prefer whichever is newer. On a tie,

@@ -124,6 +124,29 @@ trace; not repeated here (public-artifact rule: keep this effort generic).
       same assertions, which didn't fit this slice's scope. Left as a
       concrete next step before Phase 3 reuses this resolver.
 
+### Phase 2d — create-pr: real foreign creation from an already-pushed branch (not started)
+- [ ] Design + implement an additive code path in `pr_ops.create_pr()` (or a
+      new sibling function) for: `--repo <foreign, registered>` +
+      `--from-branch <branch>` (a branch some other process already pushed
+      to that repo's remote). Must skip the entire local squash/push/
+      title-derivation machinery (none of it applies -- no local checkout),
+      resolve the foreign repo's own binding via
+      `pr_config.resolve_repo_config_for_slug()`, and call
+      `provider.create_pull()` directly against it.
+- [ ] Decide what create-pr's fuller machinery (vs. the leaner
+      `agent-pull-requests create`) should still apply in this mode:
+      attribution/codename marker (whose codename -- the calling worktree's
+      own?), label application, and a tracking record on the CALLING
+      worktree (per `venue-and-claims.md`'s "a cross-repo PR is an
+      obligation on your worktree" framing -- should this auto-journal a
+      claim instead of requiring the manual `claims add pr` it documents
+      today?).
+- [ ] Still gated by `require_claimant_worktree()` (already in place from
+      the slice above).
+- [ ] Motivating case: `create-pr --repo <product-repo> --from-branch
+      <user>/<topic>-<worktree-suffix> --title "..." --body-file ...` run
+      from a harness worktree with no local checkout of `<product-repo>`.
+
 ### Phase 3 — Reviewer-capable provider
 - [ ] Extend the `PRProvider` protocol with reviewer-side operations: read
       current diff/surrounding context, read/post comments, read/resolve
@@ -177,6 +200,37 @@ trace; not repeated here (public-artifact rule: keep this effort generic).
 _Pending._
 
 ## Journal
+
+### 2026-10-03 — create-pr: claimant guard + a real --repo bug found
+- Operator caught a gap in the claimant-CWD rollout: `create-pr` didn't get
+  the guard, and their worked example
+  (`create-pr --repo <product-repo> --from-branch ... --title ...`, run from the
+  harness worktree) surfaced something worse than a missing refusal --
+  `--repo` on `create-pr` was **cosmetic only**. It relabels the tracked PR
+  record's `repo` field, but `pr_ops.create_pr()` still pushes/opens against
+  `config.default_repo` (the caller's own repo) unconditionally. So
+  `--repo <foreign> --title ...` would have silently pushed local commits
+  and opened a PR against the CALLER's own repo while recording it as if it
+  targeted the foreign one.
+- Added the same `require_claimant_worktree()` check (only when no explicit
+  `worktree_id` positional is given -- that stays its own sanctioned
+  bypass). Added a new, separate refusal: `--repo` naming a different,
+  also-registered repo is rejected outright (no already-pushed-branch mode
+  exists yet to push into it from here), pointing at two real
+  alternatives: create a worktree of that repo, or use
+  `agent-pull-requests create --repo <repo> --head <branch>` (already
+  built for exactly this).
+- **Did not build** the `--from-branch` already-pushed-branch creation mode
+  the operator's example implied wanting (open a PR against a foreign
+  repo's existing pushed branch, using create-pr's fuller machinery --
+  attribution, labels, tracking). `create_pr()` is ~400 lines of
+  local-git-coupled logic (squash, title derivation from commit history,
+  branch-reuse semantics) that a from-branch/no-local-checkout path would
+  need to skip entirely, not retrofit -- a genuine new code path, not a
+  guard addition. Flagged as the next real slice of this effort rather than
+  guessed at blind.
+- Added `tests/test_pr_create_claimant_guard.py` (6 tests). Landed via PR
+  [#5120](https://github.com/ThomasMichon/copilot-extensions/pull/5120).
 
 ### 2026-10-03 — Phase 2 refinement: claimant-CWD contract + guidance-rich refusals
 - Operator feedback after Phase 2 landed: docs/skills needed to state the
