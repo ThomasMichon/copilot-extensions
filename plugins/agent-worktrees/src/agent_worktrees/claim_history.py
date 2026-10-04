@@ -155,11 +155,22 @@ def record_event(
     event: str,
     session_id: str | None = None,
     note: str = "",
+    project: str | None = None,
 ) -> None:
     """Append one ownership-history entry for a claimed resource.
 
     ``session_id`` defaults to :func:`current_session_id` when omitted, so
     most call sites never pass it explicitly.
+
+    ``project`` should be the OWNING worktree's own tracking record
+    (``WorktreeRecord.repo``) whenever one is available to the caller --
+    never the ambient/current-process project, which can genuinely differ
+    from the record actually being mutated (e.g. an ``--owner-ref``
+    cross-project write, or a daemon dispatch invocation with no project
+    context of its own). Falls back to :func:`current_project_name`
+    (ambient config) only when the caller has no record-derived project to
+    pass -- correct for the common same-project case, but never trusted
+    over an explicit, more specific value.
 
     Best-effort and silently a no-op for any ``kind`` outside
     :data:`SUPPORTED_KINDS` or on any write failure (disk full,
@@ -196,11 +207,11 @@ def record_event(
         # misattribute or permanently drop it. Stamping the project here,
         # once, at write time, survives that independent of tracking
         # records' own lifecycle. Best-effort: an unresolvable project
-        # (e.g. no config loaded yet) leaves the field absent rather than
-        # blocking the write.
-        project = current_project_name()
-        if project:
-            entry["project"] = project
+        # (e.g. no config loaded yet, and no explicit ``project`` passed)
+        # leaves the field absent rather than blocking the write.
+        resolved_project = project or current_project_name()
+        if resolved_project:
+            entry["project"] = resolved_project
         line = json.dumps(entry, ensure_ascii=True)
         with handoff_trace._append_lock(lock_path):
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -214,38 +225,46 @@ def record_event(
 
 
 def current_project_name() -> str | None:
-    """Best-effort current project name for the durable ``project``
-    attribution stamp above -- never raises; an unresolvable config simply
-    leaves new entries without a project stamp (the mirror sweep then
-    falls back to its own live-tracking-record heuristic for them)."""
+    """Best-effort AMBIENT current project name -- the fallback
+    :func:`record_event` uses only when a caller has no record-derived
+    ``project`` of its own to pass explicitly (see that function's own
+    docstring for why ambient config is not always correct). Never
+    raises; an unresolvable config simply leaves new entries without a
+    project stamp (the mirror sweep then falls back to its own
+    live-tracking-record heuristic for them)."""
     try:
         return cfg.load_config().repo_name or None
     except Exception:
         return None
 
 
-def record_claim_released(claim, *, worktree_id: str, machine: str, note: str = "") -> None:
+def record_claim_released(
+    claim, *, worktree_id: str, machine: str, note: str = "", project: str | None = None,
+) -> None:
     """Convenience: record_event("released") for a duck-typed claim object
     (``.kind``/``.ref``) -- shrinks a batch-release call site (e.g.
     ``finalize.py``'s release-all-resources loop) to one line."""
     record_event(
         kind=claim.kind, ref=claim.ref, worktree_id=worktree_id, machine=machine,
-        event="released", note=note,
+        event="released", note=note, project=project,
     )
 
 
-def record_pr_event(ref: str, *, worktree_id: str, machine: str, event: str, note: str = "") -> None:
+def record_pr_event(
+    ref: str, *, worktree_id: str, machine: str, event: str, note: str = "",
+    project: str | None = None,
+) -> None:
     """Convenience: record_event(kind="pr", ...) for the common ``pr_ops.py``
     call-site shape, shrinking three call sites to one line each."""
     record_event(
         kind="pr", ref=ref, worktree_id=worktree_id, machine=machine,
-        event=event, note=note,
+        event=event, note=note, project=project,
     )
 
 
 def record_bundle_transfer(
     snapshot: dict[str, str], *, event: str, worktree_id: str, machine: str,
-    bundle_id: str, direction: str, counterpart: str,
+    bundle_id: str, direction: str, counterpart: str, project: str | None = None,
 ) -> None:
     """Convenience: ``record_pr_event`` for a claim-handoff bundle's own
     transfer (worktree-claims-transitive-finalization Phase 3b) -- a
@@ -254,7 +273,7 @@ def record_bundle_transfer(
         return
     note = f"transferred via claim-handoff bundle {bundle_id} {direction} {counterpart}"
     record_pr_event(snapshot["ref"], worktree_id=worktree_id, machine=machine,
-                    event=event, note=note)
+                    event=event, note=note, project=project)
 
 
 def current_session_id() -> str | None:

@@ -21,43 +21,61 @@ concern that tolerates eventual (not immediate) consistency. Instead,
 --mirror-claim-history`` (opt-in, network + force-push, the same posture
 Phase 5's ``--lease-gc`` established for this same store).
 
-**Durable event identity, not payload equality.** Two genuinely distinct
-local events can serialize identically (``record_event`` timestamps only to
-the second, so a claim released and re-claimed within one second produces
-two otherwise-indistinguishable "claimed" records); comparing raw payloads
-would wrongly treat the second as "already mirrored" and silently drop it.
-Every event pushed here instead carries a ``seq`` -- its own 0-based
-position within its resource's FULL local event sequence, in ledger order
--- as its durable identity. ``seq`` is stable forever: it is derived purely
-from the append-only ledger's own order, never from anything that can
-change later (a worktree's tracking record, a project's live config, ...).
+**Globally unique event identity, not local position alone.** Every event
+pushed here carries a ``(ledger_id, seq)`` pair as its durable identity:
+``seq`` is the event's own 0-based position within its resource's full
+LOCAL event sequence (stable forever -- the ledger is append-only); ``
+ledger_id`` is a random id minted once for this machine's own ledger
+incarnation (:func:`_ledger_id`, persisted alongside the ledger file
+itself). ``seq`` alone is only unique WITHIN one ledger's lifetime -- two
+independent machines' first events for the same PR both get ``seq=0``, and
+a reimaged machine starting a fresh ledger would collide with its own
+earlier incarnation's ``seq=0`` too. ``ledger_id`` discriminates both
+cases; a lost/absent ledger file (no prior incarnation at all, or a
+genuine reimage) mints a fresh one.
+
+**One verified remote snapshot per operation.** Reading "what does the
+remote already have" and "what tip do I compare-and-swap against" from two
+SEPARATE network round trips (an ``ls-remote`` then a later ``fetch``, or
+vice versa) lets a concurrent writer move the ref in between, producing a
+torn read: a push could adopt a parent that doesn't actually match the
+content it just inspected. :meth:`ClaimHistoryMirror._fetch_chain` is the
+ONE place that reads the remote; it returns a tip oid and the fully parsed
+chain from that EXACT oid together, and re-validates after its own fetch
+that the ref didn't move underneath it. Every other method (``fetch``,
+``push_batch``) is built on top of that single verified read -- never a
+second independent query for "the same" state.
+
+**Batched, not per-event.** :meth:`ClaimHistoryMirror.push_batch` pushes
+every still-missing event for one resource as ONE linear chain of commits
+in a SINGLE network push (one verified snapshot read, then one
+compare-and-swap write) -- not one fetch+push round trip per event, which
+would turn an N-event backfill into roughly N times the resource's own
+growing chain length worth of commit reads. :meth:`~ClaimHistoryMirror.push`
+(a single event) is a thin wrapper over a one-entry batch, kept for
+callers that only ever have one event in hand.
 
 **Stateless by design -- no local sync cursor, no local lock.** An earlier
 revision of this module persisted a local JSON "how many events have I
-already pushed" cursor, serialized by a local advisory lock. That design
-had real gaps a reviewer caught: the lock's own setup could raise and
-escape the sweep; a crash between a landed push and its own checkpoint
-write could re-push (or, worse, skip) events; and a cursor based on a
-PROJECT-FILTERED event list silently drifted whenever that filter's output
-changed shape (e.g. a worktree's tracking record got reaped between
-sweeps). Removing the local cursor file removes that whole class of bugs
-outright rather than patching each one: :func:`sync_pending` always asks
-the REMOTE directly (:meth:`ClaimHistoryMirror.fetch`) which ``seq``
-values a resource's chain already has, and only pushes the ones still
-missing. :meth:`ClaimHistoryMirror.push` repeats that same check against
-the remote's CURRENT state immediately before committing (not just once
-up front), so two sweeps racing on the same ref are safe without any local
-coordination at all -- one wins the compare-and-swap; the other's retry
-re-fetches, sees its ``seq`` now present, and no-ops.
+already pushed" cursor, serialized by a local advisory lock -- a design
+with real gaps (the lock's own setup could raise and escape the sweep; a
+crash between a landed push and its own checkpoint write could re-push or
+skip events; a cursor derived from a PROJECT-FILTERED list silently
+drifted when that filter's output changed shape). :func:`sync_pending`
+instead always asks the REMOTE directly which identities a resource's
+chain already has, and only pushes what's missing -- two overlapping
+sweeps need no local coordination at all; one wins the compare-and-swap,
+the other's retry re-reads and finds its own events already there.
 
 **Durable project attribution.** A sweep must never upload one project's
-PR references/session IDs/notes to a DIFFERENT project's configured store
--- the local ledger is machine-global, but a sweep's store is one
-project's own. Every event :mod:`claim_history` records now carries an
-optional ``project`` stamp (``claim_history.current_project_name()``,
-best-effort, at write time) -- durable, since it survives a worktree's own
-tracking record being retired long after the event was recorded. A legacy
-event recorded before this stamp existed falls back to
+PR references/session IDs/notes to a DIFFERENT project's configured store.
+Every event :mod:`claim_history` records now carries an explicit
+``project`` whenever its caller has one to pass (the OWNING worktree's own
+``WorktreeRecord.repo`` -- never ambient config, which can genuinely
+differ from the record actually being mutated, e.g. an ``--owner-ref``
+cross-project write or a daemon dispatch with no project context of its
+own). A legacy event recorded before this field existed, or written by a
+caller with no record-derived project in hand, falls back to
 :func:`_current_project_worktree_ids`'s live-tracking-record heuristic
 (lossy once a worktree is reaped, but fail-closed: never exported when
 neither signal vouches for it).
@@ -77,6 +95,7 @@ import random
 import subprocess
 import tempfile
 import time
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 
@@ -96,7 +115,9 @@ _SENTINEL = "agent-worktrees-claim-history-envelope-v1"
 #: Fields every mirrored event carries as a plain string, always -- even
 #: when the value is empty (a legacy ``machine=""`` record is a real, if
 #: degraded, value, never an absent one).
-_REQUIRED_STR_KEYS = frozenset({"ts", "kind", "ref", "worktree_id", "machine", "event"})
+_REQUIRED_STR_KEYS = frozenset(
+    {"ts", "kind", "ref", "worktree_id", "machine", "event", "ledger_id"}
+)
 
 #: Fields a mirrored event may legitimately omit -- dropped from the
 #: serialized payload only when absent/empty.
@@ -122,6 +143,14 @@ def read_failure_count() -> int:
 class ClaimHistoryMirrorError(RuntimeError):
     """A mirror push could not be completed (exhausted retries, or a
     non-CAS Git transport failure)."""
+
+
+class _SnapshotUnavailable(Exception):
+    """Internal: the remote couldn't be read as one consistent, verified
+    snapshot (a transient failure, or the ref moved between the initial
+    ``ls-remote`` and the follow-up ``fetch`` of that exact oid) -- always
+    caught and translated into a bounded retry by the caller, never
+    surfaced directly."""
 
 
 def mirror_settings(origin: str | None = None) -> LeaseSettings | None:
@@ -172,6 +201,10 @@ def _parse_entry(message: str) -> dict:
     return data
 
 
+def _event_identity(entry: dict) -> tuple[object, object]:
+    return (entry.get("ledger_id"), entry.get("seq"))
+
+
 class ClaimHistoryMirror:
     """Git-ref append-only mirror operations for one configured store."""
 
@@ -200,169 +233,216 @@ class ClaimHistoryMirror:
                 self._auth_args = []
 
     def push(self, entry: dict) -> bool:
-        """Append one history ``entry`` (carrying its own durable ``seq``)
-        to its resource's remote mirror ref, unless that ``seq`` is already
-        present anywhere in the remote chain. Returns ``True`` if a new
-        commit was created, ``False`` if the event was already there (a
-        genuine no-op, not an error). The existence check is re-done
-        against the CURRENT remote state on every attempt (not just once up
-        front), so two sweeps racing on the same ref need no local
-        coordination: one wins the compare-and-swap push; the other's
-        retry re-fetches, finds its ``seq`` now present, and returns
-        ``False``. Raises :class:`ClaimHistoryMirrorError` only after
-        exhausting retries on a non-idempotent failure (a genuine,
-        persistent Git transport problem) -- callers (:func:`sync_pending`)
-        treat that as "this one entry stays pending, try again next
-        sweep," never fatal to the sweep as a whole.
+        """Append one history ``entry`` -- a thin single-event wrapper over
+        :meth:`push_batch`. Returns ``True`` if a new commit was created,
+        ``False`` if the event's identity was already present remotely (a
+        genuine no-op, not an error)."""
+        return self.push_batch([entry]) > 0
+
+    def push_batch(self, entries: list[dict]) -> int:
+        """Push every entry in ``entries`` (all for the SAME ``(kind,
+        ref)`` resource, in the order given) that the remote doesn't
+        already have, as ONE linear chain of commits in a single network
+        push -- one verified snapshot read, then one compare-and-swap
+        write, rather than one fetch+push round trip per event (which
+        would make an N-event backfill read roughly N times the
+        resource's own growing chain length worth of commits). Returns
+        how many were actually newly committed (``0`` if every entry was
+        already present -- a legitimate no-op). Raises
+        :class:`ClaimHistoryMirrorError` only after exhausting retries on
+        a non-idempotent failure -- callers (:func:`sync_pending`) treat
+        that as "this batch stays pending, try again next sweep," never
+        fatal to the sweep as a whole.
         """
         global _write_failures
-        item = resource(str(entry["kind"]), str(entry["ref"]))
+        if not entries:
+            return 0
+        kind, ref_value = entries[0]["kind"], entries[0]["ref"]
+        if any(e["kind"] != kind or e["ref"] != ref_value for e in entries):
+            raise ValueError("push_batch requires every entry to share one (kind, ref)")
+        item = resource(str(kind), str(ref_value))
         ref = ref_for(self.settings.ref_prefix, item)
-        seq = int(entry["seq"])
-        message = _serialize_entry(entry)
+        wanted = [(_event_identity(e), e) for e in entries]
+
         attempt = 0
         while attempt <= self.retries:
-            if any(e.get("seq") == seq for e in self.fetch(item.kind, item.key)):
-                return False
-            parent = self._remote_oid(ref)
-            # Commit-tree and push must share the SAME ephemeral bare repo
-            # (mirrors GitLeaseStore._transition's own single-repo-per-attempt
-            # shape) -- the new commit is only reachable from that repo's own
-            # object store, so pushing it from a freshly-deleted one would
-            # always fail with "not a git repository" / an unknown object.
+            try:
+                tip_oid, existing = self._fetch_chain(item.kind, item.key)
+            except _SnapshotUnavailable:
+                attempt += 1
+                self._sleep(self._jitter(0.025, min(0.5, 0.05 * (2**attempt))))
+                continue
+            existing_ids = {_event_identity(e) for e in existing}
+            pending = [e for ident, e in wanted if ident not in existing_ids]
+            if not pending:
+                return 0
+
             with tempfile.TemporaryDirectory(prefix="agent-claim-history-write-") as temp:
                 repo = Path(temp) / "repo.git"
                 self._git(["init", "--bare", str(repo)])
-                if parent:
+                if tip_oid:
                     # The parent commit object only exists in whichever
-                    # ephemeral repo created it (long since deleted) -- fetch
-                    # it into THIS repo first so commit-tree -p can resolve
-                    # it (mirrors GitLeaseStore._transition's own parent-fetch
-                    # step).
+                    # ephemeral repo created it (long since deleted) --
+                    # fetch it into THIS repo first so commit-tree -p can
+                    # resolve it.
                     fetched = self._git(
                         [
                             f"--git-dir={repo}", "fetch", "--quiet", "--no-tags",
-                            self.settings.origin, f"+{ref}:refs/agent-claim-history/parent",
+                            self.settings.origin,
+                            f"+{ref}:refs/agent-claim-history/parent",
                         ],
                         check=False,
                     )
                     if fetched.returncode != 0:
-                        # Transient failure, or the ref moved since we read
-                        # it above -- either way, retry with a freshly-read
-                        # parent/existing-seq set rather than committing on
-                        # top of one we couldn't actually fetch.
                         attempt += 1
                         self._sleep(self._jitter(0.025, min(0.5, 0.05 * (2**attempt))))
                         continue
                 tree = self._git(
                     [f"--git-dir={repo}", "mktree"], input_text="",
                 ).stdout.strip()
-                args = [f"--git-dir={repo}", "commit-tree", tree]
-                if parent:
-                    args += ["-p", parent]
                 env = {
                     "GIT_AUTHOR_NAME": "agent-worktrees-claim-history",
                     "GIT_AUTHOR_EMAIL": "agent-worktrees-claim-history@localhost",
                     "GIT_COMMITTER_NAME": "agent-worktrees-claim-history",
                     "GIT_COMMITTER_EMAIL": "agent-worktrees-claim-history@localhost",
                 }
-                oid = self._git(
-                    args, input_text=message + "\n", extra_env=env,
-                ).stdout.strip()
+                parent = tip_oid
+                for e in pending:
+                    args = [f"--git-dir={repo}", "commit-tree", tree]
+                    if parent:
+                        args += ["-p", parent]
+                    parent = self._git(
+                        args, input_text=_serialize_entry(e) + "\n", extra_env=env,
+                    ).stdout.strip()
+                final_oid = parent
                 pushed = self._git(
                     [
                         f"--git-dir={repo}", "push", "--porcelain",
-                        f"--force-with-lease={ref}:{parent or ''}",
-                        self.settings.origin, f"{oid}:{ref}",
+                        f"--force-with-lease={ref}:{tip_oid or ''}",
+                        self.settings.origin, f"{final_oid}:{ref}",
                     ],
                     check=False,
                 )
             if pushed.returncode == 0:
-                return True
+                return len(pending)
             remote_now = self._remote_oid(ref)
-            if remote_now == oid:
-                return True
+            if remote_now == final_oid:
+                return len(pending)
             if attempt >= self.retries:
                 _write_failures += 1
                 detail = (pushed.stderr or pushed.stdout).strip().splitlines()
                 suffix = detail[-1] if detail else f"exit {pushed.returncode}"
                 raise ClaimHistoryMirrorError(
-                    f"giving up mirroring {entry.get('ref')!r} after "
+                    f"giving up mirroring {ref_value!r} after "
                     f"{attempt + 1} attempts: {suffix}"
                 )
             attempt += 1
             self._sleep(self._jitter(0.025, min(0.5, 0.05 * (2**attempt))))
         _write_failures += 1
         raise ClaimHistoryMirrorError(
-            f"giving up mirroring {entry.get('ref')!r} after exhausting retries"
+            f"giving up mirroring {ref_value!r} after exhausting retries"
         )
 
     def fetch(self, kind: str, ref_value: str) -> list[dict]:
         """Return every mirrored event for ``(kind, ref_value)``, oldest
-        first. Never raises -- an absent ref, an unreachable store, or a
-        malformed commit along the way degrades to an empty or partial
-        result (the entries that *did* parse cleanly), logged at debug.
+        first. Never raises -- an absent ref, an unreachable store, a
+        race with a concurrent writer, or a malformed commit along the
+        way degrades to an empty or partial result (the entries that DID
+        parse cleanly), logged at debug.
         """
-        item = resource(kind, ref_value)
-        ref = ref_for(self.settings.ref_prefix, item)
+        global _read_failures
         try:
-            oid = self._remote_oid(ref)
-            if oid is None:
-                return []
-            with tempfile.TemporaryDirectory(prefix="agent-claim-history-read-") as temp:
-                repo = Path(temp) / "repo.git"
-                self._git(["init", "--bare", str(repo)])
-                self._git(
-                    [
-                        f"--git-dir={repo}", "fetch", "--quiet", "--no-tags",
-                        self.settings.origin, f"+{ref}:refs/agent-claim-history/read",
-                    ]
-                )
-                empty_tree = self._git(
-                    [f"--git-dir={repo}", "hash-object", "-t", "tree", "--stdin"],
-                    input_text="",
-                ).stdout.strip()
-                entries: list[dict] = []
-                current = oid
-                while current:
-                    raw = self._git(
-                        [f"--git-dir={repo}", "cat-file", "commit", current]
-                    ).stdout
-                    marker = "\n\n"
-                    if marker not in raw or not raw.endswith("\n"):
-                        log.debug("claim-history mirror: malformed commit %s on %s", current, ref)
-                        break
-                    headers, encoded_message = raw.split(marker, 1)
-                    message = encoded_message[:-1]
-                    tree_lines = [
-                        line.removeprefix("tree ")
-                        for line in headers.splitlines() if line.startswith("tree ")
-                    ]
-                    parents = [
-                        line.removeprefix("parent ")
-                        for line in headers.splitlines() if line.startswith("parent ")
-                    ]
-                    if tree_lines != [empty_tree] or len(parents) > 1:
-                        log.debug(
-                            "claim-history mirror: unexpected shape at %s on %s",
-                            current, ref,
-                        )
-                        break
-                    try:
-                        entries.append(_parse_entry(message))
-                    except ProtocolError as exc:
-                        log.debug(
-                            "claim-history mirror: unparsable entry at %s on %s: %s",
-                            current, ref, exc,
-                        )
-                    current = parents[0] if parents else None
-                entries.reverse()
-                return entries
+            _tip, entries = self._fetch_chain(kind, ref_value)
+            return entries
+        except _SnapshotUnavailable:
+            _read_failures += 1
+            log.debug(
+                "claim_history_mirror.fetch(%r, %r): remote snapshot unavailable",
+                kind, ref_value,
+            )
+            return []
         except Exception as exc:
-            global _read_failures
             _read_failures += 1
             log.debug("claim_history_mirror.fetch(%r, %r) failed: %s", kind, ref_value, exc)
             return []
+
+    def _fetch_chain(self, kind: str, ref_value: str) -> tuple[str | None, list[dict]]:
+        """Read ``(tip_oid, entries)`` as ONE verified remote snapshot --
+        the single place this class ever reads remote state, so a caller
+        needing both "what's already there" and "what oid to
+        compare-and-swap against" never risks a torn read across two
+        separate network round trips. ``tip_oid`` is ``None`` only for a
+        genuinely absent ref (a valid, verified empty snapshot); any
+        failure to confirm the read -- a transient Git error, or the ref
+        having moved between the initial ``ls-remote`` and the follow-up
+        fetch of that exact oid -- raises :class:`_SnapshotUnavailable`
+        rather than returning a value that might not actually be current.
+        """
+        item = resource(kind, ref_value)
+        ref = ref_for(self.settings.ref_prefix, item)
+        oid = self._remote_oid(ref)
+        if oid is None:
+            return None, []
+        with tempfile.TemporaryDirectory(prefix="agent-claim-history-read-") as temp:
+            repo = Path(temp) / "repo.git"
+            self._git(["init", "--bare", str(repo)])
+            fetched = self._git(
+                [
+                    f"--git-dir={repo}", "fetch", "--quiet", "--no-tags",
+                    self.settings.origin, f"+{ref}:refs/agent-claim-history/read",
+                ],
+                check=False,
+            )
+            if fetched.returncode != 0:
+                raise _SnapshotUnavailable(f"fetch of {ref} failed")
+            actual = self._git(
+                [f"--git-dir={repo}", "rev-parse", "refs/agent-claim-history/read"]
+            ).stdout.strip()
+            if actual != oid:
+                # The ref moved between our ls-remote and this fetch -- the
+                # content we're about to read would not correspond to
+                # `oid`. Never silently substitute the moved tip; the
+                # caller retries with a fresh read instead.
+                raise _SnapshotUnavailable(f"{ref} moved during read")
+            empty_tree = self._git(
+                [f"--git-dir={repo}", "hash-object", "-t", "tree", "--stdin"],
+                input_text="",
+            ).stdout.strip()
+            entries: list[dict] = []
+            current: str | None = oid
+            while current:
+                raw = self._git(
+                    [f"--git-dir={repo}", "cat-file", "commit", current]
+                ).stdout
+                marker = "\n\n"
+                if marker not in raw or not raw.endswith("\n"):
+                    log.debug("claim-history mirror: malformed commit %s on %s", current, ref)
+                    break
+                headers, encoded_message = raw.split(marker, 1)
+                message = encoded_message[:-1]
+                tree_lines = [
+                    line.removeprefix("tree ")
+                    for line in headers.splitlines() if line.startswith("tree ")
+                ]
+                parents = [
+                    line.removeprefix("parent ")
+                    for line in headers.splitlines() if line.startswith("parent ")
+                ]
+                if tree_lines != [empty_tree] or len(parents) > 1:
+                    log.debug(
+                        "claim-history mirror: unexpected shape at %s on %s", current, ref,
+                    )
+                    break
+                try:
+                    entries.append(_parse_entry(message))
+                except ProtocolError as exc:
+                    log.debug(
+                        "claim-history mirror: unparsable entry at %s on %s: %s",
+                        current, ref, exc,
+                    )
+                current = parents[0] if parents else None
+            entries.reverse()
+            return oid, entries
 
     def _remote_oid(self, ref: str) -> str | None:
         result = self._git(
@@ -417,10 +497,46 @@ class ClaimHistoryMirror:
         return result
 
 
+def _ledger_id_path() -> Path:
+    return claim_history.history_path().with_name("claim-history.ledger-id")
+
+
+def _ledger_id() -> str:
+    """A persistent, random identifier for the LOCAL ledger's current
+    incarnation -- the discriminator half of a mirrored event's
+    ``(ledger_id, seq)`` identity, since ``seq`` alone is only unique
+    WITHIN one ledger's own lifetime: two independent machines' first
+    events for the same PR both get ``seq=0``, and a reimaged machine
+    starting a fresh, empty ledger would otherwise collide with its own
+    earlier incarnation's ``seq=0`` too. Minted fresh (and persisted)
+    whenever the ledger file itself doesn't exist yet alongside a prior id
+    -- the strongest available local signal of "this is a new
+    incarnation," pragmatic rather than airtight against every possible
+    on-disk corruption, but correct for the two cases that matter here:
+    two genuinely independent machines, and a genuine reimage.
+    """
+    ledger_path = claim_history.history_path()
+    id_path = _ledger_id_path()
+    if ledger_path.exists() and id_path.exists():
+        try:
+            existing = id_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            existing = ""
+        if existing:
+            return existing
+    new_id = uuid.uuid4().hex
+    try:
+        id_path.parent.mkdir(parents=True, exist_ok=True)
+        id_path.write_text(new_id, encoding="utf-8")
+    except OSError:
+        pass
+    return new_id
+
+
 def _current_project_worktree_ids() -> set[str]:
     """Worktree ids tracked under the CURRENT project's own tracking
     directory -- the fallback eligibility signal for a LEGACY event
-    recorded before :mod:`claim_history` started stamping a durable
+    recorded before :mod:`claim_history` started stamping an explicit
     ``project`` field (see :func:`_event_eligible`). Any failure to read
     tracking records degrades to an EMPTY set (nothing eligible) rather
     than "assume everything belongs to this project" -- fail closed,
@@ -436,11 +552,11 @@ def _current_project_worktree_ids() -> set[str]:
 
 def _event_eligible(entry: dict, *, project_name: str | None, owned_ids: set[str]) -> bool:
     """Whether ``entry`` may be mirrored to the CURRENT project's
-    configured store. A durable ``project`` stamp (present on every event
-    recorded since that field existed) is authoritative and never falls
-    back to the tracking-record heuristic, even if it disagrees -- it
-    survives exactly the tracking-record retirement the heuristic cannot.
-    A legacy event with no stamp at all falls back to
+    configured store. A durable ``project`` stamp (present whenever its
+    original caller had a record-derived project to pass) is authoritative
+    and never falls back to the tracking-record heuristic, even if it
+    disagrees -- it survives exactly the tracking-record retirement the
+    heuristic cannot. A legacy/unstamped event falls back to
     :func:`_current_project_worktree_ids`."""
     project = entry.get("project")
     if isinstance(project, str) and project:
@@ -451,18 +567,19 @@ def _event_eligible(entry: dict, *, project_name: str | None, owned_ids: set[str
 def _grouped_events(kind: str | None = None) -> dict[tuple[str, str], list[dict]]:
     """Parse the append-only ledger exactly once, grouping every event by
     its ``(kind, ref)`` resource in ledger order and stamping each with its
-    own durable, position-based ``seq`` (its 0-based index within that
-    resource's own full event sequence) -- the identity
-    :meth:`ClaimHistoryMirror.push`/:meth:`~ClaimHistoryMirror.fetch` use
-    for idempotency. Re-reading the whole ledger once per sweep (rather
-    than once per resource, as an earlier revision did via repeated
-    :func:`claim_history.history_for_ref` calls) avoids reparsing
-    roughly resources-times-ledger-length worth of lines on every run.
+    own durable ``(ledger_id, seq)`` identity (``seq`` -- its 0-based index
+    within that resource's own full event sequence) -- the identity
+    :meth:`ClaimHistoryMirror.push_batch`/:meth:`~ClaimHistoryMirror.fetch`
+    use. Re-reading the whole ledger once per sweep (rather than once per
+    resource, as an earlier revision did via repeated
+    :func:`claim_history.history_for_ref` calls) avoids reparsing roughly
+    resources-times-ledger-length worth of lines on every run.
     """
     path = claim_history.history_path()
     grouped: dict[tuple[str, str], list[dict]] = {}
     if not path.exists():
         return grouped
+    ledger_id = _ledger_id()
     try:
         with open(path, encoding="utf-8", errors="replace") as handle:
             for raw in handle:
@@ -483,6 +600,7 @@ def _grouped_events(kind: str | None = None) -> dict[tuple[str, str], list[dict]
                 bucket = grouped.setdefault((k, ref_value), [])
                 stamped = dict(entry)
                 stamped["seq"] = len(bucket)
+                stamped["ledger_id"] = ledger_id
                 bucket.append(stamped)
     except OSError:
         return {}
@@ -503,12 +621,9 @@ def sync_pending(
     configured store is this project's own, so an unrelated project's
     events must never ride along.
 
-    Stateless: no local cursor, no local lock (see the module docstring).
-    One preliminary :meth:`~ClaimHistoryMirror.fetch` per resource finds
-    what the remote already has; :meth:`~ClaimHistoryMirror.push` itself
-    re-confirms against the remote's CURRENT state before every commit, so
-    the whole operation is safe under concurrent/overlapping sweeps without
-    needing to coordinate with them at all.
+    Stateless and batched (see the module docstring): one verified remote
+    snapshot per resource per attempt, one push for however many events
+    are genuinely missing.
 
     ``dry_run=True`` reports how many events are genuinely still missing
     per resource without pushing anything.
@@ -530,22 +645,23 @@ def sync_pending(
         ]
         if not eligible:
             continue
-        existing_seqs = {e.get("seq") for e in mirror.fetch(k, ref_value)}
-        pending = [e for e in eligible if e["seq"] not in existing_seqs]
-        if not pending:
-            continue
         if dry_run:
-            details.append({"ref": ref_value, "kind": k, "pending": len(pending)})
-            continue
-        pushed_here = 0
-        for entry in pending:
             try:
-                if mirror.push(entry):
-                    pushed_here += 1
-            except ClaimHistoryMirrorError as exc:
-                log.debug("claim_history_mirror.sync_pending: %s", exc)
-                failed.append({"ref": ref_value, "kind": k, "error": str(exc)})
-                break
+                _tip, existing = mirror._fetch_chain(k, ref_value)
+            except _SnapshotUnavailable:
+                failed.append({"ref": ref_value, "kind": k, "error": "remote snapshot unavailable"})
+                continue
+            existing_ids = {_event_identity(e) for e in existing}
+            pending = [e for e in eligible if _event_identity(e) not in existing_ids]
+            if pending:
+                details.append({"ref": ref_value, "kind": k, "pending": len(pending)})
+            continue
+        try:
+            pushed_here = mirror.push_batch(eligible)
+        except ClaimHistoryMirrorError as exc:
+            log.debug("claim_history_mirror.sync_pending: %s", exc)
+            failed.append({"ref": ref_value, "kind": k, "error": str(exc)})
+            continue
         if pushed_here:
             pushed_total += pushed_here
             details.append({"ref": ref_value, "kind": k, "pushed": pushed_here})

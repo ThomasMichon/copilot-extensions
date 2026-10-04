@@ -169,8 +169,7 @@ def add_parsers(sub) -> None:
     )
     p.add_argument(
         "--remote", action="store_true",
-        help="with history: also merge this ref's mirrored remote "
-        "claim-history events (network, best-effort)",
+        help="with history: also merge mirrored remote claim-history events (network)",
     )
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
@@ -746,6 +745,7 @@ def _claims_sweep(args: argparse.Namespace) -> int:
                             # an involuntary reclaim -- only a non-pr kind
                             # is genuinely `abandoned` here.
                             note="merged" if c.state == obligations.RELEASED else "abandoned",
+                            project=rec.repo,  # THIS record's own project (sweep spans projects)
                         )
         else:
             before = {c.ref: c.state for c in rec.resources}
@@ -813,7 +813,7 @@ def _claims_reconcile_at_rest(args: argparse.Namespace) -> int:
                         claim_history.record_event(
                             kind=c.kind, ref=c.ref, worktree_id=rec.worktree_id,
                             machine=rec.machine, event="released",
-                            note="at-rest-reconciled",
+                            note="at-rest-reconciled", project=rec.repo,
                         )
         else:
             before = {c.ref: c.state for c in rec.resources}
