@@ -291,14 +291,52 @@ read_config() {
     done < <(printf '%s' "$content")
 }
 
-_remote_url() {
-    local url first
-    url="$(git -C "$repo_root" remote get-url origin 2>/dev/null || true)"
-    if [[ -z "$url" ]]; then
-        first="$(git -C "$repo_root" remote 2>/dev/null | while IFS= read -r name; do printf '%s' "$name"; break; done)"
-        [[ -n "$first" ]] && url="$(git -C "$repo_root" remote get-url "$first" 2>/dev/null || true)"
+_remote_name() {
+    local name
+    if git -C "$repo_root" remote get-url origin >/dev/null 2>&1; then
+        printf 'origin'
+        return 0
     fi
+    name="$(git -C "$repo_root" remote 2>/dev/null | while IFS= read -r candidate; do printf '%s' "$candidate"; break; done)"
+    printf '%s' "$name"
+}
+
+_remote_url() {
+    local name url
+    # Resolve the PUSH target, not the fetch source: a remote with a
+    # separate `pushurl` configured (e.g. an internal fetch mirror of an
+    # externally-hosted repo) must be classified by where contributions
+    # actually get published. `git remote get-url --push` already falls
+    # back to the fetch URL when no explicit pushurl is configured.
+    name="$(_remote_name)"
+    [[ -n "$name" ]] || return 0
+    url="$(git -C "$repo_root" remote get-url --push "$name" 2>/dev/null || true)"
     printf '%s' "$url"
+}
+
+_remote_push_urls_all() {
+    local name="$1"
+    git -C "$repo_root" remote get-url --push --all "$name" 2>/dev/null || true
+}
+
+host_is_internal_for_every_push_url() {
+    # A remote can mirror to several push destinations at once (`git remote
+    # set-url --add --push`). The internal_host exemption must never apply
+    # unless EVERY effective push target is configured internal -- one
+    # external destination among several means content can still reach a
+    # non-internal host, and the blanket exemption would silently suppress
+    # disclosure there.
+    local name url url_host found=0
+    name="$(_remote_name)"
+    [[ -n "$name" ]] || return 1
+    while IFS= read -r url; do
+        [[ -n "$url" ]] || continue
+        found=1
+        url_host="$(_remote_host_of "$url")"
+        host_is_internal "$url_host" || return 1
+    done < <(_remote_push_urls_all "$name")
+    (( found )) || return 1
+    return 0
 }
 
 _remote_host_of() {
@@ -320,10 +358,6 @@ _remote_host_of() {
     esac
     host_is_valid "$host" || return 0
     printf '%s' "${host,,}"
-}
-
-remote_host() {
-    _remote_host_of "$(_remote_url)"
 }
 
 remote_account() {
@@ -661,7 +695,7 @@ read_custom_instruction_configs() {
 }
 
 main() {
-    local config_home account guide kernel payload_cwd payload_nul=0 remote_host_value
+    local config_home account guide kernel payload_cwd payload_nul=0
 
     IFS= LC_ALL=C read -r -d '' -n $((max_payload_bytes + 1)) json_text && payload_nul=1
     if (( payload_nul || ${#json_text} > max_payload_bytes )) ||
@@ -702,10 +736,9 @@ main() {
     kernel="[owner: ai-attribution@$plugin_version] Before publishing, determine the audience of this specific contribution and the repository's host. "
 
     account="$(remote_account)"
-    remote_host_value="$(remote_host)"
     if [[ "$disclosure" == "always" ]]; then
         kernel+="Operator policy requires a prominent one-line italicized AI-assistance disclosure at the top of every contribution, including a self-authored one or an internal host. "
-    elif host_is_internal "$remote_host_value"; then
+    elif host_is_internal_for_every_push_url; then
         kernel+="The session-start repository's host is configured as operator-only (internal_host); disclosure is never required there regardless of who authored what this contribution responds to. "
     else
         kernel+="Disclosure turns on who this specific contribution addresses, not on who owns the repository: a self-authored PR/issue with no other party's content or participation yet, or an inline reply to an automated review bot's own comment thread (not a PR-level review/verdict), may omit disclosure; everything else -- a comment, reply, review, or verdict on a PR, issue, or thread another party authored or participates in, including one that also engages with bot findings -- requires a prominent one-line italicized AI-assistance disclosure at the top, in every repository, public or private, including one the operator owns. "

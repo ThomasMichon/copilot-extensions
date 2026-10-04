@@ -26,19 +26,27 @@ resilient safety boundary through the exact-session dynamic-guidance pattern.
 
 The ambient policy requires agents to:
 
-- determine audience and repository ownership before publishing;
-- prominently disclose AI assistance at the top of contributions to another
-  party's repository;
-- omit disclosure by default in **verified** operator-owned repositories unless
-  the operator explicitly requests it or policy tightens it to always;
+- determine the audience of this specific contribution (self-authored with no
+  other party's content or participation yet, a reply to an automated review
+  bot's own comment thread, or a response to another party's PR/issue/thread)
+  and whether the target host is configured as operator-only (`internal_host`)
+  before publishing;
+- prominently disclose AI assistance at the top of a contribution addressing
+  another party -- in every repository, public or private, including one the
+  operator owns -- even when it also engages with bot findings;
+- omit disclosure by default only for a genuinely self-authored contribution,
+  an inline bot-comment-only reply, or one on a configured `internal_host`,
+  unless the operator explicitly requests it or policy tightens it to always;
 - keep public artifacts persona-neutral and scrub private identifiers,
   credentials, paths, hosts, accounts, record IDs, and private rationale;
 - write public contributions in first-person singular and follow target-repo
   conventions;
 - audit the live published surface after publication.
 
-Local git remotes provide ownership hints only. No remote inference is treated
-as proof, and uncertainty uses the third-party policy.
+Local git remotes provide ownership and host hints only (resolved from the
+configured **push** target, not the fetch source, so an internal fetch mirror
+with an external push destination is never silently exempted). No remote
+inference is treated as proof, and uncertainty uses the third-party policy.
 
 ### Typical setup
 

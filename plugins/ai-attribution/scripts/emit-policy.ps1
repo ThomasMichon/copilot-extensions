@@ -209,15 +209,45 @@ function Read-PolicyConfig([string] $Path, [string] $Authority) {
     }
 }
 
+function Get-RemoteName([string] $RepositoryRoot) {
+    & git -C $RepositoryRoot remote get-url origin 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { return 'origin' }
+    return (& git -C $RepositoryRoot remote 2>$null | Select-Object -First 1)
+}
+
 function Get-RemoteUrl([string] $RepositoryRoot) {
-    $Url = (& git -C $RepositoryRoot remote get-url origin 2>$null | Select-Object -First 1)
-    if (-not $Url) {
-        $First = (& git -C $RepositoryRoot remote 2>$null | Select-Object -First 1)
-        if ($First) {
-            $Url = (& git -C $RepositoryRoot remote get-url $First 2>$null | Select-Object -First 1)
-        }
+    # Resolve the PUSH target, not the fetch source: a remote with a
+    # separate pushurl configured (e.g. an internal fetch mirror of an
+    # externally-hosted repo) must be classified by where contributions
+    # actually get published. `git remote get-url --push` already falls
+    # back to the fetch URL when no explicit pushurl is configured.
+    $Name = Get-RemoteName $RepositoryRoot
+    if (-not $Name) { return '' }
+    return (& git -C $RepositoryRoot remote get-url --push $Name 2>$null | Select-Object -First 1)
+}
+
+function Get-RemotePushUrlsAll([string] $RepositoryRoot, [string] $Name) {
+    return (& git -C $RepositoryRoot remote get-url --push --all $Name 2>$null)
+}
+
+function Test-InternalHostForEveryPushUrl([string] $RepositoryRoot) {
+    # A remote can mirror to several push destinations at once (`git remote
+    # set-url --add --push`). The internal_host exemption must never apply
+    # unless EVERY effective push target is configured internal -- one
+    # external destination among several means content can still reach a
+    # non-internal host, and the blanket exemption would silently suppress
+    # disclosure there.
+    $Name = Get-RemoteName $RepositoryRoot
+    if (-not $Name) { return $false }
+    $Urls = Get-RemotePushUrlsAll $RepositoryRoot $Name
+    $Found = $false
+    foreach ($Url in $Urls) {
+        if (-not $Url) { continue }
+        $Found = $true
+        $UrlHost = Get-RemoteHostOf $Url
+        if (-not (Test-InternalHost $UrlHost)) { return $false }
     }
-    return $Url
+    return $Found
 }
 
 function Get-RemoteHostOf([string] $Url) {
@@ -234,10 +264,6 @@ function Get-RemoteHostOf([string] $Url) {
     }
     if (-not (Test-Host $HostName)) { return '' }
     return $HostName.ToLowerInvariant()
-}
-
-function Get-RemoteHost([string] $RepositoryRoot) {
-    return Get-RemoteHostOf (Get-RemoteUrl $RepositoryRoot)
 }
 
 function Get-RemoteAccount([string] $RepositoryRoot) {
@@ -518,10 +544,9 @@ function Invoke-Policy {
     $Kernel = "[owner: ai-attribution@$script:PluginVersion] Before publishing, determine the audience of this specific contribution and the repository's host. "
 
     $Account = Get-RemoteAccount $script:RepoRoot
-    $RemoteHostValue = Get-RemoteHost $script:RepoRoot
     if ($script:Disclosure -eq 'always') {
         $Kernel += 'Operator policy requires a prominent one-line italicized AI-assistance disclosure at the top of every contribution, including a self-authored one or an internal host. '
-    } elseif (Test-InternalHost $RemoteHostValue) {
+    } elseif (Test-InternalHostForEveryPushUrl $script:RepoRoot) {
         $Kernel += 'The session-start repository''s host is configured as operator-only (internal_host); disclosure is never required there regardless of who authored what this contribution responds to. '
     } else {
         $Kernel += "Disclosure turns on who this specific contribution addresses, not on who owns the repository: a self-authored PR/issue with no other party's content or participation yet, or an inline reply to an automated review bot's own comment thread (not a PR-level review/verdict), may omit disclosure; everything else -- a comment, reply, review, or verdict on a PR, issue, or thread another party authored or participates in, including one that also engages with bot findings -- requires a prominent one-line italicized AI-assistance disclosure at the top, in every repository, public or private, including one the operator owns. "

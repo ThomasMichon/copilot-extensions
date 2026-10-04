@@ -903,6 +903,95 @@ def test_internal_host_matches_an_unnamespaced_remote(tmp_path: Path) -> None:
         assert "operator-only (internal_host); disclosure is never required" in context
 
 
+def test_internal_host_exemption_follows_push_url_not_fetch_url(
+    tmp_path: Path,
+) -> None:
+    """An internal fetch mirror with an EXTERNAL push target must not be
+    exempted -- content actually gets published to the push URL's host."""
+    repo = _git_repo(
+        tmp_path / "repo",
+        "https://gitea.example.internal/example-owner/repo.git",
+    )
+    subprocess.run(
+        [
+            "git", "-C", str(repo), "remote", "set-url", "--push", "origin",
+            "https://github.com/example-owner/repo.git",
+        ],
+        check=True,
+    )
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "internal_host=gitea.example.internal\n",
+    )
+    for hook in _parity_hooks():
+        context = _context(_run(hook, repo, home))
+        assert "operator-only (internal_host)" not in context
+        assert "Disclosure turns on who this specific contribution addresses" in context
+
+
+def test_internal_host_exemption_uses_the_configured_push_url(
+    tmp_path: Path,
+) -> None:
+    """The reverse of the above: a fetch URL that looks external but whose
+    push target is internal must be exempted, since publication follows the
+    push URL."""
+    repo = _git_repo(
+        tmp_path / "repo",
+        "https://github.com/example-owner/repo.git",
+    )
+    subprocess.run(
+        [
+            "git", "-C", str(repo), "remote", "set-url", "--push", "origin",
+            "https://gitea.example.internal/example-owner/repo.git",
+        ],
+        check=True,
+    )
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "internal_host=gitea.example.internal\n",
+    )
+    for hook in _parity_hooks():
+        context = _context(_run(hook, repo, home))
+        assert "operator-only (internal_host); disclosure is never required" in context
+
+
+def test_internal_host_exemption_requires_every_mirrored_push_url_internal(
+    tmp_path: Path,
+) -> None:
+    """A remote mirrored to multiple push destinations (`--add --push`) must
+    be exempted only when ALL of them are internal -- one external mirror
+    target is enough to require disclosure."""
+    repo = _git_repo(
+        tmp_path / "repo",
+        "https://gitea.example.internal/example-owner/repo.git",
+    )
+    subprocess.run(
+        [
+            "git", "-C", str(repo), "remote", "set-url", "--push", "origin",
+            "https://gitea.example.internal/example-owner/repo.git",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git", "-C", str(repo), "remote", "set-url", "--add", "--push", "origin",
+            "https://github.com/example-owner/repo.git",
+        ],
+        check=True,
+    )
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "internal_host=gitea.example.internal\n",
+    )
+    for hook in _parity_hooks():
+        context = _context(_run(hook, repo, home))
+        assert "operator-only (internal_host)" not in context
+        assert "Disclosure turns on who this specific contribution addresses" in context
+
+
 def test_owned_account_matches_with_an_explicit_url_port(tmp_path: Path) -> None:
     repo = _git_repo(
         tmp_path / "repo",
