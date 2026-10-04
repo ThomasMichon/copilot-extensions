@@ -80,7 +80,7 @@ def format_claim_ref(
 def parse_claim_ref(ref: str) -> ClaimRef | None:
     if not ref:
         return None
-    ref = decanonicalize_ref(ref)
+    ref = decanonicalize_ref(ref, expected_kinds=frozenset({"worktree", "session"}))
     body, _, session = ref.partition("#")
     session_val = session or None
     parts = body.split("/")
@@ -107,6 +107,16 @@ CLAIM_KINDS: frozenset[str] = frozenset({
     "worktree", "session", "codespace", "container", "task", "bridge",
     "ssh", "effort", "workdir", "pr", "bug", "issue",
 })
+
+#: The PR-like subset of :data:`CLAIM_KINDS` (mirrors
+#: ``claims_rank._PR_LIKE_KINDS``) -- exposed so every PR-only parser
+#: entry point (``cleanup._pr_claim_target``, ``sweep.py``'s PR view-arg
+#: builders) can restrict :func:`decanonicalize_ref` to exactly the kinds
+#: it is actually prepared to handle, rather than unwrapping ANY
+#: recognized kind. Unwrapping unconditionally would let a mismatched ref
+#: like ``"task::owner/repo#42"`` (a task ref that merely *looks* like a PR
+#: shorthand once unwrapped) be silently accepted as a PR target.
+PR_LIKE_KINDS: frozenset[str] = frozenset({"pr", "bug", "issue"})
 
 #: ``<kind>:<system>:<key>`` -- the Phase 6 canonical, self-describing claim
 #: ref shape. ``kind`` is restricted to a bare lowercase token so a URL's
@@ -143,9 +153,15 @@ def canonicalize_ref(kind: str, ref: str) -> str:
     "does this look canonical for *some* kind" (an opaque ref for kind
     ``"task"`` that happens to already read like ``"pr:...:..."`` must
     still be wrapped as ``task`` -- treating it as already-canonical would
-    silently mislabel it as a ``pr`` ref and break the round trip).
+    silently mislabel it as a ``pr`` ref and break the round trip). An
+    empty ``ref`` is returned unchanged -- there is nothing to canonicalize,
+    and wrapping it (``"<kind>::"``) would not round-trip: the canonical
+    grammar's ``key`` segment requires at least one character, so
+    :func:`decanonicalize_ref` could never recover an empty string from it.
     """
-    m = _CANONICAL_REF_RE.match(ref or "")
+    if not ref:
+        return ref
+    m = _CANONICAL_REF_RE.match(ref)
     if m and m.group(1) == kind:
         return ref  # already canonical for this exact kind
     if kind in ("worktree", "session"):
@@ -158,7 +174,9 @@ def canonicalize_ref(kind: str, ref: str) -> str:
     return f"{kind}::{ref}"
 
 
-def decanonicalize_ref(ref: str) -> str:
+def decanonicalize_ref(
+    ref: str, *, expected_kinds: frozenset[str] | None = None,
+) -> str:
     """Inverse of :func:`canonicalize_ref`: if ``ref`` is in the Phase 6
     canonical ``"<kind>:<system>:<key>"`` form, return the equivalent
     legacy-shaped ref string so every existing kind-specific parser keeps
@@ -168,6 +186,15 @@ def decanonicalize_ref(ref: str) -> str:
     canonical, including a string that only superficially matches the
     three-colon-separated shape (e.g. a PR URL's ``https:`` scheme) where
     the leading segment isn't one of :data:`CLAIM_KINDS`.
+
+    ``expected_kinds``, when given, restricts unwrapping to a ref whose
+    embedded kind is actually one this CALL SITE is prepared to handle --
+    pass e.g. :data:`PR_LIKE_KINDS` from a PR-only parser. Without it, a
+    canonical ref for an unrelated kind that happens to decode into
+    something shaped like this call site's own legacy grammar would be
+    silently accepted (e.g. a ``task``-kind ref unwrapping into something
+    that reads like a PR shorthand) -- always pass the narrowest kind set
+    a given parser actually understands.
     """
     if not ref:
         return ref
@@ -176,6 +203,8 @@ def decanonicalize_ref(ref: str) -> str:
         return ref
     kind, system, key = m.groups()
     if kind not in CLAIM_KINDS:
+        return ref
+    if expected_kinds is not None and kind not in expected_kinds:
         return ref
     if kind in ("worktree", "session"):
         return f"{system}/{key}" if system else key

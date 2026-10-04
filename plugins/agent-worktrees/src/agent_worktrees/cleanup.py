@@ -303,7 +303,9 @@ def _pr_claim_target(
     ref: str, prcfg: cfg.PRConfig,
 ) -> tuple[str, str, int, str] | None:
     """Resolve a stored PR claim into provider, repo, number, and API base."""
-    ref = tracking_claims.decanonicalize_ref(ref)
+    ref = tracking_claims.decanonicalize_ref(
+        ref, expected_kinds=tracking_claims.PR_LIKE_KINDS,
+    )
     configured_provider = (getattr(prcfg, "provider", "") or "").strip().lower()
     api_base = (getattr(prcfg, "api_base", "") or "").strip()
     short = re.fullmatch(

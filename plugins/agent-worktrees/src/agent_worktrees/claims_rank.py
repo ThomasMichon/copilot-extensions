@@ -201,13 +201,24 @@ _CLAIM_KINDS_FOR_CANON = frozenset({
 })
 
 
-def _decanonicalize_ref(ref: str) -> str:
+def _decanonicalize_ref(
+    ref: str, *, expected_kinds: frozenset[str] | None = None,
+) -> str:
     """Unwrap a Phase 6 canonical ``"<kind>:<system>:<key>"`` ref back to
     its legacy shape, or return ``ref`` unchanged for anything else
     (including a URL's own ``https:`` scheme, which never matches a known
-    kind). For ``"worktree"``, ``system`` (the machine) is re-prefixed onto
-    ``key`` to reconstruct the full ``machine/project/worktree_id[#session]``
-    legacy grammar; every other kind's ``key`` already IS its legacy ref."""
+    kind). For ``"worktree"``/``"session"``, ``system`` (the machine) is
+    re-prefixed onto ``key`` to reconstruct the full
+    ``machine/project/worktree_id[#session]`` legacy grammar; every other
+    kind's ``key`` already IS its legacy ref.
+
+    ``expected_kinds``, when given, restricts unwrapping to a ref whose
+    embedded kind this call site actually understands -- mirrors
+    ``tracking_claims.decanonicalize_ref``'s own ``expected_kinds``
+    parameter (see its docstring for why: unconditional unwrapping would
+    let an unrelated kind's ref masquerade as this call site's own shape,
+    e.g. a ``task``-kind ref unwrapping into something that reads like a
+    PR shorthand)."""
     if not ref:
         return ref
     m = _CANONICAL_REF_RE.match(ref)
@@ -216,7 +227,9 @@ def _decanonicalize_ref(ref: str) -> str:
     found_kind, system, key = m.groups()
     if found_kind not in _CLAIM_KINDS_FOR_CANON:
         return ref
-    if found_kind == "worktree":
+    if expected_kinds is not None and found_kind not in expected_kinds:
+        return ref
+    if found_kind in ("worktree", "session"):
         return f"{system}/{key}" if system else key
     return key
 
@@ -274,7 +287,7 @@ def _parse_pr_like_ref(ref: str) -> tuple[str | None, str | None]:
     malformed/foreign ref)."""
     if not ref:
         return None, None
-    stripped = _decanonicalize_ref(ref.strip())
+    stripped = _decanonicalize_ref(ref.strip(), expected_kinds=_PR_LIKE_KINDS)
     m = _GITHUB_PR_URL_RE.match(stripped) or _GENERIC_PR_URL_RE.match(stripped)
     if m:
         return m.group(1), m.group(2)
@@ -297,7 +310,10 @@ def claim_url(kind: str, ref: str) -> str | None:
     GitHub-only by the convention ``claims_cli``/create-pr writes it in) gets
     a synthesized ``github.com`` URL."""
     if kind in _PR_LIKE_KINDS:
-        stripped = _decanonicalize_ref(ref.strip()) if ref else ""
+        stripped = (
+            _decanonicalize_ref(ref.strip(), expected_kinds=frozenset({kind}))
+            if ref else ""
+        )
         if stripped.startswith("http://") or stripped.startswith("https://"):
             return stripped
         owner_repo, number = _parse_pr_like_ref(stripped)
@@ -321,7 +337,9 @@ def _parse_worktree_ref(ref: str) -> tuple[str | None, str | None]:
     older or hand-added ref with no embedded project)."""
     if not ref:
         return None, None
-    body = _decanonicalize_ref(ref).partition("#")[0]
+    body = _decanonicalize_ref(
+        ref, expected_kinds=frozenset({"worktree"}),
+    ).partition("#")[0]
     parts = body.split("/")
     if len(parts) >= 3:
         return parts[1] or None, "/".join(parts[2:]) or None
@@ -377,7 +395,9 @@ def format_claim(
     # ``#N``/bare-ref fallback below (the only branch with no kind-specific
     # unwrap of its own) also accepts a canonical-form ref identically to
     # its legacy shape, not just the worktree/PR-like branches.
-    ref = _decanonicalize_ref(ref) if ref else ref
+    ref = (
+        _decanonicalize_ref(ref, expected_kinds=frozenset({kind})) if ref else ref
+    )
     if kind == "worktree":
         project, worktree_id = _parse_worktree_ref(ref)
         if worktree_id:

@@ -18,7 +18,9 @@ and the call sites wired into ``cleanup``/``sweep``.
 """
 from __future__ import annotations
 
-from agent_worktrees import claims_rank
+import types
+
+from agent_worktrees import claims_rank, cleanup, sweep
 from agent_worktrees.tracking_claims import (
     canonicalize_ref,
     decanonicalize_ref,
@@ -86,6 +88,67 @@ def test_canonicalize_is_idempotent():
     once = canonicalize_ref("worktree", legacy)
     twice = canonicalize_ref("worktree", once)
     assert once == twice
+
+
+def test_session_ref_round_trips_through_canonical_form():
+    legacy = format_claim_ref("lambda-core", "aperture-labs", "wt-123", "sess1")
+    canon = canonicalize_ref("session", legacy)
+    assert canon == "session:lambda-core:aperture-labs/wt-123#sess1"
+    assert decanonicalize_ref(canon) == legacy
+
+
+def test_session_ref_without_session_suffix_round_trips():
+    # Regression: claims_rank's local duplicate unwrap only special-cased
+    # "worktree", silently dropping the machine for a session ref with no
+    # trailing "#session" (SESS m/p/w -> SESS p/w after canonicalization).
+    legacy = format_claim_ref("lambda-core", "aperture-labs", "wt-123")
+    canon = canonicalize_ref("session", legacy)
+    assert decanonicalize_ref(canon) == legacy
+    assert claims_rank.format_claim("session", canon) == claims_rank.format_claim(
+        "session", legacy
+    )
+
+
+def test_canonicalize_rejects_empty_ref():
+    # An empty ref can't round-trip through the canonical grammar (the key
+    # segment requires at least one character), so canonicalize_ref must
+    # leave it alone rather than producing an unrecoverable "<kind>::".
+    assert canonicalize_ref("task", "") == ""
+    assert decanonicalize_ref("task::") == "task::"
+
+
+def test_decanonicalize_restricts_to_expected_kinds():
+    # A canonical ref for an unrelated kind must not be accepted by a call
+    # site that only understands a narrower set -- e.g. a PR-only parser
+    # must reject (pass through unchanged, never unwrap) a "task"-kind
+    # canonical ref that happens to decode into something PR-shaped.
+    mismatched = canonicalize_ref("task", "owner/repo#42")
+    assert mismatched == "task::owner/repo#42"
+    assert (
+        decanonicalize_ref(mismatched, expected_kinds=frozenset({"pr"}))
+        == mismatched
+    )
+    # ... but is still accepted (and parses as a PR) when the PR-restricted
+    # unwrap is actually given a genuine PR-kind canonical ref.
+    genuine = canonicalize_ref("pr", "owner/repo#42")
+    assert (
+        decanonicalize_ref(genuine, expected_kinds=frozenset({"pr"}))
+        == "owner/repo#42"
+    )
+
+
+def test_cleanup_pr_claim_target_rejects_mismatched_kind_canonical_ref():
+    mismatched = canonicalize_ref("task", "owner/repo#42")
+    prcfg = types.SimpleNamespace(provider="github", api_base="")
+    # Must NOT be silently accepted as a PR target -- a task ref that only
+    # happens to decode into something PR-shaped once unwrapped must still
+    # fail to resolve (the exact bug this regression guards against).
+    assert cleanup._pr_claim_target(mismatched, prcfg) is None
+
+
+def test_sweep_github_pr_view_args_rejects_mismatched_kind_canonical_ref():
+    mismatched = canonicalize_ref("task", "owner/repo#42")
+    assert sweep._github_pr_view_args(mismatched) is None
 
 
 def test_canonicalize_does_not_mistake_a_different_kinds_opaque_ref_as_already_canonical():

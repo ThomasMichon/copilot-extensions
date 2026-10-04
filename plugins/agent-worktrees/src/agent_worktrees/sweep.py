@@ -273,7 +273,9 @@ def _github_pr_view_args(ref: str) -> list[str] | None:
     ambiguous without a repo).
     """
     ref = (ref or "").strip()
-    ref = tracking_claims.decanonicalize_ref(ref)
+    ref = tracking_claims.decanonicalize_ref(
+        ref, expected_kinds=tracking_claims.PR_LIKE_KINDS,
+    )
     m = _GH_PR_URL.match(ref)
     if m:
         return [ref]
@@ -327,7 +329,9 @@ def _ado_pr_view_args(ref: str) -> list[str] | None:
     any other shape yields ``None`` (spare).
     """
     ref = (ref or "").strip()
-    ref = tracking_claims.decanonicalize_ref(ref)
+    ref = tracking_claims.decanonicalize_ref(
+        ref, expected_kinds=tracking_claims.PR_LIKE_KINDS,
+    )
     m = _ADO_PR_VSTS.match(ref)
     if m:
         return ["--id", m.group(2), "--org", f"https://{m.group(1)}/"]
