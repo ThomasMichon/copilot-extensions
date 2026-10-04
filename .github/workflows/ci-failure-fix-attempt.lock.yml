@@ -1,5 +1,5 @@
-# gh-aw-metadata: {"schema_version":"v4","frontmatter_hash":"cea3da122b4ad3e625a8dffa0512a7e0b5f497a938b648046701d97e0dabcb4b","body_hash":"b9926d4f5d6b96c18a0ea7202b26cc5e54fb83bee9be57fbefbbe6830d111f3e","compiler_version":"v0.89.21","strict":true,"agent_id":"copilot","engine_versions":{"copilot":"1.0.87"}}
-# gh-aw-manifest: {"version":1,"secrets":["COPILOT_GITHUB_TOKEN","GH_AW_CI_TRIGGER_TOKEN","GH_AW_DEFAULT_OTLP_ENDPOINT","GH_AW_DEFAULT_OTLP_HEADERS","GH_AW_GITHUB_MCP_SERVER_TOKEN","GH_AW_GITHUB_TOKEN","GITHUB_TOKEN"],"actions":[{"repo":"actions/checkout","sha":"11d5960a326750d5838078e36cf38b85af677262","version":"v4"},{"repo":"actions/checkout","sha":"3d3c42e5aac5ba805825da76410c181273ba90b1","version":"v7.0.1"},{"repo":"actions/download-artifact","sha":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version":"v8.0.1"},{"repo":"actions/github-script","sha":"3a2844b7e9c422d3c10d287c895573f7108da1b3","version":"v9.0.0"},{"repo":"actions/setup-node","sha":"820762786026740c76f36085b0efc47a31fe5020","version":"v7.0.0"},{"repo":"actions/upload-artifact","sha":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version":"v7.0.1"},{"repo":"github/gh-aw-actions/setup","sha":"v0.89.21","version":"v0.89.21"}],"containers":[{"image":"ghcr.io/github/gh-aw-firewall/agent:0.28.23","digest":"sha256:2c78aaba1c108e130e2d6d01e4f2cca334ea04c53e6f258913ac34173fe7e3b2","pinned_image":"ghcr.io/github/gh-aw-firewall/agent:0.28.23@sha256:2c78aaba1c108e130e2d6d01e4f2cca334ea04c53e6f258913ac34173fe7e3b2"},{"image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.28.23","digest":"sha256:c15c3d1208df10c5b588a3657be53742aa982ae0909d1eb1812525268794ca64","pinned_image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.28.23@sha256:c15c3d1208df10c5b588a3657be53742aa982ae0909d1eb1812525268794ca64"},{"image":"ghcr.io/github/gh-aw-firewall/squid:0.28.23","digest":"sha256:02ffc56dd40158223064ef03a78c2d9717473c93723b4e403d455ea6f0b09ae0","pinned_image":"ghcr.io/github/gh-aw-firewall/squid:0.28.23@sha256:02ffc56dd40158223064ef03a78c2d9717473c93723b4e403d455ea6f0b09ae0"},{"image":"ghcr.io/github/gh-aw-mcpg:v0.4.25","digest":"sha256:9be0a86220e807a0ecc89e53d7453468f7a53fbc6b3d1efd2299025ffe01d086","pinned_image":"ghcr.io/github/gh-aw-mcpg:v0.4.25@sha256:9be0a86220e807a0ecc89e53d7453468f7a53fbc6b3d1efd2299025ffe01d086"},{"image":"ghcr.io/github/gh-aw-node","digest":"sha256:11c2c544876cdbaffefe0f7f1283b74838c209654b4934a78e23ed11f750490f","pinned_image":"ghcr.io/github/gh-aw-node@sha256:11c2c544876cdbaffefe0f7f1283b74838c209654b4934a78e23ed11f750490f"},{"image":"ghcr.io/github/github-mcp-server:v1.12.2","digest":"sha256:508a0857ec762b1ab1cece29193345b501fab1dd9d1228a7b617062954cecac6","pinned_image":"ghcr.io/github/github-mcp-server:v1.12.2@sha256:508a0857ec762b1ab1cece29193345b501fab1dd9d1228a7b617062954cecac6"}],"mcp_servers":[{"name":"github","tools":["get_commit","get_file_contents","get_latest_release","get_me","get_pull_request","get_pull_request_comments","get_pull_request_diff","get_pull_request_files","get_pull_request_review_comments","get_pull_request_reviews","get_pull_request_status","get_release_by_tag","get_tag","issue_read","list_branches","list_commits","list_issue_types","list_issues","list_pull_requests","list_releases","list_starred_repositories","list_tags","pull_request_read","search_code","search_issues","search_pull_requests","search_repositories"]},{"name":"safeoutputs","tools":["create_pull_request","missing_data","missing_tool","noop"]}]}
+# gh-aw-metadata: {"schema_version":"v4","frontmatter_hash":"c66e591e4cac545da9981572f22495b437f5bea8103cb3538790e61e007a9d4c","body_hash":"a0ddb9004ab2ccf247c5d7220cebe8321c02decc226297637b14e099f8f33b54","compiler_version":"v0.89.21","strict":true,"agent_id":"copilot","engine_versions":{"copilot":"1.0.87"}}
+# gh-aw-manifest: {"version":1,"secrets":["COPILOT_GITHUB_TOKEN","GH_AW_CI_TRIGGER_TOKEN","GH_AW_DEFAULT_OTLP_ENDPOINT","GH_AW_DEFAULT_OTLP_HEADERS","GH_AW_GITHUB_MCP_SERVER_TOKEN","GH_AW_GITHUB_TOKEN","GITHUB_TOKEN"],"actions":[{"repo":"actions/checkout","sha":"11d5960a326750d5838078e36cf38b85af677262","version":"v4"},{"repo":"actions/checkout","sha":"3d3c42e5aac5ba805825da76410c181273ba90b1","version":"v7.0.1"},{"repo":"actions/download-artifact","sha":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version":"v8.0.1"},{"repo":"actions/github-script","sha":"3a2844b7e9c422d3c10d287c895573f7108da1b3","version":"v9.0.0"},{"repo":"actions/setup-node","sha":"820762786026740c76f36085b0efc47a31fe5020","version":"v7.0.0"},{"repo":"actions/upload-artifact","sha":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version":"v7.0.1"},{"repo":"github/gh-aw/actions/setup","sha":"c35393777e5604a63721d09512263b1383301d4f","version":"c35393777e5604a63721d09512263b1383301d4f"}],"containers":[{"image":"ghcr.io/github/gh-aw-firewall/agent:0.28.23","digest":"sha256:2c78aaba1c108e130e2d6d01e4f2cca334ea04c53e6f258913ac34173fe7e3b2","pinned_image":"ghcr.io/github/gh-aw-firewall/agent:0.28.23@sha256:2c78aaba1c108e130e2d6d01e4f2cca334ea04c53e6f258913ac34173fe7e3b2"},{"image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.28.23","digest":"sha256:c15c3d1208df10c5b588a3657be53742aa982ae0909d1eb1812525268794ca64","pinned_image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.28.23@sha256:c15c3d1208df10c5b588a3657be53742aa982ae0909d1eb1812525268794ca64"},{"image":"ghcr.io/github/gh-aw-firewall/squid:0.28.23","digest":"sha256:02ffc56dd40158223064ef03a78c2d9717473c93723b4e403d455ea6f0b09ae0","pinned_image":"ghcr.io/github/gh-aw-firewall/squid:0.28.23@sha256:02ffc56dd40158223064ef03a78c2d9717473c93723b4e403d455ea6f0b09ae0"},{"image":"ghcr.io/github/gh-aw-mcpg:v0.4.25","digest":"sha256:9be0a86220e807a0ecc89e53d7453468f7a53fbc6b3d1efd2299025ffe01d086","pinned_image":"ghcr.io/github/gh-aw-mcpg:v0.4.25@sha256:9be0a86220e807a0ecc89e53d7453468f7a53fbc6b3d1efd2299025ffe01d086"},{"image":"ghcr.io/github/gh-aw-node","digest":"sha256:11c2c544876cdbaffefe0f7f1283b74838c209654b4934a78e23ed11f750490f","pinned_image":"ghcr.io/github/gh-aw-node@sha256:11c2c544876cdbaffefe0f7f1283b74838c209654b4934a78e23ed11f750490f"},{"image":"ghcr.io/github/github-mcp-server:v1.12.2","digest":"sha256:508a0857ec762b1ab1cece29193345b501fab1dd9d1228a7b617062954cecac6","pinned_image":"ghcr.io/github/github-mcp-server:v1.12.2@sha256:508a0857ec762b1ab1cece29193345b501fab1dd9d1228a7b617062954cecac6"}],"mcp_servers":[{"name":"github","tools":["get_commit","get_file_contents","get_latest_release","get_me","get_pull_request","get_pull_request_comments","get_pull_request_diff","get_pull_request_files","get_pull_request_review_comments","get_pull_request_reviews","get_pull_request_status","get_release_by_tag","get_tag","issue_read","list_branches","list_commits","list_issue_types","list_issues","list_pull_requests","list_releases","list_starred_repositories","list_tags","pull_request_read","search_code","search_issues","search_pull_requests","search_repositories"]},{"name":"safeoutputs","tools":["create_pull_request","missing_data","missing_tool","noop"]}]}
 # This file was automatically generated by gh-aw (v0.89.21). DO NOT EDIT. To debug this workflow, load the skill at https://github.com/github/gh-aw/blob/main/debug.md
 #
 #    ___                   _   _
@@ -44,7 +44,7 @@
 #   - actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0 (source v9)
 #   - actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
 #   - actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-#   - github/gh-aw-actions/setup@v0.89.21
+#   - github/gh-aw/actions/setup@c35393777e5604a63721d09512263b1383301d4f
 #
 # Container images used:
 #   - ghcr.io/github/gh-aw-firewall/agent:0.28.23@sha256:2c78aaba1c108e130e2d6d01e4f2cca334ea04c53e6f258913ac34173fe7e3b2
@@ -128,7 +128,7 @@ jobs:
     steps:
       - name: Setup Scripts
         id: setup
-        uses: github/gh-aw-actions/setup@v0.89.21
+        uses: github/gh-aw/actions/setup@c35393777e5604a63721d09512263b1383301d4f
         with:
           destination: ${{ runner.temp }}/gh-aw/actions
           job-name: ${{ github.job }}
@@ -468,7 +468,7 @@ jobs:
     steps:
       - name: Setup Scripts
         id: setup
-        uses: github/gh-aw-actions/setup@v0.89.21
+        uses: github/gh-aw/actions/setup@c35393777e5604a63721d09512263b1383301d4f
         with:
           destination: ${{ runner.temp }}/gh-aw/actions
           job-name: ${{ github.job }}
@@ -574,8 +574,10 @@ jobs:
         env:
           GH_AW_SKILL_DIR: ".github/skills"
         run: bash "${RUNNER_TEMP}/gh-aw/actions/restore_inline_skills.sh"
-      - name: Create a worktree from the configured contribution branch
-        run: "set -euo pipefail\nmkdir -p \"$GITHUB_WORKSPACE/.verify-issue\"\nuv run --project plugins/agent-worktrees agent-worktrees create --json --system --no-owner --no-pair --origin system \\\n  > \"$GITHUB_WORKSPACE/.verify-issue/worktree.json\"\n"
+      - env:
+          GH_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        name: Check out this repo's configured contribution branch
+        run: "set -euo pipefail\nmkdir -p \"$GITHUB_WORKSPACE/.verify-issue\"\nBRANCH=$(sed -n 's/^default_branch: *//p' .agent-worktrees/config.yaml | head -1)\nBRANCH=${BRANCH:-$GH_DEFAULT_BRANCH}\nif [ \"$BRANCH\" != \"$GH_DEFAULT_BRANCH\" ]; then\n  git fetch origin \"$BRANCH\" --quiet\n  git checkout --force --detach \"origin/$BRANCH\"\nfi\ngit rev-parse HEAD > \"$GITHUB_WORKSPACE/.verify-issue/base-sha.txt\"\n"
       - env:
           BODY_B64: ${{ needs.verify-issue.outputs.body-b64 }}
         name: Decode the verified issue record
@@ -1186,7 +1188,7 @@ jobs:
             echo '{"items":[]}' > /tmp/gh-aw/agent_output.json
           fi
       - name: Enforce a machine-checked change-scope gate
-        run: "set -euo pipefail\nWT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[\"worktree\"][\"path\"])' \"$GITHUB_WORKSPACE/.verify-issue/worktree.json\")\ncd \"$WT\"\nBASE=$(git rev-parse HEAD)\n# Real review finding (PR #4155): comparing only `$BASE` vs `HEAD`\n# (committed history) ignores the normal state a `create-pull-request`\n# safe-output actually collects from -- uncommitted and untracked\n# changes in the agent's own workspace, which this gate would then\n# silently miss entirely. Compare `$BASE` against the WORKING TREE\n# instead (`git diff` with no second ref, which diffs against the\n# working tree) for tracked-file changes, and add untracked new files\n# via `git ls-files --others`, so nothing the agent actually produced\n# can slip past this gate uninspected.\nCHANGED=$(\n  { git diff --name-only \"$BASE\" -- .\n    git ls-files --others --exclude-standard; } | sort -u\n)\nif [ -z \"$CHANGED\" ]; then\n  echo \"::notice::No changes to scope-check.\"\n  exit 0\nfi\nVIOLATIONS=\"\"\nwhile IFS= read -r FILE; do\n  [ -z \"$FILE\" ] && continue\n  case \"$FILE\" in\n    .verify-issue/*)\n      : # this workflow's own scratch state, never a legitimate fix target\n      ;;\n    .github/workflows/*|plugin.json|*/plugin.json|pyproject.toml|*/pyproject.toml|marketplace.json|*/marketplace.json)\n      VIOLATIONS=\"$VIOLATIONS\n- $FILE (an explicitly out-of-scope path -- already excluded from the safe-output patch, but its presence here means the agent attempted it)\"\n      ;;\n    plugins/*|libs/*|tools/*|docs/*|.changefiles/*)\n      : # the ordinary source-contribution surface\n      ;;\n    *)\n      VIOLATIONS=\"$VIOLATIONS\n- $FILE (outside the ordinary contribution surface)\"\n      ;;\n  esac\ndone <<< \"$CHANGED\"\nif [ -n \"$VIOLATIONS\" ]; then\n  echo \"::error::Change-scope gate failed -- this run touched file(s) outside the expected contribution surface, which the charter's own 'entire scope' rule forbids:$VIOLATIONS\"\n  exit 1\nfi"
+        run: "set -euo pipefail\nBASE=$(cat \"$GITHUB_WORKSPACE/.verify-issue/base-sha.txt\")\n# Real review finding (PR #4155): comparing only `$BASE` vs `HEAD`\n# (committed history) ignores the normal state a `create-pull-request`\n# safe-output actually collects from -- uncommitted and untracked\n# changes in the agent's own workspace, which this gate would then\n# silently miss entirely. Compare `$BASE` against the WORKING TREE\n# instead (`git diff` with no second ref, which diffs against the\n# working tree) for tracked-file changes, and add untracked new files\n# via `git ls-files --others`, so nothing the agent actually produced\n# can slip past this gate uninspected.\nCHANGED=$(\n  { git diff --name-only \"$BASE\" -- .\n    git ls-files --others --exclude-standard; } | sort -u\n)\nif [ -z \"$CHANGED\" ]; then\n  echo \"::notice::No changes to scope-check.\"\n  exit 0\nfi\nVIOLATIONS=\"\"\nwhile IFS= read -r FILE; do\n  [ -z \"$FILE\" ] && continue\n  case \"$FILE\" in\n    .verify-issue/*)\n      : # this workflow's own scratch state, never a legitimate fix target\n      ;;\n    .github/workflows/*|plugin.json|*/plugin.json|pyproject.toml|*/pyproject.toml|marketplace.json|*/marketplace.json)\n      VIOLATIONS=\"$VIOLATIONS\n- $FILE (an explicitly out-of-scope path -- already excluded from the safe-output patch, but its presence here means the agent attempted it)\"\n      ;;\n    plugins/*|libs/*|tools/*|docs/*|.changefiles/*)\n      : # the ordinary source-contribution surface\n      ;;\n    *)\n      VIOLATIONS=\"$VIOLATIONS\n- $FILE (outside the ordinary contribution surface)\"\n      ;;\n  esac\ndone <<< \"$CHANGED\"\nif [ -n \"$VIOLATIONS\" ]; then\n  echo \"::error::Change-scope gate failed -- this run touched file(s) outside the expected contribution surface, which the charter's own 'entire scope' rule forbids:$VIOLATIONS\"\n  exit 1\nfi"
 
       # Small dedicated copy of the agent output so safe-output processing
       # survives a failed or timed-out upload of the larger agent artifact
@@ -1267,7 +1269,7 @@ jobs:
     steps:
       - name: Setup Scripts
         id: setup
-        uses: github/gh-aw-actions/setup@v0.89.21
+        uses: github/gh-aw/actions/setup@c35393777e5604a63721d09512263b1383301d4f
         with:
           destination: ${{ runner.temp }}/gh-aw/actions
           job-name: ${{ github.job }}
@@ -1542,7 +1544,7 @@ jobs:
     steps:
       - name: Setup Scripts
         id: setup
-        uses: github/gh-aw-actions/setup@v0.89.21
+        uses: github/gh-aw/actions/setup@c35393777e5604a63721d09512263b1383301d4f
         with:
           destination: ${{ runner.temp }}/gh-aw/actions
           job-name: ${{ github.job }}
@@ -1821,7 +1823,7 @@ jobs:
     steps:
       - name: Setup Scripts
         id: setup
-        uses: github/gh-aw-actions/setup@v0.89.21
+        uses: github/gh-aw/actions/setup@c35393777e5604a63721d09512263b1383301d4f
         with:
           destination: ${{ runner.temp }}/gh-aw/actions
           job-name: ${{ github.job }}
@@ -1895,7 +1897,7 @@ jobs:
     steps:
       - name: Setup Scripts
         id: setup
-        uses: github/gh-aw-actions/setup@v0.89.21
+        uses: github/gh-aw/actions/setup@c35393777e5604a63721d09512263b1383301d4f
         with:
           destination: ${{ runner.temp }}/gh-aw/actions
           job-name: ${{ github.job }}

@@ -416,17 +416,31 @@ jobs:
 # this and recommends writing the result to a FILE and referencing that
 # fixed path in the prompt instead, which is what this step now does.
 pre-agent-steps:
-  - name: Create a worktree from the configured contribution branch
+  - name: Check out this repo's configured contribution branch
     # The Actions checkout is this workflow's ref, which is GitHub's
-    # default branch. That is not this repo's contribution branch.
-    # agent-worktrees create reads `.agent-worktrees/config.yaml`
-    # `default_branch` and forks from that ref. Do not git-checkout a
-    # hardcoded branch here.
+    # default branch -- not necessarily this repo's contribution branch.
+    # Read the real answer from the repo's own committed
+    # .agent-worktrees/config.yaml (`default_branch:`) rather than
+    # hardcoding a branch name or assuming the two match. This stays in
+    # $GITHUB_WORKSPACE (never a sibling worktree): that is the only
+    # path the engine container mounts and the only path safe-outputs'
+    # create-pull-request reads its patch from (gh-aw starts
+    # `safeoutputs` with `-w $GITHUB_WORKSPACE`) -- a worktree anywhere
+    # else would be invisible to both. Capture the resulting SHA to an
+    # immutable file now; `post-steps` below reuses it instead of
+    # re-resolving a branch that can move while the agent runs.
+    env:
+      GH_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
     run: |
       set -euo pipefail
       mkdir -p "$GITHUB_WORKSPACE/.verify-issue"
-      uv run --project plugins/agent-worktrees agent-worktrees create --json --system --no-owner --no-pair --origin system \
-        > "$GITHUB_WORKSPACE/.verify-issue/worktree.json"
+      BRANCH=$(sed -n 's/^default_branch: *//p' .agent-worktrees/config.yaml | head -1)
+      BRANCH=${BRANCH:-$GH_DEFAULT_BRANCH}
+      if [ "$BRANCH" != "$GH_DEFAULT_BRANCH" ]; then
+        git fetch origin "$BRANCH" --quiet
+        git checkout --force --detach "origin/$BRANCH"
+      fi
+      git rev-parse HEAD > "$GITHUB_WORKSPACE/.verify-issue/base-sha.txt"
   - name: Decode the verified issue record
     env:
       BODY_B64: ${{ needs.verify-issue.outputs.body-b64 }}
@@ -451,15 +465,14 @@ pre-agent-steps:
 # always removed before any patch is built, regardless of this check.
 post-steps:
   - name: Enforce a machine-checked change-scope gate
-    # Diff the worktree agent-worktrees just created, not the Actions
-    # checkout. That worktree is already the configured contribution
-    # branch; a merge-base with GitHub's default branch would treat
-    # every contribution-branch-only file as the agent's patch.
+    # Diff against the SHA `pre-agent-steps` captured before the agent
+    # ran, never a freshly re-fetched branch -- the branch can advance
+    # during the agent's run, and comparing against that later tip would
+    # misattribute upstream commits to the agent or miss files it touched
+    # that an advancing branch happens to also touch.
     run: |
       set -euo pipefail
-      WT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["worktree"]["path"])' "$GITHUB_WORKSPACE/.verify-issue/worktree.json")
-      cd "$WT"
-      BASE=$(git rev-parse HEAD)
+      BASE=$(cat "$GITHUB_WORKSPACE/.verify-issue/base-sha.txt")
       # Real review finding (PR #4155): comparing only `$BASE` vs `HEAD`
       # (committed history) ignores the normal state a `create-pull-request`
       # safe-output actually collects from -- uncommitted and untracked
@@ -1068,13 +1081,12 @@ not part of your fix, and is stripped from any patch regardless.
 `.verify-issue/body.txt` already carries the failing job name, the failing
 test node id (when the failing one was parseable), the run link and commit
 SHA, and a log excerpt. Treat
-this as your starting evidence, not your only evidence. Do not edit the
-Actions checkout. `.verify-issue/worktree.json` names a worktree
-`agent-worktrees create` already made from this repo's configured
-contribution branch (`default_branch` in `.agent-worktrees/config.yaml`),
-not from GitHub's default branch. Do all inspection and edits in that
-path. The recorded commit SHA may be behind that tip -- confirm the
-failure still reproduces there before editing.
+this as your starting evidence, not your only evidence -- `pre-agent-steps`
+already checked out this repo's actual contribution branch (read from
+`.agent-worktrees/config.yaml`, not assumed), so this workspace is already
+that branch's tip, not GitHub's default branch. The recorded commit SHA may
+be behind that tip -- confirm the failure still reproduces here before
+editing.
 
 ## Your charter -- read this before touching anything
 
