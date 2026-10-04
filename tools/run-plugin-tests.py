@@ -512,29 +512,27 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     lease: SingleInstance | None = None
-    # `--prepare-only` is deliberately NOT exempt here, unlike `--guards`/
-    # `--collect-only`: it can rebuild/delete the SHARED on-disk venv
-    # (`_ensure_venv`, via `--reinstall` or a drifted dependency
-    # fingerprint) that a concurrent bare admitted run may be relying on
-    # mid-execution -- exempting it would let `--prepare-only --reinstall`
-    # race and break that other run nondeterministically. The
+    # Every mode that reaches this point touches `_ensure_venv()` below --
+    # a real run, `--guards`, `--collect-only`, and `--prepare-only`
+    # alike -- and so can rebuild or delete the SHARED on-disk venv (via
+    # `--reinstall` or a drifted dependency fingerprint) a concurrent
+    # admitted run may be relying on mid-execution. Only `--list` is
+    # exempt, and it already returned above without reaching here. The
     # devcontainer wrapper's own internal `--prepare-only` call is
-    # unaffected: it runs inside a container with a fresh, always-
-    # uncontested tmpfs `$HOME`, so acquiring a lease there is a no-op in
-    # practice, not a behavior change.
-    needs_admission = not args.guards and not args.collect_only
-    if needs_admission:
-        if args.admission_wait:
-            print(f"Waiting up to {args.admission_wait:g}s for the host test slot ...")
-        try:
-            lease = _acquire_admission(args.admission_wait)
-        except AlreadyRunningError as exc:
-            print(
-                f"[BUSY] Another heavy plugin test run is active: {exc}. "
-                "Use --admission-wait SECONDS to wait for it.",
-                file=sys.stderr,
-            )
-            return 3
+    # unaffected in practice: it runs inside a container with a fresh,
+    # always-uncontested tmpfs `$HOME`, so acquiring a lease there is a
+    # no-op, not a behavior change.
+    if args.admission_wait:
+        print(f"Waiting up to {args.admission_wait:g}s for the host test slot ...")
+    try:
+        lease = _acquire_admission(args.admission_wait)
+    except AlreadyRunningError as exc:
+        print(
+            f"[BUSY] Another heavy plugin test run is active: {exc}. "
+            "Use --admission-wait SECONDS to wait for it.",
+            file=sys.stderr,
+        )
+        return 3
 
     try:
         print(f"Test targets: {', '.join(targets)}")

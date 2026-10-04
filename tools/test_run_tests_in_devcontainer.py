@@ -1618,11 +1618,12 @@ def test_disconnect_container_networks_fails_closed_for_none_mode_with_extra_net
             raise AssertionError("expected SystemExit")
 
 
-def test_admission_needs_admission_false_for_skip_flags() -> None:
+def test_admission_needs_admission_false_only_for_list() -> None:
+    # `--list` returns before `run-plugin-tests.py` ever reaches
+    # `_ensure_venv()`, so it is the only mode that never touches the
+    # shared venv and is therefore exempt from the host-wide lease.
     canon = wrapper._canonicalize_flag
     assert wrapper._admission.needs_admission(["--list"], canon) is False
-    assert wrapper._admission.needs_admission(["--guards"], canon) is False
-    assert wrapper._admission.needs_admission(["--collect-only"], canon) is False
 
 
 def test_admission_needs_admission_true_for_a_real_run() -> None:
@@ -1631,11 +1632,15 @@ def test_admission_needs_admission_true_for_a_real_run() -> None:
     assert wrapper._admission.needs_admission([], canon) is True
 
 
-def test_admission_needs_admission_true_for_prepare_only() -> None:
-    # Deliberately NOT exempt, unlike --guards/--collect-only: it can
-    # rebuild/delete the SHARED on-disk venv a concurrent bare admitted
-    # run may be relying on mid-execution.
+def test_admission_needs_admission_true_for_venv_mutating_modes() -> None:
+    # `--guards`, `--collect-only`, and `--prepare-only` all reach
+    # `_ensure_venv()` and so can rebuild/delete the SHARED on-disk venv
+    # (via `--reinstall` or a drifted dependency fingerprint) a
+    # concurrent admitted run may be relying on mid-execution -- none of
+    # them are exempt.
     canon = wrapper._canonicalize_flag
+    assert wrapper._admission.needs_admission(["--guards"], canon) is True
+    assert wrapper._admission.needs_admission(["--collect-only"], canon) is True
     assert wrapper._admission.needs_admission(["--prepare-only"], canon) is True
 
 

@@ -2422,3 +2422,25 @@ of a real checkout's venv across worktrees/containers that the fix
 actually closes. All tests, module-size, and docs-consistency checks
 still pass; a fresh Docker-backed end-to-end run confirmed the fix
 doesn't disturb the common case.
+
+### 2026-10-03 — Review round 7 (PR #5100): --guards/--collect-only were never actually read-only either
+The very next review round caught that round 6's fix was incomplete:
+`--guards` and `--collect-only` were left exempt on the premise that
+they're "read-only," but both still reach `run_plugin`'s own
+`_ensure_venv()` call exactly like a real run -- so either one can also
+rebuild or delete the shared on-disk venv via `--reinstall` or a drifted
+dependency fingerprint, racing a concurrent admitted run the same way
+the just-fixed `--prepare-only` case did. The only mode that is
+genuinely exempt is `--list`, which returns before `run-plugin-tests.py`
+ever reaches `_ensure_venv()` (or its own admission check) at all.
+Simplified `needs_admission` in `run-plugin-tests.py` to an
+unconditional lease acquisition at that point in `main()` (removing the
+now-dead `not args.guards and not args.collect_only` condition, since
+`--list` has already returned by the time that code runs), and narrowed
+the wrapper's mirrored `_SKIPS_ADMISSION` to `{"--list"}` to match.
+Updated `TESTING.md`'s admission-exemption list accordingly and inverted
+the `--guards` unit test that had asserted it must not take the
+heavy-test slot, adding a parallel `--collect-only` test. All tests,
+module-size, and docs-consistency checks still pass; a fresh
+Docker-backed end-to-end run confirmed the fix doesn't disturb the
+common case.

@@ -178,23 +178,53 @@ def test_heavy_run_holds_admission_for_all_targets(monkeypatch) -> None:
     assert events == ["acquire", "run:alpha", "run:beta", "release"]
 
 
-def test_guards_remain_available_without_heavy_admission(monkeypatch) -> None:
+def test_guards_also_take_heavy_admission(monkeypatch) -> None:
+    # `--guards` still reaches `_ensure_venv()` and so can rebuild/delete
+    # the SHARED on-disk venv a concurrent bare admitted run may be
+    # relying on mid-execution -- it is not exempt.
+    class Lease:
+        def release(self) -> None:
+            pass
+
     monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
     monkeypatch.setattr(runner.shutil, "which", lambda _name: "uv")
+    acquire_calls: list[float] = []
     monkeypatch.setattr(
         runner,
         "_acquire_admission",
-        lambda _wait: pytest.fail("guard runs must not take the heavy-test slot"),
+        lambda wait: acquire_calls.append(wait) or Lease(),
     )
     monkeypatch.setattr(runner, "run_plugin", lambda *_args, **_kwargs: 0)
 
     assert runner.main(["alpha", "--guards"]) == 0
+    assert acquire_calls == [0.0]
+
+
+def test_collect_only_also_takes_heavy_admission(monkeypatch) -> None:
+    # `--collect-only` likewise reaches `_ensure_venv()` and so can
+    # rebuild/delete the SHARED on-disk venv -- it is not exempt either.
+    class Lease:
+        def release(self) -> None:
+            pass
+
+    monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    monkeypatch.setattr(runner.shutil, "which", lambda _name: "uv")
+    acquire_calls: list[float] = []
+    monkeypatch.setattr(
+        runner,
+        "_acquire_admission",
+        lambda wait: acquire_calls.append(wait) or Lease(),
+    )
+    monkeypatch.setattr(runner, "run_plugin", lambda *_args, **_kwargs: 0)
+
+    assert runner.main(["alpha", "--collect-only"]) == 0
+    assert acquire_calls == [0.0]
 
 
 def test_prepare_only_takes_heavy_admission(monkeypatch) -> None:
-    # Unlike --guards/--collect-only, --prepare-only is deliberately NOT
-    # exempt: it can rebuild/delete the SHARED on-disk venv a concurrent
-    # bare admitted run may be relying on mid-execution.
+    # Like --guards/--collect-only, --prepare-only is NOT exempt: it can
+    # rebuild/delete the SHARED on-disk venv a concurrent bare admitted
+    # run may be relying on mid-execution.
     class Lease:
         def release(self) -> None:
             pass
