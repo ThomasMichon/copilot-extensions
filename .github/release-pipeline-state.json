@@ -6,8 +6,8 @@
     "tag": "promote-20261004112603"
   },
   "last_rollback": null,
-  "pause_reason": "main-history-rewrite in progress (see efforts/active/main-history-rewrite) -- purging coverage-baseline blob bloat via git filter-repo",
-  "paused": true,
+  "pause_reason": null,
+  "paused": false,
   "schema": "copilot-extensions.release-pipeline-state",
   "version": 1
 }
