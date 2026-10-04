@@ -442,6 +442,22 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             if use_json:
                 return core._json_error(str(e))
             raise
+
+        if not getattr(args, "worktree_id", None):
+            # Owning project is always the CWD -- the claimant responsible
+            # for this PR's lifetime. An explicit --worktree-id (operating
+            # on a named worktree without cd-ing into it) is its own
+            # sanctioned pattern and is not re-validated against CWD here;
+            # this only closes the "CWD traces to no worktree at all" gap
+            # for the common (no --worktree-id) invocation.
+            from . import pr_cli as _pr_cli
+
+            _claimant_id, claimant_error = _pr_cli.require_claimant_worktree("create-pr")
+            if claimant_error:
+                return core._json_error(claimant_error) if use_json else (
+                    output.err(claimant_error) or 2
+                )
+
         worktree_id = core._infer_worktree_id(args.worktree_id, config)
         if not worktree_id:
             msg = (
@@ -453,6 +469,29 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             output.err(msg)
             return 1
         worktree_id = core._resolve_worktree_id(worktree_id)
+
+        target_repo_arg = getattr(args, "repo", None)
+        if target_repo_arg:
+            from . import pr_config as _pr_config
+
+            resolution = _pr_config.resolve_repo_config_for_slug(config, target_repo_arg)
+            if resolution.resolved and not resolution.same_as_active:
+                msg = (
+                    f"create-pr: --repo {target_repo_arg!r} names a different, "
+                    f"also-registered repo than this worktree's own "
+                    f"({config.repo_name!r}) -- create-pr pushes commits from "
+                    "THIS worktree's own local checkout, which is not a "
+                    f"checkout of {target_repo_arg!r}. There is no "
+                    "already-pushed-branch mode yet. Options: (1) create a "
+                    f"worktree of {target_repo_arg!r} itself and run create-pr "
+                    "from there, or (2) if the branch already exists and is "
+                    f"already pushed to {target_repo_arg!r}, use "
+                    f"`agent-pull-requests create --repo {target_repo_arg} "
+                    "--head <branch> --title ...` instead -- that plugin is "
+                    "built for exactly this (no local checkout required). "
+                    "Do not fall back to gh/az repos/git directly."
+                )
+                return core._json_error(msg) if use_json else (output.err(msg) or 2)
 
         body = getattr(args, "body", None)
         body_file = getattr(args, "body_file", None)
