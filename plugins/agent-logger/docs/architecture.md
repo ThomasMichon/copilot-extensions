@@ -61,7 +61,10 @@ when present, sibling `provenance/` sidecars and, when unfiltered, the
 session-store index files; it never copies installed plugins, credentials,
 settings, or other `~/.copilot` state. Sync scoping can use a repo allowlist,
 denylist, fail-closed behavior for unclassified sessions, and harness-repo
-origin sidecars for downstream routing. Targets implement a small `Target`
+origin sidecars for downstream routing. **What a consumer writes into a
+session's own `files/` folder is a separate boundary the sync engine can't
+police on its own — see [`archival-content-policy.md`](archival-content-policy.md)
+for what belongs there and what doesn't.** Targets implement a small `Target`
 interface
 (`push` / `prune` / `doctor` / `describe`):
 

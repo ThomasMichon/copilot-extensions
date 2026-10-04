@@ -1,0 +1,9 @@
+{
+  "comment": "Add archival-content-policy.md documenting what belongs in a session's files/ folder (allowlist/denylist, known-benign cruft, cross-copy reconciliation pitfalls), linked from architecture.md's sync section.",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
