@@ -340,6 +340,15 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     core_time = getattr(cli, "time", time)
     reap_abandoned = _core_helper("_reap_abandoned_passive", _reap_abandoned_passive)
     reap_superseded = _core_helper("_reap_superseded_coordinators", _reap_superseded_coordinators)
+    # Overlay the installed service.env onto this process's own environment
+    # *before* deriving the cutover configuration, so a durable host/port (or
+    # control-token) pin set only in service.env -- not in the triggering
+    # process's own ambient environment -- is honored for the cutover/health-
+    # check bind, not just for the replacement process's own spawn below.
+    from .install_paths import apply_service_env_overlay
+    from .install_paths import install_dir as runtime_install_dir
+
+    apply_service_env_overlay(os.environ, runtime_install_dir())
     cfg = _config.load_config()
     token = _client_token_value()
     wildcard_v4 = ".".join(("0", "0", "0", "0"))
@@ -369,9 +378,24 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
             str(port),
             "--passive",
         ]
+        # Built from the SAME service.env overlay already captured onto
+        # os.environ above -- not a fresh re-read here. Re-reading the file
+        # at spawn time (which can happen seconds into a cutover) would risk
+        # a TOCTOU split: an operator/installer edit landing between the
+        # overlay above (which `cfg`/`token`/health-check config were already
+        # derived from) and a second read here could start the replacement
+        # on a different token/database than the orchestration around it is
+        # using, while the rest of this cutover keeps using the first
+        # snapshot.
         child_env = dict(os.environ)
-        child_env["AGENT_DISPATCH_PORT"] = str(port)
         child_env.update(windowless_python_env(python))
+        # AGENT_DISPATCH_PORT must be set *after* the overlay snapshot above:
+        # the orchestrator already selected this specific free `port` for the
+        # passive process to bind (and passes it explicitly via `--port`
+        # above), and a stale port pin captured in that snapshot must never
+        # override the fresh selection -- `server._server_bind_port()` reads
+        # the env var, not the CLI flag.
+        child_env["AGENT_DISPATCH_PORT"] = str(port)
         kwargs: dict[str, Any] = {
             "env": child_env,
             "stdin": _subprocess.DEVNULL,

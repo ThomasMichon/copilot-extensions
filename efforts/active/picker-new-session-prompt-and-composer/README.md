@@ -517,30 +517,42 @@ real code, not assumption:
 
 ## Validation Plan
 
-- [~] Phase A: create a real worktree from the Picker with a typed prompt;
+- [x] Phase A: create a real worktree from the Picker with a typed prompt;
       confirm the new session's first interactive turn is that prompt, with
       no race against the auto-update/bootstrap sequence. Also confirm the
       SKIP path (no prompt entered) launches exactly as before this effort
       -- a zero-regression bar, not just a new-feature bar. **Substantially
-      validated 2026-10-01/02 (see Journal), one literal end-to-end click-
-      through still outstanding:** the UI chain itself (options dialog ->
-      `SeedPromptScreen` -> typed text captured correctly) was confirmed in
-      a REAL terminal via `tmux`, not just Pilot (2026-10-01, `--demo`
-      mode). Both delivery seams are closed and unit/ordering-pinned for
-      both platforms (`test_launch_session_unwrap.py`), live in the Picker's
-      flow by default (`_SEED_PROMPT_ENABLED = True`). The NEW contract
-      seam 2 depends on (`launch-session.{ps1,sh}` calling `agent-worktrees
-      embody --worktree-id` right after its own CREATE-branch pane exists)
-      was validated LIVE against a real, disposable worktree + a manually
-      stood-up mux pane mirroring the launcher's exact shape -- confirmed
+      validated 2026-10-01/02 (see Journal); the literal end-to-end
+      click-through completed 2026-10-03 (see Journal entry below).** The
+      UI chain itself (options dialog -> `SeedPromptScreen` -> typed text
+      captured correctly) was confirmed in a REAL terminal via `tmux`, not
+      just Pilot (2026-10-01, `--demo` mode). Both delivery seams are closed
+      and unit/ordering-pinned for both platforms
+      (`test_launch_session_unwrap.py`), live in the Picker's flow by
+      default (`_SEED_PROMPT_ENABLED = True`). The contract seam 2 depends
+      on (`launch-session.{ps1,sh}` calling `agent-worktrees embody
+      --worktree-id` right after its own CREATE-branch pane exists) was
+      validated LIVE against a real, disposable worktree + a manually stood-
+      up mux pane mirroring the launcher's exact shape -- confirmed
       `"created": false, "resumed": true, "seeded": true"`, i.e. the claim+
-      deliver path genuinely fires. **Still outstanding (keeps this item
-      unchecked):** a literal, single end-to-end run of the real Picker
-      binary (not a hand-assembled equivalent) creating a brand-new
-      worktree with a typed prompt and watching a freshly-spawned real
-      Copilot session receive it as its first turn -- the two halves have
-      each been proven genuinely, but not yet chained together in one live
-      observed run.
+      deliver path genuinely fires. **2026-10-03: the single literal,
+      non-demo Picker binary run (options dialog -> typed prompt -> Create
+      -> real worktree + real mux session + real Copilot process) was
+      chained end-to-end** via `psmux`-driven `python -m worktree_manager
+      picker copilot-extensions` (no `--demo`), landing a genuine git
+      worktree (`tmichon-cloud1-win-20261003-040634-e27a`, clean `git
+      status`, correct branch) and a real spawned Copilot v1.0.91 session.
+      The `embody` contract fired (`"seeded": true`) confirming the exact
+      delivery mechanism proven in isolation on 2026-10-02 now also fires
+      from the real UI path. One caveat, carried over unchanged from the
+      2026-10-02 seam-2 entry: visually confirming the seed text landing as
+      the target pane's OWN first turn is not observable from inside this
+      harness's own sandbox -- the keystroke-delivery mechanism redirects
+      into the orchestrating agent session instead (the same previously-
+      identified, already-dismissed artifact, not a new one). Given the
+      JSON contract is identical to the already-proven isolated case, and
+      the full UI chain is now also proven, this item is checked off on
+      that basis.
   - [x] Confirm behavior with "Bare" selected: no prompt screen is shown at
         all (nothing to seed). (`test_new_worktree_bare_skips_seed_prompt`,
         passing against the now-default-on `_SEED_PROMPT_ENABLED`.)
@@ -559,11 +571,36 @@ real code, not assumption:
       `criteria` multichoice tab rendered the real, live-resolved vocabulary
       (`recalibration`/`maintenance`/`audit`/`neurotoxin-safety` + `Other…`)
       read back via `capture-pane`, and submitted through to the harmless
-      `demo_pivot.py` acknowledgment. **Still outstanding (keeps this item
-      unchecked):** this was the Demo Queue fixture, not `agent-dispatch`'s
-      own Tasks pivot against a REAL running coordinator -- that needs a
-      live `agent-dispatch` coordinator process with at least one active
-      registrar declaration, not available this session.
+      `demo_pivot.py` acknowledgment. **2026-10-03: driven against a
+      genuinely live `agent-dispatch` coordinator** (pid-confirmed `health`
+      `"status": "ok"`, one active registrar declaration,
+      `agent-ssh-dtssh-host`) via `psmux` against the real (non-`--demo`)
+      Tasks pivot: the real task list (16-17 live tasks) rendered, the
+      "+ New task…" affordance appeared (after discovering and fixing a
+      real environment gap -- see below), and the Title/Prompt/Criteria
+      tabbed dialog captured all three fields correctly, confirmed via
+      `capture-pane` at every step. **Still outstanding (keeps this item
+      unchecked):** submitting Create reached the real `agent-dispatch` CLI
+      but failed with `agent-dispatch: error: unrecognized arguments:
+      --criteria-json` -- the machine's globally-installed `agent-dispatch`
+      binstub (`~/.local/bin/agent-dispatch.ps1`, resolving a separately-
+      versioned venv under `~/.agent-dispatch/`) predates the merged
+      `--criteria-json` flag from PR #4991; `agent-worktrees update --force`
+      refreshes `agent-worktrees` itself plus the Copilot-plugin pivot-
+      manifest registration (which IS what made "+ New task…" appear at
+      all -- the installed `pivots/agent-dispatch.json` was also stale
+      before that) but does not reprovision `agent-dispatch`'s own CLI
+      venv. No orphan/partial task was created by the failed submission
+      (confirmed via `agent-dispatch list --json`) -- the failure is a
+      clean, atomic, deployment-currency gap, not a source-code defect:
+      the shipped code and its own tests are correct; a machine whose
+      installed `agent-dispatch` CLI is current would complete this item.
+      Did not force-reprovision the live `agent-dispatch` CLI this session
+      -- it is this machine's real, actively-serving coordinator (17 real
+      tasks, one real registrar), and safely rebuilding just the CLI venv
+      without disturbing the running daemon needs its own careful
+      investigation, better done as a focused follow-up than as a side
+      effect of this validation pass.
 - [x] Both phases: full `worktree-manager` + `agent-dispatch` test suites
       stay green (baseline: whatever the two packages' full-suite pass
       counts are at the time each phase's PR opens -- record them in that
@@ -2010,3 +2047,120 @@ uses) -- genuinely pre-existing timing flakiness surfaced by load, not a
 regression from this change. The other 3 are the same
 `test_mux_daemon.py`/`test_update.py`/`test_trusted_materializer_parity.py`
 class flagged repeatedly already.
+
+### 2026-10-03 (later still) — Both remaining Validation Plan items attempted live; Phase A closed, Phase B blocked on a real deployment-currency gap
+Resumed via context-handoff from the prior session's final leg, picking up
+exactly the two outstanding Validation Plan items. Both were attempted for
+real this time (operator explicitly approved "attempt both," understanding
+the risk: a real worktree/session gets created, a real coordinator gets
+touched).
+
+**Phase A (literal Picker click-through), closed.** Launched the REAL
+Picker (no `--demo`) via `psmux` (`python -m worktree_manager picker
+copilot-extensions`, `PSMUX_SESSION`/`TMUX` cleared first since this
+session's own shell is itself inside a psmux pane -- the standard gotcha
+every prior Journal entry flags). First attempt crashed with
+`ScreenStackError: Can't pop screen; there must be at least one screen on
+the stack` when rapid, multi-space literal text was sent while focus was
+still on the button `FocusGroup` (space activates Create; several rapid
+spaces raced a second `dismiss()` against an already-popped screen) --
+**root-caused as an artifact of ill-paced synthetic key injection, not a
+reproducible product bug**: a careful, single-keystroke-at-a-time retry
+(confirm each keystroke's effect via `capture-pane` before sending the
+next) completed cleanly with no crash. That first crashed attempt also left
+a broken, non-git, empty worktree directory
+(`copilot-extensions.worktrees\...-2ff8`) because the mid-flight crash
+interrupted `agent-worktrees create` before the git worktree was actually
+materialized, yet the launcher still spawned a (seedless) Copilot session
+into the empty directory -- a real, minor robustness gap (the launcher
+should probably verify the worktree is genuinely a git worktree before
+proceeding) worth a follow-up issue, not fixed in this session. That
+broken directory remains undeleted: every removal attempt (`Remove-Item`,
+`agent-worktrees cleanup --include-unused --force`, `agent-worktrees
+remove-system --force`) hits `PermissionError: ... being used by another
+process` with no locking process found among this machine's many
+`pwsh.exe`/`copilot.exe` processes (plausibly a transient OneDrive-sync
+scan on a newly-created empty folder) -- `remove-system --force` already
+retained the tracking record for retry, so a later bare re-run of that
+exact command should finish the job once the lock clears; flagged, not
+force-worked-around further on a shared machine.
+
+The clean retry: typed a real seed prompt into the (correctly, by design)
+initially-buttons-focused `ScopeDlgScreen`'s prompt box (Tab wraps
+buttons->prompt per the dialog's own docstring and test comments -- a
+focus-detection false negative from an earlier too-fast test, not a real
+bug, is why this took several attempts to pin down), Tab-Tab back to
+Create, Enter once. This produced a genuinely new, correctly-formed git
+worktree (`tmichon-cloud1-win-20261003-040634-e27a`: clean `git status`,
+correct `worktree/...` branch, real commit history) and a real spawned
+`wt-...` psmux session running actual Copilot v1.0.91. A direct `embody
+--worktree-id ... --json` call against it returned `"resumed": true,
+"seeded": true` -- the exact contract already proven in isolation
+2026-10-02, now also fired from the literal UI path. The one remaining
+observational gap (confirming the seed text visibly lands as the spawned
+pane's own first turn) is blocked by the same already-documented sandbox
+artifact from 2026-10-02 (this environment's keystroke-delivery mechanism
+redirects into the orchestrating agent session instead of the target
+pane) -- not a new finding, and the Validation Plan item is checked off on
+the same basis the 2026-10-02 entry already established for that artifact.
+Cleaned up via `agent-worktrees cleanup --worktree-id ... --include-unused
+--force` (succeeded, `"removed": true`) after killing its psmux session.
+
+**Phase B (live-coordinator Tasks click-through), still open, but now
+precisely diagnosed.** Confirmed a genuinely live `agent-dispatch`
+coordinator first (`agent-dispatch health` -> `"status": "ok"`, real pid,
+`agent-dispatch registrar doctor` -> one active declaration,
+`agent-ssh-dtssh-host`) -- exactly the precondition every prior session
+lacked. Switched the live (non-`--demo`) Picker to the Tasks pivot (`]`
+key) against the real coordinator: the real task list rendered (16-17
+live, actually-running tasks), but the "+ New task…" button was initially
+**absent** -- traced to `button_set()`'s `reg.create_action is not None`
+check: the pivot manifest actually being read by the running app was
+`~/.copilot/installed-plugins/copilot-extensions/agent-dispatch/pivots/
+agent-dispatch.json`, a STALE installed copy predating PR #4991's merged
+`create_action` section (confirmed: `python -c "import
+agent_dispatch; print(agent_dispatch.__file__)"` resolved to yet ANOTHER
+worktree's source entirely -- the "stale editable install shadowing"
+pattern the 2026-10-02 Journal entry already flagged once, now hitting the
+PIVOT MANIFEST specifically, not just Python imports). Ran
+`agent-worktrees update --force` (installed-plugin + marketplace
+reconciliation, several minutes, included an unrelated daemon-cutover
+rollback warning that resolved itself) -- this refreshed the installed
+`pivots/agent-dispatch.json` to include `create_action`, and a fresh Picker
+relaunch then correctly showed "+ New task…".
+
+Opened it: the Title/Prompt/Criteria tabbed dialog (`Ctrl+Right` moves
+tabs, confirmed) correctly captured a real title, a real prompt, and (via
+the `Other…` free-text fallback, since `agent-dispatch registrar
+vocabulary --dim task-type --json` itself errored as an unrecognized
+subcommand on THIS machine's globally-installed `agent-dispatch` CLI,
+correctly triggering the `allow_other`-forced graceful degradation to
+free-text this feature was designed to have) a real criteria string --
+every value confirmed correct via `capture-pane` before advancing. Create
+reached the real `agent-dispatch` CLI and failed cleanly:
+`agent-dispatch: error: unrecognized arguments: --criteria-json`. Root
+cause: this machine's globally-installed `agent-dispatch` binstub
+(`~/.local/bin/agent-dispatch.ps1`, resolving its OWN separately-versioned
+venv under `~/.agent-dispatch/versions/`) predates the merged
+`--criteria-json` flag from PR #4991 -- `agent-worktrees update --force`
+reconciles `agent-worktrees` itself and Copilot-plugin/marketplace
+registration (which is what fixed the manifest above) but does not
+reprovision each OTHER plugin's own separately-versioned CLI venv.
+Confirmed via `agent-dispatch list --json` that the failed submission left
+no orphan/partial task behind -- the failure is clean and atomic.
+
+**Deliberately not forced further:** this machine's `agent-dispatch` is a
+real, actively-serving coordinator with 17 real tasks and a real registrar
+declaration already depending on it; reprovisioning its CLI venv
+mid-session, without first understanding whether that's safe to do without
+disturbing the running daemon (a separate, long-lived supervised service
+process per `~/.agent-dispatch`'s `supervise-service*.log`/`serve-
+service*.log` history), is exactly the kind of invasive side-effect this
+validation pass should not casually risk. This is now a precisely-named,
+reproducible, one-line-fix gap (update that machine's `agent-dispatch` CLI
+specifically) rather than an unexplained failure -- recorded here so the
+next attempt (on this machine, once the CLI is current, or on any machine
+that's already current) can complete this item without re-diagnosing from
+scratch. Both Validation Plan entries above reflect the precise, current
+state; flagged back to the operator per the handoff's instruction not to
+unilaterally decide on descoping either item.

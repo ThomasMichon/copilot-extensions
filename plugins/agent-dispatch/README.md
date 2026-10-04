@@ -775,6 +775,15 @@ pool:
     agent: repository-issue-worker
 ```
 
+An optional top-level `task_contract:` mapping lets a declaration replace
+the created task's `title`, `goal`, `done_criteria`, and/or `prompt`
+templates without changing the issue-discovery/reservation engine itself.
+Each field is a string template with the placeholders
+`{issue_numbers}`, `{issues_bullets}`, `{self_config_clause}`, and
+`{worker_guidance}`. This is how `global:backlog-triager` keeps the same
+repository-issue-loop forge/emitter mechanism while swapping in a triage-only
+task contract instead of the default implementation-through-merge one.
+
 The emitter may tick more frequently than the configured cadence, but each
 occurrence is anchored to the Unix epoch. A completed task suppresses a replay
 of its occurrence after restart, and any nonterminal loop task backpressures
@@ -912,7 +921,7 @@ every other declaration file uses; a `global:<name>` ref looks up a
 plugin-shipped recipe built into
 `agent_dispatch.registrar_recipes.GLOBAL_RECIPES`.
 
-**Shipped global recipes (Sub-PR 2).** Four named recipes ship today, each
+**Shipped global recipes.** Five named recipes ship today, each
 covering the fields real adopters already repeat verbatim (shared
 exclude-label conventions, the headless pool body type, the archetype's
 standing-conduct charter) while leaving everything genuinely repo-specific
@@ -923,6 +932,7 @@ evaluator verdict-application policy) for the declaration itself to supply:
 |---|---|---|
 | `repository-issue-loop` | `kind: repository-issue-loop` | The common `exclude_labels` set (`bootstrap`/`wontfix`/`invalid`/`duplicate`/`question`) and `pool.body.type: headless`. Genuinely thin -- what the loop is *for* varies completely per adopter, so no charter/identity default is supplied. |
 | `goal-driven` | `kind: repository-issue-loop` | The same defaults as above, plus `worker_identity: goal-driven` (a built-in identity: drive the assigned issue's stated goal to completion through one or more pull requests, suspend/resume on external waits, never supersede another contributor's open PR). The standing-loop counterpart of this package's ad-hoc `goal-driven` CLI recipe -- same standing-conduct clauses, reused rather than duplicated. |
+| `backlog-triager` | `kind: repository-issue-loop` | The same common loop defaults as `repository-issue-loop`, plus `worker_identity: backlog-triager`, `require_verification: true`, and `evaluator_ref: backlog-triager`. The built-in identity handles the shared backlog-triage shape (classify the issue, confirm it is a legitimate bug, assign priority, apply the repository's own triage markers, and ensure it is attached to tracked effort work before triage is considered complete). The *exact* triage label/body-marker schema and what counts as "assigned to an effort" stay repository-specific and are enforced by a consumer-supplied trusted evaluator registration under that `evaluator_ref`; this package deliberately does not hardcode one repo's label taxonomy into every adopter. |
 | `reviewer` | `kind: reviewer-loop` | `pool.body.type: headless` plus a default `pool.body.charter`: a generalized (no `{repo}`/`{pr}` placeholders -- those vary per discovered PR and live in that PR's own task, not this static charter) standing-reviewer charter covering the `land=self`/`land=author` landing models, suspend/resume, never superseding another author's PR, and stagnation handling. |
 | `conflict-resolution` | `kind: reviewer-loop` | Same pool defaults as `reviewer`, with a charter specialized to taking a stuck, conflict-producer-opened PR the last mile: rebase, resolve, force-push back over the same PR head, never open a second PR. |
 
@@ -931,7 +941,11 @@ ordinary scalar/mapping override replaces the template's value, same
 deep-merge rule as everywhere else) -- e.g. `extends: "global:reviewer"`
 plus its own `pool.body.charter` to replace the shipped default charter
 entirely, or its own `worker_identity`/`exclude_labels` to replace
-`global:goal-driven`'s or `global:repository-issue-loop`'s defaults.
+`global:goal-driven`'s or `global:repository-issue-loop`'s defaults. For
+`global:backlog-triager`, the expected adoption shape is: use the shipped
+recipe/identity as the shared generic half, then register the repo's own
+trusted evaluator named `backlog-triager` to validate its concrete triage
+label/marker schema and effort-assignment convention.
 
 There is no path-traversal hardening on a file-path ref today; a
 declaration author is already a trusted party for the repo's own registrar

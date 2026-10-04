@@ -902,6 +902,47 @@ def test_global_goal_driven_resolves_to_repository_issue_loop_with_identity(tmp_
     assert "goal-driven" in str(source.spec)
 
 
+def test_global_backlog_triager_resolves_to_repository_issue_loop_with_verification(
+    tmp_path,
+):
+    import json as _json
+
+    from agent_dispatch.registrar_discovery import read_declaration_file_set
+
+    path = tmp_path / "triager.json"
+    path.write_text(
+        _json.dumps(
+            {
+                "extends": "global:backlog-triager",
+                "name": "triage-backlog",
+                "repo": "example/project",
+                "source": "triage-backlog",
+                "cadence_seconds": 3600,
+                "task_label": "backlog-triage",
+                "forge": {"provider": "github", "producer_login": "triage-bot"},
+                "reservation": {"label": "triage-reserved"},
+                "pool": {
+                    "max_active_processes": 1,
+                    "body": {"agent": "triage-worker"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    declarations = read_declaration_file_set(path)
+
+    workers = next(d for d in declarations if d.name == "triage-backlog-workers")
+    assert workers.body.type == "headless"
+    assert workers.body.agent == "triage-worker"
+    source = next(d for d in declarations if d.name == "triage-backlog-source")
+    spec = source.spec["repository_issue_loop"]
+    assert spec["forge"]["provider"] == "github"
+    assert spec["worker_identity"] == "backlog-triager"
+    assert spec["require_verification"] is True
+    assert spec["evaluator_ref"] == "backlog-triager"
+
+
 def test_global_reviewer_resolves_to_reviewer_loop_with_standing_charter(tmp_path):
     import json as _json
 
@@ -1010,3 +1051,13 @@ def test_goal_driven_builtin_identity_resolves():
 
     assert identity.name == "goal-driven"
     assert "drive it to completion" in identity.rules
+
+
+def test_backlog_triager_builtin_identity_resolves():
+    from agent_dispatch.worker_identities import load_worker_identity
+
+    identity = load_worker_identity("backlog-triager")
+
+    assert identity.name == "backlog-triager"
+    assert "legitimate bug" in identity.rules
+    assert "efforts/active/<slug>/README.md" in identity.rules

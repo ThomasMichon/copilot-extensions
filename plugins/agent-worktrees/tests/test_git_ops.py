@@ -806,6 +806,45 @@ class TestCrossAccountAuth:
         assert bool(res) is True
         assert res.retryable is False
 
+    def test_push_captures_stdout_not_just_stderr(self, monkeypatch):
+        """A pre-push hook's own check output commonly lands on stdout (a
+        plain print()/echo), not stderr -- only git's OWN protocol message
+        does. Confirmed live: a module-size-cap violation's full `[FAIL]
+        ...` detail was silently dropped across six retries because only
+        stderr was ever captured into the PushResult."""
+        monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
+        monkeypatch.setattr(go, "git", lambda *a, **k: types.SimpleNamespace(
+            returncode=1,
+            stdout="[FAIL] module size (1000-line cap, shrink-only baseline):\n"
+                   "  - some/module.py: 1200 lines, exceeds its ceiling of 1000",
+            stderr="error: failed to push some refs",
+        ))
+        res = go.push("origin", "master", cwd=".")
+        assert bool(res) is False
+        assert "[FAIL] module size" in res.stdout
+        assert "error: failed to push some refs" in res.stderr
+
+    def test_failure_detail_includes_both_streams(self):
+        res = go.PushResult(
+            ok=False,
+            stdout="[FAIL] module size (1000-line cap, shrink-only baseline):\n"
+                   "  - some/module.py: 1200 lines, exceeds its ceiling of 1000",
+            stderr="error: failed to push some refs",
+        )
+        detail = res.failure_detail
+        assert "[FAIL] module size" in detail
+        assert "error: failed to push some refs" in detail
+        # Both labeled, so a reader can tell which stream each line came from.
+        assert "stdout" in detail
+        assert "stderr" in detail
+
+    def test_failure_detail_omits_empty_streams(self):
+        assert go.PushResult(ok=False).failure_detail == ""
+        assert go.PushResult(ok=False, stderr="   ").failure_detail == ""
+        only_stdout = go.PushResult(ok=False, stdout="[FAIL] something")
+        assert "stdout" in only_stdout.failure_detail
+        assert "stderr" not in only_stdout.failure_detail
+
     def test_redact_args_strips_extraheader(self):
         cmd = ["git", "-c", "http.extraheader=AUTHORIZATION: basic c2VjcmV0", "push"]
         redacted = go._redact_args(cmd)

@@ -358,6 +358,7 @@ def _spawn_coordinator_process() -> None:
     from .install_paths import install_dir as runtime_install_dir
 
     install_dir = runtime_install_dir()
+    from .install_paths import apply_service_env_overlay
     from .procutil import (
         detached_kwargs,
         resolve_own_runtime_python,
@@ -378,17 +379,7 @@ def _spawn_coordinator_process() -> None:
     env = dict(os.environ)
     env.setdefault("PYTHONUTF8", "1")
     env.update(windowless_python_env(resolved_python))
-    env_file = install_dir / "service.env"
-    if env_file.is_file():
-        try:
-            for line in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
-                s = line.strip()
-                if not s or s.startswith("#") or "=" not in s:
-                    continue
-                k, v = s.split("=", 1)
-                env[k.strip()] = os.path.expandvars(v.strip())
-        except OSError:
-            pass
+    apply_service_env_overlay(env, install_dir)
 
     try:
         log: Any = open(install_dir / "serve-service.log", "ab")
