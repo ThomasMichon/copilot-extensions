@@ -296,9 +296,12 @@ def test_the_launch_budget_outlasts_embodys_seed_wait():
     from agent_bridge.routes import ui_tasks
 
     assert ui_tasks.EMBODY_TIMEOUT > ui_tasks.EMBODY_SEED_HARD_CAP >= 900.0
+    # embody may first wait up to 300s for the worktree's lifecycle lock (handoff_cli).
+    assert ui_tasks.EMBODY_LIFECYCLE_LOCK_WAIT >= 300.0
+    assert ui_tasks.EMBODY_TIMEOUT > ui_tasks.EMBODY_LIFECYCLE_LOCK_WAIT + ui_tasks.EMBODY_SEED_HARD_CAP
     try:
         from agent_worktrees import sessions
     except ImportError:  # agent-worktrees isn't importable from this plugin's test env
         return
     cap = inspect.signature(sessions.mux_seed_pane).parameters["hard_timeout"].default
-    assert ui_tasks.EMBODY_TIMEOUT > cap
+    assert ui_tasks.EMBODY_TIMEOUT > ui_tasks.EMBODY_LIFECYCLE_LOCK_WAIT + cap

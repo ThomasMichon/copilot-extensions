@@ -1628,6 +1628,21 @@ def test_seed_pane_echo_ignores_a_transcript_line_that_gains_the_seed_text():
     assert driver.enter_sent() is False
 
 
+def test_seed_pane_echo_ignores_a_stale_box_left_above_a_shell_prompt():
+    """Copilot exited after the seed was typed: its box, still holding the seed,
+    sits above a shell prompt. That's no echo, so Enter never reaches the shell."""
+    from agent_worktrees import pane_readiness
+
+    seed = "Continue: do the thing"
+    stale = _BOXED_INPUT.replace("┃\n", f"┃ {seed}\n") + "Copilot exited\nuser@box:~/repo$\n"
+    assert pane_readiness.input_text(stale) == ""
+    assert seed in pane_readiness.input_text(_BOXED_INPUT.replace("┃\n", f"┃ {seed}\n"))  # live: still read
+    driver = _SeedDriver(ready_caps=[_BOXED_INPUT, _BOXED_INPUT], echo_caps=[stale] * 4)
+    result = _run_seed(driver, seed=seed)
+    assert result["sent"] is True and result["reason"] == "seed-not-echoed"
+    assert driver.enter_sent() is False
+
+
 @pytest.mark.parametrize("rows", [9, 14])
 def test_seed_pane_echo_finds_the_caret_of_a_long_wrapped_legacy_input(rows):
     """Legacy layout: an input wrapped onto many rows keeps its caret far above

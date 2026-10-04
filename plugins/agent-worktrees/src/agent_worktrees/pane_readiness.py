@@ -58,6 +58,10 @@ def input_text(capture: str) -> str:
     lines = [line.rstrip() for line in capture.splitlines() if line.strip()]
     top = max((i for i, line in enumerate(lines) if _top_rail(line)), default=None)
     if top is not None:
+        # Only a live box is input: one left above a shell prompt (Copilot exited
+        # after the seed was typed) is a stale draft, and Enter would go to the shell.
+        if not _live_box(capture):
+            return ""
         bottom = next((i for i in range(top + 1, len(lines)) if _bottom_rail(lines[i])), None)
         if bottom is not None:
             return "\n".join(_LEFT_BORDER.sub("", line, count=1) for line in lines[top + 1:bottom])
