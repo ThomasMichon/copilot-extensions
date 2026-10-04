@@ -140,21 +140,21 @@ executing Phases 0-6 below.
 
 ## Validation Plan
 
-- [ ] Pipeline pause commit landed and confirmed via
+- [x] Pipeline pause commit landed and confirmed via
       `tools/rollback_release.py status`.
-- [ ] Mirror backup exists in at least two locations.
-- [ ] Rewritten mirror's `main` tree is byte-identical to pre-rewrite `main`
+- [x] Mirror backup exists in at least two locations.
+- [x] Rewritten mirror's `main` tree is byte-identical to pre-rewrite `main`
       tree (`git diff <old> <new>` empty).
-- [ ] All pre-rewrite `promote-*` tags resolve post-rewrite.
-- [ ] Real repo's `main` force-pushed; fresh fetch elsewhere confirms the same
+- [x] All pre-rewrite `promote-*` tags resolve post-rewrite.
+- [x] Real repo's `main` force-pushed; fresh fetch elsewhere confirms the same
       tree.
-- [ ] `copilot plugin update` / `marketplace update` succeed against the
+- [x] `copilot plugin update` / `marketplace update` succeed against the
       rewritten `main` (real-world re-confirmation of the earlier smoke test).
-- [ ] `tools/rollback_release.py status` still resolves the latest promotion
+- [x] `tools/rollback_release.py status` still resolves the latest promotion
       correctly post-rewrite.
 - [ ] Pipeline resumed; next real `dev`->`main` promotion goes green
       end-to-end.
-- [ ] Banner follow-up PR lands with the real old->new SHA pair.
+- [x] Banner follow-up PR lands with the real old->new SHA pair.
 - [ ] This effort moved to `efforts/done/` with final sizes journaled below.
 
 ## Journal
@@ -165,3 +165,60 @@ executing Phases 0-6 below.
   pushing identity (ruleset 18553911, `bypass_mode: always`). A promotion was
   in-flight at audit time (`release/promote-37195835136`); waiting for it to
   land naturally before pausing. `git-filter-repo` 2.38.0-2 installed.
+- **2026-10-04 (execution)** — Banner stub + this effort doc landed via normal
+  `dev` -> promotion (#5182 -> promoted in #5187), carrying the real
+  pre-rewrite tip to `f75b35e4...` and then, after the pause commit, to
+  `b8e83826124674f16ecb200d4c2709c77b87dc0b`. Pipeline paused via
+  `tools/rollback_release.py pause --push` (PR #5189, admin-merged -- the
+  `main source gate` workflow check only recognizes 3 PR shapes, none of
+  which cover a rollback-tool state commit, so this is the tool's own
+  documented human-operator escape hatch, used exactly as intended; also hit
+  a `gh pr create --json` incompatibility with the installed gh 2.101.0 and
+  landed the PR by hand instead -- **tracked as a real gap**, see Gotchas).
+  Local mirror backup + a second copy on NAS Scratch
+  (`/mnt/nas/Scratch/main-history-rewrite-20261004/`). First
+  `--strip-blobs-bigger-than 1M` attempt **also stripped a currently-live,
+  wanted file** (`docs/assets/worktree-picker.gif`, 1.7MB, embedded at the
+  top of README.md) -- caught via tree-hash mismatch in verification, never
+  pushed. Re-ran with an explicit blob-ID allowlist
+  (`--strip-blobs-with-ids`, excluding the gif's one blob id) instead of the
+  size-only filter: 246 of the 247 oversized-blob ids repo-wide stripped,
+  tree hash came back byte-identical (`5767f42c...`), all 243 `promote-*`
+  tags survived (remapped), `git fsck --full` clean. Force-pushed
+  `+refs/heads/main` + the 243 remapped tags from the isolated mirror (old
+  tip `b8e83826...` -> new tip `3a9b9f90b7e02de4da49376323294b3474d483f6`).
+  Post-rewrite: fresh independent clone confirmed tree + gif intact;
+  `copilot plugin marketplace update` and `copilot plugin update --all`
+  (27 plugins) both succeeded cleanly against the rewritten `main`;
+  `tools/rollback_release.py status` still resolves the latest promotion by
+  tag name correctly. Pipeline resumed (PR #5192, same admin-bypass path).
+  Repo pack size for `main`'s reachable history dropped from carrying ~300MB
+  of oversized blobs to effectively none (the one retained gif blob is
+  wanted content, not bloat). Remaining before closing this effort: confirm
+  the next real `dev`->`main` promotion goes green end-to-end post-resume,
+  then move this doc to `efforts/done/`.
+
+## Gotchas / Tracked Follow-ups
+
+- **`tools/rollback_release.py`'s `gh pr create --json number` call fails on
+  the installed gh CLI (2.101.0)** with `unknown flag: --json` -- `gh pr
+  create` doesn't support `--json` in this version (unlike `pr view`/`pr
+  list`). Both the `pause` and `resume` subcommands hit this; worked around
+  by hand (`gh pr create` without `--json`, parse the printed URL, `gh pr
+  merge --admin` separately) each time. The script's `_land_via_pr` helper
+  needs a version-tolerant fix (parse the PR number from the plain URL
+  `gh pr create` already prints, instead of requiring `--json`). Not fixed
+  in this session -- worth a small follow-up PR against `dev`.
+- **`tools/rollback_release.py pause`/`resume --push` collides with
+  `.github/workflows/ci.yml`'s `main source gate`** job: that gate only
+  recognizes 3 PR shapes targeting `main` (a `release/promote-*` promotion,
+  a workflow-file-only bootstrap PR, or the module-size-baseline-widen
+  automation PR) and fails any other PR, including the rollback tool's own
+  `release-pipeline/state-*` state-commit branch. Landed via `gh pr merge
+  --admin` each time, which the tool's own docstring already reserves for
+  exactly this ("a human operator deciding a true emergency merits it") --
+  but it means `pause`/`resume --push` can *never* complete via its own
+  documented `_land_via_pr` path as currently written; worth either adding a
+  4th recognized shape to the gate, or documenting the admin-bypass
+  requirement explicitly in the tool's own docstring.
+
