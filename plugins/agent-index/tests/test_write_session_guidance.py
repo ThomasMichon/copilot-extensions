@@ -88,6 +88,97 @@ def test_scope_binding_context_ignores_invalid_cwd(monkeypatch, tmp_path):
         assert "--cwd" not in seen["argv"]
 
 
+def test_run_producer_passes_cwd_explicitly_and_closes_stdin(monkeypatch, tmp_path):
+    """The catalog producer must get the session's real cwd via the
+    subprocess ``cwd=`` kwarg (not rely on the calling process's OWN
+    inherited working directory matching it) and must explicitly close
+    stdin (``subprocess.DEVNULL``) rather than piping the session payload as
+    ``input=`` -- the producer script never reads its own stdin, and piping
+    unused bytes there risked a nested-process stdin-handle inheritance
+    deadlock on Windows (a real production bug this fix closes)."""
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(
+            returncode=0, stdout=json.dumps({"additionalContext": "catalog"}).encode("utf-8")
+        )
+
+    monkeypatch.setattr(writer.subprocess, "run", fake_run)
+    monkeypatch.setattr(writer, "_producer_argv", lambda _root: ["fake"])
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    context = writer._run_producer(PLUGIN, {"cwd": str(repo)})
+    assert context == "catalog"
+    assert seen["cwd"] == str(repo)
+    assert seen["stdin"] is writer.subprocess.DEVNULL
+    assert "input" not in seen
+
+
+def test_run_producer_falls_back_to_none_cwd_for_invalid_payload_cwd(
+    monkeypatch, tmp_path
+):
+    seen = {}
+
+    def fake_run(argv, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(
+            returncode=0, stdout=json.dumps({"additionalContext": "catalog"}).encode("utf-8")
+        )
+
+    monkeypatch.setattr(writer.subprocess, "run", fake_run)
+    monkeypatch.setattr(writer, "_producer_argv", lambda _root: ["fake"])
+
+    for bad_cwd in (None, "relative/path", str(tmp_path / "missing")):
+        writer._run_producer(PLUGIN, {"cwd": bad_cwd})
+        assert seen["cwd"] is None
+
+
+def test_two_producers_run_concurrently_not_sequentially(monkeypatch, tmp_path):
+    """Regression test for a real production bug: the two producers used to
+    run as sequential tuple elements, so two SLOW-but-legitimate subprocess
+    calls (measured ~10-11s each on a real repo) summed to ~20s+, silently
+    eating most of the sessionStart hook's own 45s budget and regularly
+    tripping the per-producer subprocess timeout -- making the ENTIRE command
+    catalog (and therefore agent-index itself) invisible to every agent turn,
+    every session, with no visible error anywhere. Each producer here sleeps
+    for a fixed amount; if they ever regress to running sequentially again,
+    the elapsed wall-clock time will be roughly double and this assertion
+    will catch it well before actually waiting ~10s in CI.
+    """
+    import time
+
+    SLEEP_S = 0.3
+
+    def slow_producer_1(*_args):
+        time.sleep(SLEEP_S)
+        return "catalog"
+
+    def slow_producer_2(*_args):
+        time.sleep(SLEEP_S)
+        return "scope binding"
+
+    monkeypatch.setattr(writer, "_run_producer", slow_producer_1)
+    monkeypatch.setattr(writer, "_scope_binding_context", slow_producer_2)
+
+    start = time.monotonic()
+    assert writer.write_session_guidance({"sessionId": "session-1"}, home=tmp_path)
+    elapsed = time.monotonic() - start
+
+    # Running sequentially would take >= 2 * SLEEP_S; concurrently it should
+    # stay close to ONE SLEEP_S. Use 1.5x as the dividing line with headroom
+    # for scheduling jitter -- comfortably below the 2x a sequential
+    # regression would produce, comfortably above the ~1x true concurrent cost.
+    assert elapsed < SLEEP_S * 1.5, (
+        f"producers took {elapsed:.3f}s for a {SLEEP_S}s sleep each -- "
+        "they appear to be running sequentially again, not concurrently"
+    )
+    content = _target(tmp_path).read_text(encoding="utf-8")
+    assert "catalog" in content
+    assert "scope binding" in content
+
+
 def test_rejects_invalid_session_ids_without_running_producer(monkeypatch, tmp_path):
     monkeypatch.setattr(
         writer, "_run_producer",
