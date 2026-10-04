@@ -131,10 +131,15 @@ def _hold_protocol_floor(client: Any, floor: int) -> None:
                     raise
                 retrying = True
             except BridgeClientError as exc:
-                # A retiring daemon refused the request outright (it was not
-                # accepted): follow the replacement, re-probing its protocol
-                # first. Any other HTTP error is the answer.
-                if exc.status != 503 or "drain" not in str(exc.detail).lower() \
+                # The daemon refused the request outright (it was not
+                # accepted): a retiring one ("draining") hands over to its
+                # replacement, and a starting one ("initializing") answers
+                # /health before its session paths are ready. Retry either
+                # within the same deadline, re-probing the protocol first
+                # (client.py's own retries are off: they would skip the probe).
+                # Any other HTTP error is the answer.
+                detail = str(exc.detail).lower()
+                if exc.status != 503 or not ("drain" in detail or "initializing" in detail) \
                         or time.monotonic() >= deadline:
                     raise
                 retrying = True

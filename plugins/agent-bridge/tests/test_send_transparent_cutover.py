@@ -367,3 +367,42 @@ def test_a_protocol_floor_follows_a_draining_daemons_refusal(monkeypatch, detail
         return
     assert client._request("POST", "/api/v1/live-sessions/s/messages") == {"ok": True}
     assert calls[-2:] == [("http://new", "GET", "/health"), ("http://new", "POST", "/api/v1/live-sessions/s/messages")]
+
+
+def test_a_protocol_floor_retries_a_starting_daemons_initializing_refusal(monkeypatch):
+    """/health already advertises the floor, but session creation isn't ready
+    yet (503 "initializing"; never accepted). client.py's own retry for that is
+    off under the floor, so the wrapper retries it within the same grace,
+    re-probing /health before each attempt -- and still gives up at the deadline."""
+    import time as _time
+
+    from agent_bridge import session_targeting_cli as stc
+    from agent_bridge.client import BridgeClientError
+
+    clock = [0.0]
+    monkeypatch.setattr(_time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    monkeypatch.setattr(_time, "monotonic", lambda: clock[0])
+    calls: list[str] = []
+    refusals = [2]
+
+    class Client:
+        _base, _connect_grace = "http://d", 30.0
+        _reresolve = None
+
+        def _request(self, method, path, *a, **k):
+            calls.append(path)
+            if path == "/health":
+                return {"protocol_version": 21}
+            if refusals[0] > 0:
+                refusals[0] -= 1
+                raise BridgeClientError(503, "the bridge daemon is initializing; retry shortly")
+            return {"session_id": "s1"}
+
+    client = Client()
+    stc._hold_protocol_floor(client, 21)
+    assert client._request("POST", "/api/v1/sessions") == {"session_id": "s1"}
+    assert calls == ["/health", "/api/v1/sessions"] * 3  # re-probed before every attempt
+    refusals[0] = 10**6  # never becomes ready: the deadline still ends it
+    with pytest.raises(BridgeClientError) as exc:
+        client._request("POST", "/api/v1/sessions")
+    assert exc.value.status == 503 and clock[0] >= 30.0
