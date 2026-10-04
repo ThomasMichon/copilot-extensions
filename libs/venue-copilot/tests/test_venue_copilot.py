@@ -929,6 +929,39 @@ class TestDetachedRunner:
         assert "--seed-ready-timeout 180.0" in launch
         assert launch_timeouts == [1200.0]
 
+    @pytest.mark.parametrize("anchor, expected", [(False, 1200.0), (True, 330.0)])
+    def test_a_worktree_launch_without_a_seed_still_budgets_for_its_pending_seed(
+        self, monkeypatch, anchor, expected,
+    ) -> None:
+        """A worktree launch can consume the worktree's own pending seed with no
+        seed or refs passed here; its readiness wait can reach the hard cap, so
+        the transport budget gets the same floor. An anchor launch has none."""
+        from venue_copilot import detached
+
+        self._patch_bridge(monkeypatch)
+        adapter = _Adapter()
+        launch_timeouts = []
+        original_launch = adapter.launch
+
+        def launch(command: str, *, timeout: float) -> tuple[int, str, str]:
+            launch_timeouts.append(timeout)
+            return original_launch(command, timeout=timeout)
+
+        adapter.launch = launch
+        rc, _payload = detached.launch_detached(
+            adapter,
+            {**self._plan(), "anchor": anchor},
+            seed=None,
+            driver=None,
+            copilot_args=[],
+            ensure_mux=True,
+            register_timeout=30.0,
+            progress=lambda *a: None,
+        )
+
+        assert rc == 0
+        assert launch_timeouts == [expected]
+
     def test_detached_launch_uses_register_timeout_when_larger(self, monkeypatch) -> None:
         from venue_copilot import detached
 

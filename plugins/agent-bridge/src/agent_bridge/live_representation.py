@@ -433,6 +433,12 @@ def progress_from_events(
     return snapshot
 
 
+class MergePendingError(RuntimeError):
+    """A session-id merge into this log is still copying events after the
+    snapshot's wait: its history is momentarily incomplete, not replaced, so
+    the caller should retry rather than validate references against it."""
+
+
 class LiveEventStore:
     """In-memory registry of represented ``EventLog``s, keyed by session id.
 
@@ -472,14 +478,18 @@ class LiveEventStore:
         log then would find no map for a valid reference. So this waits (up to
         ``timeout``; a blocking call, for the sync routes) for merges into that
         log to finish, then reads both under one lock. A merge that starts
-        while it waits is waited for too, within the same ``timeout``."""
+        while it waits is waited for too, within the same ``timeout``. One still
+        copying at the deadline raises :class:`MergePendingError` (retryable)
+        rather than return a map that would make valid references look stale."""
         deadline = time.monotonic() + timeout
         while True:
             with self._lock:
                 log = self._logs.get(session_id)
                 pending = list(self._merging.get(id(log), ())) if log is not None else []
-                if not pending or time.monotonic() >= deadline:
+                if not pending:
                     return log, dict(self._merged_history)
+                if time.monotonic() >= deadline:
+                    raise MergePendingError(session_id)
             for done in pending:
                 done.wait(max(0.0, deadline - time.monotonic()))
 

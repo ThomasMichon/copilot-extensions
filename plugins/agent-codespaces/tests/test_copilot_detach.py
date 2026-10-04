@@ -1065,6 +1065,25 @@ def test_the_reservation_outlives_every_launch_attempt_and_registration(seams, m
     assert ttls and ttls[0] >= detach._LAUNCH_ATTEMPTS * launch + args.register_timeout
 
 
+@pytest.mark.parametrize("worktree_id", ["wt-7", None])
+def test_a_worktree_launch_without_a_seed_still_budgets_for_its_pending_seed(
+    seams, monkeypatch, capsys, worktree_id,
+):
+    """A --worktree-id launch can consume the remote worktree's pending seed
+    with no host-side seed or refs; its readiness wait can reach the hard cap,
+    so the SSH budget (and the reservation) get the same floor. An anchor
+    launch with nothing to seed keeps the shorter budget."""
+    ttls: list[float] = []
+    monkeypatch.setattr(
+        venue_copilot, "reserve_cli_mode",
+        lambda scope, ttl_seconds, venue: ttls.append(ttl_seconds) or {"reservation_id": "r1"},
+    )
+    args = _args(worktree_id=worktree_id, seed=None)
+    assert detach.cmd_detach(args, ssh_session=_ssh(seams, stdout=_CREATED)) == 0
+    floor = detach._LAUNCH_ATTEMPTS * (detach._SEED_READY_HARD_CAP + 300.0)
+    assert (ttls[0] >= floor) is (worktree_id is not None)
+
+
 def test_launch_does_not_retry_a_genuine_remote_failure(seams, monkeypatch, capsys):
     def fake(ns, *, remote_cmd_builder=None, result_sink=None, settle_on_disconnect=True):
         seams.ssh.append(1)

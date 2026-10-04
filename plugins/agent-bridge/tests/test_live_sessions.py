@@ -558,6 +558,29 @@ def client_with_store(tmp_db: Database) -> TestClient:
     return TestClient(app)
 
 
+def test_result_routes_answer_a_merge_still_copying_with_a_retryable_503(
+    client_with_store: TestClient, monkeypatch,
+) -> None:
+    """A snapshot whose merge is still copying events at its deadline is not
+    validated (a valid token would look like replaced history): both result
+    routes answer a retryable 503 instead."""
+    from agent_bridge.live_representation import LiveEventStore, MergePendingError
+
+    c = client_with_store
+    c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})
+
+    def pending(self, session_id, *, timeout=5.0):
+        raise MergePendingError(session_id)
+
+    monkeypatch.setattr(LiveEventStore, "snapshot", pending)
+    for path in ("/api/v1/live-sessions/s1/result",
+                 "/api/v1/live-sessions/s1/result/detail?ref=x"):
+        got = c.get(path)
+        assert got.status_code == 503, path
+        assert got.headers["retry-after"] == "1"
+        assert "history is merging" in got.json()["detail"]
+
+
 def test_route_ingest_updates_turn_state(client_with_store: TestClient) -> None:
     c = client_with_store
     c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})

@@ -215,7 +215,9 @@ def launch_detached(
             )
 
         launch_timeout = register_timeout + 300.0
-        if seed or refs:  # refs become (part of) the seed
+        # refs become (part of) the seed; a worktree launch may also consume the
+        # worktree's own pending seed with neither passed here, and wait as long.
+        if seed or refs or not bool(plan.get("anchor", True)):
             launch_timeout = max(launch_timeout, _SEED_READY_HARD_CAP + 300.0)
         # The reservation must outlive the refs upload, the launch (with its seed
         # readiness wait) and registration, or a concurrent rejoin could replace it.

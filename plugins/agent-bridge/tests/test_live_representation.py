@@ -748,6 +748,39 @@ def test_a_snapshot_waits_for_a_merge_still_copying_events() -> None:
     assert store.snapshot("resumed", timeout=0)[1] == history  # nothing pending now
 
 
+def test_a_snapshot_raises_rather_than_return_a_merge_still_copying() -> None:
+    """At its deadline a merge still copying leaves the map incomplete: the
+    snapshot raises (retryable) instead of answering with that map."""
+    import threading
+
+    import pytest
+
+    from agent_bridge.live_representation import LiveEventStore, MergePendingError
+
+    store = LiveEventStore()
+    store.get_or_create("placeholder").append("agent_message", {"text": "a"})
+    resumed = store.get_or_create("resumed")
+    resumed.append("agent_message", {"text": "b"})
+    copying, release, read = threading.Event(), threading.Event(), resumed.get_events
+
+    def slow_copy(after):
+        copying.set()
+        release.wait(5)
+        return read(after)
+
+    resumed.get_events = slow_copy
+    merge = threading.Thread(target=store.alias, args=("placeholder", "resumed"))
+    merge.start()
+    try:
+        assert copying.wait(5)
+        with pytest.raises(MergePendingError):
+            store.snapshot("resumed", timeout=0.05)
+    finally:
+        release.set()
+        merge.join(5)
+    assert resumed.continuity_id in store.snapshot("resumed", timeout=0)[1]
+
+
 def test_a_snapshot_also_waits_for_a_merge_that_starts_while_it_waits() -> None:
     import threading
     import time

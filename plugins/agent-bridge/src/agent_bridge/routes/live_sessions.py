@@ -115,6 +115,20 @@ def _store(request: Request) -> LiveEventStore:
     return store
 
 
+def _result_history(request: Request, session_id: str):
+    """The log and its merge map from one snapshot (see ``snapshot``); a merge
+    still copying events is a retryable 503, never a stale-history answer."""
+    from ..live_representation import MergePendingError
+
+    try:
+        return _store(request).snapshot(session_id)
+    except MergePendingError as exc:
+        raise HTTPException(
+            status_code=503, headers={"Retry-After": "1"},
+            detail="represented history is merging (a session-id change); retry shortly",
+        ) from exc
+
+
 def _resolve_registration(db: Database, ref: str) -> dict[str, Any] | None:
     exact = db.get_live_session(ref)
     if exact is not None:
@@ -426,7 +440,7 @@ def get_live_result_snapshot(
     row = _resolve_registration(db, session_ref)
     if row is None:
         raise HTTPException(status_code=404, detail="live session not found")
-    log, history = _store(request).snapshot(row["session_id"])
+    log, history = _result_history(request, row["session_id"])
     position = retarget(position, history)
     if log is None:
         log = EventLog(
@@ -461,7 +475,7 @@ def get_live_result_detail(
         raise HTTPException(status_code=404, detail="live session not found")
     # The log and its merge map from one snapshot: a merge still copying
     # events would otherwise leave a valid reference with no map (409).
-    log, history = _store(request).snapshot(row["session_id"])
+    log, history = _result_history(request, row["session_id"])
     if log is None:
         raise HTTPException(
             status_code=404,

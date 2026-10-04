@@ -576,7 +576,9 @@ def cmd_detach(
                 "(authenticated probe failed)", plan,
             )
         launch_timeout = args.register_timeout + 300.0
-        if seed or ref_files:  # refs become (part of) the seed
+        # refs become (part of) the seed; a --worktree-id launch may also consume
+        # the worktree's own pending seed with neither passed here, and wait as long.
+        if seed or ref_files or not plan["anchor"]:
             launch_timeout = max(launch_timeout, _SEED_READY_HARD_CAP + 300.0)
         # The reservation must outlive the refs upload, every launch attempt (with
         # its seed readiness wait) and registration, or a concurrent rejoin could
