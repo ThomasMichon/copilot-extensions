@@ -346,4 +346,19 @@ def test_all_mode_fails_loudly_on_an_unresolvable_head(repo: Path):
     assert result.returncode == 1
 
 
+def test_staged_mode_handles_a_digit_colon_filename_correctly(repo: Path):
+    # A literal path beginning with "<digit>:" (e.g. "0:large.json") must
+    # be resolved as that exact path, not misparsed as git's own explicit
+    # ":<stage>:<path>" revision syntax (which would silently check a
+    # DIFFERENT path -- stage 0 of "large.json" -- instead).
+    _write_bytes(repo, "0:large.json", 2 * 1024 * 1024)
+    _git(repo, "add", "--", "0:large.json")
+
+    result = _run(repo, "--", "0:large.json")
+
+    assert result.returncode == 1
+    assert "0:large.json" in result.stdout
+
+
+
 

@@ -104,6 +104,18 @@ IMAGE_EXTENSIONS = {
 ALWAYS_BLOCKED_EXTENSIONS = {".map", ".diff", ".patch"}
 
 
+class GitEnumerationError(RuntimeError):
+    """A git plumbing command needed to enumerate blobs for this check
+    failed outright (nonzero exit). Always a hard failure for the caller --
+    never silently treated as "nothing to check", since an unexamined
+    commit/path could easily be the one carrying the oversized/disallowed
+    blob this guard exists to catch. Distinct from the one legitimate soft
+    skip this tool has (an unresolvable ``--base``/``--head`` ref before
+    enumeration even starts, e.g. a not-yet-fetched base in some CI
+    contexts), which returns ``None`` rather than raising.
+    """
+
+
 def _git_bytes(*args: str) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
         ["git", "-C", str(REPO), *args],
@@ -129,6 +141,19 @@ def _git(*args: str) -> str:
     return _decode(_git_bytes(*args).stdout)
 
 
+def _git_or_raise(*args: str) -> str:
+    """Like ``_git``, but raises :class:`GitEnumerationError` (naming the
+    command and git's own stderr) instead of silently returning whatever
+    partial/empty output a failed invocation produced.
+    """
+    r = _git_bytes(*args)
+    if r.returncode != 0:
+        raise GitEnumerationError(
+            f"'git {' '.join(args)}' failed: {_decode(r.stderr).strip()}"
+        )
+    return _decode(r.stdout)
+
+
 def _rev_parse(ref: str) -> str | None:
     r = _git_bytes("rev-parse", "--verify", "--quiet", ref)
     out = _decode(r.stdout).strip()
@@ -151,7 +176,7 @@ EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 def _commits_in_range(mbase: str, head: str) -> list[str]:
-    out = _git("rev-list", f"{mbase}..{head}")
+    out = _git_or_raise("rev-list", f"{mbase}..{head}")
     return [line for line in out.split("\n") if line]
 
 
@@ -175,13 +200,15 @@ def _commit_touched_blobs(commit: str) -> list[tuple[str, int]]:
     non-ASCII characters, a tab, or a newline -- git quotes such names in
     plain ``--name-only`` output, which would otherwise make a lookup
     against the (mis-parsed, quoted) name fail and silently skip the real
-    file.
+    file. Raises :class:`GitEnumerationError` if ``diff-tree`` itself fails.
     """
     parent_r = _git_bytes("rev-parse", "--verify", "--quiet", f"{commit}^")
     parent = _decode(parent_r.stdout).strip() or EMPTY_TREE_SHA
-    diff = _git_bytes("diff-tree", "--no-commit-id", "--name-only", "-r", "--diff-filter=d", "-z", parent, commit)
+    diff = _git_or_raise(
+        "diff-tree", "--no-commit-id", "--name-only", "-r", "--diff-filter=d", "-z", parent, commit,
+    )
     out: list[tuple[str, int]] = []
-    for path in _decode(diff.stdout).split("\0"):
+    for path in diff.split("\0"):
         if not path:
             continue
         r = _git_bytes("cat-file", "-s", f"{commit}:{path}")
@@ -205,9 +232,16 @@ def _new_blobs_in_range(base_ref: str, head_ref: str) -> list[tuple[str, int]] |
     net tree-to-tree difference), and a rename/type-change whose content is
     byte-identical to something already elsewhere in history (merely
     re-pathed, so its blob object itself isn't "new" to the repository --
-    see ``_commit_touched_blobs``). Returns None if ``base_ref``/
-    ``head_ref`` can't be resolved (caller should skip the check in that
-    case -- e.g. ``base_ref`` not fetched).
+    see ``_commit_touched_blobs``).
+
+    Returns None ONLY for the one legitimate soft skip this function has:
+    ``base_ref``/``head_ref`` can't be resolved before enumeration even
+    starts (e.g. ``base_ref`` genuinely not fetched yet), matching
+    ``check-effort-vision-structure.py``'s own convention. Once enumeration
+    begins, a real git plumbing failure (``rev-list``/``diff-tree``) raises
+    :class:`GitEnumerationError` instead -- never silently returns "nothing
+    to check", since an unexamined commit could easily be the one carrying
+    the oversized/disallowed blob this guard exists to catch.
     """
     head = _rev_parse(head_ref)
     if head is None:
@@ -227,25 +261,19 @@ def _new_blobs_in_range(base_ref: str, head_ref: str) -> list[tuple[str, int]] |
     return out
 
 
-def _blobs_in_tree(rev: str) -> list[tuple[str, int]] | None:
+def _blobs_in_tree(rev: str) -> list[tuple[str, int]]:
     """Every ``(path, size)`` tracked in the tree at ``rev`` -- the path
     inventory and the size both come from the SAME snapshot (``ls-tree``),
     unlike pairing ``ls-files`` (always the current index) with a separate
     per-path lookup at an arbitrary ``rev``, which can drift out of sync
-    with each other. Returns None (distinct from an empty list, which is a
-    legitimate empty tree) if ``rev`` doesn't resolve -- ``ls-tree`` against
-    an unknown ref prints nothing and exits nonzero, which must surface as
-    a genuine failure, never a silent "nothing to check" pass.
+    with each other. Raises :class:`GitEnumerationError` if ``rev`` doesn't
+    resolve -- ``ls-tree`` against an unknown ref prints nothing and exits
+    nonzero, which must surface as a genuine failure, never a silent
+    "nothing to check" pass.
     """
-    r = _git_bytes("ls-tree", "-r", "-l", "-z", rev)
-    if r.returncode != 0:
-        print(
-            f"check-large-files: 'git ls-tree {rev}' failed: "
-            f"{_decode(r.stderr).strip()}",
-        )
-        return None
+    r = _git_or_raise("ls-tree", "-r", "-l", "-z", rev)
     out: list[tuple[str, int]] = []
-    for record in _decode(r.stdout).split("\0"):
+    for record in r.split("\0"):
         if not record:
             continue
         # "<mode> <type> <sha> <size>\t<path>"
@@ -270,14 +298,42 @@ def _staged_blobs(paths: list[str]) -> list[tuple[str, int]]:
     still what would actually be committed, and must still be caught; the
     reverse (an unrelated working-tree edit growing a safely-sized staged
     blob) must not false-positive.
+
+    Resolves each path's blob sha via ``git ls-files --stage`` (a plain CLI
+    argument, parsed unambiguously by the shell/argv, never embedded in a
+    colon-delimited revision string) rather than ``git cat-file -s
+    ":<path>"``: the latter's ``:[<n>:]<path>`` revision grammar means a
+    LITERAL path that itself begins with a stage-number-shaped prefix (e.g.
+    a file genuinely named ``0:large.json``) can be misparsed as an
+    explicit-stage reference to a *different* path (stage 0 of
+    ``large.json``), silently checking the wrong file -- or none at all.
+    Raises :class:`GitEnumerationError` only if ``ls-files`` itself fails
+    outright (a path simply absent from the index -- e.g. a staged
+    deletion -- is a legitimate, silent no-op, not a failure).
     """
+    if not paths:
+        return []
+    r = _git_or_raise("ls-files", "--stage", "-z", "--", *paths)
+    shas: dict[str, str] = {}
+    for record in r.split("\0"):
+        if not record:
+            continue
+        # "<mode> <sha> <stage>\t<path>"
+        meta, _, path = record.partition("\t")
+        fields = meta.split()
+        if len(fields) < 2:
+            continue
+        shas[path] = fields[1]
     out: list[tuple[str, int]] = []
     for path in paths:
-        r = _git_bytes("cat-file", "-s", f":{path}")
-        if r.returncode != 0:
+        sha = shas.get(path)
+        if sha is None:
             continue  # not in the index (e.g. a staged deletion) -- nothing to check
+        r2 = _git_bytes("cat-file", "-s", sha)
+        if r2.returncode != 0:
+            continue
         try:
-            size = int(_decode(r.stdout).strip())
+            size = int(_decode(r2.stdout).strip())
         except ValueError:
             continue
         out.append((path, size))
@@ -352,27 +408,31 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if args.all:
-        found_all = _blobs_in_tree(args.head)
-        if found_all is None:
-            # Distinct from "nothing to check": ls-tree itself failed (e.g.
-            # an unresolvable --head), which must be a hard failure, never
-            # a silent pass -- see _blobs_in_tree's docstring.
-            return 1
-        blobs = found_all
-        scope_desc = f"every tracked file at {args.head}"
-    elif args.paths:
-        blobs = _staged_blobs(args.paths)
-        scope_desc = f"{len(args.paths)} staged file(s)"
-    else:
-        found = _new_blobs_in_range(args.base, args.head)
-        if found is None:
-            # Genuinely environmental (e.g. --base not fetched yet) --
-            # matches check-effort-vision-structure.py's own convention of
-            # skipping (not failing) when its base ref is unavailable.
-            return 0
-        blobs = found
-        scope_desc = f"this diff's {len(blobs)} newly-introduced blob(s)"
+    try:
+        if args.all:
+            blobs = _blobs_in_tree(args.head)
+            scope_desc = f"every tracked file at {args.head}"
+        elif args.paths:
+            blobs = _staged_blobs(args.paths)
+            scope_desc = f"{len(args.paths)} staged file(s)"
+        else:
+            found = _new_blobs_in_range(args.base, args.head)
+            if found is None:
+                # Genuinely environmental (e.g. --base not fetched yet) --
+                # matches check-effort-vision-structure.py's own convention
+                # of skipping (not failing) when its base ref is
+                # unavailable.
+                return 0
+            blobs = found
+            scope_desc = f"this diff's {len(blobs)} newly-introduced blob(s)"
+    except GitEnumerationError as exc:
+        # A git plumbing command needed to enumerate blobs failed outright
+        # (e.g. an unresolvable --head, a corrupt range) -- a hard failure,
+        # never a silent "nothing to check" pass: an unexamined commit or
+        # path could easily be the one carrying the oversized/disallowed
+        # blob this guard exists to catch.
+        print(f"[FAIL] check-large-files: {exc}")
+        return 1
 
     violations = check(blobs)
     if violations:
