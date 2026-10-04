@@ -1785,26 +1785,36 @@ def test_main_releases_admission_lease_even_when_per_instance_config_fails(monke
     assert release_calls == ["release"]
 
 
-def test_main_skips_admission_for_guards(monkeypatch, tmp_path: Path) -> None:
+def test_main_guards_acquires_admission(monkeypatch, tmp_path: Path) -> None:
+    # `--guards` still reaches `_ensure_venv()` inside the container and
+    # so can rebuild/delete the shared on-disk venv -- it is NOT exempt
+    # from the host-wide lease (see
+    # test_admission_needs_admission_true_for_venv_mutating_modes).
     acquire_calls: list[float] = []
+    release_calls: list[str] = []
     config_path = tmp_path / "cfgdir-guards" / "devcontainer.json"
     config_path.parent.mkdir()
     config_path.write_text("{}")
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-guards")
-    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
                          lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
     monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
-    monkeypatch.setattr(wrapper._admission, "acquire", lambda wait: acquire_calls.append(wait))
+
+    class Lease:
+        def release(self) -> None:
+            release_calls.append("release")
+
+    monkeypatch.setattr(wrapper._admission, "acquire", lambda wait: acquire_calls.append(wait) or Lease())
 
     rc = wrapper.main(["agent-worktrees", "--guards"])
     assert rc == 0
-    assert acquire_calls == []
+    assert acquire_calls == [0.0]
+    assert release_calls == ["release"]
 
 
 def test_tear_down_removes_container_then_volume_on_success() -> None:
@@ -2366,6 +2376,23 @@ def test_main_skips_dependency_preparation_and_disconnect_for_list_only(monkeypa
     rc = wrapper.main(["--list"])
     assert rc == 0
     assert order == ["run"]
+
+
+def test_main_rejects_malformed_admission_wait_even_for_list_only(monkeypatch) -> None:
+    # `--list` skips admission acquisition entirely (see the test above),
+    # but a malformed/negative `--admission-wait` must still be rejected
+    # on the HOST before any container is brought up -- not silently
+    # skipped alongside the acquisition it would have gated.
+    bring_up_calls: list[object] = []
+    monkeypatch.setattr(wrapper, "_bring_up", lambda *a, **k: bring_up_calls.append((a, k)))
+
+    try:
+        wrapper.main(["--list", "--admission-wait", "bad"])
+    except SystemExit as exc:
+        assert "--admission-wait" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+    assert bring_up_calls == []
 
 
 

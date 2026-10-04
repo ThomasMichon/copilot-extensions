@@ -930,14 +930,16 @@ def main(argv: list[str] | None = None) -> int:
         # commit -- see `_rewrite_base_to_resolved_sha`.
         passthrough = _rewrite_base_to_resolved_sha(passthrough)
 
-        # Acquire the host-wide lease `run-plugin-tests.py` itself uses,
-        # on the HOST, first -- its in-container acquisition is uncontested.
-        # Own try/finally from the moment of acquisition: a later failure
-        # (even as early as `_per_instance_config`) can never leak it.
+        # Acquire the host-wide lease `run-plugin-tests.py` itself uses, on the HOST, first -- its
+        # in-container acquisition is uncontested. Own try/finally from the moment of acquisition: a
+        # later failure (even as early as `_per_instance_config`) can never leak it. Resolve (validate)
+        # `--admission-wait` UNCONDITIONALLY, even for `--list` (which skips acquisition): a malformed
+        # or negative value must fail before any container is brought up, not only once `--list` does.
+        admission_wait = _admission.resolve_admission_wait(passthrough, _canonicalize_flag)
         admission_lease = None
         try:
             if _admission.needs_admission(passthrough, _canonicalize_flag):
-                admission_lease = _admission.acquire(_admission.resolve_admission_wait(passthrough, _canonicalize_flag))
+                admission_lease = _admission.acquire(admission_wait)
 
             instance_label = uuid.uuid4().hex[:12]
             config_path, volume_name = _per_instance_config(instance_label)
@@ -959,8 +961,8 @@ def main(argv: list[str] | None = None) -> int:
                             _devcontainer_exe(), REPO, container_id, config_path, passthrough, _canonicalize_flag,
                         )
                         _net_scope.disconnect_container_networks(container_id)
-                        # The prep pass rebuilt the venv(s); --reinstall here
-                        # would rebuild again with no network left.
+                        # The prep pass rebuilt the venv(s); --reinstall here would rebuild
+                        # again with no network left.
                         passthrough = _net_scope.strip_reinstall(passthrough, _canonicalize_flag)
                     result = _run_tests(container_id, config_path, passthrough)
                     primary_failed = result != 0
@@ -968,10 +970,9 @@ def main(argv: list[str] | None = None) -> int:
                     primary_failed = True
                     raise
                 finally:
-                    # The primary result/exception must win over a secondary cleanup failure -- a bare
-                    # `finally` raising would otherwise silently discard it. `primary_failed` tells which
-                    # case this is: report (don't re-raise) a cleanup failure once the primary already
-                    # failed; raise it directly only when the primary succeeded.
+                    # The primary result/exception must win over a secondary cleanup failure -- a bare `finally` raising
+                    # would otherwise silently discard it. `primary_failed` says which case this is: report (don't
+                    # re-raise) a cleanup failure once the primary already failed; raise it directly only when it succeeded.
                     if container_id is None:
                         with _cleanup_signals_deferred():
                             _cleanup_orphan(instance_label, volume_name)

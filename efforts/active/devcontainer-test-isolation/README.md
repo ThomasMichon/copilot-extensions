@@ -429,9 +429,12 @@ verbatim ask.
       rather than left silently broken). **Closed.** A new
       `tools/_devcontainer_host_admission.py` module acquires the SAME
       host-wide lease on the HOST, before any container work begins,
-      mirroring that script's own skip logic (`--list`/`--guards`/
-      `--collect-only`/`--prepare-only` never gate on it either) and its
-      `--admission-wait` default (0.0, fail fast). The lock dir/service
+      mirroring that script's own skip logic -- only `--list` never gates
+      on it; `--guards`, `--collect-only`, and `--prepare-only` all do,
+      since every one of them reaches `_ensure_venv()` and so can
+      rebuild/delete the shared on-disk venv a concurrent admitted run
+      may depend on mid-execution -- and its `--admission-wait` default
+      (0.0, fail fast). The lock dir/service
       name live in a shared `tools/_admission_protocol.py` module both
       this file and `run-plugin-tests.py` import (that script's
       hyphenated filename can't be imported directly, hence the separate
@@ -441,8 +444,8 @@ verbatim ask.
       validated: a wrapped run holding the lease made a
       concurrent bare `run-plugin-tests.py` invocation fail fast with the
       same `[BUSY]` message a second bare invocation would have gotten,
-      and a concurrent `--guards` wrapped run was confirmed NOT blocked
-      by it.
+      and a concurrent bare `--guards` invocation was confirmed to
+      correctly contend for (not bypass) that same lease.
 
 ## Validation Plan
 
@@ -2444,3 +2447,27 @@ heavy-test slot, adding a parallel `--collect-only` test. All tests,
 module-size, and docs-consistency checks still pass; a fresh
 Docker-backed end-to-end run confirmed the fix doesn't disturb the
 common case.
+
+### 2026-10-04 — Review round 8 (PR #5100): validate --admission-wait before the --list skip, fix the stale wiring test and Plan
+A HIGH finding caught one more gap from round 7's fix: the wrapper only
+resolves (and so validates) `--admission-wait` INSIDE the
+`needs_admission` branch, so `--admission-wait bad --list` (or a
+negative wait combined with `--list`) skipped validation entirely and
+would start a real container before the inner runner's own argparse
+ever got a chance to reject it -- contrary to the fail-before-container
+contract every other malformed-value path in this effort already
+enforces. Fixed by resolving `--admission-wait` unconditionally, before
+the `needs_admission` check, so a malformed/negative value is rejected
+on the HOST even for `--list`. Two smaller findings landed alongside it:
+a wrapper-side wiring test (`test_main_skips_admission_for_guards`) had
+stubbed `needs_admission` to always return `False`, hard-coding the
+obsolete round-6 behavior and silently contradicting the already-fixed
+unit test in `_devcontainer_host_admission`'s own test file -- renamed
+and inverted to assert a `--guards` invocation actually acquires and
+releases the lease; and this Plan section still described the
+round-6/7-obsolete contract (`--guards`/`--collect-only`/`--prepare-only`
+all bypassing admission) -- corrected to describe the shipped
+unconditional-except-`--list` policy. All tests, module-size (re-
+condensed back to the 1000-line cap), and docs-consistency checks still
+pass; a fresh Docker-backed end-to-end run confirmed the fix doesn't
+disturb the common case.
