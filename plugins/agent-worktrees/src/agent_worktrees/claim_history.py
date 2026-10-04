@@ -187,6 +187,20 @@ def record_event(
         }
         if note:
             entry["note"] = note
+        # Durable project attribution (worktree-claims-transitive-finalization
+        # Phase 3b's remote-mirroring item): a worktree's own tracking
+        # record is NOT a durable proxy for "which project this event
+        # belongs to" -- it can be retired/deleted (reaped) long after the
+        # event itself was recorded, at which point a consumer that only
+        # ever derives ownership from CURRENTLY-LIVE tracking records would
+        # misattribute or permanently drop it. Stamping the project here,
+        # once, at write time, survives that independent of tracking
+        # records' own lifecycle. Best-effort: an unresolvable project
+        # (e.g. no config loaded yet) leaves the field absent rather than
+        # blocking the write.
+        project = current_project_name()
+        if project:
+            entry["project"] = project
         line = json.dumps(entry, ensure_ascii=True)
         with handoff_trace._append_lock(lock_path):
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -197,6 +211,17 @@ def record_event(
         _write_failures += 1
         log.debug("claim_history.record_event(%r, ref=%r) failed to write: %s",
                   event, ref, exc)
+
+
+def current_project_name() -> str | None:
+    """Best-effort current project name for the durable ``project``
+    attribution stamp above -- never raises; an unresolvable config simply
+    leaves new entries without a project stamp (the mirror sweep then
+    falls back to its own live-tracking-record heuristic for them)."""
+    try:
+        return cfg.load_config().repo_name or None
+    except Exception:
+        return None
 
 
 def record_claim_released(claim, *, worktree_id: str, machine: str, note: str = "") -> None:

@@ -1,8 +1,5 @@
 """Remote git-ref mirror for :mod:`claim_history`'s local ownership ledger
-(worktree-claims-transitive-finalization Phase 3b, 2026-10-03: "Remote-mirror
-this history for converged repos ... the store already exists and is
-trusted, no reason for PR ownership history to be local-only and evaporate
-on cleanup").
+(worktree-claims-transitive-finalization Phase 3b's remote-mirroring item).
 
 :mod:`claim_history` is a single machine-local JSONL file
 (``logs/claim-history.jsonl``) -- durable across a worktree's own cleanup,
@@ -10,53 +7,72 @@ but gone the moment the MACHINE itself is reimaged/retired, and invisible to
 any other machine wanting to audit a PR's full ownership trail. This module
 mirrors each ``pr``-kind resource's event history to its own append-only Git
 ref on the same shared store repo :mod:`lease_store`/:mod:`lease_config`
-already use for cross-machine lease coordination -- same store, same
-account-scoped auth, same "no branches/tags, hidden ref namespace" posture,
-new namespace (``refs/agent-worktrees/claim-history/v1``, see
-:data:`DEFAULT_REF_PREFIX`) and a different (simpler) protocol: a plain
-linear chain of empty-tree commits, one per recorded event, oldest at the
-root -- no compare-and-swap *exclusivity* semantics are needed here (unlike
-a lease, nothing is ever "currently held" by one ref state), only a durable,
-append-only, race-safe way to grow the chain from multiple independent
-writers.
+already use for cross-machine lease coordination (new namespace
+``refs/agent-worktrees/claim-history/v1``, same account-scoped auth): a
+plain linear chain of empty-tree commits, one per recorded event, oldest at
+the root.
 
 **Deliberately a separate, explicit, opt-in sweep -- never synchronous with
 a live claim mutation.** Every :mod:`claim_history` write happens inline
-during an ordinary claim operation (``pr_ops.py``'s claim/release,
-``finalize.py``'s bulk release, ...); adding a live network fetch+push to
-each one would add real latency and a new failure surface to every such
-operation for a durability concern that tolerates eventual (not immediate)
-consistency. Instead, :func:`sync_pending` is wired into
-``agent-worktrees gc --mirror-claim-history`` (opt-in, network +
-force-push, exactly the posture Phase 5's ``--lease-gc`` already
-established for this same store) -- call it whenever convenient; it is
-idempotent and resumable (see below), never loses an event, and degrades to
-a reported no-op (not an error) when no store is configured for this
-project.
+during an ordinary claim operation; adding a live network fetch+push to
+each one would add real latency and a new failure surface for a durability
+concern that tolerates eventual (not immediate) consistency. Instead,
+:func:`sync_pending` is wired into ``agent-worktrees gc
+--mirror-claim-history`` (opt-in, network + force-push, the same posture
+Phase 5's ``--lease-gc`` established for this same store).
 
-**Sync cursor.** :func:`sync_pending` tracks, per ``(kind, ref)`` resource,
-how many of that resource's locally-recorded events have already been
-pushed (``logs/claim-history-mirror-state.json``, by local event count --
-monotonic since the local ledger is itself append-only). Each push is
-confirmed (a successful ``git push``, or an observed-identical remote OID
-after a benign concurrent-identical-push race) before the cursor advances
-past it, and the cursor is persisted after each resource's own pushes
-complete -- a later run always resumes exactly where a prior run (or a
-mid-run crash) left off, never re-pushing an already-mirrored event and
-never silently skipping one still pending.
+**Durable event identity, not payload equality.** Two genuinely distinct
+local events can serialize identically (``record_event`` timestamps only to
+the second, so a claim released and re-claimed within one second produces
+two otherwise-indistinguishable "claimed" records); comparing raw payloads
+would wrongly treat the second as "already mirrored" and silently drop it.
+Every event pushed here instead carries a ``seq`` -- its own 0-based
+position within its resource's FULL local event sequence, in ledger order
+-- as its durable identity. ``seq`` is stable forever: it is derived purely
+from the append-only ledger's own order, never from anything that can
+change later (a worktree's tracking record, a project's live config, ...).
+
+**Stateless by design -- no local sync cursor, no local lock.** An earlier
+revision of this module persisted a local JSON "how many events have I
+already pushed" cursor, serialized by a local advisory lock. That design
+had real gaps a reviewer caught: the lock's own setup could raise and
+escape the sweep; a crash between a landed push and its own checkpoint
+write could re-push (or, worse, skip) events; and a cursor based on a
+PROJECT-FILTERED event list silently drifted whenever that filter's output
+changed shape (e.g. a worktree's tracking record got reaped between
+sweeps). Removing the local cursor file removes that whole class of bugs
+outright rather than patching each one: :func:`sync_pending` always asks
+the REMOTE directly (:meth:`ClaimHistoryMirror.fetch`) which ``seq``
+values a resource's chain already has, and only pushes the ones still
+missing. :meth:`ClaimHistoryMirror.push` repeats that same check against
+the remote's CURRENT state immediately before committing (not just once
+up front), so two sweeps racing on the same ref are safe without any local
+coordination at all -- one wins the compare-and-swap; the other's retry
+re-fetches, sees its ``seq`` now present, and no-ops.
+
+**Durable project attribution.** A sweep must never upload one project's
+PR references/session IDs/notes to a DIFFERENT project's configured store
+-- the local ledger is machine-global, but a sweep's store is one
+project's own. Every event :mod:`claim_history` records now carries an
+optional ``project`` stamp (``claim_history.current_project_name()``,
+best-effort, at write time) -- durable, since it survives a worktree's own
+tracking record being retired long after the event was recorded. A legacy
+event recorded before this stamp existed falls back to
+:func:`_current_project_worktree_ids`'s live-tracking-record heuristic
+(lossy once a worktree is reaped, but fail-closed: never exported when
+neither signal vouches for it).
 
 **Reading.** :func:`fetch_remote_history` is a plain, read-only,
-best-effort pull of one resource's mirrored chain -- independent of the
-sync cursor above, safe to call any time (e.g. ``claims history <ref>
---remote``) to see what other machines have mirrored, whether or not THIS
-machine has ever pushed to that same ref itself.
+best-effort pull of one resource's mirrored chain -- safe to call any time
+(e.g. ``claims history <ref> --remote``) to see what other machines have
+mirrored, whether or not THIS machine has ever pushed to that same ref
+itself.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
 import random
 import subprocess
 import tempfile
@@ -64,8 +80,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from . import claim_history, handoff_trace
-from . import config as cfg
+from . import claim_history
 from .lease_config import ConfigError, LeaseSettings, load_lease_settings
 from .lease_protocol import ProtocolError, canonical_json, ref_for, resource
 
@@ -77,18 +92,18 @@ log = logging.getLogger("agent-worktrees")
 DEFAULT_REF_PREFIX = "refs/agent-worktrees/claim-history/v1"
 
 _SENTINEL = "agent-worktrees-claim-history-envelope-v1"
-_REQUIRED_KEYS = frozenset({"ts", "kind", "ref", "worktree_id", "machine", "event"})
+
+#: Fields every mirrored event carries as a plain string, always -- even
+#: when the value is empty (a legacy ``machine=""`` record is a real, if
+#: degraded, value, never an absent one).
+_REQUIRED_STR_KEYS = frozenset({"ts", "kind", "ref", "worktree_id", "machine", "event"})
+
+#: Fields a mirrored event may legitimately omit -- dropped from the
+#: serialized payload only when absent/empty.
+_OPTIONAL_KEYS = frozenset({"session_id", "note"})
 
 _write_failures = 0
 _read_failures = 0
-
-
-#: Fields a mirrored event may legitimately omit -- dropped from the
-#: serialized payload only when absent/empty, unlike the required fields
-#: (which are kept verbatim even when empty: a legacy ``machine=""`` record
-#: is a real, if degraded, value, not an absent one -- dropping it would
-#: make the payload fail its own required-field check on the other end).
-_OPTIONAL_KEYS = frozenset({"session_id", "note"})
 
 
 def write_failure_count() -> int:
@@ -109,44 +124,6 @@ class ClaimHistoryMirrorError(RuntimeError):
     non-CAS Git transport failure)."""
 
 
-def _state_path() -> Path:
-    return cfg.install_dir() / "logs" / "claim-history-mirror-state.json"
-
-
-def _state_lock_path() -> Path:
-    return _state_path().with_suffix(".lock")
-
-
-def _load_state() -> dict[str, int]:
-    path = _state_path()
-    if not path.exists():
-        return {}
-    try:
-        with open(path, encoding="utf-8") as handle:
-            raw = json.load(handle)
-    except Exception:
-        return {}
-    if not isinstance(raw, dict):
-        return {}
-    return {
-        key: value
-        for key, value in raw.items()
-        if isinstance(key, str) and isinstance(value, int) and value >= 0
-    }
-
-
-def _save_state(state: dict[str, int]) -> None:
-    path = _state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(f".{os.getpid()}.tmp")
-    try:
-        with open(tmp, "w", encoding="utf-8") as handle:
-            json.dump(state, handle, sort_keys=True)
-        tmp.replace(path)
-    finally:
-        tmp.unlink(missing_ok=True)
-
-
 def mirror_settings(origin: str | None = None) -> LeaseSettings | None:
     """Resolve the shared store's settings for the claim-history namespace,
     or ``None`` when no store is configured for this project -- a no-op,
@@ -158,7 +135,8 @@ def mirror_settings(origin: str | None = None) -> LeaseSettings | None:
 
 
 def _serialize_entry(entry: dict) -> str:
-    payload = {key: entry.get(key, "") for key in _REQUIRED_KEYS}
+    payload = {key: entry.get(key, "") for key in _REQUIRED_STR_KEYS}
+    payload["seq"] = int(entry["seq"])
     for key in _OPTIONAL_KEYS:
         value = entry.get(key)
         if value not in (None, ""):
@@ -175,15 +153,21 @@ def _parse_entry(message: str) -> dict:
         data = json.loads(body)
     except json.JSONDecodeError as exc:
         raise ProtocolError("claim-history commit payload is not valid JSON") from exc
-    if not isinstance(data, dict) or not _REQUIRED_KEYS.issubset(data):
+    if not isinstance(data, dict):
+        raise ProtocolError("claim-history commit payload is not an object")
+    if not _REQUIRED_STR_KEYS.issubset(data) or "seq" not in data:
         raise ProtocolError("claim-history commit payload is missing required fields")
-    for key in _REQUIRED_KEYS:
+    for key in _REQUIRED_STR_KEYS:
         if not isinstance(data[key], str):
             raise ProtocolError(f"claim-history field {key!r} must be a string")
+    # bool is a subclass of int -- exclude it explicitly so a stray
+    # True/False can never masquerade as a valid sequence number.
+    if not isinstance(data["seq"], int) or isinstance(data["seq"], bool):
+        raise ProtocolError("claim-history field 'seq' must be an integer")
     for key in _OPTIONAL_KEYS:
         if key in data and not isinstance(data[key], str):
             raise ProtocolError(f"claim-history field {key!r} must be a string")
-    if not _REQUIRED_KEYS.union(_OPTIONAL_KEYS).issuperset(data):
+    if not _REQUIRED_STR_KEYS.union(_OPTIONAL_KEYS, {"seq"}).issuperset(data):
         raise ProtocolError("claim-history commit payload has unknown fields")
     return data
 
@@ -215,23 +199,31 @@ class ClaimHistoryMirror:
             except Exception:
                 self._auth_args = []
 
-    def push(self, entry: dict) -> None:
-        """Append one history ``entry`` to its resource's remote mirror
-        ref. Idempotent under a benign race (a concurrent identical push
-        from another machine/process observed on the remote is treated as
-        success, never re-applied); a genuine conflict (the ref moved for
-        a different reason) is retried, bounded, by re-parenting onto the
-        new remote head. Raises :class:`ClaimHistoryMirrorError` only after
-        exhausting retries -- callers (:func:`sync_pending`) treat that as
-        "this one entry stays pending, try again next sweep," never fatal
-        to the sweep as a whole.
+    def push(self, entry: dict) -> bool:
+        """Append one history ``entry`` (carrying its own durable ``seq``)
+        to its resource's remote mirror ref, unless that ``seq`` is already
+        present anywhere in the remote chain. Returns ``True`` if a new
+        commit was created, ``False`` if the event was already there (a
+        genuine no-op, not an error). The existence check is re-done
+        against the CURRENT remote state on every attempt (not just once up
+        front), so two sweeps racing on the same ref need no local
+        coordination: one wins the compare-and-swap push; the other's
+        retry re-fetches, finds its ``seq`` now present, and returns
+        ``False``. Raises :class:`ClaimHistoryMirrorError` only after
+        exhausting retries on a non-idempotent failure (a genuine,
+        persistent Git transport problem) -- callers (:func:`sync_pending`)
+        treat that as "this one entry stays pending, try again next
+        sweep," never fatal to the sweep as a whole.
         """
         global _write_failures
         item = resource(str(entry["kind"]), str(entry["ref"]))
         ref = ref_for(self.settings.ref_prefix, item)
+        seq = int(entry["seq"])
         message = _serialize_entry(entry)
         attempt = 0
         while attempt <= self.retries:
+            if any(e.get("seq") == seq for e in self.fetch(item.kind, item.key)):
+                return False
             parent = self._remote_oid(ref)
             # Commit-tree and push must share the SAME ephemeral bare repo
             # (mirrors GitLeaseStore._transition's own single-repo-per-attempt
@@ -257,19 +249,11 @@ class ClaimHistoryMirror:
                     if fetched.returncode != 0:
                         # Transient failure, or the ref moved since we read
                         # it above -- either way, retry with a freshly-read
-                        # parent rather than committing on top of one we
-                        # couldn't actually fetch.
+                        # parent/existing-seq set rather than committing on
+                        # top of one we couldn't actually fetch.
                         attempt += 1
                         self._sleep(self._jitter(0.025, min(0.5, 0.05 * (2**attempt))))
                         continue
-                    # Idempotency against a crash between a prior push and
-                    # its own checkpoint save: if the tip we're about to
-                    # parent onto already carries THIS exact event, a prior
-                    # run already mirrored it -- treat as already-applied
-                    # rather than appending a duplicate commit for the same
-                    # event.
-                    if self._commit_message(repo, parent) == message:
-                        return
                 tree = self._git(
                     [f"--git-dir={repo}", "mktree"], input_text="",
                 ).stdout.strip()
@@ -294,10 +278,10 @@ class ClaimHistoryMirror:
                     check=False,
                 )
             if pushed.returncode == 0:
-                return
+                return True
             remote_now = self._remote_oid(ref)
             if remote_now == oid:
-                return
+                return True
             if attempt >= self.retries:
                 _write_failures += 1
                 detail = (pushed.stderr or pushed.stdout).strip().splitlines()
@@ -392,19 +376,6 @@ class ClaimHistoryMirror:
             raise ClaimHistoryMirrorError(f"remote returned an ambiguous result for {ref}")
         return parts[0]
 
-    def _commit_message(self, repo: Path, oid: str) -> str | None:
-        """Return ``oid``'s raw commit message (already-fetched into
-        ``repo``), or ``None`` if it can't be read -- never raises, since
-        callers use this only as a best-effort idempotency probe."""
-        try:
-            raw = self._git([f"--git-dir={repo}", "cat-file", "commit", oid]).stdout
-        except ClaimHistoryMirrorError:
-            return None
-        marker = "\n\n"
-        if marker not in raw or not raw.endswith("\n"):
-            return None
-        return raw.split(marker, 1)[1][:-1]
-
     # Only these subcommands reach the shared origin over the network and
     # need the account-scoped auth header; every other call runs against a
     # local ephemeral bare repo (mirrors GitLeaseStore._git's own split).
@@ -446,25 +417,16 @@ class ClaimHistoryMirror:
         return result
 
 
-def _store_identity(settings: LeaseSettings) -> str:
-    """A stable identity for the destination store (origin + namespace),
-    so a persisted sync cursor is scoped to a specific store -- switching
-    stores, or running the sweep against a different one, must never reuse
-    a count that only ever reflected pushes to a DIFFERENT remote."""
-    return f"{settings.origin}#{settings.ref_prefix}"
-
-
 def _current_project_worktree_ids() -> set[str]:
     """Worktree ids tracked under the CURRENT project's own tracking
-    directory -- a sync sweep only ever runs against ONE project's local
-    claim_history ledger, but that ledger itself is machine-global (shared
-    across every project's worktrees on this machine), so this is the
-    restriction that keeps project A's sweep from also uploading project
-    B's PR references/session IDs/notes to A's configured store. Any
-    failure to read tracking records degrades to an EMPTY set (nothing
-    eligible) rather than "assume everything belongs to this project" --
-    fail closed, never leak."""
+    directory -- the fallback eligibility signal for a LEGACY event
+    recorded before :mod:`claim_history` started stamping a durable
+    ``project`` field (see :func:`_event_eligible`). Any failure to read
+    tracking records degrades to an EMPTY set (nothing eligible) rather
+    than "assume everything belongs to this project" -- fail closed,
+    never leak."""
     try:
+        from . import config as cfg
         from . import tracking
         records = tracking.list_records(cfg.tracking_dir())
     except Exception:
@@ -472,15 +434,35 @@ def _current_project_worktree_ids() -> set[str]:
     return {r.worktree_id for r in records if getattr(r, "worktree_id", None)}
 
 
-def _distinct_refs(kind: str | None = None) -> list[tuple[str, str]]:
-    """Every distinct ``(kind, ref)`` pair ever recorded locally, in
-    first-seen order -- read directly off the ledger file rather than
-    :func:`claim_history.history_for_ref` (which needs the ref value
-    up front)."""
+def _event_eligible(entry: dict, *, project_name: str | None, owned_ids: set[str]) -> bool:
+    """Whether ``entry`` may be mirrored to the CURRENT project's
+    configured store. A durable ``project`` stamp (present on every event
+    recorded since that field existed) is authoritative and never falls
+    back to the tracking-record heuristic, even if it disagrees -- it
+    survives exactly the tracking-record retirement the heuristic cannot.
+    A legacy event with no stamp at all falls back to
+    :func:`_current_project_worktree_ids`."""
+    project = entry.get("project")
+    if isinstance(project, str) and project:
+        return project_name is not None and project == project_name
+    return entry.get("worktree_id") in owned_ids
+
+
+def _grouped_events(kind: str | None = None) -> dict[tuple[str, str], list[dict]]:
+    """Parse the append-only ledger exactly once, grouping every event by
+    its ``(kind, ref)`` resource in ledger order and stamping each with its
+    own durable, position-based ``seq`` (its 0-based index within that
+    resource's own full event sequence) -- the identity
+    :meth:`ClaimHistoryMirror.push`/:meth:`~ClaimHistoryMirror.fetch` use
+    for idempotency. Re-reading the whole ledger once per sweep (rather
+    than once per resource, as an earlier revision did via repeated
+    :func:`claim_history.history_for_ref` calls) avoids reparsing
+    roughly resources-times-ledger-length worth of lines on every run.
+    """
     path = claim_history.history_path()
-    seen: dict[tuple[str, str], None] = {}
+    grouped: dict[tuple[str, str], list[dict]] = {}
     if not path.exists():
-        return []
+        return grouped
     try:
         with open(path, encoding="utf-8", errors="replace") as handle:
             for raw in handle:
@@ -498,104 +480,84 @@ def _distinct_refs(kind: str | None = None) -> list[tuple[str, str]]:
                     continue
                 if kind is not None and k != kind:
                     continue
-                seen.setdefault((k, ref_value), None)
+                bucket = grouped.setdefault((k, ref_value), [])
+                stamped = dict(entry)
+                stamped["seq"] = len(bucket)
+                bucket.append(stamped)
     except OSError:
-        return []
-    return list(seen.keys())
+        return {}
+    return grouped
 
 
 def sync_pending(
     *, origin: str | None = None, kind: str | None = None, dry_run: bool = False,
 ) -> dict[str, object]:
-    """Push every locally-recorded claim-history event not yet mirrored to
-    the shared store, resuming from each resource's own persisted cursor.
-    Degrades to ``{"available": False, ...}`` (never an error) when no
-    store is configured for this project -- this sweep is opt-in
-    (``agent-worktrees gc --mirror-claim-history``) and must never fail an
-    otherwise-successful ``gc``.
+    """Push every locally-recorded, eligible claim-history event not yet
+    present on the shared store. Degrades to ``{"available": False, ...}``
+    (never an error) when no store is configured for this project -- this
+    sweep is opt-in (``agent-worktrees gc --mirror-claim-history``) and
+    must never fail an otherwise-successful ``gc``.
 
-    Restricted to events belonging to a worktree THIS project's own
-    tracking records currently know about (see
-    :func:`_current_project_worktree_ids`) -- the local ledger is
-    machine-global, but the configured store is this project's own, so an
-    unrelated project's events must never ride along.
+    Restricted to events eligible for THIS project's configured store (see
+    :func:`_event_eligible`) -- the local ledger is machine-global, but the
+    configured store is this project's own, so an unrelated project's
+    events must never ride along.
 
-    The whole load-push-checkpoint cycle is serialized by a cross-process
-    lock (:func:`handoff_trace._append_lock`) -- two overlapping sweeps
-    (e.g. two sessions each running ``gc --mirror-claim-history`` at once)
-    must never read the same starting cursor and push the same pending
-    events twice. Each successful push's cursor is checkpointed
-    immediately (not once at the end of the whole sweep), and ``push()``
-    itself recognizes an already-applied event at its target position as a
-    no-op -- together, a crash or interruption at any point leaves a
-    resumable, never-duplicated state.
+    Stateless: no local cursor, no local lock (see the module docstring).
+    One preliminary :meth:`~ClaimHistoryMirror.fetch` per resource finds
+    what the remote already has; :meth:`~ClaimHistoryMirror.push` itself
+    re-confirms against the remote's CURRENT state before every commit, so
+    the whole operation is safe under concurrent/overlapping sweeps without
+    needing to coordinate with them at all.
 
-    ``dry_run=True`` reports how many events are pending per resource
-    without pushing or advancing any cursor.
+    ``dry_run=True`` reports how many events are genuinely still missing
+    per resource without pushing anything.
     """
     settings = mirror_settings(origin)
     if settings is None:
         return {"available": False, "pushed": 0, "refs": [], "failed": []}
     mirror = ClaimHistoryMirror(settings)
-    store_id = _store_identity(settings)
+    project_name = claim_history.current_project_name()
     owned_ids = _current_project_worktree_ids()
     details: list[dict[str, object]] = []
     failed: list[dict[str, object]] = []
     pushed_total = 0
 
-    with handoff_trace._append_lock(_state_lock_path()):
-        state = _load_state()
-        for k, ref_value in _distinct_refs(kind=kind):
-            events = [
-                e for e in claim_history.history_for_ref(ref_value)
-                if e.get("kind") == k and e.get("worktree_id") in owned_ids
-            ]
-            if not events:
-                continue
-            resource_key = resource(k, ref_value).identity
-            cursor_key = f"{store_id}::{resource_key}"
-            already = state.get(cursor_key)
-            if already is None:
-                # Best-effort migration from a pre-store-scoping cursor --
-                # never trusted across a genuinely different store, but
-                # avoids wholesale re-pushing this store's own
-                # already-mirrored history on upgrade.
-                already = state.get(resource_key, 0)
-            pending = events[already:]
-            if not pending:
-                continue
-            if dry_run:
-                details.append({"ref": ref_value, "kind": k, "pending": len(pending)})
-                continue
-            pushed_here = 0
-            for entry in pending:
-                try:
-                    mirror.push(entry)
-                except ClaimHistoryMirrorError as exc:
-                    log.debug("claim_history_mirror.sync_pending: %s", exc)
-                    failed.append({"ref": ref_value, "kind": k, "error": str(exc)})
-                    break
-                pushed_here += 1
-                state[cursor_key] = already + pushed_here
-                try:
-                    _save_state(state)
-                except OSError as exc:
-                    failed.append(
-                        {"ref": ref_value, "kind": k, "error": f"checkpoint write failed: {exc}"}
-                    )
-                    break
-            if pushed_here:
-                pushed_total += pushed_here
-                details.append({"ref": ref_value, "kind": k, "pushed": pushed_here})
+    for (k, ref_value), events in _grouped_events(kind=kind).items():
+        eligible = [
+            e for e in events
+            if _event_eligible(e, project_name=project_name, owned_ids=owned_ids)
+        ]
+        if not eligible:
+            continue
+        existing_seqs = {e.get("seq") for e in mirror.fetch(k, ref_value)}
+        pending = [e for e in eligible if e["seq"] not in existing_seqs]
+        if not pending:
+            continue
+        if dry_run:
+            details.append({"ref": ref_value, "kind": k, "pending": len(pending)})
+            continue
+        pushed_here = 0
+        for entry in pending:
+            try:
+                if mirror.push(entry):
+                    pushed_here += 1
+            except ClaimHistoryMirrorError as exc:
+                log.debug("claim_history_mirror.sync_pending: %s", exc)
+                failed.append({"ref": ref_value, "kind": k, "error": str(exc)})
+                break
+        if pushed_here:
+            pushed_total += pushed_here
+            details.append({"ref": ref_value, "kind": k, "pushed": pushed_here})
     return {"available": True, "pushed": pushed_total, "refs": details, "failed": failed}
 
 
 def fetch_remote_history(
     ref_value: str, *, kind: str = "pr", origin: str | None = None,
 ) -> list[dict]:
-    """Read-only pull of one resource's mirrored chain, independent of the
-    local sync cursor -- an empty list when no store is configured, the
-    ref was never mirrored, or the store is unreachable (never raises)."""
+    """Read-only pull of one resource's mirrored chain -- an empty list
+    when no store is configured, the ref was never mirrored, or the store
+    is unreachable (never raises)."""
     settings = mirror_settings(origin)
     if settings is None:
         return []

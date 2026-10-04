@@ -1,7 +1,7 @@
 """Tests for :mod:`claim_history_mirror` (worktree-claims-transitive-finalization
 Phase 3b's remote-mirroring item): the git-ref append-only mirror for
-:mod:`claim_history`'s local ownership ledger, its opt-in sync sweep, and
-the ``claims history <ref> --remote`` read path.
+:mod:`claim_history`'s local ownership ledger, its stateless opt-in sync
+sweep, and the ``claims history <ref> --remote`` read path.
 """
 
 from __future__ import annotations
@@ -70,8 +70,8 @@ def mirror(settings: LeaseSettings) -> claim_history_mirror.ClaimHistoryMirror:
 class _AllowAllWorktrees:
     """Stand-in for :func:`claim_history_mirror._current_project_worktree_ids`
     when a test isn't exercising cross-project scoping itself -- membership
-    always succeeds, so every test written before that guard existed keeps
-    working unchanged."""
+    always succeeds, so every test below keeps working whether or not an
+    event carries a durable ``project`` stamp."""
 
     def __contains__(self, _value: object) -> bool:
         return True
@@ -85,22 +85,28 @@ def _allow_all_worktrees(monkeypatch):
     )
 
 
+def _entry(seq: int, **overrides) -> dict:
+    base = {
+        "ts": "2026-10-03T12:00:00+00:00", "kind": "pr", "ref": "o/r#1",
+        "worktree_id": "wt-a", "machine": "m1", "event": "claimed", "seq": seq,
+    }
+    base.update(overrides)
+    return base
+
+
 # ── ClaimHistoryMirror.push / .fetch ─────────────────────────────────────
 
 def test_push_then_fetch_round_trips_one_entry(settings: LeaseSettings):
     m = mirror(settings)
-    entry = {
-        "ts": "2026-10-03T12:00:00+00:00", "kind": "pr", "ref": "o/r#1",
-        "worktree_id": "wt-a", "machine": "m1", "event": "claimed",
-        "session_id": "sess-1", "note": "opened",
-    }
-    m.push(entry)
+    entry = _entry(0, session_id="sess-1", note="opened")
+    assert m.push(entry) is True
     fetched = m.fetch("pr", "o/r#1")
     assert len(fetched) == 1
     assert fetched[0]["ref"] == "o/r#1"
     assert fetched[0]["event"] == "claimed"
     assert fetched[0]["session_id"] == "sess-1"
     assert fetched[0]["note"] == "opened"
+    assert fetched[0]["seq"] == 0
 
 
 def test_push_preserves_an_empty_required_field(settings: LeaseSettings):
@@ -109,10 +115,7 @@ def test_push_preserves_an_empty_required_field(settings: LeaseSettings):
     rather than treating an empty required field like an absent optional
     one, or the round-tripped entry fails its own required-field check."""
     m = mirror(settings)
-    m.push({
-        "ts": "2026-10-03T12:00:00+00:00", "kind": "pr", "ref": "o/r#1",
-        "worktree_id": "wt-a", "machine": "", "event": "claimed",
-    })
+    m.push(_entry(0, machine=""))
     fetched = m.fetch("pr", "o/r#1")
     assert len(fetched) == 1
     assert fetched[0]["machine"] == ""
@@ -120,14 +123,48 @@ def test_push_preserves_an_empty_required_field(settings: LeaseSettings):
 
 def test_push_appends_rather_than_overwrites(settings: LeaseSettings):
     m = mirror(settings)
-    m.push({
-        "ts": "2026-10-03T12:00:00+00:00", "kind": "pr", "ref": "o/r#1",
-        "worktree_id": "wt-a", "machine": "m1", "event": "claimed",
-    })
-    m.push({
-        "ts": "2026-10-03T13:00:00+00:00", "kind": "pr", "ref": "o/r#1",
-        "worktree_id": "wt-a", "machine": "m1", "event": "released",
-    })
+    assert m.push(_entry(0, ts="2026-10-03T12:00:00+00:00", event="claimed")) is True
+    assert m.push(_entry(1, ts="2026-10-03T13:00:00+00:00", event="released")) is True
+    fetched = m.fetch("pr", "o/r#1")
+    assert [e["event"] for e in fetched] == ["claimed", "released"]
+
+
+def test_push_is_a_noop_for_an_already_mirrored_sequence_number(settings: LeaseSettings):
+    m = mirror(settings)
+    assert m.push(_entry(0)) is True
+    assert m.push(_entry(0)) is False
+    assert len(m.fetch("pr", "o/r#1")) == 1
+
+
+def test_push_distinguishes_two_distinct_events_with_an_identical_payload(
+    settings: LeaseSettings,
+):
+    """``record_event`` timestamps only to the second, so a claim released
+    and re-claimed by the same worktree/session within one second can
+    produce two otherwise byte-identical "claimed" records. Payload
+    equality must never stand in for identity -- each gets its own
+    ``seq`` and both must land as distinct commits."""
+    m = mirror(settings)
+    assert m.push(_entry(0)) is True
+    assert m.push(_entry(1)) is True  # same payload apart from seq
+    fetched = m.fetch("pr", "o/r#1")
+    assert len(fetched) == 2
+    assert [e["seq"] for e in fetched] == [0, 1]
+
+
+def test_push_recognizes_an_earlier_event_even_after_a_later_one_landed(
+    settings: LeaseSettings,
+):
+    """A push retried after a later, unrelated event already landed on top
+    of it (e.g. a retry racing another writer) must recognize its OWN
+    event is already present somewhere in the chain -- not just at the
+    tip -- and no-op rather than duplicating it."""
+    m = mirror(settings)
+    e = m.push(_entry(0, event="claimed"))
+    f = m.push(_entry(1, event="released"))
+    assert e is True and f is True
+    # A retry of the first push (as if a caller re-observed it as pending).
+    assert m.push(_entry(0, event="claimed")) is False
     fetched = m.fetch("pr", "o/r#1")
     assert [e["event"] for e in fetched] == ["claimed", "released"]
 
@@ -138,10 +175,7 @@ def test_fetch_is_empty_for_a_never_mirrored_ref(settings: LeaseSettings):
 
 def test_fetch_is_scoped_to_its_own_resource(settings: LeaseSettings):
     m = mirror(settings)
-    m.push({
-        "ts": "2026-10-03T12:00:00+00:00", "kind": "pr", "ref": "o/r#1",
-        "worktree_id": "wt-a", "machine": "m1", "event": "claimed",
-    })
+    m.push(_entry(0))
     assert mirror(settings).fetch("pr", "o/r#2") == []
 
 
@@ -150,12 +184,7 @@ def test_parse_entry_rejects_a_non_string_field():
     must be rejected at parse time -- never accepted and handed to a caller
     (``claims history --remote``'s own merge) that assumes every field is
     a plain string."""
-    bad = claim_history_mirror._serialize_entry({
-        "ts": "t", "kind": "pr", "ref": "r", "worktree_id": "w",
-        "machine": "m", "event": "claimed",
-    })
-    # Splice in a non-string optional field the normal serializer would
-    # never produce, simulating a malformed/foreign commit on the ref.
+    bad = claim_history_mirror._serialize_entry(_entry(0))
     import json as _json
     prefix, body = bad.split("\n", 1)
     payload = _json.loads(body)
@@ -163,6 +192,56 @@ def test_parse_entry_rejects_a_non_string_field():
     tampered = prefix + "\n" + _json.dumps(payload, sort_keys=True, separators=(",", ":"))
     with pytest.raises(ProtocolError):
         claim_history_mirror._parse_entry(tampered)
+
+
+def test_parse_entry_rejects_a_non_integer_seq():
+    bad = claim_history_mirror._serialize_entry(_entry(0))
+    import json as _json
+    prefix, body = bad.split("\n", 1)
+    payload = _json.loads(body)
+    payload["seq"] = "0"
+    tampered = prefix + "\n" + _json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    with pytest.raises(ProtocolError):
+        claim_history_mirror._parse_entry(tampered)
+
+
+# ── _grouped_events ───────────────────────────────────────────────────────
+
+def test_grouped_events_stamps_a_stable_position_based_seq():
+    claim_history.record_event(
+        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
+    )
+    claim_history.record_event(
+        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="released",
+    )
+    claim_history.record_event(
+        kind="pr", ref="o/r#2", worktree_id="wt-b", machine="m1", event="claimed",
+    )
+    grouped = claim_history_mirror._grouped_events()
+    assert [e["seq"] for e in grouped[("pr", "o/r#1")]] == [0, 1]
+    assert [e["seq"] for e in grouped[("pr", "o/r#2")]] == [0]
+
+
+# ── _event_eligible / durable project attribution ────────────────────────
+
+def test_event_eligible_prefers_a_durable_project_stamp_over_the_heuristic():
+    stamped = {"project": "proj-a", "worktree_id": "wt-gone"}
+    assert claim_history_mirror._event_eligible(
+        stamped, project_name="proj-a", owned_ids=set()
+    ) is True
+    assert claim_history_mirror._event_eligible(
+        stamped, project_name="proj-b", owned_ids={"wt-gone"}
+    ) is False  # the durable stamp disagrees with the live heuristic -- it wins
+
+
+def test_event_eligible_falls_back_to_the_heuristic_for_a_legacy_unstamped_event():
+    legacy = {"worktree_id": "wt-a"}
+    assert claim_history_mirror._event_eligible(
+        legacy, project_name="proj-a", owned_ids={"wt-a"}
+    ) is True
+    assert claim_history_mirror._event_eligible(
+        legacy, project_name="proj-a", owned_ids=set()
+    ) is False
 
 
 # ── sync_pending ──────────────────────────────────────────────────────────
@@ -224,66 +303,6 @@ def test_sync_pending_is_idempotent_and_resumable(settings: LeaseSettings, monke
     assert [e["event"] for e in fetched] == ["claimed", "released"]
 
 
-def test_sync_pending_recovers_from_a_checkpoint_write_failure(
-    settings: LeaseSettings, monkeypatch
-):
-    """A push that lands on the remote but whose checkpoint write then
-    fails (a crash, a full disk) must neither lose the pushed event nor
-    duplicate it on the next, successful sweep."""
-    monkeypatch.setattr(
-        claim_history_mirror, "mirror_settings", lambda origin=None: settings
-    )
-    claim_history.record_event(
-        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
-    )
-    real_save_state = claim_history_mirror._save_state
-    monkeypatch.setattr(
-        claim_history_mirror, "_save_state",
-        lambda _state: (_ for _ in ()).throw(OSError("disk full")),
-    )
-
-    first = claim_history_mirror.sync_pending()
-    assert first["pushed"] == 1
-    assert len(first["failed"]) == 1
-    # The push itself landed, even though its checkpoint never did.
-    assert [e["event"] for e in mirror(settings).fetch("pr", "o/r#1")] == ["claimed"]
-
-    monkeypatch.setattr(claim_history_mirror, "_save_state", real_save_state)
-    second = claim_history_mirror.sync_pending()
-    assert second["pushed"] == 1
-    assert second["failed"] == []
-    # Still exactly one commit on the remote -- the retry recognized the
-    # already-applied event rather than appending a duplicate.
-    assert [e["event"] for e in mirror(settings).fetch("pr", "o/r#1")] == ["claimed"]
-
-
-def test_sync_pending_scopes_the_cursor_by_destination_store(
-    settings: LeaseSettings, tmp_path: Path, monkeypatch
-):
-    """Syncing the same local history to a SECOND store must not be
-    short-circuited by the first store's own persisted cursor."""
-    other_remote = tmp_path / "store-b.git"
-    git("init", "--bare", str(other_remote))
-    other_settings = LeaseSettings(
-        origin=str(other_remote), ref_prefix=claim_history_mirror.DEFAULT_REF_PREFIX,
-        default_ttl_seconds=60, max_ttl_seconds=3600,
-    )
-    claim_history.record_event(
-        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
-    )
-
-    monkeypatch.setattr(claim_history_mirror, "mirror_settings", lambda origin=None: settings)
-    first = claim_history_mirror.sync_pending()
-    assert first["pushed"] == 1
-
-    monkeypatch.setattr(
-        claim_history_mirror, "mirror_settings", lambda origin=None: other_settings
-    )
-    second = claim_history_mirror.sync_pending()
-    assert second["pushed"] == 1
-    assert [e["event"] for e in mirror(other_settings).fetch("pr", "o/r#1")] == ["claimed"]
-
-
 def test_sync_pending_dry_run_reports_without_pushing(settings: LeaseSettings, monkeypatch):
     monkeypatch.setattr(
         claim_history_mirror, "mirror_settings", lambda origin=None: settings
@@ -294,6 +313,20 @@ def test_sync_pending_dry_run_reports_without_pushing(settings: LeaseSettings, m
     result = claim_history_mirror.sync_pending(dry_run=True)
     assert result["refs"] == [{"ref": "o/r#1", "kind": "pr", "pending": 1}]
     assert mirror(settings).fetch("pr", "o/r#1") == []
+
+
+def test_sync_pending_dry_run_reports_nothing_once_already_mirrored(
+    settings: LeaseSettings, monkeypatch
+):
+    monkeypatch.setattr(
+        claim_history_mirror, "mirror_settings", lambda origin=None: settings
+    )
+    claim_history.record_event(
+        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
+    )
+    claim_history_mirror.sync_pending()
+    result = claim_history_mirror.sync_pending(dry_run=True)
+    assert result["refs"] == []
 
 
 def test_sync_pending_ignores_an_unsupported_kind_never_recorded_locally(
@@ -319,7 +352,10 @@ def test_sync_pending_excludes_events_from_another_project(
     """The local claim-history ledger is machine-global (shared across
     every project's worktrees), but a sweep only ever runs against ONE
     project's configured store -- an event whose worktree this project's
-    own tracking records don't recognize must never ride along."""
+    own tracking records don't recognize must never ride along. Forces the
+    legacy tracking-record heuristic (no durable project stamp) so this
+    test exercises that fallback path specifically."""
+    monkeypatch.setattr(claim_history, "current_project_name", lambda: None)
     monkeypatch.setattr(
         claim_history_mirror, "_current_project_worktree_ids", lambda: {"wt-a"}
     )
@@ -339,28 +375,27 @@ def test_sync_pending_excludes_events_from_another_project(
     assert mirror(settings).fetch("pr", "o/r#2") == []
 
 
-def test_sync_pending_serializes_overlapping_sweeps(settings: LeaseSettings, monkeypatch):
-    """The whole load/push/checkpoint cycle is wrapped in the same
-    cross-process advisory lock as :mod:`claim_history`'s own append lock
-    -- two overlapping sweeps must never run concurrently."""
-    calls: list[Path] = []
-    real_lock = claim_history_mirror.handoff_trace._append_lock
-
-    def spy_lock(lock_path):
-        calls.append(lock_path)
-        return real_lock(lock_path)
-
-    monkeypatch.setattr(claim_history_mirror.handoff_trace, "_append_lock", spy_lock)
+def test_sync_pending_survives_a_reaped_tracking_record_via_the_durable_stamp(
+    settings: LeaseSettings, monkeypatch
+):
+    """A legacy, tracking-record-based eligibility check alone would
+    permanently drop an event the instant its worktree is reaped. A
+    durable ``project`` stamp recorded at write time must keep that event
+    eligible regardless."""
     monkeypatch.setattr(
         claim_history_mirror, "mirror_settings", lambda origin=None: settings
     )
+    # No worktree is "owned" by the live heuristic at all (simulating full
+    # reap), but the event itself carries a durable project stamp.
+    monkeypatch.setattr(claim_history_mirror, "_current_project_worktree_ids", set)
+    monkeypatch.setattr(claim_history, "current_project_name", lambda: "proj-a")
+
     claim_history.record_event(
-        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
+        kind="pr", ref="o/r#1", worktree_id="wt-reaped", machine="m1", event="claimed",
     )
-    claim_history_mirror.sync_pending()
-    # record_event() above takes its own (different) append lock too --
-    # only assert the mirror's own checkpoint lock was taken exactly once.
-    assert calls.count(claim_history_mirror._state_lock_path()) == 1
+    result = claim_history_mirror.sync_pending()
+    assert result["pushed"] == 1
+    assert mirror(settings).fetch("pr", "o/r#1")[0]["event"] == "claimed"
 
 
 # ── fetch_remote_history (the claims history --remote read path) ────────
