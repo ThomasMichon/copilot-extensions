@@ -477,30 +477,45 @@ def test_cli_json_mode(capsys):
 def test_merge_events_preserves_a_repeated_local_transition_at_second_granularity():
     """``record_event`` timestamps only to the second, so a claim released
     and re-claimed by the same worktree/session within one second produces
-    two "claimed" entries that share an identical (ts, event, worktree_id,
-    machine, session_id, note) key. A plain set-based dedup across the
-    merged list would drop the second one even with an EMPTY remote side
-    -- this must never happen; every local event is preserved as-is."""
+    two "claimed" entries that share identical DISPLAY fields but distinct
+    durable identities (different ``seq``). Every local event is kept
+    as-is regardless -- merge only ever adds from the remote side."""
     local = [
         {"ts": "2026-10-03T12:00:00+00:00", "event": "claimed", "worktree_id": "wt-a",
-         "machine": "m", "session_id": None, "note": None},
+         "machine": "m", "seq": 0, "ledger_id": "ledger-a"},
         {"ts": "2026-10-03T12:00:00+00:00", "event": "released", "worktree_id": "wt-a",
-         "machine": "m", "session_id": None, "note": None},
+         "machine": "m", "seq": 1, "ledger_id": "ledger-a"},
         {"ts": "2026-10-03T12:00:00+00:00", "event": "claimed", "worktree_id": "wt-a",
-         "machine": "m", "session_id": None, "note": None},
+         "machine": "m", "seq": 2, "ledger_id": "ledger-a"},
     ]
     merged = claims_history_cli._merge_events(local, remote=[])
     assert [e["event"] for e in merged] == ["claimed", "released", "claimed"]
 
 
-def test_merge_events_collapses_a_self_mirrored_copy_but_keeps_a_genuine_extra():
+def test_merge_events_collapses_only_an_identity_matched_remote_copy():
+    """Matching DISPLAY fields never proves a remote event is the local
+    event's own mirror -- only a matching ``(ledger_id, seq)`` identity
+    does. An identical-looking copy from a genuinely different ledger
+    incarnation must surface as a distinct event, not collapse."""
     local = [
         {"ts": "2026-10-03T12:00:00+00:00", "event": "claimed", "worktree_id": "wt-a",
-         "machine": "m", "session_id": None, "note": None},
+         "machine": "m", "seq": 0, "ledger_id": "ledger-a"},
     ]
-    # One remote copy matches local's own mirrored event (collapses); a
-    # second, identical-keyed remote copy represents a genuinely distinct
-    # write (e.g. a different machine) and must still surface.
-    remote = [dict(local[0]), dict(local[0])]
+    self_mirror = dict(local[0])  # same identity -- collapses
+    other_ledger = {**local[0], "ledger_id": "ledger-b"}  # different incarnation -- distinct
+    merged = claims_history_cli._merge_events(local, [self_mirror, other_ledger])
+    assert len(merged) == 2
+
+
+def test_merge_events_keeps_every_remote_event_when_local_has_no_ledger_id():
+    """A local ledger that has never been mirrored (no sidecar yet) can't
+    durably vouch for ANY remote event as its own -- every remote event
+    must surface rather than being guessed away by display-field luck."""
+    local = [
+        {"ts": "2026-10-03T12:00:00+00:00", "event": "claimed", "worktree_id": "wt-a",
+         "machine": "m", "seq": 0, "ledger_id": None},
+    ]
+    remote = [dict(local[0], ledger_id="ledger-b")]
     merged = claims_history_cli._merge_events(local, remote)
     assert len(merged) == 2
+

@@ -10,45 +10,35 @@ See :mod:`claim_history`'s own module docstring for the full scope note
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 
 from . import claim_history, output
 
 
-def _event_key(e: dict) -> tuple:
-    return (
-        e.get("ts"), e.get("event"), e.get("worktree_id"),
-        e.get("machine"), e.get("session_id"), e.get("note"),
-    )
+def _event_identity(e: dict) -> tuple:
+    return (e.get("ledger_id"), e.get("seq"))
 
 
 def _merge_events(local: list[dict], remote: list[dict]) -> list[dict]:
-    """Merge local + mirrored events for one ref into a single ordered list,
-    counting (not set-deduplicating) by the full (ts, event, worktree_id,
-    machine, session_id, note) tuple. ``record_event`` timestamps only to
-    the second, so two genuinely distinct transitions by the same
-    worktree/session within one second can share an identical key -- a
-    plain set-based dedup across the combined list would silently drop one
-    of those REAL local events whenever its mirrored copy also happened to
-    be present, not just the redundant mirrored copy of an event local
-    already has. Instead: keep every local event as-is (never deduplicated
-    against itself), and walk ``remote`` in ITS OWN original order,
-    consuming one "already accounted for by local" credit per matching key
-    before appending a genuinely extra remote-only copy -- grouping
-    same-key remote events together (as an earlier revision did) would
-    silently reorder a real same-second remote sequence (e.g. a
-    ``claimed, released, claimed`` trio becoming ``claimed, claimed,
-    released``) even with no local history to merge against at all. The
-    final sort by ``ts`` is stable, so ties preserve local-before-extras
-    and each extra's own relative order among themselves.
+    """Merge local + mirrored events for one ref into a single ordered
+    list, deduplicated ONLY by each event's own durable ``(ledger_id,
+    seq)`` identity -- never by matching display fields (``ts``,
+    ``event``, ``worktree_id``, ...). Two genuinely distinct events (a
+    claim released and re-claimed within the same second, or one event
+    from a different ledger incarnation entirely) can share identical
+    display fields; treating that as a match would silently drop a real
+    event. ``local`` is expected pre-stamped with its own identity (see
+    :func:`claim_history_mirror.local_identities_for_ref`) -- a local
+    event with no ``ledger_id`` (this machine has never mirrored anything)
+    can never be confirmed as any remote event's own mirror, so every
+    remote event is kept rather than guessed away. Preserves ``remote``'s
+    own original relative order among any events it keeps (a stable sort
+    by ``ts`` only re-orders across the two sources, by genuine time, not
+    within either one).
     """
-    local_counts = Counter(_event_key(e) for e in local)
+    local_ids = {_event_identity(e) for e in local if e.get("ledger_id") is not None}
     merged = list(local)
-    remaining = Counter(local_counts)
     for e in remote:
-        key = _event_key(e)
-        if remaining[key] > 0:
-            remaining[key] -= 1
+        if _event_identity(e) in local_ids:
             continue
         merged.append(e)
     merged.sort(key=lambda e: str(e.get("ts", "")))
@@ -75,12 +65,13 @@ def cmd_claims_history(
         output.err(msg)
         return 2
 
-    events = claim_history.history_for_ref(ref)
-    remote_events: list[dict] = []
     if getattr(args, "remote", False):
         from . import claim_history_mirror
+        events = claim_history_mirror.local_identities_for_ref("pr", ref)
         remote_events = claim_history_mirror.fetch_remote_history(ref)
         events = _merge_events(events, remote_events)
+    else:
+        events = claim_history.history_for_ref(ref)
 
     if args.json:
         json_output({"ref": ref, "events": events})
