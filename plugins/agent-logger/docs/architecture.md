@@ -61,8 +61,13 @@ when present, sibling `provenance/` sidecars and, when unfiltered, the
 session-store index files; it never copies installed plugins, credentials,
 settings, or other `~/.copilot` state. Sync scoping can use a repo allowlist,
 denylist, fail-closed behavior for unclassified sessions, and harness-repo
-origin sidecars for downstream routing. Targets implement a small `Target`
-interface
+origin sidecars for downstream routing. **Session `files/` can also
+accumulate generated tool artifacts (venvs, git clones, `node_modules`,
+Chromium profiles) that should never be archived — `sync.detritus` detects
+and excludes these by on-disk signature; see
+[`archival-content-policy.md`](archival-content-policy.md) for the full
+policy, including the categories detritus detection does *not* yet cover.**
+Targets implement a small `Target` interface
 (`push` / `prune` / `doctor` / `describe`):
 
 | Target | Destination |
