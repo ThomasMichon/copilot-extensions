@@ -49,6 +49,40 @@ def test_load_missing_raises(tmp_path: Path):
         cfg.load_machines_yaml(tmp_path)
 
 
+def test_load_merges_canonical_and_legacy_disjoint_keys(tmp_path: Path):
+    """Regression (ThomasMichon/copilot-extensions#7914): adding the in-repo
+    canonical file for container-fleet entries must never make every real
+    facility machine in the legacy root file disappear -- the canonical
+    file's own header documents this as strictly additive. Before the fix,
+    ``load_machines_yaml`` read only whichever file ``machines_yaml_path``
+    happened to resolve first, so the legacy roster vanished the instant a
+    canonical file existed."""
+    _write(
+        tmp_path / ".agent-worktrees" / "machines.yaml",
+        "machines:\n  container-fleet:\n    display_name: Container Fleet\n",
+    )
+    _write(
+        tmp_path / "machines.yaml",
+        "machines:\n  lambda-core:\n    display_name: Lambda-Core\n"
+        "  borealis:\n    display_name: Borealis\n",
+    )
+    entries = cfg.load_machines_yaml(tmp_path)
+    assert set(entries) == {"container-fleet", "lambda-core", "borealis"}
+
+
+def test_load_canonical_wins_on_key_collision(tmp_path: Path):
+    _write(
+        tmp_path / ".agent-worktrees" / "machines.yaml",
+        "machines:\n  m1:\n    display_name: Canonical\n",
+    )
+    _write(
+        tmp_path / "machines.yaml",
+        "machines:\n  m1:\n    display_name: Legacy\n",
+    )
+    entries = cfg.load_machines_yaml(tmp_path)
+    assert entries["m1"].display_name == "Canonical"
+
+
 def test_load_normalizes_machine_metadata(tmp_path: Path):
     _write(
         tmp_path / "machines.yaml",
