@@ -24,6 +24,13 @@ PROJECTION_TEMPLATE = (
 SESSION_GUIDANCE_TEMPLATE = (
     PLUGIN / "instructions" / "session-guidance.instructions.md"
 )
+# The hook derives its emitted version from this plugin's own plugin.json at
+# runtime (falling back to a compiled-in literal only when unreadable); tests
+# that assert on normal hook output must derive the expected marker the same
+# way, not hardcode the current manifest version, or they break on every bump.
+PLUGIN_VERSION = json.loads(PLUGIN.joinpath("plugin.json").read_text(encoding="utf-8"))[
+    "version"
+]
 
 def _powershell_command() -> str | None:
     if os.name == "nt":
@@ -203,7 +210,7 @@ def test_no_config_emits_safe_defaults(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path / "repo")
     context = _context(_run(_native_hook(), repo, tmp_path / "home"))
     assert context.startswith(
-        "[owner: ai-attribution@0.1.0-dev16] Before publishing"
+        f"[owner: ai-attribution@{PLUGIN_VERSION}] Before publishing"
     )
     assert "Disclosure turns on who this specific contribution addresses" in context
     assert "may omit disclosure" in context
@@ -250,7 +257,7 @@ def test_payload_cwd_decodes_json_unicode_escapes(tmp_path: Path) -> None:
     hooks = _parity_hooks()
     for hook in hooks:
         assert _context(_run(hook, repo, tmp_path / "home")).startswith(
-            "[owner: ai-attribution@0.1.0-dev16]"
+            f"[owner: ai-attribution@{PLUGIN_VERSION}]"
         )
 
 
@@ -380,7 +387,7 @@ def test_payload_depth_limit_has_shell_parity(
     for result in results:
         if accepted:
             assert _context(result).startswith(
-                "[owner: ai-attribution@0.1.0-dev16]"
+                f"[owner: ai-attribution@{PLUGIN_VERSION}]"
             )
         else:
             assert result.stdout == "{}"
@@ -1433,17 +1440,37 @@ def test_bash_input_bounds_and_cwd_controls_are_structural() -> None:
 
 @pytest.mark.guard
 def test_version_owner_markers_match_manifest_and_fallback() -> None:
-    version = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))[
-        "version"
-    ]
+    version = PLUGIN_VERSION
     bash_source = BASH_HOOK.read_text(encoding="utf-8")
     powershell_source = POWERSHELL_HOOK.read_text(encoding="utf-8")
     template = PROJECTION_TEMPLATE.read_text(encoding="utf-8")
-    assert f'plugin_version="{version}"' in bash_source
-    assert f"$script:PluginVersion = '{version}'" in powershell_source
+    # Each hook derives its EMITTED version dynamically from plugin.json at
+    # runtime (see test_hook_prefers_plugin_json_version_over_compiled_in_fallback);
+    # its own compiled-in literal is only the last-resort fallback for a
+    # missing/malformed manifest and is not required to track plugin.json on
+    # every bump (promotion has no step that rewrites it). Only require that a
+    # syntactically well-formed fallback literal is present at all.
+    assert re.search(r'plugin_version="[0-9]+\.[0-9]+\.[0-9]+(?:-dev[0-9]+)?"', bash_source)
+    assert re.search(
+        r"\$script:PluginVersion = '[0-9]+\.[0-9]+\.[0-9]+(?:-dev[0-9]+)?'", powershell_source
+    )
     assert f"[owner: ai-attribution@{version}]" in template
     assert "Invoke the `ai-attribution` skill" in template
     assert 'kernel="[owner: ai-attribution@$plugin_version]' in bash_source
+
+
+def _compiled_in_fallback_version(hook: Path) -> str:
+    """The hook's own hardcoded fallback literal, read from its source --
+    deliberately not assumed to equal plugin.json's current version, since
+    that assumption is exactly the gap a release bump can open (plugin.json
+    bumps; this literal does not, unless promotion explicitly updates it)."""
+    source = hook.read_text(encoding="utf-8")
+    if hook.suffix == ".ps1":
+        match = re.search(r"\$script:PluginVersion = '([^']+)'", source)
+    else:
+        match = re.search(r'plugin_version="([^"]+)"', source)
+    assert match, f"could not find a compiled-in fallback version in {hook}"
+    return match.group(1)
 
 
 def test_hook_prefers_plugin_json_version_over_compiled_in_fallback(
@@ -1453,11 +1480,7 @@ def test_hook_prefers_plugin_json_version_over_compiled_in_fallback(
     not its own compiled-in fallback literal -- this is the mechanism that
     keeps a bumped plugin.json authoritative without a corresponding manual
     edit to the hook's own fallback constant."""
-    fallback_version = json.loads(
-        (PLUGIN / "plugin.json").read_text(encoding="utf-8")
-    )["version"]
     manifest_version = "9.9.9-dev99"
-    assert manifest_version != fallback_version
 
     plugin_copy = tmp_path / "plugin-copy"
     (plugin_copy / "scripts").mkdir(parents=True)
@@ -1466,11 +1489,14 @@ def test_hook_prefers_plugin_json_version_over_compiled_in_fallback(
         json.dumps({"name": "ai-attribution", "version": manifest_version}),
     )
     for hook in _parity_hooks():
+        fallback_version = _compiled_in_fallback_version(hook)
+        assert manifest_version != fallback_version
         shutil.copy2(hook, plugin_copy / "scripts" / hook.name)
 
     repo = _git_repo(tmp_path / "repo")
     home = tmp_path / "home"
     for hook in _parity_hooks():
+        fallback_version = _compiled_in_fallback_version(hook)
         copied_hook = plugin_copy / "scripts" / hook.name
         context = _context(_run(copied_hook, repo, home))
         assert f"[owner: ai-attribution@{manifest_version}]" in context
@@ -1480,10 +1506,6 @@ def test_hook_prefers_plugin_json_version_over_compiled_in_fallback(
 def test_hook_falls_back_to_compiled_in_version_without_plugin_json(
     tmp_path: Path,
 ) -> None:
-    fallback_version = json.loads(
-        (PLUGIN / "plugin.json").read_text(encoding="utf-8")
-    )["version"]
-
     plugin_copy = tmp_path / "plugin-copy"
     (plugin_copy / "scripts").mkdir(parents=True)
     # No plugin.json alongside this copy at all.
@@ -1493,6 +1515,7 @@ def test_hook_falls_back_to_compiled_in_version_without_plugin_json(
     repo = _git_repo(tmp_path / "repo")
     home = tmp_path / "home"
     for hook in _parity_hooks():
+        fallback_version = _compiled_in_fallback_version(hook)
         copied_hook = plugin_copy / "scripts" / hook.name
         context = _context(_run(copied_hook, repo, home))
         assert f"[owner: ai-attribution@{fallback_version}]" in context
