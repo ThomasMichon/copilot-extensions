@@ -250,7 +250,28 @@ fits the target repo's configured flow — they are not interchangeable:
 - **Self-merge repos** (`merge_actor: submitter-direct` / `pr-self-merge`):
   wait briefly for CI and any non-blocking automated review, check real
   status rather than assuming, rebase if the head goes stale, then merge
-  once the repo's own gates allow it.
+  once the repo's own gates allow it. **`pr-status`/`pr-watch`'s raw
+  `eligible: false` / `reason: "not yet approved"` pair is not necessarily
+  a live blocker on this profile** — it often reflects only a
+  human-approval/codeowner gate that is a documented, separate concern from
+  Copilot's own (non-blocking) review verdict, and the acting identity may
+  hold a live bypass right on that gate the raw fields don't represent
+  (`self_merge_note`, when present in the same JSON, surfaces exactly this
+  — read it before treating `eligible`/`reason` as authoritative). **Before
+  trusting either field at face value, check the target repo's own
+  CONTRIBUTING-equivalent doc for its documented verdict-shape and merge
+  rules** — many self-merge repos (e.g. a repo whose Copilot review
+  structurally never renders `Approve` on the owner's own PRs) define a
+  different passing condition than "wait for Approve," and a generic
+  `pr-watch`/`pr-status` field can misreport (see
+  `ThomasMichon/copilot-extensions#3638`, filed after exactly this
+  confusion drove a 12-round review-fix loop before an agent noticed the
+  target repo's own docs already said not to wait. A later, separate
+  25-round loop on a different PR was actually caused by carried-over
+  review findings not clearing after being fixed — see #5183 — but this
+  same verdict/bypass confusion is what then stalled *merging* that PR for
+  roughly 90 minutes once the findings themselves were resolved; keep the
+  two causes distinct when reasoning about either).
 - **Human-review repos**: poll for review state and comments (the
   end-to-end loop below); address feedback in the same worktree and
   re-request review; repeat until approved and merged.

@@ -1374,9 +1374,13 @@ def pr_reminder(
         # #225: pr-watch also wakes on CI/approval regressions, so name them as
         # states the caller may next be alerted to.
         wait.extend(("checks_failed", "approval_dismissed"))
+        # A caller-supplied ``reason`` (e.g. a live self-merge-bypass note --
+        # see the generic branch below and ThomasMichon/copilot-extensions#3638)
+        # overrides the generic headline the same way it does there, so a
+        # ``pr-watch``-built reminder doesn't silently drop it either.
         return PRReminder(
             flow.profile, verb, state, ok,
-            headline="watching the PR",
+            headline=reason or "watching the PR",
             next_step=merge,
             waiting_on=tuple(w for w in wait if w),
             use_instead=(),
