@@ -669,18 +669,8 @@ def _overlay_machines_yaml_path(repo_dir: str | Path) -> Path | None:
     return None
 
 
-def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
-    """Load the machine registry from ``machines.yaml``.
-
-    Reads the canonical ``<repo>/.agent-worktrees/machines.yaml`` (falling back to
-    the legacy repo-root ``<repo>/machines.yaml`` -- see :func:`machines_yaml_path`).
-    Returns a dict mapping machine key → MachineEntry.
-    Raises FileNotFoundError if machines.yaml is missing.
-    """
-    path = machines_yaml_path(repo_dir)
-    if not path.exists():
-        raise FileNotFoundError(f"Machine registry not found at {path}")
-
+def _parse_machines_yaml_file(path: Path) -> dict[str, MachineEntry]:
+    """Parse one ``machines.yaml`` file's ``machines:`` block into entries."""
     with open(path, encoding="utf-8") as f:
         raw: dict[str, Any] = yaml.safe_load(f)
 
@@ -739,6 +729,29 @@ def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
             ssh_ready=bool(ssh_block.get("ready", False)),
             copilot=bool(data.get("copilot", True)),
         )
+    return entries
+
+
+def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
+    """Additively merge the canonical in-repo + legacy root ``machines.yaml``
+    (returning only whichever was found first -- the prior bug, #7914 --
+    silently dropped every machine in the other file facility-wide). The
+    canonical entry wins a key collision; the two files carry disjoint keys
+    in practice.
+    """
+    canonical = Path(repo_dir) / INREPO_CONFIG_DIRNAME / "machines.yaml"
+    legacy = Path(repo_dir) / "machines.yaml"
+    have_canonical, have_legacy = canonical.is_file(), legacy.is_file()
+    if not have_canonical and not have_legacy:
+        path = machines_yaml_path(repo_dir)  # overlay fallback, or the error path
+        if not path.exists():
+            raise FileNotFoundError(f"Machine registry not found at {path}")
+        return _parse_machines_yaml_file(path)
+    entries: dict[str, MachineEntry] = {}
+    if have_legacy:
+        entries.update(_parse_machines_yaml_file(legacy))
+    if have_canonical:
+        entries.update(_parse_machines_yaml_file(canonical))
     return entries
 
 

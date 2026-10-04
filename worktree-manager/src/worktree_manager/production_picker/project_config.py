@@ -174,11 +174,8 @@ def _load_repo_yaml(project: str) -> dict:
     return {}
 
 
-@lru_cache(maxsize=None)
-def _load_machines_yaml(repo_dir: str) -> dict[str, MachineEntry]:
-    path = machines_yaml_path(repo_dir)
-    if not path.is_file():
-        raise FileNotFoundError(f"Machine registry not found at {path}")
+def _parse_machines_yaml_file(path: Path) -> dict[str, MachineEntry]:
+    """Parse one ``machines.yaml`` file's ``machines:`` block into entries."""
     raw = _read_yaml(path)
     machines = raw.get("machines")
     if not isinstance(machines, dict):
@@ -214,6 +211,40 @@ def _load_machines_yaml(repo_dir: str) -> dict[str, MachineEntry]:
             copilot=bool(value.get("copilot", True)),
         )
         entries[entry.key] = entry
+    return entries
+
+
+@lru_cache(maxsize=None)
+def _load_machines_yaml(repo_dir: str) -> dict[str, MachineEntry]:
+    """Additive merge of the canonical in-repo ``.agent-worktrees/
+    machines.yaml`` (agent-containers fleet registrations, etc.) with the
+    legacy repo-root ``machines.yaml`` (the real SSH-mesh roster) when both
+    exist -- the canonical file's own header documents this as strictly
+    additive ("never shadows or duplicates an entry already in the root
+    file"), so returning only whichever file ``machines_yaml_path`` happened
+    to resolve first (the prior behavior) silently dropped every real
+    facility machine the moment a canonical file existed (confirmed
+    regression from ThomasMichon/copilot-extensions#7914 -- a Windows
+    Worktree Manager Picker only showed its own local tab, no remote
+    machines, the instant the in-repo file was added). On a key collision
+    the canonical in-repo entry wins; collisions aren't expected since the
+    two files are meant to carry disjoint keys.
+    """
+    root = Path(repo_dir)
+    canonical = root / ".agent-worktrees" / "machines.yaml"
+    legacy = root / "machines.yaml"
+    canonical_exists = canonical.is_file()
+    legacy_exists = legacy.is_file()
+    if not canonical_exists and not legacy_exists:
+        path = machines_yaml_path(repo_dir)  # overlay fallback, or the error path
+        if not path.is_file():
+            raise FileNotFoundError(f"Machine registry not found at {path}")
+        return _parse_machines_yaml_file(path)
+    entries: dict[str, MachineEntry] = {}
+    if legacy_exists:
+        entries.update(_parse_machines_yaml_file(legacy))
+    if canonical_exists:
+        entries.update(_parse_machines_yaml_file(canonical))
     return entries
 
 
