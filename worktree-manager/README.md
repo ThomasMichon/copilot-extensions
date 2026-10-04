@@ -111,9 +111,14 @@ disk while `current-version` still correctly named it — every subsequent run
 then failed with `No module named worktree_manager`, indefinitely, since
 presence-only (`is_dir()`) checking treated that broken slot as valid forever.
 
-If you hit `No module named worktree_manager` (or any failure implying the
-slot is missing code it should have), re-run the bootstrap one-liner above, or
-`worktree-manager self-install --apply` directly — it is version-gated and
+If you hit `No module named worktree_manager`, the `worktree-manager` binstub
+itself is unusable (it runs `python -m worktree_manager` straight out of the
+broken slot, so it fails identically) — **re-run the bootstrap one-liner
+above**, which fetches a fresh payload and runs its own `self-install --apply`
+from that valid copy, independent of the broken slot. Once a working install
+is restored, `worktree-manager self-install --apply` is the right command for
+any *other* incomplete-slot symptom (e.g. a stale provider-manifest or
+binstub) where the binstub itself still runs — it is version-gated and
 idempotent, and will detect and rebuild an incomplete slot rather than
 skipping it as "already current."
 
