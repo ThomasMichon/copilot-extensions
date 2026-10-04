@@ -414,6 +414,19 @@ async def _gc_loop(
     governance_backoff: Callable[..., Any] = _governance_backoff,
 ) -> None:
     """Periodically garbage-collect tasks by **liveness**."""
+    # The reviewer-deadline reconcile below is a second, independent unit of
+    # work piggybacked onto this same loop iteration. It must NOT share
+    # ``health`` (the publicly reported ``liveness_gc`` entry): reusing one
+    # LoopHealth for two sequential supervised cycles means `in_progress`
+    # flips back to True for the second cycle the instant the first cycle's
+    # `total_runs` increments, so a caller observing `total_runs >= 1` can
+    # still race a true `in_progress` read moments later within the same
+    # iteration. Give it a private, unexposed health object instead so the
+    # public `liveness_gc` health reflects only the `reconcile_liveness`
+    # pass it is named for.
+    reviewer_deadline_health = LoopHealth(
+        name="liveness_gc.reviewer_deadline", base_interval=health.base_interval
+    )
     while True:
         await asyncio.sleep(health.current_interval)
         if await governance_backoff(
@@ -464,7 +477,7 @@ async def _gc_loop(
             log.info("cooldown reconcile auto-resumed %d suspended task(s)", resumed)
             bus.publish({"type": "task.reconciled", "cooldown_resumed": resumed})
         reviewer_resumed = await run_supervised_cycle(
-            health,
+            reviewer_deadline_health,
             queue.reconcile_reviewer_deadlines,
             cycle_timeout=cycle_timeout or min(interval, 120.0),
         )
