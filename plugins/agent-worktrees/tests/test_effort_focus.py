@@ -202,11 +202,11 @@ def test_participant_cell_with_multiple_backtick_tokens_matches_plain_text(tmp_p
     repo = tmp_path / "repo"
     repo.mkdir()
     relative = _effort(
-        repo, participant="`odsp-web-harness` worktree `tmichon-cloud1-win-20260923-180506-56f7`"
+        repo, participant="`some-repo` worktree `host-win-20260101-000000-aaaa`"
     )
     valid = ef.make_active_effort(
         relative,
-        "odsp-web-harness worktree tmichon-cloud1-win-20260923-180506-56f7",
+        "some-repo worktree host-win-20260101-000000-aaaa",
         "Phase 2 - Bind active effort",
     )
     assert ef.validate_binding(repo, valid).active
