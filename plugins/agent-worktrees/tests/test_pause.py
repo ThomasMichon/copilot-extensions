@@ -65,8 +65,8 @@ class TestPauseWorktree:
 
     def test_auto_settles_a_provably_merged_pr_claim(self, pr_repo, monkeypatch):
         """A `pr`-kind claim whose PR is provably merged is exactly the shape
-        ``sweep.self_heal`` (the obligation gate's own self-heal path) already
-        reclaims -- ``pause`` must surface it as settled, not leave it open."""
+        the never-wedge reclaim sweep already handles -- ``pause`` must
+        surface it as settled, not leave it open."""
         config, wid, _wt_path, _remote = pr_repo
         from agent_worktrees import config as cfg_mod
         from agent_worktrees import sweep
@@ -119,6 +119,58 @@ class TestPauseWorktree:
 
         events = claim_history.history_for_ref("o/r#43")
         assert any(e.get("event") == "released" for e in events)
+
+    def test_toctou_race_never_applies_a_stale_verdict_to_a_new_incarnation(
+        self, pr_repo, monkeypatch,
+    ):
+        """Between the unlocked preview read and the later record lock,
+        another process could release and re-add the SAME ref as a
+        genuinely different claim incarnation (a claim write bumps
+        `created_at`, and may change `kind`). A verdict cached by `ref`
+        alone must never apply to that new incarnation -- it must be
+        treated as unknown (left open), not silently released/abandoned."""
+        config, wid, _wt_path, _remote = pr_repo
+        from agent_worktrees import config as cfg_mod
+        from agent_worktrees import sweep
+
+        tracking_dir = Path(cfg_mod.tracking_dir())
+        yaml_path = tracking_dir / f"{wid}.yaml"
+        _add_claim(
+            tracking_dir, wid,
+            ResourceClaim(kind="pr", ref="o/r#99", state="active"),
+        )
+
+        monkeypatch.setattr(sweep, "claim_gone", lambda claim, config: True)
+        monkeypatch.setattr(sweep, "claim_safe", lambda claim, config: True)
+
+        real_make_resolvers = sweep.make_resolvers
+
+        def _make_resolvers_then_race(race_config):
+            # pause_worktree calls make_resolvers exactly once, right after
+            # its own preview read and right before computing verdicts --
+            # hooking here (rather than counting raw load_record calls,
+            # which also fire inside sync_forward's path resolution and
+            # save_record's own reservation-preserving reload) races the
+            # mutation in at exactly the point this test needs: after the
+            # preview snapshot is taken, before the later lock+reload.
+            gone_of, safe_of = real_make_resolvers(race_config)
+            rec = tracking.load_record(yaml_path)
+            for c in rec.resources:
+                if c.ref == "o/r#99":
+                    c.created_at = "2099-01-01T00:00:00"
+            tracking.save_record(rec, yaml_path)
+            return gone_of, safe_of
+
+        monkeypatch.setattr(sweep, "make_resolvers", _make_resolvers_then_race)
+
+        result = pause_mod.pause_worktree(wid, config)
+
+        assert result.settled == []
+        assert any(c["ref"] == "o/r#99" for c in result.remaining)
+
+        rec = tracking.load_record(yaml_path)
+        claim = next(c for c in rec.resources if c.ref == "o/r#99")
+        assert claim.state == "active"
 
     def test_reports_a_genuinely_open_claim_without_erroring(self, pr_repo, monkeypatch):
         """The whole point: an unsettled, NOT provably-safe claim is reported,

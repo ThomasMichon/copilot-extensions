@@ -30,8 +30,14 @@ resume in this exact worktree) is still genuinely open -- leave it."
    record lock is taken (mirroring ``claims_cli._claims_sweep``'s own
    verdicts-first pattern) -- a probe can take tens of seconds, and this
    record's lock must never block an unrelated claim writer for that long.
-   A settled claim is recorded into the durable claim-history ledger the
-   same way the fleet-wide sweep does, so ``claims history <ref>`` reflects
+   Each cached verdict is fenced against the claim's ``created_at``: if
+   another process releases and re-adds the same ``ref`` as a genuinely
+   different incarnation between the preview and the lock, the stale
+   verdict is treated as unknown (never applied) rather than flipping the
+   wrong claim. A settled claim is recorded into the durable claim-history
+   ledger (tagged with the owning record's own project, never the
+   ambient one) the same way the fleet-wide sweep does, so ``claims
+   history <ref>`` reflects
    it immediately.
 3. Report every claim that remains genuinely open -- and stop there.
    Unlike ``finalize``, this is never an error: ``pause`` never requires
@@ -112,9 +118,17 @@ def pause_worktree(
     # this record's lock must never block an unrelated claim writer for
     # that long (mirrors claims_cli._claims_sweep's own verdicts-first
     # pattern, which this module reuses rather than duplicates).
+    #
+    # Cache each claim's `created_at` alongside its verdict and re-check it
+    # against the reloaded claim inside the lock: between this unlocked
+    # preview and the lock, another process could release and re-add the
+    # same `ref` as a genuinely different incarnation (claim writes bump
+    # `created_at`, and may change `kind`). A verdict keyed by `ref` alone
+    # would then apply a stale gone/safe judgement to the wrong claim --
+    # treat a changed incarnation as unknown (never flips) instead.
     preview = tracking.load_record(yaml_path)
     gone_of, safe_of = sweep.make_resolvers(config)
-    verdicts: dict[str, tuple[bool | None, bool | None]] = {}
+    verdicts: dict[str, tuple[bool | None, bool | None, str]] = {}
     for claim in preview.resources:
         if not claim.is_unsettled or tracking.claim_handoff_reservation(preview, claim):
             continue
@@ -126,13 +140,21 @@ def pause_worktree(
             safe = safe_of(claim)
         except Exception:
             safe = None
-        verdicts[claim.ref] = (gone, safe)
+        verdicts[claim.ref] = (gone, safe, claim.created_at)
+
+    def _same_incarnation(claim: tracking.ResourceClaim) -> bool:
+        cached = verdicts.get(claim.ref)
+        return cached is not None and cached[2] == claim.created_at
 
     def _gone(claim: tracking.ResourceClaim) -> bool | None:
-        return verdicts.get(claim.ref, (None, None))[0]
+        if not _same_incarnation(claim):
+            return None
+        return verdicts[claim.ref][0]
 
     def _safe(claim: tracking.ResourceClaim) -> bool | None:
-        return verdicts.get(claim.ref, (None, None))[1]
+        if not _same_incarnation(claim):
+            return None
+        return verdicts[claim.ref][1]
 
     with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
@@ -150,6 +172,7 @@ def pause_worktree(
                     kind=c.kind, ref=c.ref, worktree_id=record.worktree_id,
                     machine=record.machine, event="released",
                     note="merged" if c.state == ob.RELEASED else "abandoned",
+                    project=record.repo,  # THIS record's own project, never ambient
                 )
         settled = [{"kind": c.kind, "ref": c.ref, "state": c.state} for c in flipped]
         remaining = _describe_unsettled(record)
