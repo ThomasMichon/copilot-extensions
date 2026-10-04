@@ -61,188 +61,20 @@ base branch.
 >    later — that one is routine cleanup, not something you need to review or
 >    act on, but don't be surprised to see it land right after yours.
 >
-> See "The wait, and how to preview past it" below for the full mechanics and
-> how to preview a pending release without waiting for a real promotion.
+> See [docs/pipelines.md § Promotion: dev → main](docs/pipelines.md#promotion-dev--main)
+> for the full mechanics and how to preview a pending release without
+> waiting for a real promotion.
 
-**Every change lands through a pull request — direct pushes to `dev` are
-blocked, and `main` accepts pushes only from the promotion pipeline (or
-explicit admin escalation).** This is enforced on four layers that agree:
-
-1. **Tooling** — `.agent-worktrees/config.yaml` sets `pr.required: true`, so
-   `agent-worktrees push-changes` refuses direct-to-`dev` and the PR-workflow
-   git-hooks block committing to `dev` / pushing a worktree branch directly.
-2. **Branch policy** — a GitHub repository ruleset ("dev branch policy:
-   PR-required") carries a `pull_request` rule (+ `non_fast_forward`) that
-   blocks direct pushes to `dev` server-side, for everyone (no bypass). A
-   separate branch-protection rule on `main` restricts pushes to the
-   promotion pipeline's own identity, with repo-admin escalation retained for
-   genuine emergencies (see Release & Versioning below).
-3. **Review** — `.github/workflows/copilot-review-gate.yml` requests a
-   Copilot review automatically, but **only** for a PR authored by a
-   **Maintainer** (the CODEOWNERS root roster, owner included) — not merely
-   any invited collaborator. A Contributor's PR gets no automatic request
-   (a Maintainer can still request one manually via the "Reviewers"
-   sidebar), and an uninvited outsider's PR gets no automatic review at all.
-   This scoping exists because GitHub's `requestReviewers` call for
-   `copilot-pull-request-reviewer[bot]` silently no-ops — no exception, no
-   timeline event — when made by the default `GITHUB_TOKEN`
-   (`github-actions[bot]`) for a PR whose author isn't this repo's owner (a
-   personal, non-org account has no equivalent of the org-only "members
-   without a Copilot license" carve-out). `MAINTAINER_REVIEW_PAT`, a
-   fine-grained PAT for the owner scoped to only this repo (`Pull requests:
-   write` + `Metadata: read`), makes the request instead, as a licensed
-   account rather than the bot — used only for Maintainer-authored PRs,
-   since Maintainers already hold ruleset self-merge bypass (this extends
-   no new trust), and a Contributor's PR still needs a Maintainer's own
-   approving review regardless of Copilot's verdict. (The ruleset-native
-   `copilot_code_review` auto-review rule has no such condition — it would
-   fire for literally anyone — so this repo has removed that rule; see
-   "Everyone else" below for why that matters.) Like
-   `workflow-lockdown-guard.yml` above, this workflow runs on
-   `pull_request_target`, so it can't fire until its own file has reached
-   `main` via a promotion — request a review manually for any PR opened
-   before that first promotion completes.
-   Whether a review (Copilot's or anyone else's) must formally *approve* the
-   PR before merge is governed by a second ruleset ("dev branch policy:
-   review required (maintainer bypass)") plus `.github/CODEOWNERS`
-   (root-scoped to the full **Maintainer** group — currently `@ThomasMichon
-   @JakeSchieber @anarmawala @namankanakiya`; CODEOWNERS review satisfaction
-   is OR across listed owners, so any *one* Maintainer's approval counts, not
-   all of them):
-   - A PR authored by anyone **other than** a Maintainer requires **some**
-     Maintainer's own approving review before it can merge — Copilot's review
-     alone is never sufficient for a Contributor's PR, however clean it comes
-     back, so a change never lands without a Maintainer being aware of it.
-     This holds even though the repo's **"Allow Copilot to approve pull
-     requests"** setting (Settings → Copilot → Code review → Auto-approval)
-     is enabled, letting Copilot submit a genuine `Approve` review that
-     counts toward `required_approving_review_count`: that count and
-     `require_code_owner_review` are independent, both-must-pass gates, and
-     Copilot is deliberately **not** listed in CODEOWNERS, so its approval
-     alone can never satisfy the codeowner-specific half of the requirement
-     for a Contributor's PR.
-   - Each Maintainer is a named `User`-actor `bypass_actors` entry on the
-     ruleset (`bypass_mode: pull_request` — still requires a real PR and all
-     required status checks; only the *review* requirement is exempted),
-     which in practice lets them self-merge their own PRs without a second
-     approving review. Deliberately, this bypass is a per-`User` ruleset
-     entry, **not** a bump to GitHub's `Maintain`/`Admin` repository role —
-     a Maintainer here keeps their ordinary `Write` permission (no
-     repo-settings, Actions-secret, or collaborator-management access) and
-     gains only the self-merge capability.
-     > **Read the bypass mechanism precisely: it is bound to the *merging*
-     > actor, never to the PR's author.** GitHub ruleset bypass has no "only
-     > my own PRs" concept: `bypass_mode: pull_request` means "when this
-     > named actor performs the merge, this rule doesn't apply to them," full
-     > stop — regardless of whose PR it is. In practice this means any
-     > Maintainer *could* merge a Contributor's still-unapproved PR
-     > themselves, bypassing the review-count/codeowner requirement meant
-     > for that Contributor. This is not new to this change — it was already
-     > true for ThomasMichon alone before Maintainers existed — this PR only
-     > extends the same structural trust to three more named accounts. There
-     > is no GitHub-side technical control for "bypass only when merging your
-     > own PR"; the mitigation is the same one that already applied to the
-     > sole owner: Maintainers are
-     > trusted not to merge past a Contributor's required review, and every
-     > bypass is visible in the ruleset insights / audit log after the fact.
-   - Required CI status checks (`PR gate`, a fixed-name aggregate — see its
-     own definition in `.github/workflows/ci.yml` for why a fixed anchor job
-     exists rather than naming dynamic matrix jobs directly) apply to
-     everyone with no bypass, including every Maintainer.
-4. **Workflow/CODEOWNERS lockdown** — `.github/workflows/`, `.github/actions/`,
-   and `.github/CODEOWNERS` itself are locked to **this repo's owner alone**
-   (`ThomasMichon` here, derived from the immutable `github.repository_owner`
-   context value rather than a repository secret/variable -- a repository
-   *variable* is writable via the API/CLI by ordinary Write access, the same
-   Maintainer tier this lockdown restricts, which would let a Maintainer
-   defeat it by simply re-pointing the value, so a user-owned fork's own
-   owner is protected automatically with zero configuration instead --
-   this policy is scoped to user-owned repos only; an organization-owned
-   fork needs its own authorization mechanism, since no individual PR
-   author can ever equal an org login), not
-   the wider Maintainer group (workflow changes can exfiltrate secrets/PATs,
-   a materially different risk than an ordinary code change). A Maintainer's
-   review-bypass above does *not* cover this: a required status check
-   (`workflow-lockdown-guard`, from `.github/workflows/workflow-lockdown-guard.yml`,
-   run via `pull_request_target` so a PR can't neuter its own trusted
-   definition) in its own ruleset ("dev branch policy: workflow/CODEOWNERS
-   lockdown") fails whenever a protected path is touched unless the **PR's
-   registered author** (`pull_request.user.login`) matches
-   `github.repository_owner` (`ThomasMichon` on this repo). This
-   deliberately checks the PR's submitter, not individual commit metadata:
-   per-commit `author`/`committer` login is just GitHub's resolution of the
-   commit's plain-text git identity (name + email) against an account, not
-   a cryptographic proof — any contributor could set
-   `git commit --author="ThomasMichon <NNN+ThomasMichon@users.noreply.github.com>"`
-   locally and pass it with zero real involvement, so validating commit
-   metadata would buy nothing but complexity. A PR's `user.login`, by
-   contrast, is an authenticated fact GitHub sets once at PR-creation time
-   (you cannot open a PR as another account) — there's no equivalent way to
-   forge it, and unlike an event's `sender` (whoever triggered *that*
-   webhook delivery), it doesn't change on close/reopen, so it isn't
-   vulnerable to a "fail once, then close+reopen to launder a pass" game.
-   **Known, accepted residual risk:** this checks who *opened* the PR, not
-   who pushed every commit in it — an already-invited Write collaborator
-   with push access to the same repo could still push a follow-up commit
-   directly onto ThomasMichon's own already-open PR branch, and this check
-   would still pass. Closing that fully would need commit-signature
-   verification, which this repo has decided against setting up (too much
-   operational hassle for the residual risk — see
-   ThomasMichon/copilot-extensions#4519, declined). This is a narrower,
-   more unusual threat (an already-trusted collaborator actively pushing an
-   unwanted commit onto someone else's PR) than an arbitrary outsider or a
-   Contributor's own PR, both of which this check fully closes.
-   **Known, accepted structural limitation:** GitHub's
-   `required_status_checks` rule matches purely by context name
-   (`workflow-lockdown-guard`), not by which workflow file produced it. A
-   Write Maintainer could modify an existing, untrusted-`pull_request`
-   workflow (e.g. `ci.yml`) within their own PR to add a trivially
-   succeeding job of the same name — GitHub does not distinguish that forged
-   check from this one by app identity (both run as ordinary GitHub
-   Actions). Closing this fully needs a check reported by a distinct,
-   separately trusted GitHub App pinned in the ruleset by `integration_id`
-   — real additional infrastructure this repo hasn't built. Until it does,
-   treat this lockdown as a strong deterrent against an ordinary
-   Contributor's PR or an unsophisticated mistake, not a cryptographically
-   hard guarantee against a Write Maintainer deliberately trying to defeat
-   it — the same category of trust already accepted in the actor-vs-author
-   bypass note above.
-   This ruleset has **no bypass actors at all** — not even ThomasMichon —
-   because the check's own pass condition already grants exactly the
-   intended exemption; a bypass actor here would let the exemption apply to
-   *whichever PR ThomasMichon merges*, not only PRs he authored, which is
-   the same actor-vs-author gap described above and unnecessary to accept
-   for this specific lockdown. The practical effect: ThomasMichon can merge
-   his own workflow-touching PRs freely; adopting anyone else's such PR
-   requires re-authoring/re-pushing it under his own account first — a
-   deliberate friction, not an oversight. (This is a required-status-check
-   workaround, not GitHub's native `file_path_restriction` ruleset rule: that
-   rule type returns `Validation Failed` on this personal, non-Enterprise
-   account — it's an Enterprise-only feature.)
-   > **Rollout note:** `workflow-lockdown-guard.yml` runs on
-   > `pull_request_target`, which always executes the workflow definition
-   > from the repository's ACTUAL default branch — **`main`**, per GitHub's
-   > own repo settings, not `dev` (this repo's separate "contribution
-   > default" convention). That means the check structurally cannot report
-   > at all until `main` has its own copy, which only happens after this
-   > repo's own promotion pipeline next promotes `dev` to `main` (routinely
-   > ~10-20 minutes after a `dev` merge — see "The wait, and how to preview
-   > past it" below). The enforcing ruleset is created but left `disabled`
-   > until after that promotion completes and a subsequent PR confirms the
-   > check actually reports `workflow-lockdown-guard` successfully — only
-   > then is it flipped to `active`. Until that flip, this specific
-   > lockdown is docs-and-workflow-only, not yet server-enforced.
-
-**Everyone else — anyone who hasn't been invited as a collaborator at all —
-gets no automatic CI, no automatic Copilot review, and no agentic-workflow
-support**, only the strictest built-in fork-PR-approval gate (Settings →
-Actions → General → "Fork pull request workflows" → **"Require approval for
-all outside collaborators"**), which already blocks every Actions run
-(including CI) from starting until a Maintainer manually approves it, plus
-`copilot-review-gate.yml`'s own collaborator check (above) for review. A
-Maintainer can still manually approve a run or request a review for an
-outside PR at their discretion — this only removes the automatic path for
-someone the repo owner never invited.
+**Every change lands through a pull request against `dev` — direct pushes
+are blocked, and `main` accepts pushes only from the promotion pipeline (or
+explicit admin escalation).** This is enforced by four independent,
+agreeing layers (tooling, branch policy, review automation, and
+workflow/CODEOWNERS lockdown), plus a stricter automatic-nothing default
+for anyone not an invited collaborator. See
+[docs/pipelines.md § PR gating: the four enforcement layers](docs/pipelines.md#pr-gating-the-four-enforcement-layers)
+for the full mechanics of each layer, and
+[docs/pipelines.md § Automated workflows reference](docs/pipelines.md#automated-workflows-reference)
+for what every workflow in `.github/workflows/` actually does.
 
 ### The flow every agent (and human) uses
 
@@ -296,7 +128,7 @@ copilot-extensions finalize          # clean up the worktree
 > checks to decide whether the verdict gate is satisfied. **Satisfying
 > Copilot's verdict gate is never merge authorization by itself: a
 > Contributor PR still requires a separate Maintainer-approval review before
-> merging** (see "Review" earlier in this section); only the repo owner's
+> merging** (see [docs/pipelines.md § Review automation](docs/pipelines.md#3-review-automation)); only the repo owner's
 > own bypassed PRs skip that second gate.
 > The full loop below covers cursor hygiene, re-review requests, and the
 > Contributor-vs-owner verdict-shape difference in detail — read it once,
@@ -363,7 +195,7 @@ that is merely "waited out." Do not spend further review rounds chasing an
 > above).
 >
 > This is a bigger gap than verdict *shape* alone: without
-> `MAINTAINER_REVIEW_PAT` (see "Review" above), the automatic request never
+> `MAINTAINER_REVIEW_PAT` (see [docs/pipelines.md § Review automation](docs/pipelines.md#3-review-automation)), the automatic request never
 > reaches Copilot at all for a non-owner Maintainer's PR — `requestReviewers`
 > silently no-ops under the default `GITHUB_TOKEN`, with no exception and no
 > timeline event, so no verdict ever arrives to have a shape. Routing the
@@ -401,7 +233,8 @@ each attempt real room to actually land before treating it as a timeout:
    unrelated commit.
 2. **Contributor PR, `Approve` landed:** proceed to merge (subject to the
    separate required-approving-review gate for a Contributor's PR — see
-   "Review" above; Copilot's own `Approve` never substitutes for that).
+   [docs/pipelines.md § Review automation](docs/pipelines.md#3-review-automation);
+   Copilot's own `Approve` never substitutes for that).
    **Owner-authored PR, `Comment` landed with zero Medium/High findings
    open:** that *is* the passing verdict here — proceed to merge, stating
    which (Low-severity or already-addressed) findings were dismissed and
@@ -437,7 +270,7 @@ each attempt real room to actually land before treating it as a timeout:
    findings worth engaging with. **This is
    strictly about Copilot's own verdict and does NOT touch the separate,
    always-required Maintainer-approval gate** for a Contributor's PR (see
-   "Review" earlier in this section) — some Maintainer still must actually
+   [docs/pipelines.md § Review automation](docs/pipelines.md#3-review-automation)) — some Maintainer still must actually
    approve the PR before anyone merges it; satisfying this step alone never
    authorizes a merge by itself. Any Medium or High finding still blocks
    proceeding past this step at all, regardless of Maintainer approval,
@@ -458,7 +291,7 @@ each attempt real room to actually land before treating it as a timeout:
   assumption -- and is out of scope for this documentation change.)
 - **`pr-status`/`pr-watch`'s `eligible: false` / `reason: "not yet
   approved"` fields still refer only to the codeowner/review-count gate**
-  (see "Review" above), not to Copilot's own verdict — for the maintainer's
+  (see [docs/pipelines.md § Review automation](docs/pipelines.md#3-review-automation)), not to Copilot's own verdict — for the maintainer's
   own bypassed PRs those fields are a known tooling-wording gap
   (copilot-extensions#3638), not a live merge gate for this account. They
   are unrelated to whether Copilot has rendered a passing verdict yet;
@@ -671,387 +504,18 @@ this PR-description statement is the review-time gate; reviewers also enforce
 that any claimed singleton-handoff exception really matches the documented
 `service-lifecycle-supervision` criteria above.
 
-## Release & Versioning
+## Release & Versioning, and the dev → main promotion pipeline
 
-### Marketplace architecture
-
-This repo is a **Copilot CLI plugin marketplace** — a GitHub-hosted
-registry of plugins that machines install via `copilot plugin marketplace
-add ThomasMichon/copilot-extensions`. The marketplace catalog lives at
-`.github/plugin/marketplace.json` and lists every plugin with its current
-version. The Copilot CLI reads this file to determine available updates.
-
-> **Deploy with `<repo> update` — never hand-run `copilot plugin update`.**
-> `copilot plugin update` on its own refreshes only a plugin's *payload* (cached
-> source + skills) — it does **not** rebuild a runtime (venv/binstubs/service),
-> and if the version wasn't bumped it silently no-ops ("already at latest"). Do
-> not chase that gap with per-plugin installers by hand; use the one unified
-> flow: **`<repo> update`** (`agent-worktrees update`, or any repo binstub such
-> as `dotfiles update`). It refreshes **every** registered plugin's payload
-> (invoking the plugin manager for you), rebuilds **every** runtime
-> (agent-worktrees, agent-bridge, agent-codespaces, …), and fast-forwards the
-> anchor checkouts — in a single command, per machine. The per-plugin
-> `scripts/install.*` / `scripts/init.*` documented below are the internals it
-> runs for you (and a local-testing / recovery path), **not** the normal deploy
-> path. See
-> [docs/install-contract.md → Plugin update ≠ runtime install](docs/install-contract.md#plugin-update--runtime-install).
-
-### Version scheme
-
-Agent Worktrees follows [PEP 440](https://peps.python.org/pep-0440/)
-compatible versioning:
-
-```
-MAJOR.MINOR.PATCH[-devN]
-```
-
-- **Patch** bumps (`1.0.1 -> 1.0.2`) — bug fixes, small improvements,
-  new skills/docs that don't change runtime behavior.
-  > Only a change **inside a plugin folder** (its `src/`, `skills/`, or its own
-  > `docs/`) ships in that plugin's payload and needs a bump. A **repo-root**
-  > `docs/` change (this repo's `docs/`, `CONTRIBUTING.md`, `README.md`) is not
-  > vendored into any plugin and needs **no** bump — see
-  > [install-contract.md § What the marketplace vendors](docs/install-contract.md#what-the-marketplace-vendors-copied-vs-loaded).
-- **Minor** bumps (`1.0.x -> 1.1.0`) — new features, behavioral changes,
-  new CLI subcommands. **Only when the maintainer decides.**
-- **Major** bumps (`1.x -> 2.0`) — breaking changes. **Only when the
-  maintainer decides.**
-
-### Contributing a change: add a changefile, don't hand-pick a version
-
-**You never hand-edit a version number.** Instead, once per touched plugin,
-run:
-
-```bash
-python tools/changefile.py add --plugin <name> --type patch --comment "<summary>"
-# one PR touching two plugins with one shared reason:
-python tools/changefile.py add \
-  --plugin agent-worktrees --type patch \
-  --plugin agent-bridge --type dev \
-  --comment "Shared fix for Y"
-python tools/changefile.py list   # see what's pending
-```
-
-Default to **`patch`** (or `dev` for an iterative fixup within an
-already-in-flight patch). Do **not** request `minor`/`major` unless the
-maintainer explicitly says so. Multiple changefiles may target the same
-plugin (e.g. two different PRs merged close together); whichever carries the
-biggest bump type wins when they're all consumed together
-(`tools/accumulate_bumps.py`'s `highest_bump`) — you never need to
-coordinate with another PR author over the exact number, which is the
-structural fix for ThomasMichon/copilot-extensions#182's parallel-PR
-`-devN` collisions.
-
-This closes a changefile's "PR at PR-time" side of the story; consuming it
-into a real version number is Release & Versioning's next concern, not
-yours as a contributor — see "The wait, and how to preview past it" below
-for what actually happens between your merge to `dev` and a real version
-landing on `main`.
-
-### Where the mechanically-applied bump lands (reference — you never edit these by hand)
-
-Each plugin has its own version triplet. The CI promotion pipeline's
-`tools/accumulate_bumps.py` is what actually writes these, consuming
-whatever changefiles are pending; nothing here is something a contributor
-edits directly.
-
-> **Mechanical shortcut:** `python tools/accumulate_bumps.py --from-diff origin/main --apply`
-> bumps exactly what `check-version-bump.py` requires for your branch -- every
-> touched plugin (all three files plus literal `__version__` fallbacks), every
-> plugin that vendors a changed lib, and the lib itself in all its copies --
-> each only when it is not already ahead of `origin/main`, so re-run it after a
-> rebase in which `main` consumed your `-devN`. `--dry-run` shows the plan.
-
-> **General rule (applies to every plugin, present and future).** For a plugin
-> `<p>`: bump `plugins/<p>/plugin.json` (`version`), `plugins/<p>/pyproject.toml`
-> (`[project].version`, runtime plugins only — payload-only plugins have none),
-> and `<p>`'s entry in `.github/plugin/marketplace.json` (find it **by name**,
-> not a hardcoded index). **agent-worktrees** additionally bumps
-> `metadata.version`; **adding a new plugin** appends a `plugins[]` entry and
-> bumps `metadata.version`. The per-plugin tables below are concrete examples for
-> the original plugins — the same rule covers agent-logger, agent-dispatch,
-> context-handoff, efforts, visions, customizing-copilot,
-> copilot-extensions-harness, and anything added later.
->
-> **Keep any in-package `__version__` in sync.** A runtime plugin that exposes a
-> Python `__version__` (e.g. `agent-dispatch`'s `src/agent_dispatch/__init__.py`,
-> surfaced by `--version` and the coordinator's `/health`) must bump it to match
-> the `pyproject.toml` version in the **same** commit — it is a *fourth* file for
-> that plugin, easy to miss because the marketplace doesn't read it. A stale
-> `__version__` makes a correctly-deployed runtime misreport its own version.
->
-> **Enforced by `tools/check-version-consistency.py`** (pre-push): it fails the
-> push if any plugin's `plugin.json` / `pyproject.toml` / `marketplace.json`
-> versions disagree — the guard added after #65 bumped only `pyproject.toml` and
-> wedged the Picker's "Update available" indicator into a permanent loop.
->
-> **Enforced by `tools/check-changefile-presence.py`** (pre-push + CI,
-> PR-diff scoped, against `dev`): it fails the push/PR if a plugin's content
-> changed **without** a pending changefile naming it. A change to **any file
-> under `plugins/<p>/`** (its `src/`, `skills/`, `agents/`, own `docs/`,
-> tests, manifests) requires a changefile for `<p>`; a change to a **shared,
-> vendored `libs/<lib>/`** requires one for **every** plugin that vendors it
-> (a lib change reaches every consumer's payload — see
-> `check-vendored-libs-sync.py`). This closes the silent stale-deploy gap
-> where new code ships under an unchanged version and the version-gated
-> runtime install never redeploys it (dotfiles #1025). Repo-root files not
-> vendored into any plugin (`tools/`, `.github/`, repo-root `docs/`,
-> `CONTRIBUTING.md`, `README.md`) need no changefile. Build artifacts under a
-> plugin are ignored.
->
-> **`worktree-manager` follows the same rule, even though it is not a
-> marketplace plugin.** It is a top-level, out-of-plugin consumer tree with
-> no `plugin.json` at all — its release version lives directly in its own
-> `pyproject.toml` (`[project].version`), and its `src/*/__init__.py`
-> `__version__` fallback is the "fourth file" equivalent above. A change to
-> **any file under `worktree-manager/`**, or to a **shared lib it consumes
-> in either form** — a real, vendored `libs/<lib>/` copy, **or** a `uv`-editable
-> canonical-reference pointer in its own `pyproject.toml`
-> `[tool.uv.sources]` (an escaping `{ path = "../libs/<lib>", editable =
-> true }` entry -- no local copy at all; see `tools/uv_editable_ref.py`'s
-> own module docstring for the full mechanism, part of the
-> vendor-pointer-generalization effort) — requires a changefile naming `worktree-manager` the same
-> way a plugin's own content change does (`python tools/changefile.py add
-> --plugin worktree-manager --type patch --comment "..."` — the `--plugin`
-> flag name is historical; it accepts any recognized consumer identifier).
-> It has no `marketplace.json` entry and no instruction-projection
-> ownership, so those two surfaces never apply to it.
->
-> **Before editing a shared lib, find every REAL copy first: `python
-> tools/check-vendored-libs-sync.py --list`.** A shared lib such as
-> `ssh-manager` is vendored **per consuming plugin**, at
-> `plugins/<plugin>/libs/<lib>/` — each copy is installed and imported
-> independently (`[tool.uv.sources] <lib> = { path = "libs/<lib>" }` in that
-> plugin's own `pyproject.toml`). Some repos also carry a legacy top-level
-> `libs/<lib>/` directory alongside these — it is easy to mistake for "the"
-> source since it sits next to the lib's own `tests/`, but for a lib with
-> only real copies, `--list` enumerates just those **real, physical**
-> consumer-local copies (`plugins/*/libs/*`, plus a registered standalone
-> consumer's own top-level `libs/*`, e.g. `worktree-manager/libs/*`) — not
-> the complete consumer map. **A top-level canonical `libs/<lib>/` is not
-> automatically inert just because `--list` doesn't name it as a copy**:
-> for a lib with any `uv`-editable pointer-only consumer (vendor-pointer-
-> generalization effort, e.g. `worktree-manager`'s `plugin-resolve`), that
-> canonical tree IS the real source materialized into those consumers at
-> promotion time (`tools/materialize_main.py`) — editing it changes their
-> real, shipped payload. When such a lib ALSO carries one or more real
-> copies, `check-vendored-libs-sync.py` cross-checks canonical against
-> those real copies the same way it would a `VENDOR_POINTER.json` copy, and
-> `--list` names the editable-pointer consumers alongside the real ones
-> (`plugin-activation` is the live example: real copies in
-> `agent-worktrees`/`customizing-copilot`, editable-pointer consumers
-> everywhere else). The one case that genuinely has no copy to cross-check
-> is a lib with editable-pointer consumers and **zero** real copies at
-> all -- canonical is their only payload, so neither `--list` nor
-> `verify()` has a second copy to compare it against. Find pointer-only
-> consumers with `python tools/check-version-bump.py --list` (their entry
-> names appear even without a local copy) or by grepping every
-> `pyproject.toml`'s `[tool.uv.sources]` for an escaping `path`. For a lib
-> with real copies, edit every listed real copy identically (or edit one
-> and copy it to the rest byte-for-byte) plus canonical if a pointer form
-> is mixed in, then re-run `check-vendored-libs-sync.py` to confirm.
-
-**agent-worktrees:**
-
-| File | Field | Purpose |
-|------|-------|---------|
-| `plugins/agent-worktrees/plugin.json` | `version` | Copilot CLI reads this to detect updates via `copilot plugin update` |
-| `plugins/agent-worktrees/pyproject.toml` | `version` under `[project]` | Python package version at runtime; shown in `--version` output |
-| `.github/plugin/marketplace.json` | `metadata.version` AND `plugins[0].version` | Marketplace catalog; Copilot CLI reads this from GitHub to check for updates |
-
-**agent-bridge:**
-
-| File | Field | Purpose |
-|------|-------|---------|
-| `plugins/agent-bridge/plugin.json` | `version` | Plugin version for marketplace detection |
-| `plugins/agent-bridge/pyproject.toml` | `version` under `[project]` | Python package version; shown in `agent-bridge version` output |
-| `.github/plugin/marketplace.json` | `plugins[1].version` | Marketplace catalog entry for agent-bridge |
-
-**agent-codespaces:**
-
-| File | Field | Purpose |
-|------|-------|---------|
-| `plugins/agent-codespaces/plugin.json` | `version` | Plugin version for marketplace detection |
-| `plugins/agent-codespaces/pyproject.toml` | `version` under `[project]` | Python package version; shown in `agent-codespaces version` output |
-| `.github/plugin/marketplace.json` | `plugins[2].version` | Marketplace catalog entry for agent-codespaces |
-
-**agent-containers:**
-
-| File | Field | Purpose |
-|------|-------|---------|
-| `plugins/agent-containers/plugin.json` | `version` | Plugin version for marketplace detection |
-| `plugins/agent-containers/pyproject.toml` | `version` under `[project]` | Python package version; shown in `agent-containers version` output |
-| `.github/plugin/marketplace.json` | `plugins[3].version` | Marketplace catalog entry for agent-containers |
-
-**agent-mcp:**
-
-| File | Field | Purpose |
-|------|-------|---------|
-| `plugins/agent-mcp/plugin.json` | `version` | Plugin version for marketplace detection |
-| `plugins/agent-mcp/pyproject.toml` | `version` under `[project]` | Python package version; shown in `agent-mcp status` output |
-| `.github/plugin/marketplace.json` | `plugins[4].version` | Marketplace catalog entry for agent-mcp |
-
-**All version files for a plugin must be bumped together in the same commit.** If any
-file is out of sync:
-
-- Stale `plugin.json` — `copilot plugin update` reports "already at
-  latest" even when new code is available.
-- Stale `marketplace.json` — the marketplace registry shows the old
-  version; machines checking for updates won't see the new version.
-- Stale `pyproject.toml` — runtime `--version` output is wrong.
-
-### When to add a changefile
-
-- After a set of changes is committed and ready to push — one changefile per
-  PR is fine; don't add one on every commit.
-- **A hot plugin with concurrent agents is no longer a coordination
-  problem.** Under the old hand-bump scheme, several agents landing PRs to
-  the same plugin within minutes of each other (`agent-worktrees` was the
-  frequent case) had to race to read-then-write the same version number.
-  Changefiles remove that race entirely: each PR just declares its own
-  intent (`patch`/`minor`/`major`/`dev`), several changefiles for the same
-  plugin can coexist peacefully, and `tools/accumulate_bumps.py` merges them
-  (biggest bump wins) into one real version only when the CI promotion
-  pipeline actually consumes them — you never need to re-fetch `dev` and
-  guess at a number before pushing.
-
-## The wait, and how to preview past it
-
-Merging to `dev` is not the same as shipping. Every consumer still only ever
-polls `main`. The CI promotion pipeline
-(`.github/workflows/validate-and-promote.yml`) is **triggered by a
-green `dev` build, not a schedule** — but there is a real wait between your
-merge landing on `dev` and a promotion actually shipping it to `main`, not
-an instant release.
-
-### The pipeline is a hard chain — a red `dev` build ships nothing
-
-The `gate` job only runs `if: github.event.workflow_run.conclusion ==
-'success'` on `CI`, and the full validation suite + `promote` job only run
-once `gate` confirms the commit is genuinely on `dev`'s history. If
-your merge leaves `dev`'s CI red, the chain simply never fires for that
-commit — **no candidate PR, no promotion, no release** — and this blocks
-every other contributor's already-merged work sitting on `dev` behind yours
-too, since the next successful trigger promotes everything accumulated on
-`dev` so far. Treat a red `dev` build as your first priority: land a forward
-fix immediately, or revert your own merge, rather than leaving it red while
-you investigate at leisure.
-
-### Expect roughly 10-20 minutes, and know what to watch
-
-Budget on the order of **10-20 minutes** from a green `dev` merge to a real
-`main` release, not an instant one: `CI` on `dev` (a few minutes) → `Validation
-Gate` → `Promote` opens a generated `release/promote-<run id>` candidate PR
-against `main` → that candidate PR's own fast `main source gate` check → auto-merge
-(via the pipeline's own `APERTURE_RELEASE_TOKEN`, not your account). To confirm
-your change actually shipped rather than assuming the `dev` merge itself was
-the release:
-
-```bash
-gh pr list --repo ThomasMichon/copilot-extensions --search "is:merged head:release/promote-" --limit 5
-```
-
-A small, separate **"clear consumed changefiles on dev"** housekeeping PR
-normally follows a few minutes after each successful promotion (it deletes
-the changefiles that promotion just consumed) — routine cleanup, not
-something you need to review, but expected to appear.
-
-Two tools close the impatience gap without waiting on a real promotion:
-
-- **`python tools/preview_release.py <plugin>`** builds a scratch copy of
-  that plugin's payload — with its vendored `libs/<lib>` materialized from
-  canonical, and the version it would get if its pending changefiles were
-  consumed right now — entirely read-only against your real checkout. Good
-  for "what would ship" without touching anything.
-- **For actually running your own uncommitted/unmerged code against the real
-  deployed CLI**, use the **mutable-dev-slot** pattern:
-  `docs/patterns/mutable-dev-slot.md` (ThomasMichon/copilot-extensions#3376).
-  It gives each plugin a claimed, first-class `versions/dev/` runtime slot
-  rebuilt in place, GC-protected by a `dev-claim.json` sidecar.
-
-If something promoted to `main` turns out to be bad, see
-`tools/rollback_release.py` (pause the pipeline, revert the generated
-commit, then resume once `dev` has an actual fix) rather than hand-editing
-`main`.
-
-### Never admin-merge a PR into `main` — not even "just this once"
-
-`main` only ever moves via a `release/promote-*` PR or a genuine
-workflow-file-ONLY bootstrap PR (see the `main-gate` job in `ci.yml`), and
-`main-gate` recognizes and passes **both** of those on its own —
-unassisted, no override needed. That means `gh pr merge --admin` (or the
-equivalent `--admin` flag on any PR-merge tool) has **no legitimate use
-against `main`** once this gate is in place: if `main-gate` is failing your
-PR, that is the gate correctly telling you the PR doesn't belong on `main`
-— retarget it to `dev`, don't override the check. This is not a hypothetical
-risk: a PR landed directly on `main` via admin-bypass once
-(ThomasMichon/copilot-extensions#3622-erratum), stranding content that the
-next wholesale dev→main promotion would have silently reverted, because
-`main`'s tree is regenerated entirely from `dev`'s current tip on every
-cycle — anything that only ever touched `main` is invisible to that diff
-and vanishes the next time anything else promotes. If you're an agent about
-to reach for `--admin` against this repo's `main`: stop, re-read this
-section, and retarget to `dev` instead.
-
-#### If you opened a PR against `main` by mistake
-
-`main-gate` (above) only ever runs as part of `ci.yml`, a plain
-`pull_request`-triggered workflow — for a first-time or otherwise
-unapproved external contributor, GitHub holds that *entire* workflow run in
-`action_required` until a maintainer manually approves it, so such a
-contributor can get zero automated feedback at all. `.github/workflows/
-base-branch-reminder.yml` closes that specific gap: a narrow,
-`pull_request_target`-triggered job (not subject to the fork-approval gate)
-posts a one-time comment asking the author to retarget to `dev`, for any
-PR against `main` not authored by the repo owner. It never checks out or
-executes the PR's own code and never runs tests — its only effect is that
-one comment, so it adds no capability a non-collaborator didn't already
-have.
-
-It recognizes `main-gate`'s own three legitimate automated-PR shapes
-(the release pipeline's own PR, a workflow-only bootstrap PR, and
-`module-size-baseline-widen.yml`'s automated PR) by the same branch-name
-and diff-content signature `main-gate` itself checks, not merely by
-"author is the repo owner" — so if this reminder is ever widened to cover
-every PR against `main` rather than only non-owner authors, it still can't
-mistake the release pipeline's own automated PRs for ones that need a
-nudge.
-
-### If `main`'s history is force-rewritten
-
-`main` may occasionally have its history rewritten (e.g. a deliberate,
-operator-approved purge of accumulated large blobs from old promotion
-commits — see the dev-branch-release-pipeline effort's own Journal for any
-specific instance). This is a one-shot, `main`-only operation, never
-routine, and never something an agent decides to do on its own initiative.
-
-If your local checkout/worktree's `main` ends up non-fast-forward against
-`origin/main` after one of these (`git fetch` reporting diverged history, or
-a push to `main` rejected for a reason that isn't the ordinary gate checks
-above): **don't merge, rebase, or try to reconcile the two histories.**
-`main` is a generated artifact (wholesale-replaced every promotion anyway,
-per the section above) — just discard your local `main` and recreate it from
-the new one:
-
-```bash
-git fetch origin main
-git checkout main && git reset --hard origin/main
-# or, for a worktree whose own branch merely based off the old main:
-git rebase --onto origin/main <old-main-tip> <your-branch>
-```
-
-**`dev` is never affected** — it forked long before any such rewrite and
-has its own independent, untouched history; only checkouts that track `main`
-directly need this. Nothing downstream that actually *consumes* this repo
-needs to know or care either: `copilot plugin install`/`update` (both the
-direct-repo and marketplace paths) and `worktree-manager`'s own self-updater
-fetch **by branch name** (`git fetch --depth 1 <repo> main` + `checkout
-FETCH_HEAD`, or an equivalent GitHub codeload tarball keyed by ref) — never
-a pinned commit SHA — so they transparently pick up whatever is currently on
-`main`, rewritten or not. This was confirmed live (installed a real plugin
-from a throwaway test repo, force-rewrote its `main`, re-ran `copilot plugin
-update`/`copilot plugin marketplace update`: both picked up the rewritten
-content with no error, no warning, nothing to work around).
+Versioning is changefile-driven (a contributor never hand-edits a version
+number), and `dev` promotes to `main` through an automated CI pipeline, not
+a direct merge. See
+[docs/pipelines.md § Release & Versioning](docs/pipelines.md#release--versioning)
+for the full version scheme and changefile workflow, and
+[docs/pipelines.md § Promotion: dev → main](docs/pipelines.md#promotion-dev--main)
+for the promotion pipeline's timing, how to preview a pending release
+without waiting for a real promotion, the `main`-admin-merge prohibition,
+what to do if a PR was opened against `main` by mistake, and recovery after
+a force-rewritten `main` history.
 
 ## Deploying: one command — `<repo> update`
 

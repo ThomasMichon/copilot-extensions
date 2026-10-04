@@ -228,7 +228,7 @@ the wait-for-a-verdict loop below before merging with
 `copilot-extensions pr-merge <PR> --now` and finalizing. Direct pushes to
 `dev` are blocked by tooling and repository policy; `main` accepts pushes
 only from the CI promotion pipeline (or explicit admin escalation) -- see
-Release & Versioning in CONTRIBUTING.md.
+`docs/pipelines.md` for the full gating and promotion mechanics.
 
 **Wait for a real verdict before merging -- contributor and maintainer PRs
 alike.** Copilot code review can only ever render `Approve` or `Comment`
@@ -358,11 +358,11 @@ maintainer explicitly says so. Never hand-edit `plugin.json` /
 `pyproject.toml` / `marketplace.json` version fields yourself — the CI
 promotion pipeline's `tools/accumulate_bumps.py` consumes every pending
 changefile and writes the real version numbers when it promotes `dev` to
-`main`. See `CONTRIBUTING.md` § Release & Versioning for the full scheme,
-the wait between merging to `dev` and a promotion actually shipping to
-`main`, and how to preview past it. (The `tools/check-docs-consistency.py`
-guard keeps the plugin lists/counts in the docs honest; run it before
-publishing doc changes.)
+`main`. See `docs/pipelines.md` § Release & Versioning for the full scheme,
+and § Promotion: dev → main for the wait between merging to `dev` and a
+promotion actually shipping to `main`, and how to preview past it. (The
+`tools/check-docs-consistency.py` guard keeps the plugin lists/counts in
+the docs honest; run it before publishing doc changes.)
 
 ### Test Before PR Publication
 

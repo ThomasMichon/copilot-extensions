@@ -175,7 +175,7 @@ installer. Know which kind you are changing.
    `[project].version`, or `.github/plugin/marketplace.json` by hand — the
    next promotion consumes your changefile and writes all three in lockstep.
    The exact changefile schema and edge cases (renamed/split plugins, shared
-   libs) are in `CONTRIBUTING.md` § Release & Versioning — follow it; entries
+   libs) are in `docs/pipelines.md` § Release & Versioning — follow it; entries
    drift, so trust the repo over this summary.
 6. **Open/update the PR.** Use `copilot-extensions create-pr` to squash the
    worktree, push `pr/<slug>`, and open the GitHub PR (the repo config has

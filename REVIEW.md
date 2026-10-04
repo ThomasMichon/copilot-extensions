@@ -50,7 +50,7 @@ specifically when reviewing a pull request, not a replacement for them.
   > repo's own CI promotion pipeline (dev-branch-release-pipeline effort,
   > `.github/workflows/validate-and-promote.yml`) from a `release/promote-*`
   > branch, or a workflow-file-ONLY bootstrap PR. Please retarget this PR's
-  > base branch to `dev` — see `CONTRIBUTING.md` § Release & Versioning.
+  > base branch to `dev` — see `docs/pipelines.md` § Release & Versioning.
 - **Scope to the diff.** Review the code the PR actually changes. The repo
   carries pre-existing style debt — do **not** demand repo-wide cleanup or
   flag untouched code.
