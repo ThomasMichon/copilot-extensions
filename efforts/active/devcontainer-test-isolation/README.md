@@ -2517,3 +2517,27 @@ regression tests for `inf` and `nan` in all four locations plus a
 combinations (wrapped + bare, `inf` + `nan`) against real Docker:
 immediate rejection, no container ever created. All tests, module-size,
 and docs-consistency checks still pass.
+
+### 2026-10-03 -- Discoverability gap closed; Windows-pathway follow-up filed
+The wrapper existed and was live-validated, but nothing pointed a
+contributing agent at it: `AGENTS.md` § *Test Before PR Publication* and
+the `contributing-to-copilot-extensions` skill both named only the bare
+`tools/run-plugin-tests.py` runner. Added an explicit "after fixing a bug,
+prefer `tools/run_tests_in_devcontainer.py` when Docker + the devcontainers
+CLI are available" pointer to both (changefile filed for
+`copilot-extensions-harness`, whose skill payload changed). **Empirically
+verified, not just asserted:** dispatched a sub-agent with no special
+instructions -- just this repo's own docs -- to find and fix a real bug
+and validate it; it found a genuine `budget-guidance` CLI bug (`--at`
+validation bypassed the JSON-error path for `status --json`), fixed it,
+added a regression test, and chose `tools/run_tests_in_devcontainer.py`
+unprompted, citing the exact `AGENTS.md` line. Separately, the operator
+flagged that the wrapper's "Linux only" doc claim is just that -- a doc
+claim, not an enforced code gate -- and that most facility contributor
+machines are Windows hosts running Docker Desktop's WSL2 backend (which
+already runs Linux containers), not native Linux or Windows containers.
+Filed as upstream follow-up
+[#5115](https://github.com/ThomasMichon/copilot-extensions/issues/5115)
+rather than reopening this effort's own Plan -- it's a genuinely new,
+not-yet-scoped pathway (native-Windows-host path translation into
+WSL2/Docker), not a gap in what Phase 1/2 already delivered and validated.
