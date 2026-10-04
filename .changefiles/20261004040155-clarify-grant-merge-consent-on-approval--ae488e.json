@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify 'grant merge consent on approval' -- defer to the target repo's own documented verdict-shape instead of assuming a universal wait-for-Approve rule",
+  "changes": [
+    {
+      "plugin": "efforts",
+      "type": "dev"
+    }
+  ]
+}

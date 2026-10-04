@@ -545,6 +545,53 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             dismiss_stale_reviews=getattr(prcfg, "dismiss_stale_reviews", None),
             on_error=lambda e: print(f"pr-watch: poll error (will retry): {e}", file=sys.stderr),
         )
+        # A single, one-time live read, taken only now that the (potentially
+        # long, up to --timeout seconds, unbounded at --timeout 0) wait has
+        # already concluded -- never before polling starts. On a
+        # pr-self-merge repo, the raw verdict/reason pair this wait's
+        # payload otherwise carries reflects only the human-approval gate,
+        # which can read as a hard block even when the acting identity
+        # holds a live Maintainer-bypass right on it
+        # (ThomasMichon/copilot-extensions#3638) -- surface that explicitly
+        # instead of letting pr-watch be the one PR surface that silently
+        # drops it (pr-status already does, via _live_pr_state). Sampling
+        # this *before* a long wait would risk reporting bypass rights (or
+        # the ruleset itself) that changed during the wait as a still-live
+        # fact; reading it only once the wait is over avoids that, at the
+        # cost of one extra live call per invocation, same as pr-status
+        # already pays.
+        if verb == "wait":
+            from . import pr_ops
+
+            # Mirror _live_pr_state's suppression: a terminal (merged/closed),
+            # WIP, or held snapshot never gets a bypass note -- there is
+            # nothing left to bypass toward, and a stale/misleading note on a
+            # PR that's already done (or deliberately paused) is worse than
+            # none.
+            watch_merge = result.payload.get("merge") or {}
+            if (
+                watch_merge.get("merge_state") not in ("merged", "closed")
+                and not watch_merge.get("wip")
+                and not watch_merge.get("held")
+            ):
+                try:
+                    watch_provider = providers.get_provider(prcfg.provider or "gitea")
+                    # Preserve an explicit --token override (build_fetch uses
+                    # it for every poll); fall back to the repo-scoped
+                    # account only when the caller didn't supply one.
+                    watch_token = (
+                        args.token if args.token is not None
+                        else providers.account_token_for_slug(args.repo, prcfg)
+                    )
+                    self_merge_note = pr_ops.self_merge_bypass_note(
+                        actor_flow.flow, watch_provider, args.repo, args.pr,
+                        api_base=args.host or prcfg.api_base or "",
+                        token=watch_token,
+                    )
+                except Exception:
+                    self_merge_note = None
+                if self_merge_note:
+                    result.payload["self_merge_note"] = self_merge_note
         if not result.matched:
             # #3486: a timeout still carries the current-state snapshot (verdict
             # / merge state / consent / labels) when a poll succeeded, so a
@@ -572,6 +619,9 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                         "the same live state without waiting)",
                         file=sys.stderr,
                     )
+                self_merge_note = payload.get("self_merge_note")
+                if self_merge_note:
+                    print(f"pr-watch: {self_merge_note}", file=sys.stderr)
             return 124
         print(_json.dumps(result.payload))
         if not args.json:
@@ -595,6 +645,9 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                     "pr-watch: merge consent already granted; the merge gate will proceed",
                     file=sys.stderr,
                 )
+            self_merge_note = result.payload.get("self_merge_note")
+            if self_merge_note:
+                print(f"pr-watch: {self_merge_note}", file=sys.stderr)
         return 0
     except ProviderError as exc:
         output.err(f"pr-watch: {exc}")

@@ -317,9 +317,25 @@ satisfied, not until one relay leg, PR, or checklist item happens to finish.
 
 In particular, **opening or pushing a reviewable change is not a stopping
 point** — it's mid-flight. Once a PR (or equivalent reviewable gate) exists,
-stay on it: watch for the verdict, and act on it immediately — grant merge
-consent on approval, address requested changes and re-push, or resolve a
-conflict — through to merge, then continue with the effort's next Plan item.
+stay on it: watch for the verdict, and act on it immediately — once the
+target repo's own documented verdict/merge gate is satisfied (read that
+repo's own CONTRIBUTING-equivalent doc for what "satisfied" actually means
+there; many repos' automated reviewers never render a literal `Approve` on
+certain PRs — e.g. a repo owner's own self-merge PRs — and define a
+different passing shape instead, such as a clean non-blocking review with no
+Medium/High finding left open), merge; otherwise address requested changes
+and re-push, or resolve a conflict — through to merge, then continue with
+the effort's next Plan item. Do not assume "wait for Approve" as a universal
+rule, and do not trust a generic tooling field (e.g. a raw `eligible`/
+`reason` pair) over that repo's own documented verdict-shape when the two
+disagree (`agent-worktrees`'s own `pr-workflow.md` reference, "Default
+conduct: drive every PR you open through to merge," covers this in more
+detail, including a precedent (`ThomasMichon/copilot-extensions#3638`)
+where exactly this confusion stalled *merging* an already-converged PR for
+roughly 90 minutes past the point the target repo's own docs already called
+done — a separate problem from why that PR's review took 25 rounds to
+converge in the first place, which was carried-over review findings not
+clearing after being fixed, not this verdict/bypass confusion).
 Journal the outcome as you go so the next slice starts from a durable record,
 not from memory of what "should" happen next.
 
