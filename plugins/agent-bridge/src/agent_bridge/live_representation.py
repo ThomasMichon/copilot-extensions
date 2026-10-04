@@ -793,8 +793,9 @@ def translate_reconnect_cursor(
     """``after`` numbered on the log named ``continuity_id``, in ``log``'s numbering
     when that log was since merged (possibly in steps) into ``log``. A cursor named
     for a log this one never absorbed (e.g. one lost in a daemon restart, when the
-    merge map is empty) can't be translated, so the reader replays from 0 rather
-    than skip the new log's events up to the old cursor; no continuity: unchanged."""
+    merge map is empty), or outside the history it names, can't be translated, so
+    the reader replays from 0 rather than skip the new log's events up to the old
+    cursor; no continuity: unchanged."""
     if not continuity_id or continuity_id == log.continuity_id:
         return after
     merged = store.merged_history()
@@ -802,7 +803,10 @@ def translate_reconnect_cursor(
         if continuity_id not in merged:
             break
         continuity_id, ids = merged[continuity_id]
-        after = merged_cursor(ids, after)
+        index = ids if isinstance(ids, MergedIds) else MergedIds(ids)
+        if not index.keys_sorted or not 0 <= after <= index.keys_sorted[-1]:
+            return 0  # beyond the history it names: untranslatable, so replay
+        after = merged_cursor(index, after)
         if continuity_id == log.continuity_id:
             return after
     return 0

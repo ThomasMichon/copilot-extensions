@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+from bisect import bisect_right
 from typing import Any
 
 _MAX_DETAIL_TOKEN_CHARS = 2048
@@ -166,9 +167,19 @@ def retarget(token: str | None, merged: dict[str, tuple[str, dict[int, int]]]) -
         continuity_id, ids = merged[continuity_id]
         value = {**value, "continuity": continuity_id}
         if value.get("kind") == "position":
-            # A read cursor: the furthest merged id at or before it (never moves back).
-            value["event_id"] = max([v for k, v in ids.items() if k <= value["event_id"]],
-                                    default=0)
+            # A read cursor: the furthest merged id at or before it (never
+            # moves back) -- but only one inside the history it was minted on
+            # (0 through that log's tail at the merge): an out-of-range cursor
+            # is left as it was, for validation to report, never clamped into
+            # a valid one that would skip or replay results.
+            from .live_representation import MergedIds
+
+            index = ids if isinstance(ids, MergedIds) else MergedIds(ids)
+            cursor = value["event_id"]
+            if not index.keys_sorted or not 0 <= cursor <= index.keys_sorted[-1]:
+                return token
+            at = bisect_right(index.keys_sorted, cursor)
+            value["event_id"] = index.prefix_max[at - 1] if at else 0
         elif not _retarget_detail(value, ids):
             return token  # unmapped or no longer contiguous: normal validation reports it
     value.pop("v", None)

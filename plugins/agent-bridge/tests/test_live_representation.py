@@ -601,6 +601,34 @@ def test_retarget_leaves_non_integer_ids_on_their_old_continuity() -> None:
     assert (ok["continuity"], ok["event_id"]) == ("new-log", 3)
 
 
+def test_retarget_leaves_an_out_of_range_position_for_validation() -> None:
+    """A position outside the history it was minted on (the source ended at id
+    2) is never clamped into a valid cursor on the merged history, which would
+    skip or replay results; it keeps its old continuity for validation."""
+    from agent_bridge.result_tokens import _decode_token, _encode_token, retarget
+
+    merged = {"old-log": ("new-log", {0: 2, 1: 3, 2: 4})}
+    base = {"source": "represented", "session_id": "s", "continuity": "old-log",
+            "kind": "position"}
+    for bad in (-1, 3, 99):
+        token = _encode_token({**base, "event_id": bad})
+        assert retarget(token, merged) == token, bad
+    for cursor, moved in ((0, 2), (2, 4)):  # the bounds themselves still translate
+        ok = _decode_token(retarget(_encode_token({**base, "event_id": cursor}), merged),
+                           source="represented", session_id="s", kinds=frozenset({"position"}))
+        assert (ok["continuity"], ok["event_id"]) == ("new-log", moved)
+
+
+def test_a_reconnect_cursor_outside_its_history_replays_instead_of_skipping() -> None:
+    from agent_bridge.live_representation import translate_reconnect_cursor
+
+    store, a, b, c = _chain()
+    prior = c.continuity_id
+    assert translate_reconnect_cursor(store, a, prior, c.latest_id) > 0  # in range: translated
+    for bad in (-1, c.latest_id + 1, 99):
+        assert translate_reconnect_cursor(store, a, prior, bad) == 0, bad
+
+
 def test_retarget_never_launders_an_oversized_or_non_base64_token() -> None:
     import base64
     import json
