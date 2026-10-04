@@ -20,7 +20,7 @@ at `discover`/`setup` time; an unknown key or wrong type is a clean
 |---|---|---|---|
 | `name` | string | yes | Letters, digits, `.`, `_`, `-` only. |
 | `kind` | string | yes | Must be the literal `repository-issue-loop`. |
-| `repo` | string | yes | `owner/name` (GitHub) or `organization/project` (Azure DevOps) -- same two-segment shape either way. |
+| `repo` | string | yes | `owner/name` (GitHub) or `organization/project` (Azure DevOps) -- same two-segment shape either way. Any non-empty string for `forge.provider: script`, but it also routes the created task (see `forge.backlog` below if the script's own backlog label is not itself a real project). |
 | `source` | string | yes | Free-form label for the emitter's task `source`; safe to change later without losing history. |
 | `cadence_seconds` | number ≥ 1 | yes | Occurrence period. |
 | `tick_interval_seconds` | number ≥ 1 | no (default: `min(60, cadence_seconds)`) | How often the emitter checks in, independent of the occurrence period. |
@@ -45,9 +45,17 @@ at `discover`/`setup` time; an unknown key or wrong type is a clean
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `provider` | string | yes | `github` or `azure-devops`. |
-| `producer_login` | string | yes | The expected authenticated identity; every read/mutation is verified against it. |
+| `provider` | string | yes | `github`, `azure-devops`, or `script`. |
+| `producer_login` | string | yes | The expected authenticated identity; every read/mutation is verified against it (`github`/`azure-devops`). For `script`, it is still required but only forwarded to the subprocess as `producer_login`, unverified. |
 | `discovery_scope` | mapping | no | **azure-devops only.** Narrows the WIQL discovery query beyond the always-applied `TeamProject` scoping. At least one of the three sub-fields is required if present: `work_item_types` (list of strings), `area_path` (string), `max_age_days` (positive number). |
+| `command` | list of strings | yes for `script` (unsupported otherwise) | The subprocess argv; `--op <name>` is appended automatically. A relative first element resolves against the declaring repo root. |
+| `cwd` | string | no, `script` only | Subprocess working directory; relative resolves against the declaring repo root. Defaults to the declaring repo root. |
+| `timeout_seconds` | number, `0 < n <= 1800`, finite | no, `script` only (default `30`) | Per-invocation execution bound. |
+| `namespace` | non-empty string | no, `script` only | Explicit coordinator resource-key namespace; overrides the auto-derived (best-effort, process-cached) identity outright. Set this for a redundant/failover deployment of the same declaration across hosts. |
+| `backlog` | non-empty string | no, `script` only | Overrides the identifier the script's own four operations receive as `repo` (wire field name unchanged), decoupling it from the top-level `repo`, which keeps routing the created task regardless. Defaults to `repo`. Set this whenever the script's natural backlog label is not itself a real, embody-routable project -- see [`repository-issue-loop.md`](repository-issue-loop.md#the-script-provider)'s "`repo` vs. `forge.backlog`". |
+
+See [`repository-issue-loop.md`](repository-issue-loop.md#the-script-provider)
+for the `script` provider's full subprocess JSON request/response contract.
 
 ### `reservation`
 
