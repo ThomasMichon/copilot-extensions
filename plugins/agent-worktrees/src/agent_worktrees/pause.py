@@ -22,6 +22,18 @@ resume in this exact worktree) is still genuinely open -- leave it."
    stops the sync with the same clear message ``sync_forward`` already
    gives, and ``pause`` aborts immediately without touching the claim
    ledger at all -- a failed sync must never still persist a claim
+   transition. **Known scope limit**: ``sync_forward`` resolves the
+   worktree path via ``tracking.resolve_worktree_path``, which (like
+   ``_resolve_worktree_id``'s short-ID lookup) reads the **ambient**
+   ``cfg.tracking_dir()`` rather than the supplied ``config``'s project --
+   the same pre-existing, shared limitation every other multi-project
+   verb here has (``finalize``, ``git sync``, ...), not something this
+   module introduces or can safely fix in isolation without touching that
+   shared resolution path for every caller. A ``--config <other-project>``
+   invocation is therefore only as cross-project-safe for the sync step as
+   those other verbs already are; the claim-ledger access *after* the sync
+   (point 2 below) is what this module scopes correctly via
+   ``cfg.tracking_dir(config.repo_name)``.
    transition.
 2. Auto-settle this worktree's own claims that are **provably** resolved
    -- reusing the same gone+safe reclaim sweep the obligation gate's
@@ -30,11 +42,15 @@ resume in this exact worktree) is still genuinely open -- leave it."
    record lock is taken (mirroring ``claims_cli._claims_sweep``'s own
    verdicts-first pattern) -- a probe can take tens of seconds, and this
    record's lock must never block an unrelated claim writer for that long.
-   Each cached verdict is fenced against the claim's ``created_at``: if
-   another process releases and re-adds the same ``ref`` as a genuinely
-   different incarnation between the preview and the lock, the stale
-   verdict is treated as unknown (never applied) rather than flipping the
-   wrong claim. A settled claim is recorded into the durable claim-history
+   The cached verdicts are fenced against the record file's own
+   ``(mtime_ns, size)``, captured right after the preview read: if another
+   process writes the record at all between the preview and the lock, the
+   sweep is skipped entirely for this pass (a per-claim fence keyed on a
+   single field -- e.g. ``created_at``, whose ``_now_iso()`` stamp has
+   only one-second resolution -- cannot reliably distinguish a released
+   and immediately re-added claim sharing the same ref, kind, and
+   timestamp from the original). A later ``pause`` retries with a fresh
+   preview. A settled claim is recorded into the durable claim-history
    ledger (tagged with the owning record's own project, never the
    ambient one) the same way the fleet-wide sweep does, so ``claims
    history <ref>`` reflects
@@ -118,17 +134,10 @@ def pause_worktree(
     # this record's lock must never block an unrelated claim writer for
     # that long (mirrors claims_cli._claims_sweep's own verdicts-first
     # pattern, which this module reuses rather than duplicates).
-    #
-    # Cache each claim's `created_at` alongside its verdict and re-check it
-    # against the reloaded claim inside the lock: between this unlocked
-    # preview and the lock, another process could release and re-add the
-    # same `ref` as a genuinely different incarnation (claim writes bump
-    # `created_at`, and may change `kind`). A verdict keyed by `ref` alone
-    # would then apply a stale gone/safe judgement to the wrong claim --
-    # treat a changed incarnation as unknown (never flips) instead.
     preview = tracking.load_record(yaml_path)
+    preview_stat = yaml_path.stat()
     gone_of, safe_of = sweep.make_resolvers(config)
-    verdicts: dict[str, tuple[bool | None, bool | None, str]] = {}
+    verdicts: dict[str, tuple[bool | None, bool | None]] = {}
     for claim in preview.resources:
         if not claim.is_unsettled or tracking.claim_handoff_reservation(preview, claim):
             continue
@@ -140,27 +149,37 @@ def pause_worktree(
             safe = safe_of(claim)
         except Exception:
             safe = None
-        verdicts[claim.ref] = (gone, safe, claim.created_at)
-
-    def _same_incarnation(claim: tracking.ResourceClaim) -> bool:
-        cached = verdicts.get(claim.ref)
-        return cached is not None and cached[2] == claim.created_at
+        verdicts[claim.ref] = (gone, safe)
 
     def _gone(claim: tracking.ResourceClaim) -> bool | None:
-        if not _same_incarnation(claim):
-            return None
-        return verdicts[claim.ref][0]
+        return verdicts.get(claim.ref, (None, None))[0]
 
     def _safe(claim: tracking.ResourceClaim) -> bool | None:
-        if not _same_incarnation(claim):
-            return None
-        return verdicts[claim.ref][1]
+        return verdicts.get(claim.ref, (None, None))[1]
 
     with tracking._RecordLock(yaml_path, require_sidecar=True):
-        record = tracking.load_record(yaml_path)
-        flipped = tracking.sweep_abandoned_obligations(
-            record, gone_of=_gone, safe_of=_safe, save=False,
+        # Fence the cached verdicts against the record FILE's own identity
+        # (mtime_ns, size), not a single claim field: between the preview
+        # read above and this lock, another process could have released
+        # and re-added the exact same `ref` as a genuinely different
+        # incarnation (same kind/state, even the same one-second
+        # `_now_iso()` timestamp) -- a per-claim fence on any one field
+        # cannot reliably catch that. If the file changed at all, skip the
+        # reclaim sweep entirely for this pass rather than risk applying a
+        # stale verdict to a claim that changed identity underneath it; a
+        # later `pause` retries with a fresh preview.
+        current_stat = yaml_path.stat()
+        stale = (
+            current_stat.st_mtime_ns != preview_stat.st_mtime_ns
+            or current_stat.st_size != preview_stat.st_size
         )
+        record = tracking.load_record(yaml_path)
+        if stale:
+            flipped: list[tracking.ResourceClaim] = []
+        else:
+            flipped = tracking.sweep_abandoned_obligations(
+                record, gone_of=_gone, safe_of=_safe, save=False,
+            )
         if flipped:
             tracking.save_record(record, yaml_path)
             # Append immediately, still inside this record's own lock,

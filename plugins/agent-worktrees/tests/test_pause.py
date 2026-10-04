@@ -120,15 +120,16 @@ class TestPauseWorktree:
         events = claim_history.history_for_ref("o/r#43")
         assert any(e.get("event") == "released" for e in events)
 
-    def test_toctou_race_never_applies_a_stale_verdict_to_a_new_incarnation(
+    def test_toctou_race_never_applies_a_stale_verdict_after_a_concurrent_write(
         self, pr_repo, monkeypatch,
     ):
         """Between the unlocked preview read and the later record lock,
-        another process could release and re-add the SAME ref as a
-        genuinely different claim incarnation (a claim write bumps
-        `created_at`, and may change `kind`). A verdict cached by `ref`
-        alone must never apply to that new incarnation -- it must be
-        treated as unknown (left open), not silently released/abandoned."""
+        another process could write the record at all (e.g. release and
+        re-add the same ref as a new incarnation sharing the same kind/
+        state/timestamp). The whole-file `(mtime_ns, size)` fence must
+        skip the reclaim sweep entirely for this pass rather than apply a
+        cached verdict against content that may no longer describe the
+        same claim."""
         config, wid, _wt_path, _remote = pr_repo
         from agent_worktrees import config as cfg_mod
         from agent_worktrees import sweep
@@ -157,7 +158,7 @@ class TestPauseWorktree:
             rec = tracking.load_record(yaml_path)
             for c in rec.resources:
                 if c.ref == "o/r#99":
-                    c.created_at = "2099-01-01T00:00:00"
+                    c.note = "concurrently rewritten"
             tracking.save_record(rec, yaml_path)
             return gone_of, safe_of
 
