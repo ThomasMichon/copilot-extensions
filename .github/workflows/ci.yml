@@ -242,6 +242,22 @@ jobs:
         run: python tools/check-module-size.py
       - name: Module size guard tests
         run: python -m pytest -q tools/test_check_module_size.py
+      - name: Large files (generous image cap, tight default cap, PR diff only)
+        # Same pinned-sha pattern as the changefile-presence/module-size steps
+        # above, for the same reason: without an explicit --head, the default
+        # diff base resolves against the ephemeral refs/pull/<n>/merge commit
+        # actions/checkout produces, silently folding dev's drift since this
+        # PR opened into what looks like this PR's own diff.
+        if: github.event_name == 'pull_request'
+        run: python tools/check-large-files.py --base ${{ github.event.pull_request.base.sha }} --head ${{ github.event.pull_request.head.sha }}
+      - name: Large files (full sweep)
+        # Runs unconditionally (push/workflow_dispatch too), mirroring the
+        # module-size full-sweep step above, so organic drift on trunk is
+        # still caught outside any single diff.
+        if: github.event_name != 'pull_request'
+        run: python tools/check-large-files.py --all
+      - name: Large files guard tests
+        run: python -m pytest -q tools/test_check_large_files.py
       - name: No agent-machines consuming-side packages in this repo
         # agent-machines packages declare a CONSUMING repo's own desired
         # machine state (sometimes gated down to a literal machine name);

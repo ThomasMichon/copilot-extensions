@@ -76,4 +76,9 @@ COPILOT_EXTENSIONS_GUARD_BASE=origin/dev "${PY[@]}" "$ROOT/tools/check-no-intern
 # (or its shrink-only grandfathered ceiling, for pre-existing offenders) --
 # a componentization failure (queue.py's ~7,200 lines) had no automated guard
 # before this. See tools/check-module-size.py and CONTRIBUTING.md § Code Style.
-exec "${PY[@]}" "$ROOT/tools/check-module-size.py"
+"${PY[@]}" "$ROOT/tools/check-module-size.py"
+# Block check-in of oversized files (a generous cap for images, a tight cap
+# for everything else, and an outright ban on source maps/raw diffs) -- the
+# guard the main-history-rewrite effort's ~300MB of accumulated
+# coverage-baseline blobs never had. See tools/check-large-files.py.
+exec "${PY[@]}" "$ROOT/tools/check-large-files.py" --base origin/dev
