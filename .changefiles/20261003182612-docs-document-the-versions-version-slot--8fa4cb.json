@@ -1,0 +1,9 @@
+{
+  "comment": "docs: document the versions/<version>/ slot completeness marker (.install-complete) and the No module named worktree_manager recovery path",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

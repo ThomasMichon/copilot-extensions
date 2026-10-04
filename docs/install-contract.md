@@ -1554,6 +1554,18 @@ and the markerless corpse is tossed + rebuilt on the next run (automatic retry).
 > WATCHDOG whole-tree kill, MARKER/TOSS, NO-ORPHANS, BOUNDED) — via a
 > `COPILOT_PLUGIN_INSTALL_SMOKE` seam, without a heavy venv build.
 
+> **`worktree-manager` carries an independent analog, not this shared
+> helper.** It is deliberately **not** a Copilot plugin (see its own
+> [README](../worktree-manager/README.md)) and ships no `libs/` monorepo
+> ancestor to a machine that fetched it standalone via tarball, so its
+> `self_install.py` cannot depend on `versioned_runtime.py`. It reimplements
+> the same "marker published only after a verified-complete build" invariant
+> directly: a per-slot `.install-complete` file, invalidated before
+> mutation and published only after every launch-critical file is confirmed
+> present, closing the identical corpse-slot hazard (there, a Windows
+> `PermissionError` from `shutil.rmtree`/`shutil.copytree` hitting a slot
+> still held open by another process) for this one standalone installer.
+
 ### POSIX parity (`.sh`)
 
 The `.sh` installers carry the **same** `install-contract:v4` blocks as `.ps1`,

@@ -93,6 +93,30 @@ install with `worktree-manager self-install` (dry-run) / `--apply`, and see it i
 project binstub discovers this Manager through the generic control-plane-provider
 registry rather than a literal `worktree-manager` PATH probe.
 
+### Slot completeness and recovery
+
+Each `versions/<version>/` slot is proven complete by its own
+`.install-complete` marker, written only as the **last** step of a fully
+successful copy + pointer materialization, and invalidated **before** any
+mutation of that slot begins (never left to the copy/removal step that
+follows, which can itself fail partway through on a locked file). A version
+is only ever reported installed (`current-version` published) when its slot
+carries that marker **and** every file the binstubs need to launch
+(`pyproject.toml`, `src/worktree_manager/__init__.py`,
+`src/worktree_manager/__main__.py`). This closes a real failure mode: a
+Windows `PermissionError` (WinError 32) from `shutil.rmtree`/`shutil.copytree`
+hitting a slot still held open by another process (a stranded or still-live
+mux-daemon pinned there) could otherwise leave an existing-but-empty slot on
+disk while `current-version` still correctly named it — every subsequent run
+then failed with `No module named worktree_manager`, indefinitely, since
+presence-only (`is_dir()`) checking treated that broken slot as valid forever.
+
+If you hit `No module named worktree_manager` (or any failure implying the
+slot is missing code it should have), re-run the bootstrap one-liner above, or
+`worktree-manager self-install --apply` directly — it is version-gated and
+idempotent, and will detect and rebuild an incomplete slot rather than
+skipping it as "already current."
+
 Registered project binstubs enter the interactive front door as
 `worktree-manager --project <name>`; that project-only form launches the Picker.
 Truly argument-free `worktree-manager` retains the provider-free first-run
