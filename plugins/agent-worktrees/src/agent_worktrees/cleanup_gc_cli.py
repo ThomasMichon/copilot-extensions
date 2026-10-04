@@ -75,6 +75,11 @@ def add_parsers(sub) -> None:
         "--lease-kind", default=None,
         help="With --lease-gc: restrict to one lease kind (codespace/container/task/...); "
              "default every kind")
+    p.add_argument(
+        "--mirror-claim-history", action="store_true",
+        help="Also push any locally-recorded, not-yet-mirrored claim_history "
+             "events (refs/agent-worktrees/claim-history/v1) to the shared "
+             "store -- opt-in (network + force-push), resumable, idempotent")
     p = sub.add_parser("sweep-managed", help="Machine-readable managed-worktree leak sweep for external control planes")
     p.add_argument("--dry-run", action="store_true", help="Report what would be removed without removing anything")
     p.add_argument("--json", action="store_true", help="Emit the managed sweep result as JSON")
@@ -697,11 +702,19 @@ def cmd_gc(args: argparse.Namespace) -> int:
          Network + force-push to the lease store; skipped entirely unless
          ``--lease-gc`` is passed, and a silent no-op (not an error) when no
          lease store is configured for this project.
+      7. **Claim-history mirror sync** (opt-in, ``--mirror-claim-history``)
+         -- pushes every locally-recorded, not-yet-mirrored
+         :mod:`claim_history` event (``refs/agent-worktrees/claim-history/v1``,
+         same shared store as the lease refs) to its own append-only remote
+         ref, so PR ownership history survives this machine's own cleanup
+         instead of evaporating with it (worktree-claims-transitive-finalization
+         Phase 3b). Resumable (a persisted per-resource cursor), idempotent,
+         and a silent no-op when no store is configured.
 
     Idempotent: a second run right after the first finds nothing to do.
 
-    ``--json`` reports the managed + orphan + shell + lease sweeps
-    (machine-readable); the tracked reap runs in text mode.
+    ``--json`` reports the managed + orphan + shell + lease + claim-history
+    mirror sweeps (machine-readable); the tracked reap runs in text mode.
     """
     from . import gc as gc_mod
 
@@ -763,6 +776,15 @@ def cmd_gc(args: argparse.Namespace) -> int:
     # 6. Lease-ref squash (opt-in, network + force-push to the lease store).
     lease_gc = _run_lease_gc(args) if getattr(args, "lease_gc", False) else None
 
+    # 7. Claim-history mirror sync (opt-in, network + force-push to the
+    #    same shared store -- worktree-claims-transitive-finalization
+    #    Phase 3b's remote-mirroring item).
+    history_mirror = (
+        _run_claim_history_mirror(args)
+        if getattr(args, "mirror_claim_history", False)
+        else None
+    )
+
     if json_mode:
         payload = {
             "dry_run": dry,
@@ -773,6 +795,8 @@ def cmd_gc(args: argparse.Namespace) -> int:
         }
         if lease_gc is not None:
             payload["lease_gc"] = lease_gc
+        if history_mirror is not None:
+            payload["claim_history_mirror"] = history_mirror
         print(json.dumps(payload, indent=2))
         return 0
     if do_managed:
@@ -782,7 +806,31 @@ def cmd_gc(args: argparse.Namespace) -> int:
         _print_gc_shells(shells, dry)
     if lease_gc is not None:
         _print_gc_lease(lease_gc, dry)
+    if history_mirror is not None:
+        _print_gc_claim_history_mirror(history_mirror, dry)
     return 0
+
+
+def _run_claim_history_mirror(args: argparse.Namespace) -> dict[str, object]:
+    """Push pending claim_history events (step 7 of ``gc``), degrading to a
+    reported no-op when no shared store is configured for this project --
+    this sweep is opt-in and must never fail an otherwise-successful ``gc``.
+    """
+    from . import claim_history_mirror
+
+    return claim_history_mirror.sync_pending(dry_run=getattr(args, "dry_run", False))
+
+
+def _print_gc_claim_history_mirror(result: dict[str, object], dry: bool) -> None:
+    if not result.get("available"):
+        return
+    refs = result.get("refs") or []
+    if dry:
+        pending = sum(int(r.get("pending", 0)) for r in refs)
+        print(f"Would mirror {pending} pending claim-history event(s) across {len(refs)} ref(s).")
+        return
+    pushed = result.get("pushed", 0)
+    print(f"Mirrored {pushed} claim-history event(s) across {len(refs)} ref(s).")
 
 
 def _run_lease_gc(args: argparse.Namespace) -> dict[str, object]:
