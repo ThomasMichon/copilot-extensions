@@ -1008,6 +1008,15 @@ executes the PR's own code and never runs tests — its only effect is that
 one comment, so it adds no capability a non-collaborator didn't already
 have.
 
+It recognizes `main-gate`'s own three legitimate automated-PR shapes
+(the release pipeline's own PR, a workflow-only bootstrap PR, and
+`module-size-baseline-widen.yml`'s automated PR) by the same branch-name
+and diff-content signature `main-gate` itself checks, not merely by
+"author is the repo owner" — so if this reminder is ever widened to cover
+every PR against `main` rather than only non-owner authors, it still can't
+mistake the release pipeline's own automated PRs for ones that need a
+nudge.
+
 ### If `main`'s history is force-rewritten
 
 `main` may occasionally have its history rewritten (e.g. a deliberate,
