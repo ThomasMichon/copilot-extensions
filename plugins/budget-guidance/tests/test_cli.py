@@ -82,6 +82,22 @@ def test_invalid_at_is_a_machine_readable_error(capsys):
     assert "--at must be a valid RFC 3339 instant" in error["error"]
 
 
+def test_empty_at_is_rejected_not_silently_defaulted(capsys):
+    # An explicitly supplied empty string is a malformed --at, not an omitted
+    # one -- it must not silently fall back to "now".
+    assert main(["status", "--at", "", "--json"]) == 2
+    error = json.loads(capsys.readouterr().out)
+    assert error["schema"] == "copilot-extensions.budget-posture-error"
+    assert "--at must be a valid RFC 3339 instant" in error["error"]
+
+
+def test_invalid_at_human_error_is_not_mislabeled_as_configuration(capsys):
+    assert main(["status", "--at", "not-a-timestamp"]) == 2
+    err = capsys.readouterr().err
+    assert "invalid configuration" not in err
+    assert "--at must be a valid RFC 3339 instant" in err
+
+
 def test_huge_freshness_returns_modeled_configuration_error(tmp_path, capsys):
     config = tmp_path / "config.json"
     _write_config(config)

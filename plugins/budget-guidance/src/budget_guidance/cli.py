@@ -47,29 +47,40 @@ def _render_human(posture: dict[str, Any]) -> str:
     )
 
 
+def _emit_model_error(args: argparse.Namespace, exc: ModelError, *, human_prefix: str) -> int:
+    """Report a ModelError in the shape ``args.json`` requests and return exit code 2."""
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "schema": "copilot-extensions.budget-posture-error",
+                    "version": 1,
+                    "error": str(exc),
+                },
+                sort_keys=True,
+            )
+        )
+    else:
+        print(f"budget-guidance: {human_prefix}{exc}", file=sys.stderr)
+    return 2
+
+
 def _status(args: argparse.Namespace) -> int:
+    # `args.at is not None` (not a truthy check) so an explicitly supplied
+    # empty string ("--at \"\"") is still validated and rejected rather than
+    # silently defaulting to "now".
     try:
-        at = parse_instant(args.at, "--at") if args.at else datetime.now(timezone.utc)
+        at = parse_instant(args.at, "--at") if args.at is not None else datetime.now(timezone.utc)
+    except ModelError as exc:
+        return _emit_model_error(args, exc, human_prefix="")
+    try:
         config_path = Path(args.config).expanduser()
         if not config_path.is_file():
             posture = unavailable_posture(at, f"configuration not found: {config_path}")
         else:
             posture = build_posture(parse_config(load_json(config_path)), at)
     except ModelError as exc:
-        if args.json:
-            print(
-                json.dumps(
-                    {
-                        "schema": "copilot-extensions.budget-posture-error",
-                        "version": 1,
-                        "error": str(exc),
-                    },
-                    sort_keys=True,
-                )
-            )
-        else:
-            print(f"budget-guidance: invalid configuration: {exc}", file=sys.stderr)
-        return 2
+        return _emit_model_error(args, exc, human_prefix="invalid configuration: ")
     if args.json:
         print(json.dumps(posture, indent=2, sort_keys=True))
     else:
