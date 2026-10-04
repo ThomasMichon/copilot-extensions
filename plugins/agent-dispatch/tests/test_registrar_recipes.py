@@ -989,6 +989,47 @@ def test_global_issue_reproducer_resolves_to_repository_issue_loop_with_verifica
     assert spec["evaluator_ref"] == "issue-reproducer"
 
 
+def test_global_effort_builder_resolves_to_repository_issue_loop_with_verification(
+    tmp_path,
+):
+    import json as _json
+
+    from agent_dispatch.registrar_discovery import read_declaration_file_set
+
+    path = tmp_path / "effort-builder.json"
+    path.write_text(
+        _json.dumps(
+            {
+                "extends": "global:effort-builder",
+                "name": "effort-backlog",
+                "repo": "example/project",
+                "source": "effort-backlog",
+                "cadence_seconds": 3600,
+                "task_label": "effort-build",
+                "forge": {"provider": "github", "producer_login": "effort-bot"},
+                "reservation": {"label": "effort-reserved"},
+                "pool": {
+                    "max_active_processes": 1,
+                    "body": {"agent": "effort-worker"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    declarations = read_declaration_file_set(path)
+
+    workers = next(d for d in declarations if d.name == "effort-backlog-workers")
+    assert workers.body.type == "headless"
+    assert workers.body.agent == "effort-worker"
+    source = next(d for d in declarations if d.name == "effort-backlog-source")
+    spec = source.spec["repository_issue_loop"]
+    assert spec["forge"]["provider"] == "github"
+    assert spec["worker_identity"] == "effort-builder"
+    assert spec["require_verification"] is True
+    assert spec["evaluator_ref"] == "effort-builder"
+
+
 def test_global_reviewer_resolves_to_reviewer_loop_with_standing_charter(tmp_path):
     import json as _json
 
@@ -1117,3 +1158,13 @@ def test_issue_reproducer_builtin_identity_resolves():
     assert identity.name == "issue-reproducer"
     assert "relevant reproduction strategies" in identity.rules
     assert "strike marker convention" in identity.rules
+
+
+def test_effort_builder_builtin_identity_resolves():
+    from agent_dispatch.worker_identities import load_worker_identity
+
+    identity = load_worker_identity("effort-builder")
+
+    assert identity.name == "effort-builder"
+    assert "planning-and-assignment lane" in identity.rules
+    assert "constituent bug fixes" in identity.rules

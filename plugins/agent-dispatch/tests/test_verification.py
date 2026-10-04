@@ -841,6 +841,92 @@ def test_repository_issue_loop_issue_reproducer_requires_evidence_and_outcome_ma
     assert queue.get(incomplete_id).status == Status.SUBMITTED
 
 
+def test_repository_issue_loop_effort_builder_requires_shared_effort_assignment_and_review_gate(
+    tmp_path,
+):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    script = tmp_path / "eval.py"
+    script.write_text(
+        "import json, re, sys\n"
+        "fixtures = {\n"
+        "  'issues': {\n"
+        "    37: {'body': 'Assigned to efforts/active/repro-hardening/README.md'},\n"
+        "    38: {'body': 'Assigned to efforts/active/repro-hardening/README.md'},\n"
+        "    39: {'body': 'Assigned to efforts/active/review-pending/README.md'},\n"
+        "    40: {'body': 'Assigned to efforts/active/other-effort/README.md'},\n"
+        "  },\n"
+        "  'efforts': {\n"
+        "    'efforts/active/repro-hardening/README.md': {\n"
+        "      'review_gate': 'merged',\n"
+        "      'pr_url': 'https://example.com/pull/77',\n"
+        "    },\n"
+        "    'efforts/active/review-pending/README.md': {\n"
+        "      'review_gate': 'draft',\n"
+        "      'pr_url': None,\n"
+        "    },\n"
+        "  },\n"
+        "}\n"
+        "task = json.load(sys.stdin)['task']\n"
+        "payload = json.loads(task['payload_inline'])\n"
+        "keys = payload['repository_issue_loop']['resource_keys']\n"
+        "numbers = [int(re.search(r':issue:(\\d+)$', key).group(1)) for key in keys]\n"
+        "effort_path = None\n"
+        "for number in numbers:\n"
+        "    body = fixtures['issues'][number]['body']\n"
+        "    match = re.search(r'(efforts/active/[^\\s]+/README\\.md)', body)\n"
+        "    if match is None:\n"
+        "        json.dump({'decision': 'noop', 'reason': 'issue missing effort assignment'}, sys.stdout)\n"
+        "        break\n"
+        "    current = match.group(1)\n"
+        "    if effort_path is None:\n"
+        "        effort_path = current\n"
+        "    elif current != effort_path:\n"
+        "        json.dump({'decision': 'noop', 'reason': 'issues assigned to different efforts'}, sys.stdout)\n"
+        "        break\n"
+        "else:\n"
+        "    effort = fixtures['efforts'].get(effort_path, {})\n"
+        "    gate = effort.get('review_gate')\n"
+        "    if gate not in {'open', 'merged'}:\n"
+        "        json.dump({'decision': 'noop', 'reason': 'effort not yet in review gate'}, sys.stdout)\n"
+        "    else:\n"
+        "        json.dump({'decision': 'confirm', 'reason': 'issues grouped into one reviewed effort'}, sys.stdout)\n",
+        encoding="utf-8",
+    )
+    _register_script(queue, str(script), evaluator_ref="effort-builder")
+    good_id = _submitted_task(
+        queue,
+        "issues grouped into merged effort plan",
+        require_verification=True,
+        evaluator_ref="effort-builder",
+        payload_inline='{"repository_issue_loop":{"resource_keys":["forge:github:repository:example/project:issue:37","forge:github:repository:example/project:issue:38"]}}',
+    )
+    unassigned_id = _submitted_task(
+        queue,
+        "issue assigned to different effort",
+        require_verification=True,
+        evaluator_ref="effort-builder",
+        payload_inline='{"repository_issue_loop":{"resource_keys":["forge:github:repository:example/project:issue:37","forge:github:repository:example/project:issue:40"]}}',
+    )
+    missing_gate_id = _submitted_task(
+        queue,
+        "effort exists but has not reached review gate",
+        require_verification=True,
+        evaluator_ref="effort-builder",
+        payload_inline='{"repository_issue_loop":{"resource_keys":["forge:github:repository:example/project:issue:39"]}}',
+    )
+
+    good = evaluate_submitted_task(queue, good_id, trigger="submitted")
+    unassigned = evaluate_submitted_task(queue, unassigned_id, trigger="submitted")
+    missing_gate = evaluate_submitted_task(queue, missing_gate_id, trigger="submitted")
+
+    assert good["applied"][0]["decision"] == "complete"
+    assert queue.get(good_id).status == Status.COMPLETED
+    assert unassigned["applied"][0]["decision"] == "noop"
+    assert queue.get(unassigned_id).status == Status.SUBMITTED
+    assert missing_gate["applied"][0]["decision"] == "noop"
+    assert queue.get(missing_gate_id).status == Status.SUBMITTED
+
+
 def test_future_scheduled_verification_uses_idle_interval_not_retry_interval(tmp_path):
     queue = TaskQueue(tmp_path / "tasks.db")
     task = queue.create(

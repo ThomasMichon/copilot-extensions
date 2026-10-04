@@ -22,6 +22,7 @@ from agent_dispatch.repository_issue_loops import (
     _forge_provider_for,
     _latest_reservations,
     _marker,
+    _resource_key,
     expand_repository_issue_loop,
     occurrence_epoch,
     run_tick,
@@ -1035,6 +1036,106 @@ def test_global_issue_reproducer_drives_through_the_generic_issue_loop(tmp_path)
     assert "implementation, required checks, review, merge, and issue closure" not in task["prompt"]
 
 
+def test_global_effort_builder_groups_multiple_issues_into_one_effort_task(tmp_path):
+    import json as _json
+
+    path = tmp_path / "effort-builder.json"
+    path.write_text(
+        _json.dumps(
+            {
+                "extends": "global:effort-builder",
+                "name": "effort-backlog",
+                "repo": "example/project",
+                "source": "effort-backlog",
+                "cadence_seconds": 3600,
+                "issue_numbers": [17, 18],
+                "task_label": "effort-build",
+                "forge": {"provider": "github", "producer_login": "effort-bot"},
+                "reservation": {"label": "effort-reserved", "comment": True},
+                "pool": {
+                    "max_active_processes": 1,
+                    "body": {"agent": "effort-worker"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    declarations = read_declaration_file_set(path)
+    source = next(d for d in declarations if d.name == "effort-backlog-source")
+    config = source.spec["repository_issue_loop"]
+    provider = FakeProvider(
+        [
+            _issue(17, labels=("bug", "triage:accepted", "ready")),
+            _issue(18, labels=("bug", "triage:accepted", "ready")),
+            _issue(19, labels=("bug", "triage:accepted", "ready")),
+        ]
+    )
+
+    result = run_tick(
+        FakeClient(),
+        config,
+        provider=provider,
+        clock=lambda: 10_000,
+    )
+
+    task = result["created"][0]
+    assert provider.list_calls == 1
+    assert task["require_verification"] is True
+    assert task["evaluator_ref"] == "effort-builder"
+    assert task["title"] == "Build tracked effort for repository issues #17, #18"
+    assert task["goal"] == "Group repository issues #17, #18 into tracked effort work"
+    assert "- #17: Issue 17 (https://example.com/issues/17)" in task["prompt"]
+    assert "- #18: Issue 18 (https://example.com/issues/18)" in task["prompt"]
+    assert "#19" not in task["title"]
+    assert "- #19: Issue 19" not in task["prompt"]
+    assert "Group the selected issues into one coherent tracked effort" in task["prompt"]
+    assert "Do not turn this effort-building task into an implementation lane" in task["prompt"]
+    assert "that execution belongs to a separate worker" in task["prompt"]
+    assert "implementation, required checks, review, merge, and issue closure" not in task["prompt"]
+
+
+def test_explicit_issue_set_suppresses_creation_when_any_configured_issue_is_missing():
+    config = _config(issue_numbers=[17, 18], include_labels=["ready"])
+    provider = FakeProvider([_issue(17, labels=("ready",)), _issue(19, labels=("ready",))])
+
+    result = run_tick(
+        FakeClient(),
+        config,
+        provider=provider,
+        clock=lambda: 10_000,
+    )
+
+    assert result["created"] == []
+    assert result["eligible"] == []
+    assert result["reserved"] == []
+
+
+def test_explicit_issue_set_releases_partial_reservations_when_one_issue_loses_election():
+    config = _config(issue_numbers=[17, 18], include_labels=["ready"])
+    provider = FakeProvider([_issue(17, labels=("ready",)), _issue(18, labels=("ready",))])
+    client = FakeClient()
+    client.resource_reservations[_resource_key(config, 18)] = {
+        "key": _resource_key(config, 18),
+        "owner": "other-loop",
+        "token": "token-existing",
+        "task_id": None,
+    }
+
+    result = run_tick(
+        client,
+        config,
+        provider=provider,
+        clock=lambda: 10_000,
+    )
+
+    assert result["created"] == []
+    assert result["reserved"] == []
+    assert result["lost"] == [18]
+    assert 17 in [issue for issue, *_rest in provider.released]
+    assert _resource_key(config, 17) not in client.resource_reservations
+
+
 def test_proposed_task_retries_transient_approve_failure():
     provider = FakeProvider([_issue(1)])
     client = FakeClient(fail_approve_once=True)
@@ -1772,6 +1873,8 @@ def test_claim_does_not_reuse_a_different_loops_comment():
     [
         ({"source": ""}, "source"),
         ({"batch_size": 0}, "batch_size"),
+        ({"issue_numbers": [True]}, "issue_numbers: expected a list of positive integers"),
+        ({"issue_numbers": ["17"]}, "issue_numbers: expected a list of positive integers"),
         ({"forge": {"provider": "other"}}, "only \\['azure-devops', 'github'\\]"),
         ({"forge": {"provider": "github"}}, "producer_login"),
         ({"task_contract": False}, "task_contract: expected a mapping"),
