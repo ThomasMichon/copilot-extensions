@@ -969,6 +969,42 @@ and vanishes the next time anything else promotes. If you're an agent about
 to reach for `--admin` against this repo's `main`: stop, re-read this
 section, and retarget to `dev` instead.
 
+### If `main`'s history is force-rewritten
+
+`main` may occasionally have its history rewritten (e.g. a deliberate,
+operator-approved purge of accumulated large blobs from old promotion
+commits — see the dev-branch-release-pipeline effort's own Journal for any
+specific instance). This is a one-shot, `main`-only operation, never
+routine, and never something an agent decides to do on its own initiative.
+
+If your local checkout/worktree's `main` ends up non-fast-forward against
+`origin/main` after one of these (`git fetch` reporting diverged history, or
+a push to `main` rejected for a reason that isn't the ordinary gate checks
+above): **don't merge, rebase, or try to reconcile the two histories.**
+`main` is a generated artifact (wholesale-replaced every promotion anyway,
+per the section above) — just discard your local `main` and recreate it from
+the new one:
+
+```bash
+git fetch origin main
+git checkout main && git reset --hard origin/main
+# or, for a worktree whose own branch merely based off the old main:
+git rebase --onto origin/main <old-main-tip> <your-branch>
+```
+
+**`dev` is never affected** — it forked long before any such rewrite and
+has its own independent, untouched history; only checkouts that track `main`
+directly need this. Nothing downstream that actually *consumes* this repo
+needs to know or care either: `copilot plugin install`/`update` (both the
+direct-repo and marketplace paths) and `worktree-manager`'s own self-updater
+fetch **by branch name** (`git fetch --depth 1 <repo> main` + `checkout
+FETCH_HEAD`, or an equivalent GitHub codeload tarball keyed by ref) — never
+a pinned commit SHA — so they transparently pick up whatever is currently on
+`main`, rewritten or not. This was confirmed live (installed a real plugin
+from a throwaway test repo, force-rewrote its `main`, re-ran `copilot plugin
+update`/`copilot plugin marketplace update`: both picked up the rewritten
+content with no error, no warning, nothing to work around).
+
 ## Deploying: one command — `<repo> update`
 
 **The canonical deploy is a single unified command: `<repo> update`**
