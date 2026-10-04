@@ -131,10 +131,10 @@ def test_daemon_statuses_marks_a_failed_health_request_unreachable(tmp_path: Pat
 def test_daemon_statuses_requires_port_match_not_just_pid_for_active(
     tmp_path: Path, monkeypatch
 ):
-    """Copilot review finding: after PID reuse, the routing table's active
-    row can retain a stale endpoint whose pid a later, unrelated daemon
-    happens to reuse on a DIFFERENT port -- matching pid alone would
-    misreport that unrelated daemon as active."""
+    """After PID reuse, the routing table's active row can retain a stale
+    endpoint whose pid a later, unrelated daemon happens to reuse on a
+    DIFFERENT port -- matching pid alone would misreport that unrelated
+    daemon as active."""
     root = tmp_path / "root"
     root.mkdir()
 
