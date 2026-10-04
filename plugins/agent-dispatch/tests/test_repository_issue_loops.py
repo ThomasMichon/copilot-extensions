@@ -936,6 +936,56 @@ def test_repository_issue_loop_stamps_evaluator_ref():
     assert result["created"][0]["evaluator_ref"] == "review-loop"
 
 
+def test_global_backlog_triager_drives_through_the_generic_issue_loop(tmp_path):
+    import json as _json
+
+    path = tmp_path / "triager.json"
+    path.write_text(
+        _json.dumps(
+            {
+                "extends": "global:backlog-triager",
+                "name": "triage-backlog",
+                "repo": "example/project",
+                "source": "triage-backlog",
+                "cadence_seconds": 3600,
+                "task_label": "backlog-triage",
+                "forge": {"provider": "github", "producer_login": "triage-bot"},
+                "reservation": {"label": "triage-reserved", "comment": True},
+                "pool": {
+                    "max_active_processes": 1,
+                    "body": {"agent": "triage-worker"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    declarations = read_declaration_file_set(path)
+    source = next(d for d in declarations if d.name == "triage-backlog-source")
+    config = source.spec["repository_issue_loop"]
+    provider = FakeProvider([_issue(17, labels=("bug", "needs-triage"))])
+
+    result = run_tick(
+        FakeClient(),
+        config,
+        provider=provider,
+        clock=lambda: 10_000,
+    )
+
+    task = result["created"][0]
+    assert provider.list_calls == 1
+    assert task["require_verification"] is True
+    assert task["evaluator_ref"] == "backlog-triager"
+    assert task["title"] == "Triage repository issues #17"
+    assert task["goal"] == "Classify and triage repository issues #17"
+    assert "Legitimate active bugs must" in task["prompt"]
+    assert "Do not turn this triage task into an implementation lane" in task["prompt"]
+    assert "return immediately to triage/dispositioning" in task["prompt"]
+    assert "implementation, required checks, review, merge, and issue closure" not in task["prompt"]
+    assert "classify it" in task["prompt"]
+    assert "attached to tracked effort" in task["prompt"]
+
+
 def test_proposed_task_retries_transient_approve_failure():
     provider = FakeProvider([_issue(1)])
     client = FakeClient(fail_approve_once=True)
@@ -1675,6 +1725,7 @@ def test_claim_does_not_reuse_a_different_loops_comment():
         ({"batch_size": 0}, "batch_size"),
         ({"forge": {"provider": "other"}}, "only \\['azure-devops', 'github'\\]"),
         ({"forge": {"provider": "github"}}, "producer_login"),
+        ({"task_contract": False}, "task_contract: expected a mapping"),
         ({"reservation": {"label": "x", "comment": False}}, "must be true"),
         ({"pool": {"max_active_processes": 2}}, "concurrency must be 1"),
         ({"pool": {"body": {"type": "embody"}}}, "must be 'headless'"),

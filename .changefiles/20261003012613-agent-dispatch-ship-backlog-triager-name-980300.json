@@ -1,0 +1,9 @@
+{
+  "comment": "agent-dispatch: ship backlog-triager named recipe",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    }
+  ]
+}
