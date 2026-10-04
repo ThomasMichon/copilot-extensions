@@ -120,6 +120,7 @@ phase 1 "install the live-cutover trio"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
+  "sandbox": { "enabled": false },
   "extraKnownMarketplaces": { "$MARKETPLACE_NAME": $MARKETPLACE_SOURCE },
   "enabledPlugins": {
     "agent-worktrees@$MARKETPLACE_NAME": true,
@@ -150,7 +151,7 @@ PLUGIN_ARGS=()
 for p in "${TRIO[@]}"; do
     [ -d "$INSTALLED_ROOT/$p" ] && PLUGIN_ARGS+=( --plugin-dir "$INSTALLED_ROOT/$p" )
 done
-( cd "$HOME/wt-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARGS[@]}" ) || true
+( cd "$HOME/wt-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all --experimental "${PLUGIN_ARGS[@]}" ) || true
 sleep 8
 # Deterministically ensure the agent-worktrees + agent-dispatch binstubs resolve.
 # First-session self-provisioning is best-effort here (agent-worktrees notably

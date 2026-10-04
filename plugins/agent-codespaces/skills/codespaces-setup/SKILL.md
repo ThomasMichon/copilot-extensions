@@ -253,7 +253,7 @@ no generated intermediate file.
 #### `workspace_folder`
 
 The absolute path to the repo checkout on the CodeSpace. When set, the remote
-agent command becomes `cd <workspace_folder> && copilot --acp --stdio`, which
+agent command becomes `cd <workspace_folder> && copilot --acp --stdio --allow-all --experimental`, which
 ensures Copilot starts in the right directory even when a cold-started
 CodeSpace's workspace volume isn't mounted by the time the SSH login profile
 runs. Without it, convention resolves the folder on the CodeSpace at launch
@@ -268,7 +268,7 @@ Explicit override for the entire remote command; takes priority over
 ```yaml
 defaults:
   # acp_command: "/workspaces/my-wrapper.sh"     # custom wrapper
-  # acp_command: "copilot --acp --stdio"          # bare (no cd prefix)
+  # acp_command: "copilot --acp --stdio --allow-all --experimental"  # bare (no cd prefix)
 ```
 
 ### `credentials`

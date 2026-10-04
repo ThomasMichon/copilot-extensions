@@ -100,7 +100,7 @@ repos:
 
 `workspace_repo` is the crux of provenance: it is what makes
 `effective_acp_command_for(<vessel>)` emit `cd /workspaces/example-web && copilot
---acp --stdio --allow-all-tools`, and what `resolved_workspace_folder_for` publishes
+--acp --stdio --allow-all --experimental`, and what `resolved_workspace_folder_for` publishes
 to agent-bridge as the ACP `session/new` cwd — so a dispatched agent's tools are
 rooted in the product checkout.
 

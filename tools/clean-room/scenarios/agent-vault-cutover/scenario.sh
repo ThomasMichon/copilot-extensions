@@ -75,6 +75,7 @@ phase 1 "install $PLUGIN"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
+  "sandbox": { "enabled": false },
   "extraKnownMarketplaces": { "$MARKETPLACE_NAME": { "source": { "source": "github", "repo": "$MARKETPLACE_REPO" } } },
   "enabledPlugins": { "$PLUGIN@$MARKETPLACE_NAME": true }
 }
@@ -93,7 +94,7 @@ _apply_uv_index_fixture
 mkdir -p "$HOME/av-repo" && ( cd "$HOME/av-repo" && git init -q && git config user.email t@e && git config user.name t && echo '# av' > README.md && git add -A && git commit -qm init )
 PLUGIN_ARG=()
 [ -d "$INSTALLED_ROOT/$PLUGIN" ] && PLUGIN_ARG=( --plugin-dir "$INSTALLED_ROOT/$PLUGIN" )
-( cd "$HOME/av-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARG[@]}" ) || true
+( cd "$HOME/av-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all --experimental "${PLUGIN_ARG[@]}" ) || true
 sleep 8
 # Drive the self-provisioning binstub in a LOGIN shell (so ~/.local/bin is on
 # PATH) and the installer's explicit `provision` action as a deterministic fallback.

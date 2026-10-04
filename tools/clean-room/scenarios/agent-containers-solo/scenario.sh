@@ -75,6 +75,7 @@ phase 1 "install ONLY $PLUGIN"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
+  "sandbox": { "enabled": false },
   "extraKnownMarketplaces": { "$MARKETPLACE_NAME": { "source": { "source": "github", "repo": "$MARKETPLACE_REPO" } } },
   "enabledPlugins": { "$PLUGIN@$MARKETPLACE_NAME": true }
 }
@@ -100,7 +101,7 @@ _apply_uv_index_fixture
 mkdir -p "$HOME/ac-repo" && ( cd "$HOME/ac-repo" && git init -q && git config user.email t@e && git config user.name t && echo '# ac' > README.md && git add -A && git commit -qm init )
 PLUGIN_ARG=()
 [ -d "$INSTALLED_ROOT/$PLUGIN" ] && PLUGIN_ARG=( --plugin-dir "$INSTALLED_ROOT/$PLUGIN" )
-( cd "$HOME/ac-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARG[@]}" ) || true
+( cd "$HOME/ac-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all --experimental "${PLUGIN_ARG[@]}" ) || true
 sleep 8
 # First call to the self-provisioning binstub builds the venv on demand if the
 # session-start stamp placed it on PATH; the explicit installer provision is the

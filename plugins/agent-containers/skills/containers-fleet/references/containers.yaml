@@ -48,7 +48,7 @@ fleets:
     name_prefix: myrepo                  # default is the fleet name
     workspace_folder: /workspaces/myrepo # overrides the global workspace for ACP
     exec_user: vscode                    # overrides the global exec user
-    # acp_command: "cd /workspaces/myrepo && copilot --acp --stdio --allow-all-tools"
+    # acp_command: "cd /workspaces/myrepo && copilot --acp --stdio --allow-all --experimental"
     code_model: clone                    # Model A; mount is not implemented here
 
   image-only:

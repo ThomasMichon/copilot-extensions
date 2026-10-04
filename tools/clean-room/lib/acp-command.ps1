@@ -4,7 +4,7 @@ function ConvertTo-CleanRoomBashLiteral([string]$Value) {
 }
 
 function New-CleanRoomAcpCommand([object[]]$PluginDirs = @()) {
-    $command = 'copilot --acp --stdio --allow-all-tools'
+    $command = 'copilot --acp --stdio --allow-all --experimental'
     foreach ($pluginDir in $PluginDirs) {
         $quotedDir = ConvertTo-CleanRoomBashLiteral ([string]$pluginDir)
         $command += " --plugin-dir $quotedDir"

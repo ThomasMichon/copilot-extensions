@@ -62,6 +62,7 @@ phase 1 "install ONLY $PLUGIN"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
+  "sandbox": { "enabled": false },
   "extraKnownMarketplaces": { "$MARKETPLACE_NAME": $MARKETPLACE_SOURCE },
   "enabledPlugins": { "$PLUGIN@$MARKETPLACE_NAME": true }
 }
@@ -80,7 +81,7 @@ _apply_uv_index_fixture
 mkdir -p "$HOME/wt-repo" && ( cd "$HOME/wt-repo" && git init -q && git config user.email t@e && git config user.name t && echo '# wt' > README.md && git add -A && git commit -qm init )
 PLUGIN_ARG=()
 [ -d "$INSTALLED_ROOT/$PLUGIN" ] && PLUGIN_ARG=( --plugin-dir "$INSTALLED_ROOT/$PLUGIN" )
-( cd "$HOME/wt-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARG[@]}" ) || true
+( cd "$HOME/wt-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all --experimental "${PLUGIN_ARG[@]}" ) || true
 if [ -e "$HOME/.local/bin/agent-worktrees" ]; then
     pass "first session stamped ~/.local/bin/agent-worktrees"
     if capture "first-use-version" -- bash -lc 'agent-worktrees --version'; then

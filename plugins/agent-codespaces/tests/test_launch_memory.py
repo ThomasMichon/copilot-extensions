@@ -20,7 +20,7 @@ def test_a_bare_resume_of_the_recorded_session_gets_its_flags_and_driver_back():
 
 
 def test_another_session_or_continue_never_borrows_the_record():
-    lm.remember("cs-1", TENANT, ["--allow-all-tools"], "orchestrator", "s-b")
+    lm.remember("cs-1", TENANT, ["--allow-all", "--experimental"], "orchestrator", "s-b")
     # Resuming a different (earlier) session: it must not gain session B's permissions.
     assert lm.apply("cs-1", TENANT, ["--resume=s-a"], None) == (["--resume=s-a"], D, [])
     # --continue names no session: nothing to match, nothing recalled.
@@ -32,7 +32,7 @@ def test_a_new_session_or_explicit_settings_never_inherit_the_record():
     assert lm.apply("cs-1", TENANT, [], None) == ([], D, [])
     assert lm.apply("cs-1", TENANT, ["--no-ask-user"], None) == (["--no-ask-user"], D, [])
     assert lm.apply("cs-1", TENANT, ["--model=m2", "--resume=s1"], None) == (["--model=m2", "--resume=s1"], D, [])
-    assert lm.apply("cs-1", TENANT, ["--resume=s1"], "odsp") == (["--resume=s1"], "odsp", [])
+    assert lm.apply("cs-1", TENANT, ["--resume=s1"], "other-driver") == (["--resume=s1"], "other-driver", [])
     # An explicit --driver cli-mode is a choice too, not the omitted default.
     assert lm.apply("cs-1", TENANT, ["--resume=s1"], D) == (["--resume=s1"], D, [])
 
@@ -76,7 +76,7 @@ def test_a_corrupt_or_foreign_record_is_ignored():
 
 
 def test_more_than_one_selector_is_ambiguous_and_recalls_nothing():
-    lm.remember("cs-1", TENANT, ["--allow-all-tools"], "orchestrator", "s1")
+    lm.remember("cs-1", TENANT, ["--allow-all", "--experimental"], "orchestrator", "s1")
     for sel in (["--continue", "--resume=s1"], ["--resume=s0", "--resume=s1"], ["-r", "s1", "--session-id=s1"]):
         assert lm.apply("cs-1", TENANT, sel, None) == (sel, D, []), sel
 
@@ -129,9 +129,8 @@ def test_records_under_an_unsafe_directory_are_never_trusted(tmp_path):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir(mode=0o700)
     (elsewhere / lm._path("cs-2", TENANT).name).write_text(json.dumps(
-        {"tenant": TENANT, "session_id": "s1", "copilot_args": ["--allow-all-tools"], "driver": "o"}))
+        {"tenant": TENANT, "session_id": "s1", "copilot_args": ["--allow-all", "--experimental"], "driver": "o"}))
     (lm.LAUNCHES_DIR / "cs-2").symlink_to(elsewhere, target_is_directory=True)
     assert lm.apply("cs-2", TENANT, ["--resume=s1"], None) == (["--resume=s1"], D, [])
     lm.remember("cs-2", TENANT, ["--x"], "o", "s1")
-    assert json.loads((elsewhere / lm._path("cs-2", TENANT).name).read_text())["copilot_args"] == ["--allow-all-tools"]
-
+    assert json.loads((elsewhere / lm._path("cs-2", TENANT).name).read_text())["copilot_args"] == ["--allow-all", "--experimental"]

@@ -3,8 +3,8 @@
 Unlike :mod:`agent_dispatch.bridge` (which spawns a *headless* agent-bridge ACP
 worker), this spawns a durable, **CLI-backed autopilot** session in a fresh
 parallel worktree on the same machine via ``agent-worktrees embody``. The
-embodied Copilot launches with ``--allow-all-tools`` (tools auto-approved -- no
-per-tool confirmation prompts), claims and starts the task, works it
+embodied Copilot launches with ``--allow-all --experimental`` (all prompts
+auto-approved, and SDK extensions allowed to load), claims and starts the task, works it
 autonomously, and marks the task ``submitted`` **explicitly** only when it judges
 the goal reached -- *deferred completion*, never stamped at spawn or pickup.
 

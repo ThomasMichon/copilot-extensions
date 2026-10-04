@@ -18,6 +18,16 @@ from agent_containers.config import (
 )
 
 
+def test_default_acp_command_is_the_trusted_allow_all_experimental_pair():
+    # A literal regression assertion: every other test here derives its
+    # expectation from the SAME imported DEFAULT_ACP_COMMAND constant, so
+    # they'd still pass even if that constant silently reverted to the old
+    # --allow-all-tools (or dropped --experimental, which SDK extension
+    # loading depends on entirely). Pin the exact string so a regression in
+    # the constant itself is actually caught.
+    assert DEFAULT_ACP_COMMAND == "copilot --acp --stdio --allow-all --experimental"
+
+
 def test_defaults():
     c = ContainersConfig()
     assert c.exec_user == "vscode"

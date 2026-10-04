@@ -98,7 +98,7 @@ credential relay, no host worktree mount, read-only rootfs, size-bounded tmpfs
 workspace/home/scratch, dropped capabilities, no privilege escalation,
 CPU/memory/PID ceilings, and an explicit network. It is image-only and requires
 an explicit per-fleet `acp_command`; there is no implicit
-`--allow-all-tools` fallback. `fleet --json` reports the inspected effective
+`--allow-all --experimental` fallback. `fleet --json` reports the inspected effective
 posture. Stopping the container clears its restricted writable state; extract or
 push work before release.
 
@@ -173,7 +173,7 @@ lets agent-bridge discover `container:` without importing this package into the
 bridge venv. The resolver launches the `exec --stdio <name>` action through its registered
 management entry point, which
 then reaches a trusted container through OpenSSH and runs
-`copilot --acp --stdio --allow-all-tools`, staging the host `gh auth token`
+`copilot --acp --stdio --allow-all --experimental`, staging the host `gh auth token`
 through stdin so the token is not persisted in bridge state, argv, or logs.
 That SSH process also carries the credential relay over an explicit loopback
 reverse forward (`-R 127.0.0.1:<container-port>:127.0.0.1:<live-host-port>`).
