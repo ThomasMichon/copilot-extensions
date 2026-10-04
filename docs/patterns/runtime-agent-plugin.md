@@ -298,6 +298,11 @@ python tools/check-skills.py
 python tools/run-plugin-tests.py agent-example
 ```
 
+Prefer `python tools/run_tests_in_devcontainer.py agent-example` over the
+bare runner's last line when Docker + the devcontainers CLI are available
+(Linux only) — see `AGENTS.md` § *Test Before PR Publication* and
+`TESTING.md` § *Optional devcontainer-based isolation*.
+
 `check-marketplace-isolation.py` is report-only during migration. A new plugin's
 one required legacy root/wrapper may be an expected baseline finding; adding
 extra unqualified ownership surfaces is not.

@@ -7,11 +7,12 @@ snapshots) so callers stay decoupled from the server-side dataclasses.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import httpx
 from .client_completion_review import CompletionReviewMixin
+from .client_events import EventStreamClientMixin
 from .client_exclude import ClearExcludeClientMixin
 from .client_registrations import RegistrationClientMixin
 from .client_spawn_terminal import SpawnTerminalClientMixin
@@ -44,7 +45,7 @@ class DispatchUpgradeRequired(DispatchError):
         super().__init__(426, detail)
 
 
-class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin):
+class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, EventStreamClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(
@@ -71,6 +72,15 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, Complet
         # together with the HTTP client, so the transport lives exactly as long
         # as the client that rides it.
         self._tunnel = tunnel
+
+    @property
+    def base_url(self) -> str:
+        """The coordinator base URL this client is actually bound to --
+        never re-resolved. Lets a second request path (e.g. a plain
+        ``urllib`` fetch beside this client's SSE connection) target the
+        same coordinator generation instead of independently re-resolving
+        ``active.json``, which could observe a cutover mid-way."""
+        return str(self._http.base_url).rstrip("/")
 
     def close(self) -> None:
         self._http.close()
@@ -1053,16 +1063,6 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, Complet
         )
 
     # -- supervisor registrations (RegistrationClientMixin) -----------------
-
-    def stream_events(self) -> Iterator[dict]:
-        """Yield task events from the coordinator's SSE stream (blocking)."""
-        with self._http.stream("GET", "/events") as resp:
-            if resp.status_code >= 400:
-                resp.read()
-                raise DispatchError(resp.status_code, resp.text)
-            for line in resp.iter_lines():
-                if line.startswith("data:"):
-                    yield json.loads(line[len("data:") :].strip())
 
 
 class ResolvingDispatchClient:
