@@ -229,11 +229,25 @@ order.
       integration case.
 
 ### Phase 3 — Diff-scoped selection + coverage-debt / smoke fallback
-- [ ] Build the diff-scoped selector: PR diff + resolved baseline (with
+- [x] Build the diff-scoped selector: PR diff + resolved baseline (with
       Phase 2's remap/invalidate applied) → targeted test subset.
-- [ ] Implement coverage-debt accounting (age and/or commit-volume since the
+      **Done** (`tools/coverage_guided_selection/selection.py`, landed as
+      part of the Phase 0 pilot, PR #4807 -- `select_tests` already
+      implements the per-file/per-line fallback triggers this phase
+      requires: `no_baseline_entry` and `line_not_attributed`, the latter
+      distinguishing a partially- from fully-covered file).
+- [x] Implement coverage-debt accounting (age and/or commit-volume since the
       resolved baseline) with a tunable threshold, per the vision's own
-      Behavior.
+      Behavior. **Done** (`tools/coverage_guided_selection/debt.py`,
+      2026-10-03): `assess_debt` measures commit-volume (`git rev-list
+      --count`) against `measured_commit` and age against the baseline's
+      own `generated_at` timestamp (review caught an initial version that
+      wrongly anchored age to the commit's own git timestamp instead --
+      fixed, with a regression proving re-collecting against the same old
+      commit resets reported age); either configured threshold crossing
+      trips `exceeded` for the *whole* selection, distinct from
+      `selection.select_tests`'s own per-file/per-line triggers. A `None`
+      threshold is measured-but-not-enforced, never silently defaulted.
 - [ ] **Curate and validate the fallback set itself**, not just its trigger
       conditions: today `worktrees-smoke` only has `--collect-only` (no real
       execution) plus the always-run structural `--guards` step, neither of
@@ -337,6 +351,28 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-03 — Phase 3 slice: coverage-debt accounting
+Phase 3's selector (`selection.select_tests`) and fallback curation
+(`fallback.compute_fallback_set`) already existed from the Phase 0 pilot
+(PR #4807) but were checked off nowhere, and Phase 3's own coverage-debt
+dimension had no implementation at all. Added
+`tools/coverage_guided_selection/debt.py` (`assess_debt`): commit-volume
+(`git rev-list --count`) and wall-clock age (committer-date delta) since a
+resolved baseline's `measured_commit`, each independently tunable, either
+crossing trips the whole-selection fallback. 7 new tests (synthetic git
+repos, mirroring `ancestor_resolution`'s own fixture conventions).
+
+**Remaining Phase 3 scope, not yet done:** wiring `fallback.py`'s own
+documented `eligible_tests` restriction to `test-portfolio`'s real tier
+markers (today it defaults to the full baseline, a documented Phase 0
+simplification, not a safety claim); one orchestrating entry point that
+ties resolution + selection + debt + fallback into a single auditable
+decision (which baseline generation, fresh-subset vs. fallback + why);
+and the Phase 3 Validation Plan's three fallback-path tests + the curated
+set's own evidenced-assurance check. Phase 4 (CI wiring into
+`agent-worktrees`' `worktrees-smoke` job) remains untouched, correctly --
+it depends on this phase finishing first.
 
 ### 2026-10-03 — Phase 0 storage/correlation decision reversed: hybrid pointer + Release asset
 Reopens and revises the 2026-10-01 Phase 0 storage/correlation decision
