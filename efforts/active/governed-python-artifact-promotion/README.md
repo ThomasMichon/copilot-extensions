@@ -720,6 +720,37 @@ win grows with build complexity.
   identical `lock_id`, and the default no-`--toolchain-venv` CLI path
   (the round-10 Windows fix) still succeeds end-to-end with `packaging`
   now present in the recorded `build_toolchain.packages`.
+- A twelfth review round found 3 more issues, closing the final credential-
+  handling and transport-security gaps: (1) **MEDIUM:** the validated index
+  URL may legally carry embedded `user:pass@` credentials (uv supports
+  this); persisting the raw value into `.governed-feed-provenance.json`,
+  and interpolating it into the quarantine-failure diagnostic, violated
+  this effort's own "never log credentials" rule. Fixed with a shared
+  `_credential_free_index_identity()` helper, stripping userinfo before
+  the value is EVER persisted or displayed -- the raw, possibly-
+  credentialed URL is still used for the actual authenticated `uv venv`/
+  `uv pip install --index-url` calls themselves, just never stored or
+  logged. (2) **MEDIUM:** the hostname allowlist accepted a plain
+  `http://<trusted-host>/...` URL, and `UV_INSECURE_HOST` (which disables
+  uv's TLS verification for a named host) was never stripped -- either
+  path let a network attacker impersonate an allowlisted host while the
+  resulting toolchain was still recorded as governed. Fixed by requiring
+  an HTTPS scheme in `_validated_trusted_index_url` and adding
+  `UV_INSECURE_HOST` to the stripped-variable set. (3) the race-losing
+  publisher's rename-failure fallback treated ANY existing interpreter at
+  the destination as proof a legitimate winner published there, without
+  checking its provenance -- two callers validating DIFFERENT indexes
+  could both observe an absent destination before either publishes, so
+  the loser could silently trust a venv sourced from the other caller's
+  different index. Fixed by requiring the same `_provenance_matches` check
+  used by the normal reuse path here too. 8 more unit tests (132 total,
+  all passing; zero `F`/`E` markers in the pytest dot stream, cross-
+  checked against `--collect-only`'s own count); real smoke test
+  re-verified against `agent-worktrees` (fresh build) then `agent-bridge`
+  (reuse) sharing the same `--toolchain-venv` against the real governed
+  feed -- both manifests recorded the identical `lock_id`, and the
+  provenance marker now stores the (credential-free, since this feed has
+  none embedded) validated index URL.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 
