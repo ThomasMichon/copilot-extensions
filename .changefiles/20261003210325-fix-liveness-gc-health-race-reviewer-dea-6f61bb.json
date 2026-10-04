@@ -1,0 +1,9 @@
+{
+  "comment": "Fix liveness_gc health race: reviewer-deadline reconcile sub-pass now uses its own private LoopHealth instead of sharing the public liveness_gc health, so in_progress/total_runs accurately reflect the reconcile_liveness pass alone (fixes #5138).",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
