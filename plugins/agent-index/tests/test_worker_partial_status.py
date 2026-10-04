@@ -18,7 +18,17 @@ from agent_index.indexing.task_store import TaskStatus, TaskStore
 
 
 def _store(tmp_path, monkeypatch):
-    monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))
+    # Use the explicit, most-specific override (AGENT_INDEX_DATA_DIR) rather
+    # than AGENT_INDEX_HOME: before the index_config.py fix landed (the fix
+    # this leak prompted), IndexConfig.data_dir's default silently ignored
+    # AGENT_INDEX_HOME entirely, so setting it here did NOT isolate this test
+    # from the real production data directory -- every run of this test file
+    # was writing real task rows into the operator's actual ~/.agent-index/data
+    # (confirmed: 12 such rows, with THIS file's own exact mock fixtures,
+    # ended up in production). AGENT_INDEX_DATA_DIR has always been honored
+    # first, with no fallback ambiguity, so prefer it here even now that the
+    # underlying default is fixed.
+    monkeypatch.setenv("AGENT_INDEX_DATA_DIR", str(tmp_path / "home" / "data"))
     from agent_index.index_config import IndexConfig
 
     cfg = IndexConfig()
