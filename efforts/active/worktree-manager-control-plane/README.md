@@ -978,10 +978,11 @@ Worktree Manager, re-introduced into agent-worktrees.
       configuration mode of agent-worktrees").
 - [ ] **Step 4 — regression coverage.** Add a test asserting a "new window"
       launch registers a live mux-daemon mapping identical to an ordinary
-      Resume launch (extending the Phase 3b-era
-      `test_terminal_decoupling.py`/launcher-script regression style), so a
-      future new launch-plan modifier can't silently bypass registration
-      again.
+      muxed Resume launch (extending the Phase 3b-era
+      `test_terminal_decoupling.py`/launcher-script regression style) when
+      mux is enabled, and registers none when composed with `--no-mux` (mux
+      is bypassed entirely in that case) — so a future new launch-plan
+      modifier can't silently bypass registration for a muxed variant again.
 
 ### Bug sweep — linked open bugs (2026-09-24)
 
@@ -1011,11 +1012,14 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   rejection.
 - **Non-agentic + idempotent.** `setup` is dry-run by default and re-runnable;
   re-running the bootstrap one-liner is version-gated (a no-op when current).
-- **"New window" registers like every other launch.** A launch using the
-  relocated "new window" modifier (Phase 9) produces a `mux-mapping.json`
-  entry with `"live": true` and a fresh `observed_at`, identical in shape and
-  timing to an ordinary Resume/Bare/No-mux launch — proved by a regression
-  test, not only manual confirmation.
+- **"New window" registers like every other muxed launch.** A launch using
+  the relocated "new window" modifier (Phase 9), composed with mux enabled,
+  produces a `mux-mapping.json` entry with `"live": true` and a fresh
+  `observed_at`, identical in shape and timing to an ordinary muxed
+  Resume/Bare launch — proved by a regression test, not only manual
+  confirmation. A `--no-mux` launch correctly registers no mux mapping at
+  all, muxed or not; the regression test asserts registration only for the
+  muxed variants, never for `--no-mux`.
 
 ## Coordination
 
