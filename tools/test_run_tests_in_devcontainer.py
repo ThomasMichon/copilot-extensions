@@ -30,6 +30,8 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parent / "run_tests_in_devcontainer.py"
 _previous_path = sys.path.copy()
 sys.path.insert(0, str(SCRIPT.parent))
@@ -41,6 +43,25 @@ try:
     _spec.loader.exec_module(wrapper)
 finally:
     sys.path[:] = _previous_path
+
+
+@pytest.fixture(autouse=True)
+def _stub_host_devcontainer_cli(monkeypatch):
+    """Host unit tests do not install the devcontainer CLI.
+
+    ``main`` resolves it before the mocked dependency-prep seam, so a
+    missing host binary must not fail lifecycle tests. A test that asserts
+    the missing-CLI error patches ``shutil.which`` itself; that patch
+    replaces this stub for the duration of the test body.
+    """
+    real_which = wrapper.shutil.which
+
+    def which(cmd, *args, **kwargs):
+        if cmd == "devcontainer":
+            return "/usr/bin/devcontainer"
+        return real_which(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(wrapper.shutil, "which", which)
 
 
 def test_scrubbed_git_env_removes_repository_context_variables(monkeypatch) -> None:
@@ -1409,6 +1430,468 @@ def test_run_tests_invokes_devcontainer_exec_with_full_passthrough_args(tmp_path
     assert args[-5:] == ["python", "tools/run-plugin-tests.py", "agent-worktrees", "-k", "foo"]
 
 
+def test_is_list_only_detects_bare_list_flag() -> None:
+    assert wrapper._net_scope.is_list_only(["--list"], wrapper._canonicalize_flag) is True
+
+
+def test_is_list_only_detects_abbreviated_list_flag() -> None:
+    assert wrapper._net_scope.is_list_only(["--lis"], wrapper._canonicalize_flag) is True
+
+
+def test_is_list_only_false_for_other_passthrough() -> None:
+    canon = wrapper._canonicalize_flag
+    assert wrapper._net_scope.is_list_only(["agent-worktrees"], canon) is False
+    assert wrapper._net_scope.is_list_only(["--collect-only"], canon) is False
+    assert wrapper._net_scope.is_list_only([], canon) is False
+
+
+def test_prepare_dependencies_appends_prepare_only_when_absent(tmp_path: Path) -> None:
+    fake_result = mock.Mock(returncode=0)
+    config_path = tmp_path / "devcontainer.json"
+    config_path.write_text("{}")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=fake_result) as run:
+        wrapper._net_scope.prepare_dependencies(
+            "/usr/bin/devcontainer", wrapper.REPO, "abc123", config_path,
+            ["agent-worktrees"], wrapper._canonicalize_flag,
+        )
+    args = run.call_args.args[0]
+    assert args[-3:] == ["tools/run-plugin-tests.py", "agent-worktrees", "--prepare-only"]
+
+
+def test_prepare_dependencies_does_not_duplicate_an_explicit_prepare_only(tmp_path: Path) -> None:
+    fake_result = mock.Mock(returncode=0)
+    config_path = tmp_path / "devcontainer.json"
+    config_path.write_text("{}")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=fake_result) as run:
+        wrapper._net_scope.prepare_dependencies(
+            "/usr/bin/devcontainer", wrapper.REPO, "abc123", config_path,
+            ["agent-worktrees", "--prepare-only"], wrapper._canonicalize_flag,
+        )
+    args = run.call_args.args[0]
+    assert args.count("--prepare-only") == 1
+
+
+def test_prepare_dependencies_raises_on_nonzero_exit(tmp_path: Path) -> None:
+    fake_result = mock.Mock(returncode=1)
+    config_path = tmp_path / "devcontainer.json"
+    config_path.write_text("{}")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=fake_result):
+        try:
+            wrapper._net_scope.prepare_dependencies(
+                "/usr/bin/devcontainer", wrapper.REPO, "abc123", config_path,
+                ["agent-worktrees"], wrapper._canonicalize_flag,
+            )
+        except SystemExit as exc:
+            assert "dependency-preparation" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
+def test_strip_reinstall_removes_the_flag() -> None:
+    canon = wrapper._canonicalize_flag
+    result = wrapper._net_scope.strip_reinstall(["agent-worktrees", "--reinstall"], canon)
+    assert result == ["agent-worktrees"]
+
+
+def test_strip_reinstall_recognizes_abbreviated_flag() -> None:
+    canon = wrapper._canonicalize_flag
+    result = wrapper._net_scope.strip_reinstall(["agent-worktrees", "--reinst"], canon)
+    assert result == ["agent-worktrees"]
+
+
+def test_strip_reinstall_leaves_other_flags_untouched() -> None:
+    canon = wrapper._canonicalize_flag
+    passthrough = ["agent-worktrees", "--all", "-k", "foo"]
+    assert wrapper._net_scope.strip_reinstall(passthrough, canon) == passthrough
+
+
+def test_disconnect_container_networks_disconnects_every_attached_network() -> None:
+    inspect_result = mock.Mock(
+        returncode=0, stdout='bridge\t{"bridge": {}, "test-isolation-net": {}}', stderr="",
+    )
+    disconnect_result = mock.Mock(returncode=0, stdout="", stderr="")
+    calls: list[list[str]] = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return inspect_result if args[1] == "inspect" else disconnect_result
+
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", side_effect=fake_run):
+        wrapper._net_scope.disconnect_container_networks("abc123")
+    disconnect_calls = [c for c in calls if c[1] == "network"]
+    assert len(disconnect_calls) == 2
+    disconnected_networks = {c[4] for c in disconnect_calls}
+    assert disconnected_networks == {"bridge", "test-isolation-net"}
+    for c in disconnect_calls:
+        assert c[:2] == ["docker", "network"]
+        assert "-f" in c
+
+
+def test_disconnect_container_networks_raises_on_inspect_failure() -> None:
+    inspect_result = mock.Mock(returncode=1, stdout="", stderr="no such container")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result):
+        try:
+            wrapper._net_scope.disconnect_container_networks("abc123")
+        except SystemExit as exc:
+            assert "no such container" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
+def test_disconnect_container_networks_raises_on_malformed_inspect_output() -> None:
+    inspect_result = mock.Mock(returncode=0, stdout="bridge\tnot json", stderr="")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result):
+        try:
+            wrapper._net_scope.disconnect_container_networks("abc123")
+        except SystemExit as exc:
+            assert "could not parse" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
+def test_disconnect_container_networks_raises_on_disconnect_failure() -> None:
+    inspect_result = mock.Mock(returncode=0, stdout='bridge\t{"bridge": {}}', stderr="")
+    disconnect_result = mock.Mock(returncode=1, stdout="", stderr="not attached")
+
+    def fake_run(args, **kwargs):
+        return inspect_result if args[1] == "inspect" else disconnect_result
+
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", side_effect=fake_run):
+        try:
+            wrapper._net_scope.disconnect_container_networks("abc123")
+        except SystemExit as exc:
+            assert "not attached" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
+def test_disconnect_container_networks_fails_closed_on_host_network_mode() -> None:
+    inspect_result = mock.Mock(returncode=0, stdout="host\t{}", stderr="")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result):
+        try:
+            wrapper._net_scope.disconnect_container_networks("abc123")
+        except SystemExit as exc:
+            assert "host" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
+def test_disconnect_container_networks_fails_closed_on_shared_container_namespace() -> None:
+    inspect_result = mock.Mock(returncode=0, stdout="container:other-id\t{}", stderr="")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result):
+        try:
+            wrapper._net_scope.disconnect_container_networks("abc123")
+        except SystemExit as exc:
+            assert "container:other-id" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
+def test_disconnect_container_networks_fails_closed_on_empty_map_with_non_none_mode() -> None:
+    # Invariant: an empty NetworkSettings.Networks map must never be read
+    # as "already isolated" for a mode other than literal "none" (Docker's
+    # real shape for --network none is one entry keyed "none" -> {}).
+    inspect_result = mock.Mock(returncode=0, stdout="bridge\t{}", stderr="")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result):
+        try:
+            wrapper._net_scope.disconnect_container_networks("abc123")
+        except SystemExit as exc:
+            assert "no inspectable attached networks" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
+def test_disconnect_container_networks_no_op_for_none_mode() -> None:
+    inspect_result = mock.Mock(returncode=0, stdout='none\t{"none": {}}', stderr="")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result) as run:
+        wrapper._net_scope.disconnect_container_networks("abc123")
+    assert run.call_count == 1  # only the inspect call -- nothing to disconnect
+
+
+def test_disconnect_container_networks_no_op_for_none_mode_with_real_endpoint_metadata() -> None:
+    # Only the NETWORK KEY is the isolation invariant -- a legitimate
+    # `--network none` container's single "none" entry still carries real
+    # (non-empty) EndpointSettings metadata; comparing the whole value to
+    # `{}` would wrongly reject this common, safe shape.
+    inspect_result = mock.Mock(
+        returncode=0,
+        stdout='none\t{"none": {"NetworkID": "abc", "EndpointID": "def"}}',
+        stderr="",
+    )
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result) as run:
+        wrapper._net_scope.disconnect_container_networks("abc123")
+    assert run.call_count == 1
+
+
+def test_disconnect_container_networks_fails_closed_for_none_mode_with_extra_network() -> None:
+    # NetworkMode reflects CREATION-time config, not live state -- a later
+    # `docker network connect` can attach a real network to a
+    # "none"-mode container while this field stays frozen at "none".
+    inspect_result = mock.Mock(
+        returncode=0, stdout='none\t{"none": {}, "bridge": {}}', stderr="",
+    )
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result):
+        try:
+            wrapper._net_scope.disconnect_container_networks("abc123")
+        except SystemExit as exc:
+            assert "not just 'none'" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
+def test_admission_needs_admission_false_only_for_list() -> None:
+    # `--list` returns before `run-plugin-tests.py` ever reaches
+    # `_ensure_venv()`, so it is the only mode that never touches the
+    # shared venv and is therefore exempt from the host-wide lease.
+    canon = wrapper._canonicalize_flag
+    assert wrapper._admission.needs_admission(["--list"], canon) is False
+
+
+def test_admission_needs_admission_true_for_a_real_run() -> None:
+    canon = wrapper._canonicalize_flag
+    assert wrapper._admission.needs_admission(["agent-worktrees"], canon) is True
+    assert wrapper._admission.needs_admission([], canon) is True
+
+
+def test_admission_needs_admission_true_for_venv_mutating_modes() -> None:
+    # `--guards`, `--collect-only`, and `--prepare-only` all reach
+    # `_ensure_venv()` and so can rebuild/delete the SHARED on-disk venv
+    # (via `--reinstall` or a drifted dependency fingerprint) a
+    # concurrent admitted run may be relying on mid-execution -- none of
+    # them are exempt.
+    canon = wrapper._canonicalize_flag
+    assert wrapper._admission.needs_admission(["--guards"], canon) is True
+    assert wrapper._admission.needs_admission(["--collect-only"], canon) is True
+    assert wrapper._admission.needs_admission(["--prepare-only"], canon) is True
+
+
+def test_admission_resolve_wait_defaults_to_zero() -> None:
+    assert wrapper._admission.resolve_admission_wait(["agent-worktrees"], wrapper._canonicalize_flag) == 0.0
+
+
+def test_admission_resolve_wait_extracts_space_and_equals_forms() -> None:
+    canon = wrapper._canonicalize_flag
+    assert wrapper._admission.resolve_admission_wait(["--admission-wait", "30"], canon) == 30.0
+    assert wrapper._admission.resolve_admission_wait(["--admission-wait=45"], canon) == 45.0
+
+
+def test_admission_resolve_wait_honors_last_repeated_occurrence() -> None:
+    canon = wrapper._canonicalize_flag
+    passthrough = ["--admission-wait", "10", "--admission-wait", "20"]
+    assert wrapper._admission.resolve_admission_wait(passthrough, canon) == 20.0
+
+
+def test_admission_resolve_wait_rejects_malformed_value_immediately() -> None:
+    # Matches argparse's own semantics: each occurrence is validated as
+    # it's seen, not just the FINAL resolved value -- a malformed earlier
+    # occurrence must not be silently masked by a later valid override,
+    # since argparse itself would reject it the moment it's parsed.
+    canon = wrapper._canonicalize_flag
+    try:
+        wrapper._admission.resolve_admission_wait(["--admission-wait", "bad"], canon)
+    except SystemExit as exc:
+        assert "bad" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+
+
+def test_admission_resolve_wait_rejects_malformed_earlier_occurrence_even_with_later_valid_one() -> None:
+    canon = wrapper._canonicalize_flag
+    passthrough = ["--admission-wait", "bad", "--admission-wait", "20"]
+    try:
+        wrapper._admission.resolve_admission_wait(passthrough, canon)
+    except SystemExit as exc:
+        assert "bad" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+
+
+def test_admission_resolve_wait_rejects_negative_value() -> None:
+    # A negative value is well-formed (parses as a float), so the
+    # malformed-value check above doesn't catch it -- this needs its own
+    # range check, matching `acquire()`'s. It must live here (not only in
+    # `acquire()`), since `--list` never reaches `acquire()` at all.
+    canon = wrapper._canonicalize_flag
+    try:
+        wrapper._admission.resolve_admission_wait(["--admission-wait", "-1"], canon)
+    except SystemExit as exc:
+        assert "non-negative" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+
+
+def test_admission_resolve_wait_rejects_infinite_value() -> None:
+    # `float("inf")` is well-formed and isn't `< 0`, so neither check
+    # above catches it -- it needs its own `math.isfinite` guard, or a
+    # wait of `inf` would poll forever under contention.
+    canon = wrapper._canonicalize_flag
+    try:
+        wrapper._admission.resolve_admission_wait(["--admission-wait", "inf"], canon)
+    except SystemExit as exc:
+        assert "finite" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+
+
+def test_admission_resolve_wait_rejects_nan_value() -> None:
+    # `float("nan")` is also well-formed, and `nan < 0` is False, so a
+    # bare negative check alone would silently accept it too.
+    canon = wrapper._canonicalize_flag
+    try:
+        wrapper._admission.resolve_admission_wait(["--admission-wait", "nan"], canon)
+    except SystemExit as exc:
+        assert "finite" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+
+
+def test_admission_acquire_rejects_negative_wait_with_system_exit() -> None:
+    try:
+        wrapper._admission.acquire(-1.0)
+    except SystemExit as exc:
+        assert "non-negative" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+
+
+def test_admission_acquire_rejects_non_finite_wait_with_system_exit() -> None:
+    for bad_wait in (float("inf"), float("nan")):
+        try:
+            wrapper._admission.acquire(bad_wait)
+        except SystemExit as exc:
+            assert "finite" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
+def test_admission_acquire_succeeds_when_uncontested(tmp_path: Path) -> None:
+    with mock.patch.object(wrapper._admission, "admission_dir", return_value=tmp_path):
+        lease = wrapper._admission.acquire(0.0)
+    try:
+        assert lease.held
+    finally:
+        lease.release()
+
+
+def test_admission_acquire_fails_fast_when_busy_and_wait_is_zero(tmp_path: Path, capsys) -> None:
+    # Preserves `run-plugin-tests.py`'s own documented exit code 3 for
+    # busy contention (unlike every other failure here, which exits 1 via
+    # a string `SystemExit` payload) -- so a wrapped run's exit code
+    # means the same thing a bare invocation's does.
+    with mock.patch.object(wrapper._admission, "admission_dir", return_value=tmp_path):
+        holder = wrapper._admission.acquire(0.0)
+        try:
+            try:
+                wrapper._admission.acquire(0.0)
+            except SystemExit as exc:
+                assert exc.code == 3
+                assert "BUSY" in capsys.readouterr().err
+            else:
+                raise AssertionError("expected SystemExit")
+        finally:
+            holder.release()
+
+
+def test_admission_acquire_waits_then_succeeds_once_released(tmp_path: Path) -> None:
+    import threading
+
+    with mock.patch.object(wrapper._admission, "admission_dir", return_value=tmp_path):
+        holder = wrapper._admission.acquire(0.0)
+
+        def release_soon() -> None:
+            import time
+            time.sleep(0.1)
+            holder.release()
+
+        threading.Thread(target=release_soon).start()
+        lease = wrapper._admission.acquire(2.0)
+    try:
+        assert lease.held
+    finally:
+        lease.release()
+
+
+def test_main_acquires_and_releases_admission_lease_around_the_run(monkeypatch, tmp_path: Path) -> None:
+    order: list[str] = []
+    fake_lease = mock.Mock()
+    fake_lease.release = mock.Mock(side_effect=lambda: order.append("release"))
+
+    config_path = tmp_path / "cfgdir-admission" / "devcontainer.json"
+    config_path.parent.mkdir()
+    config_path.write_text("{}")
+    monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
+    monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
+    monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: order.append("bring-up") or "container-admission")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
+    monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
+    monkeypatch.setattr(wrapper._net_scope, "is_list_only", lambda passthrough, canonicalize: True)
+    monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: order.append("run") or 0)
+    monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: True)
+    monkeypatch.setattr(wrapper._admission, "acquire", lambda wait: order.append("acquire") or fake_lease)
+
+    rc = wrapper.main(["agent-worktrees"])
+    assert rc == 0
+    assert order == ["acquire", "bring-up", "run", "release"]
+
+
+def test_main_releases_admission_lease_even_when_per_instance_config_fails(monkeypatch) -> None:
+    # Invariant: once the host-wide lease is acquired, it must be released
+    # on EVERY exit path -- including a failure as early as
+    # `_per_instance_config` itself, not just the common success path.
+    release_calls: list[str] = []
+    fake_lease = mock.Mock()
+    fake_lease.release = mock.Mock(side_effect=lambda: release_calls.append("release"))
+
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: True)
+    monkeypatch.setattr(wrapper._admission, "acquire", lambda wait: fake_lease)
+
+    def failing_per_instance_config(label: str):
+        raise SystemExit("devcontainer config write failed: boom")
+
+    monkeypatch.setattr(wrapper, "_per_instance_config", failing_per_instance_config)
+
+    try:
+        wrapper.main(["agent-worktrees"])
+    except SystemExit as exc:
+        assert "boom" in str(exc)
+    else:
+        raise AssertionError("expected the original SystemExit to propagate")
+    assert release_calls == ["release"]
+
+
+def test_main_guards_acquires_admission(monkeypatch, tmp_path: Path) -> None:
+    # `--guards` still reaches `_ensure_venv()` inside the container and
+    # so can rebuild/delete the shared on-disk venv -- it is NOT exempt
+    # from the host-wide lease (see
+    # test_admission_needs_admission_true_for_venv_mutating_modes).
+    acquire_calls: list[float] = []
+    release_calls: list[str] = []
+    config_path = tmp_path / "cfgdir-guards" / "devcontainer.json"
+    config_path.parent.mkdir()
+    config_path.write_text("{}")
+    monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
+    monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
+    monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-guards")
+    monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
+    monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
+
+    class Lease:
+        def release(self) -> None:
+            release_calls.append("release")
+
+    monkeypatch.setattr(wrapper._admission, "acquire", lambda wait: acquire_calls.append(wait) or Lease())
+
+    rc = wrapper.main(["agent-worktrees", "--guards"])
+    assert rc == 0
+    assert acquire_calls == [0.0]
+    assert release_calls == ["release"]
+
+
 def test_tear_down_removes_container_then_volume_on_success() -> None:
     container_result = mock.Mock(returncode=0, stderr="")
     volume_result = mock.Mock(returncode=0, stderr="")
@@ -1543,10 +2026,14 @@ def test_main_installs_a_sigterm_handler(monkeypatch) -> None:
     monkeypatch.setattr(wrapper, "_per_instance_config", fake_per_instance_config)
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda instance_label, config_path: "container-1")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace",
                          lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests",
                          lambda container_id, config_path, passthrough: 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
 
     signal_calls: list[tuple] = []
@@ -1573,8 +2060,12 @@ def test_main_restores_the_previous_sigterm_handler_after_returning(monkeypatch,
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-restore")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
 
     sentinel_handler = lambda signum, frame: None
@@ -1598,8 +2089,12 @@ def test_main_installs_and_restores_a_sighup_handler(monkeypatch, tmp_path: Path
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-sighup")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
 
     sentinel_handler = lambda signum, frame: None
@@ -1861,9 +2356,13 @@ def test_main_strips_double_dash_separator_anywhere_in_passthrough(monkeypatch) 
                          lambda label: (Path("/tmp/fake-devcontainer-dir/devcontainer.json"), "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, config_path: "container-1")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests",
                          lambda container_id, config_path, passthrough: calls.append(passthrough) or 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
     monkeypatch.setattr(wrapper.shutil, "rmtree", lambda path, ignore_errors=False: None)
     # This test is about `--` stripping specifically -- base-rewriting has
@@ -1882,6 +2381,159 @@ def test_main_strips_double_dash_separator_anywhere_in_passthrough(monkeypatch) 
     assert calls == [["--all", "-k", "some_filter"]]
 
 
+def test_main_prepares_dependencies_and_disconnects_networks_before_running_tests(monkeypatch) -> None:
+    order: list[str] = []
+
+    monkeypatch.setattr(wrapper, "_per_instance_config",
+                         lambda label: (Path("/tmp/fake-devcontainer-dir/devcontainer.json"), "fake-volume"))
+    monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
+    monkeypatch.setattr(wrapper, "_bring_up", lambda label, config_path: "container-1")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
+    monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: order.append("prepare"))
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks",
+                         lambda container_id: order.append("disconnect"))
+    monkeypatch.setattr(wrapper, "_run_tests",
+                         lambda container_id, config_path, passthrough: order.append("run") or 0)
+    monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
+    monkeypatch.setattr(wrapper.shutil, "rmtree", lambda path, ignore_errors=False: None)
+
+    rc = wrapper.main(["agent-worktrees"])
+    assert rc == 0
+    assert order == ["prepare", "disconnect", "run"]
+
+
+def test_main_raises_when_devcontainer_cli_missing_before_prepare(monkeypatch) -> None:
+    # The host lookup happens in ``main`` before the mocked prepare seam.
+    # A missing CLI must still fail there, not inside the mock.
+    prepare_calls: list[object] = []
+    monkeypatch.setattr(wrapper, "_per_instance_config",
+                         lambda label: (Path("/tmp/fake-devcontainer-dir/devcontainer.json"), "fake-volume"))
+    monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
+    monkeypatch.setattr(wrapper, "_bring_up", lambda label, config_path: "container-1")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
+    monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
+    monkeypatch.setattr(
+        wrapper._net_scope, "prepare_dependencies",
+        lambda *args, **kwargs: prepare_calls.append(args),
+    )
+    monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
+    monkeypatch.setattr(wrapper.shutil, "rmtree", lambda path, ignore_errors=False: None)
+    monkeypatch.setattr(wrapper.shutil, "which", lambda *args, **kwargs: None)
+
+    try:
+        wrapper.main(["agent-worktrees"])
+    except SystemExit as exc:
+        assert "devcontainer CLI not found" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+    assert prepare_calls == []
+
+
+def test_main_strips_reinstall_before_the_real_pass_after_preparing(monkeypatch) -> None:
+    # The prep pass already rebuilt the venv -- the real pass must reuse
+    # it, not delete and rebuild it again with no network left.
+    real_pass_args: list[list[str]] = []
+
+    monkeypatch.setattr(wrapper, "_per_instance_config",
+                         lambda label: (Path("/tmp/fake-devcontainer-dir/devcontainer.json"), "fake-volume"))
+    monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
+    monkeypatch.setattr(wrapper, "_bring_up", lambda label, config_path: "container-1")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
+    monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
+    monkeypatch.setattr(
+        wrapper, "_run_tests",
+        lambda container_id, config_path, passthrough: real_pass_args.append(passthrough) or 0,
+    )
+    monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
+    monkeypatch.setattr(wrapper.shutil, "rmtree", lambda path, ignore_errors=False: None)
+
+    rc = wrapper.main(["agent-worktrees", "--reinstall"])
+    assert rc == 0
+    assert real_pass_args == [["agent-worktrees"]]
+
+
+def test_main_skips_dependency_preparation_and_disconnect_for_list_only(monkeypatch) -> None:
+    order: list[str] = []
+
+    monkeypatch.setattr(wrapper, "_per_instance_config",
+                         lambda label: (Path("/tmp/fake-devcontainer-dir/devcontainer.json"), "fake-volume"))
+    monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
+    monkeypatch.setattr(wrapper, "_bring_up", lambda label, config_path: "container-1")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
+    monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: order.append("prepare"))
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks",
+                         lambda container_id: order.append("disconnect"))
+    monkeypatch.setattr(wrapper, "_run_tests",
+                         lambda container_id, config_path, passthrough: order.append("run") or 0)
+    monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
+    monkeypatch.setattr(wrapper.shutil, "rmtree", lambda path, ignore_errors=False: None)
+
+    rc = wrapper.main(["--list"])
+    assert rc == 0
+    assert order == ["run"]
+
+
+def test_main_rejects_malformed_admission_wait_even_for_list_only(monkeypatch) -> None:
+    # `--list` skips admission acquisition entirely (see the test above),
+    # but a malformed/negative `--admission-wait` must still be rejected
+    # on the HOST before any container is brought up -- not silently
+    # skipped alongside the acquisition it would have gated.
+    bring_up_calls: list[object] = []
+    monkeypatch.setattr(wrapper, "_bring_up", lambda *a, **k: bring_up_calls.append((a, k)))
+
+    try:
+        wrapper.main(["--list", "--admission-wait", "bad"])
+    except SystemExit as exc:
+        assert "--admission-wait" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+    assert bring_up_calls == []
+
+
+def test_main_rejects_negative_admission_wait_even_for_list_only(monkeypatch) -> None:
+    # A negative `--admission-wait` is well-formed (parses as a float),
+    # so the malformed-value path above doesn't catch it -- only a
+    # separate range check does. With `--list`, `needs_admission()` is
+    # False and `acquire()` (which has its own range check) never runs,
+    # so that range check must live in `resolve_admission_wait` itself.
+    bring_up_calls: list[object] = []
+    monkeypatch.setattr(wrapper, "_bring_up", lambda *a, **k: bring_up_calls.append((a, k)))
+
+    try:
+        wrapper.main(["--list", "--admission-wait", "-1"])
+    except SystemExit as exc:
+        assert "--admission-wait" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+    assert bring_up_calls == []
+
+
+def test_main_rejects_non_finite_admission_wait_even_for_list_only(monkeypatch) -> None:
+    # `inf`/`nan` both parse as valid floats and neither is `< 0`, so the
+    # negative-range check above doesn't catch them either -- each needs
+    # its own `math.isfinite` guard, enforced before `--list` can skip
+    # admission entirely.
+    for bad_wait in ("inf", "nan"):
+        bring_up_calls: list[object] = []
+        monkeypatch.setattr(wrapper, "_bring_up", lambda *a, **k: bring_up_calls.append((a, k)))
+
+        try:
+            wrapper.main(["--list", "--admission-wait", bad_wait])
+        except SystemExit as exc:
+            assert "--admission-wait" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+        assert bring_up_calls == []
+
+
+
 def test_main_tears_down_container_and_volume_unless_keep_is_passed(monkeypatch, tmp_path: Path) -> None:
     torn_down: list[tuple[str, str]] = []
 
@@ -1897,8 +2549,12 @@ def test_main_tears_down_container_and_volume_unless_keep_is_passed(monkeypatch,
                          lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-2")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(
         wrapper, "_tear_down",
         lambda container_id, volume_name: torn_down.append((container_id, volume_name)),
@@ -1936,8 +2592,12 @@ def test_main_defers_sigterm_during_the_teardown_call(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-sigterm")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", fake_tear_down)
 
     previous_sigterm = signal.getsignal(signal.SIGTERM)
@@ -1973,8 +2633,12 @@ def test_main_propagates_a_signal_received_during_successful_teardown(monkeypatc
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-sigterm-success")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", fake_tear_down)
 
     previous_sigterm = signal.getsignal(signal.SIGTERM)
@@ -2001,9 +2665,13 @@ def test_main_raises_teardown_failure_when_primary_path_succeeded(monkeypatch, t
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-3")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace",
                          lambda container_id, passthrough, *, include_untracked: None)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
 
     def failing_tear_down(container_id: str, volume_name: str) -> None:
         raise SystemExit("teardown failed: boom")
@@ -2028,6 +2696,7 @@ def test_main_preserves_primary_exception_when_teardown_also_fails(monkeypatch, 
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-4")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
 
     def failing_populate(container_id: str, passthrough: list[str], *, include_untracked: bool) -> None:
         raise SystemExit("primary failure: real test problem")
@@ -2037,6 +2706,9 @@ def test_main_preserves_primary_exception_when_teardown_also_fails(monkeypatch, 
 
     monkeypatch.setattr(wrapper, "_populate_workspace", failing_populate)
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 0)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
     monkeypatch.setattr(wrapper, "_tear_down", failing_tear_down)
 
     # The PRIMARY failure must win -- a `_tear_down` failure in the
@@ -2063,10 +2735,14 @@ def test_main_preserves_nonzero_test_result_when_teardown_also_fails(monkeypatch
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-5")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace",
                          lambda container_id, passthrough, *, include_untracked: None)
     # A real test FAILURE (nonzero exit), not an exception.
     monkeypatch.setattr(wrapper, "_run_tests", lambda container_id, cfg, passthrough: 7)
+    monkeypatch.setattr(wrapper._net_scope, "prepare_dependencies",
+                         lambda exe, repo, container_id, config_path, passthrough, canonicalize: None)
+    monkeypatch.setattr(wrapper._net_scope, "disconnect_container_networks", lambda container_id: None)
 
     def failing_tear_down(container_id: str, volume_name: str) -> None:
         raise SystemExit("secondary teardown failure")
@@ -2092,6 +2768,7 @@ def test_main_cleans_up_orphan_and_reraises_when_bring_up_fails(monkeypatch, tmp
                          lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", failing_bring_up)
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(
         wrapper, "_cleanup_orphan",
         lambda instance_label, volume_name: cleanup_calls.append((instance_label, volume_name)),
@@ -2131,6 +2808,7 @@ def test_main_tears_down_not_orphan_cleans_up_when_bring_up_succeeded_but_someth
     monkeypatch.setattr(wrapper, "_per_instance_config", lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
     monkeypatch.setattr(wrapper, "_bring_up", lambda label, cfg: "container-gap")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(wrapper, "_populate_workspace", failing_populate)
     monkeypatch.setattr(
         wrapper, "_tear_down",
@@ -2166,6 +2844,7 @@ def test_main_cleans_up_orphan_when_create_bounded_volume_itself_fails(monkeypat
     monkeypatch.setattr(wrapper, "_per_instance_config",
                          lambda label: (config_path, "fake-volume"))
     monkeypatch.setattr(wrapper, "_create_bounded_volume", failing_create_volume)
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
     monkeypatch.setattr(
         wrapper, "_cleanup_orphan",
         lambda instance_label, volume_name: cleanup_calls.append((instance_label, volume_name)),

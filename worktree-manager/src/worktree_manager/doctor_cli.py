@@ -6,6 +6,7 @@ import json
 
 from . import __version__, daemon_health
 from .core_install import core_status
+from .harness_state import mis_registered_repos
 from .model import coverage
 from .prereqs import current_os, detect_baseline, missing
 from .self_install import status as self_status
@@ -42,6 +43,23 @@ def _alignment_blocking(cov) -> bool:
     way, so it is not treated as drift.
     """
     return cov.source_kind != "none" and not cov.ok
+
+
+def _print_repo_registration(findings: list[tuple[str, str, str]]) -> None:
+    blocking = [(n, d) for n, status, d in findings if status != "unknown"]
+    unknown = [(n, d) for n, status, d in findings if status == "unknown"]
+    print("  repo registration:")
+    if blocking:
+        print("    ✗ registered repos whose checkout doesn't resolve:")
+        for name, detail in blocking:
+            print(f"        - {name}: {detail}")
+    elif not unknown:
+        print("    ✓ every registered repo with a checkout path resolves to a real git checkout.")
+    if unknown:
+        print("    ○ could not verify (git probe failed/unavailable) — not treated as drift:")
+        for name, detail in unknown:
+            print(f"        - {name}: {detail}")
+    print()
 
 
 def _print_alignment(cov) -> None:
@@ -82,6 +100,8 @@ def cmd_doctor(rest: list[str]) -> int:
     core = core_status()
     daemon_report = daemon_health.doctor_report(apply=apply_daemon_health)
     cov = coverage()
+    repo_findings = mis_registered_repos()
+    repo_blocking = [f for f in repo_findings if f[1] != "unknown"]
 
     if json_mode:
         selfst = self_status()
@@ -124,6 +144,19 @@ def cmd_doctor(rest: list[str]) -> int:
                         "uncovered": list(cov.uncovered),
                         "phantom": list(cov.phantom),
                         "published_prereq_gaps": [list(g) for g in cov.published_prereq_gaps],
+                    },
+                    "repo_registration": {
+                        "ok": not repo_blocking,
+                        "problems": [
+                            {"repo": n, "status": status, "detail": d}
+                            for n, status, d in repo_findings
+                            if status != "unknown"
+                        ],
+                        "unknown": [
+                            {"repo": n, "detail": d}
+                            for n, status, d in repo_findings
+                            if status == "unknown"
+                        ],
                     },
                     "source": {
                         "repo": _sc.resolved_repo(),
@@ -211,6 +244,8 @@ def cmd_doctor(rest: list[str]) -> int:
 
     _print_alignment(cov)
 
+    _print_repo_registration(repo_findings)
+
     gaps = missing(statuses)
     if gaps or not core.installed:
         print("  → not fully set up. Run `worktree-manager setup` to see the plan "
@@ -218,4 +253,6 @@ def cmd_doctor(rest: list[str]) -> int:
     else:
         print("  ✓ prerequisites satisfied and the core is installed.")
     print()
-    return 0 if (not gaps and core.installed and not _alignment_blocking(cov)) else 1
+    return 0 if (
+        not gaps and core.installed and not _alignment_blocking(cov) and not repo_blocking
+    ) else 1

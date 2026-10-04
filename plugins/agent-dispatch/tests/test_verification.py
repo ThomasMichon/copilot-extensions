@@ -684,6 +684,81 @@ def test_reviewer_loop_stale_after_days_uses_relocated_observation_store_path(
     assert queue.get(task_id).status == Status.ABANDONED
 
 
+def test_backlog_triager_verification_checks_repo_specific_label_schema_and_effort_marker(
+    tmp_path,
+):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    script = tmp_path / "eval.py"
+    script.write_text(
+        "import json, re, sys\n"
+        "fixtures = {\n"
+        "  17: {\n"
+        "    'labels': ['bug', 'triage:accepted', 'priority:high'],\n"
+        "    'body': 'Active effort: `efforts/active/example/README.md`',\n"
+        "  },\n"
+        "  18: {\n"
+        "    'labels': ['bug', 'triage:accepted', 'priority:high'],\n"
+        "    'body': 'triaged, but no effort linked yet',\n"
+        "  },\n"
+        "  19: {\n"
+        "    'labels': ['triage:duplicate'],\n"
+        "    'body': 'duplicate of #17; no effort link needed',\n"
+        "  },\n"
+        "}\n"
+        "task = json.load(sys.stdin)['task']\n"
+        "payload = json.loads(task['payload_inline'])\n"
+        "keys = payload['repository_issue_loop']['resource_keys']\n"
+        "numbers = [int(re.search(r':issue:(\\d+)$', key).group(1)) for key in keys]\n"
+        "for number in numbers:\n"
+        "    issue = fixtures[number]\n"
+        "    labels = set(issue['labels'])\n"
+        "    active_bug = 'triage:accepted' in labels and 'bug' in labels\n"
+        "    if not active_bug:\n"
+        "        continue\n"
+        "    has_priority = any(label.startswith('priority:') for label in labels)\n"
+        "    has_effort = 'efforts/active/' in issue['body'] and '/README.md' in issue['body']\n"
+        "    if not (has_priority and has_effort):\n"
+        "        json.dump({'decision': 'noop', 'reason': 'triage schema incomplete'}, sys.stdout)\n"
+        "        break\n"
+        "else:\n"
+        "    json.dump({'decision': 'confirm', 'reason': 'triage schema + effort marker present'}, sys.stdout)\n",
+        encoding="utf-8",
+    )
+    _register_script(queue, str(script), evaluator_ref="backlog-triager")
+    good_id = _submitted_task(
+        queue,
+        "triaged backlog issue",
+        require_verification=True,
+        evaluator_ref="backlog-triager",
+        payload_inline='{"repository_issue_loop":{"resource_keys":["forge:github:repository:example/project:issue:17"]}}',
+    )
+    incomplete_id = _submitted_task(
+        queue,
+        "still missing effort marker",
+        require_verification=True,
+        evaluator_ref="backlog-triager",
+        payload_inline='{"repository_issue_loop":{"resource_keys":["forge:github:repository:example/project:issue:18"]}}',
+    )
+    duplicate_id = _submitted_task(
+        queue,
+        "duplicate report closed without effort link",
+        require_verification=True,
+        evaluator_ref="backlog-triager",
+        payload_inline='{"repository_issue_loop":{"resource_keys":["forge:github:repository:example/project:issue:19"]}}',
+    )
+
+    good = evaluate_submitted_task(queue, good_id, trigger="submitted")
+    incomplete = evaluate_submitted_task(queue, incomplete_id, trigger="submitted")
+    duplicate = evaluate_submitted_task(queue, duplicate_id, trigger="submitted")
+
+    assert good["applied"][0]["decision"] == "complete"
+    assert queue.get(good_id).status == Status.COMPLETED
+    assert incomplete["applied"][0]["decision"] == "noop"
+    assert queue.get(incomplete_id).status == Status.SUBMITTED
+    assert duplicate["applied"][0]["decision"] == "complete"
+    assert queue.get(duplicate_id).status == Status.COMPLETED
+
+
 def test_future_scheduled_verification_uses_idle_interval_not_retry_interval(tmp_path):
     queue = TaskQueue(tmp_path / "tasks.db")
     task = queue.create(

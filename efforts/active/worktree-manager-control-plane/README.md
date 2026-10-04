@@ -881,14 +881,14 @@ worktree-manager.
       client-side re-resolution piece scoped in `agent-worktrees` first.
       Tracked as
       [#5001](https://github.com/ThomasMichon/copilot-extensions/issues/5001).
-- [ ] `doctor`/validation breadth: plugin-catalog alignment (coverage)
+- [x] `doctor`/validation breadth: plugin-catalog alignment (coverage)
       reporting landed (PR #4986), covering unmet-plugin-prerequisite/
       cross-plugin-drift detection. The governing vision
       (installer §`health-doctoring-and-validation`) also covers missing
-      prerequisites, stale/broken binstubs, and mis-registered repos — doctor
-      already reports the prereq/core-install/binstub pieces from earlier
-      phases, but a dedicated mis-registered-repos check remains open, so
-      this item stays unchecked.
+      prerequisites, stale/broken binstubs, and mis-registered repos —
+      doctor already reported the prereq/core-install/binstub pieces from
+      earlier phases, and the dedicated mis-registered-repos check landed
+      via PR #5099 (see Journal), closing this item.
 - [ ] Plugin updating & alignment: largely covered already (`worktree-manager
       update` + `agent-worktrees update`/`reconcile-plugins`); remains open
       only for whatever further cross-plugin alignment surfacing doctor/
@@ -988,6 +988,61 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-10-03** — Landed the dedicated mis-registered-repos doctor check
+  (Phase 7's remaining `doctor`/validation-breadth gap), closing
+  installer §`health-doctoring-and-validation`'s last open item for this
+  Phase. Investigated `agent-worktrees`' own `doctor.py`
+  `missing_repo_entry` finding first
+  (issue [#2961](https://github.com/ThomasMichon/copilot-extensions/issues/2961))
+  to see if it could be surfaced directly; it detects the opposite
+  direction (an adopted project with no `repos.yaml` entry at all) and
+  lives inside `agent-worktrees`' own mutation-capable surface, so
+  importing it would break `harness_state.py`'s explicit read-only,
+  no-plugin-import boundary. Scoped instead as a small, self-contained
+  read-model addition (`mis_registered_repos()`), surfaced in
+  `worktree-manager doctor` the same way plugin-catalog alignment was in
+  PR #4986. Landed as
+  [#5099](https://github.com/ThomasMichon/copilot-extensions/pull/5099)
+  after 4 Copilot review rounds, each catching a real correctness gap:
+  (1) `build_repos()`'s deliberate cross-platform path fallback meant a
+  repo registered only under a sibling platform's key was wrongly
+  inspected as if it were this platform's own — fixed with a dedicated
+  `_exact_platform_key()` (no fallback, WSL-aware); (2) a filesystem-
+  marker-only git-checkout test (`.git` exists, or `HEAD`+`objects`
+  present) would pass an empty/corrupt directory — replaced with a real
+  `git rev-parse --is-bare-repository`/`--show-toplevel` probe
+  (`GIT_*` env cleared); (3) the platform detector's `Darwin` branch
+  returned a nonexistent `repos.yaml` `macos` key (agent-worktrees itself
+  maps Darwin to `linux`) — fixed, and a bare `~/src/repo` registration
+  wasn't expanded before the filesystem check — fixed via
+  `Path.expanduser()`; (4) an inconclusive git probe (binary missing,
+  timeout) was silently dropped, which would make `doctor` claim full
+  success for a repo it genuinely couldn't verify — reworked
+  `mis_registered_repos()` to return a 3-way status (`missing`/`not-git`/
+  `unknown`) so `doctor` surfaces the unknown case visibly without
+  treating it as confirmed drift or exit-status-blocking.
+
+  Along the way, hit and fixed an unrelated repo-wide CI blocker: PR #5096
+  had merged a `pr-workflow.md` prose edit using a bare
+  `agent-worktrees repos add ...` command instead of the catalog-resolved
+  `argv[0]` placeholder form, tripping the marketplace-isolation
+  `bare-agent-command` guard and failing `guards + lint` on `dev` for
+  every PR. Fixed directly as a tiny separate PR
+  ([#5103](https://github.com/ThomasMichon/copilot-extensions/pull/5103)),
+  merged first, then rebased this PR onto the fix.
+
+  Final merge was also blocked by a second, unrelated and still-open CI
+  issue: `tools/test_run_tests_in_devcontainer.py`'s tests assume a real
+  `devcontainer` CLI is on `PATH` (only `_bring_up`/`_run_tests` are
+  mocked, not `_devcontainer_exe()` itself) and fail when the CI runner's
+  image lacks it — confirmed failing on `dev` itself at the same time
+  (not caused by this PR), and non-deterministic across reruns of the
+  identical commit. Filed
+  [#5107](https://github.com/ThomasMichon/copilot-extensions/issues/5107)
+  to track it (left unfixed — bigger, unrelated surface) rather than
+  scope-creep this PR, and merged #5099 via the resolved Maintainer
+  bypass once the failure was confirmed environmental.
 
 - **2026-10-03** — Claimed and landed a bounded Phase 7 slice: fixed a
   stranded-cutover-passive bug in `self_install()` (a crashed

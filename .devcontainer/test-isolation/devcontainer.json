@@ -7,8 +7,10 @@
   // concern); it exists solely so a plugin's pytest suite can run with a
   // real OS-level filesystem/privilege boundary instead of (or on top of)
   // `tools/run-plugin-tests.py`'s existing process-level containment.
-  // Networking is NOT (yet) part of that boundary -- see this file's own
-  // networking comment below, a known, named, open design gap.
+  // Networking during the actual test run is disconnected by
+  // `tools/run_tests_in_devcontainer.py` itself (see this file's own
+  // networking comment below) -- the real pytest pass has no outbound
+  // reach, only the preceding dependency-preparation pass does.
   //
   // Linux-only (this repo's CI already covers the Windows-specific
   // containment paths `TESTING.md` describes via its own windows-latest
@@ -156,14 +158,19 @@
     "GIT_CONFIG_VALUE_0": "/workspaces/copilot-extensions"
   },
 
-  // Networking (Phase 1, item 2, open/residual): left at Docker's default
-  // bridge network with full outbound reach for now, because dependency
-  // resolution (`uv sync` inside `tools/run-plugin-tests.py`, invoked via
-  // `run_tests_in_devcontainer.py`) and the test run itself currently share
-  // one process and have not yet been split into a network-enabled "prime
-  // the venv cache" pass and a network-disconnected "run pytest" pass. See
-  // the effort README's Phase 1 journal entry for why this is recorded as a
-  // deliberate, named gap rather than silently left unaddressed.
+  // Networking (Phase 1, item 2; closed in Phase 2): left at Docker's
+  // default bridge network for container creation and the dependency-
+  // preparation pass (`tools/run_tests_in_devcontainer.py`'s
+  // `prepare_dependencies`, which drives `uv venv`/`uv pip install` via
+  // `run-plugin-tests.py --prepare-only`) -- that pass genuinely needs
+  // outbound reach to resolve packages. The wrapper then disconnects the
+  // container from every attached network
+  // (`disconnect_container_networks`) before the real pytest pass runs,
+  // so the actual test execution has no outbound reach at all. This spec
+  // itself has no fixed `--network` runArg because the devcontainer CLI's
+  // own default network name isn't a stable contract; the wrapper reads
+  // whatever networks are actually attached from `docker inspect` instead
+  // of assuming one.
 
   "remoteUser": "vscode",
   "containerUser": "vscode",
