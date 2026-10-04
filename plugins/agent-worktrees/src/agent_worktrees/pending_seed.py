@@ -35,6 +35,36 @@ def claim_pending_seed(path: Path) -> str | None:
         return None
 
 
+#: ``mux_seed_pane`` outcomes that prove no keystroke reached the pane: it
+#: never typed (no confirmed-ready Copilot, or the pane was gone before it
+#: did). Anything else -- even ``send-failed``, which can follow a partial
+#: send -- may have left a draft, so retrying would append another copy.
+_NOTHING_TYPED = frozenset({"not-ready-timeout", "pane-target-unresolved", "pane-target-lost"})
+
+
+def nothing_typed(result: dict) -> bool:
+    """True when a seed delivery provably typed nothing (or was never
+    attempted), so its claimed pending seed may be restored for a retry."""
+    return not result or (not result.get("sent") and result.get("reason") in _NOTHING_TYPED)
+
+
+def settle_claim(path: Path, seed: str | None, result: dict) -> dict:
+    """After delivering a claimed pending ``seed``: restore it for a later
+    attach only when the delivery provably typed nothing. A typed but
+    unconfirmed seed may sit in the input as a draft -- another delivery would
+    append a second copy -- so it is reported for recovery instead: returns
+    those report fields (else ``{}``)."""
+    if not seed or result.get("ok"):
+        return {}
+    if not nothing_typed(result):
+        return {"seed_reason": result.get("reason"), "seed_unconfirmed": True}
+    try:
+        restore_pending_seed(path, seed)
+    except Exception:
+        pass
+    return {}
+
+
 def restore_pending_seed(path: Path, seed: str) -> None:
     """Roll back an unconfirmed claim so a later attach can retry.
 

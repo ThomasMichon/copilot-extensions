@@ -722,10 +722,12 @@ def cmd_detach(
         )
         # A resume can re-register under a new id after the claim; only a daemon
         # with live-session aliases carries a bridge message (seed or note) across it.
+        # A rejoin's own flags (or none) say nothing about how the running
+        # session was launched -- it may still be resuming -- so it always does.
         from venue_copilot import LIVE_SESSION_ALIAS_PROTOCOL, may_switch_session_id
 
         alias_floor = ({"min_daemon_protocol": LIVE_SESSION_ALIAS_PROTOCOL}
-                       if may_switch_session_id(copilot_args) else {})
+                       if not created or may_switch_session_id(copilot_args) else {})
         if seed_needs_bridge:
             from venue_copilot.refs import deliver_note
 

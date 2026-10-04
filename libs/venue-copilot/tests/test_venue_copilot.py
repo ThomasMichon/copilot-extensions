@@ -692,10 +692,13 @@ class TestDetachedRunner:
         assert sent and sent[0][0] == "sid-42" and "trace.har" in sent[0][1]
         assert sent[0][2] == "r1"  # keyed to this launch: a later launch's same note is sent again
 
+    @pytest.mark.parametrize("copilot_args", [["--resume=abc"], []])
     @pytest.mark.parametrize("daemon_has_aliases", [True, False])
     def test_a_resumed_rejoins_ref_note_needs_a_daemon_that_follows_renames(
-        self, monkeypatch, daemon_has_aliases,
+        self, monkeypatch, daemon_has_aliases, copilot_args,
     ) -> None:
+        """Flagless too: a rejoin's own flags say nothing about how the running
+        session was launched, so it may still be resuming either way."""
         from venue_copilot import detached, refs
 
         self._patch_bridge(monkeypatch)
@@ -705,7 +708,7 @@ class TestDetachedRunner:
         )
         adapter = _Adapter({"ok": True, "created": False, "session": "wt-anchor-repo"})
         rc, payload = detached.launch_detached(
-            adapter, self._plan(), seed=None, driver=None, copilot_args=["--resume=abc"],
+            adapter, self._plan(), seed=None, driver=None, copilot_args=copilot_args,
             ensure_mux=True, register_timeout=0.0, progress=lambda *a: None, refs=self._refs(),
         )
         assert rc == 0

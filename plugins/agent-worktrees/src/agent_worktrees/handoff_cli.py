@@ -408,17 +408,14 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 claimed = pending_seed_mod.claim_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml")
             except Exception:
                 claimed = None
-        pending_seed_result = {}
+        pending_seed_result, unconfirmed = {}, {}
         if claimed:
             pending_seed_result = sessions.mux_seed_pane(
                 copilot_pane, claimed, session_name=sessions.mux_session_name(wt_id),
                 ready_timeout=getattr(args, "seed_ready_timeout", None) or 180.0,
             )
-            if not pending_seed_result.get("ok"):
-                try:
-                    pending_seed_mod.restore_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml", claimed)
-                except Exception:
-                    pass
+            unconfirmed = pending_seed_mod.settle_claim(
+                cfg.tracking_dir() / f"{wt_id}.yaml", claimed, pending_seed_result)
         _json_output(
             {
                 "ok": True,
@@ -430,6 +427,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 "new_pane": display_pane,
                 "note": "a live mux session already embodies this worktree",
                 "seeded": bool(pending_seed_result.get("ok")) if claimed else False,
+                **unconfirmed,  # typed but unconfirmed: may sit as a draft; not retried
             }
         )
         return 0
@@ -569,8 +567,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
         if (new_pane and seed)
         else {}
     )
-    if not explicit_seed and claimed_seed and not seed_result.get("ok"):
-        pending_seed_mod.restore_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml", claimed_seed)
+    pending_seed_mod.settle_claim(  # restored only if nothing was typed (else seed_reason)
+        cfg.tracking_dir() / f"{wt_id}.yaml", None if explicit_seed else claimed_seed, seed_result)
 
     verified = None
     verify_timeout = getattr(args, "verify_timeout", 0.0) or 0.0

@@ -260,7 +260,7 @@ class TestCmdEmbody:
             sessions, "mux_seed_pane",
             lambda pane, seed, **k: {"ok": False, "pane": pane, "ready": False,
                                      "sent": False, "submitted": False,
-                                     "reason": "timeout"},
+                                     "reason": "not-ready-timeout"},
         )
 
         rc = m.cmd_embody(_ns(worktree_id="wtF"))
@@ -379,7 +379,7 @@ class TestCmdEmbody:
             sessions, "mux_seed_pane",
             lambda pane, seed, **k: {"ok": False, "pane": pane, "ready": False,
                                      "sent": False, "submitted": False,
-                                     "reason": "timeout"},
+                                     "reason": "not-ready-timeout"},
         )
 
         rc = m.cmd_embody(_ns(worktree_id="wtQ"))
@@ -388,6 +388,50 @@ class TestCmdEmbody:
         out = json.loads(capfd.readouterr().out)
         assert out["seeded"] is False
         assert state["pending_seed"] == "still queued"
+
+    @pytest.mark.parametrize("live_pane", [False, True])
+    @pytest.mark.parametrize("outcome", [
+        {"sent": True, "reason": "seed-not-echoed"},
+        {"sent": True, "reason": "enter-failed"},
+        {"sent": False, "reason": "send-failed"},  # may follow a partial send
+    ])
+    def test_an_ambiguous_pending_seed_delivery_is_reported_not_retried(
+        self, monkeypatch, capfd, tmp_path, live_pane, outcome,
+    ):
+        """A delivery that may have typed (a draft left in the input) keeps its
+        pending seed claimed, on a fresh launch and on a live-pane resume alike:
+        the next attach would otherwise type a second copy after the draft."""
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtA")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / "wtA.yaml").write_text("x")
+        state = {"worktree_path": "/w/wtA", "pending_seed": "queued"}
+
+        def _save(rec, path):
+            state["pending_seed"] = rec.pending_seed
+
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: type("Rec", (), dict(state))())
+        monkeypatch.setattr(m.tracking, "save_record", _save)
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: live_pane)
+        monkeypatch.setattr(sessions, "mux_copilot_pane", lambda w: "%4")
+        monkeypatch.setattr(
+            sessions, "mux_new_session",
+            lambda *a, **k: {"ok": True, "session": "wt-wtA", "new_pane": "%8", "error": None},
+        )
+        monkeypatch.setattr(
+            sessions, "mux_seed_pane",
+            lambda pane, seed, **k: {"ok": False, "pane": pane, "ready": True,
+                                     "submitted": False, **outcome},
+        )
+
+        rc = m.cmd_embody(_ns(worktree_id="wtA"))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert state["pending_seed"] is None  # not restored for an automatic retry
+        assert out["seed_reason"] == outcome["reason"]
+        if live_pane:
+            assert out["seed_unconfirmed"] is True
 
     def test_explicit_seed_wins_and_supersedes_any_stale_pending_seed(
         self, monkeypatch, capfd, tmp_path,

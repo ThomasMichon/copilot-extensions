@@ -929,12 +929,14 @@ def test_ref_files_for_a_running_session_are_sent_as_a_message(seams, tmp_path, 
     assert json.loads(capsys.readouterr().out)["refs_delivered"] == "message"
 
 
+@pytest.mark.parametrize("copilot_args", [["--resume=abc"], []])
 @pytest.mark.parametrize("daemon_has_aliases", [True, False])
 def test_a_resumed_rejoin_sends_ref_notes_only_through_a_daemon_that_follows_renames(
-    seams, tmp_path, monkeypatch, capsys, daemon_has_aliases,
+    seams, tmp_path, monkeypatch, capsys, daemon_has_aliases, copilot_args,
 ):
     """A rejoin can claim a still-resuming session's placeholder id: an older
-    daemon would strand the note in that placeholder's inbox, so it is refused."""
+    daemon would strand the note in that placeholder's inbox, so it is refused.
+    A flagless rejoin too: its flags say nothing about how the session started."""
     from venue_copilot import refs as venue_refs
 
     sent = []
@@ -944,7 +946,7 @@ def test_a_resumed_rejoin_sends_ref_notes_only_through_a_daemon_that_follows_ren
     )
     resumed = json.dumps({"ok": True, "created": False, "resumed": True})
     rc = detach.cmd_detach(
-        _args(ref_files=[_ref_file(tmp_path)], copilot_args=["--resume=abc"]),
+        _args(ref_files=[_ref_file(tmp_path)], copilot_args=copilot_args),
         ssh_session=_ssh(seams, stdout=resumed),
     )
     assert rc == 0
