@@ -11,13 +11,21 @@ import sys
 from pathlib import Path
 
 from . import (
-    activity, claim_history, finalize as fin, git_ops, obligations, output,
-    sessions, tracking,
+    activity,
+    claim_history,
+    claims_cli,
+    git_ops,
+    obligations,
+    output,
+    reap_cli,
+    sessions,
+    tracking,
 )
-from . import claims_cli
 from . import config as cfg
+from . import (
+    finalize as fin,
+)
 from . import managed_worktree_guard as remove_guard
-from . import reap_cli
 
 
 def _core():
@@ -535,7 +543,7 @@ def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | 
         # is durably confirmed (never before).
         claim_history.record_pr_event(
             claim.ref, worktree_id=record.worktree_id, machine=record.machine,
-            event="claimed",
+            event="claimed", project=record.repo,
         )
     return claim
 
@@ -652,6 +660,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 claim_history.record_pr_event(
                     claim.ref, worktree_id=owner_record.worktree_id,
                     machine=owner_record.machine, event="claimed",
+                    project=owner_record.repo,
                 )
             return True
         except Exception as exc:
