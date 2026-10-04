@@ -1087,7 +1087,7 @@ def test_global_effort_builder_groups_multiple_issues_into_one_effort_task(tmp_p
     assert "- #18: Issue 18 (https://example.com/issues/18)" in task["prompt"]
     assert "Group the selected issues into one coherent tracked effort" in task["prompt"]
     assert "Do not turn this effort-building task into an implementation lane" in task["prompt"]
-    assert "Phase 8-style execution belongs to a separate worker" in task["prompt"]
+    assert "that execution belongs to a separate worker" in task["prompt"]
     assert "implementation, required checks, review, merge, and issue closure" not in task["prompt"]
 
 

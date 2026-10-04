@@ -274,7 +274,7 @@ continue; never rely on a worktree-only nudge.
 
 Do not turn this effort-building task into an implementation lane by fixing the
 underlying bugs, closing the issues as resolved, or archiving/driving the
-effort itself; Phase 8-style execution belongs to a separate worker. Do not
+effort itself; that execution belongs to a separate worker. Do not
 select excluded or bootstrap issues, and do not delete a reusable workspace.
 Completion requires the workspace to be clean and synchronized for reuse.
 {self_config_clause}
