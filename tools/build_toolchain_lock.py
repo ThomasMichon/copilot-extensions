@@ -103,17 +103,21 @@ _PROVENANCE_MARKER_NAME = ".governed-feed-provenance.json"
 
 def _credential_free_index_identity(url: str) -> str:
     """``url`` with any embedded ``user:pass@`` userinfo, query string, AND
-    fragment stripped -- `uv`/PEP 508 index URLs may legally carry
-    credentials in any of these three places (e.g. a governed feed using a
-    signed URL with a `?token=...` query parameter, not just userinfo),
-    but none of them must ever be persisted to disk (a provenance marker
-    published into every shared venv) or interpolated into a diagnostic
-    message, per this effort's own "never log credentials" validation
-    rule. The raw, possibly-credentialed ``url`` (including its original
-    query/fragment) is used ONLY for the actual authenticated `uv venv`/
-    `uv pip install --index-url` invocations themselves in
-    `resolve_toolchain_lock` -- never stored or displayed; every
-    persisted/displayed use goes through this function first."""
+    fragment stripped -- for HUMAN-READABLE DISPLAY only (a diagnostic
+    message naming the index a caller validated). `uv`/PEP 508 index URLs
+    may legally carry credentials in any of these three places (e.g. a
+    governed feed using a signed URL with a `?token=...` query parameter,
+    not just userinfo), and none of them must ever be interpolated into a
+    message shown to a human, per this effort's own "never log
+    credentials" validation rule.
+
+    NEVER used for persistence or identity comparison: stripping the
+    query string discards real distinguishing information a query
+    parameter can legitimately carry (e.g. a tenant/feed selector, not
+    just a credential) -- two URLs differing only by query would
+    collapse to the same redacted string here and be wrongly treated as
+    the same index. `_opaque_index_identity` is the persisted/compared
+    identity; this function is for display only."""
     parts = urllib.parse.urlsplit(url)
     if not parts.username and not parts.password and not parts.query and not parts.fragment:
         return url
@@ -123,27 +127,43 @@ def _credential_free_index_identity(url: str) -> str:
     return urllib.parse.urlunsplit(parts._replace(netloc=netloc, query="", fragment=""))
 
 
+def _opaque_index_identity(url: str) -> str:
+    """A secret-safe, ONE-WAY digest of the FULL validated index URL --
+    including any embedded userinfo, query string, and fragment -- used
+    to persist to disk (a provenance marker) and to compare whether two
+    calls share EXACTLY the same effective index. A query parameter can
+    select a tenant/feed, not just carry a credential, so redacting
+    (stripping) it before comparing -- as `_credential_free_index_identity`
+    does for display -- would wrongly treat two distinct feeds sharing a
+    host/path as identical and silently reuse a venv across them. Hashing
+    the full, unredacted value instead preserves its full distinguishing
+    power while remaining safe to persist or display: a one-way digest
+    cannot be reversed to recover the original secret."""
+    return _hash_fields(url)
+
+
 def _toolchain_identity_hash(validated_index_url: str, python: str | None) -> str:
     """A stable identity for one (validated index, requested interpreter)
     pairing -- the exact two inputs that determine what a locked
-    toolchain venv actually contains. Used both to key a deterministic
-    alternate venv location (`_alternate_toolchain_dir`) and, via
-    `_credential_free_index_identity`, never folds in embedded
-    credentials."""
-    return _hash_fields(_credential_free_index_identity(validated_index_url), python or "")
+    toolchain venv actually contains. Used to key a deterministic
+    alternate venv location (`_alternate_toolchain_dir`); via
+    `_opaque_index_identity`, never folds in a redacted (query/fragment-
+    stripped) form that could conflate two distinct indexes."""
+    return _hash_fields(_opaque_index_identity(validated_index_url), python or "")
 
 
 def _write_provenance_marker(
     venv_dir: Path, validated_index_url: str, python: str | None = None
 ) -> None:
-    """Records ``validated_index_url``'s credential-free identity, and the
-    requested ``python`` interpreter, into ``venv_dir``'s own provenance
-    marker -- called on the staging directory BEFORE the atomic rename
-    that publishes it, so the marker and the venv it describes always
-    arrive together, never as two separate, racy writes. Never persists
-    embedded credentials to disk."""
+    """Records ``validated_index_url``'s opaque (one-way-hashed) identity,
+    and the requested ``python`` interpreter, into ``venv_dir``'s own
+    provenance marker -- called on the staging directory BEFORE the
+    atomic rename that publishes it, so the marker and the venv it
+    describes always arrive together, never as two separate, racy
+    writes. Never persists the raw URL (or any redacted-but-reversible
+    form of it) to disk -- see `_opaque_index_identity`."""
     marker = {
-        "validated_index_url": _credential_free_index_identity(validated_index_url),
+        "validated_index_identity": _opaque_index_identity(validated_index_url),
         "python": python or "",
     }
     (venv_dir / _PROVENANCE_MARKER_NAME).write_text(
@@ -155,16 +175,16 @@ def _provenance_matches(
     venv_dir: Path, validated_index_url: str, python: str | None = None
 ) -> bool:
     """Whether ``venv_dir``'s own provenance marker records EXACTLY
-    ``validated_index_url``'s credential-free identity AND the requested
-    ``python`` interpreter -- a missing, unreadable, or mismatched marker
-    (including a venv published before this check existed, which never
-    wrote one at all, or one published for a DIFFERENT ``--python``)
-    returns ``False``, never treated as "probably fine". Omitting the
-    requested interpreter identity here would let a venv created with one
-    Python version be silently reused for a later call that explicitly
-    asked for a different one -- the toolchain's `marker_environment` and
-    every subsequent build would then run against the wrong interpreter
-    despite the caller's own `--python` selection."""
+    ``validated_index_url``'s opaque identity AND the requested ``python``
+    interpreter -- a missing, unreadable, or mismatched marker (including
+    a venv published before this check existed, which never wrote one at
+    all, or one published for a DIFFERENT ``--python``) returns ``False``,
+    never treated as "probably fine". Omitting the requested interpreter
+    identity here would let a venv created with one Python version be
+    silently reused for a later call that explicitly asked for a
+    different one -- the toolchain's `marker_environment` and every
+    subsequent build would then run against the wrong interpreter despite
+    the caller's own `--python` selection."""
     marker_path = venv_dir / _PROVENANCE_MARKER_NAME
     try:
         data = json.loads(marker_path.read_text(encoding="utf-8"))
@@ -172,8 +192,7 @@ def _provenance_matches(
         return False
     return (
         isinstance(data, dict)
-        and data.get("validated_index_url")
-        == _credential_free_index_identity(validated_index_url)
+        and data.get("validated_index_identity") == _opaque_index_identity(validated_index_url)
         and data.get("python", "") == (python or "")
     )
 
@@ -198,6 +217,30 @@ def _alternate_toolchain_dir(
     mismatch case, rather than to a brand-new disposable venv per call."""
     identity = _toolchain_identity_hash(validated_index_url, python)
     return venv_dir.parent / f".{venv_dir.name}.alt-{identity[:16]}"
+
+
+def _occupied_by_other_identity(
+    target_dir: Path, validated_index_url: str, python: str | None
+) -> bool:
+    """Whether ``target_dir`` exists on disk but is NOT a complete,
+    provenance-matching venv for this EXACT (index, python) identity --
+    covers a mismatched/stale venv, AND an empty or partially-built
+    directory (e.g. a manually pre-created ``--toolchain-venv`` path, or
+    residue from a crashed prior run). A directory in either of these
+    shapes is never safe to treat as "absent": the eventual
+    staging-directory rename that publishes a freshly built venv would
+    land on an ALREADY-EXISTING destination, which Windows always
+    rejects (`Path.rename` has no POSIX-style "replace an empty
+    directory" behavior) -- so this must be detected and routed to the
+    alternate slot (or fail) BEFORE staging a build, not discovered only
+    when the publish rename itself fails."""
+    if not target_dir.exists():
+        return False
+    venv_python = _venv_python_path(target_dir)
+    return not (
+        venv_python.is_file()
+        and _provenance_matches(target_dir, validated_index_url, python)
+    )
 
 
 class ArtifactBuildError(Exception):
@@ -525,16 +568,20 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
 
     An existing venv whose provenance does not match (a different
     validated index, a different requested ``--python``, or no marker at
-    all -- e.g. published before this check existed) is never trusted on
-    interpreter-presence alone -- but it is also NEVER renamed, deleted, or
-    otherwise disturbed: another process sharing this exact path may be
-    actively building against it right now, and moving it aside out from
-    under a live build is itself a race this effort's own prior
-    quarantine-based design was found to have. Instead, THIS call resolves
-    into a separate, deterministic sibling keyed on its own (index,
-    python) identity (`_alternate_toolchain_dir`) -- built fresh there if
-    needed, or reused there if a prior call in this same run already built
-    that exact differing identity.
+    all -- e.g. published before this check existed) -- OR an existing
+    but EMPTY/partially-built directory at ``venv_dir`` (e.g. a manually
+    pre-created ``--toolchain-venv`` path, or residue from a crashed prior
+    run) -- is never trusted or built into directly: another process
+    sharing this exact path may be actively building against it right
+    now, and moving it aside out from under a live build is itself a race
+    this effort's own prior quarantine-based design was found to have;
+    building fresh directly into an already-existing-but-incomplete
+    directory would also make the eventual publish rename fail (Windows
+    rejects renaming onto an existing destination, even an empty one).
+    Instead, THIS call resolves into a separate, deterministic sibling
+    keyed on its own (index, python) identity (`_alternate_toolchain_dir`)
+    -- built fresh there if needed, or reused there if a prior call in
+    this same run already built that exact differing identity.
 
     Never resolves from an untrusted index: this call itself first
     resolves the effective default index, verifying it is both non-public
@@ -575,32 +622,31 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             "an unverified index"
         )
     target_dir = venv_dir
-    venv_python = _venv_python_path(target_dir)
-    if venv_python.is_file() and not _provenance_matches(
-        target_dir, validated_index_url, python
-    ):
-        # The shared slot is occupied by a toolchain built for a DIFFERENT
-        # validated index or a different requested --python -- it may be
-        # actively in use by a concurrent build RIGHT NOW. Never rename or
-        # delete it: resolve this call's own, differently-identified
-        # toolchain into its own deterministic sibling path instead,
-        # entirely independent of whatever currently lives at venv_dir.
+    if _occupied_by_other_identity(target_dir, validated_index_url, python):
+        # The shared slot exists but is NOT a complete, matching venv for
+        # this exact (index, python) identity -- a different validated
+        # index, a different requested --python, or an empty/partially-
+        # built directory (which the eventual publish rename below could
+        # never land on anyway; Windows rejects renaming onto an already-
+        # existing destination). It may also be actively in use by a
+        # concurrent build RIGHT NOW. Never rename or delete it: resolve
+        # this call's own, differently-identified toolchain into its own
+        # deterministic sibling path instead, entirely independent of
+        # whatever currently lives at venv_dir.
         target_dir = _alternate_toolchain_dir(venv_dir, validated_index_url, python)
-        venv_python = _venv_python_path(target_dir)
-        if venv_python.is_file() and not _provenance_matches(
-            target_dir, validated_index_url, python
-        ):
+        if _occupied_by_other_identity(target_dir, validated_index_url, python):
             # This alternate path is itself keyed on this exact identity,
-            # so a mismatch here is a genuine anomaly (e.g. a hash
-            # collision, or manual tampering), never an expected race --
-            # fail closed rather than silently rebuilding over it or
-            # reusing an unverified venv.
+            # so finding it occupied by something else here is a genuine
+            # anomaly (e.g. a hash collision, or manual tampering), never
+            # an expected race -- fail closed rather than silently
+            # rebuilding over it or reusing an unverified venv.
             raise ArtifactBuildError(
                 f"{target_dir}: toolchain venv exists at this identity-"
                 "keyed path but its provenance does not match the index/"
                 "interpreter it should exclusively hold -- refusing to "
                 "reuse or rebuild over it"
             )
+    venv_python = _venv_python_path(target_dir)
     if not venv_python.is_file():
         target_dir.parent.mkdir(parents=True, exist_ok=True)
         staging_venv_dir = Path(
