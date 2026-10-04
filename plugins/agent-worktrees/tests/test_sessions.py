@@ -1371,12 +1371,13 @@ def test_seed_keystrokes_are_refused_not_misdirected_when_the_pane_moves_after_l
             state["moved"] = True  # a layout change lands between lookup and keystroke
         here = "=wt-x:1.%9" if state["moved"] else "=wt-x:0.%9"
         rc = 0 if at == here else 1  # the server's own identity check
+        err = "" if rc == 0 else f"psmux: can't find pane: {at.rsplit('.', 1)[1]}"
         if argv[1] == "send-keys":
             sends.append((at, argv[4:], rc))
             state["typed"] |= rc == 0 and "-l" in argv
-            return SimpleNamespace(stdout="", returncode=rc)
+            return SimpleNamespace(stdout="", stderr=err, returncode=rc)
         out = f"{ready}\n{seed}" if state["typed"] else ready
-        return SimpleNamespace(stdout=out if rc == 0 else "", returncode=rc)
+        return SimpleNamespace(stdout=out if rc == 0 else "", stderr=err, returncode=rc)
 
     with patch("subprocess.run", side_effect=run), patch("time.sleep"), \
          patch("time.monotonic", side_effect=_Clock()), \
@@ -1391,31 +1392,36 @@ def test_seed_keystrokes_are_refused_not_misdirected_when_the_pane_moves_after_l
 
 
 def test_a_failed_send_followed_by_a_lost_pane_stays_ambiguous():
-    """A send the server refused (or that failed partway) may have left a
-    draft; a pane lookup failing right after proves nothing about that, so it
-    is a ``send-failed`` -- never ``pane-target-lost``, which callers treat as
-    "nothing typed" and would retry, typing a second copy."""
+    """A send that failed for any reason but the server's own target refusal
+    may have left a partial draft: it is a ``send-failed`` -- never retried,
+    even where the pane went, and never ``pane-target-lost`` (which callers
+    treat as "nothing typed" and would retry, typing a second copy)."""
     from types import SimpleNamespace
 
     ready = "press esc to interrupt"
-    state = {"sent": False}
+    for after in (None, "=wt-x:1.0"):  # the pane is gone, or moved, after the failure
+        state = {"sent": False}
+        sends: list[str] = []
 
-    def locate(pane, mux, session_name=None):
-        return None if state["sent"] else "=wt-x:0.0"
+        def locate(pane, mux, session_name=None, after=after, state=state):
+            return after if state["sent"] else "=wt-x:0.0"
 
-    def run(argv, **kw):
-        if argv[1] == "send-keys":
-            state["sent"] = True
-            return SimpleNamespace(stdout="", returncode=1)
-        return SimpleNamespace(stdout=ready, returncode=0)
+        def run(argv, state=state, sends=sends, **kw):
+            if argv[1] == "send-keys":
+                state["sent"] = True
+                sends.append(argv[3])
+                return SimpleNamespace(stdout="", stderr="send failed", returncode=1)
+            return SimpleNamespace(stdout=ready, stderr="", returncode=0)
 
-    with patch("subprocess.run", side_effect=run), patch("time.sleep"), \
-         patch("time.monotonic", side_effect=_Clock()), \
-         patch("agent_worktrees.sessions._mux_bin", return_value="psmux"), \
-         patch("agent_worktrees.sessions_pane_retire._mux_qualified_pane_target", side_effect=locate):
-        out = mux_seed_pane("%9", "Continue: build", session_name="wt-x",
-                            ready_timeout=100.0, poll_interval=0.0, settle=0.0)
-    assert out["reason"] == "send-failed" and out["submitted"] is False
+        with patch("subprocess.run", side_effect=run), patch("time.sleep"), \
+             patch("time.monotonic", side_effect=_Clock()), \
+             patch("agent_worktrees.sessions._mux_bin", return_value="psmux"), \
+             patch("agent_worktrees.sessions_pane_retire._mux_qualified_pane_target",
+                   side_effect=locate):
+            out = mux_seed_pane("%9", "Continue: build", session_name="wt-x",
+                                ready_timeout=100.0, poll_interval=0.0, settle=0.0)
+        assert out["reason"] == "send-failed" and out["submitted"] is False, after
+        assert sends == ["=wt-x:0.%9"], after  # one attempt: never resent
 
 
 def test_seed_fails_closed_when_its_pane_disappears():

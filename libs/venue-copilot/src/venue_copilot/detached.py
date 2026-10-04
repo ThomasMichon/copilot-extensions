@@ -350,7 +350,8 @@ def launch_detached(
             session_id=session_id,
             created=created,
             resumed=not created,
-            seeded=bool(created and seed and seed_delivery_status in {"typed", "bridge"}),
+            seeded=bool(created and seed and seed_delivery_status in {"typed", "bridge"})
+            or seed_extra.get("seed_delivery") == "typed",
             keeper=keeper,
             **seed_extra,
             **refs_extra,

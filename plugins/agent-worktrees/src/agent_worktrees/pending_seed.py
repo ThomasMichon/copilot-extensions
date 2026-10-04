@@ -50,19 +50,22 @@ def nothing_typed(result: dict) -> bool:
 
 def settle_claim(path: Path, seed: str | None, result: dict) -> dict:
     """After delivering a claimed pending ``seed``: restore it for a later
-    attach only when the delivery provably typed nothing. A typed but
+    attach only when the delivery provably typed nothing, and say so
+    (``seed_deferred``) -- the session is idle until then. A typed but
     unconfirmed seed may sit in the input as a draft -- another delivery would
-    append a second copy -- so it is reported for recovery instead: returns
-    those report fields (else ``{}``)."""
+    append a second copy -- so it is reported for recovery instead
+    (``seed_unconfirmed``). Returns those report fields (``{}`` when there was
+    no claim or it was submitted)."""
     if not seed or result.get("ok"):
         return {}
+    report = {"seed_reason": result.get("reason") or "not-attempted"}
     if not nothing_typed(result):
-        return {"seed_reason": result.get("reason"), "seed_unconfirmed": True}
+        return {**report, "seed_unconfirmed": True}
     try:
         restore_pending_seed(path, seed)
     except Exception:
         pass
-    return {}
+    return {**report, "seed_deferred": True}
 
 
 def restore_pending_seed(path: Path, seed: str) -> None:

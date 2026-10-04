@@ -269,6 +269,7 @@ class TestCmdEmbody:
         out = json.loads(capfd.readouterr().out)
         assert out["resumed"] is True and out["seeded"] is False
         assert state["pending_seed"] == "not yet delivered"
+        assert out["seed_deferred"] is True  # kept for later: reported, not silent
 
     def test_create_detached_session_and_seed(self, monkeypatch, capfd, tmp_path):
         _stub_config(monkeypatch)
@@ -388,6 +389,7 @@ class TestCmdEmbody:
         out = json.loads(capfd.readouterr().out)
         assert out["seeded"] is False
         assert state["pending_seed"] == "still queued"
+        assert out["seed_deferred"] is True and out["seed_reason"] == "not-ready-timeout"
 
     @pytest.mark.parametrize("live_pane", [False, True])
     @pytest.mark.parametrize("outcome", [

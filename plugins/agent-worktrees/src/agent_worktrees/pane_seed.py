@@ -129,26 +129,28 @@ def mux_seed_pane(
                 "reason": "not-ready-timeout"}
 
     def _send(*a: str) -> bool | None:
-        """Send keys to the pane wherever it is now; ``None`` when it is gone.
-        A send the server refused because the pane left that window in the
-        meantime typed nothing anywhere, so it is retried once where it went."""
+        """Send keys to the pane wherever it is now; ``None`` when it is gone
+        and nothing was typed. Only the server's explicit refusal of the target
+        (``can't find pane/window/session``: resolved before any key is sent)
+        proves nothing landed, so only that is retried, once, where the pane
+        went; any other failure may have typed part of the keys: fail closed."""
         tried = None
         for _ in range(2):
             at = _where()
             if not at:
-                # Gone -- but after an attempted send that proves nothing about
-                # a partial draft it may have left: ambiguous, never "lost".
-                return False if tried else None
+                return None  # gone; any earlier attempt was a verified refusal
             if at == tried:
                 return False  # refused, but not because it moved: a real failure
             tried = at
             try:
                 r = subprocess.run([mux_bin, "send-keys", "-t", _bound(at), *a],
-                                   capture_output=True, timeout=5)
+                                   capture_output=True, text=True, timeout=5)
             except (OSError, subprocess.TimeoutExpired):
                 return False
             if r.returncode == 0:
                 return True
+            if "can't find" not in (r.stderr or "").lower():
+                return False
         return False
 
     # A distinctive head of the seed, whitespace-squashed so terminal soft-wrap

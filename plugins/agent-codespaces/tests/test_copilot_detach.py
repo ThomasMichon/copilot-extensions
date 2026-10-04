@@ -1086,20 +1086,28 @@ def test_a_worktree_launch_without_a_seed_still_budgets_for_its_pending_seed(
     assert (ttls[0] >= floor) is (worktree_id is not None)
 
 
-def test_an_unconfirmed_pending_seed_is_reported_without_a_host_seed(seams, monkeypatch, capsys):
-    """A --worktree-id launch with no host seed whose embody typed the
-    worktree's pending seed but couldn't confirm the submit reports it (a
-    possible draft) -- and never resends it over the bridge."""
+@pytest.mark.parametrize("embody_says, delivery, seeded", [
+    ({"seed_unconfirmed": True, "seed_reason": "enter-failed"}, "unconfirmed", False),
+    ({"seed_deferred": True, "seed_reason": "not-ready-timeout"}, "deferred", False),
+    ({"seeded": True, "seed_submitted": True}, "typed", True),
+])
+def test_a_pending_seed_outcome_is_reported_without_a_host_seed(
+    seams, monkeypatch, capsys, embody_says, delivery, seeded,
+):
+    """A --worktree-id launch with no host seed reports how embody fared with
+    the worktree's pending seed (submitted, kept for later, or a possible
+    draft) -- and never resends it over the bridge."""
     from venue_copilot import refs as venue_refs
 
     monkeypatch.setattr(venue_refs, "deliver_note", lambda *a, **k: pytest.fail("must not resend"))
-    embodied = json.dumps({"ok": True, "created": True, "session": "wt-wt-7",
-                           "seed_unconfirmed": True, "seed_reason": "enter-failed"})
+    embodied = json.dumps({"ok": True, "created": True, "session": "wt-wt-7", **embody_says})
     rc = detach.cmd_detach(_args(worktree_id="wt-7", seed=None),
                            ssh_session=_ssh(seams, stdout=embodied))
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["seed_delivery"] == "unconfirmed" and "enter-failed" in out["warning"]
+    assert (out["seed_delivery"], out["seeded"]) == (delivery, seeded)
+    if delivery != "typed":
+        assert embody_says["seed_reason"] in out["warning"]
 
 
 def test_launch_does_not_retry_a_genuine_remote_failure(seams, monkeypatch, capsys):

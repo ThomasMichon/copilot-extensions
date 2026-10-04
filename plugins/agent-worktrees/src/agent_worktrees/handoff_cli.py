@@ -408,13 +408,13 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 claimed = pending_seed_mod.claim_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml")
             except Exception:
                 claimed = None
-        pending_seed_result, unconfirmed = {}, {}
+        pending_seed_result, settled = {}, {}
         if claimed:
             pending_seed_result = sessions.mux_seed_pane(
                 copilot_pane, claimed, session_name=sessions.mux_session_name(wt_id),
                 ready_timeout=getattr(args, "seed_ready_timeout", None) or 180.0,
             )
-            unconfirmed = pending_seed_mod.settle_claim(
+            settled = pending_seed_mod.settle_claim(
                 cfg.tracking_dir() / f"{wt_id}.yaml", claimed, pending_seed_result)
         _json_output(
             {
@@ -427,7 +427,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 "new_pane": display_pane,
                 "note": "a live mux session already embodies this worktree",
                 "seeded": bool(pending_seed_result.get("ok")) if claimed else False,
-                **unconfirmed,  # typed but unconfirmed: may sit as a draft; not retried
+                **settled,  # a claimed seed kept for later, or a possible draft (not retried)
             }
         )
         return 0
@@ -567,7 +567,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         if (new_pane and seed)
         else {}
     )
-    unconfirmed = pending_seed_mod.settle_claim(  # restored only if nothing was typed
+    settled = pending_seed_mod.settle_claim(  # restored only if nothing was typed
         cfg.tracking_dir() / f"{wt_id}.yaml", None if explicit_seed else claimed_seed, seed_result)
 
     verified = None
@@ -595,7 +595,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         "seed_ready": bool(seed_result.get("ready")) if seed else False,
         "seed_submitted": bool(seed_result.get("submitted")) if seed else False,
         "seed_reason": seed_result.get("reason") if seed else None,
-        **unconfirmed,  # a claimed pending seed typed but unconfirmed: a possible draft
+        **settled,  # a claimed pending seed kept for later, or a possible draft
         "mux_verified": verified,
         "verify_hint": (
             f"agent-bridge live-sessions | grep {wt_id}  "

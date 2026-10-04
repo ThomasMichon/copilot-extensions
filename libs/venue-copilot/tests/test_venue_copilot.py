@@ -965,23 +965,30 @@ class TestDetachedRunner:
         assert rc == 0
         assert launch_timeouts == [expected]
 
-    def test_an_unconfirmed_pending_seed_is_reported_without_a_host_seed(self, monkeypatch) -> None:
-        """A launch with no seed of its own whose embody typed the worktree's
-        pending seed but couldn't confirm the submit reports it (a possible
-        draft); nothing is resent over the bridge."""
+    @pytest.mark.parametrize("embody_says, delivery, seeded", [
+        ({"seed_unconfirmed": True, "seed_reason": "seed-not-echoed"}, "unconfirmed", False),
+        ({"seed_deferred": True, "seed_reason": "not-ready-timeout"}, "deferred", False),
+        ({"seeded": True, "seed_submitted": True}, "typed", True),
+    ])
+    def test_a_pending_seed_outcome_is_reported_without_a_host_seed(
+        self, monkeypatch, embody_says, delivery, seeded,
+    ) -> None:
+        """A launch with no seed of its own whose embody delivered (or kept, or
+        maybe half-typed) the worktree's pending seed reports that outcome;
+        nothing is ever resent over the bridge."""
         from venue_copilot import detached, refs
 
         self._patch_bridge(monkeypatch)
         monkeypatch.setattr(refs, "deliver_note", lambda *a, **k: pytest.fail("must not resend"))
-        adapter = _Adapter({"ok": True, "created": True, "session": "wt-anchor-repo",
-                            "seed_unconfirmed": True, "seed_reason": "seed-not-echoed"})
+        adapter = _Adapter({"ok": True, "created": True, "session": "wt-anchor-repo", **embody_says})
         rc, payload = detached.launch_detached(
             adapter, {**self._plan(), "anchor": False}, seed=None, driver=None, copilot_args=[],
             ensure_mux=True, register_timeout=0.0, progress=lambda *a: None,
         )
         assert rc == 0
-        assert payload["seed_delivery"] == "unconfirmed"
-        assert "seed-not-echoed" in payload["warning"]
+        assert (payload["seed_delivery"], payload["seeded"]) == (delivery, seeded)
+        if delivery != "typed":
+            assert embody_says["seed_reason"] in payload["warning"]
 
     def test_detached_launch_uses_register_timeout_when_larger(self, monkeypatch) -> None:
         from venue_copilot import detached

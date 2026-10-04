@@ -119,19 +119,31 @@ def seed_outcome(embodied: dict, *, created: bool, seed: str | None) -> tuple[st
 
 def pending_seed_report(embodied: dict, *, seed: str | None) -> dict:
     """A launch with no seed of its own can still deliver the worktree's
-    pending seed (embody claims it). When embody typed it but couldn't
-    confirm the submit (``seed_unconfirmed``), it may sit as a draft in
-    Copilot's input and is deliberately not retried: report that to the
-    caller (never resend it). ``{}`` otherwise."""
-    if seed or not embodied.get("seed_unconfirmed"):
+    pending seed (embody claims it); report how that went, never resending it:
+    ``typed`` (submitted), ``deferred`` (provably never typed: embody kept it
+    for the next attach, so the session is idle until then) or ``unconfirmed``
+    (typed but the submit unconfirmed: it may sit as a draft in Copilot's
+    input). ``{}`` when the launch had its own seed or no pending seed ran."""
+    if seed:
         return {}
     reason = embodied.get("seed_reason") or "unknown"
-    return {
-        "seed_delivery": "unconfirmed",
-        "warning": f"the worktree's pending seed was typed but not confirmed submitted "
-                   f"({reason}); it may sit as a draft in Copilot's input -- check the "
-                   "session (it was not resent)",
-    }
+    if embodied.get("seed_unconfirmed"):
+        return {
+            "seed_delivery": "unconfirmed",
+            "warning": f"the worktree's pending seed was typed but not confirmed submitted "
+                       f"({reason}); it may sit as a draft in Copilot's input -- check the "
+                       "session (it was not resent)",
+        }
+    if embodied.get("seed_deferred"):
+        return {
+            "seed_delivery": "deferred",
+            "warning": f"the worktree's pending seed was never typed ({reason}) and is kept "
+                       "for the next attach: the session is idle until you re-run this "
+                       "launch or send the task with `agent-bridge send`",
+        }
+    if embodied.get("seed_submitted") or (not embodied.get("created") and embodied.get("seeded")):
+        return {"seed_delivery": "typed"}
+    return {}
 
 # The daemon's own config dir, matching agent-bridge's ``effective_config_dir()``
 # default -- overridable the same way, via ``AGENT_BRIDGE_CONFIG_DIR``.

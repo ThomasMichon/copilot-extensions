@@ -778,14 +778,15 @@ def cmd_detach(
             _local_forwards_ready(args.name, reported_local, local_forwards, prior_assigned_local)
             if reported_local else {}
         )
+        pending_report = {} if created and seed else pending_seed_report(embodied, seed=seed)
         print(json.dumps({
             "ok": True, **plan, "session_id": session_id, "created": created,
             **({"ref_files": refs_note_text.splitlines()[1:], "refs_delivered": refs_delivered}
                if refs_note_text else {}),
             "resumed": not created,
-            "seeded": bool(created and seed and seed_delivery_status in {"typed", "bridge"}),
-            **({"seed_delivery": seed_delivery_status} if created and seed
-               else pending_seed_report(embodied, seed=seed)),
+            "seeded": bool(created and seed and seed_delivery_status in {"typed", "bridge"})
+            or pending_report.get("seed_delivery") == "typed",
+            **({"seed_delivery": seed_delivery_status} if created and seed else pending_report),
             **({"seed_delivery": "unconfirmed",
                 "warning": "a lost earlier launch attempt may have started this session; "
                            "its seed can't be confirmed -- check `agent-bridge result "
