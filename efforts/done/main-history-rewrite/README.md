@@ -6,7 +6,7 @@
   out-of-band operation against `main` (not a normal promotion — see
   Coordination)
 - **Created:** 2026-10-04
-- **Status:** Active
+- **Status:** Done
 - **Related:** follows directly from
   [`efforts/active/coverage-guided-ci`](../coverage-guided-ci/README.md)'s
   pipeline-health work (the coverage-baseline design fixed in PRs #5078 /
@@ -152,10 +152,10 @@ executing Phases 0-6 below.
       rewritten `main` (real-world re-confirmation of the earlier smoke test).
 - [x] `tools/rollback_release.py status` still resolves the latest promotion
       correctly post-rewrite.
-- [ ] Pipeline resumed; next real `dev`->`main` promotion goes green
+- [x] Pipeline resumed; next real `dev`->`main` promotion goes green
       end-to-end.
 - [x] Banner follow-up PR lands with the real old->new SHA pair.
-- [ ] This effort moved to `efforts/done/` with final sizes journaled below.
+- [x] This effort moved to `efforts/done/` with final sizes journaled below.
 
 ## Journal
 
@@ -221,4 +221,16 @@ executing Phases 0-6 below.
   documented `_land_via_pr` path as currently written; worth either adding a
   4th recognized shape to the gate, or documenting the admin-bypass
   requirement explicitly in the tool's own docstring.
+
+- **2026-10-04 (closeout)** — Confirmed the first real `dev`->`main`
+  promotion after resume (#5194, run 37200432102) completed green
+  end-to-end, including its `Promote dev -> main` job, landing commit
+  `856275d7...` on the rewritten `main`. All Validation Plan items
+  resolved. Effort moved to `efforts/done/`. Final numbers: `main`'s
+  history went from 162 oversized blobs (~300MB) to 0 (the one >1MB blob
+  that remains, `docs/assets/worktree-picker.gif`, is live-wanted content,
+  not bloat); repo mirror pack size for the rewritten history line is
+  ~74MB packed. The two `tools/rollback_release.py` gaps above remain open
+  as small, separately-tracked follow-ups -- not blockers to this effort's
+  own completion.
 
