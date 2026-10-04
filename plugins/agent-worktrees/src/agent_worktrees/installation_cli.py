@@ -382,8 +382,7 @@ def cmd_install(args: argparse.Namespace) -> int:
 
     # Machine registry is optional -- repos without machines.yaml still work
     machine_entry: cfg.MachineEntry | None = None
-    machines_yaml = repo_dir / "machines.yaml"
-    if machines_yaml.exists():
+    if cfg.machines_yaml_path(repo_dir).exists():
         machine_entry = _core_helper("_validate_machine_registry", _validate_machine_registry)(repo_dir, machine)
         if machine_entry is None:
             return 1
@@ -630,8 +629,7 @@ def cmd_register(args: argparse.Namespace) -> int:
 
     # Machine registry is optional -- external repos may not have machines.yaml
     machine_entry: cfg.MachineEntry | None = None
-    machines_yaml = repo_dir / "machines.yaml"
-    if machines_yaml.exists():
+    if cfg.machines_yaml_path(repo_dir).exists():
         machine_entry = _core_helper("_validate_machine_registry", _validate_machine_registry)(repo_dir, machine)
         if machine_entry is None:
             return 1
