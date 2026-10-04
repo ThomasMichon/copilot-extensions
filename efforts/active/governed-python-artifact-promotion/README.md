@@ -751,6 +751,37 @@ win grows with build complexity.
   feed -- both manifests recorded the identical `lock_id`, and the
   provenance marker now stores the (credential-free, since this feed has
   none embedded) validated index URL.
+- A thirteenth review round found 2 more issues, resolving a genuine
+  architectural hazard in the quarantine design itself: (1) **HIGH:** the
+  quarantine rename (moving a mismatched venv aside before rebuilding)
+  could move a shared toolchain out from under another process actively
+  building against it right now -- two callers racing on the same shared
+  path could each observe the other's provenance as mismatched and rename
+  a live, in-use venv aside mid-build. (2) the reuse identity ignored the
+  requested `--python`: a venv built for one interpreter could be
+  silently returned for a later call that explicitly asked for a
+  different one, running markers/builds against the wrong interpreter.
+  **Both resolved by removing the quarantine mechanism entirely**, not
+  patching around it: `resolve_toolchain_lock` now NEVER renames, deletes,
+  or otherwise disturbs an occupied `--toolchain-venv` path. When the
+  shared slot's provenance doesn't match this call's own validated index
+  AND requested interpreter (now part of the provenance marker), it
+  resolves into a deterministic, content-addressed sibling directory
+  keyed on that exact (index, python) identity instead -- built fresh
+  there if needed, reused there on a repeat call with the same differing
+  identity, and never touching the original occupied path. A mismatch
+  found AT that identity-keyed alternate path is a genuine anomaly (never
+  an expected race) and fails closed rather than silently rebuilding over
+  it. Net +2 unit tests (134 total: 2 provenance-mismatch tests rewritten
+  for the new never-touch-the-shared-path behavior, 1 obsolete
+  quarantine-specific test removed as no-longer-applicable, 3 new --
+  repeat-mismatch reuse, anomalous-alternate-mismatch, and python-identity
+  mismatch; all passing). Smoke-tested for real again: built
+  `agent-worktrees` (fresh) then `agent-bridge` (reuse, same `lock_id`)
+  against the live governed feed; then hand-simulated a provenance
+  mismatch on the shared venv and confirmed the rebuild landed in a
+  correctly-marked alternate sibling directory while the original
+  (mismatched) marker at the shared path was left completely untouched.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 

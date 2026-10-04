@@ -83,14 +83,15 @@ def sanitize_subprocess_env(env: dict | None = None) -> dict:
 
 
 #: The file published atomically alongside a shared `--toolchain-venv`,
-#: recording the governed index it was actually built from -- so a LATER
-#: call sharing the same ``venv_dir`` can verify the existing venv
-#: genuinely came from the currently-validated governed feed before
-#: trusting its mere presence (`venv_python.is_file()`) as a completion
-#: signal. Without this, a venv built before this machine's trust policy
-#: existed, or from a since-revoked/different index, would be silently
-#: reused and trusted forever just because an interpreter happens to
-#: exist at the expected path.
+#: recording the governed index -- and requested interpreter -- it was
+#: actually built from, so a LATER call sharing the same ``venv_dir`` can
+#: verify the existing venv genuinely came from the currently-validated
+#: identity (index AND interpreter) before trusting its mere presence
+#: (`venv_python.is_file()`) as a completion signal. Without this, a venv
+#: built before this machine's trust policy existed, from a since-
+#: revoked/different index, or for a DIFFERENT ``--python``, would be
+#: silently reused and trusted forever just because an interpreter
+#: happens to exist at the expected path.
 _PROVENANCE_MARKER_NAME = ".governed-feed-provenance.json"
 
 
@@ -114,26 +115,48 @@ def _credential_free_index_identity(url: str) -> str:
     return urllib.parse.urlunsplit(parts._replace(netloc=netloc))
 
 
-def _write_provenance_marker(venv_dir: Path, validated_index_url: str) -> None:
-    """Records ``validated_index_url``'s credential-free identity into
-    ``venv_dir``'s own provenance marker -- called on the staging
-    directory BEFORE the atomic rename that publishes it, so the marker
-    and the venv it describes always arrive together, never as two
-    separate, racy writes. Never persists embedded credentials to disk."""
+def _toolchain_identity_hash(validated_index_url: str, python: str | None) -> str:
+    """A stable identity for one (validated index, requested interpreter)
+    pairing -- the exact two inputs that determine what a locked
+    toolchain venv actually contains. Used both to key a deterministic
+    alternate venv location (`_alternate_toolchain_dir`) and, via
+    `_credential_free_index_identity`, never folds in embedded
+    credentials."""
+    return _hash_fields(_credential_free_index_identity(validated_index_url), python or "")
+
+
+def _write_provenance_marker(
+    venv_dir: Path, validated_index_url: str, python: str | None = None
+) -> None:
+    """Records ``validated_index_url``'s credential-free identity, and the
+    requested ``python`` interpreter, into ``venv_dir``'s own provenance
+    marker -- called on the staging directory BEFORE the atomic rename
+    that publishes it, so the marker and the venv it describes always
+    arrive together, never as two separate, racy writes. Never persists
+    embedded credentials to disk."""
     marker = {
-        "validated_index_url": _credential_free_index_identity(validated_index_url)
+        "validated_index_url": _credential_free_index_identity(validated_index_url),
+        "python": python or "",
     }
     (venv_dir / _PROVENANCE_MARKER_NAME).write_text(
         json.dumps(marker), encoding="utf-8"
     )
 
 
-def _provenance_matches(venv_dir: Path, validated_index_url: str) -> bool:
+def _provenance_matches(
+    venv_dir: Path, validated_index_url: str, python: str | None = None
+) -> bool:
     """Whether ``venv_dir``'s own provenance marker records EXACTLY
-    ``validated_index_url``'s credential-free identity -- a missing,
-    unreadable, or mismatched marker (including a venv published before
-    this check existed, which never wrote one at all) returns ``False``,
-    never treated as "probably fine"."""
+    ``validated_index_url``'s credential-free identity AND the requested
+    ``python`` interpreter -- a missing, unreadable, or mismatched marker
+    (including a venv published before this check existed, which never
+    wrote one at all, or one published for a DIFFERENT ``--python``)
+    returns ``False``, never treated as "probably fine". Omitting the
+    requested interpreter identity here would let a venv created with one
+    Python version be silently reused for a later call that explicitly
+    asked for a different one -- the toolchain's `marker_environment` and
+    every subsequent build would then run against the wrong interpreter
+    despite the caller's own `--python` selection."""
     marker_path = venv_dir / _PROVENANCE_MARKER_NAME
     try:
         data = json.loads(marker_path.read_text(encoding="utf-8"))
@@ -143,7 +166,30 @@ def _provenance_matches(venv_dir: Path, validated_index_url: str) -> bool:
         isinstance(data, dict)
         and data.get("validated_index_url")
         == _credential_free_index_identity(validated_index_url)
+        and data.get("python", "") == (python or "")
     )
+
+
+def _alternate_toolchain_dir(
+    venv_dir: Path, validated_index_url: str, python: str | None
+) -> Path:
+    """A deterministic, content-addressed SIBLING of ``venv_dir`` for a
+    toolchain identity (validated index + requested interpreter) that does
+    NOT match whatever currently occupies the shared ``venv_dir`` slot.
+
+    `resolve_toolchain_lock` routes here instead of ever renaming or
+    otherwise disturbing an occupied ``venv_dir``: another process sharing
+    that same path may be actively building against it RIGHT NOW, and a
+    rename-aside ("quarantine") of a live, in-use venv is itself a race --
+    this effort's own prior quarantine design was found to have exactly
+    that hazard. Keying the alternate path on the identity itself (rather
+    than, say, a fresh disposable per-call directory) means repeat calls
+    in the SAME run with the exact same differing identity still land on
+    one shared, reusable path -- the "share one lock across a run" promise
+    degrades to a second, parallel shared slot in this (expected-rare)
+    mismatch case, rather than to a brand-new disposable venv per call."""
+    identity = _toolchain_identity_hash(validated_index_url, python)
+    return venv_dir.parent / f".{venv_dir.name}.alt-{identity[:16]}"
 
 
 class ArtifactBuildError(Exception):
@@ -455,22 +501,32 @@ def _governed_feed_configured(*, env: dict | None = None) -> bool:
 
 
 def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> ToolchainLock:
-    """Resolves one pinned build-toolchain venv at ``venv_dir`` and returns
-    its exact installed ``setuptools``/``wheel``/``packaging`` versions.
+    """Resolves one pinned build-toolchain venv and returns its exact
+    installed ``setuptools``/``wheel``/``packaging`` versions.
 
     If ``venv_dir`` already holds a venv from an earlier call in this same
     process or a previous invocation of this script, AND that venv's own
     provenance marker (`_provenance_matches`) confirms it was published
-    from EXACTLY the index validated for THIS call, venv creation and
-    package installation are skipped and only the already-installed
-    versions are read back -- this is how a caller shares ONE toolchain
-    lock across several plugins in one promotion run without this tool
-    needing to build more than one plugin per process invocation: pass the
-    same ``venv_dir`` (``--toolchain-venv`` on the CLI) to every invocation
-    in that run. An existing venv whose provenance does not match (or
-    carries none at all -- e.g. published before this check existed) is
-    never trusted on interpreter-presence alone: it is quarantined aside
-    and rebuilt fresh, exactly as if ``venv_dir`` had never existed.
+    from EXACTLY the index AND requested interpreter validated for THIS
+    call, venv creation and package installation are skipped and only the
+    already-installed versions are read back -- this is how a caller
+    shares ONE toolchain lock across several plugins in one promotion run
+    without this tool needing to build more than one plugin per process
+    invocation: pass the same ``venv_dir`` (``--toolchain-venv`` on the
+    CLI) to every invocation in that run.
+
+    An existing venv whose provenance does not match (a different
+    validated index, a different requested ``--python``, or no marker at
+    all -- e.g. published before this check existed) is never trusted on
+    interpreter-presence alone -- but it is also NEVER renamed, deleted, or
+    otherwise disturbed: another process sharing this exact path may be
+    actively building against it right now, and moving it aside out from
+    under a live build is itself a race this effort's own prior
+    quarantine-based design was found to have. Instead, THIS call resolves
+    into a separate, deterministic sibling keyed on its own (index,
+    python) identity (`_alternate_toolchain_dir`) -- built fresh there if
+    needed, or reused there if a prior call in this same run already built
+    that exact differing identity.
 
     Never resolves from an untrusted index: this call itself first
     resolves the effective default index, verifying it is both non-public
@@ -488,11 +544,11 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
 
     Built in a staging directory -- a genuinely unique one per call
     (`tempfile.mkdtemp`, not merely PID-qualified, since two threads in the
-    same process share a PID) -- and published into ``venv_dir`` only via
-    an atomic rename AFTER both `uv venv` and `uv pip install` succeed --
-    never directly into ``venv_dir`` -- so an interrupted or partially
-    failed setup never leaves a venv on disk that a later call's own
-    `venv_python.is_file()` reuse check would mistake for a complete,
+    same process share a PID) -- and published into its target directory
+    only via an atomic rename AFTER both `uv venv` and `uv pip install`
+    succeed -- never directly into the target -- so an interrupted or
+    partially failed setup never leaves a venv on disk that a later call's
+    own `venv_python.is_file()` reuse check would mistake for a complete,
     already-installed one (which would otherwise skip straight to the
     version query and fail there forever, requiring a manual delete to
     recover)."""
@@ -510,46 +566,37 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             "otherwise silently resolve setuptools/wheel/packaging from "
             "an unverified index"
         )
-    venv_python = _venv_python_path(venv_dir)
-    if venv_python.is_file() and not _provenance_matches(venv_dir, validated_index_url):
-        # An interpreter existing at this shared path is not itself a
-        # trust signal: it could be a venv built before this machine's
-        # trust policy existed, built from a since-revoked/different
-        # index, or simply never published by this function at all.
-        # Never silently reuse it just because the version query below
-        # would happily succeed against it -- quarantine it aside (never
-        # delete outright, so a genuinely mismatched venv remains
-        # available for postmortem) and fall through to a fresh build
-        # from the currently-validated index, exactly as if venv_dir had
-        # never existed.
-        try:
-            quarantine_dir = Path(
-                tempfile.mkdtemp(
-                    dir=venv_dir.parent, prefix=f".{venv_dir.name}.untrusted-"
-                )
+    target_dir = venv_dir
+    venv_python = _venv_python_path(target_dir)
+    if venv_python.is_file() and not _provenance_matches(
+        target_dir, validated_index_url, python
+    ):
+        # The shared slot is occupied by a toolchain built for a DIFFERENT
+        # validated index or a different requested --python -- it may be
+        # actively in use by a concurrent build RIGHT NOW. Never rename or
+        # delete it: resolve this call's own, differently-identified
+        # toolchain into its own deterministic sibling path instead,
+        # entirely independent of whatever currently lives at venv_dir.
+        target_dir = _alternate_toolchain_dir(venv_dir, validated_index_url, python)
+        venv_python = _venv_python_path(target_dir)
+        if venv_python.is_file() and not _provenance_matches(
+            target_dir, validated_index_url, python
+        ):
+            # This alternate path is itself keyed on this exact identity,
+            # so a mismatch here is a genuine anomaly (e.g. a hash
+            # collision, or manual tampering), never an expected race --
+            # fail closed rather than silently rebuilding over it or
+            # reusing an unverified venv.
+            raise ArtifactBuildError(
+                f"{target_dir}: toolchain venv exists at this identity-"
+                "keyed path but its provenance does not match the index/"
+                "interpreter it should exclusively hold -- refusing to "
+                "reuse or rebuild over it"
             )
-            quarantine_dir.rmdir()  # mkdtemp pre-creates it; rename needs no destination
-            venv_dir.rename(quarantine_dir)
-        except OSError:
-            # Lost a race with a concurrent rebuild/quarantine of this
-            # same path -- re-check rather than assume: if the path now
-            # genuinely matches, the race resolved itself benignly;
-            # otherwise this is a real failure, not a benign lost race.
-            if not (
-                venv_python.is_file()
-                and _provenance_matches(venv_dir, validated_index_url)
-            ):
-                raise ArtifactBuildError(
-                    f"{venv_dir}: existing toolchain venv does not carry "
-                    "provenance matching the currently validated governed "
-                    "index "
-                    f"({_credential_free_index_identity(validated_index_url)}), "
-                    "and it could not be quarantined for a rebuild"
-                )
     if not venv_python.is_file():
-        venv_dir.parent.mkdir(parents=True, exist_ok=True)
+        target_dir.parent.mkdir(parents=True, exist_ok=True)
         staging_venv_dir = Path(
-            tempfile.mkdtemp(dir=venv_dir.parent, prefix=f".{venv_dir.name}.staging-")
+            tempfile.mkdtemp(dir=target_dir.parent, prefix=f".{target_dir.name}.staging-")
         )
         # Strip every ambient variable that could supply packages from
         # somewhere other than the one validated URL below -- `--no-config`
@@ -594,7 +641,7 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             )
             if result.returncode != 0:
                 raise ArtifactBuildError(
-                    f"uv venv failed for toolchain venv {venv_dir}:\n"
+                    f"uv venv failed for toolchain venv {target_dir}:\n"
                     f"{result.stdout}\n{result.stderr}"
                 )
             staging_venv_python = _venv_python_path(staging_venv_dir)
@@ -609,20 +656,20 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             )
             if install.returncode != 0:
                 raise ArtifactBuildError(
-                    f"uv pip install failed for toolchain venv {venv_dir}:\n"
+                    f"uv pip install failed for toolchain venv {target_dir}:\n"
                     f"{install.stdout}\n{install.stderr}"
                 )
             # Only now, with BOTH steps verified successful, publish the
             # venv into its real location via a single rename -- a retry
             # after any earlier failure never finds a partially built
-            # venv_dir, since venv_dir never existed until this point.
+            # target_dir, since target_dir never existed until this point.
             # The provenance marker is written into the staging directory
             # BEFORE the rename, so it is published atomically together
             # with the venv it describes -- a later call reusing this
             # exact path can verify it actually came from the currently-
-            # validated governed index, never trusting mere interpreter
-            # presence (see the provenance check above).
-            # Never pre-delete an existing venv_dir: a concurrent caller
+            # validated identity, never trusting mere interpreter presence
+            # (see the provenance check above).
+            # Never pre-delete an existing target_dir: a concurrent caller
             # sharing this same path may have already published its OWN
             # complete venv (and may already be building against it) --
             # clobbering it here would violate the "unchanged shared lock"
@@ -630,26 +677,26 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             # itself fails, confirm a winner's venv is genuinely present
             # (venv_python now exists) AND carries matching provenance
             # before treating it as a benign lost race -- two concurrent
-            # callers validating DIFFERENT indexes can both observe an
+            # callers validating DIFFERENT identities can both observe an
             # absent destination; without the provenance check, whichever
             # loses the rename race would silently trust a venv sourced
-            # from the OTHER caller's (different) validated index. A
-            # permission/filesystem/invalid-destination error with no
-            # real, matching winner must still surface as a build
-            # failure, never a silently swallowed exception that leaves
-            # nothing trustworthy at venv_dir for the version query below
-            # to find.
-            _write_provenance_marker(staging_venv_dir, validated_index_url)
+            # from the OTHER caller's (different) identity. A permission/
+            # filesystem/invalid-destination error with no real, matching
+            # winner must still surface as a build failure, never a
+            # silently swallowed exception that leaves nothing
+            # trustworthy at target_dir for the version query below to
+            # find.
+            _write_provenance_marker(staging_venv_dir, validated_index_url, python)
             try:
-                staging_venv_dir.rename(venv_dir)
+                staging_venv_dir.rename(target_dir)
             except OSError as exc:
                 if not (
                     venv_python.is_file()
-                    and _provenance_matches(venv_dir, validated_index_url)
+                    and _provenance_matches(target_dir, validated_index_url, python)
                 ):
                     raise ArtifactBuildError(
                         f"could not publish toolchain venv {staging_venv_dir} "
-                        f"to {venv_dir}: {exc}"
+                        f"to {target_dir}: {exc}"
                     ) from exc
         finally:
             if staging_venv_dir.exists():
@@ -678,7 +725,7 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
     missing = [p for p in _LOCKED_TOOLCHAIN_PACKAGES if not packages.get(p)]
     if missing:
         raise ArtifactBuildError(
-            f"{venv_dir}: locked toolchain venv is missing required package(s) "
+            f"{target_dir}: locked toolchain venv is missing required package(s) "
             f"{missing} -- refusing to record an incomplete toolchain lock"
         )
     return ToolchainLock(venv_python, packages)

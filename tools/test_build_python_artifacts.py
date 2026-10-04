@@ -1200,8 +1200,11 @@ def test_resolve_toolchain_lock_rebuilds_when_provenance_marker_missing(
     # Regression: an interpreter existing at venv_dir is NOT itself a
     # trust signal -- a venv published before this provenance check
     # existed (no marker at all) must never be silently reused just
-    # because `venv_python.is_file()` happens to be true; it must be
-    # quarantined aside and rebuilt from the currently-validated index.
+    # because `venv_python.is_file()` happens to be true. It must also
+    # NEVER be renamed/quarantined aside: another process sharing this
+    # exact path could be actively building against it right now. Instead
+    # this call must resolve into its own deterministic alternate sibling,
+    # leaving venv_dir completely untouched.
     _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
     venv_python = bpa._venv_python_path(venv_dir)
@@ -1230,12 +1233,15 @@ def test_resolve_toolchain_lock_rebuilds_when_provenance_marker_missing(
     assert any(cmd[:2] == ["uv", "venv"] for cmd in calls)
     assert any(cmd[:3] == ["uv", "pip", "install"] for cmd in calls)
     assert lock.venv_python.read_text(encoding="utf-8") == "rebuilt"
-    # The stale, unmarked venv was quarantined aside, never deleted.
-    quarantined = list(venv_dir.parent.glob(f".{venv_dir.name}.untrusted-*"))
-    assert len(quarantined) == 1
-    assert bpa._venv_python_path(quarantined[0]).read_text(
-        encoding="utf-8"
-    ) == "stale-unmarked-interpreter"
+    # The stale, unmarked venv at venv_dir itself was NEVER touched --
+    # no rename/quarantine of a path another process might be using.
+    assert venv_python.read_text(encoding="utf-8") == "stale-unmarked-interpreter"
+    assert list(venv_dir.parent.glob(f".{venv_dir.name}.untrusted-*")) == []
+    # The rebuilt lock lives at the deterministic alternate sibling.
+    expected_alt = btl._alternate_toolchain_dir(
+        venv_dir, "https://example.internal/simple/", None
+    )
+    assert lock.venv_python == bpa._venv_python_path(expected_alt)
 
 
 def test_resolve_toolchain_lock_rebuilds_when_provenance_marker_mismatched(
@@ -1243,8 +1249,10 @@ def test_resolve_toolchain_lock_rebuilds_when_provenance_marker_mismatched(
 ):
     # Regression: a venv published from a DIFFERENT index than the one
     # currently validated (e.g. built under a prior/different trust
-    # policy) must never be reused just because its marker exists --
-    # only an EXACT match to the currently validated index is trusted.
+    # policy) must never be reused just because its marker exists -- only
+    # an EXACT match to the currently validated index is trusted. It must
+    # also be left completely untouched (never renamed/quarantined),
+    # since another process may be actively building against it.
     _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
     venv_python = bpa._venv_python_path(venv_dir)
@@ -1267,11 +1275,132 @@ def test_resolve_toolchain_lock_rebuilds_when_provenance_marker_mismatched(
         )
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
-    bpa.resolve_toolchain_lock(venv_dir)
+    lock = bpa.resolve_toolchain_lock(venv_dir)
 
-    assert btl._provenance_matches(venv_dir, "https://example.internal/simple/")
-    quarantined = list(venv_dir.parent.glob(f".{venv_dir.name}.untrusted-*"))
-    assert len(quarantined) == 1
+    # venv_dir itself is untouched: still carries its ORIGINAL (different)
+    # provenance, never overwritten or renamed aside.
+    assert btl._provenance_matches(venv_dir, "https://different.example/simple/")
+    assert not btl._provenance_matches(venv_dir, "https://example.internal/simple/")
+    assert list(venv_dir.parent.glob(f".{venv_dir.name}.untrusted-*")) == []
+    # The new lock was built at the deterministic alternate sibling instead.
+    expected_alt = btl._alternate_toolchain_dir(
+        venv_dir, "https://example.internal/simple/", None
+    )
+    assert lock.venv_python == bpa._venv_python_path(expected_alt)
+    assert btl._provenance_matches(expected_alt, "https://example.internal/simple/")
+
+
+def test_resolve_toolchain_lock_reuses_alternate_sibling_on_repeat_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: a SECOND call sharing the same venv_dir, with the same
+    # differing identity, must reuse the alternate sibling built by the
+    # first call rather than rebuilding it again -- the "shared lock"
+    # promise still holds for repeat calls at one (expected-rare)
+    # mismatched identity, just via a second shared slot.
+    _assume_governed_feed_configured(monkeypatch)
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_python = bpa._venv_python_path(venv_dir)
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
+    btl._write_provenance_marker(venv_dir, "https://different.example/simple/")
+
+    build_count = {"n": 0}
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[:2] == ["uv", "venv"]:
+            build_count["n"] += 1
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    lock1 = bpa.resolve_toolchain_lock(venv_dir)
+    lock2 = bpa.resolve_toolchain_lock(venv_dir)
+
+    assert build_count["n"] == 1
+    assert lock1.venv_python == lock2.venv_python
+
+
+def test_resolve_toolchain_lock_treats_different_python_as_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: the reuse identity must not ignore the requested
+    # --python -- a venv created for one interpreter must never be
+    # silently returned for a later call that explicitly asked for a
+    # different one.
+    _assume_governed_feed_configured(monkeypatch)
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_python = bpa._venv_python_path(venv_dir)
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("py310-build", encoding="utf-8")
+    btl._write_provenance_marker(
+        venv_dir, "https://example.internal/simple/", "/usr/bin/python3.10"
+    )
+    build_cmds: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[:2] == ["uv", "venv"]:
+            build_cmds.append(cmd)
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("py312-build", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    lock = bpa.resolve_toolchain_lock(venv_dir, python="/usr/bin/python3.12")
+
+    # The ORIGINAL (3.10) venv at venv_dir was never touched.
+    assert venv_python.read_text(encoding="utf-8") == "py310-build"
+    # This call's own (3.12) lock was built fresh at the alternate sibling.
+    assert lock.venv_python.read_text(encoding="utf-8") == "py312-build"
+    assert "--python" in build_cmds[0]
+    assert build_cmds[0][build_cmds[0].index("--python") + 1] == "/usr/bin/python3.12"
+
+
+def test_resolve_toolchain_lock_rejects_anomalous_alternate_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: the alternate sibling is keyed EXACTLY on this call's
+    # own identity, so finding something there that does NOT match is a
+    # genuine anomaly (never an expected race) -- must fail closed rather
+    # than silently rebuild over or reuse an unverified venv.
+    _assume_governed_feed_configured(monkeypatch)
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_python = bpa._venv_python_path(venv_dir)
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
+    btl._write_provenance_marker(venv_dir, "https://different.example/simple/")
+
+    alt_dir = btl._alternate_toolchain_dir(
+        venv_dir, "https://example.internal/simple/", None
+    )
+    alt_python = bpa._venv_python_path(alt_dir)
+    alt_python.parent.mkdir(parents=True, exist_ok=True)
+    alt_python.write_text("", encoding="utf-8")
+    btl._write_provenance_marker(alt_dir, "https://yet-another.example/simple/")
+
+    monkeypatch.setattr(
+        bpa.subprocess, "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""),  # noqa: ARG005
+    )
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa.resolve_toolchain_lock(venv_dir)
 
 
 # --- provenance marker never persists embedded credentials ---------------
@@ -1325,36 +1454,6 @@ def test_credential_free_index_identity_strips_userinfo_only():
         btl._credential_free_index_identity("https://example.internal/simple/")
         == "https://example.internal/simple/"
     )
-
-
-def test_resolve_toolchain_lock_quarantine_failure_message_redacts_credentials(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    # Regression: the quarantine-failure diagnostic interpolates the
-    # validated index URL -- it must never leak embedded credentials into
-    # that message.
-    credentialed_url = "https://produser:hunter2@example.internal/simple/"
-    monkeypatch.setattr(
-        btl, "_validated_trusted_index_url", lambda env: credentialed_url  # noqa: ARG005
-    )
-    venv_dir = tmp_path / "toolchain-venv"
-    venv_python = bpa._venv_python_path(venv_dir)
-    venv_python.parent.mkdir(parents=True, exist_ok=True)
-    venv_python.write_text("stale-unmarked-interpreter", encoding="utf-8")
-
-    real_rename = Path.rename
-
-    def failing_rename(self, target):  # noqa: ARG001
-        raise OSError("simulated quarantine failure")
-
-    monkeypatch.setattr(Path, "rename", failing_rename)
-    try:
-        with pytest.raises(bpa.ArtifactBuildError) as exc_info:
-            bpa.resolve_toolchain_lock(venv_dir)
-    finally:
-        monkeypatch.setattr(Path, "rename", real_rename)
-    assert "hunter2" not in str(exc_info.value)
-    assert "produser" not in str(exc_info.value)
 
 
 def test_resolve_toolchain_lock_venv_creation_failure_raises(
