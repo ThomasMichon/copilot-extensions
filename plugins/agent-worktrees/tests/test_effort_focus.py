@@ -194,6 +194,24 @@ def test_validate_binding_requires_declared_participant_and_slice(tmp_path):
         ef.validate_binding(repo, substring_slice)
 
 
+def test_participant_cell_with_multiple_backtick_tokens_matches_plain_text(tmp_path):
+    """A Participants cell may wrap several identifiers separately in backticks
+    (e.g. "`repo` worktree `id`") rather than wrapping the whole cell once --
+    every backtick is markdown code-span syntax here, not content, so matching
+    must strip all of them, not just a leading/trailing pair."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    relative = _effort(
+        repo, participant="`some-repo` worktree `host-win-20260101-000000-aaaa`"
+    )
+    valid = ef.make_active_effort(
+        relative,
+        "some-repo worktree host-win-20260101-000000-aaaa",
+        "Phase 2 - Bind active effort",
+    )
+    assert ef.validate_binding(repo, valid).active
+
+
 def test_binding_requires_canonical_active_effort_prefix(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()

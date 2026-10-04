@@ -112,3 +112,44 @@ def test_machines_yaml_path_prefers_active_repo_registry(monkeypatch, tmp_path):
         context.reset()
 
     assert resolved == local
+
+
+def test_load_machines_yaml_merges_canonical_and_legacy_disjoint_keys(tmp_path):
+    """Regression (ThomasMichon/copilot-extensions#7914): the canonical
+    in-repo ``.agent-worktrees/machines.yaml`` (container-fleet entries) must
+    never make every real facility machine in the legacy root file disappear
+    from the Picker's multi-machine roster -- the canonical file's own
+    header documents this as strictly additive. Before the fix,
+    ``_load_machines_yaml`` read only whichever file ``machines_yaml_path``
+    resolved first, so a Windows Worktree Manager Picker showed only its own
+    local tab, no remote machines, the instant the in-repo file existed."""
+    root = tmp_path / "repo"
+    canonical = root / ".agent-worktrees" / "machines.yaml"
+    canonical.parent.mkdir(parents=True)
+    canonical.write_text(
+        "machines:\n  container-fleet:\n    display_name: Container Fleet\n",
+        encoding="utf-8",
+    )
+    legacy = root / "machines.yaml"
+    legacy.write_text(
+        "machines:\n  lambda-core:\n    display_name: Lambda-Core\n"
+        "  borealis:\n    display_name: Borealis\n",
+        encoding="utf-8",
+    )
+    entries = project_config.load_machines_yaml(root)
+    assert set(entries) == {"container-fleet", "lambda-core", "borealis"}
+
+
+def test_load_machines_yaml_canonical_wins_on_key_collision(tmp_path):
+    root = tmp_path / "repo"
+    canonical = root / ".agent-worktrees" / "machines.yaml"
+    canonical.parent.mkdir(parents=True)
+    canonical.write_text(
+        "machines:\n  m1:\n    display_name: Canonical\n", encoding="utf-8"
+    )
+    legacy = root / "machines.yaml"
+    legacy.write_text(
+        "machines:\n  m1:\n    display_name: Legacy\n", encoding="utf-8"
+    )
+    entries = project_config.load_machines_yaml(root)
+    assert entries["m1"].display_name == "Canonical"
