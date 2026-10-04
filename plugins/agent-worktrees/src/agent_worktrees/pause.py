@@ -34,7 +34,6 @@ resume in this exact worktree) is still genuinely open -- leave it."
    those other verbs already are; the claim-ledger access *after* the sync
    (point 2 below) is what this module scopes correctly via
    ``cfg.tracking_dir(config.repo_name)``.
-   transition.
 2. Auto-settle this worktree's own claims that are **provably** resolved
    -- reusing the same gone+safe reclaim sweep the obligation gate's
    self-heal path is built on, scoped to just this one record rather than
