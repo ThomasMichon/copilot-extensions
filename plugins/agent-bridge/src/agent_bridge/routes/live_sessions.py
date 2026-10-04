@@ -531,19 +531,24 @@ async def record_live_progress(
 
 @router.delete("/{session_id}")
 async def deregister_live_session(
-    session_id: str, request: Request
+    session_id: str, request: Request,
+    pid: int | None = Query(default=None),
+    process_started_at: float | None = Query(default=None),
 ) -> dict[str, Any]:
     """Deregister a live interactive CLI session (best-effort on session exit).
 
     Deleting an unknown session_id is a no-op (idempotent), so a duplicate or
     late deregister never errors. Also drops any represented event log so the
-    live tail's memory is reclaimed when the session goes away.
+    live tail's memory is reclaimed when the session goes away. An extension
+    passes its own ``pid``/``process_started_at``: a row another process has
+    since registered under the id is then left alone.
     """
     db = _db(request)
     # Only the call that deletes the exact registration drops the represented
     # log: a late DELETE through a retired id (or one that lost a race with a
     # rollover) deletes nothing and must not drop the live successor's log.
-    deleted = db.deregister_live_session(session_id)
+    deleted = db.deregister_live_session(
+        session_id, pid=pid, process_started_at=process_started_at)
     store = getattr(request.app.state, "live_event_store", None)
     if store is not None and deleted:
         for sid in store.ids_of(session_id) or [session_id]:

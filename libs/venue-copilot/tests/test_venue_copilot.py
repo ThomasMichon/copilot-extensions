@@ -625,6 +625,42 @@ class TestDetachedRunner:
 
         assert unstable_handle_warning(41234, ["--no-ask-user"], health=health) is None
 
+    def test_an_implicit_resume_on_a_daemon_without_aliases_reports_a_provisional_handle(
+        self, monkeypatch,
+    ) -> None:
+        """No resume flag from the host, but embody resumed the existing
+        worktree's head itself (``resume_session``): the id can still change."""
+        from venue_copilot import detached
+
+        self._patch_bridge(monkeypatch)
+        monkeypatch.setattr("venue_copilot._daemon_health", lambda port: {"protocol_version": 20})
+        adapter = _Adapter({"ok": True, "created": True, "session": "wt-anchor-repo",
+                            "resume_session": "head-1"})
+        rc, payload = detached.launch_detached(
+            adapter, {**self._plan(), "anchor": False}, seed=None, driver=None, copilot_args=[],
+            ensure_mux=True, register_timeout=0.0, progress=lambda *a: None,
+        )
+        assert rc == 0
+        assert payload["session_handle"] == "provisional"
+
+    def test_a_rejoin_with_a_host_seed_still_reports_the_pending_seed_outcome(
+        self, monkeypatch,
+    ) -> None:
+        """A rejoin ignores the host seed but still runs the worktree's own
+        pending seed: that attempt's outcome is reported, not hidden."""
+        from venue_copilot import detached, refs
+
+        self._patch_bridge(monkeypatch)
+        monkeypatch.setattr(refs, "deliver_note", lambda *a, **k: True)
+        adapter = _Adapter({"ok": True, "created": False, "session": "wt-anchor-repo",
+                            "seed_deferred": True, "seed_reason": "not-ready-timeout"})
+        rc, payload = detached.launch_detached(
+            adapter, {**self._plan(), "anchor": False}, seed="do it", driver=None,
+            copilot_args=[], ensure_mux=True, register_timeout=0.0, progress=lambda *a: None,
+        )
+        assert rc == 0
+        assert payload["seed_delivery"] == "deferred"
+
     def test_handle_never_echoes_runner_configuration(self, monkeypatch) -> None:
         from venue_copilot import detached
 
@@ -1011,6 +1047,8 @@ class TestDetachedRunner:
         assert (payload["seed_delivery"], payload["seeded"]) == (delivery, seeded)
         if delivery != "typed":
             assert embody_says["seed_reason"] in payload["warning"]
+        if delivery == "deferred":  # still stored: a manual send would run it twice
+            assert "agent-bridge send" not in payload["warning"]
 
     def test_detached_launch_uses_register_timeout_when_larger(self, monkeypatch) -> None:
         from venue_copilot import detached

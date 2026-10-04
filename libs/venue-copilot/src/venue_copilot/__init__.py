@@ -121,13 +121,15 @@ def seed_outcome(embodied: dict, *, created: bool, seed: str | None) -> tuple[st
 
 
 def pending_seed_report(embodied: dict, *, seed: str | None) -> dict:
-    """A launch with no seed of its own can still deliver the worktree's
-    pending seed (embody claims it); report how that went, never resending it:
+    """A launch can deliver the worktree's own pending seed (embody claims it)
+    when it has no seed of its own, or rejoins a running session (a rejoin
+    ignores the host seed); report how that went, never resending it:
     ``typed`` (submitted), ``deferred`` (provably never typed: embody kept it
     for the next attach, so the session is idle until then) or ``unconfirmed``
     (typed but the submit unconfirmed: it may sit as a draft in Copilot's
-    input). ``{}`` when the launch had its own seed or no pending seed ran."""
-    if seed:
+    input). ``{}`` when a fresh launch used its own seed (a rejoin ignores the
+    host seed, so the worktree's own still ran) or no pending seed ran."""
+    if seed and embodied.get("created"):
         return {}
     reason = embodied.get("seed_reason") or "unknown"
     if embodied.get("seed_unconfirmed"):
@@ -138,11 +140,13 @@ def pending_seed_report(embodied: dict, *, seed: str | None) -> dict:
                        "session (it was not resent)",
         }
     if embodied.get("seed_deferred"):
+        # Not `agent-bridge send`: the seed is still stored, so the next attach
+        # would deliver the task a second time.
         return {
             "seed_delivery": "deferred",
             "warning": f"the worktree's pending seed was never typed ({reason}) and is kept "
                        "for the next attach: the session is idle until you re-run this "
-                       "launch or send the task with `agent-bridge send`",
+                       "launch, which delivers it (don't send the task separately)",
         }
     if embodied.get("seed_lost"):
         return {

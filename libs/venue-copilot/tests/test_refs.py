@@ -94,6 +94,10 @@ def test_deliver_note_sends_over_stdin():
     assert len({key(0), key(2), key(3), key(4)}) == 4
     assert venue_refs.deliver_note("sid-1", "another note", run=run, operation="launch-1")
     assert key(5) != key(0)
+    # A retry naming the id the placeholder was renamed to reaches the same
+    # session: the same key, so an accepted-but-unanswered first send isn't run twice.
+    assert venue_refs.deliver_note("resumed-sid", "see /x/y.har", run=run, operation="launch-1")
+    assert key(6) == key(0)
 
 
 def test_deliver_note_is_steered_and_bounded():

@@ -14,6 +14,7 @@ from .db_core import (
 )
 from .db_live_session_aliases import (
     CANONICAL_SESSION_SQL as _CANON,
+    PROCESS_START_TOLERANCE_SECONDS,
     register_live_session_atomic,
 )
 
@@ -210,13 +211,27 @@ class _LiveSessionsMixin:
         )
         return cur.rowcount > 0
 
-    def deregister_live_session(self, session_id: str) -> bool:
-        """Atomically remove a live registration, its queue and aliases; True only if this exact row went."""
+    def deregister_live_session(
+        self, session_id: str, *, pid: int | None = None, process_started_at: float | None = None,
+    ) -> bool:
+        """Atomically remove a live registration, its queue and aliases; True only if this exact row went.
+
+        With the deregistering process's identity, only a row that process
+        registered goes: another process's (a replacement that registered the
+        id between this process's cleanup DELETEs) is left alone, checked in
+        the same statement. Omitted on either side, a field never conflicts."""
         conn = self._get_conn()
         with self._write_lock:
             conn.execute("BEGIN IMMEDIATE")
             try:
-                if conn.execute("DELETE FROM live_sessions WHERE session_id=?", (session_id,)).rowcount != 1:
+                if conn.execute(
+                    "DELETE FROM live_sessions WHERE session_id=? "
+                    "AND (? IS NULL OR pid IS NULL OR pid = ?) "
+                    "AND (? IS NULL OR process_started_at IS NULL "
+                    "     OR ABS(process_started_at - ?) < ?)",
+                    (session_id, pid, pid, process_started_at, process_started_at,
+                     PROCESS_START_TOLERANCE_SECONDS),
+                ).rowcount != 1:
                     conn.rollback()
                     return False
                 conn.execute("DELETE FROM live_messages WHERE session_id=?", (session_id,))

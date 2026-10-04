@@ -205,9 +205,13 @@ const register = serializedRegister(
 async function deregister() {
   // Every id this process registered, once no registration is left in flight
   // (a rename can leave the placeholder's row and the resumed one). An id
-  // folded into its successor is already gone; its DELETE is a no-op.
+  // folded into its successor is already gone; its DELETE is a no-op. Each
+  // carries this process's identity, so a row another process registered under
+  // the id meanwhile (between these DELETEs) is left alone by the bridge.
+  const { pid, process_started_at: started } = processIdentity();
+  const who = `pid=${encodeURIComponent(pid)}&process_started_at=${encodeURIComponent(started)}`;
   for (const id of await register.close()) {
-    await bridgeFetch("DELETE", `/api/v1/live-sessions/${encodeURIComponent(id)}`);
+    await bridgeFetch("DELETE", `/api/v1/live-sessions/${encodeURIComponent(id)}?${who}`);
   }
 }
 

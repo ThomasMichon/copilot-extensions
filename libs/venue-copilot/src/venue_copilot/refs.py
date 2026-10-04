@@ -142,16 +142,17 @@ def deliver_note(
     protocol; an agent-bridge CLI too old to know the flag fails too.
 
     ``operation`` names this logical delivery (a launch passes its reservation
-    id): a retry of it reuses the key, so the bridge answers an ambiguous
-    earlier attempt with the original message instead of enqueueing the note
-    -- or a seed -- twice. A later, separate delivery of the same text is a new
-    operation with its own key, so it is really sent. Omitted, every call is
-    its own operation.
+    id): a retry of it reuses the key -- whichever handle it names (a
+    placeholder or the id it was renamed to: both reach the same session) --
+    so the bridge answers an ambiguous earlier attempt with the original
+    message instead of enqueueing the note -- or a seed -- twice. A later,
+    separate delivery of the same text is a new operation with its own key, so
+    it is really sent. Omitted, every call is its own operation.
     """
     _bin = "agent-bridge"  # marketplace-isolation: allow legacy-compatibility
     bridge = shutil.which(_bin) or _bin
     op = operation or uuid.uuid4().hex
-    key = "venue-note-" + hashlib.sha256(f"{session_id}\0{op}\0{note}".encode("utf-8")).hexdigest()[:32]
+    key = "venue-note-" + hashlib.sha256(f"{op}\0{note}".encode("utf-8")).hexdigest()[:32]
     argv = [bridge, "send", session_id, "--prompt-file", "-", "--no-wait", "--steer",
             "--idempotency-key", key]
     if min_daemon_protocol:

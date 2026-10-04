@@ -1099,6 +1099,31 @@ def test_a_flagless_rejoin_on_a_daemon_without_aliases_reports_a_provisional_han
     assert out["session_handle"] == "provisional" and "live-session aliases" in out["handle_warning"]
 
 
+def test_an_implicit_resume_on_a_daemon_without_aliases_reports_a_provisional_handle(
+    seams, monkeypatch, capsys,
+):
+    """No resume flag from the host, but embody resumed the existing worktree's
+    head itself (``resume_session``): a protocol-20 daemon's handle is provisional."""
+    monkeypatch.setattr(venue_copilot, "_daemon_health", lambda port: {"protocol_version": 20})
+    created = json.dumps({"ok": True, "created": True, "session": "wt-wt-7",
+                          "resume_session": "head-1"})
+    assert detach.cmd_detach(_args(worktree_id="wt-7", seed=None),
+                             ssh_session=_ssh(seams, stdout=created)) == 0
+    assert json.loads(capsys.readouterr().out)["session_handle"] == "provisional"
+
+
+def test_a_rejoin_with_a_host_seed_still_reports_the_pending_seed_outcome(seams, monkeypatch, capsys):
+    """A rejoin ignores the host seed but still runs the worktree's own pending
+    seed: that attempt's outcome is reported, not hidden."""
+    from venue_copilot import refs as venue_refs
+
+    monkeypatch.setattr(venue_refs, "deliver_note", lambda *a, **k: True)
+    rejoined = json.dumps({"ok": True, "created": False, "resumed": True, "session": "wt-wt-7",
+                           "seed_unconfirmed": True, "seed_reason": "enter-failed"})
+    assert detach.cmd_detach(_args(worktree_id="wt-7"), ssh_session=_ssh(seams, stdout=rejoined)) == 0
+    assert json.loads(capsys.readouterr().out)["seed_delivery"] == "unconfirmed"
+
+
 def test_the_reservation_outlives_every_launch_attempt_and_registration(seams, monkeypatch, capsys):
     ttls: list[float] = []
     monkeypatch.setattr(
@@ -1153,6 +1178,8 @@ def test_a_pending_seed_outcome_is_reported_without_a_host_seed(
     assert (out["seed_delivery"], out["seeded"]) == (delivery, seeded)
     if delivery != "typed":
         assert embody_says["seed_reason"] in out["warning"]
+    if delivery == "deferred":  # still stored: a manual send would run it twice
+        assert "agent-bridge send" not in out["warning"]
 
 
 def test_launch_does_not_retry_a_genuine_remote_failure(seams, monkeypatch, capsys):

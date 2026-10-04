@@ -301,7 +301,10 @@ def launch_detached(
         if seed_delivery_status == "failed":
             progress("seed-draft", f"typed seed was not submitted ({embodied.get('seed_reason')}); "
                      "not resending: the draft may remain in Copilot's input")
-        if not created and not handle_warning:  # whatever its flags, a rejoin may rename
+        # Whatever its flags, a rejoin may rename -- and so may a launch embody
+        # itself resumed (an existing worktree's head: ``resume_session``).
+        resuming = not created or bool(embodied.get("resume_session"))
+        if resuming and not handle_warning:
             handle_warning = unstable_handle_warning(daemon_port, copilot_args, rejoin=True)
         progress("register", "waiting for the session to register with the host bridge")
         session_id = await_claim(plan["scope_id"], reservation["reservation_id"], register_timeout)
@@ -317,7 +320,7 @@ def launch_detached(
         # A rejoin's own flags say nothing about how the running session was
         # launched (it may still be resuming), so it always needs that floor.
         alias_floor = ({"min_daemon_protocol": LIVE_SESSION_ALIAS_PROTOCOL}
-                       if not created or may_switch_session_id(copilot_args) else {})
+                       if resuming or may_switch_session_id(copilot_args) else {})
         if seed_needs_bridge:
             from .refs import deliver_note
 

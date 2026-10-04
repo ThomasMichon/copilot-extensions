@@ -558,6 +558,29 @@ def client_with_store(tmp_db: Database) -> TestClient:
     return TestClient(app)
 
 
+def test_a_deregister_leaves_a_replacement_registered_by_another_process(
+    client_with_store: TestClient,
+) -> None:
+    """Between an exiting extension's cleanup DELETEs another process registers
+    one of its ids: the DELETE carries the exiting process's identity, so the
+    replacement's row (and its queue) is left alone; its own DELETE removes it."""
+    c = client_with_store
+    c.post("/api/v1/live-sessions",
+           json={"session_id": "A", "pid": 2222, "process_started_at": 500.0})
+    gone = c.delete("/api/v1/live-sessions/A", params={"pid": 1111, "process_started_at": 100.0})
+    assert gone.status_code == 200
+    assert c.get("/api/v1/live-sessions/A").status_code == 200  # the replacement survives
+    same_pid_restarted = {"pid": 2222, "process_started_at": 100.0}
+    c.delete("/api/v1/live-sessions/A", params=same_pid_restarted)
+    assert c.get("/api/v1/live-sessions/A").status_code == 200  # a reused pid, another process
+    c.delete("/api/v1/live-sessions/A", params={"pid": 2222, "process_started_at": 500.0})
+    assert c.get("/api/v1/live-sessions/A").status_code == 404
+    # Without identity (an older extension), a DELETE behaves as before.
+    c.post("/api/v1/live-sessions", json={"session_id": "B", "pid": 3333})
+    c.delete("/api/v1/live-sessions/B")
+    assert c.get("/api/v1/live-sessions/B").status_code == 404
+
+
 def test_result_routes_answer_a_merge_still_copying_with_a_retryable_503(
     client_with_store: TestClient, monkeypatch,
 ) -> None:

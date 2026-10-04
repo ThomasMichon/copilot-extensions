@@ -704,7 +704,10 @@ def cmd_detach(
         if seed_delivery_status == "failed":
             _progress("seed-draft", f"typed seed was not submitted ({embodied.get('seed_reason')}); "
                       "not resending: the draft may remain in Copilot's input")
-        if not created and not handle_warning:  # whatever its flags, a rejoin may rename
+        # Whatever its flags, a rejoin may rename -- and so may a launch embody
+        # itself resumed (an existing worktree's head: ``resume_session``).
+        resuming = not created or bool(embodied.get("resume_session"))
+        if resuming and not handle_warning:
             handle_warning = unstable_handle_warning(daemon_port, copilot_args, rejoin=True)
         # A lost earlier attempt may have created (and maybe seeded) the session
         # this rejoin found: its seed's fate is unknown, so never resend it
@@ -733,7 +736,7 @@ def cmd_detach(
         from venue_copilot import LIVE_SESSION_ALIAS_PROTOCOL, may_switch_session_id
 
         alias_floor = ({"min_daemon_protocol": LIVE_SESSION_ALIAS_PROTOCOL}
-                       if not created or may_switch_session_id(copilot_args) else {})
+                       if resuming or may_switch_session_id(copilot_args) else {})
         if seed_needs_bridge:
             from venue_copilot.refs import deliver_note
 
