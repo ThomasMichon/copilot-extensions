@@ -599,19 +599,21 @@ class PickerScreenRenderingMixin:
         from :meth:`_update_seg` (the engine/marketplace payload's staged
         state). Directly qualifies the ``v{VERSION}`` string it sits next
         to: ``idle`` shows nothing (never checked yet / non-GitHub source),
-        ``current`` shows a plain ✓, ``available`` shows a short, focusable
-        ``↻ Update available`` button (Enter self-updates the Manager and
-        restarts the picker on it -- see zone ``"MUP"``). Kept intentionally
-        terse (no embedded version number or literal command) to match
-        :meth:`_update_seg`'s style and avoid overflowing the topbar; the
-        exact target version remains available via
-        ``manager_update_check.read_status()`` for anyone who wants it."""
+        ``current`` shows ``mgr✓`` (always carrying the ``mgr`` qualifier --
+        never a bare ✓ -- so it reads distinctly from :meth:`_update_seg`'s
+        own bare ✓ when both render adjacently in the topbar), ``available``
+        shows a short, focusable ``↻ Update available`` button (Enter
+        self-updates the Manager and restarts the picker on it -- see zone
+        ``"MUP"``). Kept intentionally terse (no embedded version number or
+        literal command) to match :meth:`_update_seg`'s style and avoid
+        overflowing the topbar; the exact target version remains available
+        via ``manager_update_check.read_status()`` for anyone who wants it."""
         st = getattr(self, "manager_update_state", "idle")
         if st == "idle":
             return None
         t = Text()
         if st == "current":
-            t.append(" ✓", style=C_READY)
+            t.append(" mgr\u2713", style=C_READY)
         elif st == "available":
             t.append(" ↻", style=(C_BTN_SEL if focused else C_HINT_ON))
             if show_text:

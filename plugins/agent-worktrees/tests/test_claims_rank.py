@@ -243,6 +243,78 @@ def test_claim_url_resolves_github_pr_and_issue_refs():
     assert claims_rank.claim_url("task", "task-9f21") is None
 
 
+def test_format_claim_pr_parses_a_full_non_github_forge_url_ref():
+    # Self-hosted Gitea/Forgejo use "pulls" (plural), not GitHub's "pull".
+    gitea_url = "https://git.example.org/acme-org/sample-repo/pulls/7961"
+    assert claims_rank.format_claim(
+        "pr", gitea_url, own_repo="copilot-extensions",
+    ) == "sample-repo#7961"
+    # Same-repo (own_repo matches the ref's repo) -- bare number only.
+    assert claims_rank.format_claim(
+        "pr", gitea_url, own_repo="sample-repo",
+    ) == "#7961"
+    # GitLab uses "merge_requests".
+    gitlab_url = "https://gitlab.example.org/acme-org/sample-repo/merge_requests/3"
+    assert claims_rank.format_claim(
+        "pr", gitlab_url, own_repo="sample-repo",
+    ) == "#3"
+    # "issues" is shared across forges.
+    assert claims_rank.format_claim(
+        "bug", "https://git.example.org/acme-org/sample-repo/issues/17",
+        own_repo="sample-repo",
+    ) == "#17"
+
+
+def test_format_claim_pr_parses_a_canonical_gitlab_url_with_nested_groups():
+    # Canonical GitLab project URLs use a "/-/" separator before the verb
+    # and support an arbitrary-depth "group/subgroup/.../project" namespace,
+    # not just a flat "owner/repo" -- distinct from the simpler shape the
+    # other forge test above already covers.
+    nested_url = (
+        "https://gitlab.example.org/group/subgroup/project/-/merge_requests/3"
+    )
+    assert claims_rank.format_claim(
+        "pr", nested_url, own_repo="other-project",
+    ) == "project#3"
+    assert claims_rank.format_claim(
+        "pr", nested_url, own_repo="project",
+    ) == "#3"
+    assert claims_rank.claim_url("pr", nested_url) == nested_url
+    # "/-/issues/" is the same canonical shape for issues.
+    assert claims_rank.format_claim(
+        "bug",
+        "https://gitlab.example.org/group/subgroup/project/-/issues/9",
+        own_repo="project",
+    ) == "#9"
+
+
+def test_format_claim_pr_parses_azure_devops_and_generic_pull_requests_urls():
+    # Same vocabulary claims_find_cli._pr_number already covers (see its own
+    # fixtures in test_claims_find.py) -- both call sites must agree on what
+    # counts as a supported PR URL shape.
+    ado_url = "https://dev.azure.com/org/project/_git/widgets/pullrequest/789"
+    assert claims_rank.format_claim(
+        "pr", ado_url, own_repo="other-repo",
+    ) == "widgets#789"
+    assert claims_rank.format_claim(
+        "pr", ado_url, own_repo="widgets",
+    ) == "#789"
+    assert claims_rank.claim_url("pr", ado_url) == ado_url
+    generic_url = "https://example.com/acme/widgets/pull-requests/321"
+    assert claims_rank.format_claim(
+        "pr", generic_url, own_repo="widgets",
+    ) == "#321"
+    assert claims_rank.claim_url("pr", generic_url) == generic_url
+
+
+def test_claim_url_hyperlinks_a_non_github_forge_ref_as_is():
+    # A ref that is already a full URL on a non-GitHub host must be
+    # hyperlinked unchanged -- never rewritten to a reconstructed
+    # github.com URL (which would silently point at the wrong site).
+    gitea_url = "https://git.example.org/acme-org/sample-repo/pulls/7961"
+    assert claims_rank.claim_url("pr", gitea_url) == gitea_url
+
+
 def test_claim_entries_for_worktree_pairs_label_with_url():
     claims = [
         ResourceClaim(kind="pr", ref="acme-org/sample-repo#2481"),
