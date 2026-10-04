@@ -46,13 +46,18 @@ issues sort by the first matching `priority_labels` rank, then `created_at`,
 then issue number. `batch_size` bounds the selected set.
 
 The forge boundary is intentionally narrow: list open issues, reserve, promote
-to claimed, and release an orphan. Two adapters implement it today: `github`
-(via `gh`) and `azure-devops` (via the `az` CLI's `devops`/`boards`
+to claimed, and release an orphan. Three adapters implement it today: `github`
+(via `gh`), `azure-devops` (via the `az` CLI's `devops`/`boards`
 subcommands, with an untagged work item's title, tags, and dates read through
 `az boards work-item show` and its reservation markers carried as work-item
-comments through the generic `az devops invoke` REST bridge). `repo` is
+comments through the generic `az devops invoke` REST bridge), and `script`
+(a declared subprocess that implements the same four operations itself --
+see "The `script` provider" below). `repo` is
 `owner/name` for GitHub and `organization/project` for Azure DevOps -- the
-same two-segment shape either way. GitHub discovery uses a bounded GraphQL
+same two-segment shape either way; `script` interprets `repo` itself and
+accepts any non-empty string.
+
+GitHub discovery uses a bounded GraphQL
 connection: at most ten 100-issue pages, with the latest 100 comments and
 first 100 labels fetched inline per issue. This keeps call count proportional
 to bounded pages rather than issue count; missing cursors, GraphQL errors, or
@@ -159,6 +164,167 @@ The default blast-radius charter also forbids force-push, bypassing checks,
 merging branches the worker did not create, selecting excluded/bootstrap
 issues, and changing the active declaration. The adopter must explicitly set
 `allow_self_config_changes: true` to relax only the last restriction.
+
+## The `script` provider
+
+`forge.provider: script` replaces the forge entirely with a declared,
+repo-packaged subprocess that implements the same four backlog operations
+itself (`list_open_issues`, `reserve`, `claim`, `release`) -- the
+`extend-any-declaration` vision's script-path-hook model realized for this
+engine (`visions/plugins/agent-dispatch/README.md`). The loop's own
+scheduling/lease/quiet-period/dedup machinery is reused unchanged; the
+script supplies only the domain-specific backlog source.
+
+```yaml
+forge:
+  provider: script
+  command: ["scripts/my-backlog-source.py"]
+  cwd: "scripts"              # optional, defaults to the declaring repo root
+  timeout_seconds: 30          # optional, defaults to 30; must be finite, > 0, and <= 1800
+  producer_login: "my-bot"     # required (same field as github/azure-devops); forwarded unverified
+  backlog: "pending-work-items" # optional; see "`repo` vs. `forge.backlog`" below
+```
+
+A relative `command[0]` (the script path) and a relative `cwd` both resolve
+against the declaring repo root (the same `cwd` `repository_issue_loop`
+already threads for `worker_identity`), never the daemon process's own
+incidental working directory. `repo` is interpreted by the script itself and
+accepts any non-empty string -- it is not required to be `owner/name`.
+
+**`repo` vs. `forge.backlog`:** `repo` is never purely a `script`-local label
+-- the loop also hands it to the task queue as the created task's routing
+lane (`client.list`/`client.create`, and `project_for_task` resolving which
+local project `embody` spawns into). A `repo` that is actually an arbitrary,
+non-`owner/name` backlog label (e.g. `"pending-work-items"`) therefore risks
+misrouting the task -- embody would try to spawn into a project named after
+that label instead of the repo the declaration actually lives in. Set
+`forge.backlog` (any non-empty string) when the script's own natural backlog
+identifier differs from a real, embody-routable project: the script's four
+operations then receive `forge.backlog` instead of `repo`, while `repo`
+itself keeps routing the task normally. `forge.backlog` defaults to `repo`
+when unset, so an existing declaration with no real project to route to --
+and no need for one -- is unaffected.
+
+**Known limitation with `extends:`:** that repo root is always the *leaf*
+declaration's own root, never the directory of whichever hop in an
+`extends:` chain actually supplied the `script` override. A declaration
+that inherits a *relative* `forge.command`/`forge.cwd` is refused outright
+at registration (a clear `RegistrarError`) whenever the *nearest hop that
+actually defines that field* (not merely some hop elsewhere in the chain)
+lives outside this repo -- rather than silently resolving it against the
+wrong root. Generalizing per-hop origin tracking to cover these fields,
+the way `kind: emitter`'s own `spec.cwd` already does, remains a known,
+tracked gap. Use an absolute `command`/`cwd` for a cross-repo inherited
+override (or declare `forge.command`/`forge.cwd` directly in the
+extending file instead of inheriting them) until that gap is closed. A
+field whose defining hop lives in this same repo -- even if some other,
+unrelated hop further up the same chain lives elsewhere -- or a leaf file
+that declares `forge.command`/`forge.cwd` itself rather than inheriting
+them, is never affected by this.
+
+The resolved `command[0]` is then prefixed with whatever interpreter/shell
+its suffix requires, mirroring the plugin companion script-path resolver
+(`companion.py`): `.py` is run via the current Python interpreter
+(`sys.executable`), `.sh` via `bash`, and `.ps1` via `pwsh` (or, on
+Windows, a fallback to the bundled Windows PowerShell). Any other suffix is
+executed directly, relying on its own executable bit/shebang -- which works
+on POSIX but not on Windows, so a cross-platform declaration should use one
+of the three recognized suffixes.
+
+An explicit `forge.namespace` (any non-empty string) overrides the
+coordinator's auto-derived resource-key namespace outright -- set this for
+a correctness-critical redundant/failover deployment (the same declaration
+running on more than one host) rather than relying on the auto-derived
+identity, which is a best-effort git-remote probe cached by resolved repo
+root for the life of the daemon process (not re-run on every tick) and can
+fall back to the machine-local checkout path if that probe ever fails. A
+transient failure on that first probe is cached the same way, until the
+process restarts -- so the auto-derived namespace is stable between ticks
+on one running host, but can still differ across a restart, or across two
+redundant hosts whose first probe happened to fail differently.
+
+### Subprocess JSON contract
+
+The runtime invokes `<command...> --op <name>` once per operation, writing a
+single-line JSON request object to the script's stdin and expecting a single
+JSON response object on stdout:
+
+| Op | Request body | Expected response |
+|----|---------------|--------------------|
+| `list_open_issues` | `{"repo": ..., "producer_login": ...}` | `{"issues": [<issue>, ...]}` |
+| `reserve` | `{"repo": ..., "issue": <issue>, "reservation": {...}, "producer_login": ...}` | any object (ignored) |
+| `claim` | `{"repo": ..., "issue": <issue>, "reservation": {...}, "task_id": ..., "producer_login": ...}` | any object (ignored) |
+| `release` | `{"repo": ..., "issue": <issue>, "reservation": {...}, "reason": ..., "producer_login": ...}` | any object (ignored) |
+
+The request body's `"repo"` is `forge.backlog` when the declaration sets it,
+otherwise the declaration's own `repo` (see "`repo` vs. `forge.backlog`"
+above) -- the wire field name is unchanged either way, only the source of
+its value differs.
+
+
+An `<issue>` object is
+`{"number": int, "title": str, "url": str, "labels": [str, ...],
+"created_at": float, "updated_at": float, "reservations": [...]}` (epoch
+seconds for the two timestamps). `producer_login` is always the declaration's
+`forge.producer_login` -- unlike `github`/`azure-devops`, the script is
+trusted to interpret or ignore it itself; nothing verifies it against the
+script's own identity. Empty stdout is treated as `{}` rather than an error.
+
+A non-zero exit is always a real error (stderr surfaced verbatim, truncated
+to 400 characters); so is exceeding `timeout_seconds`, a start failure (e.g.
+the command is not executable), malformed/non-JSON stdout, or a JSON value
+that is not an object -- none of these are silently treated as an empty
+success. `list_open_issues`'s response additionally requires an `issues`
+list of well-formed issue objects; a malformed entry is also a real error.
+
+### Reservation object schema and state transitions
+
+An issue's `reservations` entries carry the loop's own
+reserve/claim/release history -- the same state machine a `github`/
+`azure-devops` adapter encodes as a marker comment (see "Eligibility and
+reservation" above), just reported directly as JSON objects instead of
+parsed out of comment text. Each entry is:
+
+```json
+{
+  "loop": "<declaration name>",
+  "occurrence": 0,
+  "state": "reserved",
+  "at": 0.0,
+  "label": "<reservation.label>",
+  "issue": 0,
+  "task_id": "<task id, 'claimed' only>",
+  "reason": "<release reason, 'released' only>"
+}
+```
+
+`loop`/`occurrence`/`state`/`at`/`label`/`issue` are always required;
+`task_id` is required (non-empty string) when `state` is `claimed`,
+forbidden (must be absent/`null`) when `state` is `reserved`, and optional
+when `state` is `released` (carrying forward the claim that was released,
+if any); `reason` is required (non-empty string) when `state` is
+`released`, and forbidden when `state` is `reserved` (unvalidated,
+effectively ignored if present, for `claimed`). `issue` must equal the
+containing issue's own `number` -- a mismatch (or any other schema
+violation) is rejected as a malformed issue entry, the same way a
+mistyped core field is.
+
+The script, not the runtime, owns persisting these markers so a later
+`list_open_issues` call reports them back:
+
+1. On `reserve(repo, issue, reservation)`, persist `{**reservation, "issue":
+   issue["number"]}` (`reservation` already carries `loop`/`occurrence`/
+   `state: "reserved"`/`at`/`label`) against that issue.
+2. On `claim(repo, issue, reservation, task_id)`, persist a new marker with
+   `state: "claimed"` and `task_id` set (the same `loop`/`occurrence`/`at`/
+   `label`/`issue` as the reservation).
+3. On `release(repo, issue, reservation, reason)`, persist a new marker with
+   `state: "released"` and `reason` set (carrying forward `task_id` if the
+   release follows a claim).
+
+The loop reads the full accumulated history back (never just the latest
+entry) to reconcile orphaned reservations and in-flight claims, so a script
+backlog must retain every prior marker for an issue, not just overwrite it.
 
 ## Operations
 

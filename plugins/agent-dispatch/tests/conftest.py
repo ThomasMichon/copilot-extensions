@@ -4,6 +4,22 @@ from __future__ import annotations
 
 import pytest
 
+# Force `single_instance`'s own module-level `if os.name == "nt": import
+# msvcrt` to evaluate now, against the *real* `os.name`, rather than lazily
+# whenever some test first imports it (directly or transitively). Several
+# tests legitimately monkeypatch `os.name = "nt"` to exercise Windows-only
+# code paths (`procutil`'s own `run_agent_worktrees_capture` tests, for
+# one) -- since that monkeypatch mutates the real, shared `os` module
+# object, any *unrelated* first import of `single_instance` that happens to
+# land inside such a test's patched window would otherwise try a genuine
+# `import msvcrt` on a non-Windows host and crash with
+# `ModuleNotFoundError`. Which subsuite/test-file grouping a given pytest
+# run collects determines whether some earlier module import already
+# cached `single_instance` safely -- a real, environment-dependent flake,
+# not merely a hermeticity nicety. Importing it here, at collection time
+# before any test runs, makes every subsuite grouping safe.
+import agent_dispatch.single_instance  # noqa: F401
+
 
 @pytest.fixture(autouse=True)
 def _isolate_discovery(monkeypatch, tmp_path):
