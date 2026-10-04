@@ -127,7 +127,7 @@ jobs:
             exit 0
           fi
           if [ "$PR_AUTHOR" != "$REPO_OWNER" ]; then
-            echo "::error::This PR targets 'main' and is not the promotion pipeline's own PR. main only ever moves via a release/promote-* PR, or (rarely) a workflow-file-only bootstrap PR by the repo owner. Please retarget this PR's base branch to 'dev' -- see CONTRIBUTING.md > Release & Versioning."
+            echo "::error::This PR targets 'main' and is not the promotion pipeline's own PR. main only ever moves via a release/promote-* PR, or (rarely) a workflow-file-only bootstrap PR by the repo owner. Please retarget this PR's base branch to 'dev' -- see docs/pipelines.md > Release & Versioning."
             exit 1
           fi
           # Merge-base-relative (three-dot semantics), not a literal
@@ -166,7 +166,7 @@ jobs:
           if [ -n "$non_workflow" ]; then
             echo "::error::This PR touches file(s) outside .github/workflows/, so it cannot use the workflow-only bootstrap exception:"
             echo "::error::$non_workflow"
-            echo "::error::main only ever moves via a release/promote-* PR, a workflow-file-ONLY bootstrap PR, or module-size-baseline-widen.yml's own automated PR. Please retarget this PR's base branch to 'dev' -- see CONTRIBUTING.md > Release & Versioning."
+            echo "::error::main only ever moves via a release/promote-* PR, a workflow-file-ONLY bootstrap PR, or module-size-baseline-widen.yml's own automated PR. Please retarget this PR's base branch to 'dev' -- see docs/pipelines.md > Release & Versioning."
             exit 1
           fi
           echo "Workflow-file-only bootstrap PR by the repo owner -- OK. Files:"

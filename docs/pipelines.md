@@ -225,7 +225,7 @@ rationale and any known limitations.
 | `copilot-review-gate.yml` | `pull_request_target` → `dev` | Requests an automatic Copilot review, Maintainer-authored PRs only (see [Review automation](#3-review-automation)). |
 | `workflow-lockdown-guard.yml` | `pull_request_target` → `dev` | Required check: fails if a protected path (`.github/workflows/`, `.github/actions/`, `.github/CODEOWNERS`) is touched by anyone but the repo owner (see [Workflow/CODEOWNERS lockdown](#4-workflowcodeowners-lockdown)). |
 | `base-branch-reminder.yml` | `pull_request_target` → `main` | Posts a one-time comment asking a non-owner author to retarget a PR against `main` to `dev` (see [If you opened a PR against `main` by mistake](#if-you-opened-a-pr-against-main-by-mistake)). Never checks out or executes PR code. |
-| `trusted-ci.yml` | `pull_request_target`, paths-scoped to `libs/**`/`agent-bridge`/`tools/**` | Opt-in (`vars.TRUSTED_SELF_HOSTED_CI`), collaborator-gated self-hosted CI lane for paths too sensitive/expensive for the standard runner pool. |
+| `trusted-ci.yml` | `pull_request_target`, paths-scoped to `.github/workflows/trusted-ci.yml`/`libs/**`/`agent-bridge`/`tools/**` | Opt-in (`vars.TRUSTED_SELF_HOSTED_CI`), collaborator-gated self-hosted CI lane for paths too sensitive/expensive for the standard runner pool; includes its own file so a change to the gate itself also re-runs it. |
 
 **Reactive, post-CI (triggered by `ci.yml` completing):**
 
@@ -247,12 +247,12 @@ rationale and any known limitations.
 |----------|---------|---------|
 | `module-size-baseline-widen.yml` | `push` → `main` | Post-merge, main-only companion to the module-size guard: widens the shrink-only baseline when a legitimate growth landed, via its own reviewable PR — never inside a PR branch's own CI run against its own diff. |
 | `module-size-baseline-widen-verify.yml` | `workflow_dispatch` | Manual verification harness for the above. |
-| `module-health-watchdog.yml` | `schedule` (daily) | Scans for module-size drift and other structural health signals; files tracking issues. |
-| `stale-branch-sweep.yml` | `schedule` (weekly) | Deletes merged-PR branches still lingering on `origin` — the automated form of the one-time 3000+-branch cleanup. |
-| `installation-context-full.yml` | `schedule` (daily) | Full-sweep variant of the installation-context contract smoke check `ci.yml` runs per-PR. |
+| `module-health-watchdog.yml` | `schedule` (daily), `workflow_dispatch` | Scans for module-size drift and other structural health signals; files tracking issues. |
+| `stale-branch-sweep.yml` | `schedule` (weekly), `workflow_dispatch` | Deletes merged-PR branches still lingering on `origin` — the automated form of the one-time 3000+-branch cleanup. |
+| `installation-context-full.yml` | `schedule` (daily), `workflow_dispatch` | Full-sweep variant of the installation-context contract smoke check `ci.yml` runs per-PR. |
 | `context-handoff-exhaustive.yml` | `schedule` (weekly), `workflow_dispatch` | The real-git/child-process/lock-race exhaustive suite for `context-handoff`'s exhaustive test tree — deliberately its own workflow so its `schedule` trigger doesn't apply to the rest of `ci.yml`'s matrix. |
-| `crash-diagnostics-stress.yml` | `schedule` (daily) | Stress-tests `context-handoff` crash-diagnostics paths. |
-| `ci-failure-fix-attempt.lock.yml` | `issues: [labeled]` | Generated agentic-workflow (`gh-aw` compiled) that reacts to a labeled CI-failure tracking issue. |
+| `crash-diagnostics-stress.yml` | `schedule` (daily), `workflow_dispatch` | Stress-tests `context-handoff` crash-diagnostics paths. |
+| `ci-failure-fix-attempt.lock.yml` | `issues: [labeled]`, `workflow_dispatch` | Generated agentic-workflow (`gh-aw` compiled) that reacts to a labeled CI-failure tracking issue; also manually dispatchable with inputs. |
 
 ## Promotion: dev → main
 
@@ -282,8 +282,9 @@ Budget on the order of **10-20 minutes** from a green `dev` merge to a real
 `main` release: `CI` on `dev` (a few minutes) → `Validation Gate` →
 `Promote` opens a generated `release/promote-<run id>` candidate PR
 against `main` → that candidate PR's own fast `main source gate` check →
-auto-merge (via the pipeline's own `APERTURE_RELEASE_TOKEN`, not a
-personal account). To confirm a change actually shipped rather than
+auto-merge (via the pipeline's own `APERTURE_RELEASE_TOKEN` — a personal
+fine-grained PAT minted under the maintainer's own account, not the
+default `GITHUB_TOKEN`/Actions-bot identity). To confirm a change actually shipped rather than
 assuming the `dev` merge itself was the release:
 
 ```bash
@@ -315,10 +316,11 @@ commit, then resume once `dev` has an actual fix) rather than hand-editing
 
 ## Never admin-merge a PR into `main`
 
-`main` only ever moves via a `release/promote-*` PR or a genuine
-workflow-file-ONLY bootstrap PR (see the `main-gate` job in `ci.yml`), and
-`main-gate` recognizes and passes **both** of those on its own —
-unassisted, no override needed. That means `gh pr merge --admin` (or the
+`main` only ever moves via a `release/promote-*` PR, a genuine
+workflow-file-ONLY bootstrap PR, or `module-size-baseline-widen.yml`'s own
+automated PR (see the `main-gate` job in `ci.yml`), and `main-gate`
+recognizes and passes **all three** of those on its own — unassisted, no
+override needed. That means `gh pr merge --admin` (or the
 equivalent `--admin` flag on any PR-merge tool) has **no legitimate use
 against `main`** once this gate is in place: if `main-gate` is failing a
 PR, that is the gate correctly telling you the PR doesn't belong on `main`
