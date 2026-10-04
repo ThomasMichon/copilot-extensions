@@ -5,44 +5,46 @@ small reference documents, architecture notes, task breakdowns — that
 shouldn't land in a repo. It is **not** a general-purpose scratch directory,
 a package cache, or a place to stage a cloned repository for inspection.
 
-`agent_logger.sync` already refuses to copy installed plugins, credentials,
-settings, or other `~/.copilot` state at the sync boundary (see
-[`architecture.md`](architecture.md) § *Session sync*). This doc covers the
-one boundary that engine can't police on its own: the **contents a consumer
-writes into `files/` during a session**, which sync then faithfully (and
-indiscriminately) carries forward. A consumer that doesn't clean up after
-itself — a virtualenv it created to test something, a repo it cloned to
-inspect, a browser profile from a login flow — leaks that scratch into
-every archived copy of the session from then on.
+## What's already handled: `sync.detritus`
 
-## Why this matters
+`agent_logger.sync.detritus` already detects and excludes four recurring
+"scope creep" categories, by on-disk signature, at sync time — see
+[`deployment-topologies.md`](deployment-topologies.md) for the full
+mechanism:
 
-An operator audit of one long-running deployment found a session corpus
-that had grown far beyond its transcript content: a large share of total
-archived bytes turned out to be stray virtualenvs, full repository
-checkouts, browser profiles, and ad-hoc test fixtures that had been written
-into `files/` and never cleaned up, then faithfully synced and retained
-indefinitely. None of it was session content in any meaningful sense — it
-was scratch that outlived the task that created it.
-
-## Denylist — never acceptable in `files/`
-
-Any of the following found anywhere in a `files/` subtree — not just at the
-top level; a wrapper folder around one of these still counts — marks that
-whole top-level entry as non-archival scratch:
-
-| Pattern | What it is |
+| Category | Detected by |
 |---|---|
-| `pyvenv.cfg`, `site-packages/`, a `Scripts/activate` / `bin/activate` script, a name containing `venv` | A Python (or similar) virtual environment |
-| A `.git/` directory anywhere in the subtree | A cloned repository checkout |
-| A name containing `pytest-` (or a bare `tmp_path`/`tmpdir`-shaped directory) | A test framework's temp-directory fixture |
-| Browser profile markers (`Cookies`, `Local State`, a `places.sqlite`, a `.mozilla`/`.config/google-chrome`-shaped tree) | A captured browser profile |
-| `__pycache__/`, `node_modules/` | A language runtime's compiled-artifact or dependency cache |
-| A name containing `blob-` paired with many same-sized files | Synthetic test fixture data |
+| Python virtual environment | a `pyvenv.cfg` file at the environment root |
+| Git clone or linked worktree | a `.git` entry — a directory for a normal clone, or a regular `gitdir:`-pointer **file** for a linked worktree checkout |
+| `node_modules` tree | the directory name itself |
+| Chromium browser profile | a `Local State` file alongside a `Default`/`Profile N` subdirectory containing `Preferences` + a `Network` directory |
 
-This list is **evidence-based, not exhaustive** — build it from what you
-actually find leaking through, not from enumerating every conceivable
-pattern up front. Expect to add entries.
+Detection walks top-down and excludes the **whole subtree** the moment a
+root signature matches — it never descends into an already-excluded root,
+and a later byte-level audit should reason the same way (see *Reconciling
+two copies*, below). This is **detection, not prevention**: it keeps these
+artifacts out of the synced archive and removes any stale copy already on a
+filesystem-backed destination, but it does not stop an agent from writing
+them into `files/` in the first place, and the latest exclusion footprint is
+visible via `session-sync status`.
+
+## What detritus detection does *not* yet cover
+
+The four categories above are the ones proven common enough to warrant a
+dedicated signature. They are not exhaustive. Categories observed in the
+wild that still land in `files/` unfiltered:
+
+- Test-framework temp-directory fixtures (e.g. a copied `pytest` `tmp_path`/
+  `tmpdir`), which carry no root-level signature distinguishing them from
+  ordinary curated output.
+- Synthetic test fixture data (large sets of same-sized placeholder files).
+- A manually-downloaded build/CI tool (e.g. a CI runner package) extracted
+  into `files/` for inspection.
+
+If you find a new recurring pattern, the right fix is usually a new
+signature in `sync.detritus`, not just a documentation note — file an issue
+or open a PR adding the detection, following the existing categories'
+shape (a cheap, root-directory-local check, never a full-tree scan).
 
 ## Allowlist / acceptable content
 
@@ -68,7 +70,7 @@ pattern up front. Expect to add entries.
 - Ephemeral database journal/WAL sidecars next to a session's own SQLite
   state.
 
-## If you're reconciling two copies of the same corpus
+## Reconciling two copies of the same corpus
 
 Comparing an old sync destination against a current one (e.g. while
 migrating targets, or auditing retention) has three sharp edges worth
@@ -82,17 +84,19 @@ knowing about up front:
    means the schema gained a field after the older copy was taken. Only
    the reverse direction — present in the old copy, missing from the new
    one — is worth investigating.
-3. **Junk classification must operate at the same granularity the
-   original prune used.** If a whole top-level `files/<name>` folder was
-   removed because *something inside it* matched a denylist pattern, a
-   later byte-level diff will see every individual surviving-elsewhere
-   file as "unexpectedly missing" unless it re-applies that same
-   whole-folder reasoning. Conversely, never assume everything in such a
-   gap *is* junk, either — verify it, since a partially-synced legitimate
-   reference fixture looks identical to a partially-pruned junk folder
-   until you actually look.
+3. **Audit at the same granularity detection used.** `sync.detritus`
+   excludes whole subtrees from a root signature, not individual files — a
+   later byte-level diff will see every individual file *below* an excluded
+   root as "unexpectedly missing" unless it re-applies the same
+   whole-subtree reasoning. Conversely, never assume everything in such a
+   gap *is* excluded detritus, either — a partially-synced legitimate
+   reference fixture (e.g. an incomplete transfer, unrelated to detritus
+   exclusion) looks identical to correctly-excluded detritus until you
+   actually check file counts on both sides.
 
 ## See Also
 
-- [`architecture.md`](architecture.md) § *Session sync* — the sync-boundary
-  scoping this policy complements
+- [`deployment-topologies.md`](deployment-topologies.md) — the detritus
+  detection mechanism this policy documents
+- [`architecture.md`](architecture.md) § *Session sync* — the broader
+  sync-boundary scoping this policy complements
