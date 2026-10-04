@@ -367,7 +367,13 @@ def _declares(section: str, value: str) -> bool:
         if heading:
             candidates.append(heading.group(1))
         for candidate in candidates:
-            normalized = _SPACE_RE.sub(" ", candidate).strip(" `*_").casefold()
+            # Inline code-span backticks are markdown syntax, not content, and can appear
+            # anywhere in the cell/heading (e.g. "`a` worktree `b`" has several separately
+            # backticked tokens) -- strip every backtick, not just a leading/trailing pair.
+            # `*`/`_` emphasis markers are only safely stripped at the edges, since they can
+            # legitimately appear inside an identifier (e.g. snake_case).
+            without_code_markers = candidate.replace("`", "")
+            normalized = _SPACE_RE.sub(" ", without_code_markers).strip(" *_").casefold()
             if normalized == expected:
                 return True
     return False
