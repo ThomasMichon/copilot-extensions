@@ -306,7 +306,7 @@ _remote_name() {
     # `branch.<name>.pushRemote` or the repo-wide `remote.pushDefault`) means
     # `origin` can be configured internal while a real `git push` on this
     # branch actually publishes somewhere else entirely.
-    local branch push_remote push_default branch_remote remotes remote_count
+    local branch push_remote push_default branch_remote
     branch="$(_current_branch)"
     if [[ -n "$branch" ]]; then
         push_remote="$(_git_config_value "branch.$branch.pushRemote")"
@@ -331,19 +331,13 @@ _remote_name() {
         printf 'origin'
         return 0
     fi
-    # Git itself refuses to guess when several remotes exist and nothing
-    # above resolved one (`fatal: No configured push destination` / no
-    # single unambiguous remote) -- it only auto-selects when there is
-    # EXACTLY one remote. Picking an arbitrary first remote here could
-    # activate the internal_host exemption on the wrong (external) one.
-    remotes="$(git -C "$repo_root" remote 2>/dev/null || true)"
-    remote_count=0
-    if [[ -n "$remotes" ]]; then
-        remote_count="$(printf '%s\n' "$remotes" | wc -l)"
-    fi
-    if [[ "$remote_count" -eq 1 ]]; then
-        printf '%s' "$remotes"
-    fi
+    # Fail closed, not guess: without a configured push remote, push
+    # default, branch tracking, or `origin`, plain `git push` itself has no
+    # configured destination and refuses to run -- it does not auto-select
+    # a sole remaining remote. Leaving this unresolved means the
+    # internal_host exemption cannot apply (safe default: require
+    # disclosure); per operator policy, an unresolved/ambiguous remote is
+    # never treated as a safe path to waive it.
 }
 
 _remote_url() {

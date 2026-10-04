@@ -82,10 +82,14 @@ keys are not repo-delegable and are ignored there.
 The hook resolves the local git remote to inspect using the same effective
 push-remote precedence Git itself uses for `git push`: a per-branch
 `branch.<name>.pushRemote` override, then the repo-wide `remote.pushDefault`,
-then the current branch's tracked `branch.<name>.remote`, then `origin`, then
--- only when it is the single unambiguous remote -- whatever one remote is
-configured. It never guesses among several unconfigured remotes, matching
-Git's own refusal to pick one. It makes no network call and performs no
+then the current branch's tracked `branch.<name>.remote`, then `origin`. If
+none of those resolves a remote -- including the case of several configured
+remotes with no tracking/override naming one -- the push target is left
+**unresolved**, matching Git's own refusal to guess (`git push` itself fails
+with no configured push destination in that case). An unresolved remote can
+never grant the `internal_host` exemption: per operator policy, disclosure
+defaults on, and only an explicit, unambiguous, safe match waives it -- never
+an inferred or guessed one. It makes no network call and performs no
 authentication.
 
 For `owned_account`, both host and owner from that resolved remote's **push**
@@ -102,6 +106,17 @@ ownership hint above. When the resolved remote has multiple configured push
 URLs (`git remote set-url --add --push`), every one of them must resolve to a
 configured `internal_host` for the exemption to apply -- one external mirror
 destination is enough to require disclosure.
+
+**Known limitation (accepted, not solved):** this heuristic reflects the
+local git push configuration, not necessarily the actual host a PR, issue, or
+review gets published against -- a fork/triangular workflow can push to one
+remote while its PR opens against a different (forge-determined, not purely
+git-config) upstream. The plugin makes no network call to resolve this
+precisely. The fail-closed design is the deliberate mitigation: the
+exemption only ever activates on an unambiguous local match, so this gap can
+produce a missed exemption (disclosure shown when it strictly wasn't
+required) but never a false exemption (disclosure silently suppressed for a
+contribution that actually reaches a non-internal audience).
 
 The resulting hints are anchored only to the repository named by the
 `sessionStart` payload. Both must be re-derived before publishing to any

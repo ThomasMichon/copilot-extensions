@@ -238,13 +238,13 @@ function Get-RemoteName([string] $RepositoryRoot) {
     }
     & git -C $RepositoryRoot remote get-url origin 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) { return 'origin' }
-    # Git itself refuses to guess when several remotes exist and nothing
-    # above resolved one (`fatal: No configured push destination` / no
-    # single unambiguous remote) -- it only auto-selects when there is
-    # EXACTLY one remote. Picking an arbitrary first remote here could
-    # activate the internal_host exemption on the wrong (external) one.
-    $Remotes = @(& git -C $RepositoryRoot remote 2>$null | Where-Object { $_ })
-    if ($Remotes.Count -eq 1) { return $Remotes[0] }
+    # Fail closed, not guess: without a configured push remote, push
+    # default, branch tracking, or origin, plain `git push` itself has no
+    # configured destination and refuses to run -- it does not auto-select
+    # a sole remaining remote. Leaving this unresolved means the
+    # internal_host exemption cannot apply (safe default: require
+    # disclosure); per operator policy, an unresolved/ambiguous remote is
+    # never treated as a safe path to waive it.
     return ''
 }
 
