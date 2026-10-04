@@ -431,6 +431,97 @@ def test_ledger_id_serializes_initialization(monkeypatch):
     assert calls[0] == ledger_path.with_suffix(ledger_path.suffix + ".lock")
 
 
+def test_rotate_ledger_id_sidecar_falls_back_to_truncating_when_unlink_fails(monkeypatch):
+    """If outright deletion of the stale sidecar fails (not merely
+    "already absent"), the rotation must still make the content
+    untrustworthy (empty) rather than leaving a fully-valid-looking
+    stale id in place -- a silent deletion failure must never let an old
+    incarnation survive a recreate."""
+    old_id = claim_history_mirror._ledger_id()
+    id_path = claim_history_mirror._ledger_id_path()
+    assert id_path.read_text(encoding="utf-8").strip() == old_id
+
+    real_unlink = type(id_path).unlink
+
+    def failing_unlink(self, *a, **k):
+        if self == id_path:
+            raise OSError("permission denied")
+        return real_unlink(self, *a, **k)
+
+    monkeypatch.setattr(type(id_path), "unlink", failing_unlink)
+    claim_history._rotate_ledger_id_sidecar()
+    assert id_path.read_text(encoding="utf-8").strip() == ""
+
+    monkeypatch.undo()
+    new_id = claim_history_mirror._ledger_id()
+    assert new_id != old_id
+
+
+def test_ledger_id_raises_on_a_sidecar_read_failure_rather_than_replacing_it(monkeypatch):
+    """A transient read failure on an EXISTING, valid sidecar must never
+    fall through to minting a replacement -- the old id may still be
+    perfectly correct, and a spurious rotation would make every event it
+    already mirrored look brand new again."""
+    claim_history.record_event(
+        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
+    )
+    original_id = claim_history_mirror._ledger_id()
+    id_path = claim_history_mirror._ledger_id_path()
+    real_read_text = type(id_path).read_text
+
+    def failing_read_text(self, *a, **k):
+        if self == id_path:
+            raise OSError("transient I/O error")
+        return real_read_text(self, *a, **k)
+
+    monkeypatch.setattr(type(id_path), "read_text", failing_read_text)
+    with pytest.raises(OSError):
+        claim_history_mirror._ledger_id()
+    monkeypatch.undo()
+    # The sidecar's own real content survives untouched.
+    assert id_path.read_text(encoding="utf-8").strip() == original_id
+
+
+def test_grouped_events_reads_identity_and_content_under_one_lock_acquisition(
+    monkeypatch,
+):
+    """A SEPARATE id-read and content-read (two lock acquisitions) leaves
+    a window where ``record_event()`` can recreate the ledger (rotating
+    its identity) in between, stamping stale content with a fresh id or
+    vice versa. One acquisition for both closes that window."""
+    claim_history.record_event(
+        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
+    )
+    calls: list = []
+    real_lock = claim_history_mirror.handoff_trace._append_lock
+
+    def spy_lock(lock_path):
+        calls.append(lock_path)
+        return real_lock(lock_path)
+
+    monkeypatch.setattr(claim_history_mirror.handoff_trace, "_append_lock", spy_lock)
+    claim_history_mirror._grouped_events()
+    assert len(calls) == 1
+
+
+def test_local_identities_for_ref_reads_identity_and_content_under_one_lock(
+    monkeypatch,
+):
+    claim_history.record_event(
+        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
+    )
+    calls: list = []
+    real_lock = claim_history_mirror.handoff_trace._append_lock
+
+    def spy_lock(lock_path):
+        calls.append(lock_path)
+        return real_lock(lock_path)
+
+    monkeypatch.setattr(claim_history_mirror.handoff_trace, "_append_lock", spy_lock)
+    claim_history_mirror.local_identities_for_ref("pr", "o/r#1")
+    assert len(calls) == 1
+
+
 def test_ledger_id_readonly_is_none_before_any_initialization():
     assert claim_history_mirror._ledger_id_readonly() is None
 

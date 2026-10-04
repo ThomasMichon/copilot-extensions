@@ -524,6 +524,49 @@ def _ledger_id_path() -> Path:
     return claim_history._ledger_id_sidecar_path()
 
 
+def _ledger_lock_path() -> Path:
+    """The SAME cross-process advisory lock :func:`claim_history.record_event`
+    uses for its own ledger appends (not a separate lock of the identity
+    sidecar) -- every read of the ledger's identity and/or content goes
+    through this one lock, so a concurrent ``record_event()`` recreating a
+    deleted ledger (and rotating its stale identity) can never interleave
+    with a sweep reading either half."""
+    ledger_path = claim_history.history_path()
+    return ledger_path.with_suffix(ledger_path.suffix + ".lock")
+
+
+def _mint_or_reuse_ledger_id_locked(ledger_path: Path, id_path: Path) -> str:
+    """Core mint-or-reuse logic for :func:`_ledger_id` -- the CALLER must
+    already hold :func:`_ledger_lock_path`'s lock. Split out so
+    :func:`_snapshot_ledger` can read the id and the ledger's own content
+    together under one lock acquisition, rather than two separate ones
+    with a recreation race in between.
+
+    A read failure on an EXISTING, non-empty-looking sidecar raises
+    rather than silently falling through to minting a replacement: the
+    old id may well still be the correct one, just transiently
+    unreadable (a permissions blip, a full disk on some other op) -- a
+    spurious rotation would re-upload everything that id already
+    legitimately mirrored as if it were new.
+    """
+    if ledger_path.exists() and id_path.exists():
+        try:
+            existing = id_path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise OSError(f"ledger id sidecar unreadable: {exc}") from exc
+        if existing:
+            return existing
+    new_id = uuid.uuid4().hex
+    id_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = id_path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(new_id, encoding="utf-8")
+        tmp.replace(id_path)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return new_id
+
+
 def _ledger_id() -> str:
     """A persistent, random identifier for the LOCAL ledger's current
     incarnation -- the discriminator half of a mirrored event's
@@ -531,50 +574,20 @@ def _ledger_id() -> str:
     WITHIN one ledger's own lifetime: two independent machines' first
     events for the same PR both get ``seq=0``, and a reimaged machine
     starting a fresh, empty ledger would otherwise collide with its own
-    earlier incarnation's ``seq=0`` too.
-
-    The whole check-then-mint-then-persist sequence is serialized by the
-    SAME cross-process advisory lock :func:`claim_history.record_event`
-    uses for its own ledger appends (not a separate lock of this
-    sidecar's own) -- this is also what lets ``record_event`` safely
-    invalidate a stale sidecar the instant it recreates a deleted ledger
-    file (see :func:`claim_history._rotate_ledger_id_sidecar`): a
-    concurrent sweep's own mint-or-reuse read can never interleave with
-    that rotation. Two overlapping first sweeps racing to initialize this
-    sidecar must never each mint and persist a DIFFERENT id (the second
-    write winning silently would orphan whichever events the first sweep
-    already stamped and pushed under its own, now-overwritten id, since no
-    future read would ever match them again).
+    earlier incarnation's ``seq=0`` too. See :func:`_snapshot_ledger` for
+    the atomic id+content read a real sweep actually needs; this
+    standalone accessor is for callers that only need the identity
+    itself (and is what that function's own locked core is built from).
     """
     ledger_path = claim_history.history_path()
     id_path = _ledger_id_path()
-    lock_path = ledger_path.with_suffix(ledger_path.suffix + ".lock")
-    with handoff_trace._append_lock(lock_path):
-        if ledger_path.exists() and id_path.exists():
-            try:
-                existing = id_path.read_text(encoding="utf-8").strip()
-            except OSError:
-                existing = ""
-            if existing:
-                return existing
-        new_id = uuid.uuid4().hex
-        id_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = id_path.with_suffix(f".{uuid.uuid4().hex}.tmp")
-        try:
-            tmp.write_text(new_id, encoding="utf-8")
-            tmp.replace(id_path)
-        finally:
-            tmp.unlink(missing_ok=True)
-        return new_id
+    with handoff_trace._append_lock(_ledger_lock_path()):
+        return _mint_or_reuse_ledger_id_locked(ledger_path, id_path)
 
 
-def _ledger_id_readonly() -> str | None:
-    """Read-only sibling of :func:`_ledger_id` -- the persisted ledger
-    incarnation id if the sidecar already exists, else ``None``. NEVER
-    mints or writes one: a pure display/read path (e.g. ``claims history
-    --remote``'s own local/remote merge) must never have the side effect
-    of creating a fresh ledger identity merely by being invoked."""
-    id_path = _ledger_id_path()
+def _read_ledger_id_readonly_locked(id_path: Path) -> str | None:
+    """Core read-only logic for :func:`_ledger_id_readonly` -- the CALLER
+    must already hold the lock. NEVER mints or writes."""
     if not id_path.exists():
         return None
     try:
@@ -584,21 +597,73 @@ def _ledger_id_readonly() -> str | None:
     return existing or None
 
 
+def _ledger_id_readonly() -> str | None:
+    """Read-only sibling of :func:`_ledger_id` -- the persisted ledger
+    incarnation id if the sidecar already exists, else ``None``. NEVER
+    mints or writes one: a pure display/read path (e.g. ``claims history
+    --remote``'s own local/remote merge) must never have the side effect
+    of creating a fresh ledger identity merely by being invoked."""
+    with handoff_trace._append_lock(_ledger_lock_path()):
+        return _read_ledger_id_readonly_locked(_ledger_id_path())
+
+
+def _snapshot_ledger() -> tuple[str, list[dict]]:
+    """Read the ledger's own mint-or-reuse identity AND its full raw
+    content together, under ONE lock acquisition -- the atomic read
+    :func:`_grouped_events` needs. Reading them as two separate locked
+    operations (as an earlier revision did) leaves a window where
+    ``record_event()`` can recreate a deleted ledger (rotating its
+    identity) IN BETWEEN: the content read afterward would then get
+    stamped with an identity that doesn't actually correspond to it.
+    Raises ``OSError`` (never silently degrades) on either an
+    unreadable id or an unreadable ledger, with a message identifying
+    which, so :func:`sync_pending` can report the right failure.
+    """
+    ledger_path = claim_history.history_path()
+    id_path = _ledger_id_path()
+    with handoff_trace._append_lock(_ledger_lock_path()):
+        ledger_id = _mint_or_reuse_ledger_id_locked(ledger_path, id_path)
+        if not ledger_path.exists():
+            return ledger_id, []
+        try:
+            with open(ledger_path, encoding="utf-8", errors="replace") as handle:
+                lines = handle.readlines()
+        except OSError as exc:
+            raise OSError(f"claim-history ledger unreadable: {exc}") from exc
+    entries: list[dict] = []
+    for raw in lines:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            entry = json.loads(raw)
+        except Exception:
+            continue
+        if isinstance(entry, dict):
+            entries.append(entry)
+    return ledger_id, entries
+
+
 def local_identities_for_ref(kind: str, ref_value: str) -> list[dict]:
     """Local events for ``(kind, ref_value)``, each stamped with the same
     ``(seq, ledger_id)`` durable identity a sync sweep would use -- for
     comparing against a resource's MIRRORED chain (e.g. ``claims history
-    --remote``'s own merge), never for pushing. Read-only: uses
-    :func:`_ledger_id_readonly`, so merely displaying history never mints
-    a ledger id as a side effect. A ``ledger_id`` of ``None`` here (no
-    sidecar yet -- this machine has never mirrored anything) means no
-    local event can be durably matched against a remote one; callers
-    should treat that as "no confirmed match," never a false one.
+    --remote``'s own merge), never for pushing. Read-only (never mints an
+    id); reads the readonly identity and the ledger's own content under
+    the SAME lock a real sweep uses, so a concurrent ``record_event()``
+    recreating the ledger can never interleave between the two and hand
+    old events a new identity (hiding unrelated remote events during
+    merging). The lock is held only for this local read -- released well
+    before any network work. A ``ledger_id`` of ``None`` here (no sidecar
+    yet -- this machine has never mirrored anything) means no local event
+    can be durably matched against a remote one; callers should treat
+    that as "no confirmed match," never a false one.
     """
-    events = [
-        e for e in claim_history.history_for_ref(ref_value) if e.get("kind") == kind
-    ]
-    ledger_id = _ledger_id_readonly()
+    with handoff_trace._append_lock(_ledger_lock_path()):
+        ledger_id = _read_ledger_id_readonly_locked(_ledger_id_path())
+        events = [
+            e for e in claim_history.history_for_ref(ref_value) if e.get("kind") == kind
+        ]
     stamped = []
     for i, e in enumerate(events):
         entry = dict(e)
@@ -645,38 +710,17 @@ def _grouped_events(kind: str | None = None) -> dict[tuple[str, str], list[dict]
     own durable ``(ledger_id, seq)`` identity (``seq`` -- its 0-based index
     within that resource's own full event sequence) -- the identity
     :meth:`ClaimHistoryMirror.push_batch`/:meth:`~ClaimHistoryMirror.fetch`
-    use. Re-reading the whole ledger once per sweep (rather than once per
-    resource, as an earlier revision did via repeated
-    :func:`claim_history.history_for_ref` calls) avoids reparsing roughly
-    resources-times-ledger-length worth of lines on every run.
+    use. Reads the ledger's identity and content together via
+    :func:`_snapshot_ledger` (one lock acquisition, immune to a concurrent
+    recreate-and-rotate landing in between). Re-reading the whole ledger
+    once per sweep (rather than once per resource, as an earlier revision
+    did via repeated :func:`claim_history.history_for_ref` calls) avoids
+    reparsing roughly resources-times-ledger-length worth of lines on
+    every run.
     """
-    path = claim_history.history_path()
     grouped: dict[tuple[str, str], list[dict]] = {}
-    if not path.exists():
-        return grouped
-    ledger_id = _ledger_id()
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            lines = handle.readlines()
-    except OSError as exc:
-        # Distinguished from a ledger-id init failure (raised above, by
-        # _ledger_id() itself) by this wrapped message -- propagated to
-        # the caller (sync_pending) as a genuine read failure, never
-        # silently swallowed into an empty grouping: that would let
-        # sync_pending report available=True, pushed=0, failed=[] (a
-        # clean sweep) when the local backup source itself couldn't even
-        # be read.
-        raise OSError(f"claim-history ledger unreadable: {exc}") from exc
-    for raw in lines:
-        raw = raw.strip()
-        if not raw:
-            continue
-        try:
-            entry = json.loads(raw)
-        except Exception:
-            continue
-        if not isinstance(entry, dict):
-            continue
+    ledger_id, raw_entries = _snapshot_ledger()
+    for entry in raw_entries:
         k, ref_value = entry.get("kind"), entry.get("ref")
         if not isinstance(k, str) or not isinstance(ref_value, str):
             continue

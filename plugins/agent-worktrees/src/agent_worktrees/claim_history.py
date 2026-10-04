@@ -247,10 +247,21 @@ def _ledger_id_sidecar_path() -> Path:
 def _rotate_ledger_id_sidecar() -> None:
     """Best-effort: drop a stale ledger-incarnation-id sidecar so the next
     read mints a fresh one for this genuinely new ledger incarnation.
-    Never raises -- a failure here degrades to a stale (but never
-    duplicated-looking) id surviving, not a blocked write."""
+    Never raises -- a write/sync failure here must never block the
+    ledger append itself. If outright deletion fails (not merely
+    "already absent"), fall back to truncating its content to empty --
+    never leave a FULLY-VALID-LOOKING stale id in place, since
+    ``_ledger_id()``'s own existing-content check only trusts a non-empty
+    read; an emptied file forces it to mint fresh exactly like an absent
+    one would."""
+    path = _ledger_id_sidecar_path()
     try:
-        _ledger_id_sidecar_path().unlink(missing_ok=True)
+        path.unlink(missing_ok=True)
+        return
+    except OSError:
+        pass
+    try:
+        path.write_text("", encoding="utf-8")
     except OSError:
         pass
 
