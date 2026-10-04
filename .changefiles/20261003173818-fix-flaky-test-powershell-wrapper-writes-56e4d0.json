@@ -1,0 +1,9 @@
+{
+  "comment": "Fix flaky test_powershell_wrapper_writes_bounded_session_file (issue #4653): disable pwsh's update-check network call and give the test a more generous, justified timeout for its real multi-process (pwsh -> python3 -> bash) cost.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}
