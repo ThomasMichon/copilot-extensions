@@ -1,0 +1,142 @@
+# Posts a one-time, read-only-safe reminder comment on a PR that targets
+# `main` directly, asking the author to retarget to `dev` -- `main` only
+# ever receives automated releases (see CONTRIBUTING.md > Release &
+# Versioning, and this is the same policy `ci.yml`'s `main-gate` job
+# actually ENFORCES).
+#
+# `main-gate` lives inside `ci.yml`, a `pull_request`-triggered workflow.
+# For a first-time or otherwise unapproved external contributor's fork PR,
+# GitHub holds the ENTIRE `ci.yml` run (every job, `main-gate` included) in
+# `action_required` until a maintainer manually approves it -- so such a
+# contributor gets no automated feedback at all unless someone happens to
+# notice and approve the run (confirmed live: PR #5091, a first-time fork
+# contributor's PR against `main`, sat with zero checks ever posted).
+#
+# This workflow exists ONLY to close that feedback gap with a narrow, safe
+# nudge. It does not replace or weaken `main-gate`, and it does not grant a
+# non-collaborator any new capability: it never checks out or executes the
+# PR's own code, never runs tests, never requests a review, and its only
+# effect is one explanatory comment. Deliberately minimal on purpose -- see
+# the operator direction that prompted this file: avoid over-enabling
+# functionality for an uninvited contributor by accident.
+#
+# Uses `pull_request_target` (the same mechanism as copilot-review-gate.yml
+# and workflow-lockdown-guard.yml -- see either file's header for the full
+# rationale): it runs the TRUSTED workflow definition from the repository's
+# actual default branch regardless of the PR author's trust level, and is
+# NOT subject to the fork-approval gate that blocks `pull_request`-triggered
+# workflows for first-time contributors. This job never checks out the PR's
+# head, so it carries none of the usual `pull_request_target`
+# secret-exfiltration risk.
+name: Base branch reminder
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, edited]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  # Serializes the check-existing-comment-then-post sequence per PR: without
+  # this, two runs (e.g. `opened` immediately followed by an `edited`) can
+  # both list comments before either has posted, both see no marker yet, and
+  # both post a reminder. `cancel-in-progress: false` so a run already
+  # mid-flight always finishes its own check-then-post instead of being
+  # killed partway and leaving an inconsistent GitHub Actions log for no
+  # benefit (this job is seconds-long; queuing briefly costs nothing).
+  group: base-branch-reminder-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  remind:
+    name: remind-to-target-dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Post a one-time reminder to retarget to dev
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        with:
+          script: |
+            const { PR_AUTHOR, REPO_OWNER } = process.env;
+
+            // The repo owner's own legitimate main-targeting flows (the
+            // release/promote-* pipeline PR, a workflow-only bootstrap PR,
+            // or module-size-baseline-widen.yml's automated PR -- see
+            // ci.yml's `main-gate` job for the exact shapes that gate
+            // actually enforces) all share one precondition: PR_AUTHOR ==
+            // REPO_OWNER. Skip the nudge entirely for those; only a
+            // non-owner author ever needs it.
+            if (PR_AUTHOR === REPO_OWNER) {
+              core.info(`PR author ${PR_AUTHOR} is the repo owner; skipping reminder.`);
+              return;
+            }
+
+            const marker = "<!-- base-branch-reminder -->";
+            const pull_number = context.payload.pull_request.number;
+
+            // Re-fetch the PR's CURRENT state immediately before posting --
+            // the serializing concurrency group above means a queued run can
+            // execute minutes after its triggering event, by which time the
+            // author may have already retargeted to `dev` or closed the PR.
+            // The triggering event's payload is a snapshot from enqueue time,
+            // not proof of the current state.
+            const { data: current } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number,
+            });
+            if (current.state !== "open" || current.base.ref !== "main") {
+              core.info(
+                `PR is now state=${current.state} base=${current.base.ref}; no longer needs the reminder.`,
+              );
+              return;
+            }
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pull_number,
+            });
+            // Require BOTH the marker AND the posting identity -- the PR
+            // author (or anyone else commenting) fully controls their own
+            // comment bodies, so the marker string alone is spoofable: a
+            // contributor could paste it into any comment to suppress this
+            // reminder from ever posting, even though the workflow never
+            // actually posted one.
+            if (
+              comments.some(
+                (comment) =>
+                  comment.user?.login === "github-actions[bot]" &&
+                  comment.body &&
+                  comment.body.includes(marker),
+              )
+            ) {
+              core.info("Reminder already posted on this PR; skipping.");
+              return;
+            }
+
+            const body = [
+              marker,
+              "Thanks for opening this pull request! This repository's `main` branch only " +
+                "ever receives automated releases -- regular contributions target `dev` " +
+                "instead (see CONTRIBUTING.md > Release & Versioning for the full policy, " +
+                "and why).",
+              "",
+              "Could you retarget this PR's base branch to `dev`? Click \"Edit\" next to the " +
+                "PR title, change the base branch dropdown to `dev`, and confirm with " +
+                '"Change base" -- no need to reopen or recreate the PR.',
+            ].join("\n");
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pull_number,
+              body,
+            });
