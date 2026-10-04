@@ -1610,7 +1610,7 @@ def run_tick(
                     reservation_base,
                     "explicit issue set was not fully reservable",
                 )
-                key, owner, token = resource_owners.pop(issue.number)
+                key, owner, token = resource_owners[issue.number]
                 client.release_resource_reservation(key, owner, token)
             return {
                 "occurrence": discovered["occurrence"],
