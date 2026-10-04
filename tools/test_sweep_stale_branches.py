@@ -799,6 +799,7 @@ def test_main_execute_returns_nonzero_when_a_deletion_fails(sweep, monkeypatch):
     monkeypatch.setattr(sweep, "_default_branch", lambda repo: "main")
     monkeypatch.setattr(sweep, "_verify_remote_matches_repo", lambda remote, repo: None)
     monkeypatch.setattr(sweep, "_delete_branch", lambda remote, repo, branch, oid: False)
+    monkeypatch.setattr(sweep, "_clear_tracking_issue", lambda repo: True)
     monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--execute"])
 
     assert sweep.main() == 1
