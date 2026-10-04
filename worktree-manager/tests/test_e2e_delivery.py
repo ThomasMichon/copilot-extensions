@@ -90,6 +90,31 @@ def _seed_older_install(tmp: Path, root: Path, version: str) -> None:
     assert res.action == "installed" and current_version(root) == version
 
 
+@pytest.fixture(autouse=True)
+def _isolate_provider_registry(monkeypatch, tmp_path):
+    """Every real ``self_install()``/``self_update(dry_run=False)`` call in
+    this file reaches ``_write_control_plane_provider_manifest``, which
+    writes to ``control_plane_providers_dir()`` -- **not** gated by ``root``
+    the way the marker/slot/binstub writes are. Each test here already
+    isolates the binstub command via ``si.local_bin`` (so the manifest's own
+    *content* -- ``command``/``provider_root`` -- correctly points at
+    ``tmp_path``), but without ALSO isolating where that manifest file gets
+    *written*, every test wrote it straight through to the real
+    ``~/.agent-worktrees/control-plane-providers.d/worktree-manager.json`` on
+    any machine that ran this suite natively -- clobbering the real
+    worktree-manager registration with this test's own tmp_path-rooted
+    values and leaving it broken long after the run that caused it had
+    finished (the exact production incident this fixture closes). Autouse,
+    not opt-in per test, both because every test here needs it and because
+    an easy-to-forget opt-in is exactly how this leaked in the first place
+    (same convention as ``test_self_install.py``'s
+    ``_patch_provider_registry``).
+    """
+    registry = tmp_path / ".agent-worktrees" / "control-plane-providers.d"
+    monkeypatch.setattr(si, "control_plane_providers_dir", lambda: registry)
+    return registry
+
+
 @pytest.fixture
 def mock_cutover(monkeypatch):
     """This file is about the real git-fetch -> versioned-slot-publish delivery

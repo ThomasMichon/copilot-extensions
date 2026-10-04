@@ -182,7 +182,7 @@ class TestDecorateEvents:
             "transitions": ["approved"], "pr_state": "open", "merged": False,
             "mergeable": True, "head_sha": "abc", "base_ref": "master",
             "checks_state": "",
-            "cursor": "r3",
+            "cursor": "r3..habc",
             # Additive merge-readiness block. No consent label bound here, so it
             # degrades to a verdict/merge-state readout with no action to take.
             "merge": {

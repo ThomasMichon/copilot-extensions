@@ -71,7 +71,17 @@ def _run_contributor(root: Path, stem: str, payload: bytes) -> str:
             capture_output=True,
             timeout=_SUBPROCESS_TIMEOUT_S,
             check=False,
-            env={**os.environ, "PYTHONPATH": ""},
+            env={
+                **os.environ,
+                "PYTHONPATH": "",
+                # On Windows this spawns pwsh/powershell.exe; without a
+                # cached update-check timestamp (first run, or a sandboxed
+                # HOME) it would otherwise attempt a real network call on
+                # every sessionStart -- unnecessary and avoidably slow for a
+                # one-shot, non-interactive hook. See
+                # about_Update_Notifications; no-op on the bash path.
+                "POWERSHELL_UPDATECHECK": "Off",
+            },
         )
     except (OSError, subprocess.SubprocessError):
         return ""

@@ -437,6 +437,32 @@ def test_poll_spawns_eligible_task_once(q, client):
     assert spawn.calls == [t.id]
 
 
+def test_eligible_scopes_the_200_limit_per_own_label_not_globally(q, client):
+    """A per-label eligibility regression: `client.list()` truncates at
+    `limit` (200) newest-first ACROSS THE WHOLE COORDINATOR -- every
+    label/pool sharing it, not just this one. Flood the queue with 250
+    newer, differently-labeled tasks (simulating heavy unrelated activity
+    from other pools) ahead of one older task in THIS supervisor's own
+    label -- it must still be found eligible, not silently truncated off a
+    shared newest-first page before this supervisor's own label filter ever
+    gets a chance to apply."""
+    old_task = q.create("old durable review", labels=["intelligence-dampener-review"])
+    for i in range(250):
+        q.create(f"unrelated newer task {i}", labels=["some-other-pool"])
+
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        labels={"intelligence-dampener-review"},
+    )
+
+    spawned = sup.poll_once()
+    assert spawned == [old_task.id]
+
+
 def test_poll_skips_a_held_queued_task(q, client):
     """PR #2913 review finding: `Supervisor._eligible()` must exclude a
     queued task with a durable operator hold (Phase 1's Pause primitive) --
@@ -1327,6 +1353,93 @@ def test_recover_stranded_cold_reservation_never_counts_toward_dead_letter(
     )
     # Still freely spawnable -- never dead-lettered by repair debt.
     assert sup.poll_once() == [blocked.id]
+
+
+# -- recover_stranded_releasing_reservations: the no-handle releasing gap ---
+#
+# Confirmed live (copilot-extensions#3179): a
+# RELEASING reservation that never recorded a session_handle (the spawn
+# itself crashed/errored before ever launching a body) has nothing an
+# automatic exact-absence proof could ever check -- there's no handle to
+# probe liveness against -- so it sits RELEASING forever with no other sweep
+# ever revisiting it, permanently blocking its exclusive_key across every
+# future task sharing that key, not just its own retry. The CLI's own
+# `reservations fail --force` already carries the correct judgment for this
+# exact shape; this sweep applies it automatically past a bounded age.
+
+
+def test_recover_stranded_releasing_reservation_with_no_handle(q, client):
+    blocked = q.create("needs recovery", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.request_spawn_release(reservation.key, disposition="failed")
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
+    assert not q.get_reservation(reservation.key).session_handle
+
+    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, labels=["review"])
+
+    old_enough = time.time() + 601
+    assert sup.recover_stranded_releasing_reservations(now=old_enough) == 1
+    assert q.get_reservation(reservation.key).state == SpawnState.FAILED
+
+    # Freed for a fresh attempt on the very next cycle.
+    assert sup.poll_once() == [blocked.id]
+
+
+def test_recover_stranded_releasing_reservation_ignores_handle_carrying(q, client):
+    """A RELEASING reservation that DOES carry a session_handle is a
+    liveness-checkable case -- never this sweep's job (it would otherwise
+    cut off a release that's genuinely still in flight)."""
+    blocked = q.create("needs recovery", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(reservation.key, session_handle="local-body:still-live")
+    q.request_spawn_release(reservation.key, disposition="failed")
+    assert q.get_reservation(reservation.key).session_handle
+
+    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, labels=["review"])
+
+    old_enough = time.time() + 601
+    assert sup.recover_stranded_releasing_reservations(now=old_enough) == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
+
+
+def test_recover_stranded_releasing_reservation_respects_the_age_bound(q, client):
+    """Never cut off a release call that might still be genuinely in
+    flight -- only a reservation past the bound is stranded."""
+    blocked = q.create("needs recovery", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.request_spawn_release(reservation.key, disposition="failed")
+
+    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, labels=["review"])
+
+    still_fresh = time.time() + 1  # well under the 600s bound
+    assert sup.recover_stranded_releasing_reservations(now=still_fresh) == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RELEASING
+
+
+def test_recover_stranded_releasing_reservation_never_blocks_other_lanes(q, client):
+    """The exact blast-radius shape confirmed live: a stranded no-handle
+    RELEASING reservation for one task permanently blocks `reserve_spawn`
+    for every OTHER task sharing its exclusive_key, even brand-new ones --
+    this sweep clearing it must free the whole exclusive_key, not just the
+    one stuck task."""
+    stuck = q.create("stuck", labels=["review"], exclusive_key="pr-42")
+    reservation, _ = q.reserve_spawn(stuck.id)
+    q.request_spawn_release(reservation.key, disposition="failed")
+
+    # A fresh task sharing the same exclusive_key (the real-world shape: the
+    # original task got abandoned/recreated, but the stale reservation still
+    # fences the key) cannot even be reserved while the stuck one stands.
+    fresh = q.create("fresh retry", labels=["review"], exclusive_key="pr-42")
+    blocked_reservation, reserved = q.reserve_spawn(fresh.id)
+    assert reserved is False
+
+    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO, labels=["review"])
+    old_enough = time.time() + 601
+    assert sup.recover_stranded_releasing_reservations(now=old_enough) == 1
+
+    # Now a fresh reservation for the other task succeeds.
+    _, reserved_after = q.reserve_spawn(fresh.id)
+    assert reserved_after is True
 
 
 def test_reconcile_settles_reservation_once_task_is_confirmed(q, client):
