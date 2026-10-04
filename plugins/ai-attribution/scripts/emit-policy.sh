@@ -391,6 +391,14 @@ _remote_host_of() {
             authority="${url%%:*}"
             host="${authority##*@}"
             ;;
+        [A-Za-z]:[\\/]*)
+            # Windows local drive path (e.g. C:\repo or C:/repo), not an scp-style remote.
+            return 0
+            ;;
+        *:*)
+            # scp-like syntax with an optional user: host:path (no explicit user@).
+            host="${url%%:*}"
+            ;;
         *)
             return 0
             ;;
@@ -414,6 +422,15 @@ remote_account() {
         *@*:*)
             authority="${url%%:*}"
             host="${authority##*@}"
+            path="${url#*:}"
+            ;;
+        [A-Za-z]:[\\/]*)
+            # Windows local drive path (e.g. C:\repo or C:/repo), not an scp-style remote.
+            return 0
+            ;;
+        *:*)
+            # scp-like syntax with an optional user: host:path (no explicit user@).
+            host="${url%%:*}"
             path="${url#*:}"
             ;;
         *)

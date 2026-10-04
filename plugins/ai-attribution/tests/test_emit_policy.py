@@ -1124,6 +1124,66 @@ def test_internal_host_matches_case_insensitively(tmp_path: Path) -> None:
     assert "operator-only (internal_host), so disclosure is not required for a contribution that actually publishes there" in context
 
 
+def test_internal_host_matches_scp_style_remote_without_username(
+    tmp_path: Path,
+) -> None:
+    repo = _git_repo(
+        tmp_path / "repo",
+        "gitea.example.internal:example-owner/repo.git",
+    )
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "internal_host=gitea.example.internal\n",
+    )
+    for hook in _parity_hooks():
+        context = _context(_run(hook, repo, home))
+        assert "operator-only (internal_host), so disclosure is not required for a contribution that actually publishes there" in context
+
+
+def test_owned_account_matches_scp_style_remote_without_username(
+    tmp_path: Path,
+) -> None:
+    repo = _git_repo(
+        tmp_path / "repo",
+        "gitea.example.internal:example-owner/repo.git",
+    )
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "owned_account=gitea.example.internal/example-owner\n",
+    )
+    for hook in _parity_hooks():
+        context = _context(_run(hook, repo, home))
+        assert "configured public account `gitea.example.internal/example-owner`" in context
+
+
+def test_windows_drive_path_remote_is_not_misclassified_as_scp_host(
+    tmp_path: Path,
+) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "remote",
+            "add",
+            "origin",
+            "C:\\example-owner\\repo.git",
+        ],
+        check=True,
+    )
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "internal_host=example-owner\n",
+    )
+    for hook in _parity_hooks():
+        context = _context(_run(hook, repo, home))
+        assert "operator-only (internal_host)" not in context
+
+
 def test_non_internal_host_requires_disclosure_for_third_party_audience(
     tmp_path: Path,
 ) -> None:

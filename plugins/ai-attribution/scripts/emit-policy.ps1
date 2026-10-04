@@ -292,6 +292,12 @@ function Get-RemoteHostOf([string] $Url) {
         if ($ColonIndex -ge 0) { $HostName = $HostName.Substring(0, $ColonIndex) }
     } elseif ($Url -match '^[^@]+@([^:]+):(.*)$') {
         $HostName = $Matches[1]
+    } elseif ($Url -match '^[A-Za-z]:[\\/]') {
+        # Windows local drive path (e.g. C:\repo or C:/repo), not an scp-style remote.
+        return ''
+    } elseif ($Url -match '^([^/\\@:]+):(.*)$') {
+        # scp-like syntax with an optional user: host:path (no explicit user@).
+        $HostName = $Matches[1]
     } else {
         return ''
     }
@@ -311,6 +317,13 @@ function Get-RemoteAccount([string] $RepositoryRoot) {
         if ($ColonIndex -ge 0) { $HostName = $HostName.Substring(0, $ColonIndex) }
         $Path = $Matches[2]
     } elseif ($Url -match '^[^@]+@([^:]+):(.*)$') {
+        $HostName = $Matches[1]
+        $Path = $Matches[2]
+    } elseif ($Url -match '^[A-Za-z]:[\\/]') {
+        # Windows local drive path (e.g. C:\repo or C:/repo), not an scp-style remote.
+        return ''
+    } elseif ($Url -match '^([^/\\@:]+):(.*)$') {
+        # scp-like syntax with an optional user: host:path (no explicit user@).
         $HostName = $Matches[1]
         $Path = $Matches[2]
     } else {

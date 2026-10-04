@@ -120,10 +120,9 @@ PR/issue/comment's own host) matches before relying on it, disclosing
 otherwise. Combined with the fail-closed resolution above (the exemption only
 ever activates on an unambiguous local match), this leaves the residual risk
 at "an agent trusts the hint without checking the actual publish target in a
-fork/triangular workflow" rather than "the hook silently asserts disclosure is
-never required" -- the former is a one-step verification the published
-guidance text itself prompts; the latter is what earlier revisions of this
-hook did and has since been corrected.
+fork/triangular workflow" -- a one-step verification the published guidance
+text itself prompts -- rather than an unconditional assertion that disclosure
+is never required.
 
 The resulting hints are anchored only to the repository named by the
 `sessionStart` payload. Both must be re-derived before publishing to any
