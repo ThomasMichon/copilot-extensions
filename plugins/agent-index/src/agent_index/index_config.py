@@ -217,6 +217,37 @@ def _default_backup_dir() -> Path:
     return install_root / "backups"
 
 
+def _default_data_dir() -> Path:
+    """Durable data directory for index state and task queues.
+
+    Precedence: ``AGENT_INDEX_DATA_DIR`` / ``AGENT_INDEX_STATE_DIR`` (explicit,
+    most specific overrides) -- then ``AGENT_INDEX_HOME`` (the overall runtime
+    root override, same variable every OTHER sibling default in this module
+    honors: see ``_default_backup_dir`` above and ``agent_index.config``'s own
+    ``data_dir()``/``install_dir()``) -- then the hardcoded default. Before this
+    fix, this default_factory skipped ``AGENT_INDEX_HOME`` entirely and went
+    straight to the hardcoded path, silently ignoring it where every other
+    "where does agent-index keep its stuff" resolver in this package DOES
+    honor it. That's not just a latent inconsistency: it means setting
+    ``AGENT_INDEX_HOME`` to relocate the whole data store (a documented,
+    reasonable use -- e.g. in a test, or to point at a different drive) had NO
+    EFFECT on any code path using ``IndexConfig().data_dir`` (which is most of
+    the indexing/task-queue code), while still correctly redirecting backups
+    and the corpus-config home -- a correctness gap with real operational
+    impact, confirmed to have silently pointed test-isolated task-queue writes
+    at the REAL production data directory instead of a test's intended
+    sandbox.
+    """
+    override = os.environ.get("AGENT_INDEX_DATA_DIR") or os.environ.get(
+        "AGENT_INDEX_STATE_DIR"
+    )
+    if override:
+        return Path(override).expanduser()
+    _default_home = "~/.agent-index"  # marketplace-isolation: allow legacy-compatibility
+    home = Path(os.environ.get("AGENT_INDEX_HOME", _default_home)).expanduser()
+    return home / "data"
+
+
 # -- Main config -------------------------------------------------------------
 
 
@@ -225,13 +256,7 @@ class IndexConfig:
     """Immutable configuration for the agent-index core."""
 
     # Paths
-    data_dir: Path = field(
-        default_factory=lambda: Path(
-            os.environ.get("AGENT_INDEX_DATA_DIR")
-            or os.environ.get("AGENT_INDEX_STATE_DIR")
-            or "~/.agent-index/data"  # marketplace-isolation: allow legacy-compatibility
-        ).expanduser()
-    )
+    data_dir: Path = field(default_factory=_default_data_dir)
 
     # Primary embedding model (single-model compatibility; use model_profiles
     # for multi-model indexing).
