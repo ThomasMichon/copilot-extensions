@@ -188,6 +188,11 @@ export class SessionViewer {
   async _stream(w) {
     while (this.watch === w) {
       try {
+        // Fold what the last connection already delivered before naming its
+        // cursor: a delayed animation-frame flush (a background tab) would
+        // otherwise leave those events pending while the server sends them
+        // again from the older cursor, and both copies would be folded.
+        if (this.pending.length) this._flush();
         const cont = this.model.continuity ? `&continuity_id=${encodeURIComponent(this.model.continuity)}` : "";
         const r = await this.request(
           `/api/v1/live-sessions/${encodeURIComponent(w.id)}/events?after=${this.model.lastId}${cont}`,
