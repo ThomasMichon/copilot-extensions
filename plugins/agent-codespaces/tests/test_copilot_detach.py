@@ -142,7 +142,7 @@ def test_detach_success_reports_exact_session_and_keeps_forwards(seams, capsys):
     }
     launch = seams.ssh[0]
     assert launch["settle"] is False  # claim stays active while the session runs
-    assert launch["ns"].timeout == 1200.0
+    assert launch["ns"].timeout == 1320.0  # 300s lifecycle lock + 900s seed cap + 120s overhead
     remote = launch["remote"]
     assert remote.startswith("cd /workspaces/example-web && " + detach._VENUE_TOOLING + " && python3 -c ")
     assert detach.trust_folder_command("/workspaces/example-web") in remote
@@ -1132,7 +1132,8 @@ def test_the_reservation_outlives_every_launch_attempt_and_registration(seams, m
     )
     args = _args()
     assert detach.cmd_detach(args, ssh_session=_ssh(seams, stdout=_CREATED)) == 0
-    launch = max(args.register_timeout + 300.0, detach._SEED_READY_HARD_CAP + 300.0)
+    launch = max(args.register_timeout + 300.0, detach._SEEDED_LAUNCH_TIMEOUT)
+    assert detach._SEEDED_LAUNCH_TIMEOUT > detach._LIFECYCLE_LOCK_WAIT + detach._SEED_READY_HARD_CAP
     assert ttls and ttls[0] >= detach._LAUNCH_ATTEMPTS * launch + args.register_timeout
 
 
@@ -1151,7 +1152,7 @@ def test_a_worktree_launch_without_a_seed_still_budgets_for_its_pending_seed(
     )
     args = _args(worktree_id=worktree_id, seed=None)
     assert detach.cmd_detach(args, ssh_session=_ssh(seams, stdout=_CREATED)) == 0
-    floor = detach._LAUNCH_ATTEMPTS * (detach._SEED_READY_HARD_CAP + 300.0)
+    floor = detach._LAUNCH_ATTEMPTS * detach._SEEDED_LAUNCH_TIMEOUT
     assert (ttls[0] >= floor) is (worktree_id is not None)
 
 

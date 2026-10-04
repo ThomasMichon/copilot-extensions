@@ -58,6 +58,12 @@ _COORDINATION_EXIT = 78
 _RESERVATION_TTL = 900.0  # generous: venue prep + first-run provisioning + seed wait
 _RESERVE_RETRY_WINDOW = 90.0
 _SEED_READY_HARD_CAP = 900.0
+# embody may first wait this long for the worktree's lifecycle lock
+# (agent-worktrees handoff_cli), and the launch itself needs some time too.
+_LIFECYCLE_LOCK_WAIT = 300.0
+_LAUNCH_OVERHEAD = 120.0
+#: The transport floor for a launch that may wait for its seed.
+_SEEDED_LAUNCH_TIMEOUT = _LIFECYCLE_LOCK_WAIT + _SEED_READY_HARD_CAP + _LAUNCH_OVERHEAD
 
 
 def _progress(stage: str, detail: str = "") -> None:
@@ -580,7 +586,7 @@ def cmd_detach(
         # refs become (part of) the seed; a --worktree-id launch may also consume
         # the worktree's own pending seed with neither passed here, and wait as long.
         if seed or ref_files or not plan["anchor"]:
-            launch_timeout = max(launch_timeout, _SEED_READY_HARD_CAP + 300.0)
+            launch_timeout = max(launch_timeout, _SEEDED_LAUNCH_TIMEOUT)
         # The reservation must outlive the refs upload, every launch attempt (with
         # its seed readiness wait) and registration, or a concurrent rejoin could
         # replace it while this launch is still waiting.

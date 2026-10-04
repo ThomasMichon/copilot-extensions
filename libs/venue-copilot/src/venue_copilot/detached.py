@@ -71,6 +71,12 @@ _RUNNER_CONFIG_KEYS = frozenset({
 # Mirrors agent-worktrees' mux seed hard cap. The remote launch timeout must
 # stay above it because readiness can slide while Copilot is visibly busy.
 _SEED_READY_HARD_CAP = 900.0
+# embody may first wait this long for the worktree's lifecycle lock
+# (agent-worktrees handoff_cli), and the launch itself needs some time too.
+_LIFECYCLE_LOCK_WAIT = 300.0
+_LAUNCH_OVERHEAD = 120.0
+#: The transport floor for a launch that may wait for its seed.
+_SEEDED_LAUNCH_TIMEOUT = _LIFECYCLE_LOCK_WAIT + _SEED_READY_HARD_CAP + _LAUNCH_OVERHEAD
 
 
 def public_plan(plan: dict[str, Any]) -> dict[str, Any]:
@@ -219,7 +225,7 @@ def launch_detached(
         # refs become (part of) the seed; a worktree launch may also consume the
         # worktree's own pending seed with neither passed here, and wait as long.
         if seed or refs or not bool(plan.get("anchor", True)):
-            launch_timeout = max(launch_timeout, _SEED_READY_HARD_CAP + 300.0)
+            launch_timeout = max(launch_timeout, _SEEDED_LAUNCH_TIMEOUT)
         # The reservation must outlive the refs upload, the launch (with its seed
         # readiness wait) and registration, or a concurrent rejoin could replace it.
         ttl = max(float(plan.get("reservation_ttl", 900.0)),

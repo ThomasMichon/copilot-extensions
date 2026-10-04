@@ -698,7 +698,8 @@ class TestDetachedRunner:
             ensure_mux=True, register_timeout=600.0, progress=lambda *a: None, refs=self._refs(),
         )
         assert rc == 0
-        launch = detached._SEED_READY_HARD_CAP + 300.0
+        launch = detached._SEEDED_LAUNCH_TIMEOUT
+        assert launch > detached._LIFECYCLE_LOCK_WAIT + detached._SEED_READY_HARD_CAP  # plus launch overhead
         assert ttls == [600.0 + launch + 600.0 + 120.0]
 
     def _patch_bridge(self, monkeypatch) -> None:
@@ -987,9 +988,9 @@ class TestDetachedRunner:
         assert rc == 0
         launch = next(command for kind, command in adapter.calls if kind == "launch")
         assert "--seed-ready-timeout 180.0" in launch
-        assert launch_timeouts == [1200.0]
+        assert launch_timeouts == [1320.0]  # 300s lifecycle lock + 900s seed cap + 120s overhead
 
-    @pytest.mark.parametrize("anchor, expected", [(False, 1200.0), (True, 330.0)])
+    @pytest.mark.parametrize("anchor, expected", [(False, 1320.0), (True, 330.0)])
     def test_a_worktree_launch_without_a_seed_still_budgets_for_its_pending_seed(
         self, monkeypatch, anchor, expected,
     ) -> None:
