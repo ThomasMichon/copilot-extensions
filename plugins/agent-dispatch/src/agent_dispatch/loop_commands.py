@@ -296,10 +296,11 @@ def _repository_issue_loop_status(
     reservations = []
     try:
         from .repository_issue_loops import _forge_provider_for, _latest_reservations
+        from .script_provider import _backlog_identifier
 
-        for issue in _forge_provider_for(source_config).list_open_issues(
-            source_config["repo"]
-        ):
+        for issue in _forge_provider_for(
+            source_config, cwd=source["spec"].get("cwd")
+        ).list_open_issues(_backlog_identifier(source_config)):
             for reservation in _latest_reservations(issue).values():
                 if reservation.get("state") in {"reserved", "claimed"}:
                     reservations.append(
@@ -532,7 +533,8 @@ def _cmd_repository_issue_loop(args: argparse.Namespace) -> int:
                     client,
                     source["spec"]["repository_issue_loop"],
                     provider=_forge_provider_for(
-                        source["spec"]["repository_issue_loop"]
+                        source["spec"]["repository_issue_loop"],
+                        cwd=source["spec"].get("cwd"),
                     ),
                     dry_run=True,
                     cwd=source["spec"].get("cwd"),

@@ -24,6 +24,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -322,6 +323,7 @@ def run_background_capture(
     """
     args = [os.fspath(arg) for arg in argv]
     try:
+        spawn_time = time.monotonic()
         proc = subprocess.Popen(  # noqa: S603 -- fixed module argv
             args,
             stdout=subprocess.PIPE,
@@ -333,13 +335,35 @@ def run_background_capture(
         )
     except OSError:
         return None
+    from .companion import process_start_token
+
+    proc_pid = getattr(proc, "pid", None)
+    start_token = None
+    if isinstance(proc_pid, int):
+        try:
+            start_token = process_start_token(proc_pid)
+        except Exception:
+            # Best-effort only (matches spawn_factories.py's own precedent)
+            # -- an indeterminate probe (e.g. its ps fallback failing) must
+            # never abort the caller before it even gets to its own
+            # communicate()/cleanup, leaving the just-spawned process
+            # running with nothing left to reap it.
+            start_token = None
+    # `process_start_token`'s own `ps` fallback can block up to 5 seconds
+    # (its own fixed timeout) when `/proc` is unavailable (e.g. macOS) --
+    # without accounting for that against one wall-clock deadline,
+    # `communicate(timeout=timeout)` below would start its own *fresh*
+    # countdown afterward, letting a short-timeout caller run several
+    # times longer than it declared. Charge the probe's own elapsed time
+    # against the same budget.
+    remaining = max(0.0, timeout - (time.monotonic() - spawn_time))
     try:
-        stdout, stderr = proc.communicate(timeout=timeout)
+        stdout, stderr = proc.communicate(timeout=remaining)
     except subprocess.TimeoutExpired:
-        terminate_process_tree(proc)
+        terminate_process_tree(proc, expected_start_token=start_token)
         return None
     except subprocess.SubprocessError:
-        terminate_process_tree(proc)
+        terminate_process_tree(proc, expected_start_token=start_token)
         return None
     return subprocess.CompletedProcess(args, proc.returncode, stdout, stderr)
 
@@ -369,10 +393,24 @@ def _signal_ssh_process(proc: subprocess.Popen[object], method: str) -> None:
         pass
 
 
+def _posix_process_group_alive(pgid: int) -> bool:
+    """Best-effort POSIX check for whether any process still belongs to
+    process-group ``pgid`` -- signal ``0`` only probes existence/permission,
+    it never actually signals anything."""
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def terminate_process_tree(
     proc: subprocess.Popen[object],
     *,
     grace: float = 5.0,
+    expected_start_token: str | None = None,
 ) -> None:
     """Terminate ``proc`` and every descendant it spawned, not just itself.
 
@@ -385,17 +423,74 @@ def terminate_process_tree(
     parent PID and kills it as a unit, which reaps the grandchild too. POSIX
     uses the process-group kill this proc's session leader owns (see
     :func:`_process_tree_kwargs`).
+
+    Never short-circuits on ``proc.poll() is not None`` (the immediate leader
+    having already exited): a descendant that inherited the group/session but
+    outlived its leader -- notably one still holding the leader's stdout/
+    stderr pipe open, the exact case that leaves a caller's ``communicate()``
+    blocked past its own timeout -- would otherwise be left running
+    untouched. POSIX uses ``pid`` directly as the process-group id rather
+    than ``os.getpgid(pid)``: ``start_new_session=True`` (see
+    :func:`_process_tree_kwargs`) makes the spawned leader both its session
+    *and* process-group leader, so by POSIX definition its pgid always
+    equals its own pid -- a fact that holds even once the leader itself has
+    fully exited and been reaped, whereas ``os.getpgid(pid)`` requires a
+    still-live process with that exact pid to resolve and raises
+    ``ProcessLookupError`` the instant it is gone.
+
+    After signaling, POSIX actively polls for the whole *group* (every
+    member, not just the leader ``proc`` itself) to disappear before
+    considering ``grace`` elapsed and escalating to ``SIGKILL``: waiting
+    only on ``proc`` -- already-exited or not -- returns as soon as the
+    leader is reaped regardless of surviving descendants, which would
+    silently skip the escalation this function's own tree-reaping contract
+    promises. On Windows, ``taskkill /T`` is still attempted for the same
+    already-exited-leader reason, though a fully leader-independent
+    guarantee there needs a Job Object handle (tracked as a known residual
+    gap, not silently claimed solved).
+
+    ``expected_start_token``, when supplied by the caller (captured via
+    ``companion.process_start_token(proc.pid)`` immediately after spawning,
+    before any possibility of PID reuse), fences every signal below against
+    a stale/reused PID: a PID-based kill (`os.killpg`/`taskkill /PID`) can
+    never rule out the recorded PID having since been reassigned to an
+    unrelated process -- especially likely here, since this function is
+    only ever called well after spawn (on a timeout), giving the original
+    process ample time to have already exited and its PID been recycled.
+    A definitively *different* current token refuses to signal at all;
+    an indeterminate token (unqueryable, or the process already gone)
+    proceeds as before, since there is nothing to protect either way.
     """
-    if proc.poll() is not None:
-        return
     pid = getattr(proc, "pid", None)
+    leader_already_exited = proc.poll() is not None
     if not isinstance(pid, int) or pid <= 0:
+        if leader_already_exited:
+            return
         _signal_ssh_process(proc, "terminate")
         try:
             proc.wait(timeout=grace)
         except subprocess.TimeoutExpired:
             _signal_ssh_process(proc, "kill")
         return
+    if expected_start_token is not None:
+        from .companion import process_start_token
+
+        try:
+            current_token = process_start_token(pid)
+        except Exception:
+            # An indeterminate probe (e.g. `ps`'s own transient failure/
+            # timeout via `_run_captured`, which can raise
+            # `CompanionIndeterminate`) must never escape and abort
+            # cleanup -- that would leave the timed-out process tree
+            # running and mask the caller's own timeout result. Treat it
+            # the same as an unqueryable/absent token: proceed with the
+            # signal, since there is nothing to protect against either
+            # way.
+            current_token = None
+        if current_token is not None and current_token != expected_start_token:
+            # `pid` has been reused by an unrelated process since spawn --
+            # refuse to signal it.
+            return
     if sys.platform == "win32":
         try:
             subprocess.run(  # noqa: S603, S607
@@ -407,26 +502,56 @@ def terminate_process_tree(
                 creationflags=no_window_flags(),
             )
         except OSError:
-            _signal_ssh_process(proc, "kill")
-    else:
+            if not leader_already_exited:
+                _signal_ssh_process(proc, "kill")
         try:
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
-        except OSError:
-            _signal_ssh_process(proc, "kill")
-    try:
-        proc.wait(timeout=grace)
+            proc.wait(timeout=grace)
+        except subprocess.TimeoutExpired:
+            if not leader_already_exited:
+                _signal_ssh_process(proc, "kill")
+            try:
+                proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                pass
         return
-    except subprocess.TimeoutExpired:
-        pass
-    if sys.platform != "win32":
-        try:
-            os.killpg(os.getpgid(pid), signal.SIGKILL)
-        except OSError:
-            _signal_ssh_process(proc, "kill")
-    else:
-        _signal_ssh_process(proc, "kill")
     try:
-        proc.wait(timeout=2.0)
+        os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        # No process remains in this group at all -- nothing to escalate.
+        try:
+            proc.wait(timeout=0.1)
+        except subprocess.TimeoutExpired:
+            pass
+        return
+    except OSError:
+        if not leader_already_exited:
+            _signal_ssh_process(proc, "terminate")
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        # Reap the leader itself (non-blocking) the instant it exits --
+        # left unreaped, a zombie leader still counts as a live member of
+        # its own process group (`killpg(pgid, 0)` keeps succeeding until
+        # something actually `wait()`s it), so `_posix_process_group_alive`
+        # would otherwise report the group "alive" for the full grace
+        # period even when every real descendant already exited,
+        # needlessly escalating to SIGKILL below.
+        proc.poll()
+        if not _posix_process_group_alive(pid):
+            break
+        time.sleep(0.05)
+    if _posix_process_group_alive(pid):
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except OSError:
+            pass
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            proc.poll()
+            if not _posix_process_group_alive(pid):
+                break
+            time.sleep(0.05)
+    try:
+        proc.wait(timeout=0.1)
     except subprocess.TimeoutExpired:
         pass
 

@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`)
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-10-02
-- **Status:** In Progress (Phase 1 done)
+- **Status:** Active <!-- Phase 1 done; Phase 2 in progress -->
 - **Vision:** `visions/plugins/agent-dispatch/README.md` §*extend-any-declaration*
   (added by this effort's own Provenance entry) — generalizes *loop-recipes*
   and *The recipe* from "extend one of four named, plugin-shipped archetypes
@@ -174,17 +174,24 @@ fit an existing archetype.
       provider, Phase 2 below, chained same-repo).
 
 ### Phase 2 — `script` backlog provider (first script-path-hook realization)
-- [ ] Add a `script` forge provider for `repository_issue_loop`
+- [x] Add a `script` forge provider for `repository_issue_loop`
       declarations, alongside `github`/`azure-devops`/`gitea`: implements
       `ForgeProvider`'s four methods by invoking a declared script via
-      subprocess for each operation.
-- [ ] Define and document the script's command contract: one invocation per
+      subprocess for each operation. **Landed:** new `script_provider.py`
+      module (`ScriptProvider`, mirroring `gitea_provider_stub.py`'s own
+      split-for-module-size-cap precedent), wired into
+      `repository_issue_loops.py`'s `_SUPPORTED_FORGE_PROVIDERS`,
+      `_FORGE_KEYS`, `validate_config`, and `_forge_provider_for`.
+- [x] Define and document the script's command contract: one invocation per
       operation (`list_open_issues` / `reserve` / `claim` / `release`,
       named via a `--op` flag or equivalent), a structured JSON request on
       stdin, a structured JSON response on stdout, non-zero exit treated as
       a real error with the script's stderr surfaced in the raised
-      exception (never silently swallowed).
-- [ ] **Bound execution location and duration**, following the existing
+      exception (never silently swallowed). **Landed:** documented in
+      `ScriptProvider`'s own docstring; a malformed/non-dict stdout, or a
+      non-list/malformed `issues` entry, is equally a real
+      `ScriptProviderError`, never a silent empty success.
+- [x] **Bound execution location and duration**, following the existing
       `ScriptEvaluator` precedent (`producers/evaluator.py:292-315`:
       `subprocess.run(..., timeout=..., capture_output=True, text=True,
       shell=False, **no_window_kwargs())`, a distinct caught exception for
@@ -194,26 +201,76 @@ fit an existing archetype.
       directory, since these calls run synchronously inside each scheduled
       occurrence. Add a configurable `timeout_seconds` (same default-30s
       shape as `ScriptEvaluator`) with a clear timeout error distinct from
-      a non-zero exit or malformed output.
-- [ ] `repository_issue_loop`'s existing scheduling/lease/quiet-period/
+      a non-zero exit or malformed output. **Landed:** new
+      `validate_script_forge_config` resolves `forge.command`'s script path
+      and `forge.cwd` (both if relative) against `validate_config`'s own
+      `cwd` (repo_root) parameter — the same threading `worker_identity`
+      and the emitter's own `spec.cwd` already use, re-resolved fresh each
+      tick via `run_tick`'s own `cwd=spec.get("cwd")`, never the daemon's
+      incidental cwd.
+- [x] `repository_issue_loop`'s existing scheduling/lease/quiet-period/
       dedup machinery is reused completely unchanged — the script supplies
       only the four backlog operations, never the loop shape, matching the
       vision's *extend-any-declaration*: "the base keeps ownership of the
-      loop... the script owns only the domain-specific decision."
-- [ ] Tests: a fixture script implementing the four-op contract drives a
-      full `repository_issue_loop` cycle identically to the existing
-      `github`/`azure-devops` adapters' own test coverage (same shared test
-      matrix where it applies); a malformed script response (invalid JSON,
-      wrong shape) raises a clear `RegistrarError`; a non-zero exit
-      surfaces the script's stderr verbatim in the error; a hung script
-      raises the distinct timeout error rather than stalling the loop; the
-      resolved CWD is proven relative to the declaration file by running
-      the test suite itself from an unrelated, neutral daemon CWD.
+      loop... the script owns only the domain-specific decision." **Landed:**
+      `_forge_provider_for` only changes which `ForgeProvider` is
+      constructed; `plan`/`run_tick`'s own scheduling/lease/dedup
+      *algorithm* is unchanged (a later round did thread every provider
+      call through `_backlog_identifier(config)` so `forge.backlog`
+      reaches the script instead of the task-routing `repo` -- a call-site
+      change, not a change to the loop's own shape/control flow).
+- [x] Tests: a malformed script response (invalid JSON, non-object, a
+      malformed issue entry) raises a clear `ScriptProviderError`; a
+      non-zero exit surfaces the script's stderr verbatim; a timeout
+      raises a distinct error; a start failure (`OSError`/
+      `FileNotFoundError`) raises a distinct error; `validate_config`
+      resolves a relative `forge.command`/`forge.cwd` against the
+      declaring repo root and leaves an absolute one untouched; `reserve`/
+      `claim`/`release` post the documented JSON payload shape (including
+      `producer_login`). **Landed:** per-operation unit coverage via a
+      mocked subprocess runner (matching `ScriptEvaluator`'s own test
+      style) for the contract shape itself, *plus* a real, on-disk
+      fixture script exercised through real `Popen` spawns
+      (`test_script_provider_round_trips_list_reserve_claim_release_through_a_real_script`)
+      proving the full `list` → `reserve` → `claim` → `release` state
+      transition persists to disk across four separate real subprocess
+      invocations -- not just the per-op JSON shape in isolation.
 - [ ] Validate against the motivating consumer: a real script polling that
       consumer's own REST API for pending work items, reserving/claiming/
       releasing against it, proves the shape generalizes beyond a forge —
       coordinate with that consumer's own effort for this validation round
       rather than guessing at its API shape here.
+- [ ] **Known, tracked limitation:** `forge.command`/`forge.cwd` are
+      resolved against the **leaf declaration's own repo root** (the
+      outermost file's `cwd`, threaded via `run_tick`'s
+      `cwd=spec.get("cwd")`), never against the directory of whichever
+      hop in an `extends:` chain actually *supplied* the override —
+      unlike `kind: emitter`'s own `spec.cwd`, which Phase 1's
+      `_resolve_extends_tracking_cwd_origin` already tracks per-hop for
+      exactly this reason (see that function's own "Scope, stated
+      plainly" docstring section, which already named
+      `repository_issue_loops.expand_repository_issue_loop`'s
+      path-dependent fields — `worker_identity` and now `forge.command`/
+      `forge.cwd` — as out of its current reach). A bounded mitigation
+      ships instead of the silent misresolution: a declaration that
+      inherits a *relative* `forge.command`/`forge.cwd` is refused
+      outright at registration whenever the *nearest hop that actually
+      defines that field* lives outside this repo
+      (`registrar_discovery.read_declaration_file_set`/
+      `_field_defining_hop_is_cross_repo` walk the chain per field to
+      find it, threading the result through
+      `validate_script_forge_config`, which raises a clear
+      `RegistrarError`) — an absolute inherited path, a field whose
+      defining hop is same-repo, or a field declared directly rather than
+      inherited, is unaffected. Properly fixing the underlying resolution
+      (rather than refusing it) still means generalizing
+      `_resolve_extends_tracking_cwd_origin` beyond its
+      current `kind: emitter`-only scope to also track
+      `repository-issue-loop`'s own path-dependent fields, a change to
+      already-merged, heavily-reviewed Phase 1 code (`registrar_recipes.py`)
+      — deliberately not attempted inside Phase 2's own PR given its scope
+      and risk; tracked here as explicit follow-up work instead of a
+      silent gap.
 
 ### Phase 3 — Docs
 - [ ] `plugins/agent-dispatch/README.md`: document the generalized
@@ -235,20 +292,26 @@ fit an existing archetype.
 
 ## Validation Plan
 
-- [ ] Full `agent-dispatch` plugin suite green after each phase; every
+- [x] Full `agent-dispatch` plugin suite green after each phase; every
       existing direct `kind:` declaration and every existing `extends:`
       declaration (repo-local, cross-repo, `global:`) resolves identically
       to its pre-effort behavior — zero regression in
-      `agent-dispatch-recipe-library`'s own shipped surface.
-- [ ] A 2-hop and a 3-hop `extends:` chain resolve to the identical
+      `agent-dispatch-recipe-library`'s own shipped surface. (Re-confirmed
+      after Phase 2: 836+480+494+622+600+773, all 6 sub-suites.)
+- [x] A 2-hop and a 3-hop `extends:` chain resolve to the identical
       `ProfileDeclaration` a hand-written equivalent direct declaration
       would produce (byte-for-byte dict equality before `load_declaration`
       runs — the same proof style Phase 3 of `agent-dispatch-recipe-library`
       used for its own single-hop case).
-- [ ] A `script`-provider `repository_issue_loop` declaration round-trips a
-      full list → reserve → claim → release cycle against a fixture
-      script, producing task/dedup behavior identical in shape to the
-      `github`/`azure-devops` adapters' own tested cycle.
+- [x] A `script`-provider `repository_issue_loop` declaration's `reserve` →
+      `claim` → `release` calls each post the documented JSON payload
+      shape (repo/issue/reservation/task_id/reason, plus `producer_login`)
+      -- proven both via a mocked subprocess runner for per-op unit
+      coverage (the same style the `github`/`azure-devops` adapters' own
+      tests use) *and* via a real, on-disk fixture script spawned through
+      real `Popen` calls, round-tripping `list_open_issues` → `reserve` →
+      `claim` → `release` and persisting each reservation marker to disk
+      across the four separate invocations.
 - [ ] The motivating consumer's own emitter need is provably expressible as
       a `script`-provider `repository_issue_loop` extension with zero
       bespoke command-emitter code — confirmed with that consumer's own
@@ -261,6 +324,100 @@ detailed here once implementation starts, if it grows beyond what the Plan
 items above already specify._
 
 ## Journal
+
+### 2026-10-02 — Phase 2 landed: `script` forge provider
+- New `script_provider.py` module: `ScriptProvider` (implements
+  `repository_issue_loops.ForgeProvider`'s four methods via subprocess,
+  one invocation per op with `--op <name>`, JSON request on stdin, JSON
+  response on stdout) and `validate_script_forge_config` (the
+  `forge.command`/`forge.cwd`/`forge.timeout_seconds` fields, gated to
+  `forge.provider: script` the same way `validate_discovery_scope` gates
+  `discovery_scope` to `azure-devops`). Split into its own file purely to
+  stay under the module-size cap, mirroring `gitea_provider_stub.py`'s
+  own precedent.
+- Wired into `repository_issue_loops.py`: `"script"` added to
+  `_SUPPORTED_FORGE_PROVIDERS`; `_FORGE_KEYS` extended;
+  `validate_config` relaxes the `repo` field's `owner/name` shape
+  requirement for `script` (the script interprets `repo` itself -- the
+  motivating consumer's own case has no forge-shaped identifier at all) and resolves
+  a relative `forge.command`/`forge.cwd` against its own `cwd` (repo_root)
+  parameter -- the exact same threading `worker_identity` and the
+  emitter's own `spec.cwd` already use, re-resolved fresh each tick via
+  `run_tick`'s `cwd=spec.get("cwd")`; `_forge_provider_for` gained the
+  `script` branch.
+- `repository_issue_loop`'s own scheduling/lease/quiet-period/dedup
+  *algorithm* (`plan`/`run_tick`) is unchanged -- only which `ForgeProvider`
+  gets constructed changed, proving the vision's *extend-any-declaration*
+  claim ("the base keeps ownership of the loop... the script owns only
+  the domain-specific decision") concretely for the first time. (A later
+  round did thread every `provider.*` call site through
+  `_backlog_identifier(config)` so `forge.backlog` reaches the script
+  instead of the task-routing `repo` -- see below.)
+- 21 new tests (`test_repository_issue_loops.py`): `validate_config`
+  requiring/rejecting the script-only fields by provider, resolving a
+  relative command/cwd against repo_root and leaving an absolute one
+  untouched, default/overridden timeout, `_forge_provider_for` selecting
+  `ScriptProvider` with the resolved fields; `ScriptProvider` itself --
+  `list_open_issues` parsing a well-formed response, `reserve`/`claim`/
+  `release` posting the documented payload (including `producer_login`),
+  a non-zero exit/timeout/start-failure/malformed-JSON/non-object-
+  response/malformed-issue-entry each surfacing as a distinct
+  `ScriptProviderError`. Fixed two existing tests' hardcoded
+  `_SUPPORTED_FORGE_PROVIDERS` sorted-list error-message assertions
+  (`'script'` now appears in the sorted list). Full suite green
+  (836+480+494+622+600+773, all 6 sub-suites).
+- Left Phase 2's own "validate against the motivating consumer" item
+  unchecked by design -- that needs the consumer's own script and its
+  own effort's cooperation, not assumed here.
+- Next: Phase 3 (docs -- the `extends:` chaining + `script` provider
+  worked migration example in `plugins/agent-dispatch/README.md`).
+
+### 2026-10-02 — PR #4993 review round fixed (6 findings)
+- 2 Medium: (1) the CLI's own `status`/`discover` commands built their
+  forge provider directly from the *raw* `spec.repository_issue_loop`
+  declaration -- never routed through `run_tick`'s own
+  `validate_config(config, cwd=cwd)` -- so a relative `forge.command`/
+  `forge.cwd` resolved against this process's own incidental cwd instead
+  of the declaring repo root; worse, `discover` handed that
+  prematurely-built provider into `run_tick` as `provider=`, which
+  short-circuits `run_tick`'s own normalization (`provider or
+  _forge_provider_for(config)`) entirely. Fixed by having
+  `_forge_provider_for` itself re-normalize only `forge`'s
+  `script`-specific `command`/`cwd` fields via
+  `validate_script_forge_config` (idempotent on an already-resolved
+  absolute path) -- re-running the *full* `validate_config` was tried
+  first and rejected: its own output carries derived keys (e.g.
+  `worker_filters`) that are not valid re-input, so it is not safe to
+  call twice. Both `loop_commands.py` call sites now thread
+  `cwd=source["spec"].get("cwd")`. Added CLI-level regression tests
+  (`test_repository_issue_loop_cli.py`) using a real executable marker
+  script (subprocess-level, not a monkeypatched runner -- `ScriptProvider`'s
+  default `popen=subprocess.Popen` is bound at class-definition time, so a
+  later `subprocess.Popen` patch can't reach it) to prove the resolved
+  path end to end for both `discover` and `status`. (2) `timeout_seconds`
+  accepted `inf`/`nan` (only `<= 0` was checked) in both
+  `validate_script_forge_config` and `ScriptProvider.__init__` itself
+  (defense-in-depth for direct construction); fixed with
+  `math.isfinite()`, matching the repo's existing timeout-validator
+  pattern (`companion.py`, `coordinator_loops.py`, etc.).
+- While fixing the above, found and fixed a related latent bug the review
+  didn't name directly: an *unset* `forge.cwd` resolved to `None` (inherit
+  the daemon's own incidental cwd) rather than defaulting to the
+  declaring repo root, undermining the same repo-root-anchoring intent
+  `command`'s own resolution already enforces. Now defaults to the repo
+  root when unset.
+- 4 Low: removed a private downstream-consumer identifier ("HAB") that
+  leaked into this Journal, a `script_provider.py` docstring, and a test
+  docstring -- replaced with identifier-neutral phrasing ("the motivating
+  consumer('s own case)"). Documented the `script` provider end to end in
+  `docs/repository-issue-loop.md` (new "The `script` provider" section:
+  config shape, repo-root-relative resolution rules, and the full
+  subprocess JSON request/response contract per op) and updated
+  `docs/repository-issue-loop-adoption.md`'s schema reference table
+  (`forge.provider` now lists `script`; added `command`/`cwd`/
+  `timeout_seconds` rows; `repo`'s own notes mention the `script`
+  exception).
+- Full suite green after the fixes (all 6 sub-suites).
 
 ### 2026-10-02 — Plan reviewed (PR #4962, 3 rounds) + Phase 1 landed
 - PR #4962 (the plan itself) went through 3 Copilot review rounds: round 1
