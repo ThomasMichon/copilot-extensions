@@ -1,5 +1,17 @@
 # copilot-extensions
 
+> **⚠️ `main`'s git history was rewritten.** This repository's `main` branch
+> had its git **history** (not content) rewritten to purge ~150-300MB of
+> accumulated binary bloat (`.github/coverage-baselines/*`, committed before
+> the coverage-baseline design moved to GitHub Release assets — see
+> [PR #5078](https://github.com/ThomasMichon/copilot-extensions/pull/5078)).
+> Pre-rewrite tip: `<pending — filled in once the rewrite lands>`.
+> Post-rewrite tip: `<pending — filled in once the rewrite lands>`. If your
+> local clone tracks `main` directly, see
+> [`CONTRIBUTING.md`'s "If main's history is force-rewritten"
+> section](CONTRIBUTING.md) for recovery. **`dev` was never affected.** Full
+> procedure and status: [`efforts/active/main-history-rewrite`](efforts/active/main-history-rewrite/README.md).
+
 <p align="center">
   <img src="docs/assets/worktree-picker.gif"
        alt="The Worktree Picker: an interactive terminal front door listing worktree-backed agents across machines and environments, with live state, sync tags, and per-worktree actions"
