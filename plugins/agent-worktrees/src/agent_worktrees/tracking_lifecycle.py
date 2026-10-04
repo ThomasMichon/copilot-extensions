@@ -64,6 +64,7 @@ def record_pr_claims_reassigned(
             event="reassigned",
             session_id=successor_session_id,
             note=f"{note}: {predecessor_session_id} -> {successor_session_id}",
+            project=record.repo,
         )
 
 

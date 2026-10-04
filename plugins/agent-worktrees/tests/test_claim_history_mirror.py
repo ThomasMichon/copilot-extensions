@@ -1,11 +1,12 @@
 """Tests for :mod:`claim_history_mirror` (worktree-claims-transitive-finalization
 Phase 3b's remote-mirroring item): the git-ref append-only mirror for
-:mod:`claim_history`'s local ownership ledger, its stateless opt-in sync
-sweep, and the ``claims history <ref> --remote`` read path.
+:mod:`claim_history`'s local ownership ledger, its stateless opt-in batched
+sync sweep, and the ``claims history <ref> --remote`` read path.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -85,16 +86,17 @@ def _allow_all_worktrees(monkeypatch):
     )
 
 
-def _entry(seq: int, **overrides) -> dict:
+def _entry(seq: int, *, ledger_id: str = "ledger-a", **overrides) -> dict:
     base = {
         "ts": "2026-10-03T12:00:00+00:00", "kind": "pr", "ref": "o/r#1",
         "worktree_id": "wt-a", "machine": "m1", "event": "claimed", "seq": seq,
+        "ledger_id": ledger_id,
     }
     base.update(overrides)
     return base
 
 
-# ── ClaimHistoryMirror.push / .fetch ─────────────────────────────────────
+# ── ClaimHistoryMirror.push / .push_batch / .fetch ───────────────────────
 
 def test_push_then_fetch_round_trips_one_entry(settings: LeaseSettings):
     m = mirror(settings)
@@ -107,6 +109,7 @@ def test_push_then_fetch_round_trips_one_entry(settings: LeaseSettings):
     assert fetched[0]["session_id"] == "sess-1"
     assert fetched[0]["note"] == "opened"
     assert fetched[0]["seq"] == 0
+    assert fetched[0]["ledger_id"] == "ledger-a"
 
 
 def test_push_preserves_an_empty_required_field(settings: LeaseSettings):
@@ -129,7 +132,7 @@ def test_push_appends_rather_than_overwrites(settings: LeaseSettings):
     assert [e["event"] for e in fetched] == ["claimed", "released"]
 
 
-def test_push_is_a_noop_for_an_already_mirrored_sequence_number(settings: LeaseSettings):
+def test_push_is_a_noop_for_an_already_mirrored_identity(settings: LeaseSettings):
     m = mirror(settings)
     assert m.push(_entry(0)) is True
     assert m.push(_entry(0)) is False
@@ -169,6 +172,77 @@ def test_push_recognizes_an_earlier_event_even_after_a_later_one_landed(
     assert [e["event"] for e in fetched] == ["claimed", "released"]
 
 
+def test_push_distinguishes_the_same_seq_from_two_different_ledgers(settings: LeaseSettings):
+    """``seq`` alone is only unique WITHIN one ledger's lifetime -- two
+    independent machines' (or a reimaged machine's fresh incarnation's)
+    first events for the same PR can both legitimately be ``seq=0``.
+    ``ledger_id`` must discriminate them; neither may be skipped as a
+    false duplicate of the other."""
+    m = mirror(settings)
+    assert m.push(_entry(0, ledger_id="ledger-a", event="claimed")) is True
+    assert m.push(_entry(0, ledger_id="ledger-b", event="claimed")) is True
+    fetched = m.fetch("pr", "o/r#1")
+    assert len(fetched) == 2
+    assert {e["ledger_id"] for e in fetched} == {"ledger-a", "ledger-b"}
+
+
+def test_push_batch_pushes_every_missing_entry_as_one_chain(settings: LeaseSettings):
+    m = mirror(settings)
+    entries = [_entry(i, event=e) for i, e in enumerate(["claimed", "released", "claimed"])]
+    pushed = m.push_batch(entries)
+    assert pushed == 3
+    fetched = m.fetch("pr", "o/r#1")
+    assert [e["event"] for e in fetched] == ["claimed", "released", "claimed"]
+
+
+def test_push_batch_skips_already_mirrored_entries_within_the_batch(settings: LeaseSettings):
+    m = mirror(settings)
+    m.push(_entry(0, event="claimed"))
+    # A batch re-submitting the already-mirrored entry 0 alongside a
+    # genuinely new entry 1 must push only the new one.
+    pushed = m.push_batch([_entry(0, event="claimed"), _entry(1, event="released")])
+    assert pushed == 1
+    fetched = m.fetch("pr", "o/r#1")
+    assert [e["event"] for e in fetched] == ["claimed", "released"]
+
+
+def test_push_batch_is_a_noop_when_every_entry_is_already_mirrored(settings: LeaseSettings):
+    m = mirror(settings)
+    m.push(_entry(0))
+    assert m.push_batch([_entry(0)]) == 0
+
+
+def test_push_batch_rejects_a_mixed_resource_batch(settings: LeaseSettings):
+    m = mirror(settings)
+    with pytest.raises(ValueError):
+        m.push_batch([_entry(0, ref="o/r#1"), _entry(1, ref="o/r#2")])
+
+
+def test_push_batch_empty_is_a_noop(settings: LeaseSettings):
+    assert mirror(settings).push_batch([]) == 0
+
+
+def test_fetch_chain_detects_a_ref_that_moved_mid_read(settings: LeaseSettings, monkeypatch):
+    """``_fetch_chain`` is the one place the remote is read; if the ref
+    moves between its initial ``ls-remote`` and the follow-up fetch of
+    that exact oid, it must raise rather than silently returning content
+    that no longer corresponds to the oid it reported."""
+    m = mirror(settings)
+    m.push(_entry(0))
+    real_remote_oid = m._remote_oid
+    calls = {"n": 0}
+
+    def flaky_remote_oid(ref):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return "0" * 40  # a plausible-looking oid the follow-up fetch won't actually have
+        return real_remote_oid(ref)
+
+    monkeypatch.setattr(m, "_remote_oid", flaky_remote_oid)
+    with pytest.raises(claim_history_mirror._SnapshotUnavailable):
+        m._fetch_chain("pr", "o/r#1")
+
+
 def test_fetch_is_empty_for_a_never_mirrored_ref(settings: LeaseSettings):
     assert mirror(settings).fetch("pr", "o/r#404") == []
 
@@ -185,29 +259,48 @@ def test_parse_entry_rejects_a_non_string_field():
     (``claims history --remote``'s own merge) that assumes every field is
     a plain string."""
     bad = claim_history_mirror._serialize_entry(_entry(0))
-    import json as _json
     prefix, body = bad.split("\n", 1)
-    payload = _json.loads(body)
+    payload = json.loads(body)
     payload["note"] = ["not", "a", "string"]
-    tampered = prefix + "\n" + _json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    tampered = prefix + "\n" + json.dumps(payload, sort_keys=True, separators=(",", ":"))
     with pytest.raises(ProtocolError):
         claim_history_mirror._parse_entry(tampered)
 
 
 def test_parse_entry_rejects_a_non_integer_seq():
     bad = claim_history_mirror._serialize_entry(_entry(0))
-    import json as _json
     prefix, body = bad.split("\n", 1)
-    payload = _json.loads(body)
+    payload = json.loads(body)
     payload["seq"] = "0"
-    tampered = prefix + "\n" + _json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    tampered = prefix + "\n" + json.dumps(payload, sort_keys=True, separators=(",", ":"))
     with pytest.raises(ProtocolError):
         claim_history_mirror._parse_entry(tampered)
 
 
+# ── _ledger_id ────────────────────────────────────────────────────────────
+
+def test_ledger_id_is_stable_across_calls():
+    first = claim_history_mirror._ledger_id()
+    claim_history.record_event(
+        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
+    )
+    second = claim_history_mirror._ledger_id()
+    assert first == second
+
+
+def test_ledger_id_changes_after_the_ledger_file_is_removed(monkeypatch):
+    """A reimaged machine starting a fresh, empty ledger must mint a fresh
+    incarnation id -- never silently reuse a stale one left over from a
+    stray sidecar file."""
+    first = claim_history_mirror._ledger_id()
+    claim_history.history_path().unlink(missing_ok=True)
+    second = claim_history_mirror._ledger_id()
+    assert first != second
+
+
 # ── _grouped_events ───────────────────────────────────────────────────────
 
-def test_grouped_events_stamps_a_stable_position_based_seq():
+def test_grouped_events_stamps_a_stable_position_based_seq_and_ledger_id():
     claim_history.record_event(
         kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
     )
@@ -220,6 +313,8 @@ def test_grouped_events_stamps_a_stable_position_based_seq():
     grouped = claim_history_mirror._grouped_events()
     assert [e["seq"] for e in grouped[("pr", "o/r#1")]] == [0, 1]
     assert [e["seq"] for e in grouped[("pr", "o/r#2")]] == [0]
+    ids = {e["ledger_id"] for events in grouped.values() for e in events}
+    assert len(ids) == 1  # the same local ledger incarnation for every entry
 
 
 # ── _event_eligible / durable project attribution ────────────────────────
@@ -396,6 +491,28 @@ def test_sync_pending_survives_a_reaped_tracking_record_via_the_durable_stamp(
     result = claim_history_mirror.sync_pending()
     assert result["pushed"] == 1
     assert mirror(settings).fetch("pr", "o/r#1")[0]["event"] == "claimed"
+
+
+def test_sync_pending_propagates_an_explicit_project_over_ambient_config(
+    settings: LeaseSettings, monkeypatch
+):
+    """``record_event``'s explicit ``project=`` (the OWNING record's own
+    ``repo``) must win even when ambient config disagrees -- the exact
+    cross-project ``--owner-ref``/daemon-dispatch mismatch a prior review
+    round flagged."""
+    monkeypatch.setattr(claim_history, "current_project_name", lambda: "ambient-project")
+    monkeypatch.setattr(
+        claim_history_mirror, "mirror_settings", lambda origin=None: settings
+    )
+    claim_history.record_event(
+        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
+        project="actual-owning-project",
+    )
+    # The sweep's own project context matches the explicit stamp, not the
+    # (deliberately different) ambient one.
+    monkeypatch.setattr(claim_history, "current_project_name", lambda: "actual-owning-project")
+    result = claim_history_mirror.sync_pending()
+    assert result["pushed"] == 1
 
 
 # ── fetch_remote_history (the claims history --remote read path) ────────
