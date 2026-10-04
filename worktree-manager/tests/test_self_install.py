@@ -13,8 +13,10 @@ import os
 from pathlib import Path
 
 import pytest
+from _conftest_sandbox import _apply_sandbox
 
 import worktree_manager.self_install as si
+from worktree_manager.__main__ import main
 from worktree_manager.self_install import (
     current_version,
     needs_install,
@@ -23,7 +25,6 @@ from worktree_manager.self_install import (
     status,
     version_slot,
 )
-from worktree_manager.__main__ import main
 
 
 def _fake_payload(tmp: Path, version: str) -> Path:
@@ -1017,3 +1018,159 @@ def test_self_install_normalizes_a_malformed_pointer_failure_to_runtimeerror(tmp
     assert "pointer materialization" in (res.reason or "")
     assert current_version(root) is None
     assert not version_slot("8.8.8", root).exists()
+
+
+# ---------------------------------------------------------------------------
+# Regression coverage for conftest.py's own suite-wide safety-net fixture.
+#
+# Round-review finding on #5157: the tests above pass explicit root=/patch the
+# bin and provider-registry paths directly, so their assertions never actually
+# exercise this fallback safety net itself. These tests call
+# ``_conftest_sandbox._apply_sandbox`` directly -- the fixture's own logic,
+# extracted as a plain function precisely so it can be driven without relying
+# on pytest's autouse-fixture scheduling (which has no clean way to simulate
+# "an override was already set before this fixture ran").
+#
+# Deliberately placed here (NOT a new standalone test_*.py file): an earlier
+# version of this coverage lived in its own ``test_conftest_safety_net.py``,
+# which collects alphabetically before ``test_plugin_contracts.py`` and was
+# observed to make that unrelated file's tests fail in full-suite CI runs
+# (pre-existing global-state fragility there, triggered only by collection
+# order). Appending to this already-later-sorting file sidesteps the trigger
+# entirely without touching the unrelated module.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    # Enumerated literally, independent of the implementation's own
+    # `_SELF_INSTALL_TEST_MODULES` allowlist -- reading that set here would
+    # make this parametrization track whatever the implementation claims to
+    # cover, silently losing coverage for any module quietly removed from it.
+    ["test_e2e_delivery", "test_self_install", "test_update"],
+)
+def test_apply_sandbox_activates_for_every_selected_module(module_name, tmp_path, monkeypatch):
+    """The fixture activates (sets USERPROFILE/HOME under the tmp sandbox)
+    for all three selected modules -- not just whichever one a prior test
+    happened to exercise.
+
+    Uses a distinct inner sub-path (``tmp_path / "inner"``), never
+    ``tmp_path`` itself: this test runs inside ``test_self_install`` -- a
+    selected module -- so the outer, real autouse fixture has already set
+    USERPROFILE/HOME to ``tmp_path / "fake-home"`` before this body even
+    runs. Asserting against that same path would pass even if
+    ``_apply_sandbox`` were deleted or stopped selecting ``module_name``
+    entirely, since the outer activation alone already satisfies it."""
+    inner = tmp_path / "inner"
+    _apply_sandbox(module_name, inner, monkeypatch)
+    fake_home = inner / "fake-home"
+    assert os.environ["USERPROFILE"] == str(fake_home)
+    assert os.environ["HOME"] == str(fake_home)
+    assert fake_home.is_dir()
+
+
+def test_apply_sandbox_is_a_noop_for_an_unrelated_module(tmp_path, monkeypatch):
+    """A module not in the selected set must be left completely untouched --
+    confirms the overhead/behavior really is scoped, not accidentally global.
+
+    Uses a distinct, unused sub-path (``tmp_path / "unrelated"``) rather than
+    asserting ``tmp_path / "fake-home"`` is absent: this test itself runs
+    inside ``test_self_install`` -- a selected module -- so conftest.py's own
+    real autouse fixture has already created that exact path for THIS test
+    before its body even runs; asserting its absence would conflate that
+    outer, legitimate activation with the inner, unrelated-module call this
+    test is actually exercising."""
+    before_userprofile = os.environ.get("USERPROFILE")
+    before_home = os.environ.get("HOME")
+    unrelated = tmp_path / "unrelated"
+    _apply_sandbox("test_something_unrelated", unrelated, monkeypatch)
+    assert os.environ.get("USERPROFILE") == before_userprofile
+    assert os.environ.get("HOME") == before_home
+    assert not (unrelated / "fake-home").exists()
+
+
+def test_apply_sandbox_removes_a_preexisting_root_override(tmp_path, monkeypatch):
+    """A WORKTREE_MANAGER_ROOT/AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR
+    override a prior test/session left set (the exact production incident
+    this whole fixture exists to prevent, #5122) must be cleared, not merely
+    shadowed -- otherwise an unpatched self_install()/self_update() call
+    would still resolve through the stale override instead of the sandbox."""
+    stale_root = tmp_path / "stale-root-from-a-prior-test"
+    stale_registry = tmp_path / "stale-registry-from-a-prior-test"
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(stale_root))
+    monkeypatch.setenv("AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR", str(stale_registry))
+
+    _apply_sandbox("test_self_install", tmp_path / "inner", monkeypatch)
+
+    assert "WORKTREE_MANAGER_ROOT" not in os.environ
+    assert "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR" not in os.environ
+
+
+def test_autouse_fixture_resolves_unpatched_default_paths_under_the_sandbox():
+    """With NO explicit ``_apply_sandbox`` call at all -- relying purely on
+    automatic fixture setup -- the real, unpatched ``default_root()``/
+    ``local_bin()``/``control_plane_providers_dir()`` must resolve under the
+    sandbox -- never under the real ``~``. Calling ``_apply_sandbox`` here
+    directly (as an earlier version of this test did) would mask a failure
+    of the autouse fixture itself to select this module, since the explicit
+    call alone is enough to satisfy the assertions regardless of whether
+    the real fixture ran at all."""
+    fake_home = Path(os.environ["USERPROFILE"])
+    assert fake_home.name == "fake-home"
+
+    assert si.default_root() == fake_home / ".worktree-manager"
+    assert si.local_bin() == fake_home / ".local" / "bin"
+    assert si.control_plane_providers_dir() == (
+        fake_home / ".agent-worktrees" / "control-plane-providers.d"
+    )
+
+
+def test_autouse_fixture_activates_automatically_for_this_module():
+    """Unlike every test above (which calls ``_apply_sandbox`` directly), this
+    one makes NO such call -- it asserts purely on ambient state, proving the
+    REAL ``conftest.py`` autouse fixture (not the plain function it delegates
+    to) actually wires up automatically for a selected module. This is the
+    exact seam a prior round of this fixture's own regression -- the
+    fixture unconditionally materializing ``tmp_path``/``monkeypatch`` via
+    ``request.getfixturevalue(...)`` before checking the module name, which
+    broke unrelated ``test_plugin_contracts.py`` tests in full-suite CI runs
+    -- slipped through: every test here called ``_apply_sandbox`` directly, so
+    none of them exercised the autouse fixture's own wiring at all."""
+    assert "fake-home" in os.environ["USERPROFILE"]
+    assert "fake-home" in os.environ["HOME"]
+    assert Path(os.environ["USERPROFILE"]).is_dir()
+
+
+def test_autouse_fixture_leaves_an_unrelated_module_untouched(pytester):
+    """End-to-end integration check, via a real nested pytest run: a test in
+    a module NOT in ``_SELF_INSTALL_TEST_MODULES`` must see the real
+    USERPROFILE/HOME untouched, AND must not have a ``tmp_path`` directory
+    gratuitously created for it -- both regressed together in the exact
+    incident ``test_autouse_fixture_activates_automatically_for_this_module``
+    documents above, since the fixture called ``request.getfixturevalue``
+    unconditionally before checking the module name at all.
+
+    Compares against the OUTER test's own (already-sandboxed) USERPROFILE/
+    HOME values, passed down via env vars rather than re-asserting the raw
+    strings: this outer test itself runs inside ``test_self_install`` -- a
+    selected module -- so its own USERPROFILE/HOME are already pointed at an
+    outer ``fake-home``, which `pytester`'s nested run inherits. Asserting
+    those are simply absent/unsandboxed would therefore always fail,
+    regardless of whether the unrelated module was genuinely left alone."""
+    outer_userprofile = os.environ["USERPROFILE"]
+    outer_home = os.environ["HOME"]
+    pytester.makeconftest((Path(__file__).parent / "conftest.py").read_text(encoding="utf-8"))
+    sandbox_src = (Path(__file__).parent / "_conftest_sandbox.py").read_text(encoding="utf-8")
+    pytester.makepyfile(_conftest_sandbox=sandbox_src)
+    pytester.makepyfile(
+        test_totally_unrelated_module=f"""
+        import os
+
+        def test_sees_the_inherited_environment_unchanged(request):
+            assert os.environ.get("USERPROFILE") == {outer_userprofile!r}
+            assert os.environ.get("HOME") == {outer_home!r}
+            assert "tmp_path" not in request.fixturenames
+        """
+    )
+    result = pytester.runpytest()
+    result.assert_outcomes(passed=1)
