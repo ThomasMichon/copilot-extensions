@@ -26,19 +26,27 @@ resilient safety boundary through the exact-session dynamic-guidance pattern.
 
 The ambient policy requires agents to:
 
-- determine audience and repository ownership before publishing;
-- prominently disclose AI assistance at the top of contributions to another
-  party's repository;
-- omit disclosure by default in **verified** operator-owned repositories unless
-  the operator explicitly requests it or policy tightens it to always;
+- determine the audience of this specific contribution (self-authored with no
+  other party's content or participation yet, a reply to an automated review
+  bot's own comment thread, or a response to another party's PR/issue/thread)
+  and whether the target host is configured as operator-only (`internal_host`)
+  before publishing;
+- prominently disclose AI assistance at the top of a contribution addressing
+  another party -- in every repository, public or private, including one the
+  operator owns -- even when it also engages with bot findings;
+- omit disclosure by default only for a genuinely self-authored contribution,
+  an inline bot-comment-only reply, or one on a configured `internal_host`,
+  unless the operator explicitly requests it or policy tightens it to always;
 - keep public artifacts persona-neutral and scrub private identifiers,
   credentials, paths, hosts, accounts, record IDs, and private rationale;
 - write public contributions in first-person singular and follow target-repo
   conventions;
 - audit the live published surface after publication.
 
-Local git remotes provide ownership hints only. No remote inference is treated
-as proof, and uncertainty uses the third-party policy.
+Local git remotes provide ownership and host hints only (resolved from the
+configured **push** target, not the fetch source, so an internal fetch mirror
+with an external push destination is never silently exempted). No remote
+inference is treated as proof, and uncertainty uses the third-party policy.
 
 ### Typical setup
 
@@ -128,10 +136,14 @@ grammar, keys, precedence, authority boundaries, and diagnostics.
   file to diagnose unavailable policy.
 - **A setting is ignored:** read stderr. Malformed, unknown, invalid, and
   unauthorized keys are diagnosed and ignored without weakening safe defaults.
-- **Ownership is unresolved or unexpectedly third-party:** configure the
-  public forge account as `owned_account=<host>/<account>` in operator scope; do
-  not place it in target-repo config. Still verify ownership before using the
-  disclosure-only own-repo exception.
+- **Ownership is unresolved or unexpectedly treated as addressing another
+  party:** configure the public forge account as
+  `owned_account=<host>/<account>` in operator scope; do not place it in
+  target-repo config. Still verify who this specific contribution actually
+  addresses before using the self-authored/bot-reply carve-out -- repository
+  ownership is a supporting hint, not the deciding fact.
+- **An internal-host repo still asks for disclosure:** configure the forge's
+  host as `internal_host=<host>` in operator scope.
 - **Guidance looks stale after a config/ownership change:** the computed
   policy is cached per repository for up to
   `AI_ATTRIBUTION_CACHE_TTL_SECONDS` (default 3600s) under

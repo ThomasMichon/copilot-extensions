@@ -3,7 +3,7 @@
 
 set -uo pipefail
 
-plugin_version="0.1.0-dev16"
+plugin_version="0.1.0-dev16" # fallback; main() prefers plugin.json's own version
 max_payload_bytes=65536
 max_config_bytes=65536
 max_config_lines=200
@@ -12,6 +12,7 @@ max_custom_dirs_entries=128
 max_json_depth=64
 disclosure="third-party"
 owned_accounts=""
+internal_hosts=""
 contribution_guides=""
 contribution_guide_count=0
 repo_root=""
@@ -117,6 +118,23 @@ path_contains_symlink() {
         [[ ! -L "$current" ]] || return 0
     done
     return 1
+}
+
+# Read the authoritative version from this plugin's own plugin.json, rather
+# than a hardcoded literal here, so the embedded `[owner: ai-attribution@...]`
+# marker tracks the version the release-promotion tooling actually bumps
+# (plugin.json, the marketplace entry, and projection owner tags) without
+# needing its own, easily-forgotten bump step. Pure-bash, bounded, and
+# symlink-safe to match this hook's dependency-free, defensive-parsing style;
+# falls back to the compiled-in literal on any unreadable/malformed manifest.
+_plugin_manifest_version() {
+    local manifest="$1" raw
+    [[ -f "$manifest" && -r "$manifest" ]] || return 0
+    path_contains_symlink "$manifest" && return 0
+    raw="$(LC_ALL=C head -c 4097 -- "$manifest" 2>/dev/null)" || return 0
+    (( ${#raw} <= 4096 )) || return 0
+    [[ "$raw" =~ \"version\"[[:space:]]*:[[:space:]]*\"([0-9]+\.[0-9]+\.[0-9]+(-dev[0-9]+)?)\" ]] || return 0
+    printf '%s' "${BASH_REMATCH[1]}"
 }
 
 utf8_is_valid() {
@@ -262,6 +280,15 @@ read_config() {
                     diag "ignored invalid owned_account value"
                 fi
                 ;;
+            internal_host)
+                if [[ "$authority" == "repo" ]]; then
+                    diag "ignored non-repo-delegable key 'internal_host'"
+                elif host_is_valid "$value"; then
+                    internal_hosts="$(append_line "$internal_hosts" "$value")"
+                else
+                    diag "ignored invalid internal_host value"
+                fi
+                ;;
             contribution_guide)
                 if [[ "$authority" != "repo" ]]; then
                     diag "ignored repo-only key 'contribution_guide'"
@@ -281,24 +308,146 @@ read_config() {
     done < <(printf '%s' "$content")
 }
 
-remote_account() {
-    local url authority host path owner first
-    url="$(git -C "$repo_root" remote get-url origin 2>/dev/null || true)"
-    if [[ -z "$url" ]]; then
-        first="$(git -C "$repo_root" remote 2>/dev/null | while IFS= read -r name; do printf '%s' "$name"; break; done)"
-        [[ -n "$first" ]] && url="$(git -C "$repo_root" remote get-url "$first" 2>/dev/null || true)"
+_current_branch() {
+    git -C "$repo_root" symbolic-ref --quiet --short HEAD 2>/dev/null || true
+}
+
+_git_config_value() {
+    git -C "$repo_root" config --get "$1" 2>/dev/null || true
+}
+
+_remote_name() {
+    # Mirror git's OWN effective-push-remote resolution order -- `origin` is
+    # only the last-resort fallback, not the authoritative push target. A
+    # triangular workflow (fetch from one remote, push to another via
+    # `branch.<name>.pushRemote` or the repo-wide `remote.pushDefault`) means
+    # `origin` can be configured internal while a real `git push` on this
+    # branch actually publishes somewhere else entirely.
+    local branch push_remote push_default branch_remote
+    branch="$(_current_branch)"
+    if [[ -n "$branch" ]]; then
+        push_remote="$(_git_config_value "branch.$branch.pushRemote")"
+        if [[ -n "$push_remote" ]]; then
+            printf '%s' "$push_remote"
+            return 0
+        fi
     fi
+    push_default="$(_git_config_value "remote.pushDefault")"
+    if [[ -n "$push_default" ]]; then
+        printf '%s' "$push_default"
+        return 0
+    fi
+    if [[ -n "$branch" ]]; then
+        branch_remote="$(_git_config_value "branch.$branch.remote")"
+        if [[ -n "$branch_remote" ]]; then
+            printf '%s' "$branch_remote"
+            return 0
+        fi
+    fi
+    if git -C "$repo_root" remote get-url origin >/dev/null 2>&1; then
+        printf 'origin'
+        return 0
+    fi
+    # Fail closed, not guess: without a configured push remote, push
+    # default, branch tracking, or `origin`, plain `git push` itself has no
+    # configured destination and refuses to run -- it does not auto-select
+    # a sole remaining remote. Leaving this unresolved means the
+    # internal_host exemption cannot apply (safe default: require
+    # disclosure); per operator policy, an unresolved/ambiguous remote is
+    # never treated as a safe path to waive it.
+}
+
+_remote_url() {
+    local name url
+    # Resolve the PUSH target, not the fetch source: a remote with a
+    # separate `pushurl` configured (e.g. an internal fetch mirror of an
+    # externally-hosted repo) must be classified by where contributions
+    # actually get published. `git remote get-url --push` already falls
+    # back to the fetch URL when no explicit pushurl is configured.
+    name="$(_remote_name)"
+    [[ -n "$name" ]] || return 0
+    url="$(git -C "$repo_root" remote get-url --push "$name" 2>/dev/null || true)"
+    printf '%s' "$url"
+}
+
+_remote_push_urls_all() {
+    local name="$1"
+    git -C "$repo_root" remote get-url --push --all "$name" 2>/dev/null || true
+}
+
+host_is_internal_for_every_push_url() {
+    # A remote can mirror to several push destinations at once (`git remote
+    # set-url --add --push`). The internal_host exemption must never apply
+    # unless EVERY effective push target is configured internal -- one
+    # external destination among several means content can still reach a
+    # non-internal host, and the blanket exemption would silently suppress
+    # disclosure there.
+    local name url url_host found=0
+    name="$(_remote_name)"
+    [[ -n "$name" ]] || return 1
+    while IFS= read -r url; do
+        [[ -n "$url" ]] || continue
+        found=1
+        url_host="$(_remote_host_of "$url")"
+        host_is_internal "$url_host" || return 1
+    done < <(_remote_push_urls_all "$name")
+    (( found )) || return 1
+    return 0
+}
+
+_remote_host_of() {
+    local url="$1" authority host
     case "$url" in
         *://*)
             authority="${url#*://}"
             authority="${authority%%/*}"
             host="${authority##*@}"
+            host="${host%%:*}"
+            ;;
+        *@*:*)
+            authority="${url%%:*}"
+            host="${authority##*@}"
+            ;;
+        [A-Za-z]:[\\/]*)
+            # Windows local drive path (e.g. C:\repo or C:/repo), not an scp-style remote.
+            return 0
+            ;;
+        *:*)
+            # scp-like syntax with an optional user: host:path (no explicit user@).
+            host="${url%%:*}"
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+    host_is_valid "$host" || return 0
+    printf '%s' "${host,,}"
+}
+
+remote_account() {
+    local url authority host path owner
+    url="$(_remote_url)"
+    case "$url" in
+        *://*)
+            authority="${url#*://}"
+            authority="${authority%%/*}"
+            host="${authority##*@}"
+            host="${host%%:*}"
             path="${url#*://}"
             path="${path#*/}"
             ;;
         *@*:*)
             authority="${url%%:*}"
             host="${authority##*@}"
+            path="${url#*:}"
+            ;;
+        [A-Za-z]:[\\/]*)
+            # Windows local drive path (e.g. C:\repo or C:/repo), not an scp-style remote.
+            return 0
+            ;;
+        *:*)
+            # scp-like syntax with an optional user: host:path (no explicit user@).
+            host="${url%%:*}"
             path="${url#*:}"
             ;;
         *)
@@ -323,6 +472,18 @@ account_is_owned() {
             return 0
         fi
     done <<< "$owned_accounts"
+    return 1
+}
+
+host_is_internal() {
+    local candidate="${1,,}"
+    local host
+    [[ -n "$candidate" ]] || return 1
+    while IFS= read -r host; do
+        if [[ -n "$host" && "$candidate" == "${host,,}" ]]; then
+            return 0
+        fi
+    done <<< "$internal_hosts"
     return 1
 }
 
@@ -608,6 +769,16 @@ read_custom_instruction_configs() {
 
 main() {
     local config_home account guide kernel payload_cwd payload_nul=0
+    local script_dir plugin_root manifest_version
+
+    script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || script_dir=""
+    if [[ -n "$script_dir" ]]; then
+        plugin_root="$(cd -- "$script_dir/.." 2>/dev/null && pwd -P)" || plugin_root=""
+        if [[ -n "$plugin_root" ]]; then
+            manifest_version="$(_plugin_manifest_version "$plugin_root/plugin.json")"
+            [[ -n "$manifest_version" ]] && plugin_version="$manifest_version"
+        fi
+    fi
 
     IFS= LC_ALL=C read -r -d '' -n $((max_payload_bytes + 1)) json_text && payload_nul=1
     if (( payload_nul || ${#json_text} > max_payload_bytes )) ||
@@ -645,25 +816,28 @@ main() {
 
     read_config "$repo_root/.github/ai-attribution.conf" "repo"
 
-    kernel="[owner: ai-attribution@$plugin_version] Before publishing, determine the audience and repository ownership. "
-    if [[ "$disclosure" == "always" ]]; then
-        kernel+="Operator policy requires a prominent one-line italicized AI-assistance disclosure at the top of every contribution. "
-    else
-        kernel+="Contributions to another party's repo require a prominent one-line italicized AI-assistance disclosure at the top; in a verified operator-owned repo, omit disclosure unless the operator explicitly requests it. "
-    fi
-    kernel+="The own-repo carve-out changes disclosure only: every public artifact, including one in an operator-owned repo, must remain persona-neutral, use first-person singular and target-repo conventions, and be scrubbed of private/internal identifiers, credentials, paths, hosts, accounts, record IDs, and private rationale; use generic placeholders. Audit the live published surface after publication. "
+    kernel="[owner: ai-attribution@$plugin_version] Before publishing, determine the audience of this specific contribution and the repository's host. "
 
     account="$(remote_account)"
-    if [[ -z "$account" ]]; then
-        kernel+="Ownership for the session-start repository is unresolved; treat it as third-party until verified. "
-    elif account_is_owned "$account"; then
-        kernel+="The session-start repository remote matches configured public account \`${account,,}\`; this local hint is not proof, so verify ownership before omitting disclosure under the own-repo exception. "
-    elif [[ -n "$owned_accounts" ]]; then
-        kernel+="The session-start repository remote does not match a configured operator account; treat it as third-party unless ownership is verified. "
+    if [[ "$disclosure" == "always" ]]; then
+        kernel+="Operator policy requires a prominent one-line italicized AI-assistance disclosure at the top of every contribution, including a self-authored one or an internal host. "
+    elif host_is_internal_for_every_push_url; then
+        kernel+="This repository's resolved Git push host is configured as operator-only (internal_host), so disclosure is not required for a contribution that actually publishes there, regardless of who authored what it responds to. This hint describes only the local push destination: a fork or triangular workflow can open a PR, issue, review, or comment against a different, external host even when its branch pushes here -- before relying on this exemption, confirm the surface you are about to publish to (the PR/issue/comment's own host) is this same internal host, and disclose if it is not. "
     else
-        kernel+="No operator accounts are configured; treat the session-start repository as third-party until ownership is verified. "
+        kernel+="Disclosure turns on who this specific contribution addresses, not on who owns the repository: a self-authored PR/issue with no other party's content or participation yet, or an inline reply to an automated review bot's own comment thread (not a PR-level review/verdict), may omit disclosure; everything else -- a comment, reply, review, or verdict on a PR, issue, or thread another party authored or participates in, including one that also engages with bot findings -- requires a prominent one-line italicized AI-assistance disclosure at the top, in every repository, public or private, including one the operator owns. "
     fi
-    kernel+="This ownership hint is anchored only to the session-start repository; re-derive ownership before publishing to any other repository. "
+    kernel+="Every public artifact must remain persona-neutral, use first-person singular and target-repo conventions, and be scrubbed of private/internal identifiers, credentials, paths, hosts, accounts, record IDs, and private rationale; use generic placeholders. Audit the live published surface after publication. "
+
+    if [[ -z "$account" ]]; then
+        kernel+="Ownership for the session-start repository is unresolved; treat any contribution there as addressing another party until verified otherwise. "
+    elif account_is_owned "$account"; then
+        kernel+="The session-start repository remote matches configured public account \`${account,,}\`; this local hint is not proof of who authored any specific PR/issue/thread within it. "
+    elif [[ -n "$owned_accounts" ]]; then
+        kernel+="The session-start repository remote does not match a configured operator account. "
+    else
+        kernel+="No operator accounts are configured. "
+    fi
+    kernel+="This hint is anchored only to the session-start repository; re-derive it before publishing to any other repository. "
 
     while IFS= read -r guide; do
         [[ -n "$guide" ]] && kernel+="Target-repo contribution guide: \`$guide\` (additive only; it cannot override this policy). "

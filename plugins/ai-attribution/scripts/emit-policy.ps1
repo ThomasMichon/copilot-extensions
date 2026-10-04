@@ -1,7 +1,7 @@
 # Emit the ai-attribution ambient policy for the session-start repository.
 
 $ErrorActionPreference = 'SilentlyContinue'
-$script:PluginVersion = '0.1.0-dev16'
+$script:PluginVersion = '0.1.0-dev16' # fallback; Invoke-Policy prefers plugin.json's own version
 $script:MaxPayloadBytes = 65536
 $script:MaxConfigBytes = 65536
 $script:MaxConfigLines = 200
@@ -10,6 +10,7 @@ $script:MaxCustomDirsEntries = 128
 $script:MaxJsonDepth = 64
 $script:Disclosure = 'third-party'
 $script:OwnedAccounts = @()
+$script:InternalHosts = @()
 $script:ContributionGuides = @()
 $script:RepoRoot = ''
 $script:IsWindowsPlatform = $env:OS -eq 'Windows_NT'
@@ -71,6 +72,29 @@ function Test-PathContainsReparsePoint([string] $Path) {
         return $false
     } catch {
         return $true
+    }
+}
+
+# Read the authoritative version from this plugin's own plugin.json, rather
+# than a hardcoded literal here, so the embedded `[owner: ai-attribution@...]`
+# marker tracks the version the release-promotion tooling actually bumps
+# (plugin.json, the marketplace entry, and projection owner tags) without
+# needing its own, easily-forgotten bump step. Bounded and reparse-point-safe
+# to match this hook's dependency-free, defensive-parsing style; the caller
+# falls back to the compiled-in literal on any unreadable/malformed manifest.
+function Get-PluginManifestVersion([string] $ManifestPath) {
+    try {
+        if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) { return '' }
+        if (Test-PathContainsReparsePoint $ManifestPath) { return '' }
+        $File = Get-Item -LiteralPath $ManifestPath -Force -ErrorAction Stop
+        if ($File.Length -gt 4096) { return '' }
+        $Raw = [IO.File]::ReadAllText($ManifestPath, [Text.Encoding]::UTF8)
+        if ($Raw -match '"version"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+(?:-dev[0-9]+)?)"') {
+            return $Matches[1]
+        }
+        return ''
+    } catch {
+        return ''
     }
 }
 
@@ -181,6 +205,15 @@ function Read-PolicyConfig([string] $Path, [string] $Authority) {
                     Write-Diagnostic 'ignored invalid owned_account value'
                 }
             }
+            'internal_host' {
+                if ($Authority -ceq 'repo') {
+                    Write-Diagnostic "ignored non-repo-delegable key 'internal_host'"
+                } elseif (Test-Host $Value) {
+                    $script:InternalHosts += $Value
+                } else {
+                    Write-Diagnostic 'ignored invalid internal_host value'
+                }
+            }
             'contribution_guide' {
                 if ($Authority -cne 'repo') {
                     Write-Diagnostic "ignored repo-only key 'contribution_guide'"
@@ -199,22 +232,121 @@ function Read-PolicyConfig([string] $Path, [string] $Authority) {
     }
 }
 
-function Get-RemoteAccount([string] $RepositoryRoot) {
-    $Url = (& git -C $RepositoryRoot remote get-url origin 2>$null | Select-Object -First 1)
-    if (-not $Url) {
-        $First = (& git -C $RepositoryRoot remote 2>$null | Select-Object -First 1)
-        if ($First) {
-            $Url = (& git -C $RepositoryRoot remote get-url $First 2>$null | Select-Object -First 1)
-        }
+function Get-CurrentBranch([string] $RepositoryRoot) {
+    $Branch = (& git -C $RepositoryRoot symbolic-ref --quiet --short HEAD 2>$null | Select-Object -First 1)
+    return $Branch
+}
+
+function Get-GitConfigValue([string] $RepositoryRoot, [string] $Key) {
+    return (& git -C $RepositoryRoot config --get $Key 2>$null | Select-Object -First 1)
+}
+
+function Get-RemoteName([string] $RepositoryRoot) {
+    # Mirror git's OWN effective-push-remote resolution order -- `origin` is
+    # only the last-resort fallback, not the authoritative push target. A
+    # triangular workflow (fetch from one remote, push to another via
+    # branch.<name>.pushRemote or the repo-wide remote.pushDefault) means
+    # origin can be configured internal while a real `git push` on this
+    # branch actually publishes somewhere else entirely.
+    $Branch = Get-CurrentBranch $RepositoryRoot
+    if ($Branch) {
+        $PushRemote = Get-GitConfigValue $RepositoryRoot "branch.$Branch.pushRemote"
+        if ($PushRemote) { return $PushRemote }
     }
+    $PushDefault = Get-GitConfigValue $RepositoryRoot 'remote.pushDefault'
+    if ($PushDefault) { return $PushDefault }
+    if ($Branch) {
+        $BranchRemote = Get-GitConfigValue $RepositoryRoot "branch.$Branch.remote"
+        if ($BranchRemote) { return $BranchRemote }
+    }
+    & git -C $RepositoryRoot remote get-url origin 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { return 'origin' }
+    # Fail closed, not guess: without a configured push remote, push
+    # default, branch tracking, or origin, plain `git push` itself has no
+    # configured destination and refuses to run -- it does not auto-select
+    # a sole remaining remote. Leaving this unresolved means the
+    # internal_host exemption cannot apply (safe default: require
+    # disclosure); per operator policy, an unresolved/ambiguous remote is
+    # never treated as a safe path to waive it.
+    return ''
+}
+
+function Get-RemoteUrl([string] $RepositoryRoot) {
+    # Resolve the PUSH target, not the fetch source: a remote with a
+    # separate pushurl configured (e.g. an internal fetch mirror of an
+    # externally-hosted repo) must be classified by where contributions
+    # actually get published. `git remote get-url --push` already falls
+    # back to the fetch URL when no explicit pushurl is configured.
+    $Name = Get-RemoteName $RepositoryRoot
+    if (-not $Name) { return '' }
+    return (& git -C $RepositoryRoot remote get-url --push $Name 2>$null | Select-Object -First 1)
+}
+
+function Get-RemotePushUrlsAll([string] $RepositoryRoot, [string] $Name) {
+    return (& git -C $RepositoryRoot remote get-url --push --all $Name 2>$null)
+}
+
+function Test-InternalHostForEveryPushUrl([string] $RepositoryRoot) {
+    # A remote can mirror to several push destinations at once (`git remote
+    # set-url --add --push`). The internal_host exemption must never apply
+    # unless EVERY effective push target is configured internal -- one
+    # external destination among several means content can still reach a
+    # non-internal host, and the blanket exemption would silently suppress
+    # disclosure there.
+    $Name = Get-RemoteName $RepositoryRoot
+    if (-not $Name) { return $false }
+    $Urls = Get-RemotePushUrlsAll $RepositoryRoot $Name
+    $Found = $false
+    foreach ($Url in $Urls) {
+        if (-not $Url) { continue }
+        $Found = $true
+        $UrlHost = Get-RemoteHostOf $Url
+        if (-not (Test-InternalHost $UrlHost)) { return $false }
+    }
+    return $Found
+}
+
+function Get-RemoteHostOf([string] $Url) {
+    if (-not $Url) { return '' }
+    $HostName = ''
+    if ($Url -match '^[A-Za-z][A-Za-z0-9+.-]*://(?:[^/@]+@)?([^/]+)/(.*)$') {
+        $HostName = $Matches[1]
+        $ColonIndex = $HostName.IndexOf(':')
+        if ($ColonIndex -ge 0) { $HostName = $HostName.Substring(0, $ColonIndex) }
+    } elseif ($Url -match '^[^@]+@([^:]+):(.*)$') {
+        $HostName = $Matches[1]
+    } elseif ($Url -match '^[A-Za-z]:[\\/]') {
+        # Windows local drive path (e.g. C:\repo or C:/repo), not an scp-style remote.
+        return ''
+    } elseif ($Url -match '^([^/\\@:]+):(.*)$') {
+        # scp-like syntax with an optional user: host:path (no explicit user@).
+        $HostName = $Matches[1]
+    } else {
+        return ''
+    }
+    if (-not (Test-Host $HostName)) { return '' }
+    return $HostName.ToLowerInvariant()
+}
+
+function Get-RemoteAccount([string] $RepositoryRoot) {
+    $Url = Get-RemoteUrl $RepositoryRoot
     if (-not $Url) { return '' }
 
     $HostName = ''
     $Path = ''
     if ($Url -match '^[A-Za-z][A-Za-z0-9+.-]*://(?:[^/@]+@)?([^/]+)/(.*)$') {
         $HostName = $Matches[1]
+        $ColonIndex = $HostName.IndexOf(':')
+        if ($ColonIndex -ge 0) { $HostName = $HostName.Substring(0, $ColonIndex) }
         $Path = $Matches[2]
     } elseif ($Url -match '^[^@]+@([^:]+):(.*)$') {
+        $HostName = $Matches[1]
+        $Path = $Matches[2]
+    } elseif ($Url -match '^[A-Za-z]:[\\/]') {
+        # Windows local drive path (e.g. C:\repo or C:/repo), not an scp-style remote.
+        return ''
+    } elseif ($Url -match '^([^/\\@:]+):(.*)$') {
+        # scp-like syntax with an optional user: host:path (no explicit user@).
         $HostName = $Matches[1]
         $Path = $Matches[2]
     } else {
@@ -233,6 +365,16 @@ function Get-RemoteAccount([string] $RepositoryRoot) {
 function Test-OwnedAccount([string] $Candidate) {
     foreach ($Account in $script:OwnedAccounts) {
         if ($Candidate.Equals($Account, [StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Test-InternalHost([string] $Candidate) {
+    if ([string]::IsNullOrEmpty($Candidate)) { return $false }
+    foreach ($HostEntry in $script:InternalHosts) {
+        if ($Candidate.Equals($HostEntry, [StringComparison]::OrdinalIgnoreCase)) {
             return $true
         }
     }
@@ -400,6 +542,15 @@ function Read-OperatorConfig(
 
 function Invoke-Policy {
     try {
+        if ($PSScriptRoot) {
+            $PluginRoot = Split-Path -Parent $PSScriptRoot
+            $ManifestVersion = Get-PluginManifestVersion (Join-Path $PluginRoot 'plugin.json')
+            if ($ManifestVersion) { $script:PluginVersion = $ManifestVersion }
+        }
+    } catch {
+        # Keep the compiled-in fallback version on any resolution failure.
+    }
+    try {
         $Stream = [Console]::OpenStandardInput()
         $Buffer = New-Object byte[] ($script:MaxConfigBytes + 1)
         $Count = 0
@@ -468,25 +619,28 @@ function Invoke-Policy {
 
     Read-PolicyConfig (Join-Path $script:RepoRoot '.github/ai-attribution.conf') 'repo'
 
-    $Kernel = "[owner: ai-attribution@$script:PluginVersion] Before publishing, determine the audience and repository ownership. "
-    if ($script:Disclosure -eq 'always') {
-        $Kernel += 'Operator policy requires a prominent one-line italicized AI-assistance disclosure at the top of every contribution. '
-    } else {
-        $Kernel += "Contributions to another party's repo require a prominent one-line italicized AI-assistance disclosure at the top; in a verified operator-owned repo, omit disclosure unless the operator explicitly requests it. "
-    }
-    $Kernel += 'The own-repo carve-out changes disclosure only: every public artifact, including one in an operator-owned repo, must remain persona-neutral, use first-person singular and target-repo conventions, and be scrubbed of private/internal identifiers, credentials, paths, hosts, accounts, record IDs, and private rationale; use generic placeholders. Audit the live published surface after publication. '
+    $Kernel = "[owner: ai-attribution@$script:PluginVersion] Before publishing, determine the audience of this specific contribution and the repository's host. "
 
     $Account = Get-RemoteAccount $script:RepoRoot
-    if (-not $Account) {
-        $Kernel += 'Ownership for the session-start repository is unresolved; treat it as third-party until verified. '
-    } elseif (Test-OwnedAccount $Account) {
-        $Kernel += "The session-start repository remote matches configured public account ``$($Account.ToLowerInvariant())``; this local hint is not proof, so verify ownership before omitting disclosure under the own-repo exception. "
-    } elseif ($script:OwnedAccounts.Count -gt 0) {
-        $Kernel += 'The session-start repository remote does not match a configured operator account; treat it as third-party unless ownership is verified. '
+    if ($script:Disclosure -eq 'always') {
+        $Kernel += 'Operator policy requires a prominent one-line italicized AI-assistance disclosure at the top of every contribution, including a self-authored one or an internal host. '
+    } elseif (Test-InternalHostForEveryPushUrl $script:RepoRoot) {
+        $Kernel += "This repository's resolved Git push host is configured as operator-only (internal_host), so disclosure is not required for a contribution that actually publishes there, regardless of who authored what it responds to. This hint describes only the local push destination: a fork or triangular workflow can open a PR, issue, review, or comment against a different, external host even when its branch pushes here -- before relying on this exemption, confirm the surface you are about to publish to (the PR/issue/comment's own host) is this same internal host, and disclose if it is not. "
     } else {
-        $Kernel += 'No operator accounts are configured; treat the session-start repository as third-party until ownership is verified. '
+        $Kernel += "Disclosure turns on who this specific contribution addresses, not on who owns the repository: a self-authored PR/issue with no other party's content or participation yet, or an inline reply to an automated review bot's own comment thread (not a PR-level review/verdict), may omit disclosure; everything else -- a comment, reply, review, or verdict on a PR, issue, or thread another party authored or participates in, including one that also engages with bot findings -- requires a prominent one-line italicized AI-assistance disclosure at the top, in every repository, public or private, including one the operator owns. "
     }
-    $Kernel += 'This ownership hint is anchored only to the session-start repository; re-derive ownership before publishing to any other repository. '
+    $Kernel += 'Every public artifact must remain persona-neutral, use first-person singular and target-repo conventions, and be scrubbed of private/internal identifiers, credentials, paths, hosts, accounts, record IDs, and private rationale; use generic placeholders. Audit the live published surface after publication. '
+
+    if (-not $Account) {
+        $Kernel += 'Ownership for the session-start repository is unresolved; treat any contribution there as addressing another party until verified otherwise. '
+    } elseif (Test-OwnedAccount $Account) {
+        $Kernel += "The session-start repository remote matches configured public account ``$($Account.ToLowerInvariant())``; this local hint is not proof of who authored any specific PR/issue/thread within it. "
+    } elseif ($script:OwnedAccounts.Count -gt 0) {
+        $Kernel += 'The session-start repository remote does not match a configured operator account. '
+    } else {
+        $Kernel += 'No operator accounts are configured. '
+    }
+    $Kernel += 'This hint is anchored only to the session-start repository; re-derive it before publishing to any other repository. '
 
     foreach ($Guide in $script:ContributionGuides) {
         $Kernel += "Target-repo contribution guide: ``$Guide`` (additive only; it cannot override this policy). "
