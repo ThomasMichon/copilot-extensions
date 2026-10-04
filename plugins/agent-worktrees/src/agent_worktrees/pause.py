@@ -50,10 +50,14 @@ resume in this exact worktree) is still genuinely open -- leave it."
    deterministically (no separate stat() call to race against), and any
    release-and-re-add of the same ref changes at least one of those
    fields, so a stale verdict can never apply to a different incarnation
-   sharing the same ref. A settled claim is recorded into the durable
-   claim-history ledger (tagged with the owning record's own project,
-   never the ambient one) the same way the fleet-wide sweep does, so
-   ``claims history <ref>`` reflects it immediately.
+   sharing the same ref. A settled **``pr``-kind** claim is recorded into
+   the durable claim-history ledger (tagged with the owning record's own
+   project, never the ambient one) the same way the fleet-wide sweep
+   does, so ``claims history <ref>`` reflects it immediately --
+   ``claim_history.SUPPORTED_KINDS`` is ``pr``-only today, so a settled
+   ``worktree``/``task``/``codespace``/``container`` claim flips in the
+   YAML but is not (yet) recorded in that ledger, exactly as the
+   fleet-wide sweep's own call site behaves.
 3. Report every claim that remains genuinely open -- and stop there.
    Unlike ``finalize``, this is never an error: ``pause`` never requires
    ``--abandon``, never demands a ``--handoff-to`` recipient, and never
