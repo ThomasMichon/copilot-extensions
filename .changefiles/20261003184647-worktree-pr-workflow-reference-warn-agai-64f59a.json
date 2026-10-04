@@ -1,0 +1,9 @@
+{
+  "comment": "worktree pr-workflow reference: warn against delegating git/PR work into an actively-used worktree (a shared checkout is a coupled surface, never safe for concurrent delegate edits)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

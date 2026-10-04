@@ -130,7 +130,17 @@ Each prompt to a delegate should state:
    coordinator explicitly authorizes nested delegation.
 
 Assign non-overlapping edit ownership. Two agents should not modify the same
-file or coupled surface concurrently.
+file or coupled surface concurrently. A shared git checkout/worktree is
+itself a coupled surface even when the two agents touch different files:
+commits, stashes, rebases, and pushes all operate at the repo level, so a
+delegate given the SAME worktree path you are concurrently editing can
+silently corrupt your in-flight edits (a `git stash` meant to clear its own
+way, a rebase that drops your already-pushed commits from local history) with
+no error on either side -- confirmed live: a background delegate mistakenly
+pointed at the coordinator's own active worktree ran for hours alongside it,
+and the resulting corruption surfaced only much later as what looked like
+unexplained data loss. Give a delegate doing git/PR work its own freshly
+created worktree, never the path you are concurrently using yourself.
 
 ## Route common task shapes
 
