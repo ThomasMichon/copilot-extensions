@@ -162,8 +162,12 @@ def test_run_contributor_disables_powershell_updatecheck(monkeypatch, tmp_path):
 # interpreter/runtime startups chained together) is legitimately higher and
 # more CI-variance-prone than the rest of this suite's pure-unit tests. A
 # dedicated, more generous timeout bounds that real variance without masking
-# an actual hang (a true deadlock would still fail this).
-@pytest.mark.timeout(90)
+# an actual hang (a true deadlock would still fail this). Capped at 45s --
+# the same deadline hooks.json enforces on the real write-session-guidance
+# sessionStart hook (see test_hook_and_projection_contracts) -- so this
+# test can never pass a regression that the production harness would
+# actually have killed.
+@pytest.mark.timeout(45)
 def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
     shell = shutil.which("pwsh") or shutil.which("powershell.exe")
     if not shell:
