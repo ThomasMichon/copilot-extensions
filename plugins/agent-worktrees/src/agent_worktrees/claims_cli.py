@@ -145,12 +145,7 @@ def add_parsers(sub) -> None:
         default="",
         help="with handoff decline/cancel: required explanation",
     )
-    p.add_argument(
-        "--actor",
-        default="",
-        dest="claim_actor",
-        help=argparse.SUPPRESS,
-    )
+    p.add_argument("--actor", default="", dest="claim_actor", help=argparse.SUPPRESS)
     p.add_argument("--all-states", action="store_true", help="with owner: include released claims")
     p.add_argument(
         "--repo",
@@ -171,6 +166,11 @@ def add_parsers(sub) -> None:
         dest="claim_live",
         help="with find pr: cross-check each candidate against the "
         "provider's live PR state instead of trusting local tracking",
+    )
+    p.add_argument(
+        "--remote", action="store_true",
+        help="with history: also merge this ref's mirrored remote "
+        "claim-history events (network, best-effort)",
     )
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 

@@ -72,8 +72,16 @@ follow-up, not silently dropped):
   defensive reject of a stale carried worktree id, never an active
   reassignment) -- still unstarted, and tracked only in the consuming
   deployment's own private effort tracker, not here.
-- Remote-mirroring for converged repos (today this is a single machine-
-  local file, same posture ``claim_handoffs.py`` itself started from).
+
+**Remote-mirroring is wired** (worktree-claims-transitive-finalization
+Phase 3b, 2026-10-03): this ledger is still local-write-only (unchanged
+above), but :mod:`claim_history_mirror` can push any locally-recorded event
+to its own append-only ref on the same shared store repo
+:mod:`lease_store` already uses for cross-machine lease coordination --
+opt-in, via ``agent-worktrees gc --mirror-claim-history`` (never
+synchronous with a live claim mutation; see that module's own docstring
+for why). ``agent-worktrees claims history <ref> --remote`` merges a
+ref's local events with its mirrored ones for display.
 
 **Concurrent writers.** Multiple independent processes can append a claim
 event at once (the CLI, a resident daemon dispatch, ``pr_ops``'s own

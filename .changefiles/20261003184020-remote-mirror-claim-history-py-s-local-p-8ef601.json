@@ -1,0 +1,9 @@
+{
+  "comment": "Remote-mirror claim_history.py's local PR ownership ledger to the shared lease store (opt-in gc --mirror-claim-history sweep; claims history <ref> --remote read).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}
