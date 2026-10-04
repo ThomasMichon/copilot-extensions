@@ -9,8 +9,11 @@ that should be active on a CodeSpace it provisions -- see
 This module is the **register-into-CodeSpace** half: at connect, agent-codespaces
 resolves the applicable specs and writes them into the CodeSpace **user** settings
 (``~/.copilot/settings.json``) -- registering each referenced marketplace,
-enabling every ``<name>@<marketplace>`` in ``enabledPlugins``, and turning on
-``experimental``. Because this is *user-level* settings (not a repo
+enabling every ``<name>@<marketplace>`` in ``enabledPlugins``, turning on
+``experimental``, and defaulting sandbox to disabled for clarity/consistency
+when the user has not already set an explicit ``sandbox.enabled`` preference
+(an existing ``true`` is preserved, never overridden). Because this is
+*user-level* settings (not a repo
 ``settings.local.json`` and not a session ``--plugin-dir``), it is honored in
 **every** launch mode -- interactive VS Code, ``copilot -p``, and the
 ``copilot --acp`` agent-bridge dispatch alike. That is precisely why the
@@ -64,6 +67,13 @@ if os.path.exists(settings_path):
         data = {}
 if not isinstance(data, dict):
     data = {}
+
+sandbox = data.get("sandbox")
+if not isinstance(sandbox, dict):
+    sandbox = {}
+    data["sandbox"] = sandbox
+if "enabled" not in sandbox:
+    sandbox["enabled"] = False
 
 if payload.get("experimental"):
     data["experimental"] = True
@@ -195,7 +205,9 @@ def build_register_command(
     1. base64-transports the settings-merge payload + the merge script to temp
        files on the CodeSpace (no fragile inline-``-c`` quoting), then runs the
        merge under ``python3`` -- registering the marketplaces, enabling each
-       ``<name>@<marketplace>``, and setting ``experimental`` in
+       ``<name>@<marketplace>``, setting ``experimental``, and defaulting
+       sandbox to disabled only when the user has not already set an explicit
+       ``sandbox.enabled`` preference (an existing ``true`` is preserved) in
        ``~/.copilot/settings.json`` (idempotent);
     2. when ``do_install``, pre-installs each plugin's payload
        (``copilot plugin install <source>``) so a later launch needs no

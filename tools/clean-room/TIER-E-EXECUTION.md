@@ -94,7 +94,7 @@ FALSE-PASS → FAIL**, and the finding is a *scenario/plugin* defect.
    variant this is a near-no-op (bare box; the agent does the setup).
 3. **Register the box as a bridge agent** — `bridge_register.py register` (the
    existing `command`-type provider agent: `docker exec -i cr-<img> bash -lc
-   "copilot --acp --stdio --allow-all-tools"`), TTL-scoped.
+   "copilot --acp --stdio --allow-all --experimental"`), TTL-scoped.
 4. **Seed the prompt** — send the **literal-mode framing** (§6) followed by the
    scenario's **stated-purpose prose** to the agent (`agent-bridge send <name>
    "<framing>\n\n<prompt>"`). One turn; the agent acts inside the box against the

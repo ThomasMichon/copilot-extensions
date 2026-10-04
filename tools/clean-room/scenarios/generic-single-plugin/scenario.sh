@@ -107,6 +107,7 @@ phase 1 "register marketplace + install ONE plugin ($PRIMARY_PLUGIN)"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
+  "sandbox": { "enabled": false },
   "extraKnownMarketplaces": {
     "$MARKETPLACE_NAME": $MARKETPLACE_SOURCE
   },
@@ -164,7 +165,7 @@ _plugin_dir_args() {
 }
 mapfile -t PLUGIN_ARGS < <(_plugin_dir_args)
 ( cd "$HOME/harness-repo" && capture "session-first" -- \
-    copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARGS[@]}" ) || true
+    copilot -p "Reply with the single word: ready." --allow-all --experimental "${PLUGIN_ARGS[@]}" ) || true
 if [ -e "$HOME/.local/bin/agent-codespaces" ]; then
     pass "first session stamped ~/.local/bin/agent-codespaces"
     if capture "first-use-agent-codespaces" -- bash -lc 'agent-codespaces --help'; then
@@ -222,10 +223,10 @@ fi
 phase 5 "plugin loading in headless copilot -p (enabledPlugins vs --plugin-dir)"
 # (a) rely on enabledPlugins in settings.json (NO --plugin-dir)
 ( cd "$HOME/harness-repo" && capture "load-enabledonly" -- \
-    copilot -p "List your available skills that mention 'codespace'. If none, say NONE." --allow-all-tools ) || true
+    copilot -p "List your available skills that mention 'codespace'. If none, say NONE." --allow-all --experimental ) || true
 # (b) explicit --plugin-dir staging
 ( cd "$HOME/harness-repo" && capture "load-plugindir" -- \
-    copilot -p "List your available skills that mention 'codespace'. If none, say NONE." --allow-all-tools "${PLUGIN_ARGS[@]}" ) || true
+    copilot -p "List your available skills that mention 'codespace'. If none, say NONE." --allow-all --experimental "${PLUGIN_ARGS[@]}" ) || true
 if grep -qiE 'codespace' "$CR_LOGDIR/load-enabledonly.log" 2>/dev/null; then
     info "headless -p appears to honor enabledPlugins (codespace skill surfaced WITHOUT --plugin-dir)"
 else
@@ -273,7 +274,7 @@ echo '{}' > "$HOME/.copilot/settings.json"
 rm -f "$HOME/.local/bin/$PRIMARY_PLUGIN"
 _apply_uv_index_fixture
 # Run a session FROM the repo, WITHOUT --plugin-dir: only .github/copilot/settings.json can enable it.
-( cd "$_repo" && capture "session-reposcoped" -- copilot -p "Reply with the single word: ok." --allow-all-tools ) || true
+( cd "$_repo" && capture "session-reposcoped" -- copilot -p "Reply with the single word: ok." --allow-all --experimental ) || true
 sleep 5
 if [ -e "$HOME/.local/bin/$PRIMARY_PLUGIN" ]; then
     pass "repo-scoped .github/copilot/settings.json enablement fired the sessionStart hook ($PRIMARY_PLUGIN binstub re-stamped)"

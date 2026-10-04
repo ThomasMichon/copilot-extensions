@@ -59,6 +59,7 @@ else {
 phase 1 "install $Plugin (marketplace source)"
 New-Item -ItemType Directory -Force -Path (Join-Path $HOME '.copilot') | Out-Null
 $settings = @{
+    sandbox                = @{ enabled = $false }
     extraKnownMarketplaces = @{ "$MarketplaceName" = @{ source = @{ source = 'github'; repo = "$MarketplaceRepo" } } }
     enabledPlugins         = @{ "$Plugin@$MarketplaceName" = $true }
 } | ConvertTo-Json -Depth 6
@@ -114,7 +115,7 @@ else {
     # independent of headed vs. headless mode (confirmed on the Linux arm;
     # unconfirmed but assumed identical on Windows -- verify here).
     Start-CrPsmux -Session $Session -Cwd $RepoDir -Prompt 'What is 19+23? Reply with only the number.' `
-        -ExtraArgs (@('--experimental', '--allow-all-tools') + $PluginArgs)
+        -ExtraArgs (@('--experimental', '--allow-all') + $PluginArgs)
     if (Wait-CrPsmuxFor -Session $Session -Pattern '\b42\b' -TimeoutSec 60) {
         pass 'headed session completed its first turn (psmux pane shows the reply)'
     }

@@ -24,7 +24,7 @@ class TestBuildMuxNewSessionArgv:
         argv = sessions.build_mux_new_session_argv(
             "wt1-abc",
             "/w/wt1",
-            ["bash", "setup.sh", "--allow-all-tools"],
+            ["bash", "setup.sh", "--allow-all", "--experimental"],
             {"COPILOT_FEATURE_FLAGS": "x"},
             mux="tmux",
             pane_wrapper="/does/not/exist",
@@ -43,7 +43,7 @@ class TestBuildMuxNewSessionArgv:
         assert argv[e:e + 5] == [
             "env", "-u", "WORKTREE_PROJECT", "-u", "WORKTREE_ID",
         ]
-        assert argv[-3:] == ["bash", "setup.sh", "--allow-all-tools"]
+        assert argv[-4:] == ["bash", "setup.sh", "--allow-all", "--experimental"]
         assert "--" not in argv
 
     def test_tmux_with_wrapper_wraps_command(self, tmp_path):
