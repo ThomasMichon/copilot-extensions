@@ -903,6 +903,22 @@ win grows with build complexity.
   trimming comments further). Smoke-tested for real again: built
   `agent-worktrees` fresh against the live governed feed with the
   reordered validate-then-publish sequence active.
+- An eighteenth review round found 1 more issue: the project/user/system
+  config-discovery loop (`_effective_default_index_url`) would silently
+  `continue` past a higher-precedence candidate that EXISTED but failed
+  to parse (malformed TOML, or an unreadable file), falling through to a
+  lower-precedence candidate instead -- `uv` itself would not silently
+  fall through to a different file either, so a malformed project-level
+  `uv.toml` could wrongly let a DIFFERENT, lower-precedence (user-level)
+  URL win. Fixed by returning `None` (fail closed) as soon as an existing
+  candidate fails to parse, rather than continuing the loop -- a
+  `pyproject.toml` simply lacking a `[tool.uv]` table remains a normal
+  continue (not malformed, just carries no uv config). 1 more unit test
+  (151 total, all passing). Trimmed further to stay under the module cap
+  (997 lines -- within 0.3% of the cap; any further substantive finding
+  will very likely require splitting a piece of this module out rather
+  than trimming comments further). Smoke-tested for real again: built
+  `agent-worktrees` fresh against the live governed feed.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 

@@ -2274,6 +2274,30 @@ def test_governed_feed_project_discovery_skipped_when_uv_config_file_set(
     ) is None
 
 
+def test_governed_feed_malformed_project_config_fails_closed_not_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: a malformed HIGHER-precedence config (one that exists
+    # at a real tier `uv` itself would read) must never be skipped in
+    # favor of a lower-precedence one -- `uv` itself would not silently
+    # fall through to a different file either. A valid, otherwise-
+    # trusted user-level uv.toml must NOT be used when the project-level
+    # one (checked first) is unparseable.
+    monkeypatch.setattr(bpa.sys, "platform", "win32")
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "uv.toml").write_text("not = [valid toml", encoding="utf-8")
+    user_uv_toml = tmp_path / "appdata" / "uv" / "uv.toml"
+    user_uv_toml.parent.mkdir(parents=True)
+    user_uv_toml.write_text(
+        'index-url = "https://user.internal/simple/"\n', encoding="utf-8"
+    )
+    monkeypatch.chdir(project_dir)
+    assert btl._effective_default_index_url(
+        {"APPDATA": str(tmp_path / "appdata")}
+    ) is None
+
+
 # --- Test PyPI is treated as public --------------------------------------
 
 

@@ -13,11 +13,11 @@ Owns the Phase 2 Build hermeticity direction of the
 ONE pinned `setuptools`/`wheel` venv (`resolve_toolchain_lock`), reusable
 unchanged across every wheel built in a run, verifying it only ever
 installs from an affirmatively trusted, governed, non-public package feed
-(`_governed_feed_configured`), and verifying a specific source's own
-`[build-system].requires` floor is actually satisfied by the locked
-versions before a `--no-build-isolation` build runs
-(`_assert_toolchain_satisfies_build_requires`), since that build mode can
-never substitute a different version to compensate.
+(`_governed_feed_configured`), and verifying a source's own `[build-
+system].requires` floor is satisfied by the locked versions before a
+`--no-build-isolation` build runs (`_assert_toolchain_satisfies_build_
+requires`), since that build mode can never substitute a different
+version to compensate.
 """
 from __future__ import annotations
 
@@ -64,12 +64,11 @@ _LOCKED_TOOLCHAIN_PACKAGES = ("setuptools", "wheel", "packaging")
 #: --no-build-isolation` build itself in `build_python_artifacts.py`) --
 #: this repo's own managed-runtime probes apply the same isolation (see
 #: `plugins/agent-worktrees/scripts/install.sh:1025-1031`). This is a
-#: DIFFERENT vector from the `-I` (isolated mode) flag also passed to
-#: every direct `python -c <script>` invocation in this module: `-I`
-#: closes the CURRENT-DIRECTORY `sys.path` injection a local `json.py`/
-#: `platform.py` could otherwise exploit to forge a `-c` script's own
-#: stdlib imports, which stripping these two environment variables alone
-#: does not prevent.
+#: DIFFERENT vector from the `-I` flag also passed to every direct
+#: `python -c <script>` invocation in this module: `-I` closes the
+#: CURRENT-DIRECTORY `sys.path` injection a local `json.py`/`platform.py`
+#: could otherwise exploit to forge a `-c` script's imports, which
+#: stripping these two variables alone does not prevent.
 _PYTHON_RUNTIME_ENV_VARS = ("PYTHONPATH", "PYTHONHOME")
 
 
@@ -105,19 +104,16 @@ def _credential_free_index_identity(url: str) -> str:
     """``url`` with any embedded ``user:pass@`` userinfo, query string, AND
     fragment stripped -- for HUMAN-READABLE DISPLAY only (a diagnostic
     message naming the index a caller validated). `uv`/PEP 508 index URLs
-    may legally carry credentials in any of these three places (e.g. a
-    governed feed using a signed URL with a `?token=...` query parameter,
-    not just userinfo), and none of them must ever be interpolated into a
-    message shown to a human, per this effort's own "never log
-    credentials" validation rule.
+    may legally carry credentials in any of these three places, and none
+    of them must ever be interpolated into a message shown to a human,
+    per this effort's own "never log credentials" rule.
 
-    NEVER used for persistence or identity comparison: stripping the
-    query string discards real distinguishing information a query
-    parameter can legitimately carry (e.g. a tenant/feed selector, not
-    just a credential) -- two URLs differing only by query would
-    collapse to the same redacted string here and be wrongly treated as
-    the same index. `_opaque_index_identity` is the persisted/compared
-    identity; this function is for display only."""
+    NEVER used for persistence or identity comparison: a query parameter
+    can legitimately carry a tenant/feed selector, not just a credential
+    -- two URLs differing only by query would collapse to the same
+    redacted string here and be wrongly treated as the same index.
+    `_opaque_index_identity` is the persisted/compared identity; this
+    function is for display only."""
     parts = urllib.parse.urlsplit(url)
     if not parts.username and not parts.password and not parts.query and not parts.fragment:
         return url
@@ -435,19 +431,16 @@ def _effective_uv_toml_candidates(env: dict) -> list[Path]:
     """The uv.toml file(s) `uv` itself would actually read for index
     config in this environment, in `uv`'s own precedence order -- user-
     level first, then system-level -- matching this repo's own
-    `install.ps1`/`install.sh` identical uv-config-discovery helpers
-    (`Test-UvConfiguredIndex` / `_ensure_uv_index`), rather than a
-    partial, user-level-only reimplementation. Project-level discovery
-    (which takes precedence over BOTH of these) is a separate concern --
-    see `_project_uv_toml_candidates` -- since it is cwd-based rather than
-    environment-based and has its own `pyproject.toml` shape to parse.
+    `install.ps1`/`install.sh` uv-config-discovery helpers
+    (`Test-UvConfiguredIndex` / `_ensure_uv_index`). Project-level
+    discovery (higher precedence than both) is separate -- see
+    `_project_uv_toml_candidates` -- since it is cwd-based with its own
+    `pyproject.toml` shape to parse.
 
     ``UV_CONFIG_FILE`` is EXCLUSIVE in `uv`'s own config resolution: when
-    set, `uv` reads ONLY that file and skips its normal project/user/
-    system discovery entirely -- so this must mirror that explicitly,
-    never additionally (or instead) consulting any of the other paths
-    below while `UV_CONFIG_FILE` is set, which would check a file `uv`
-    itself is NOT reading."""
+    set, `uv` reads ONLY that file and skips project/user/system
+    discovery entirely -- this must mirror that, never additionally
+    consulting the other paths below while it is set."""
     config_file = env.get("UV_CONFIG_FILE")
     if config_file:
         return [Path(config_file)]
@@ -477,21 +470,21 @@ def _effective_default_index_url(env: dict) -> str | None:
     environment, or ``None`` if nothing replaces `uv`'s own implicit
     public-PyPI default. `UV_INDEX` (plural) and a plain `[[index]]` table
     without `default = true` only add a SUPPLEMENTAL index -- `uv` still
-    falls back to public PyPI for anything the supplemental index doesn't
-    resolve, so neither is the effective default. Only `UV_DEFAULT_INDEX`/
-    `UV_INDEX_URL`, the legacy `index-url` key, or an `[[index]]` entry
-    with `default = true` actually replace it.
+    falls back to public PyPI for anything it doesn't resolve, so neither
+    is the effective default. Only `UV_DEFAULT_INDEX`/`UV_INDEX_URL`, the
+    legacy `index-url` key, or an `[[index]]` entry with `default = true`
+    actually replace it.
 
     Checks PROJECT-level config (`_project_uv_toml_candidates`) before
-    user-/system-level config, mirroring uv's own precedence -- a
-    project's own `uv.toml`/`pyproject.toml` can configure (or override)
-    the default index independently of whatever a user- or system-level
-    file says, and a check that only ever consulted user/system config
-    would both miss a project-only governed default and could select the
-    wrong (lower-precedence) URL when a project-level one should win.
-    Project discovery is skipped entirely when `UV_CONFIG_FILE` is set,
-    per that variable's own exclusivity (see `_effective_uv_toml_
-    candidates`'s docstring)."""
+    user-/system-level config, mirroring uv's own precedence -- a check
+    that only ever consulted user/system config would both miss a
+    project-only governed default and could select the wrong (lower-
+    precedence) URL when a project-level one should win. Project
+    discovery is skipped when `UV_CONFIG_FILE` is set (see `_effective_uv_toml_
+    candidates`'s docstring). An EXISTING higher-precedence candidate
+    that fails to parse is never skipped in favor of a lower-precedence
+    one -- it fails closed (returns ``None``) instead, since `uv` itself
+    would not silently fall through to a different file either."""
     for var in _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS:
         value = env.get(var)
         if value:
@@ -506,13 +499,24 @@ def _effective_default_index_url(env: dict) -> str | None:
         try:
             data = tomllib.loads(candidate.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
-            continue
+            # This candidate EXISTS at a real precedence tier `uv` itself
+            # would read -- a parse failure here means `uv` would also
+            # fail (or behave unpredictably) on it, never silently fall
+            # through to a LOWER-precedence file instead. Continuing past
+            # it could select a lower-precedence URL `uv` itself would
+            # never actually use, violating this gate's fail-closed
+            # contract. Fail closed: report no validated index at all.
+            return None
         if not isinstance(data, dict):
-            continue
+            return None
         if is_pyproject:
             tool = data.get("tool")
             data = tool.get("uv") if isinstance(tool, dict) else None
             if not isinstance(data, dict):
+                # Not malformed -- a `pyproject.toml` simply carrying no
+                # `[tool.uv]` table at all is a valid file; it just has
+                # no uv config in it, so lower-precedence tiers are still
+                # consulted normally.
                 continue
         index_url = data.get("index-url")
         if isinstance(index_url, str) and index_url:
