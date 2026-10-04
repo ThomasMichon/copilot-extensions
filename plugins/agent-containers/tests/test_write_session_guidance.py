@@ -137,6 +137,14 @@ def test_main_always_emits_empty_object(monkeypatch, capsys):
     assert capsys.readouterr().out == "{}"
 
 
+# This test's own real-process cost (pwsh -> python3 -> bash, three
+# interpreter/runtime startups chained together) is legitimately higher and
+# more CI-variance-prone than the rest of this suite's pure-unit tests (see
+# issue #4653: observed a >30s pytest-timeout CI flake with no reproducible
+# code-level hang -- local runs consistently complete in well under a
+# second). A dedicated, more generous timeout bounds that real variance
+# without masking an actual hang (a true deadlock would still fail this).
+@pytest.mark.timeout(90)
 def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
     shell = shutil.which("pwsh") or shutil.which("powershell.exe")
     if not shell:
@@ -149,6 +157,13 @@ def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
         "HOME": str(home),
         "USERPROFILE": str(home),
         "COPILOT_PLUGIN_ROOT": str(_PLUGIN),
+        # Every test invocation uses a fresh HOME, so pwsh never finds a
+        # cached "last checked" timestamp and would otherwise attempt a
+        # real network call on every run (an update-notification check --
+        # see about_Update_Notifications). That network dependency serves
+        # no purpose for a non-interactive, one-shot script and is a
+        # plausible source of CI-only latency; disable it outright.
+        "POWERSHELL_UPDATECHECK": "Off",
     }
     for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"):
         env.pop(name, None)
