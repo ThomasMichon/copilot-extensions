@@ -1,9 +1,0 @@
-{
-  "comment": "session-sync: durable local change-tracking so routine syncs skip unchanged sessions, with segmented full reconciliation to bound push size for large corpora",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "minor"
-    }
-  ]
-}

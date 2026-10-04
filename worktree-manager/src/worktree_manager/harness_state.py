@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -317,6 +318,123 @@ def build_repos(home_dir: Path | None = None) -> list[RepoInfo]:
             pr_model=pr_model(path),
         ))
     return sorted(out, key=lambda r: (not r.is_project, r.name))
+
+
+def _exact_platform_key() -> str:
+    """This platform's own ``repos.yaml`` key, with no cross-platform fallback.
+
+    Unlike ``_platform_key()`` (used by ``build_repos()``'s deliberate
+    cross-platform fallback chain, so a repo without its *own* machine's
+    entry still resolves to whichever path is registered), this never falls
+    back to another OS's entry and distinguishes WSL from plain Linux (the
+    same ``/proc/version`` probe ``terminal_fragment.detect_platform()``
+    uses) — ``mis_registered_repos()`` must only ever inspect the path a repo
+    actually registered for *this exact* platform, never borrow a sibling
+    platform's path and judge it as if it were this machine's own.
+
+    ``repos.yaml`` itself only ever carries ``windows``/``wsl``/``linux``
+    keys — agent-worktrees' own platform resolver maps macOS to ``linux``
+    too (there is no ``macos`` key), so this never returns anything else.
+    """
+    if os.name == "nt":
+        return "windows"
+    try:
+        with open("/proc/version") as f:
+            if "microsoft" in f.read().lower():
+                return "wsl"
+    except OSError:
+        pass
+    return "linux"
+
+
+def _is_real_git_checkout(path: Path) -> bool | None:
+    """Probe git itself rather than trust `.git`/``HEAD``+``objects`` markers.
+
+    A marker-only check (a bare, possibly empty ``.git`` directory; a
+    ``HEAD``+``objects`` pair left over from a partial/corrupt bare clone)
+    can pass a filesystem-only test while being unusable to git. Ask git
+    directly whether ``path`` is a bare repository or is the exact top-level
+    of a working-tree checkout, with ambient ``GIT_*`` overrides cleared so
+    an unrelated repo's env (``GIT_DIR``, ``GIT_WORK_TREE``) can't skew the
+    probe.
+
+    Returns ``True``/``False`` when the probe ran conclusively, or ``None``
+    when git itself couldn't be probed (binary missing, timeout) — an
+    inconclusive probe must never be reported as proof of mis-registration.
+    """
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    try:
+        bare = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--is-bare-repository"],
+            capture_output=True, text=True, timeout=5, env=env,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if bare.stdout.strip() == "true":
+        return True
+    if bare.returncode != 0:
+        return False
+    try:
+        top = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=5, env=env,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if top.returncode != 0:
+        return False
+    try:
+        return Path(top.stdout.strip()).resolve() == path.resolve()
+    except OSError:
+        return False
+
+
+def mis_registered_repos(home_dir: Path | None = None) -> list[tuple[str, str, str]]:
+    """``repos.yaml`` entries whose registered checkout doesn't actually resolve.
+
+    Read-only counterpart to a ``repos.yaml`` entry going stale (moved,
+    renamed, or never actually checked out on this machine) — surfaced by
+    ``worktree-manager doctor`` alongside plugin-catalog alignment. Each
+    result is ``(repo_name, status, detail)`` where ``status`` is one of:
+
+    * ``"missing"`` — the registered path doesn't exist on disk.
+    * ``"not-git"`` — the path exists but doesn't resolve to a real git
+      checkout (confirmed by probing git itself).
+    * ``"unknown"`` — the git probe itself couldn't run (git missing,
+      timed out). This is **not** confirmed drift — `doctor`'s own
+      prerequisite section separately reports git availability — but it
+      must not be silently folded into a clean report either; the caller
+      decides how to surface it.
+
+    A repo without a path registered for *this exact* platform is not
+    itself flagged here (a legitimate reference-only entry can be pathless
+    on a given machine, and another platform's entry is never a stand-in
+    for this one). A home-relative path (``~/src/repo``) is expanded before
+    checking, matching how ``agent-worktrees`` itself resolves a registered
+    path.
+    """
+    reg = repos_registry(home_dir)
+    pkey = _exact_platform_key()
+    findings: list[tuple[str, str, str]] = []
+    for name, entry in (reg.get("repos") or {}).items():
+        entry = entry or {}
+        raw_path = entry.get(pkey)
+        if not raw_path:
+            continue
+        path = Path(raw_path).expanduser()
+        if not path.exists():
+            findings.append((name, "missing", f"registered path does not exist: {raw_path}"))
+            continue
+        is_checkout = _is_real_git_checkout(path)
+        if is_checkout is False:
+            findings.append((name, "not-git", f"registered path is not a git checkout: {raw_path}"))
+        elif is_checkout is None:
+            findings.append((
+                name, "unknown",
+                f"could not verify (git probe failed/unavailable): {raw_path}",
+            ))
+    return findings
+
 
 
 def build_projects(home_dir: Path | None = None) -> list[ProjectInfo]:

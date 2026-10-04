@@ -1,9 +1,0 @@
-{
-  "comment": "Fix a real-process leak in test_self_update_without_git_falls_back_to_tarball: mock the daemon cutover step (matching every sibling self_update test) so this test no longer spawns a real detached background process that could leak host-level side effects",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

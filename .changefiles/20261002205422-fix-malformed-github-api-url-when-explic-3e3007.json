@@ -1,9 +1,0 @@
-{
-  "comment": "Fix malformed GitHub API URL when explicitly reindexing a github:X:issues/:pulls derived source (resolves to the parent spec's bare name, same fix class as :commits in #4948)",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

@@ -56,6 +56,7 @@ def test_doctor_json_includes_daemon_health(monkeypatch, capsys):
     monkeypatch.setattr(doctor_cli, "core_status", _core)
     monkeypatch.setattr(doctor_cli, "self_status", _self)
     monkeypatch.setattr(doctor_cli, "coverage", lambda: _cov())
+    monkeypatch.setattr(doctor_cli, "mis_registered_repos", lambda: [])
     monkeypatch.setattr(source_config, "configured_source", lambda: ("", ""))
     monkeypatch.setattr(source_config, "resolved_repo", lambda: "repo")
     monkeypatch.setattr(source_config, "resolved_ref", lambda: "dev")
@@ -80,6 +81,7 @@ def test_doctor_json_includes_daemon_health(monkeypatch, capsys):
         "phantom": [],
         "published_prereq_gaps": [],
     }
+    assert payload["repo_registration"] == {"ok": True, "problems": [], "unknown": []}
 
 
 def test_doctor_apply_renders_daemon_actions(monkeypatch, capsys):
@@ -89,6 +91,7 @@ def test_doctor_apply_renders_daemon_actions(monkeypatch, capsys):
     monkeypatch.setattr(doctor_cli, "core_status", _core)
     monkeypatch.setattr(doctor_cli, "self_status", _self)
     monkeypatch.setattr(doctor_cli, "coverage", lambda: _cov())
+    monkeypatch.setattr(doctor_cli, "mis_registered_repos", lambda: [])
     monkeypatch.setattr(source_config, "configured_source", lambda: ("", ""))
     monkeypatch.setattr(source_config, "resolved_repo", lambda: "repo")
     monkeypatch.setattr(source_config, "resolved_ref", lambda: "dev")
@@ -131,11 +134,12 @@ def test_doctor_apply_renders_daemon_actions(monkeypatch, capsys):
     assert "duplicate_resident: pid 202 -> terminated (fake)" in out
 
 
-def _patch_common(monkeypatch, doctor_cli, source_config, *, cov):
+def _patch_common(monkeypatch, doctor_cli, source_config, *, cov, repo_problems=()):
     monkeypatch.setattr(doctor_cli, "detect_baseline", lambda: [_status(True)])
     monkeypatch.setattr(doctor_cli, "core_status", _core)
     monkeypatch.setattr(doctor_cli, "self_status", _self)
     monkeypatch.setattr(doctor_cli, "coverage", lambda: cov)
+    monkeypatch.setattr(doctor_cli, "mis_registered_repos", lambda: list(repo_problems))
     monkeypatch.setattr(source_config, "configured_source", lambda: ("", ""))
     monkeypatch.setattr(source_config, "resolved_repo", lambda: "repo")
     monkeypatch.setattr(source_config, "resolved_ref", lambda: "dev")
@@ -245,3 +249,67 @@ def test_doctor_unreachable_marketplace_does_not_fail_alignment(monkeypatch, cap
     assert wm.main(["doctor"]) == 0
     out = capsys.readouterr().out
     assert "no marketplace reachable" in out
+
+
+def test_doctor_reports_clean_repo_registration(monkeypatch, capsys):
+    from worktree_manager import doctor_cli, source_config
+
+    _patch_common(monkeypatch, doctor_cli, source_config, cov=_cov())
+
+    assert wm.main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "repo registration:" in out
+    assert "every registered repo with a checkout path resolves to a real git checkout" in out
+
+
+def test_doctor_fails_on_mis_registered_repo(monkeypatch, capsys):
+    from worktree_manager import doctor_cli, source_config
+
+    _patch_common(
+        monkeypatch, doctor_cli, source_config,
+        cov=_cov(),
+        repo_problems=[("moved-repo", "missing", "registered path does not exist: /tmp/gone")],
+    )
+
+    assert wm.main(["doctor"]) == 1
+    out = capsys.readouterr().out
+    assert "registered repos whose checkout doesn't resolve" in out
+    assert "moved-repo: registered path does not exist: /tmp/gone" in out
+
+    payload_rc = wm.main(["doctor", "--json"])
+    assert payload_rc == 0  # json mode never gates on doctor findings
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["repo_registration"] == {
+        "ok": False,
+        "problems": [
+            {"repo": "moved-repo", "status": "missing", "detail": "registered path does not exist: /tmp/gone"}
+        ],
+        "unknown": [],
+    }
+
+
+def test_doctor_surfaces_inconclusive_repo_probe_without_failing(monkeypatch, capsys):
+    """An 'unknown' (git-probe-failed) finding must be visibly reported, but
+    must not fail doctor's exit status -- it isn't confirmed drift."""
+    from worktree_manager import doctor_cli, source_config
+
+    _patch_common(
+        monkeypatch, doctor_cli, source_config,
+        cov=_cov(),
+        repo_problems=[("flaky-repo", "unknown", "could not verify (git probe failed/unavailable): /src/flaky")],
+    )
+
+    assert wm.main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "could not verify (git probe failed/unavailable) — not treated as drift" in out
+    assert "flaky-repo: could not verify" in out
+
+    payload_rc = wm.main(["doctor", "--json"])
+    assert payload_rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["repo_registration"]["ok"] is True
+    assert payload["repo_registration"]["problems"] == []
+    assert payload["repo_registration"]["unknown"] == [
+        {"repo": "flaky-repo", "detail": "could not verify (git probe failed/unavailable): /src/flaky"}
+    ]
+

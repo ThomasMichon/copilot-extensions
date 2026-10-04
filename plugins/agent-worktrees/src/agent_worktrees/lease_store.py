@@ -20,6 +20,7 @@ from .lease_protocol import (
     Resource,
     format_timestamp,
     parse_record,
+    parse_timestamp,
     ref_for,
     resource,
     resource_from_ref,
@@ -287,6 +288,146 @@ class GitLeaseStore:
         except _CASConflict:
             raise LeaseLost("release compare-and-swap failed; the lease is lost") from None
         return self._snapshot(item, oid, record, now)
+
+    def squash_stale(
+        self, *, retention_days: int, kind: str | None = None, dry_run: bool = False,
+    ) -> list[dict[str, str]]:
+        """Collapse each RELEASED lease ref past ``retention_days`` to a
+        minimal **two-commit** history -- a synthetic ``acquire`` root
+        (reusing the terminal record's own real ``lease_id``/``holder``/
+        ``issued_at``/``context``, so the original acquisition time and
+        who held it both survive) followed by the unmodified terminal
+        ``release`` record -- never fewer: the protocol's own
+        self-validation (:meth:`_validate_transition`) hard-requires the
+        history's root commit to be an ``acquire`` event, so a single
+        parentless ``release`` commit would fail every future read. Never
+        deleted either, so ``acquire()``'s "absent, released, or stale"
+        contract is untouched and the terminal disposition remains
+        directly inspectable -- only the discarded intermediate
+        renew/takeover/transfer events stop making the ref's history grow
+        forever (worktree-claims-transitive-finalization Phase 5).
+
+        Only a ``released`` ref is ever touched -- a live/stale ``leased``
+        ref is never squashed, regardless of age (its own TTL expiry is
+        the only thing that ever makes it re-acquirable). Best-effort per
+        ref: a lost CAS race (a concurrent ``acquire()`` on the same
+        now-released resource) or a transient Git failure skips that one
+        ref rather than aborting the whole sweep. A ref already at or
+        below the minimal two-commit shape is left untouched.
+
+        ``dry_run=True`` reports every eligible ref (``old_oid`` only,
+        ``new_oid`` is empty) without pushing anything -- the history-length
+        probe is still a real (read-only) network fetch, but no force-push
+        ever happens.
+
+        Returns one ``{"ref", "old_oid", "new_oid"}`` entry per ref
+        actually (or, under ``dry_run``, would-be) squashed, oldest-ref-first
+        (by resource identity, via :meth:`list`'s own sort) for a stable,
+        reviewable report.
+        """
+        cutoff = self._utc_now() - timedelta(days=retention_days)
+        squashed: list[dict[str, str]] = []
+        for snapshot in self.list(kind=kind):
+            record = snapshot.record
+            if record.state != "released":
+                continue
+            if parse_timestamp(record.renewed_at) > cutoff:
+                continue
+            if self._history_length(snapshot.ref) <= 2:
+                continue
+            if dry_run:
+                squashed.append(
+                    {"ref": snapshot.ref, "old_oid": snapshot.oid, "new_oid": ""}
+                )
+                continue
+            try:
+                new_oid = self._squash_ref(snapshot.ref, snapshot.oid, record)
+            except (_CASConflict, GitError):
+                continue
+            if new_oid != snapshot.oid:
+                squashed.append(
+                    {"ref": snapshot.ref, "old_oid": snapshot.oid, "new_oid": new_oid}
+                )
+        return squashed
+
+    def _history_length(self, ref: str) -> int:
+        """Total commit count reachable from ``ref``, or a large sentinel
+        when it can't be determined (never mistaken for "already minimal",
+        which would wrongly skip a genuine squash candidate)."""
+        with tempfile.TemporaryDirectory(prefix="agent-leases-gc-check-") as temp:
+            repo = Path(temp) / "repo.git"
+            self._git(["init", "--bare", str(repo)])
+            fetched = self._git(
+                [f"--git-dir={repo}", "fetch", "--quiet", "--no-tags",
+                 self.settings.origin, ref],
+                check=False,
+            )
+            if fetched.returncode != 0:
+                return 1 << 30
+            count = self._git(
+                [f"--git-dir={repo}", "rev-list", "--count", "FETCH_HEAD"], check=False,
+            )
+            return int(count.stdout.strip()) if count.returncode == 0 else (1 << 30)
+
+    def _squash_ref(self, ref: str, expected_oid: str, record: LeaseRecord) -> str:
+        """Push a minimal synthetic-acquire-root + real-release-leaf pair
+        carrying ``record`` over ``ref``, iff the remote still points at
+        ``expected_oid`` -- the same compare-and-swap discipline
+        :meth:`_transition` uses, minus the parent-fetch step (a squash
+        never needs the old history, only the terminal record it's
+        replacing with an equivalent minimal chain).
+        """
+        root_record = LeaseRecord(
+            schema_version=record.schema_version,
+            resource=record.resource,
+            state="leased",
+            event="acquire",
+            lease_id=record.lease_id,
+            holder=record.holder,
+            issued_at=record.issued_at,
+            renewed_at=record.issued_at,
+            expires_at=record.issued_at,
+            ttl_seconds=0,
+            context=record.context,
+        )
+        with tempfile.TemporaryDirectory(prefix="agent-leases-gc-write-") as temp:
+            repo = Path(temp) / "repo.git"
+            self._git(["init", "--bare", str(repo)])
+            tree = self._git([f"--git-dir={repo}", "mktree"], input_text="").stdout.strip()
+            env = {
+                "GIT_AUTHOR_NAME": "agent-leases",
+                "GIT_AUTHOR_EMAIL": "agent-leases@localhost",
+                "GIT_COMMITTER_NAME": "agent-leases",
+                "GIT_COMMITTER_EMAIL": "agent-leases@localhost",
+            }
+            root_oid = self._git(
+                [f"--git-dir={repo}", "commit-tree", tree],
+                input_text=serialize_record(root_record) + "\n",
+                extra_env=env,
+            ).stdout.strip()
+            validate_oid(root_oid)
+            oid = self._git(
+                [f"--git-dir={repo}", "commit-tree", tree, "-p", root_oid],
+                input_text=serialize_record(record) + "\n",
+                extra_env=env,
+            ).stdout.strip()
+            validate_oid(oid)
+            pushed = self._git(
+                [f"--git-dir={repo}", "push", "--porcelain",
+                 f"--force-with-lease={ref}:{expected_oid}",
+                 self.settings.origin, f"{oid}:{ref}"],
+                check=False,
+            )
+            if pushed.returncode != 0:
+                remote_oid_now = self._remote_oid(ref)
+                if remote_oid_now == oid:
+                    return oid
+                if remote_oid_now != expected_oid:
+                    raise _CASConflict()
+                self._raise_git_error(pushed, "push lease squash")
+            if self._remote_oid(ref) != oid:
+                raise _CASConflict()
+            return oid
 
     def inspect(self, kind: str, key: str) -> LeaseSnapshot | None:
         """Read and validate the resource's current ref directly from the remote."""

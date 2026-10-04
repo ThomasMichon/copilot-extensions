@@ -1,9 +1,0 @@
-{
-  "comment": "Template bare agent-dispatch/agent-bridge commands in troubleshooting-agent-dispatch SKILL.md to the required catalog-argv[0] placeholder form.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

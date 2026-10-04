@@ -1,9 +1,0 @@
-{
-  "comment": "Fix a real spawn-starvation bug: a confirmed-gone body's session_handle was never marked release_requested, so reserve_spawn kept carrying it forward (across every task sharing the lane's exclusive_key) and retrying a resume against a dead session until the attempt budget dead-lettered the task -- even after an operator rearm, since rearm_spawn didn't set release_requested either and reserve_spawn's retirement check didn't treat 'rearmed' as terminal. fail_spawn/settle_spawn gained an explicit release_requested flag the caller sets only once independently confirmed gone; every genuine confirmed-gone recovery path in supervisor.py/doctor.py/reattach.py now passes it; rearm_spawn sets it too; reserve_spawn's retirement check now also accepts 'rearmed'. Also: configure_file_logging (new) wires a real rotating file handler for the agent-dispatch logger hierarchy into both the coordinator and supervisor daemon entrypoints -- previously every log.info/warning/exception call across the whole package was silently dropped (no handler, headless pythonw.exe process, no console), making this exact class of bug invisible without direct SQLite archaeology. Found and fixed live while debugging a stalled gim-home/odsp-web-harness dispatch lane (see #4978).",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "reviewer-loop stale_after_days + verification wiring",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

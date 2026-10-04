@@ -1,9 +1,0 @@
-{
-  "comment": "New-worktree dialog: Enter in the prompt box jumps straight to Create (not the options list). All ModalScreen subclasses (17 across 8 files) switch from a translucent 55%-alpha backdrop to an opaque one -- profiled: the translucency forced a full compositor re-render on nearly every keystroke/nav-key, measurably slowing typing in every modal, worst on Windows.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

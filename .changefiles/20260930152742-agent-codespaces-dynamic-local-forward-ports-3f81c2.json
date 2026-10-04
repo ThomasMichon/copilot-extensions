@@ -1,9 +1,0 @@
-{
-  "comment": "agent-codespaces keeps fixed --forward host ports as the default, adds explicit --forward 0:VENUE_PORT support where the Connection Owner records the assigned host port back into launch JSON and rejoins, preserves that assigned port across reconnects and repeated dynamic launches while the Owner owns it, reassigns when a dynamic port becomes unbindable, reports pending assignment without failing an otherwise registered session, rejects --ttl-seconds with detached lifecycle commands because it applies only to attached mode, and preserves existing Connection Owner scheduled-task/systemd services when the runtime status query is unknown instead of treating transient query failure as explicit disablement.",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

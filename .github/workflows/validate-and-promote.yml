@@ -819,13 +819,26 @@ jobs:
           # function's own docstring for why a shortened prefix risks a
           # release-tag collision between two distinct commits.
           release_tag="coverage-baselines-${DEV_SHA}"
-          if gh release view "$release_tag" >/dev/null 2>&1; then
-            gh release upload "$release_tag" coverage-baselines/*.json --clobber
-          else
-            gh release create "$release_tag" --target "$DEV_SHA" \
-              --title "Coverage baselines @ ${DEV_SHA:0:12}" \
-              --notes "Per-plugin coverage baselines measured against dev commit $DEV_SHA. Correlated via the small pointer files promote_release.py checks into .github/coverage-baselines/ on main -- see tools/coverage_guided_selection/correlation.py." \
-              coverage-baselines/*.json
+          # Attempt the upload directly first, rather than `gh release
+          # view` then branching on its result: a separate check-then-act
+          # is a real TOCTOU race against anything else that can touch
+          # this release between the two calls -- confirmed live (a run
+          # whose `view` found the release, then whose own very next
+          # `upload` 404'd because it had already vanished by then).
+          # `gh release upload` itself fails loudly (and meaningfully,
+          # not just "not found") if the release doesn't exist yet, so
+          # that single failure is the only signal this needs: fall back
+          # to `create` exactly then, never speculatively.
+          if ! upload_err=$(gh release upload "$release_tag" coverage-baselines/*.json --clobber 2>&1); then
+            echo "$upload_err"
+            if echo "$upload_err" | grep -qi "release not found\|404"; then
+              gh release create "$release_tag" --target "$DEV_SHA" \
+                --title "Coverage baselines @ ${DEV_SHA:0:12}" \
+                --notes "Per-plugin coverage baselines measured against dev commit $DEV_SHA. Correlated via the small pointer files promote_release.py checks into .github/coverage-baselines/ on main -- see tools/coverage_guided_selection/correlation.py." \
+                coverage-baselines/*.json
+            else
+              exit 1
+            fi
           fi
       - name: Land the candidate branch on main via PR + squash-merge
         id: land

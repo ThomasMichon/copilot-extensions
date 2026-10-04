@@ -362,3 +362,145 @@ def test_applied_push_with_lost_status_is_reported_as_success(
     client._git = unreliable_git  # type: ignore[method-assign]
     acquired = client.acquire("machine", "ambiguous-push", "holder")
     assert client.inspect("machine", "ambiguous-push").oid == acquired.oid
+
+
+def test_squash_stale_collapses_an_old_released_lease(
+    remote: Path, settings: LeaseSettings,
+) -> None:
+    """worktree-claims-transitive-finalization Phase 5: a `released` ref
+    well past the retention window collapses to a minimal two-commit
+    history (a synthetic acquire root + the unmodified terminal release)
+    -- never deleted, and never a single parentless commit either (the
+    protocol's own self-validation requires the history's root to be an
+    acquire event)."""
+    client = store(settings)
+    acquired = client.acquire("machine", "stale-history", "holder")
+    renewed = client.renew("machine", "stale-history", acquired.oid)
+    released = client.release("machine", "stale-history", renewed.oid)
+    assert commit_parents(remote, released.oid) == [released.oid, renewed.oid]
+
+    later = store(settings, now=BASE + timedelta(days=31))
+    report = later.squash_stale(retention_days=30)
+
+    assert report == [
+        {"ref": released.ref, "old_oid": released.oid,
+         "new_oid": remote_oid(remote, released.ref)}
+    ]
+    new_oid = remote_oid(remote, released.ref)
+    assert new_oid != released.oid
+    parents = commit_parents(remote, new_oid)
+    assert len(parents) == 2
+    assert parents[0] == new_oid
+    squashed = later.inspect("machine", "stale-history")
+    assert squashed.record.state == "released"
+    assert squashed.record.holder == "holder"
+    assert squashed.record.lease_id == released.record.lease_id
+    assert squashed.record.issued_at == released.record.issued_at
+    assert squashed.record.renewed_at == released.record.renewed_at
+    assert squashed.live is False
+
+
+def test_squash_stale_skips_a_recently_released_lease(
+    remote: Path, settings: LeaseSettings,
+) -> None:
+    client = store(settings)
+    released = client.release(
+        "machine", "fresh", client.acquire("machine", "fresh", "holder").oid
+    )
+
+    same_day = store(settings, now=BASE + timedelta(hours=1))
+    assert same_day.squash_stale(retention_days=30) == []
+    assert remote_oid(remote, released.ref) == released.oid
+
+
+def test_squash_stale_never_touches_a_live_lease_regardless_of_age(
+    remote: Path, settings: LeaseSettings,
+) -> None:
+    client = store(settings)
+    acquired = client.acquire("machine", "still-leased", "holder")
+
+    much_later = store(settings, now=BASE + timedelta(days=365))
+    assert much_later.squash_stale(retention_days=30) == []
+    assert remote_oid(remote, acquired.ref) == acquired.oid
+
+
+def test_squash_stale_is_idempotent_on_an_already_squashed_ref(
+    settings: LeaseSettings,
+) -> None:
+    client = store(settings)
+    acquired = client.acquire("machine", "twice", "holder")
+    renewed = client.renew("machine", "twice", acquired.oid)
+    client.release("machine", "twice", renewed.oid)
+    later = store(settings, now=BASE + timedelta(days=60))
+    first = later.squash_stale(retention_days=30)
+    assert len(first) == 1
+    second = later.squash_stale(retention_days=30)
+    assert second == []
+
+
+def test_squash_stale_filters_by_kind(
+    remote: Path, settings: LeaseSettings,
+) -> None:
+    client = store(settings)
+    m_acquired = client.acquire("machine", "m-ref", "holder")
+    m_renewed = client.renew("machine", "m-ref", m_acquired.oid)
+    m = client.release("machine", "m-ref", m_renewed.oid)
+    c_acquired = client.acquire("codespace", "c-ref", "holder")
+    c_renewed = client.renew("codespace", "c-ref", c_acquired.oid)
+    c = client.release("codespace", "c-ref", c_renewed.oid)
+    later = store(settings, now=BASE + timedelta(days=60))
+    report = later.squash_stale(retention_days=30, kind="codespace")
+    assert [entry["ref"] for entry in report] == [c.ref]
+    assert remote_oid(remote, m.ref) == m.oid
+
+
+def test_squash_stale_dry_run_reports_without_pushing(
+    remote: Path, settings: LeaseSettings,
+) -> None:
+    client = store(settings)
+    acquired = client.acquire("machine", "preview", "holder")
+    renewed = client.renew("machine", "preview", acquired.oid)
+    released = client.release("machine", "preview", renewed.oid)
+    later = store(settings, now=BASE + timedelta(days=60))
+
+    report = later.squash_stale(retention_days=30, dry_run=True)
+
+    assert report == [{"ref": released.ref, "old_oid": released.oid, "new_oid": ""}]
+    assert remote_oid(remote, released.ref) == released.oid
+
+
+def test_squash_stale_skips_a_ref_reacquired_mid_sweep(
+    remote: Path, settings: LeaseSettings,
+) -> None:
+    """A concurrent `acquire()` racing in between `squash_stale`'s own
+    `list()` read and its push (another client re-acquiring the resource
+    right after it was released) must never be clobbered -- the push's own
+    compare-and-swap (the same `--force-with-lease` discipline every other
+    lease mutation uses) rejects it, and `squash_stale` skips that ref
+    gracefully rather than raising or corrupting the live lease."""
+    client = store(settings)
+    acquired = client.acquire("machine", "raced", "holder")
+    renewed = client.renew("machine", "raced", acquired.oid)
+    released = client.release("machine", "raced", renewed.oid)
+
+    later = store(settings, now=BASE + timedelta(days=60))
+    racer = store(settings, now=BASE + timedelta(days=60))
+    real_git = later._git
+    reacquired = {}
+
+    def _race_before_push(args, **kwargs):
+        if "push" in args and "--force-with-lease" in " ".join(args):
+            reacquired["snapshot"] = racer.acquire("machine", "raced", "new-holder")
+        return real_git(args, **kwargs)
+
+    later._git = _race_before_push  # type: ignore[method-assign]
+
+    report = later.squash_stale(retention_days=30)
+
+    assert report == []
+    assert "snapshot" in reacquired
+    live = later.inspect("machine", "raced")
+    assert live.record.state == "leased"
+    assert live.record.holder == "new-holder"
+    assert live.oid == reacquired["snapshot"].oid
+    assert remote_oid(remote, released.ref) == reacquired["snapshot"].oid

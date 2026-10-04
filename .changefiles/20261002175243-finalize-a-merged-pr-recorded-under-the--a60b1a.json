@@ -1,9 +1,0 @@
-{
-  "comment": "finalize: a merged PR recorded under the project name (not owner/name) is looked up by its PR URL's repo, so a merged, aligned worktree can finalize",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

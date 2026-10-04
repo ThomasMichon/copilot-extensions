@@ -1,9 +1,0 @@
-{
-  "comment": "defining-subagents: clarify Per-toolset ownership -- dedicated scripts calling a backend directly are fine; only the raw adapter needs wrapping",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

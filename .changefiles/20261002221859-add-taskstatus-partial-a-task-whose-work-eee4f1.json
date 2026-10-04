@@ -1,9 +1,0 @@
-{
-  "comment": "Add TaskStatus.PARTIAL: a task whose worker ran to completion but with one or more individually-failed sources (result_stats.sources_failed) is no longer indistinguishable from a clean complete",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "minor"
-    }
-  ]
-}

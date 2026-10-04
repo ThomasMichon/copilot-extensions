@@ -1,9 +1,0 @@
-{
-  "comment": "related-repo-briefing: fix editing-model ambiguity, cross-reference using-<repo>-<venue> skills, and record machine presence on register-project-entry adoption (closing the setup.ps1-bootstrap gap in directive 3)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -17,6 +17,7 @@ from .pr_cli import (
     _classify_pr_operands,
     _infer_active_repo_slug,
     _tracked_pr_head_evidence,
+    require_claimant_worktree,
 )
 
 
@@ -53,6 +54,10 @@ def _pr_merge_usage() -> None:
     print("  --max-passes N  (sweep+loop) Cap passes (0 = unbounded).", file=out)
     print("  --json          Emit the result JSON on stdout.", file=out)
     print("  Overrides: --host URL (api base), --token TOKEN.", file=out)
+    print(file=out)
+    print("  Run this FROM your own (claimant) worktree -- never from an", file=out)
+    print("  untracked directory or the target repo's own checkout. <owner/name>", file=out)
+    print("  addresses the target; no local checkout of it is required.", file=out)
 
 
 def _pr_merge_print_human(summary: dict) -> None:
@@ -506,6 +511,11 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
     except SystemExit as exc:
         return int(exc.code or 0)
 
+    _claimant_id, claimant_error = require_claimant_worktree("pr-merge")
+    if claimant_error:
+        output.err(claimant_error)
+        return 2
+
     # A repo slug (contains '/') and/or a PR number (all digits) may be given in
     # any order; the slug is optional and inferred below when omitted, so a bare
     # `pr-merge <#>` is never mistaken for a repo.
@@ -537,10 +547,15 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
         if not resolution.resolved:
             output.err(
                 f"pr-merge: {args.repo!r} is not a registered repo this "
-                "machine can resolve a PR binding for -- register it "
-                "(agent-worktrees repos add) or run this from a worktree "
-                "that already has it registered. Refusing to fall back to "
-                "the active project's own binding for a different repo."
+                "machine can resolve a PR binding for. Register it "
+                "(agent-worktrees repos add <name> <path> --remote <url>) "
+                "so its own provider/token/policy can be resolved, then "
+                "retry -- CWD stays your own (claimant) worktree; "
+                f"{args.repo!r} is just the argument, you do not need a "
+                "local checkout of it. Refusing to fall back to the "
+                "active project's own binding for a different repo, and "
+                "do not fall back to gh/az repos/git directly -- that "
+                "skips this command's provider/token/policy resolution."
             )
             return 2
         repo_cfg = resolution.repo_config

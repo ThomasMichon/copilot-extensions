@@ -1,9 +1,0 @@
-{
-  "comment": "local-cache-delivery-primacy Phase 2: refresh a worktree's gitignored *.local.instructions.md siblings before a target.type==local spawn's Copilot CLI process is launched, closing the last local-spawn path create/resume/sessionStart didn't already cover.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

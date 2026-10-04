@@ -1,9 +1,0 @@
-{
-  "comment": "connection-owner: the daemon logs to a size-rotated ~/.agent-codespaces/logs/owner.log, so relay/forward re-establishes are visible when it runs headless",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Clarify auto-complete/auto-merge is not a bypass merge in the PR workflow reference",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

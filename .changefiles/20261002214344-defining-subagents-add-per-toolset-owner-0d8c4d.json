@@ -1,9 +1,0 @@
-{
-  "comment": "defining-subagents: add Per-toolset ownership guidance (consolidate CLI/REST alongside MCP, not just the MCP server)",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

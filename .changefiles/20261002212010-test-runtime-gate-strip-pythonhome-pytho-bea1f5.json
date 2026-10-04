@@ -1,9 +1,0 @@
-{
-  "comment": "test_runtime_gate: strip PYTHONHOME/PYTHONPATH/VIRTUAL_ENV before invoking the fake-runtime interpreter, fixing an encodings bootstrap crash under the coverage-baseline collection harness",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

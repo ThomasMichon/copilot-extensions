@@ -1,9 +1,0 @@
-{
-  "comment": "Add agent-remote-driver: user-global SDK extension for baseline session drivability (cli-default-bridging Phase 1)",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}

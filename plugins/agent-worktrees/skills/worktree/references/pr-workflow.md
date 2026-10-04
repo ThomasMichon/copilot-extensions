@@ -12,6 +12,7 @@ rules.
 
 ## Contents
 - Check the target repo's PR flow first (profiles + verb applicability)
+- Addressing a foreign repo -- no local checkout needed (the claimant contract)
 - Detecting PR mode + where PR config lives (machine-local vs in-repo)
 - Auto-complete/auto-merge is not a bypass -- prefer it, keep watching
 - Default conduct: drive every PR through to merge (waiting policy + sanctioned deviations)
@@ -27,6 +28,45 @@ rules.
 
 Some repos opt into a **pull-request workflow** instead of direct-push
 finalization. A repo is in PR mode when its config sets `pr.enabled: true`.
+
+### Addressing a foreign repo -- no local checkout needed (the claimant contract)
+
+`pr-watch` and `pr-merge` can act on a PR in a repo you have **no local
+checkout of at all** -- the `foreign-repo-pr-operations` capability. The
+contract is fixed, regardless of which repo you're addressing:
+
+- **The owning project is always your CWD.** Run these commands from your
+  own worktree -- the one responsible for the work, and the **claimant**
+  that owns this operation's lifetime. Never run them from an untracked
+  directory, a bare project anchor, or -- the common mistake -- from inside
+  the *target* repo's own checkout.
+- **The target repo is always an explicit argument** (`owner/name` or ADO
+  `project/repo`), never inferred from "whichever repo's checkout I happen
+  to be sitting in." Addressing a repo this way needs it **registered**
+  (`<agent-worktrees catalog argv[0]> repos add <name> <path> --remote <url>`)
+  so its own provider/token/policy can be resolved -- it does **not** need a
+  local worktree of it.
+
+```
+<agent-worktrees catalog argv[0]> pr-watch wait owner/other-repo 42 --timeout 1
+<agent-worktrees catalog argv[0]> pr-merge owner/other-repo 42 --now
+```
+
+Both commands refuse, with actionable guidance, instead of silently doing
+the wrong thing, when:
+- **CWD isn't a tracked worktree** -- there is no claimant to own the
+  operation. The error names the fix: run it from your own worktree.
+- **The target slug isn't a repo this machine can resolve a binding for** --
+  it refuses rather than falling back to *your own* project's
+  provider/token/policy for a *different* repo (which would silently act
+  under the wrong identity/policy).
+
+**If either refusal fires, follow the guidance in the error -- do not fall
+back to `gh`/`az repos`/`git` directly for the same operation.** That skips
+the provider/token/policy resolution this command exists to get right, and
+defeats the point of having one coherent PR surface at all.
+
+
 
 ### Check the target repo's PR flow FIRST -- it is not the same everywhere
 

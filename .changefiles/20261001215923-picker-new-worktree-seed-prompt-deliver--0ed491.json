@@ -1,9 +1,0 @@
-{
-  "comment": "Picker New-worktree seed prompt: deliver pending_seed after launch-session.{ps1,sh} creates a worktree's first live mux session (agent-worktrees embody hook); skip the prompt for No-Mux/Bare.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}
