@@ -24,12 +24,17 @@ examples, logs, screenshots, and generated artifacts.
    exclusive by default (an operator-initiated thread can gain another
    party's participation), so re-check which one actually applies at the
    moment of publishing, not just at the thread's creation.
-2. Determine whether the target host is configured as an operator-only
-   internal host (`internal_host`, e.g. a self-hosted forge where every
-   participant is already a known operator/facility identity). Under the
-   default `disclosure=third-party` policy, an internal host never requires
-   disclosure, regardless of audience -- `disclosure=always` still requires
-   it there too.
+2. Determine whether the host you are about to publish *this specific
+   contribution* to is an operator-only internal host (`internal_host`, e.g.
+   a self-hosted forge where every participant is already a known
+   operator/facility identity). The hook's emitted `internal_host` hint
+   reflects only the local git push target, which is not always where a PR,
+   issue, review, or comment actually publishes (a fork or triangular
+   workflow can push internally while opening against an external upstream)
+   -- confirm the actual destination host matches before treating the
+   exemption as applying. Under the default `disclosure=third-party` policy,
+   a confirmed internal host never requires disclosure, regardless of
+   audience -- `disclosure=always` still requires it there too.
 3. Establish repository ownership as a supporting fact, not the deciding one.
    A local git remote can provide a hint, but it is not proof: forks, mirrors,
    enterprise hosts, and rewritten remotes can be misleading. Compare both

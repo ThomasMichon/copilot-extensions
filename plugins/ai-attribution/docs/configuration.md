@@ -107,16 +107,23 @@ URLs (`git remote set-url --add --push`), every one of them must resolve to a
 configured `internal_host` for the exemption to apply -- one external mirror
 destination is enough to require disclosure.
 
-**Known limitation (accepted, not solved):** this heuristic reflects the
-local git push configuration, not necessarily the actual host a PR, issue, or
-review gets published against -- a fork/triangular workflow can push to one
-remote while its PR opens against a different (forge-determined, not purely
-git-config) upstream. The plugin makes no network call to resolve this
-precisely. The fail-closed design is the deliberate mitigation: the
-exemption only ever activates on an unambiguous local match, so this gap can
-produce a missed exemption (disclosure shown when it strictly wasn't
-required) but never a false exemption (disclosure silently suppressed for a
-contribution that actually reaches a non-internal audience).
+**Known limitation (accepted, mitigated by a conditional hint, not solved):**
+this heuristic reflects the local git push configuration, not necessarily the
+actual host a PR, issue, or review gets published against -- a
+fork/triangular workflow can push to one remote while its PR opens against a
+different (forge-determined, not purely git-config) upstream. The plugin
+makes no network call to resolve this precisely, so the emitted `internal_host`
+guidance is deliberately **conditional, not absolute**: it states the exemption
+applies to a contribution that actually publishes on this resolved push host,
+and directs the agent to confirm the specific surface being published to (the
+PR/issue/comment's own host) matches before relying on it, disclosing
+otherwise. Combined with the fail-closed resolution above (the exemption only
+ever activates on an unambiguous local match), this leaves the residual risk
+at "an agent trusts the hint without checking the actual publish target in a
+fork/triangular workflow" rather than "the hook silently asserts disclosure is
+never required" -- the former is a one-step verification the published
+guidance text itself prompts; the latter is what earlier revisions of this
+hook did and has since been corrected.
 
 The resulting hints are anchored only to the repository named by the
 `sessionStart` payload. Both must be re-derived before publishing to any

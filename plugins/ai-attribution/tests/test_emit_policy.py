@@ -863,7 +863,7 @@ def test_internal_host_omits_disclosure_requirement(tmp_path: Path) -> None:
     )
     for hook in _parity_hooks():
         context = _context(_run(hook, repo, home))
-        assert "operator-only (internal_host); disclosure is never required" in context
+        assert "operator-only (internal_host), so disclosure is not required for a contribution that actually publishes there" in context
         assert "requires a prominent one-line italicized" not in context
 
 
@@ -882,7 +882,7 @@ def test_internal_host_matches_with_an_explicit_url_port(tmp_path: Path) -> None
     )
     for hook in _parity_hooks():
         context = _context(_run(hook, repo, home))
-        assert "operator-only (internal_host); disclosure is never required" in context
+        assert "operator-only (internal_host), so disclosure is not required for a contribution that actually publishes there" in context
 
 
 def test_internal_host_matches_an_unnamespaced_remote(tmp_path: Path) -> None:
@@ -900,7 +900,7 @@ def test_internal_host_matches_an_unnamespaced_remote(tmp_path: Path) -> None:
     )
     for hook in _parity_hooks():
         context = _context(_run(hook, repo, home))
-        assert "operator-only (internal_host); disclosure is never required" in context
+        assert "operator-only (internal_host), so disclosure is not required for a contribution that actually publishes there" in context
 
 
 def test_internal_host_exemption_follows_push_url_not_fetch_url(
@@ -954,7 +954,7 @@ def test_internal_host_exemption_uses_the_configured_push_url(
     )
     for hook in _parity_hooks():
         context = _context(_run(hook, repo, home))
-        assert "operator-only (internal_host); disclosure is never required" in context
+        assert "operator-only (internal_host), so disclosure is not required for a contribution that actually publishes there" in context
 
 
 def test_internal_host_exemption_requires_every_mirrored_push_url_internal(
@@ -1121,7 +1121,7 @@ def test_internal_host_matches_case_insensitively(tmp_path: Path) -> None:
         "internal_host=gitea.example.internal\n",
     )
     context = _context(_run(_native_hook(), repo, home))
-    assert "operator-only (internal_host); disclosure is never required" in context
+    assert "operator-only (internal_host), so disclosure is not required for a contribution that actually publishes there" in context
 
 
 def test_non_internal_host_requires_disclosure_for_third_party_audience(
