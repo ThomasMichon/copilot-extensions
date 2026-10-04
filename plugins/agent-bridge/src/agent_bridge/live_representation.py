@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import re
 import time
+from bisect import bisect_right
 from collections import deque
 from threading import Event, Lock
 from typing import Any
@@ -582,6 +583,7 @@ class LiveEventStore:
             if sdk:
                 with self._lock:
                     old_sdk.setdefault(sdk, []).append(appended)
+        ids = MergedIds(ids)
         merged.merged_into = (old, ids)
         if prior and old.continuity_id:
             with self._lock:
@@ -698,11 +700,28 @@ class LiveEventStore:
 TurnReply = dict[str, Any]
 
 
+class MergedIds(dict):
+    """A merged-away log's id map (its id -> the merged log's id), complete when
+    published and never changed after, with a prefix-max index over its sorted
+    ids so :func:`merged_cursor` bisects instead of scanning the whole map on
+    every reconnect or merge-follow read."""
+
+    def __init__(self, ids: dict[int, int]) -> None:
+        super().__init__(ids)
+        self.keys_sorted = sorted(self)
+        self.prefix_max: list[int] = []
+        for k in self.keys_sorted:
+            prior = self.prefix_max[-1] if self.prefix_max else self[k]
+            self.prefix_max.append(max(self[k], prior))
+
+
 def merged_cursor(ids: dict[int, int], cursor: int) -> int:
     """A read cursor in the merged numbering: the furthest merged id at or
     before it, so a reader never moves back into history it already read
     (``ids`` is exact; a skipped duplicate maps to its earlier retained copy)."""
-    return max([v for k, v in ids.items() if k <= cursor], default=cursor)
+    index = ids if isinstance(ids, MergedIds) else MergedIds(ids)
+    i = bisect_right(index.keys_sorted, cursor)
+    return index.prefix_max[i - 1] if i else cursor
 
 
 def translate_merged_cursor(prev: EventLog, current: EventLog, cursor: int) -> int | None:

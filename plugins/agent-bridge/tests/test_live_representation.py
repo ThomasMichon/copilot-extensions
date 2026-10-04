@@ -1188,6 +1188,24 @@ def test_a_cursor_crosses_a_transitive_merge() -> None:
     assert translate_merged_cursor(x, EventLog(session_id="z"), 1) is None  # a cycle stops
 
 
+def test_merged_cursor_index_matches_a_full_scan() -> None:
+    """The bisected prefix-max index gives exactly the furthest merged id at or
+    before the cursor, never moving back past a retained earlier copy."""
+    import random
+
+    from agent_bridge.live_representation import MergedIds, merged_cursor
+
+    rng = random.Random(4854)  # noqa: S311 -- a reproducible test sample, not crypto
+    for _ in range(200):
+        ids = {k: rng.randint(1, 60) for k in rng.sample(range(0, 40), rng.randint(0, 20))}
+        index = MergedIds(ids)
+        assert index == ids
+        for cursor in range(-1, 45):
+            expected = max([v for k, v in ids.items() if k <= cursor], default=cursor)
+            assert merged_cursor(index, cursor) == expected
+            assert merged_cursor(ids, cursor) == expected  # a plain dict still works
+
+
 def test_a_token_follows_a_transitive_merge() -> None:
     from agent_bridge.result_tokens import _decode_token, _encode_token, _position_token, retarget
 

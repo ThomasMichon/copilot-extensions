@@ -58,48 +58,54 @@ class _SchemaMixin:
                 "idx_live_messages_idempotency ON live_messages(idempotency_key)"
                 " WHERE idempotency_key IS NOT NULL"
             )
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS live_session_aliases ("
-                "alias_session_id TEXT PRIMARY KEY, "
-                "target_session_id TEXT NOT NULL, "
-                "created_at REAL NOT NULL)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_live_session_aliases_target "
-                "ON live_session_aliases(target_session_id)"
-            )
-            # A retired (aliased) id never registers again as its own row. This
-            # daemon resolves an alias before writing, but an older daemon still
-            # serving the same database during a cutover doesn't: its old-id
-            # heartbeat would recreate the folded-away predecessor, which the
-            # worktree's delivery check then picks over the resumed session.
-            # Fenced here, in the database, the old write is a silent no-op.
-            conn.execute(
-                "CREATE TRIGGER IF NOT EXISTS live_sessions_retired_id_fence "
-                "BEFORE INSERT ON live_sessions "
-                "WHEN EXISTS (SELECT 1 FROM live_session_aliases "
-                "WHERE alias_session_id = NEW.session_id) "
-                "BEGIN SELECT RAISE(IGNORE); END"
-            )
-            # An alias outlives its target only by mistake: an older daemon
-            # deregistering the current id deletes just its row, which would
-            # leave the retired ids pointing at nothing -- and, through the
-            # fence above, unable ever to register again. Cleaned up here, in
-            # the database, every daemon's delete takes its aliases with it.
-            # (A rollover repoints aliases before deleting the predecessor.)
-            conn.execute(
-                "CREATE TRIGGER IF NOT EXISTS live_sessions_drop_orphaned_aliases "
-                "AFTER DELETE ON live_sessions "
-                "BEGIN DELETE FROM live_session_aliases "
-                "WHERE target_session_id = OLD.session_id; END"
-            )
-            # The registering process's start time: with the pid, it tells a
-            # same-process resume from an unrelated process that reused the pid.
-            if "process_started_at" not in {
-                r[1] for r in conn.execute("PRAGMA table_info(live_sessions)")
-            }:
-                conn.execute("ALTER TABLE live_sessions ADD COLUMN process_started_at REAL")
+            self._ensure_live_session_aliases(conn)
             conn.commit()
+
+    def _ensure_live_session_aliases(self, conn: sqlite3.Connection) -> None:
+        """Schema v24, idempotently: the alias table, its two triggers and
+        ``live_sessions.process_started_at`` -- shared by the v24 migration and
+        the every-init ensure path so neither depends on the other."""
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS live_session_aliases ("
+            "alias_session_id TEXT PRIMARY KEY, "
+            "target_session_id TEXT NOT NULL, "
+            "created_at REAL NOT NULL)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_live_session_aliases_target "
+            "ON live_session_aliases(target_session_id)"
+        )
+        # A retired (aliased) id never registers again as its own row. This
+        # daemon resolves an alias before writing, but an older daemon still
+        # serving the same database during a cutover doesn't: its old-id
+        # heartbeat would recreate the folded-away predecessor, which the
+        # worktree's delivery check then picks over the resumed session.
+        # Fenced here, in the database, the old write is a silent no-op.
+        conn.execute(
+            "CREATE TRIGGER IF NOT EXISTS live_sessions_retired_id_fence "
+            "BEFORE INSERT ON live_sessions "
+            "WHEN EXISTS (SELECT 1 FROM live_session_aliases "
+            "WHERE alias_session_id = NEW.session_id) "
+            "BEGIN SELECT RAISE(IGNORE); END"
+        )
+        # An alias outlives its target only by mistake: an older daemon
+        # deregistering the current id deletes just its row, which would
+        # leave the retired ids pointing at nothing -- and, through the
+        # fence above, unable ever to register again. Cleaned up here, in
+        # the database, every daemon's delete takes its aliases with it.
+        # (A rollover repoints aliases before deleting the predecessor.)
+        conn.execute(
+            "CREATE TRIGGER IF NOT EXISTS live_sessions_drop_orphaned_aliases "
+            "AFTER DELETE ON live_sessions "
+            "BEGIN DELETE FROM live_session_aliases "
+            "WHERE target_session_id = OLD.session_id; END"
+        )
+        # The registering process's start time: with the pid, it tells a
+        # same-process resume from an unrelated process that reused the pid.
+        if "process_started_at" not in {
+            r[1] for r in conn.execute("PRAGMA table_info(live_sessions)")
+        }:
+            conn.execute("ALTER TABLE live_sessions ADD COLUMN process_started_at REAL")
 
     def _ensure_columns(self, conn: sqlite3.Connection) -> None:
         """Idempotently add any missing post-base ``sessions`` columns.
@@ -609,15 +615,7 @@ class _SchemaMixin:
             # the same claimed CLI-mode scope (for example once a resumed
             # conversation finishes loading). The live_sessions table remains
             # the single registry; aliases only preserve old handles.
-            conn.executescript("""
-                CREATE TABLE IF NOT EXISTS live_session_aliases (
-                    alias_session_id TEXT PRIMARY KEY,
-                    target_session_id TEXT NOT NULL,
-                    created_at REAL NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_live_session_aliases_target
-                    ON live_session_aliases(target_session_id);
-            """)
+            self._ensure_live_session_aliases(conn)
             conn.execute("UPDATE schema_version SET version=?", (24,))
             conn.commit()
             log.info("Schema migrated to version 24: live-session aliases")

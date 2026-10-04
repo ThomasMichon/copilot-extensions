@@ -275,6 +275,33 @@ def test_migration_v23_to_v24_adds_live_session_aliases(tmp_path: Path) -> None:
         db.close()
 
 
+def test_migration_v24_alone_installs_aliases_triggers_and_start_time(tmp_path: Path) -> None:
+    """The v24 migration is self-contained: run on its own (without the
+    every-init ensure path) it still installs the alias table, both triggers
+    and ``live_sessions.process_started_at``."""
+    db = Database(tmp_path / "b.db")
+    try:
+        conn = db._get_conn()
+        conn.executescript(
+            "DROP TRIGGER live_sessions_retired_id_fence;"
+            "DROP TRIGGER live_sessions_drop_orphaned_aliases;"
+            "DROP TABLE live_session_aliases;"
+            "ALTER TABLE live_sessions DROP COLUMN process_started_at;"
+            "UPDATE schema_version SET version = 23;"
+        )
+        db._migrate(conn, 23)
+        triggers = {
+            r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")
+        }
+        fence, cleanup = "live_sessions_retired_id_fence", "live_sessions_drop_orphaned_aliases"
+        assert {fence, cleanup} <= triggers
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(live_sessions)")}
+        assert "process_started_at" in columns
+        assert db.execute_read("SELECT version FROM schema_version")[0]["version"] == 24
+    finally:
+        db.close()
+
+
 # -- Route layer ------------------------------------------------------------
 
 
