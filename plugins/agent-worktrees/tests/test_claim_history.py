@@ -12,10 +12,16 @@ from pathlib import Path
 
 import pytest
 
-from agent_worktrees import claim_history, claims_history_cli
+from agent_worktrees import (
+    claim_history,
+    claims_history_cli,
+    finalize,
+    obligations,
+    tracking,
+    tracking_claim_write,
+    tracking_write,
+)
 from agent_worktrees import config as cfg
-from agent_worktrees import finalize
-from agent_worktrees import obligations, tracking, tracking_claim_write, tracking_write
 
 
 @pytest.fixture(autouse=True)
@@ -464,3 +470,37 @@ def test_cli_json_mode(capsys):
     assert rc == 0
     assert captured["payload"]["ref"] == "o/r#5"
     assert len(captured["payload"]["events"]) == 1
+
+
+# ── _merge_events (the --remote local+mirrored merge) ───────────────────
+
+def test_merge_events_preserves_a_repeated_local_transition_at_second_granularity():
+    """``record_event`` timestamps only to the second, so a claim released
+    and re-claimed by the same worktree/session within one second produces
+    two "claimed" entries that share an identical (ts, event, worktree_id,
+    machine, session_id, note) key. A plain set-based dedup across the
+    merged list would drop the second one even with an EMPTY remote side
+    -- this must never happen; every local event is preserved as-is."""
+    local = [
+        {"ts": "2026-10-03T12:00:00+00:00", "event": "claimed", "worktree_id": "wt-a",
+         "machine": "m", "session_id": None, "note": None},
+        {"ts": "2026-10-03T12:00:00+00:00", "event": "released", "worktree_id": "wt-a",
+         "machine": "m", "session_id": None, "note": None},
+        {"ts": "2026-10-03T12:00:00+00:00", "event": "claimed", "worktree_id": "wt-a",
+         "machine": "m", "session_id": None, "note": None},
+    ]
+    merged = claims_history_cli._merge_events(local, remote=[])
+    assert [e["event"] for e in merged] == ["claimed", "released", "claimed"]
+
+
+def test_merge_events_collapses_a_self_mirrored_copy_but_keeps_a_genuine_extra():
+    local = [
+        {"ts": "2026-10-03T12:00:00+00:00", "event": "claimed", "worktree_id": "wt-a",
+         "machine": "m", "session_id": None, "note": None},
+    ]
+    # One remote copy matches local's own mirrored event (collapses); a
+    # second, identical-keyed remote copy represents a genuinely distinct
+    # write (e.g. a different machine) and must still surface.
+    remote = [dict(local[0]), dict(local[0])]
+    merged = claims_history_cli._merge_events(local, remote)
+    assert len(merged) == 2
