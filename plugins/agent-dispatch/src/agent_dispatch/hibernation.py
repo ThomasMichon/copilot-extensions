@@ -49,16 +49,33 @@ class RunSpec:
     waiter_generation: int | None = None
 
 
-def resume_message(spec: RunSpec, returncode: int) -> str:
+def resume_message(spec: RunSpec, returncode: int, *, gave_up: bool = False) -> str:
     """The nudge text delivered to the resumed worker.
 
-    An explicit ``spec.message`` wins; otherwise a default that states the awaited
-    step's outcome and tells the worker to resume where it suspended.
+    ``gave_up`` (a timeout backstop tripped -- see :data:`MAX_TIMEOUT_REATTEMPTS`)
+    always gets its own warning, even when the caller supplied an explicit
+    ``spec.message``: unlike a genuine transition or a real error, nothing
+    observable actually happened, and a caller's custom message is normally
+    written assuming the awaited step DID resolve -- silently swapping it in
+    here would hand the resumed worker stale/misleading wording with no way
+    to tell the wait never actually fired. An explicit ``spec.message`` is
+    appended as additional context instead of replacing the warning.
     """
+    what = f" for task {spec.task_id}" if spec.task_id else ""
+    if gave_up:
+        warning = (
+            f"The awaited step{what} never resolved after repeated timeout "
+            f"re-arms -- giving up and resuming anyway rather than hibernating "
+            f"indefinitely. Re-check the condition directly (it may have moved "
+            f"in a way the wait command's own vocabulary doesn't cover) before "
+            f"deciding whether to keep waiting, act, or card a blocker."
+        )
+        if spec.message:
+            return f"{warning}\n\n{spec.message}"
+        return warning
     if spec.message:
         return spec.message
     outcome = "finished" if returncode == 0 else f"exited with code {returncode}"
-    what = f" for task {spec.task_id}" if spec.task_id else ""
     return (
         f"The awaited step{what} {outcome}. Resume where you suspended and continue "
         f"toward your goal."
@@ -77,12 +94,25 @@ signal; every other code must still wake the worker (a genuine transition, or
 a real problem it needs to know about immediately).
 """
 
+MAX_TIMEOUT_REATTEMPTS = 3
+"""Default backstop on indefinite no-op re-arming (see :func:`run_and_resume`).
+
+A wait command that times out because the awaited condition genuinely never
+arrives is supposed to be rare -- but a gap in the wait command's own
+transition vocabulary can make that indistinguishable from "still
+legitimately waiting," and the re-arm loop has no other bound on its own. 3
+re-arms already means several hours of silence at ``pr-watch``'s own 3600s
+default timeout, which is backstop territory, not routine -- a healthy wait
+fires within its first cycle or two.
+"""
+
 
 def run_and_resume(
     spec: RunSpec,
     *,
     runner: Callable[[tuple[str, ...]], int],
     resumer: Callable[[str, str], bool],
+    max_reattempts: int | None = MAX_TIMEOUT_REATTEMPTS,
 ) -> dict:
     """Run the blocking wait, then resume the worktree-affinitied worker.
 
@@ -92,24 +122,30 @@ def run_and_resume(
     ``resumed`` is ``None`` when no ``resume_worktree`` was given, else the
     resumer's success flag.
 
-    A ``runner`` result of :data:`TIMED_OUT_CODE` (124) is **not** a resume
-    trigger: it means the wait command itself polled the full window and found
-    no real transition, so waking a torn-down, token-costing embodied worker
-    to independently re-discover "nothing changed" would be pure waste -- and,
-    observed in production, a source of redundant near-duplicate PR comments
-    when a worker re-posted a status update on every such no-op wake
-    (ThomasMichon/copilot-extensions#2576, also observed independently in a
-    consuming harness repo's own issue tracker). On a
-    124, re-invoke ``runner`` again in place (the wait command re-arms itself
-    against the same baseline/cursor) rather than resuming; only a genuine
-    transition (0) or an actual error (anything else) escalates to a resume.
+    A ``runner`` result of :data:`TIMED_OUT_CODE` (124) is **not**, on its own,
+    a resume trigger: it means the wait command itself polled the full window
+    and found no real transition, so waking a torn-down, token-costing
+    embodied worker to independently re-discover "nothing changed" would be
+    pure waste (ThomasMichon/copilot-extensions#2576). On a 124, re-invoke
+    ``runner`` again in place (the wait command re-arms itself against the
+    same baseline/cursor) rather than resuming -- but only up to
+    ``max_reattempts`` times (default :data:`MAX_TIMEOUT_REATTEMPTS`; ``None``
+    means unbounded re-arming, for a caller that explicitly wants it). Once
+    that cap is hit, this escalates anyway (``gave_up`` in the report) rather
+    than hibernating forever. A genuine transition (0) or an actual error
+    (anything else) always escalates to a resume immediately, unaffected by
+    the cap.
     """
     returncode = runner(spec.command)
     reattempts = 0
+    gave_up = False
     while returncode == TIMED_OUT_CODE:
+        if max_reattempts is not None and reattempts >= max_reattempts:
+            gave_up = True
+            break
         reattempts += 1
         returncode = runner(spec.command)
-    message = resume_message(spec, returncode)
+    message = resume_message(spec, returncode, gave_up=gave_up)
     resumed: bool | None = None
     if spec.resume_worktree:
         try:
@@ -122,6 +158,7 @@ def run_and_resume(
         "resume_worktree": spec.resume_worktree,
         "message": message,
         "resumed": resumed,
+        "gave_up": gave_up,
         "reattempts_on_timeout": reattempts,
     }
 

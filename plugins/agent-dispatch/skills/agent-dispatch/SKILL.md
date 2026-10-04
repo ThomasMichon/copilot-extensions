@@ -613,7 +613,10 @@ alongside the abandon. See the plugin README
 
 When a loop can only wait on a slow external condition, don't sit on a live
 session. Hand the wait to `run`: it executes the blocking command and, when it
-resolves, resumes the worktree-affinitied worker via an agent-bridge nudge.
+resolves, resumes the worktree-affinitied worker via an agent-bridge nudge. A
+repeated-timeout (nothing ever changes) backstop caps how long it re-arms in
+place before giving up and resuming anyway with an explicit "never resolved"
+message -- see the plugin README (**Hibernate the wait**).
 
 ```bash
 <agent-dispatch catalog argv[0]> run --resume <machine/worktree> --task <id> -- agent-worktrees pr-watch 42 # marketplace-isolation: allow agent-worktrees-management
