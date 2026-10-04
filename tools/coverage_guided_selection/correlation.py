@@ -11,9 +11,9 @@ promotion pipeline's own `main`-side tag. A reader resolves the nearest
 qualifying pointer via ordinary git history
 (`ancestor_resolution.resolve_nearest_baseline`, no network I/O), then
 fetches that generation's real coverage map from its Release asset (new
-network I/O, a separate explicit step -- Phase 3 wiring, not yet
-implemented here). See `efforts/active/coverage-guided-ci/README.md`'s own
-Journal for how and why this design was chosen (and later revised).
+network I/O, a separate explicit step -- see `fetch_baseline_asset`). See
+`efforts/active/coverage-guided-ci/README.md`'s own Journal for how and why
+this design was chosen (and later revised).
 
 This repo's existing `.github/release-pipeline-state.json` already records
 `last_promotion.dev_head` -- the `dev` commit each `main` promotion was
@@ -28,6 +28,11 @@ this module can enforce on its own.
 """
 
 from __future__ import annotations
+
+import json
+import subprocess
+import tempfile
+from pathlib import Path
 
 # `.github/` already hosts `release-pipeline-state.json` -- this directory
 # lives alongside it rather than inventing a separate top-level location,
@@ -134,3 +139,58 @@ def require_measured_commit(baseline: dict) -> str:
             f"{BASELINE_DIR_ON_MAIN} without a correlatable dev commit"
         )
     return measured_commit
+
+
+class BaselineFetchError(RuntimeError):
+    """Raised when a baseline's Release asset cannot be downloaded or
+    parsed -- the Phase 3 network-I/O step this module's own docstring
+    named as "not yet implemented here"."""
+
+
+def fetch_baseline_asset(repo: str, pointer: dict) -> dict:
+    """Download and parse the **full** baseline document a `pointer`
+    references.
+
+    `pointer` is the small document `build_pointer`/
+    `ancestor_resolution.resolve_nearest_baseline` produce (``schema``,
+    ``plugin``, ``measured_commit``, ``release_tag``, ``asset``) -- never
+    the full baseline itself; this is the one function in the package that
+    actually fetches the real coverage map the pointer only ever points at.
+
+    Performs real network I/O via ``gh release download``; raises
+    `BaselineFetchError` on any failure (a missing release/asset, a
+    malformed JSON payload) rather than returning a partial/empty baseline
+    a caller could mistake for "nothing covered" -- a genuinely empty
+    coverage map and a failed download must never look the same to a
+    caller deciding whether to trust a selection.
+    """
+    release_tag = pointer.get("release_tag")
+    asset = pointer.get("asset")
+    if not release_tag or not asset:
+        raise BaselineFetchError(f"pointer is missing release_tag/asset: {pointer!r}")
+    with tempfile.TemporaryDirectory() as tmp:
+        out = subprocess.run(
+            [
+                "gh", "release", "download", release_tag,
+                "--repo", repo, "--pattern", asset, "--dir", tmp, "--clobber",
+            ],
+            capture_output=True, text=True, check=False,
+        )
+        if out.returncode != 0:
+            raise BaselineFetchError(
+                f"gh release download {release_tag} --pattern {asset} failed: "
+                f"{out.stderr.strip()}"
+            )
+        asset_path = Path(tmp) / asset
+        try:
+            content = asset_path.read_text(encoding="utf-8")
+        except OSError as error:
+            raise BaselineFetchError(
+                f"downloaded asset not found at {asset_path}: {error}"
+            ) from error
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError as error:
+        raise BaselineFetchError(
+            f"downloaded asset {asset} is not valid JSON: {error}"
+        ) from error

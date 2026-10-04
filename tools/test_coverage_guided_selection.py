@@ -40,6 +40,7 @@ from tools.coverage_guided_selection import correlation  # noqa: E402
 from tools.coverage_guided_selection import fallback, selection as select  # noqa: E402
 from tools.coverage_guided_selection import ancestor_resolution as ar
 from tools.coverage_guided_selection import debt  # noqa: E402
+from tools.coverage_guided_selection import decide as decide_mod  # noqa: E402
 
 
 def _synthetic_baseline() -> dict:
@@ -352,6 +353,65 @@ class TestCorrelation:
         # The pointer is a correlation index, never the payload -- no
         # per-line coverage map should ever be embedded here.
         assert "coverage" not in pointer
+
+
+class TestFetchBaselineAsset:
+    def test_rejects_a_pointer_missing_release_tag_or_asset(self) -> None:
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", {"plugin": "x"})
+
+    def test_downloads_and_parses_the_asset(self, tmp_path, monkeypatch) -> None:
+        pointer = {"release_tag": "coverage-baselines-abc", "asset": "agent-x.json"}
+        payload = {"measured_commit": "abc", "coverage": {}, "tests": {}}
+
+        def _fake_run(args, **kwargs):
+            # Locate the --dir argument and write the asset there, exactly
+            # as `gh release download` would.
+            dest_dir = Path(args[args.index("--dir") + 1])
+            (dest_dir / pointer["asset"]).write_text(json.dumps(payload))
+
+            class _Result:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return _Result()
+
+        monkeypatch.setattr(correlation.subprocess, "run", _fake_run)
+
+        result = correlation.fetch_baseline_asset("owner/repo", pointer)
+
+        assert result == payload
+
+    def test_raises_on_a_failed_download(self, monkeypatch) -> None:
+        pointer = {"release_tag": "coverage-baselines-abc", "asset": "agent-x.json"}
+
+        class _Failed:
+            returncode = 1
+            stdout = ""
+            stderr = "release not found"
+
+        monkeypatch.setattr(correlation.subprocess, "run", lambda *a, **k: _Failed())
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", pointer)
+
+    def test_raises_on_malformed_json(self, tmp_path, monkeypatch) -> None:
+        pointer = {"release_tag": "coverage-baselines-abc", "asset": "agent-x.json"}
+
+        def _fake_run(args, **kwargs):
+            dest_dir = Path(args[args.index("--dir") + 1])
+            (dest_dir / pointer["asset"]).write_text("not valid json {{{")
+
+            class _Result:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return _Result()
+
+        monkeypatch.setattr(correlation.subprocess, "run", _fake_run)
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", pointer)
 
 
 class TestPlanChunks:
@@ -1402,6 +1462,139 @@ class TestAssessDebt:
 
         with pytest.raises(debt.CoverageDebtError):
             debt.assess_debt(repo, "0" * 40, self._GENERATED_AT)
+
+
+class TestDecide:
+    """`decide()` orchestrates every other module via its own imported
+    names, so each collaborator is monkeypatched directly on `decide_mod`
+    rather than re-exercised here (each already has its own dedicated test
+    class above)."""
+
+    def _resolved(self, measured_commit="m1", baseline_commit="b1"):
+        return ar.ResolvedBaseline(
+            baseline={"measured_commit": measured_commit, "release_tag": "t", "asset": "a.json"},
+            baseline_commit=baseline_commit,
+        )
+
+    def test_no_baseline_resolved_falls_back_with_no_evidence(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: None)
+
+        def _boom(*_a, **_k):
+            raise AssertionError("must not fetch/assess/select without a resolved baseline")
+
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", _boom)
+
+        result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {})
+
+        assert result.mode == "fallback"
+        assert result.reason == decide_mod.NO_BASELINE_AVAILABLE
+        assert result.baseline_generation is None
+        assert result.selected_tests == ()
+
+    def test_fetch_failure_falls_back_with_the_error_recorded(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: self._resolved())
+
+        def _fail(*_a, **_k):
+            raise decide_mod.BaselineFetchError("boom")
+
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", _fail)
+
+        result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {})
+
+        assert result.mode == "fallback"
+        assert result.reason.startswith(decide_mod.FETCH_FAILED_PREFIX)
+        assert result.baseline_generation == "m1"
+        assert result.baseline_commit_on_main == "b1"
+
+    def test_debt_exceeded_falls_back_to_the_curated_set(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: self._resolved())
+        full_baseline = {"measured_commit": "m1", "generated_at": "2026-01-01T00:00:00+00:00", "coverage": {}, "tests": {}}
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", lambda *a, **k: full_baseline)
+        monkeypatch.setattr(decide_mod, "remap_or_invalidate_baseline", lambda *a, **k: full_baseline)
+        over_debt = debt.DebtAssessment(
+            commit_volume=100, age_seconds=1.0,
+            commit_volume_threshold=5, age_threshold_seconds=None,
+            exceeded=True, reasons=("commit_volume 100 exceeds threshold 5",),
+        )
+        monkeypatch.setattr(decide_mod, "assess_debt", lambda *a, **k: over_debt)
+        curated = fallback.FallbackSet(selected_tests=("test_smoke",), total_runtime_s=1.0, covered_fraction=0.5, universe_size=2)
+        monkeypatch.setattr(decide_mod, "compute_fallback_set", lambda *a, **k: curated)
+
+        def _boom(*_a, **_k):
+            raise AssertionError("must not run diff-scoped selection once debt already trips fallback")
+
+        monkeypatch.setattr(decide_mod, "select_tests", _boom)
+
+        result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {}, commit_volume_threshold=5)
+
+        assert result.mode == "fallback"
+        assert result.reason.startswith(decide_mod.COVERAGE_DEBT_PREFIX)
+        assert result.selected_tests == ("test_smoke",)
+        assert result.debt == over_debt.as_dict()
+        assert result.fallback_set == curated.as_dict()
+
+    def test_selection_fallback_trigger_falls_back_to_the_curated_set(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: self._resolved())
+        full_baseline = {"measured_commit": "m1", "generated_at": "2026-01-01T00:00:00+00:00", "coverage": {}, "tests": {}}
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", lambda *a, **k: full_baseline)
+        monkeypatch.setattr(decide_mod, "remap_or_invalidate_baseline", lambda *a, **k: full_baseline)
+        clean_debt = debt.DebtAssessment(
+            commit_volume=1, age_seconds=1.0,
+            commit_volume_threshold=None, age_threshold_seconds=None,
+            exceeded=False, reasons=(),
+        )
+        monkeypatch.setattr(decide_mod, "assess_debt", lambda *a, **k: clean_debt)
+        triggered = select.SelectionResult(
+            selected_tests=(), fallback_triggered=True,
+            fallback_reasons=(select.FallbackReason("f.py", 3, "no_baseline_entry"),),
+        )
+        monkeypatch.setattr(decide_mod, "select_tests", lambda *a, **k: triggered)
+        curated = fallback.FallbackSet(selected_tests=("test_smoke",), total_runtime_s=1.0, covered_fraction=0.5, universe_size=2)
+        monkeypatch.setattr(decide_mod, "compute_fallback_set", lambda *a, **k: curated)
+
+        result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {"f.py": [3]})
+
+        assert result.mode == "fallback"
+        assert result.reason.startswith(decide_mod.SELECTION_FALLBACK_PREFIX)
+        assert result.selection_fallback_reasons == ({"file": "f.py", "line": 3, "reason": "no_baseline_entry"},)
+        assert result.selected_tests == ("test_smoke",)
+
+    def test_clean_selection_returns_the_selected_tests(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: self._resolved())
+        full_baseline = {"measured_commit": "m1", "generated_at": "2026-01-01T00:00:00+00:00", "coverage": {}, "tests": {}}
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", lambda *a, **k: full_baseline)
+        monkeypatch.setattr(decide_mod, "remap_or_invalidate_baseline", lambda *a, **k: full_baseline)
+        clean_debt = debt.DebtAssessment(
+            commit_volume=1, age_seconds=1.0,
+            commit_volume_threshold=None, age_threshold_seconds=None,
+            exceeded=False, reasons=(),
+        )
+        monkeypatch.setattr(decide_mod, "assess_debt", lambda *a, **k: clean_debt)
+        clean_selection = select.SelectionResult(
+            selected_tests=("test_a", "test_b"), fallback_triggered=False,
+        )
+        monkeypatch.setattr(decide_mod, "select_tests", lambda *a, **k: clean_selection)
+
+        def _boom(*_a, **_k):
+            raise AssertionError("must not curate a fallback set on a clean selection")
+
+        monkeypatch.setattr(decide_mod, "compute_fallback_set", _boom)
+
+        result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {"f.py": [1]})
+
+        assert result.mode == "selected"
+        assert result.reason == decide_mod.FRESH_SELECTION
+        assert result.selected_tests == ("test_a", "test_b")
+        assert result.baseline_generation == "m1"
+        assert result.fallback_set is None
+
+    def test_as_dict_round_trips_through_json(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: None)
+
+        result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {})
+
+        json.dumps(result.as_dict())  # must not raise
+
 
 
 

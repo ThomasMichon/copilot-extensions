@@ -263,16 +263,33 @@ order.
       once saturated — and recompute it whenever the baseline changes
       meaningfully. Validate that curated set carries real assurance
       (per `test-portfolio`'s own evidence-bearing-family bar), not just that
-      it exists.
-- [ ] Wire the smoke-fallback trigger: missing baseline, stale baseline,
+      it exists. **Partially done**: `fallback.compute_fallback_set` (Phase 0
+      pilot) already implements the greedy algorithm and accepts
+      `eligible_tests`; still open -- wiring `eligible_tests` to
+      `test-portfolio`'s real tier markers (today it defaults to the full
+      baseline, a documented, explicit non-safety-claim) and the curated
+      set's own evidenced-assurance validation.
+- [x] Wire the smoke-fallback trigger: missing baseline, stale baseline,
       unresolvable/invalidated attribution for a touched file, a changed
       line or module with **no attribution even where its own file has
       other baseline entries** (the common new-code/previously-uncovered-code
       case — a partially-attributed file is not the same as a fully-covered
       one), or debt past threshold — any one trips the fallback for the
-      affected scope, never a silently smaller subset.
-- [ ] Make the selection auditable: which baseline generation was used, and
+      affected scope, never a silently smaller subset. **Done**
+      (`tools/coverage_guided_selection/decide.py`, 2026-10-04): `decide()`
+      is the one orchestrating entry point -- no resolvable baseline, a
+      failed Release-asset fetch, exceeded coverage-debt, or any
+      per-file/per-line selection trigger each independently route to the
+      curated fallback tier (or, for "no baseline at all", an explicit
+      zero-evidence fallback with no curated set to draw from).
+- [x] Make the selection auditable: which baseline generation was used, and
       why (fresh subset vs. fallback + trigger), discoverable per CI run.
+      **Done**: `decide()`'s `SelectionDecision` records `mode`
+      (`"selected"`/`"fallback"`), a human-readable `reason`, the resolved
+      `baseline_generation`/`baseline_commit_on_main`, the full debt
+      assessment, and (on a selection-level fallback) exactly which
+      file/line triggered it -- `as_dict()` is JSON-serializable for a CI
+      run to emit directly.
 
 ### Phase 4 — Rollout: replace `agent-worktrees`' collect-only tier
 - [ ] Wire `ci.yml`'s `worktrees-smoke` job to use diff-scoped selection
@@ -351,6 +368,54 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-04 — Phase 3 slice: Release-asset fetch + orchestrating decide()
+Closes the two biggest gaps the 2026-10-03 debt-accounting slice left open.
+
+**`correlation.fetch_baseline_asset`** (new): the actual network-I/O step
+`correlation.py`'s own module docstring had explicitly flagged as "not yet
+implemented here" since the Phase 0 pilot -- downloads and parses a
+pointer's referenced full baseline via `gh release download`, raising a
+distinct `BaselineFetchError` (never a silently-empty baseline) on a
+missing release/asset or malformed JSON.
+
+**`decide.py`** (new): the orchestrating entry point the previous
+Journal entry named as still missing. `decide()` ties resolution (Phase 2)
++ the new fetch + debt (2026-10-03) + selection + fallback curation
+(Phase 0 pilot) into one `SelectionDecision`: which tests to run, `mode`
+(`"selected"`/`"fallback"`), a human-readable `reason`, which baseline
+generation was used, and the full debt assessment -- closing out both the
+"wire the smoke-fallback trigger" and "make the selection auditable"
+checklist items. Every fallback path routes through it: no resolvable
+baseline at all, a failed asset fetch, exceeded coverage-debt, or any
+per-file/per-line selection trigger (`no_baseline_entry`/
+`line_not_attributed`).
+
+16 new tests (`TestFetchBaselineAsset`, `TestDecide`) -- `decide()`'s own
+tests monkeypatch its collaborators directly (each already has its own
+dedicated test class) rather than re-exercising them through real git/
+network I/O.
+
+**Also noted, not caused by this work:** the operator flagged that
+`main`'s history was force-rewritten (via `git filter-repo`) to purge
+~300MB of accumulated `.github/coverage-baselines/` blobs committed
+before the hybrid pointer+Release-asset design below replaced that
+pattern -- see the (now-closed) `efforts/active/main-history-rewrite`
+mini-effort (PRs #5182/#5189/#5192/#5193/#5195) and
+`CONTRIBUTING.md`'s new "If `main`'s history is force-rewritten" section
+(PR #5110) for the full account and recovery procedure. Confirmed this
+doesn't affect anything in this effort: `dev` was never touched, the
+pointer files' own git history and the GitHub Releases they reference
+(both keyed on `dev` SHAs, not `main` SHAs) remain fully intact and
+resolvable post-rewrite.
+
+**Remaining Phase 3 scope, not yet done:** wiring `fallback.py`'s own
+documented `eligible_tests` restriction to `test-portfolio`'s real tier
+markers (today it defaults to the full baseline, a documented, explicit
+non-safety-claim); the curated fallback set's own evidenced-assurance
+validation; and the Phase 3 Validation Plan's three fallback-path tests.
+Phase 4 (CI wiring into `agent-worktrees`' `worktrees-smoke` job) remains
+untouched, correctly -- it depends on this phase finishing first.
 
 ### 2026-10-03 — Phase 3 slice: coverage-debt accounting
 Phase 3's selector (`selection.select_tests`) and fallback curation
