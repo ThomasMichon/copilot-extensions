@@ -287,6 +287,7 @@ def test_rename_sets_the_picker_title(client, cli) -> None:
     assert client.post("/api/v1/ui/tasks/zz/title", headers=SAME, json={"title": "x"}).status_code == 404
 
 
+@pytest.mark.guard
 def test_the_launch_budget_outlasts_embodys_seed_wait():
     """embody keeps waiting for a busy Copilot to take its seed up to its hard
     cap (agent-worktrees ``mux_seed_pane(hard_timeout=900.0)``); a shorter UI
