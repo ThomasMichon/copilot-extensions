@@ -30,6 +30,8 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parent / "run_tests_in_devcontainer.py"
 _previous_path = sys.path.copy()
 sys.path.insert(0, str(SCRIPT.parent))
@@ -41,6 +43,25 @@ try:
     _spec.loader.exec_module(wrapper)
 finally:
     sys.path[:] = _previous_path
+
+
+@pytest.fixture(autouse=True)
+def _stub_host_devcontainer_cli(monkeypatch):
+    """Host unit tests do not install the devcontainer CLI.
+
+    ``main`` resolves it before the mocked dependency-prep seam, so a
+    missing host binary must not fail lifecycle tests. A test that asserts
+    the missing-CLI error patches ``shutil.which`` itself; that patch
+    replaces this stub for the duration of the test body.
+    """
+    real_which = wrapper.shutil.which
+
+    def which(cmd, *args, **kwargs):
+        if cmd == "devcontainer":
+            return "/usr/bin/devcontainer"
+        return real_which(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(wrapper.shutil, "which", which)
 
 
 def test_scrubbed_git_env_removes_repository_context_variables(monkeypatch) -> None:
@@ -2381,6 +2402,33 @@ def test_main_prepares_dependencies_and_disconnects_networks_before_running_test
     rc = wrapper.main(["agent-worktrees"])
     assert rc == 0
     assert order == ["prepare", "disconnect", "run"]
+
+
+def test_main_raises_when_devcontainer_cli_missing_before_prepare(monkeypatch) -> None:
+    # The host lookup happens in ``main`` before the mocked prepare seam.
+    # A missing CLI must still fail there, not inside the mock.
+    prepare_calls: list[object] = []
+    monkeypatch.setattr(wrapper, "_per_instance_config",
+                         lambda label: (Path("/tmp/fake-devcontainer-dir/devcontainer.json"), "fake-volume"))
+    monkeypatch.setattr(wrapper, "_create_bounded_volume", lambda volume_name: None)
+    monkeypatch.setattr(wrapper, "_bring_up", lambda label, config_path: "container-1")
+    monkeypatch.setattr(wrapper._admission, "needs_admission", lambda passthrough, canonicalize: False)
+    monkeypatch.setattr(wrapper, "_populate_workspace", lambda container_id, passthrough, *, include_untracked: None)
+    monkeypatch.setattr(
+        wrapper._net_scope, "prepare_dependencies",
+        lambda *args, **kwargs: prepare_calls.append(args),
+    )
+    monkeypatch.setattr(wrapper, "_tear_down", lambda container_id, volume_name: None)
+    monkeypatch.setattr(wrapper.shutil, "rmtree", lambda path, ignore_errors=False: None)
+    monkeypatch.setattr(wrapper.shutil, "which", lambda *args, **kwargs: None)
+
+    try:
+        wrapper.main(["agent-worktrees"])
+    except SystemExit as exc:
+        assert "devcontainer CLI not found" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+    assert prepare_calls == []
 
 
 def test_main_strips_reinstall_before_the_real_pass_after_preparing(monkeypatch) -> None:
