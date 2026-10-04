@@ -268,7 +268,7 @@ class ClaimHistoryMirror:
         while attempt <= self.retries:
             try:
                 tip_oid, existing = self._fetch_chain(item.kind, item.key)
-            except _SnapshotUnavailable:
+            except (_SnapshotUnavailable, ClaimHistoryMirrorError):
                 attempt += 1
                 self._sleep(self._jitter(0.025, min(0.5, 0.05 * (2**attempt))))
                 continue
@@ -284,16 +284,29 @@ class ClaimHistoryMirror:
                     # The parent commit object only exists in whichever
                     # ephemeral repo created it (long since deleted) --
                     # fetch it into THIS repo first so commit-tree -p can
-                    # resolve it.
+                    # resolve it. --depth=1 + re-verifying the fetched oid
+                    # against the EXACT tip_oid this attempt already
+                    # verified (rather than trusting "fetched the ref,
+                    # whatever that currently is") keeps this to the
+                    # minimum objects needed and catches the ref having
+                    # moved again in between, rather than silently
+                    # following it.
                     fetched = self._git(
                         [
                             f"--git-dir={repo}", "fetch", "--quiet", "--no-tags",
-                            self.settings.origin,
-                            f"+{ref}:refs/agent-claim-history/parent",
+                            "--depth=1", self.settings.origin,
+                            f"+{tip_oid}:refs/agent-claim-history/parent",
                         ],
                         check=False,
                     )
                     if fetched.returncode != 0:
+                        attempt += 1
+                        self._sleep(self._jitter(0.025, min(0.5, 0.05 * (2**attempt))))
+                        continue
+                    actual_parent = self._git(
+                        [f"--git-dir={repo}", "rev-parse", "refs/agent-claim-history/parent"]
+                    ).stdout.strip()
+                    if actual_parent != tip_oid:
                         attempt += 1
                         self._sleep(self._jitter(0.025, min(0.5, 0.05 * (2**attempt))))
                         continue
@@ -325,7 +338,10 @@ class ClaimHistoryMirror:
                 )
             if pushed.returncode == 0:
                 return len(pending)
-            remote_now = self._remote_oid(ref)
+            try:
+                remote_now = self._remote_oid(ref)
+            except ClaimHistoryMirrorError:
+                remote_now = None
             if remote_now == final_oid:
                 return len(pending)
             if attempt >= self.retries:

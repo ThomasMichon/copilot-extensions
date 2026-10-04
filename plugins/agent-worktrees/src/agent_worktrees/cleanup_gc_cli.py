@@ -818,7 +818,17 @@ def _run_claim_history_mirror(args: argparse.Namespace) -> dict[str, object]:
     """
     from . import claim_history_mirror
 
-    return claim_history_mirror.sync_pending(dry_run=getattr(args, "dry_run", False))
+    try:
+        return claim_history_mirror.sync_pending(dry_run=getattr(args, "dry_run", False))
+    except Exception as exc:
+        # The "never fail gc" contract above must hold even for a failure
+        # sync_pending() itself didn't anticipate (an import-time error, a
+        # non-ConfigError failure inside settings resolution, ...) -- not
+        # just the ones it already catches internally.
+        return {
+            "available": True, "pushed": 0, "refs": [],
+            "failed": [{"ref": None, "kind": None, "error": str(exc)}],
+        }
 
 
 def _print_gc_claim_history_mirror(result: dict[str, object], dry: bool) -> None:

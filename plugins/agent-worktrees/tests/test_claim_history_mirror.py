@@ -222,6 +222,70 @@ def test_push_batch_empty_is_a_noop(settings: LeaseSettings):
     assert mirror(settings).push_batch([]) == 0
 
 
+def test_push_batch_retries_a_transient_remote_error_during_the_snapshot_read(
+    settings: LeaseSettings, monkeypatch,
+):
+    """``_fetch_chain`` can raise ``ClaimHistoryMirrorError`` (e.g. an
+    ``ls-remote`` transport failure), not just ``_SnapshotUnavailable`` --
+    both must be treated as retryable rather than escaping immediately
+    and abandoning the batch."""
+    m = mirror(settings)
+    calls = {"n": 0}
+    real_fetch_chain = m._fetch_chain
+
+    def flaky_fetch_chain(kind, ref_value):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise claim_history_mirror.ClaimHistoryMirrorError("transient ls-remote failure")
+        return real_fetch_chain(kind, ref_value)
+
+    monkeypatch.setattr(m, "_fetch_chain", flaky_fetch_chain)
+    assert m.push_batch([_entry(0)]) == 1
+    assert calls["n"] >= 2
+
+
+def test_push_batch_retries_when_remote_oid_check_fails_after_a_push_failure(
+    settings: LeaseSettings, monkeypatch,
+):
+    """A ``_remote_oid()`` call used only to check whether a just-failed
+    push actually landed (a benign race) must itself be guarded -- a
+    transient failure there must be treated as "couldn't confirm, retry,"
+    never let escape and abort the batch outright."""
+    m = mirror(settings)
+    # Something is already mirrored (bypassing m), so the push m is about
+    # to attempt -- built against a snapshot that (lyingly) claims the ref
+    # is absent -- genuinely fails its force-with-lease against the real
+    # remote state.
+    conflict = mirror(settings)
+    conflict.push(_entry(99, event="claimed"))
+
+    real_fetch_chain = m._fetch_chain
+    fetch_calls = {"n": 0}
+
+    def lying_fetch_chain(kind, ref_value):
+        fetch_calls["n"] += 1
+        if fetch_calls["n"] == 1:
+            return None, []  # a stale/lying snapshot: claims the ref is absent
+        return real_fetch_chain(kind, ref_value)
+
+    monkeypatch.setattr(m, "_fetch_chain", lying_fetch_chain)
+
+    real_remote_oid = m._remote_oid
+    oid_calls = {"n": 0}
+
+    def flaky_remote_oid(ref_arg):
+        oid_calls["n"] += 1
+        if oid_calls["n"] == 1:
+            # The post-push-failure confirmation check.
+            raise claim_history_mirror.ClaimHistoryMirrorError("transient ls-remote failure")
+        return real_remote_oid(ref_arg)
+
+    monkeypatch.setattr(m, "_remote_oid", flaky_remote_oid)
+    assert m.push_batch([_entry(0)]) == 1
+    fetched = m.fetch("pr", "o/r#1")
+    assert [e["seq"] for e in fetched] == [99, 0]
+
+
 def test_fetch_chain_detects_a_ref_that_moved_mid_read(settings: LeaseSettings, monkeypatch):
     """``_fetch_chain`` is the one place the remote is read; if the ref
     moves between its initial ``ls-remote`` and the follow-up fetch of
@@ -623,3 +687,28 @@ def test_fetch_remote_history_returns_mirrored_events(settings: LeaseSettings, m
     fetched = claim_history_mirror.fetch_remote_history("o/r#1")
     assert len(fetched) == 1
     assert fetched[0]["event"] == "claimed"
+
+
+# ── cleanup_gc_cli._run_claim_history_mirror (the "never fail gc" contract) ──
+
+def test_run_claim_history_mirror_never_fails_gc_on_an_unexpected_exception(monkeypatch):
+    """``gc --mirror-claim-history`` must never fail the rest of ``gc``,
+    even for a failure ``sync_pending()`` didn't anticipate itself (an
+    import-time error, a non-``ConfigError`` settings-resolution failure,
+    ...) -- not just the ones it already catches internally."""
+    import argparse
+
+    from agent_worktrees import cleanup_gc_cli
+
+    def boom(**_kwargs):
+        raise RuntimeError("unexpected failure")
+
+    monkeypatch.setattr(claim_history_mirror, "sync_pending", boom)
+    result = cleanup_gc_cli._run_claim_history_mirror(argparse.Namespace(dry_run=False))
+    assert result["available"] is True
+    assert result["pushed"] == 0
+    assert len(result["failed"]) == 1
+    assert "unexpected failure" in result["failed"][0]["error"]
+    # Must not raise -- the print helper handles it like any other failure.
+    cleanup_gc_cli._print_gc_claim_history_mirror(result, dry=False)
+
