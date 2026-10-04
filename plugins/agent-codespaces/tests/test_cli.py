@@ -718,6 +718,30 @@ class TestNamespaceSeams:
         assert rc == 0
         assert _json.loads(capsys.readouterr().out)[0]["name"] == "cs-a"
 
+    def test_namespace_list_tolerates_query_failure(self, capsys):
+        """A CodeSpace-listing failure (missing `codespace` OAuth scope, no
+        `gh` auth, network unreachable, etc.) must never be a hard
+        requirement to resolve any agent -- CodeSpaces are optional, and a
+        host that doesn't use them has no reason to carry that scope.
+        Confirmed live, Lambda-Core, 2026-10-04: an uncaught failure here
+        propagated as a non-zero exit from this CLI, which agent-bridge's
+        own namespace-resolver consumer surfaced as 404s for completely
+        unrelated, purely-static agents -- starving the Intelligence
+        Dampener reviewer-dispatch pool for hours. This must report zero
+        CodeSpaces (exit 0) instead of crashing."""
+        import json as _json
+
+        async def _list_specs(self):
+            raise RuntimeError(
+                "gh codespace list failed: HTTP 403: Must have admin rights "
+                "to Repository."
+            )
+
+        with patch("agent_codespaces.resolver.CodespaceResolver.list_specs", _list_specs):
+            rc = main(["namespace-list"])
+        assert rc == 0
+        assert _json.loads(capsys.readouterr().out) == []
+
     def test_namespace_resolve_json_and_argv(self, capsys):
         import json as _json
         seen = {}
