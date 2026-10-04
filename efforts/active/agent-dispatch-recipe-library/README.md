@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`)
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-09-30
-- **Status:** In Progress (Phase 1 done)
+- **Status:** In Progress (Phases 1, 3-8 done; Phase 2 reviewer adapters and Phase 9 docs remain)
 - **Vision:** `visions/plugins/agent-dispatch/README.md` (§*The recipe*)
   advances *loop-recipes* from "four fixed archetypes, hand-declared per
   consumer" to "named, extendable templates a consumer instantiates with a
@@ -402,14 +402,14 @@ below — read it before starting any Phase 3 work).
       effort-creation PR with all issues assigned.
 
 ### Phase 8 — Named recipe: effort-driver (Request item f)
-- [ ] Ship a global recipe (a `goal-driven` specialization): takes an
+- [x] Ship a global recipe (a `goal-driven` specialization): takes an
       assigned effort and drives it — PRs as needed, resolving bugs/hurdles
       — until it reaches archive state via its last PR.
-- [ ] Emitter sources from the active efforts in the consumer's own bound
+- [x] Emitter sources from the active efforts in the consumer's own bound
       state root (repo-local; no forge adapter needed here).
-- [ ] Evaluator requires the named effort in archive state, with evidence
+- [x] Evaluator requires the named effort in archive state, with evidence
       the PRs were made and the constituent issues resolved.
-- [ ] Tests: a fixture effort with open constituent issues drives to
+- [x] Tests: a fixture effort with open constituent issues drives to
       archive state with issues closed and PRs merged.
 
 ### Phase 9 — Docs
@@ -1205,3 +1205,73 @@ suite green (3743 passed, 23 skipped, the one known flake above).
     - 792 passed
     - 24 passed, 1 skipped
   - none of the effort-noted unrelated flakes appeared in this run.
+
+### 2026-10-04 — Phase 8: effort-driver named recipe landed
+- Added an eighth built-in global recipe template,
+  `global:effort-driver`, with a new built-in `worker_identity:
+  effort-driver`, `require_verification: true`, an opaque shared
+  `evaluator_ref: effort-driver`, and a bounded task contract specialized to
+  driving one already-assigned tracked effort through its remaining PRs
+  until the effort itself reaches archive state.
+- **Design decision — why this is its own `kind: effort-driver-loop` instead
+  of another `repository-issue-loop` parameterization:** Phase 7's
+  effort-builder still reused `repository-issue-loop` because the discovery
+  problem stayed "take a query or named set of repository issues and reserve
+  them." Phase 8's discovery problem is materially different: there is no
+  forge-backed issue list here at all. The source of work is the consumer's
+  own state root (`efforts/active/<slug>/README.md`-shaped state), so the
+  shipped standing loop is a new repo-local emitter kind that scans active
+  effort READMEs and authors one goal-driven task per eligible effort. The
+  generic emitter runtime was extended with a second built-in tick path
+  (`effort_driver_loop`) alongside the existing `repository_issue_loop`,
+  while the declaration still expands to the same ordinary emitter + one
+  headless worker lane shape.
+- Added the built-in worker identity
+  `agent_dispatch/identities/effort-driver.identity.md`. Its charter is
+  explicitly the execution-only half of the effort-builder/effort-driver
+  boundary: drive the already-named effort through implementation, review,
+  merge, and archive; do **not** create a replacement effort for work that
+  already belongs to the named one, and do **not** collapse back into raw
+  issue triage as the objective.
+- **Shared-vs-consumer evaluator split (same deliberate pattern as Phases
+  5-7):** the shipped recipe fixes the reusable lifecycle contract
+  (`require_verification` + `evaluator_ref`) and the repo-local
+  effort-discovery source, but does **not** hardcode one repository's exact
+  archive convention, merged-PR proof shape, or "constituent issues
+  resolved" evidence contract. A consumer repo supplies its own trusted
+  evaluator registration under `evaluator_ref: effort-driver` to define what
+  counts as archive state there.
+- Documentation updated: `plugins/agent-dispatch/README.md` now documents
+  `global:effort-driver` in the shipped global-recipes table (and corrects
+  that table's stale shipped-recipe count) plus the same shared-recipe /
+  repo-scoped-evaluator adoption split as `effort-builder`.
+- Tests added:
+  - `test_effort_driver_loops.py`: the new loop expands to one emitter + one
+    headless worker lane, discovers active efforts from a repo-local state
+    root, and authors the expected goal-driven task contract for the named
+    effort while leaving unrelated active efforts untouched. Explicit
+    `effort_slugs` behave as an all-or-nothing selector (missing named
+    efforts suppress creation rather than silently creating a partial set).
+  - `test_registrar_recipes.py`: `global:effort-driver` resolves end to end
+    through `read_declaration_file_set`, stamps the expected verification
+    fields, and the built-in identity resolves.
+  - `test_producers_emitter.py`: the generic emitter runtime now dispatches
+    the new built-in `effort_driver_loop` tick path and threads the stamped
+    `cwd` into its validation exactly as it already does for
+    `repository_issue_loop`.
+  - `test_verification.py`: a fixture trusted script evaluator keyed by
+    `effort-driver` confirms completion only when the named effort has left
+    `efforts/active/`, appeared at its archive path, and the archived README
+    carries durable PR + constituent-issue evidence; still-active and
+    weak-evidence fixtures stay submitted.
+- Validation:
+  - focused Phase 8 tests: **121 passed**
+  - install contract: **OK**
+  - full `agent-dispatch` suite: re-run twice via
+    `python tools/run-plugin-tests.py agent-dispatch --timeout 600 --plugin-timeout 2400`;
+    both runs hit only the already-noted pre-existing aggregate flake
+    `test_liveness_gc_publishes_a_bus_event_for_auto_suspend_with_zero_requeued`
+    (`test_liveness_gc*` is the exact known Phase 7 flake class called out in
+    this effort's operator brief). Isolated rerun of that single test passed
+    immediately, confirming the failure shape stayed flaky-only-in-aggregate
+    rather than a Phase 8 regression.

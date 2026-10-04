@@ -282,6 +282,36 @@ Completion requires the workspace to be clean and synchronized for reuse.
         },
         "pool": {"body": {"type": "headless"}},
     },
+    # Shared/global half only: this is the execution lane for an already-
+    # assigned effort. Discovery comes from the consumer's own active effort
+    # state (repo-local, not forge-backed), so this is intentionally its own
+    # emitter kind rather than another repository-issue-loop parameterization.
+    # The shipped recipe fixes the identity plus `require_verification: true`;
+    # a consuming repo supplies its own trusted evaluator registration under
+    # this opaque evaluator_ref to define what counts as "archive state with
+    # durable evidence that the PRs landed and the constituent issues were
+    # resolved", rather than this package hardcoding one repository's effort
+    # archive convention into every adopter.
+    "effort-driver": {
+        "kind": "effort-driver-loop",
+        "worker_identity": "effort-driver",
+        "require_verification": True,
+        "evaluator_ref": "effort-driver",
+        "task_contract": {
+            "title": "Drive effort {effort_title} to archive state",
+            "goal": "Drive tracked effort {effort_title} to archive state",
+            "done_criteria": (
+                "The named effort no longer lives under its active path. It "
+                "has moved to the repository's dated effort archive (or the "
+                "consumer's equivalent), and the archived record plus linked "
+                "issue flow provide durable evidence that the constituent work "
+                "landed through the necessary pull request(s) and the effort's "
+                "constituent issues are resolved or explicitly transferred. "
+                "The reusable workspace is clean and synchronized."
+            ),
+        },
+        "pool": {"body": {"type": "headless"}},
+    },
     "reviewer": {
         "kind": "reviewer-loop",
         "pool": {"body": {"type": "headless", "charter": _REVIEWER_CHARTER}},
@@ -749,13 +779,17 @@ def _resolve_extends_tracking_cwd_origin(
         and isinstance(template.get("spec"), Mapping)
         and isinstance(template["spec"].get("cwd"), str)
     ):
-        next_base_dir = resolved_path.parent if resolved_path is not None else _plugin_payload_root()
+        next_base_dir = (
+            resolved_path.parent
+            if resolved_path is not None
+            else _plugin_payload_root()
+        )
     else:
         next_base_dir = None
     pending_cwd_origin: Path | None = None
     if "extends" in template:
         template, pending_cwd_origin = _resolve_extends_tracking_cwd_origin(
-            template, base_dir=next_base_dir, _chain=_chain + (identity,)
+            template, base_dir=next_base_dir, _chain=(*_chain, identity)
         )
     if pending_cwd_origin is None and next_base_dir is not None:
         # This hop's own (non-inherited, or no-longer-pending) template

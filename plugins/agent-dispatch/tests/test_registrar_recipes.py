@@ -19,7 +19,6 @@ from agent_dispatch.registrar_recipes import (
     substitute_placeholders,
 )
 
-
 # -- deep_merge ---------------------------------------------------------------
 
 def test_deep_merge_override_wins_on_scalar_conflict():
@@ -1030,6 +1029,45 @@ def test_global_effort_builder_resolves_to_repository_issue_loop_with_verificati
     assert spec["evaluator_ref"] == "effort-builder"
 
 
+def test_global_effort_driver_resolves_to_effort_driver_loop_with_verification(
+    tmp_path,
+):
+    import json as _json
+
+    from agent_dispatch.registrar_discovery import read_declaration_file_set
+
+    path = tmp_path / "effort-driver.json"
+    path.write_text(
+        _json.dumps(
+            {
+                "extends": "global:effort-driver",
+                "name": "effort-driver",
+                "repo": "example/project",
+                "source": "effort-driver",
+                "cadence_seconds": 3600,
+                "task_label": "effort-work",
+                "state_root": str(tmp_path),
+                "pool": {
+                    "max_active_processes": 1,
+                    "body": {"agent": "effort-worker"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    declarations = read_declaration_file_set(path, repo_root=tmp_path)
+
+    workers = next(d for d in declarations if d.name == "effort-driver-workers")
+    assert workers.body.type == "headless"
+    assert workers.body.agent == "effort-worker"
+    source = next(d for d in declarations if d.name == "effort-driver-source")
+    spec = source.spec["effort_driver_loop"]
+    assert spec["worker_identity"] == "effort-driver"
+    assert spec["require_verification"] is True
+    assert spec["evaluator_ref"] == "effort-driver"
+
+
 def test_global_reviewer_resolves_to_reviewer_loop_with_standing_charter(tmp_path):
     import json as _json
 
@@ -1168,3 +1206,13 @@ def test_effort_builder_builtin_identity_resolves():
     assert identity.name == "effort-builder"
     assert "planning-and-assignment lane" in identity.rules
     assert "constituent bug fixes" in identity.rules
+
+
+def test_effort_driver_builtin_identity_resolves():
+    from agent_dispatch.worker_identities import load_worker_identity
+
+    identity = load_worker_identity("effort-driver")
+
+    assert identity.name == "effort-driver"
+    assert "execution half only" in identity.rules
+    assert "archive state" in identity.rules
