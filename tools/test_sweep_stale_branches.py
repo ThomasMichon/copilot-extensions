@@ -370,6 +370,59 @@ def test_verify_remote_matches_repo_rejects_a_lookalike_host(sweep, monkeypatch)
         sweep._verify_remote_matches_repo("origin", "owner/repo")
 
 
+def test_verify_remote_matches_repo_uses_push_url_not_fetch_url(sweep, monkeypatch):
+    # Regression: `git remote get-url <remote>` (no flags) reports the
+    # FETCH url; `git push` actually sends to `remote.<name>.pushurl` when
+    # one is configured, which can legitimately differ. Must query with
+    # `--push --all` and validate what push will actually use.
+    captured_args = []
+
+    class _Result:
+        returncode = 0
+        stdout = "https://github.com/owner/repo.git\n"
+        stderr = ""
+
+    def _fake_run(args, **_kwargs):
+        captured_args.append(args)
+        return _Result()
+
+    monkeypatch.setattr(sweep.subprocess, "run", _fake_run)
+
+    sweep._verify_remote_matches_repo("origin", "owner/repo")
+
+    assert "--push" in captured_args[0]
+    assert "--all" in captured_args[0]
+
+
+def test_verify_remote_matches_repo_rejects_a_mismatched_push_url(sweep, monkeypatch):
+    # Regression: a remote whose FETCH url matches --repo but whose
+    # configured PUSH url (remote.<name>.pushurl) points elsewhere must
+    # still be rejected -- the deletion would otherwise go to the wrong repo.
+    class _Result:
+        returncode = 0
+        stdout = "https://github.com/owner/other-repo.git\n"  # the push URL
+        stderr = ""
+
+    monkeypatch.setattr(sweep.subprocess, "run", lambda *a, **k: _Result())
+
+    with pytest.raises(sweep.GhCallFailed):
+        sweep._verify_remote_matches_repo("origin", "owner/repo")
+
+
+def test_verify_remote_matches_repo_rejects_if_any_of_multiple_push_urls_mismatches(sweep, monkeypatch):
+    # A remote can fan out to multiple push URLs (multiple `url`/`pushurl`
+    # entries); every single one must match, not just the first.
+    class _Result:
+        returncode = 0
+        stdout = "https://github.com/owner/repo.git\nhttps://github.com/owner/other-repo.git\n"
+        stderr = ""
+
+    monkeypatch.setattr(sweep.subprocess, "run", lambda *a, **k: _Result())
+
+    with pytest.raises(sweep.GhCallFailed):
+        sweep._verify_remote_matches_repo("origin", "owner/repo")
+
+
 def test_verify_remote_matches_repo_accepts_mixed_case_repo_against_canonical_casing_url(sweep, monkeypatch):
     # Regression: the default --repo is mixed-case
     # ("ThomasMichon/copilot-extensions"), and `origin` preserves that exact

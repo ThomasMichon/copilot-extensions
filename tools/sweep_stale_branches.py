@@ -392,22 +392,34 @@ def _verify_remote_matches_repo(remote: str, repo: str) -> None:
     pointed elsewhere than the directory this script happens to run in)
     must never result in deleting branches on the wrong repository. Checks
     both the host (must be ``github.com``) and an EXACT owner/repo path --
-    never a suffix match, which a lookalike host would otherwise pass."""
+    never a suffix match, which a lookalike host would otherwise pass.
+
+    Validates every configured **push** URL (``git remote get-url --push
+    --all``), not the fetch URL -- `git push` actually sends to
+    ``remote.<name>.pushurl`` when one is configured, which can legitimately
+    differ from the plain fetch URL `git remote get-url` alone would report
+    (and `git push` also fans out to every URL in `pushurl`/`url` with
+    multiple values, so every one of them must match, not just the first).
+    """
     out = subprocess.run(
-        ["git", "remote", "get-url", remote], capture_output=True, text=True, env=_scrubbed_git_env()
+        ["git", "remote", "get-url", "--push", "--all", remote],
+        capture_output=True, text=True, env=_scrubbed_git_env(),
     )
     if out.returncode != 0:
-        raise GhCallFailed(f"git remote get-url {remote} failed: {out.stderr.strip()}")
-    url = out.stdout.strip()
-    parsed = _parse_git_remote_owner_repo(url)
-    if parsed is None:
-        raise GhCallFailed(f"git remote '{remote}' ({url}) could not be parsed as an owner/repo URL -- refusing to push deletions.")
-    host, owner_repo = parsed
-    if host != GITHUB_HOST or owner_repo != repo.lower():
-        raise GhCallFailed(
-            f"git remote '{remote}' ({url}) does not match --repo {repo} -- refusing to "
-            "push deletions against a mismatched local checkout."
-        )
+        raise GhCallFailed(f"git remote get-url --push --all {remote} failed: {out.stderr.strip()}")
+    urls = [line for line in out.stdout.splitlines() if line.strip()]
+    if not urls:
+        raise GhCallFailed(f"git remote '{remote}' reports no push URL -- refusing to push deletions.")
+    for url in urls:
+        parsed = _parse_git_remote_owner_repo(url)
+        if parsed is None:
+            raise GhCallFailed(f"git remote '{remote}' push URL ({url}) could not be parsed as an owner/repo URL -- refusing to push deletions.")
+        host, owner_repo = parsed
+        if host != GITHUB_HOST or owner_repo != repo.lower():
+            raise GhCallFailed(
+                f"git remote '{remote}' push URL ({url}) does not match --repo {repo} -- "
+                "refusing to push deletions against a mismatched local checkout."
+            )
 
 
 def _has_open_pr(repo: str, branch: str) -> bool:
