@@ -39,6 +39,17 @@ permissions:
   contents: read
   issues: write
 
+concurrency:
+  # Serializes the check-existing-comment-then-post sequence per PR: without
+  # this, two runs (e.g. `opened` immediately followed by an `edited`) can
+  # both list comments before either has posted, both see no marker yet, and
+  # both post a reminder. `cancel-in-progress: false` so a run already
+  # mid-flight always finishes its own check-then-post instead of being
+  # killed partway and leaving an inconsistent GitHub Actions log for no
+  # benefit (this job is seconds-long; queuing briefly costs nothing).
+  group: base-branch-reminder-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 jobs:
   remind:
     name: remind-to-target-dev
@@ -74,7 +85,20 @@ jobs:
               repo: context.repo.repo,
               issue_number: pull_number,
             });
-            if (comments.some((comment) => comment.body && comment.body.includes(marker))) {
+            // Require BOTH the marker AND the posting identity -- the PR
+            // author (or anyone else commenting) fully controls their own
+            // comment bodies, so the marker string alone is spoofable: a
+            // contributor could paste it into any comment to suppress this
+            // reminder from ever posting, even though the workflow never
+            // actually posted one.
+            if (
+              comments.some(
+                (comment) =>
+                  comment.user?.login === "github-actions[bot]" &&
+                  comment.body &&
+                  comment.body.includes(marker),
+              )
+            ) {
               core.info("Reminder already posted on this PR; skipping.");
               return;
             }
