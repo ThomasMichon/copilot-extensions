@@ -86,7 +86,24 @@ def cmd_claims_history(
 
     if getattr(args, "remote", False):
         from . import claim_history_mirror
-        events = claim_history_mirror.local_identities_for_ref("pr", ref)
+        try:
+            events = claim_history_mirror.local_identities_for_ref("pr", ref)
+        except OSError:
+            # The local snapshot's own lock acquisition (not the remote
+            # store) failed -- e.g. a read-only filesystem. That must
+            # never abort --remote before even attempting the remote
+            # fetch; fall back to plain local history (no verified
+            # identity, so merge can't falsely dedupe against it) and
+            # keep going.
+            print(
+                f"  ⚠️  claims history --remote: could not read {ref}'s local "
+                "claim-history identity (continuing with unverified local "
+                "history; remote events may appear as duplicates)",
+                file=sys.stderr,
+            )
+            events = [dict(e, ledger_id=None) for e in claim_history.history_for_ref(ref)]
+            for i, e in enumerate(events):
+                e["seq"] = i
         failures_before = claim_history_mirror.read_failure_count()
         remote_events = claim_history_mirror.fetch_remote_history(ref)
         if claim_history_mirror.read_failure_count() > failures_before:

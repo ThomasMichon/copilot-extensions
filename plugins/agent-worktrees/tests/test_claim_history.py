@@ -516,6 +516,35 @@ def test_cli_remote_warns_on_stderr_when_the_remote_read_fails(capsys, monkeypat
     assert "could not read" in err
 
 
+def test_cli_remote_falls_back_to_unverified_local_history_when_the_lock_fails(
+    capsys, monkeypatch
+):
+    """The local snapshot's own lock acquisition failing (e.g. a
+    read-only filesystem) must never abort ``--remote`` before even
+    attempting the remote fetch -- it degrades to plain, unstamped local
+    history (never dedupes falsely against remote) and keeps going."""
+    from agent_worktrees import claim_history_mirror
+
+    claim_history.record_event(
+        kind="pr", ref="o/r#7", worktree_id="wt-a", machine="m", event="claimed",
+    )
+
+    def boom(kind, ref_value):
+        raise OSError("read-only filesystem")
+
+    monkeypatch.setattr(claim_history_mirror, "local_identities_for_ref", boom)
+    monkeypatch.setattr(claim_history_mirror, "fetch_remote_history", lambda ref_value, **k: [])
+    captured: dict = {}
+    rc = claims_history_cli.cmd_claims_history(
+        _ns(json=True, remote=True), "o/r#7",
+        json_error=lambda *a, **k: 2, json_output=lambda p: captured.setdefault("payload", p),
+    )
+    assert rc == 0
+    assert len(captured["payload"]["events"]) == 1
+    err = capsys.readouterr().err
+    assert "could not read" in err and "identity" in err
+
+
 # ── _merge_events (the --remote local+mirrored merge) ───────────────────
 
 def test_merge_events_preserves_a_repeated_local_transition_at_second_granularity():
