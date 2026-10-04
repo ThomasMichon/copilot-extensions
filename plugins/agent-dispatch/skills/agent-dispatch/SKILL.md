@@ -892,7 +892,8 @@ to `machine` only when the mismatch is machine-wide.
 - **`--spawn-backend embody`** -- a **durable, CLI-backed autopilot** session in
   a **fresh parallel worktree on the same machine**, via `agent-worktrees embody
   --new` <!-- marketplace-isolation: allow agent-worktrees-management -->
-  (tools auto-approved with `--allow-all-tools`, stamped `--driver
+  (launched with `--allow-all --experimental` so prompts stay auto-approved and
+  any installed SDK extension can actually load, stamped `--driver
   agent-dispatch` so it's viewable in Neuron Forge with a "driven by" banner).
   This is the **"dispatch an agent to do X"** path: the embodied session claims →
   starts → works the task autonomously → and **completes it explicitly** only

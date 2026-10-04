@@ -46,7 +46,7 @@ from agent_codespaces.config import CodespacesConfig, RepoConfig
 from agent_codespaces.lifecycle import CodespaceInfo
 from agent_codespaces.resolver import CodespaceResolver
 
-_COPILOT = "copilot --acp --stdio --allow-all-tools"
+_COPILOT = "copilot --acp --stdio --allow-all --experimental"
 _CS_REPO = "example-org/example-web-codespaces"
 
 

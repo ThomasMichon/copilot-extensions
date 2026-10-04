@@ -31,7 +31,7 @@ class TestBuildMuxNewWindowArgv:
         argv = sessions.build_mux_new_window_argv(
             "wt1-abc",
             "/w/wt1",
-            ["bash", "setup.sh", "--allow-all-tools", "-i", "seed text"],
+            ["bash", "setup.sh", "--allow-all", "--experimental", "-i", "seed text"],
             {"COPILOT_FEATURE_FLAGS": "x"},
             mux="tmux",
             pane_wrapper="/does/not/exist",
@@ -54,7 +54,9 @@ class TestBuildMuxNewWindowArgv:
             "env", "-u", "WORKTREE_PROJECT", "-u", "WORKTREE_ID",
         ]
         # command tail is verbatim (no -- separator, no wrapper)
-        assert argv[-5:] == ["bash", "setup.sh", "--allow-all-tools", "-i", "seed text"]
+        assert argv[-6:] == [
+            "bash", "setup.sh", "--allow-all", "--experimental", "-i", "seed text",
+        ]
         assert "--" not in argv
 
     def test_tmux_with_wrapper_wraps_command(self, tmp_path):
@@ -91,10 +93,10 @@ class TestBuildMuxNewWindowArgv:
         # the command verbatim -- no quoting layer that could break the spawn.
         argv = sessions.build_mux_new_window_argv(
             "id2", "C:/w",
-            ["pwsh.exe", "--allow-all-tools"], None, mux="psmux",
+            ["pwsh.exe", "--allow-all", "--experimental"], None, mux="psmux",
             pane_wrapper="/does/not/exist",
         )
-        assert argv[-2:] == ["pwsh.exe", "--allow-all-tools"]
+        assert argv[-3:] == ["pwsh.exe", "--allow-all", "--experimental"]
 
     def test_psmux_prompt_transport_requires_and_uses_wrapper(self, tmp_path):
         wrapper = tmp_path / "wrapper with spaces" / "pane-wrapper.ps1"
@@ -1859,7 +1861,7 @@ class TestCmdHandoffCutover:
             m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight())
         monkeypatch.setattr(
             m, "_build_launch_cmd",
-            lambda cfg_, args, wd, **k: ["bash", "setup.sh", "--allow-all-tools"],
+            lambda cfg_, args, wd, **k: ["bash", "setup.sh", "--allow-all", "--experimental"],
         )
         monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
         monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
@@ -1875,7 +1877,7 @@ class TestCmdHandoffCutover:
         assert out["old_pane"] == "%1"
         assert out["session"] == "wt-wtY"
         # The seed is NOT a launch arg -- the plain launch cmd is reported as-is.
-        assert out["cmd"] == ["bash", "setup.sh", "--allow-all-tools"]
+        assert out["cmd"] == ["bash", "setup.sh", "--allow-all", "--experimental"]
         assert out["seed_len"] == len("continue the work")
 
     def test_retry_refocuses_live_successor_without_spawning(

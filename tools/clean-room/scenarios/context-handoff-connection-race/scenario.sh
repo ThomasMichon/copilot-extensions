@@ -77,6 +77,7 @@ phase 1 "install $PLUGIN (marketplace source)"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
+  "sandbox": { "enabled": false },
   "extraKnownMarketplaces": { "$MARKETPLACE_NAME": { "source": { "source": "github", "repo": "$MARKETPLACE_REPO" } } },
   "enabledPlugins": { "$PLUGIN@$MARKETPLACE_NAME": true }
 }
@@ -131,7 +132,7 @@ else
     # the JS extension-host component is gated behind this flag entirely,
     # independent of headed vs. headless mode.
     cr_tmux_start "$TMUX_SESSION" "$HOME/ch-repro" "What is 19+23? Reply with only the number." \
-        --experimental --allow-all-tools "${PLUGIN_ARG[@]}"
+        --experimental --allow-all "${PLUGIN_ARG[@]}"
     # Extension subprocesses launch during session bootstrap, which precedes
     # the first model turn, so by the time the reply lands every candidate
     # has already had its chance to connect (or clash).

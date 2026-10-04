@@ -1,0 +1,9 @@
+{
+  "comment": "Default embody launch command: --allow-all-tools -> --allow-all --experimental (ensures any installed SDK extension actually loads; --allow-all is a strict superset)",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    }
+  ]
+}

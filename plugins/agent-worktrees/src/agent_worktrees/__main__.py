@@ -2346,9 +2346,12 @@ def _build_launch_cmd(
     # Auto-approve everything so worktree sessions run without any
     # confirmation prompts.  --allow-all is equivalent to
     # --allow-all-tools --allow-all-paths --allow-all-urls, so a worktree
-    # session never stalls on a tool, path, or URL prompt.  Skip ACP
-    # sessions (agent-bridge manages permissions over the protocol) and
-    # never duplicate an all-permissions flag the caller already supplied.
+    # session never stalls on a tool, path, or URL prompt.  Also force
+    # --experimental: Copilot CLI silently refuses to load SDK extensions
+    # without it, so default worktree launches/resumes must carry the flag
+    # explicitly for installed extensions to appear.  Skip ACP sessions for
+    # the all-permissions flag only (agent-bridge manages permissions over
+    # the protocol) and never duplicate a flag the caller already supplied.
     # ACP detection inspects the complete command assembled so far (not just
     # copilot_args/profile args), so a configured `launch` template that
     # embeds `--acp` directly is detected too -- same class of gap as the
@@ -2359,6 +2362,8 @@ def _build_launch_cmd(
         a == flag for a in passthrough for flag in ("--allow-all-tools", "--allow-all", "--yolo")
     ):
         cmd.append("--allow-all")
+    if "--experimental" not in cmd:
+        cmd.append("--experimental")
 
     # Re-express the persisted model/effort/context-tier preference
     # (agent-machines' copilot.settings is the sole writer of

@@ -51,6 +51,7 @@ phase 1 "install ONLY $PLUGIN (no agent-worktrees base)"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
+  "sandbox": { "enabled": false },
   "extraKnownMarketplaces": { "$MARKETPLACE_NAME": { "source": { "source": "github", "repo": "$MARKETPLACE_REPO" } } },
   "enabledPlugins": { "$PLUGIN@$MARKETPLACE_NAME": true }
 }
@@ -77,7 +78,7 @@ _apply_uv_index_fixture
 mkdir -p "$HOME/br-repo" && ( cd "$HOME/br-repo" && git init -q && git config user.email t@e && git config user.name t && echo '# br' > README.md && git add -A && git commit -qm init )
 PLUGIN_ARG=()
 [ -d "$INSTALLED_ROOT/$PLUGIN" ] && PLUGIN_ARG=( --plugin-dir "$INSTALLED_ROOT/$PLUGIN" )
-( cd "$HOME/br-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARG[@]}" ) || true
+( cd "$HOME/br-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all --experimental "${PLUGIN_ARG[@]}" ) || true
 sleep 8
 if [ -d "$HOME/.agent-bridge" ] && { [ -d "$HOME/.agent-bridge/versions" ] || [ -x "$HOME/.agent-bridge/.venv/bin/python" ] || [ -e "$HOME/.local/bin/agent-bridge" ]; }; then
     pass "agent-bridge runtime deployed after first session"

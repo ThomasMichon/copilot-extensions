@@ -339,7 +339,7 @@ $CleanRoomLabel = 'copilot-extensions.clean-room=1'
 # Core dumps must not dirty a fixture, and the hidden distro rg avoids Copilot's
 # bundled ARM64 binary rejecting hosts with 16 KiB pages.
 $script:AcpPrefix = 'ulimit -c 0 && env USE_BUILTIN_RIPGREP=false PATH=/opt/copilot-cleanroom/bin:$PATH'
-$script:AcpCommand = "$($script:AcpPrefix) copilot --acp --stdio --allow-all-tools"
+$script:AcpCommand = "$($script:AcpPrefix) copilot --acp --stdio --allow-all --experimental"
 $script:AcpCwd = ''
 $script:BridgeContainerId = ''
 

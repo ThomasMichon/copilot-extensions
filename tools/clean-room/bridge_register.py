@@ -59,7 +59,7 @@ DEFAULT_NAME_FILTER = "cr-"
 
 #: The in-container Copilot ACP command. The runner overrides this with the
 #: scenario's ``--plugin-dir`` flags so the driven agent loads its plugins.
-DEFAULT_ACP = "copilot --acp --stdio --allow-all-tools"
+DEFAULT_ACP = "copilot --acp --stdio --allow-all --experimental"
 
 #: Cross-plugin exit-code contract for ``namespace-resolve`` (agent-bridge #892
 #: Inc 3): not-found -> 3 (daemon maps to KeyError). Clean-room boxes have no

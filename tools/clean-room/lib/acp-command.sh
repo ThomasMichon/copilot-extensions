@@ -5,7 +5,7 @@ clean_room_quote_bash() {
 }
 
 clean_room_build_acp_command() {
-    local command='copilot --acp --stdio --allow-all-tools'
+    local command='copilot --acp --stdio --allow-all --experimental'
     local plugin_dir quoted_dir
     while IFS= read -r plugin_dir; do
         quoted_dir="$(clean_room_quote_bash "$plugin_dir")"

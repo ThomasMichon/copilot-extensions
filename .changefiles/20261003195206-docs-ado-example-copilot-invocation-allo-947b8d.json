@@ -1,0 +1,9 @@
+{
+  "comment": "docs: ado example copilot invocation -- --allow-all-tools -> --allow-all --experimental, consistent with the repo-wide default-launch-flag policy update",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "dev"
+    }
+  ]
+}

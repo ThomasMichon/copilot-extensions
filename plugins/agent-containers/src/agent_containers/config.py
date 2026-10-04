@@ -68,8 +68,10 @@ SECURITY_GID_LABEL = "agent-containers.security-gid"
 SECURITY_IMAGE_ID_LABEL = "agent-containers.security-image-id"
 
 # Default ACP launch command run inside the container. Mirrors the codespaces
-# resolver. ``--allow-all-tools`` is required for headless dispatch.
-DEFAULT_ACP_COMMAND = "copilot --acp --stdio --allow-all-tools"
+# resolver. ``--allow-all`` prevents interactive permission prompts during
+# headless dispatch, and ``--experimental`` is required for any installed SDK
+# extension to load.
+DEFAULT_ACP_COMMAND = "copilot --acp --stdio --allow-all --experimental"
 TRUSTED_PROFILE = "trusted"
 RESTRICTED_PROFILE = "restricted"
 SECURITY_PROFILES = {TRUSTED_PROFILE, RESTRICTED_PROFILE}
@@ -500,7 +502,8 @@ class ContainersConfig:
             if not fleet.acp_command:
                 raise RuntimeError(
                     "Restricted fleet requires an explicit per-fleet "
-                    "'acp_command'; the trusted --allow-all-tools default is disabled"
+                    "'acp_command'; the trusted --allow-all --experimental "
+                    "default is disabled"
                 )
             return self.effective_acp_command(
                 workspace_folder=workspace,

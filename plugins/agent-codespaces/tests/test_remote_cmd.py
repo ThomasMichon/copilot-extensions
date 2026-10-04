@@ -57,7 +57,7 @@ _PLUGIN_DIRS = [
 
 def test_plugin_dirs_folded_for_stdio_launch():
     cmd = _build_launch_command(
-        "copilot --acp --stdio --allow-all-tools",
+        "copilot --acp --stdio --allow-all --experimental",
         _PLUGIN_DIRS,
         is_stdio=True,
         relay_env="",
@@ -78,7 +78,7 @@ def test_model_flags_folded_after_plugin_dirs_for_stdio_launch(monkeypatch):
         lambda: " --model claude-opus-4.8 --reasoning-effort high --context long_context",
     )
     cmd = _build_launch_command(
-        "copilot --acp --stdio --allow-all-tools",
+        "copilot --acp --stdio --allow-all --experimental",
         _PLUGIN_DIRS,
         is_stdio=True,
         relay_env="",
@@ -149,7 +149,7 @@ def test_launch_prelude_scrubs_injected_ms_ado_pat():
     assert "VSS_NUGET_ACCESSTOKEN" in _SCRUB_ENV_VARS
     scrub = "".join(f"unset {v}; " for v in _SCRUB_ENV_VARS)
     cmd = _build_launch_command(
-        "copilot --acp --stdio --allow-all-tools", [],
+        "copilot --acp --stdio --allow-all --experimental", [],
         is_stdio=True, relay_env=scrub, breadcrumb="true",
     )
     assert cmd is not None

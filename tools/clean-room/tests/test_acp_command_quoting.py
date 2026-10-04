@@ -61,7 +61,8 @@ def _assert_command_preserves_plugin_dir(
     assert stdout.splitlines() == [
         "--acp",
         "--stdio",
-        "--allow-all-tools",
+        "--allow-all",
+        "--experimental",
         "--plugin-dir",
         plugin_dir,
     ]
