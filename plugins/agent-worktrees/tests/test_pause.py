@@ -126,10 +126,11 @@ class TestPauseWorktree:
         """Between the unlocked preview read and the later record lock,
         another process could write the record at all (e.g. release and
         re-add the same ref as a new incarnation sharing the same kind/
-        state/timestamp). The whole-file `(mtime_ns, size)` fence must
-        skip the reclaim sweep entirely for this pass rather than apply a
-        cached verdict against content that may no longer describe the
-        same claim."""
+        state/timestamp but a different `note`). The per-claim content
+        fingerprint must then treat the cached verdict as unknown and
+        skip flipping that claim this pass, rather than apply it against
+        content that no longer matches what the verdict was computed
+        for."""
         config, wid, _wt_path, _remote = pr_repo
         from agent_worktrees import config as cfg_mod
         from agent_worktrees import sweep
@@ -247,3 +248,37 @@ class TestPauseWorktree:
         rec = tracking.load_record(tracking_dir / f"{wid}.yaml")
         claim = next(c for c in rec.resources if c.ref == "o/r#42")
         assert claim.state == "active"
+
+
+class TestClaimFingerprint:
+    """Direct coverage of the per-claim content fingerprint pause uses to
+    fence a cached verdict -- deterministic from a single in-memory read,
+    unlike a filesystem stat()/timestamp (see pause_worktree's own TOCTOU
+    regression test for the end-to-end race it closes)."""
+
+    def test_identical_claims_fingerprint_identically(self):
+        a = ResourceClaim(kind="pr", ref="o/r#1", state="active", created_at="t1")
+        b = ResourceClaim(kind="pr", ref="o/r#1", state="active", created_at="t1")
+        assert pause_mod._claim_fingerprint(a) == pause_mod._claim_fingerprint(b)
+
+    def test_any_changed_field_changes_the_fingerprint(self):
+        base = ResourceClaim(
+            kind="pr", ref="o/r#1", state="active", note="n",
+            created_at="t1", handoff_bundle="",
+        )
+        original = pause_mod._claim_fingerprint(base)
+        for field_name, new_value in [
+            ("kind", "codespace"),
+            ("state", "at-rest"),
+            ("note", "different"),
+            ("created_at", "t2"),
+            ("handoff_bundle", "bundle-1"),
+        ]:
+            mutated = ResourceClaim(
+                kind="pr", ref="o/r#1", state="active", note="n",
+                created_at="t1", handoff_bundle="",
+            )
+            setattr(mutated, field_name, new_value)
+            assert pause_mod._claim_fingerprint(mutated) != original, (
+                f"changing {field_name!r} did not change the fingerprint"
+            )

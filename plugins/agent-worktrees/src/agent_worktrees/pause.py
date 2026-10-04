@@ -40,25 +40,20 @@ resume in this exact worktree) is still genuinely open -- leave it."
    the fleet-wide ``claims sweep``. Provider/lease probes run *before* the
    record lock is taken (mirroring ``claims_cli._claims_sweep``'s own
    verdicts-first pattern) -- a probe can take tens of seconds, and this
-   record's lock must never block an unrelated claim writer for that long.
-   The preview read and its paired ``stat()`` are themselves taken under
-   one short, immediately-released lock acquisition -- without it, a
-   writer could replace the file in the gap between an unlocked
-   ``load_record()`` and the following ``stat()``, leaving the preview
-   content paired with a *newer* file's stat and defeating the staleness
-   check below by construction. The cached verdicts are then fenced
-   against that paired record file's own ``(mtime_ns, size)``: if another
-   process writes the record at all between the preview and the main
-   lock, the sweep is skipped entirely for this pass (a per-claim fence
-   keyed on a single field -- e.g. ``created_at``, whose ``_now_iso()``
-   stamp has only one-second resolution -- cannot reliably distinguish
-   a released and immediately re-added claim sharing the same ref, kind, and
-   timestamp from the original). A later ``pause`` retries with a fresh
-   preview. A settled claim is recorded into the durable claim-history
-   ledger (tagged with the owning record's own project, never the
-   ambient one) the same way the fleet-wide sweep does, so ``claims
-   history <ref>`` reflects
-   it immediately.
+   record's lock must never block an unrelated claim writer for that long
+   (the lock may never be held across network/git I/O at all -- see
+   ``tracking._RecordLock``'s own scope invariant). Each cached verdict is
+   fenced against a **content fingerprint** of the exact claim it was
+   computed for (every identity/state field: kind, ref, state, note,
+   created_at, handoff_bundle) rather than a timestamp or a file-level
+   stat -- a single in-memory read pairs the fingerprint with the claim
+   deterministically (no separate stat() call to race against), and any
+   release-and-re-add of the same ref changes at least one of those
+   fields, so a stale verdict can never apply to a different incarnation
+   sharing the same ref. A settled claim is recorded into the durable
+   claim-history ledger (tagged with the owning record's own project,
+   never the ambient one) the same way the fleet-wide sweep does, so
+   ``claims history <ref>`` reflects it immediately.
 3. Report every claim that remains genuinely open -- and stop there.
    Unlike ``finalize``, this is never an error: ``pause`` never requires
    ``--abandon``, never demands a ``--handoff-to`` recipient, and never
@@ -74,6 +69,7 @@ resume in this exact worktree) is still genuinely open -- leave it."
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 
 from . import claim_history, git_collab, sweep, tracking
@@ -136,22 +132,12 @@ def pause_worktree(
     # Compute gone/safe verdicts OUTSIDE the record lock -- a provider/lease
     # probe (e.g. a `gh`/`az` call per claim) can take tens of seconds, and
     # this record's lock must never block an unrelated claim writer for
-    # that long (mirrors claims_cli._claims_sweep's own verdicts-first
-    # pattern, which this module reuses rather than duplicates).
-    #
-    # Take the SAME short record lock around the preview read and its
-    # paired stat, then release it immediately: without this, a writer
-    # could replace the file between an unlocked `load_record()` and the
-    # following `stat()`, leaving `preview` describing the OLD content
-    # while `preview_stat` already describes the NEW file -- the later
-    # staleness check would then wrongly see "unchanged" and apply a
-    # cached verdict to a claim that was, in fact, rewritten underneath
-    # the preview.
-    with tracking._RecordLock(yaml_path, require_sidecar=True):
-        preview = tracking.load_record(yaml_path)
-        preview_stat = yaml_path.stat()
+    # that long, nor may the lock ever be held across network/git I/O at
+    # all (mirrors claims_cli._claims_sweep's own verdicts-first pattern,
+    # which this module reuses rather than duplicates).
+    preview = tracking.load_record(yaml_path)
     gone_of, safe_of = sweep.make_resolvers(config)
-    verdicts: dict[str, tuple[bool | None, bool | None]] = {}
+    verdicts: dict[str, tuple[bool | None, bool | None, str]] = {}
     for claim in preview.resources:
         if not claim.is_unsettled or tracking.claim_handoff_reservation(preview, claim):
             continue
@@ -163,37 +149,25 @@ def pause_worktree(
             safe = safe_of(claim)
         except Exception:
             safe = None
-        verdicts[claim.ref] = (gone, safe)
+        verdicts[claim.ref] = (gone, safe, _claim_fingerprint(claim))
 
     def _gone(claim: tracking.ResourceClaim) -> bool | None:
-        return verdicts.get(claim.ref, (None, None))[0]
+        cached = verdicts.get(claim.ref)
+        if cached is None or cached[2] != _claim_fingerprint(claim):
+            return None
+        return cached[0]
 
     def _safe(claim: tracking.ResourceClaim) -> bool | None:
-        return verdicts.get(claim.ref, (None, None))[1]
+        cached = verdicts.get(claim.ref)
+        if cached is None or cached[2] != _claim_fingerprint(claim):
+            return None
+        return cached[1]
 
     with tracking._RecordLock(yaml_path, require_sidecar=True):
-        # Fence the cached verdicts against the record FILE's own identity
-        # (mtime_ns, size), not a single claim field: between the preview
-        # read above and this lock, another process could have released
-        # and re-added the exact same `ref` as a genuinely different
-        # incarnation (same kind/state, even the same one-second
-        # `_now_iso()` timestamp) -- a per-claim fence on any one field
-        # cannot reliably catch that. If the file changed at all, skip the
-        # reclaim sweep entirely for this pass rather than risk applying a
-        # stale verdict to a claim that changed identity underneath it; a
-        # later `pause` retries with a fresh preview.
-        current_stat = yaml_path.stat()
-        stale = (
-            current_stat.st_mtime_ns != preview_stat.st_mtime_ns
-            or current_stat.st_size != preview_stat.st_size
-        )
         record = tracking.load_record(yaml_path)
-        if stale:
-            flipped: list[tracking.ResourceClaim] = []
-        else:
-            flipped = tracking.sweep_abandoned_obligations(
-                record, gone_of=_gone, safe_of=_safe, save=False,
-            )
+        flipped = tracking.sweep_abandoned_obligations(
+            record, gone_of=_gone, safe_of=_safe, save=False,
+        )
         if flipped:
             tracking.save_record(record, yaml_path)
             # Append immediately, still inside this record's own lock,
@@ -213,6 +187,24 @@ def pause_worktree(
     return PauseResult(
         worktree_id=worktree_id, synced=True, settled=settled, remaining=remaining,
     )
+
+
+def _claim_fingerprint(claim: tracking.ResourceClaim) -> str:
+    """Content fingerprint of every field that defines this claim's
+    identity/state (kind, ref, state, note, created_at, handoff_bundle).
+
+    Deterministic and computed from a single in-memory read -- unlike a
+    filesystem ``stat()``, there is no separate call to race against, and
+    unlike a single field (e.g. ``created_at``, whose ``_now_iso()`` stamp
+    has only one-second resolution), any release-and-re-add of the same
+    ``ref`` changes at least one of these fields, so a cached verdict can
+    never silently apply to a different incarnation sharing the same ref.
+    """
+    raw = "\x00".join([
+        claim.kind, claim.ref, claim.state, claim.note,
+        claim.created_at, claim.handoff_bundle,
+    ])
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def _describe_unsettled(record: tracking.WorktreeRecord) -> list[dict[str, str]]:
