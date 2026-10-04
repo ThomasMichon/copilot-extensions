@@ -1,0 +1,9 @@
+{
+  "comment": "Fix: codespace-boundary end_session now awaits and verifies the far-side kill instead of firing it off unawaited",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
