@@ -431,16 +431,16 @@ pre-agent-steps:
     # re-resolving a branch that can move while the agent runs.
     env:
       GH_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-      # Real review finding (PR #5135): `safe-outputs.create-pull-request`'s
-      # own `base-branch:` below is compile-time frontmatter -- it cannot
-      # read a shell variable, so it cannot itself track whatever this
-      # step resolves at runtime. Hardcoding it to match is a silent
-      # coupling: if the repo's configured contribution branch ever
-      # changes, the agent would edit one branch while safe-outputs opens
-      # the patch against another, with no error, just a wrong-based PR.
-      # Fail loudly here instead, the same machine-enforced-gate pattern
-      # `post-steps` below already uses, rather than trusting a comment to
-      # keep the two in sync.
+      # safe-outputs.create-pull-request's own base-branch: below is
+      # compile-time frontmatter -- it cannot read a shell variable, so
+      # it cannot itself track whatever this step resolves at runtime.
+      # Hardcoding it to match is a silent coupling: if the repo's
+      # configured contribution branch ever changes, the agent would
+      # edit one branch while safe-outputs opens the patch against
+      # another, with no error, just a wrong-based PR. Fail loudly here
+      # instead, the same machine-enforced-gate pattern `post-steps`
+      # below already uses, rather than trusting a comment to keep the
+      # two in sync.
       SAFE_OUTPUTS_BASE_BRANCH: dev
     run: |
       set -euo pipefail
