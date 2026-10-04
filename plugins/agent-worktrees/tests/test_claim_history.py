@@ -12,10 +12,16 @@ from pathlib import Path
 
 import pytest
 
-from agent_worktrees import claim_history, claims_history_cli
+from agent_worktrees import (
+    claim_history,
+    claims_history_cli,
+    finalize,
+    obligations,
+    tracking,
+    tracking_claim_write,
+    tracking_write,
+)
 from agent_worktrees import config as cfg
-from agent_worktrees import finalize
-from agent_worktrees import obligations, tracking, tracking_claim_write, tracking_write
 
 
 @pytest.fixture(autouse=True)
@@ -175,6 +181,24 @@ def test_claim_add_feeds_history_for_pr_kind(record_path):
     assert events[0]["event"] == "claimed"
     assert events[0]["worktree_id"] == "wt-claim"
     assert events[0]["machine"] == "machine-x"
+
+
+def test_claim_add_stamps_the_owning_records_own_project_not_ambient_config(
+    record_path, monkeypatch,
+):
+    """``claims add --owner-ref`` resolves ANOTHER project's tracking
+    record and dispatches here, possibly from a process whose ambient
+    config names a different project entirely (or a daemon invocation
+    with no project context of its own). The stamped ``project`` must be
+    the record's own ``repo`` -- never whatever ``current_project_name()``
+    happens to report."""
+    monkeypatch.setattr(claim_history, "current_project_name", lambda: "ambient-project")
+    tracking_claim_write.apply_claim_add({
+        "worktree_id": "wt-claim", "yaml_path": str(record_path),
+        "kind": "pr", "ref": "o/r#10",
+    })
+    events = claim_history.history_for_ref("o/r#10")
+    assert events[0]["project"] == "example"  # record_path's own WorktreeRecord.repo
 
 
 def test_claim_add_uses_the_caller_supplied_session_id(record_path):
@@ -464,3 +488,139 @@ def test_cli_json_mode(capsys):
     assert rc == 0
     assert captured["payload"]["ref"] == "o/r#5"
     assert len(captured["payload"]["events"]) == 1
+
+
+def test_cli_remote_warns_on_stderr_when_the_remote_read_fails(capsys, monkeypatch):
+    """A failed remote read must never look identical to "no ownership
+    history exists" -- the CLI warns (on stderr, never polluting JSON
+    stdout) distinguishing the two."""
+    from agent_worktrees import claim_history_mirror
+
+    claim_history.record_event(
+        kind="pr", ref="o/r#6", worktree_id="wt-a", machine="m", event="claimed",
+    )
+
+    def failing_fetch(ref_value, **kwargs):
+        claim_history_mirror._read_failures += 1
+        return []
+
+    monkeypatch.setattr(claim_history_mirror, "fetch_remote_history", failing_fetch)
+    captured: dict = {}
+    rc = claims_history_cli.cmd_claims_history(
+        _ns(json=True, remote=True), "o/r#6",
+        json_error=lambda *a, **k: 2, json_output=lambda p: captured.setdefault("payload", p),
+    )
+    assert rc == 0
+    assert len(captured["payload"]["events"]) == 1  # local history still shown
+    err = capsys.readouterr().err
+    assert "could not read" in err
+
+
+def test_cli_remote_falls_back_to_unverified_local_history_when_the_lock_fails(
+    capsys, monkeypatch
+):
+    """The local snapshot's own lock acquisition failing (e.g. a
+    read-only filesystem) must never abort ``--remote`` before even
+    attempting the remote fetch -- it degrades to plain, unstamped local
+    history (never dedupes falsely against remote) and keeps going."""
+    from agent_worktrees import claim_history_mirror
+
+    claim_history.record_event(
+        kind="pr", ref="o/r#7", worktree_id="wt-a", machine="m", event="claimed",
+    )
+
+    def boom(kind, ref_value):
+        raise OSError("read-only filesystem")
+
+    monkeypatch.setattr(claim_history_mirror, "local_identities_for_ref", boom)
+    monkeypatch.setattr(claim_history_mirror, "fetch_remote_history", lambda ref_value, **k: [])
+    captured: dict = {}
+    rc = claims_history_cli.cmd_claims_history(
+        _ns(json=True, remote=True), "o/r#7",
+        json_error=lambda *a, **k: 2, json_output=lambda p: captured.setdefault("payload", p),
+    )
+    assert rc == 0
+    assert len(captured["payload"]["events"]) == 1
+    err = capsys.readouterr().err
+    assert "could not read" in err and "identity" in err
+
+
+# ── _merge_events (the --remote local+mirrored merge) ───────────────────
+
+def test_merge_events_preserves_a_repeated_local_transition_at_second_granularity():
+    """``record_event`` timestamps only to the second, so a claim released
+    and re-claimed by the same worktree/session within one second produces
+    two "claimed" entries that share identical DISPLAY fields but distinct
+    durable identities (different ``seq``). Every local event is kept
+    as-is regardless -- merge only ever adds from the remote side."""
+    local = [
+        {"ts": "2026-10-03T12:00:00+00:00", "event": "claimed", "worktree_id": "wt-a",
+         "machine": "m", "seq": 0, "ledger_id": "ledger-a"},
+        {"ts": "2026-10-03T12:00:00+00:00", "event": "released", "worktree_id": "wt-a",
+         "machine": "m", "seq": 1, "ledger_id": "ledger-a"},
+        {"ts": "2026-10-03T12:00:00+00:00", "event": "claimed", "worktree_id": "wt-a",
+         "machine": "m", "seq": 2, "ledger_id": "ledger-a"},
+    ]
+    merged = claims_history_cli._merge_events(local, remote=[])
+    assert [e["event"] for e in merged] == ["claimed", "released", "claimed"]
+
+
+def test_merge_events_collapses_only_an_identity_matched_remote_copy():
+    """Matching DISPLAY fields never proves a remote event is the local
+    event's own mirror -- only a matching ``(ledger_id, seq)`` identity
+    does. An identical-looking copy from a genuinely different ledger
+    incarnation must surface as a distinct event, not collapse."""
+    local = [
+        {"ts": "2026-10-03T12:00:00+00:00", "event": "claimed", "worktree_id": "wt-a",
+         "machine": "m", "seq": 0, "ledger_id": "ledger-a"},
+    ]
+    self_mirror = dict(local[0])  # same identity -- collapses
+    other_ledger = {**local[0], "ledger_id": "ledger-b"}  # different incarnation -- distinct
+    merged = claims_history_cli._merge_events(local, [self_mirror, other_ledger])
+    assert len(merged) == 2
+
+
+def test_merge_events_keeps_every_remote_event_when_local_has_no_ledger_id():
+    """A local ledger that has never been mirrored (no sidecar yet) can't
+    durably vouch for ANY remote event as its own -- every remote event
+    must surface rather than being guessed away by display-field luck."""
+    local = [
+        {"ts": "2026-10-03T12:00:00+00:00", "event": "claimed", "worktree_id": "wt-a",
+         "machine": "m", "seq": 0, "ledger_id": None},
+    ]
+    remote = [dict(local[0], ledger_id="ledger-b")]
+    merged = claims_history_cli._merge_events(local, remote)
+    assert len(merged) == 2
+
+
+def test_merge_events_never_reorders_local_under_a_non_monotonic_clock():
+    """A later local event recorded with an EARLIER-looking timestamp than
+    an event before it (a clock adjustment) must never be reordered by
+    the merge -- a plain ``sort(key=ts)`` would silently invert them even
+    with an empty remote side, contradicting plain local history (which
+    never resorts by ts at all)."""
+    local = [
+        {"ts": "2026-10-03T12:00:05+00:00", "event": "claimed", "worktree_id": "wt-a",
+         "machine": "m", "seq": 0, "ledger_id": "ledger-a"},
+        {"ts": "2026-10-03T12:00:01+00:00", "event": "released", "worktree_id": "wt-a",
+         "machine": "m", "seq": 1, "ledger_id": "ledger-a"},  # clock moved backward
+    ]
+    merged = claims_history_cli._merge_events(local, remote=[])
+    assert [e["event"] for e in merged] == ["claimed", "released"]
+
+
+def test_merge_events_never_reorders_remote_only_extras_under_a_non_monotonic_clock():
+    """The remote-side counterpart: with NO local history at all, a
+    mirrored ``claimed, released`` pair recorded under a non-monotonic
+    clock (the release's own timestamp looking earlier than its claim's)
+    must still display in the chain's own recorded order, not reversed
+    by a from-the-start timestamp scan."""
+    remote = [
+        {"ts": "2026-10-03T12:00:05+00:00", "event": "claimed", "worktree_id": "wt-a",
+         "machine": "m", "seq": 0, "ledger_id": "ledger-a"},
+        {"ts": "2026-10-03T12:00:01+00:00", "event": "released", "worktree_id": "wt-a",
+         "machine": "m", "seq": 1, "ledger_id": "ledger-a"},
+    ]
+    merged = claims_history_cli._merge_events(local=[], remote=remote)
+    assert [e["event"] for e in merged] == ["claimed", "released"]
+

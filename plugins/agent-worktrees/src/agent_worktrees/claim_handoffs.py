@@ -404,7 +404,7 @@ def accept_source(bundle_id: str, *, actor: str) -> ClaimBundle:
                     claim_history.record_bundle_transfer(
                         snapshot, event="released", worktree_id=source_record.worktree_id,
                         machine=source_record.machine, bundle_id=bundle.bundle_id,
-                        direction="to", counterpart=bundle.consumer,
+                        direction="to", counterpart=bundle.consumer, project=source_record.repo,
                     )
                 accepted = _bundle_state(bundle, "accepted")
                 bundles[index] = accepted
@@ -510,7 +510,7 @@ def _finish_accept_consumer_side(bundle: ClaimBundle, *, machine: str) -> ClaimB
                     claim_history.record_bundle_transfer(
                         snapshot, event="claimed", worktree_id=consumer_record.worktree_id,
                         machine=consumer_record.machine, bundle_id=bundle.bundle_id,
-                        direction="from", counterpart=bundle.source,
+                        direction="from", counterpart=bundle.source, project=consumer_record.repo,
                     )
             for child_path, child_record in child_records.items():
                 tracking.save_record(child_record, Path(child_path), preserve_handoff_reservations=False)

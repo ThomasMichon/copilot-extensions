@@ -2065,12 +2065,11 @@ def validate_and_finalize(
                     f"owned by {worktree_id} (finalized) -- review/clean them:"
                 )
                 for c in released:
-                    label = f"  · {c.kind}: {c.ref}"
-                    if c.note:
-                        label += f" ({c.note})"
+                    label = f"  · {c.kind}: {c.ref}" + (f" ({c.note})" if c.note else "")
                     print(label)
                     claim_history.record_claim_released(
-                        c, worktree_id=worktree_id, machine=record.machine, note="finalized")
+                        c, worktree_id=worktree_id, machine=record.machine, note="finalized",
+                        project=record.repo)
 
             # Obligation settlement, upward (resource-obligation-settlement Ph3):
             # this worktree finalizing means its OWN work is safe, so settle the
