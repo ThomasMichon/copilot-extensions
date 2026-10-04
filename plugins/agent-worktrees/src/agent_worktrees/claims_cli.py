@@ -145,12 +145,7 @@ def add_parsers(sub) -> None:
         default="",
         help="with handoff decline/cancel: required explanation",
     )
-    p.add_argument(
-        "--actor",
-        default="",
-        dest="claim_actor",
-        help=argparse.SUPPRESS,
-    )
+    p.add_argument("--actor", default="", dest="claim_actor", help=argparse.SUPPRESS)
     p.add_argument("--all-states", action="store_true", help="with owner: include released claims")
     p.add_argument(
         "--repo",
@@ -171,6 +166,10 @@ def add_parsers(sub) -> None:
         dest="claim_live",
         help="with find pr: cross-check each candidate against the "
         "provider's live PR state instead of trusting local tracking",
+    )
+    p.add_argument(
+        "--remote", action="store_true",
+        help="with history: also merge mirrored remote claim-history events (network)",
     )
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
@@ -746,6 +745,7 @@ def _claims_sweep(args: argparse.Namespace) -> int:
                             # an involuntary reclaim -- only a non-pr kind
                             # is genuinely `abandoned` here.
                             note="merged" if c.state == obligations.RELEASED else "abandoned",
+                            project=rec.repo,  # THIS record's own project (sweep spans projects)
                         )
         else:
             before = {c.ref: c.state for c in rec.resources}
@@ -813,7 +813,7 @@ def _claims_reconcile_at_rest(args: argparse.Namespace) -> int:
                         claim_history.record_event(
                             kind=c.kind, ref=c.ref, worktree_id=rec.worktree_id,
                             machine=rec.machine, event="released",
-                            note="at-rest-reconciled",
+                            note="at-rest-reconciled", project=rec.repo,
                         )
         else:
             before = {c.ref: c.state for c in rec.resources}
