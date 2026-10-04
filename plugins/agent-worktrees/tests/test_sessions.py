@@ -1424,6 +1424,36 @@ def test_a_failed_send_followed_by_a_lost_pane_stays_ambiguous():
         assert sends == ["=wt-x:0.%9"], after  # one attempt: never resent
 
 
+def test_a_send_refused_wherever_the_pane_is_typed_nothing():
+    """Every attempt was the server's own target refusal -- at the same place twice,
+    or at the old and the new place -- so no key landed: it reports the no-typing
+    outcome (``pane-target-lost``), letting a caller restore the pending seed."""
+    from types import SimpleNamespace
+
+    ready = "press esc to interrupt"
+    for moves in (False, True):
+        state = {"sends": 0}
+
+        def locate(pane, mux, session_name=None, moves=moves, state=state):
+            return "=wt-x:1.0" if moves and state["sends"] else "=wt-x:0.0"
+
+        def run(argv, state=state, **kw):
+            if argv[1] == "send-keys":
+                state["sends"] += 1
+                return SimpleNamespace(stdout="", stderr="psmux: can't find pane: %9", returncode=1)
+            return SimpleNamespace(stdout=ready, stderr="", returncode=0)
+
+        with patch("subprocess.run", side_effect=run), patch("time.sleep"), \
+             patch("time.monotonic", side_effect=_Clock()), \
+             patch("agent_worktrees.sessions._mux_bin", return_value="psmux"), \
+             patch("agent_worktrees.sessions_pane_retire._mux_qualified_pane_target",
+                   side_effect=locate):
+            out = mux_seed_pane("%9", "Continue: build", session_name="wt-x",
+                                ready_timeout=100.0, poll_interval=0.0, settle=0.0)
+        assert out["reason"] == "pane-target-lost" and out["sent"] is False, moves
+        assert state["sends"] == (2 if moves else 1), moves
+
+
 def test_seed_fails_closed_when_its_pane_disappears():
     ready = "press esc to interrupt"
     where = iter(["=wt-x:0.0", "=wt-x:0.0"])

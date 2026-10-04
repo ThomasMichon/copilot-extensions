@@ -560,6 +560,10 @@ class _LiveFakeClient:
             return dict(self._by_handle[handle] or {})
         return dict(self._resolved) if self._resolved else {}
 
+    def daemon_supports(self, _version):
+        # An older daemon: `send` keeps its client-side expected-session precheck.
+        return False
+
     def send_live_message(self, session_id, *, sender, body, reply_to=None,
                           kind="prompt", wait=False, wait_timeout=None, **options):
         self.delivered.append(

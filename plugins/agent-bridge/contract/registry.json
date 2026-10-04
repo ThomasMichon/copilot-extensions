@@ -77,9 +77,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "7c670ca273b968616f67acbc9df8b8081e71a943670e57e9daa743c58f15002e",
+          "sha256": "c4693eb71026d5a19a25a6b36c9c72bc69852b4f55447c86829a6d17529b00ab",
           "semantic": false,
-          "non_semantic_reason": "Live-message request/response models gained an optional delivery urgency field, then its default changed from \"queue\" to \"steer\" (noted inline on the field, not the docstring, to stay within the module's grandfathered line-count ceiling), and the live-session registration request gained an optional process_started_at; the representative session-create wire shape is unchanged."
+          "non_semantic_reason": "Live-message request/response models gained an optional delivery urgency field, then its default changed from \"queue\" to \"steer\" (noted inline on the field, not the docstring, to stay within the module's grandfathered line-count ceiling), and the live-session registration request gained an optional process_started_at (its inline note says the routes refuse a non-finite one); the representative session-create wire shape is unchanged."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
