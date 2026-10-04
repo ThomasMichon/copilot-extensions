@@ -102,7 +102,19 @@ installer. Know which kind you are changing.
 3. **Test.** Run `pytest` from the changed runtime plugin's dir
    (`plugins/<plugin>/`). Lint touched Python with `ruff check --select F,E9`.
    Respect the repo's `TESTING.md` for how to run the suites and the opt-in
-   e2e smoke tests.
+   e2e smoke tests. **After fixing a bug specifically, prefer
+   `tools/run_tests_in_devcontainer.py <plugin>` over the bare
+   `tools/run-plugin-tests.py` when Docker + the devcontainers CLI are
+   available (Linux only)** — it runs the identical suite inside a hardened,
+   network-disconnected, ephemeral container, adding a real OS-level
+   boundary the bare runner's process-level containment alone can't
+   guarantee against. Fall back to the bare runner when that tooling isn't
+   present. **`git add` any newly created source/test files first** — the
+   wrapper snapshots only git-tracked paths by default, so an untracked
+   regression test is silently omitted and the run can pass without ever
+   exercising it; staging is enough, a commit isn't required.
+   See `AGENTS.md` § *Test Before PR Publication* and `TESTING.md`
+   § *Optional devcontainer-based isolation*.
 
    **Fix every failing test you encounter — never label it "pre-existing" and
    move on.** `dev` feeds a fully automated release pipeline

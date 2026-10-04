@@ -388,6 +388,32 @@ canonicalization, F3 binding invariants) so `--guards` runs them in
 sub-second-per-plugin. Copilot review is non-blocking, so run the relevant suite
 yourself before publishing a plugin change.
 
+**After fixing a bug, prefer the devcontainer-isolated runner when available
+(Linux, Docker + the devcontainers CLI present):**
+
+```bash
+git add <new/changed files>                          # see prerequisite below
+python tools/run_tests_in_devcontainer.py <plugin>   # same suite, inside a hardened, ephemeral, network-disconnected container
+```
+
+**Prerequisite: `git add` any newly created source/test files first.** The
+wrapper snapshots only git-tracked (i.e. `git ls-files --cached`) paths by
+default — an untracked regression test you just wrote is silently omitted,
+so the run can pass without ever exercising it. Staging (`git add`) is
+enough; you don't need to commit. `--include-untracked` additionally
+sweeps in untracked-but-not-gitignored files, but stays an explicit opt-in
+rather than a default — it can scoop up an untracked secret-like file that
+isn't gitignored.
+
+It runs the exact suite above inside a hardened, network-disconnected,
+ephemeral container — a real OS-level boundary on top of the turn-key
+runner's own process-level containment, so a fix that *looks* contained but
+still reaches outside its redirected roots (an absolute-path write, a raw
+socket) can't leave evidence on, or depend on state from, this host. Fall
+back to the bare runner above when Docker/the devcontainers CLI isn't
+available. See `TESTING.md` § *Optional devcontainer-based isolation* for
+the full mechanics.
+
 **Per-plugin coverage** — what each plugin's suite exercises — lives in
 `TESTING.md` § *Per-plugin coverage*, not here (that enumeration drifts as
 plugins are added). The largest is **agent-worktrees**: a ~1400-test suite
