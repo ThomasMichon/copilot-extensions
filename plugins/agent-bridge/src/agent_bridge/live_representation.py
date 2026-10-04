@@ -767,11 +767,13 @@ class MergeFollowingLog:
         if current is not self._log:
             # Translate from the numbering the cursor is actually in, so two merges
             # with only a heartbeat poll between them (C:2 -> B:3 -> A:4) chain.
+            # A replacement it can't translate into (no merge map: e.g. the id
+            # was deregistered and registered again) restarts the reader at 0,
+            # announced as such, rather than skip the new log's first events.
             moved = translate_merged_cursor(self._log, current, cursor)
             self._log = current
-            self._moved = (original, moved) if moved is not None else None
-            if moved is not None:
-                cursor = moved
+            self._moved = (original, 0 if moved is None else moved)
+            cursor = self._moved[1]
         return current, cursor
 
     async def wait_for_events_snapshot(self, cursor: int, *, timeout: float):

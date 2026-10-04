@@ -1289,7 +1289,7 @@ def test_seed_targets_the_pane_inside_its_own_session_only():
     the session-qualified target, and an unresolvable pane is never typed into."""
     seen: list[tuple[str, str]] = []
     ready = "press esc to interrupt"
-    driver = _SeedDriver(ready_caps=[ready, ready], echo_caps=[f"{ready}\nContinue: build"])
+    driver = _SeedDriver(ready_caps=[ready, ready], echo_caps=[f"❯ Continue: build\n{ready}"])
 
     def _run(argv, **kw):
         seen.append((argv[1], argv[argv.index("-t") + 1]))
@@ -1332,7 +1332,7 @@ def test_seed_follows_its_pane_when_the_layout_changes_during_the_wait():
         if argv[1] == "capture-pane":
             if at == "=wt-x:0.%9":  # read before the move: proves nothing now
                 return SimpleNamespace(stdout=ready, returncode=0)
-            out = f"{ready}\nContinue: build" if typed["done"] else ready
+            out = f"❯ Continue: build\n{ready}" if typed["done"] else ready
             return SimpleNamespace(stdout=out, returncode=0)
         if argv[1] == "send-keys" and "-l" in argv:
             typed["done"] = True
@@ -1376,7 +1376,7 @@ def test_seed_keystrokes_are_refused_not_misdirected_when_the_pane_moves_after_l
             sends.append((at, argv[4:], rc))
             state["typed"] |= rc == 0 and "-l" in argv
             return SimpleNamespace(stdout="", stderr=err, returncode=rc)
-        out = f"{ready}\n{seed}" if state["typed"] else ready
+        out = f"❯ {seed}\n{ready}" if state["typed"] else ready
         return SimpleNamespace(stdout=out if rc == 0 else "", stderr=err, returncode=rc)
 
     with patch("subprocess.run", side_effect=run), patch("time.sleep"), \
@@ -1466,7 +1466,7 @@ def test_seed_pane_happy_path_submits():
     seed = "Continue: build multi-account effort"
     driver = _SeedDriver(
         ready_caps=["press esc to interrupt", "press esc to interrupt"],
-        echo_caps=[f"press esc to interrupt\n{seed}"],
+        echo_caps=[f"❯ {seed}\npress esc to interrupt"],
     )
     result = _run_seed(driver, seed=seed)
     assert result["ready"] is True
@@ -1481,7 +1481,7 @@ def test_seed_pane_footer_cue_also_ready():
     seed = "Continue: do the thing"
     driver = _SeedDriver(
         ready_caps=["press esc to interrupt", "press esc to interrupt"],
-        echo_caps=[seed],
+        echo_caps=[f"❯ {seed}\npress esc to interrupt"],
     )
     result = _run_seed(driver, seed=seed)
     assert result["ready"] is True
@@ -1616,6 +1616,27 @@ def test_seed_pane_echo_ignores_a_stale_prompt_in_the_transcript(layout):
     assert driver.enter_sent() is False
 
 
+def test_seed_pane_echo_ignores_a_transcript_line_that_gains_the_seed_text():
+    """Legacy layout: the input prompt stays empty while a transcript line
+    above it changes to contain the seed's words -- not an echo: no Enter."""
+    seed = "Continue: do the thing"
+    before = " ● working on it\n❯\npress esc to interrupt"
+    after = f" ● {seed} (quoted by the assistant)\n❯\npress esc to interrupt"
+    driver = _SeedDriver(ready_caps=[before, before], echo_caps=[after] * 4)
+    result = _run_seed(driver, seed=seed)
+    assert result["ready"] is True and result["reason"] == "seed-not-echoed"
+    assert driver.enter_sent() is False
+
+
+@pytest.mark.parametrize("seed", ["Diagnose the ╻▄ input border", "Diagnose the ╹▀ input border"])
+def test_seed_pane_echo_keeps_rail_glyphs_typed_in_the_input(seed):
+    """Only a line that *starts* with a rail is the frame: a seed naming the
+    rail glyphs echoes inside the box and submits."""
+    driver = _SeedDriver(ready_caps=[_BOXED_INPUT, _BOXED_INPUT],
+                         echo_caps=[_BOXED_INPUT.replace("┃\n", f"┃ {seed}\n")])
+    assert _run_seed(driver, seed=seed)["submitted"] is True
+
+
 def test_seed_pane_echo_in_the_box_still_submits_under_a_stale_prompt():
     seed = "Continue: do the thing"
     pane = _STALE_PROMPT + _BOXED_INPUT
@@ -1652,7 +1673,7 @@ def test_seed_pane_dismisses_desktop_app_nudge_then_seeds():
     seed = "Continue: build multi-account effort"
     driver = _SeedDriver(
         ready_caps=[_DESKTOP_APP_NUDGE, "press esc to interrupt", "press esc to interrupt"],
-        echo_caps=[f"press esc to interrupt\n{seed}"],
+        echo_caps=[f"❯ {seed}\npress esc to interrupt"],
     )
     result = _run_seed(driver, seed=seed)
     assert result["ready"] is True
@@ -1687,7 +1708,7 @@ def test_seed_pane_never_dismisses_a_nudge_at_a_position_the_pane_left():
         if argv[1] == "capture-pane":
             if at == "=wt-x:0.%9" or not state["dismissed"]:
                 return SimpleNamespace(stdout=_DESKTOP_APP_NUDGE, returncode=0)
-            return SimpleNamespace(stdout=f"{ready}\n{seed}" if state["typed"] else ready,
+            return SimpleNamespace(stdout=f"❯ {seed}\n{ready}" if state["typed"] else ready,
                                    returncode=0)
         if argv[1] == "send-keys":
             state["dismissed"] |= argv[4:] == ["Escape"]

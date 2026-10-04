@@ -1256,5 +1256,7 @@ def test_a_retired_id_rejects_a_reused_pid_with_another_start_time(client, app) 
     assert stranger.status_code == 409
     assert stranger.json()["detail"]["reason"] == "incarnation_mismatch"
     assert db.get_live_session_exact("resumed")["process_started_at"] == 100.0
-    same = client.post("/api/v1/live-sessions", json={**body, "process_started_at": 100.1})
+    same = client.post("/api/v1/live-sessions", json={**body, "process_started_at": 100.0})
     assert same.status_code == 200
+    reused_fast = client.post("/api/v1/live-sessions", json={**body, "process_started_at": 100.1})
+    assert reused_fast.status_code == 409  # 100 ms later is still another process

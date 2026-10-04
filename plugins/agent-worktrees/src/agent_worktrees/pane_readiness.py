@@ -12,6 +12,16 @@ _BUSY_STATUS = re.compile(
 )
 
 
+def _top_rail(line: str) -> bool:
+    """The boxed input's top rail: it *starts* the frame line -- a ``╻▄``
+    typed in the input sits after the left border and is text."""
+    return line.lstrip().startswith("╻▄")
+
+
+def _bottom_rail(line: str) -> bool:
+    return line.lstrip().startswith("╹▀")
+
+
 def input_region(capture: str) -> str:
     """Bottom live-input region, not scrollback transcript history.
 
@@ -20,7 +30,7 @@ def input_region(capture: str) -> str:
     last few lines of the pane.
     """
     lines = [line.rstrip() for line in capture.splitlines() if line.strip()]
-    rail = max((i for i, line in enumerate(lines) if "╻▄" in line), default=None)
+    rail = max((i for i, line in enumerate(lines) if _top_rail(line)), default=None)
     if rail is not None:
         return "\n".join(lines[max(0, rail - 2):])
     return "\n".join(lines[-8:])
@@ -29,37 +39,37 @@ def input_region(capture: str) -> str:
 #: The boxed input's left frame border at the start of each interior line --
 #: only that one glyph: box/block characters typed in the input are text.
 _LEFT_BORDER = re.compile("^\\s*[\u2500-\u259f]")
+#: The legacy layout's input prompt: a caret at the start of the line.
+_LEGACY_PROMPT = re.compile(r"^\s*[❯>]\s?")
+#: A transcript line (``● output``, ``○ step``...): never part of the input.
+_TRANSCRIPT_MARK = re.compile(r"^\s*[^\w\s❯>]")
 
 
-def input_text(capture: str, *, before: str | None = None) -> str:
+def input_text(capture: str) -> str:
     """The editable input's text, to echo-verify a typed seed -- never the
     transcript above it, where a resumed conversation can hold an earlier
-    prompt with the same words.
+    prompt with the same words (or a changing line that gains them).
 
     Boxed input (CLI >= 1.0.89): the lines inside the box, each without its
-    left frame border.
-    Older layouts have no such boundary, so it is what the typing added: the
-    lines of ``capture`` not already in ``before`` (the capture that confirmed
-    readiness), counted as a multiset so an unchanged transcript line never
-    counts, however often it repeats.
+    left frame border. Older layouts: the caret prompt line directly above the
+    live interrupt footer, and its wrapped continuation. Without such a
+    positively identified input it is ``""``: fail closed, nothing verified.
     """
     lines = [line.rstrip() for line in capture.splitlines() if line.strip()]
-    top = max((i for i, line in enumerate(lines) if "╻▄" in line), default=None)
+    top = max((i for i, line in enumerate(lines) if _top_rail(line)), default=None)
     if top is not None:
-        bottom = next((i for i in range(top + 1, len(lines)) if "╹▀" in lines[i]), None)
+        bottom = next((i for i in range(top + 1, len(lines)) if _bottom_rail(lines[i])), None)
         if bottom is not None:
             return "\n".join(_LEFT_BORDER.sub("", line, count=1) for line in lines[top + 1:bottom])
-    remaining: dict[str, int] = {}
-    for line in (before or "").splitlines():
-        if line.strip():
-            remaining[line.rstrip()] = remaining.get(line.rstrip(), 0) + 1
-    added = []
-    for line in lines:
-        if remaining.get(line, 0) > 0:
-            remaining[line] -= 1
-        else:
-            added.append(line)
-    return "\n".join(added)
+        return ""
+    if not lines or not _is_interrupt_footer_row(lines[-1]):
+        return ""
+    for i in range(len(lines) - 2, max(-1, len(lines) - 10), -1):
+        if _LEGACY_PROMPT.match(lines[i]):
+            return "\n".join([_LEGACY_PROMPT.sub("", lines[i], count=1), *lines[i + 1:-1]])
+        if _TRANSCRIPT_MARK.match(lines[i]):
+            break  # transcript reached before any prompt: no input found
+    return ""
 
 
 def is_busy(region: str) -> bool:
@@ -96,10 +106,10 @@ def _live_box(capture: str) -> bool:
     but Copilot's footer rows. A box left in the scrollback above a shell
     prompt (Copilot exited) or any other later output is not live input."""
     lines = [line.rstrip() for line in capture.splitlines() if line.strip()]
-    top = max((i for i, line in enumerate(lines) if "╻▄" in line), default=None)
+    top = max((i for i, line in enumerate(lines) if _top_rail(line)), default=None)
     if top is None:
         return False
-    bottom = next((i for i in range(top + 1, len(lines)) if "╹▀" in lines[i]), None)
+    bottom = next((i for i in range(top + 1, len(lines)) if _bottom_rail(lines[i])), None)
     if bottom is None:
         return False
     tail = lines[bottom + 1:]

@@ -256,7 +256,8 @@ export class SessionViewer {
       const ev = parseSseBlock(block);
       if (ev.type === "continuity") {  // the stream followed a merge: ids are renumbered
         if (ev.data && ev.data.continuity_id) {
-          const next = followContinuity(this.model, ev.data.continuity_id, ev.data.after);
+          // A replaced log the bridge couldn't translate into restarts at 0.
+          const next = followContinuity(this.model, ev.data.continuity_id, ev.data.after ?? 0);
           if (next.replay) {
             this._replayHistory(next.model);
             changed.clear();

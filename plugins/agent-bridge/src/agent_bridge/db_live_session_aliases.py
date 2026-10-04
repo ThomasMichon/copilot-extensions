@@ -16,13 +16,13 @@ from typing import Any
 
 from .db_core import LIVE_SESSION_STALE_SECONDS
 
-#: How far two reports of one process's start time may drift. The extension
-#: fixes it once per process (wall clock minus uptime), so the same process
-#: reports the same value; only a recomputation (an extension reload in the
-#: same process) moves it, by milliseconds. A reused pid's process can't have
-#: started within this window of the original's: the original registered (and
-#: so outlived it) before the pid was free again.
-PROCESS_START_TOLERANCE_SECONDS = 0.25
+#: How far two reports of one process's start time may differ: only float
+#: round-tripping (JSON, SQLite REAL). The extension pins the value on its
+#: process object, so the same process -- across extension reloads too --
+#: reports it bit-identically, and no lifetime assumption is needed: a process
+#: that reused the pid started at another instant, however short-lived the
+#: original was.
+PROCESS_START_TOLERANCE_SECONDS = 1e-6
 
 
 def _newer_turn(predecessor: Any, successor: Any) -> tuple[Any, Any]:

@@ -80,7 +80,6 @@ def mux_seed_pane(
     # Readiness must be STABLE (two polls) so a transient banner/spinner frame
     # can't trip it. A known blocking dialog is dismissed at most once per call.
     ready = False
-    ready_cap = ""
     stable, dismissed_nudge = 0, False
     last_ready_sig: str | None = None
     last_region: str | None = None
@@ -103,7 +102,7 @@ def mux_seed_pane(
             last_ready_sig = ready_sig
             if stable >= 2:
                 if _where() == target:
-                    ready, ready_cap = True, cap
+                    ready = True
                     break
                 stable, last_ready_sig = 0, None  # moved under the second poll: confirm again
         elif not dismissed_nudge and pane_nudges.is_desktop_app_nudge(cap):
@@ -178,7 +177,7 @@ def mux_seed_pane(
             at = _where()
             if not at:
                 return _lost(ready=True, sent=True)
-            if head in _squash(pane_readiness.input_text(_cap(at), before=ready_cap)):
+            if head in _squash(pane_readiness.input_text(_cap(at))):
                 echoed = True
                 break
             time.sleep(poll_interval)

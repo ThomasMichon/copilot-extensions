@@ -23,8 +23,12 @@
 import { exec, execFile } from "node:child_process";
 import { hostname } from "node:os";
 
-// Epoch seconds this process started (wall clock minus uptime), fixed once.
-const PROCESS_STARTED_AT = Date.now() / 1000 - process.uptime();
+// Epoch seconds this process started (wall clock minus uptime), fixed once
+// per *process*: pinned on the process object, so an extension reload in the
+// same process (a new module instance) reports the bit-identical value rather
+// than a recomputation milliseconds off -- the bridge can then compare exactly.
+const STARTED_AT_KEY = Symbol.for("agent-bridge.processStartedAt");
+const PROCESS_STARTED_AT = (process[STARTED_AT_KEY] ??= Date.now() / 1000 - process.uptime());
 
 // This process's identity, known at load with no subprocess, so every
 // registration -- the very first one included -- lets the bridge refuse a row

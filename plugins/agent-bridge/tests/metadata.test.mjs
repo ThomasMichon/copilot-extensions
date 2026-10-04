@@ -177,3 +177,14 @@ test("resolveMetadataAsync falls back to the hostname when the machine lookup fa
 
   assert.equal(meta.machine, hostname().toLowerCase());
 });
+
+// An extension reload in the same process is a new module instance: it must
+// still report the bit-identical start time, so the bridge can compare start
+// times exactly (no drift window a reused pid could slip through).
+test("a reloaded metadata module reports the same process start time exactly", async () => {
+  const first = (await import("../extensions/agent-bridge/metadata.mjs")).processIdentity();
+  const reloaded = await import(`../extensions/agent-bridge/metadata.mjs?reload=${Date.now()}`);
+  assert.equal(reloaded.processIdentity().process_started_at, first.process_started_at);
+  assert.equal(reloaded.processIdentity().pid, process.pid);
+});
+

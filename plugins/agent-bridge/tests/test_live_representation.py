@@ -1279,6 +1279,27 @@ def test_a_token_follows_a_transitive_merge() -> None:
     cyclic = {"x": ("y", {1: 1}), "y": ("x", {1: 1})}
     assert retarget(_encode_token({"kind": "position", "continuity": "x", "event_id": 1}), cyclic)
 
+def test_a_replaced_log_without_a_merge_map_restarts_the_reader_at_zero() -> None:
+    """The same id deregistered and registered again while a stream stays open:
+    there is no translation into the new log, so the reader restarts at 0 (and
+    the stream announces after=0) instead of skipping the new log's first
+    events from its old cursor."""
+    from agent_bridge.live_representation import MergeFollowingLog
+
+    store = LiveEventStore()
+    old = store.get_or_create("S")
+    for i in range(5):
+        old.append("agent_message", {"text": f"old{i}"})
+    view = MergeFollowingLog(store, "S", old)
+    store.drop("S")
+    new = store.get_or_create("S")
+    new.append("agent_message", {"text": "new0"})
+    log, cursor = view._follow(old.latest_id)
+    assert log is new and cursor == 0
+    assert view.translated_cursor == 0 and view.followed_continuity_id == new.continuity_id
+    assert [e.data.get("text") for e in log.get_events(cursor)] == ["new0"]
+
+
 def test_two_merges_between_reader_polls_translate_from_the_readers_numbering() -> None:
     """C:2 -> B:3 after one merge; a heartbeat-only poll leaves the reader's
     cursor at 2; the next merge must continue from B:3 (-> A:4), never treat
