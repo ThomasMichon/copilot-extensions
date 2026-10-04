@@ -10,7 +10,7 @@
 > local clone tracks `main` directly, see
 > [`CONTRIBUTING.md`'s "If main's history is force-rewritten"
 > section](CONTRIBUTING.md) for recovery. **`dev` was never affected.** Full
-> procedure and status: [`efforts/active/main-history-rewrite`](efforts/active/main-history-rewrite/README.md).
+> procedure and status: [`efforts/done/main-history-rewrite`](efforts/done/main-history-rewrite/README.md).
 
 <p align="center">
   <img src="docs/assets/worktree-picker.gif"
