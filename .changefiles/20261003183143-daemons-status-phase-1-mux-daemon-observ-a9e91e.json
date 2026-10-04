@@ -1,0 +1,9 @@
+{
+  "comment": "daemons status: Phase 1 mux-daemon observability (#5001) -- lists resident mux-daemons (pid/port/active/version/attached clients/busy), read-only",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
