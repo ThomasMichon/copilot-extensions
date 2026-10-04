@@ -1,0 +1,52 @@
+# Scheduled safety-net sweep for stale merged-PR branches. Automates the
+# exact manual technique used for the one-time cleanup of 3000+ accumulated
+# branches (see the `branch-hygiene` investigation): cross-reference merged
+# PRs' head branches against what still exists on origin, and delete the
+# matches. See tools/sweep_stale_branches.py's module docstring for the full
+# rationale, including why this still matters even with
+# `delete_branch_on_merge` enabled and `agent-worktrees`' own merge tooling
+# passing `--delete-branch` by default (both are forward-only; this is the
+# net for everything else: GitHub-UI merges predating the setting, external
+# tools/bots that skip branch deletion, and any other repo's pre-existing
+# backlog).
+name: Stale branch sweep
+
+on:
+  schedule:
+    - cron: "30 9 * * 1" # weekly, Monday; time/day are not load-bearing
+  workflow_dispatch:
+
+concurrency:
+  group: stale-branch-sweep
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+  issues: write
+
+jobs:
+  sweep:
+    name: delete stale merged-PR branches; flag no-PR-record branches
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # `workflow_dispatch` can target any ref; `schedule` always runs the
+    # default branch already. Belt-and-suspenders guard, same pattern
+    # `module-health-watchdog.yml` and `module-size-baseline-widen.yml` both
+    # already use for their own scheduled/dispatchable jobs -- this job
+    # writes real, repo-wide state (branch deletions, a filed issue), so a
+    # manual dispatch against an unreviewed non-default ref must not run it
+    # with a different plan than the trusted default-branch copy would.
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Sweep stale branches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python tools/sweep_stale_branches.py --execute
