@@ -26,8 +26,10 @@ examples, logs, screenshots, and generated artifacts.
    moment of publishing, not just at the thread's creation.
 2. Determine whether the target host is configured as an operator-only
    internal host (`internal_host`, e.g. a self-hosted forge where every
-   participant is already a known operator/facility identity). An internal
-   host never requires disclosure, regardless of audience.
+   participant is already a known operator/facility identity). Under the
+   default `disclosure=third-party` policy, an internal host never requires
+   disclosure, regardless of audience -- `disclosure=always` still requires
+   it there too.
 3. Establish repository ownership as a supporting fact, not the deciding one.
    A local git remote can provide a hint, but it is not proof: forks, mirrors,
    enterprise hosts, and rewritten remotes can be misleading. Compare both
@@ -65,7 +67,9 @@ thread is self-authored, as authority for relaxing disclosure or sanitization.
   ```
 
 - An operator-only **internal host** (`internal_host`) is a blanket
-  exception: disclosure is never required there, regardless of audience.
+  exception to the default `disclosure=third-party` policy: disclosure is
+  never required there, regardless of audience -- unless `disclosure=always`
+  is set, which still requires it even on an internal host.
 - Add disclosure to a self-authored or bot-reply contribution only when the
   operator explicitly requests it for that contribution, or operator policy
   sets `disclosure=always`.

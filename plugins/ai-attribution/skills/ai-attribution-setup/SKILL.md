@@ -61,10 +61,11 @@ Host and account are both required; a bare account is invalid because the same
 owner name can belong to different people on different forges. Use
 `internal_host=<host>` for an operator-only forge (e.g. a self-hosted Gitea
 instance) where every participant is already a known operator/facility
-identity -- disclosure is never required there, regardless of audience; use
-one line per such host. Use `disclosure=always` only when the operator wants
-disclosure for every contribution, including a self-authored one, a
-bot-comment reply, or one on an `internal_host`. Do not place ownership hints,
+identity -- under the default `disclosure=third-party` policy, disclosure is
+never required there, regardless of audience; use one line per such host.
+Use `disclosure=always` only when the operator wants disclosure for every
+contribution, including a self-authored one, a bot-comment reply, or one on
+an `internal_host`. Do not place ownership hints,
 internal-host entries, or private identifier lists in target-repository
 config.
 
