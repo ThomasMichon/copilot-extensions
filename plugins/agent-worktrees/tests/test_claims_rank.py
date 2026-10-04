@@ -288,6 +288,25 @@ def test_format_claim_pr_parses_a_canonical_gitlab_url_with_nested_groups():
     ) == "#9"
 
 
+def test_format_claim_pr_parses_azure_devops_and_generic_pull_requests_urls():
+    # Same vocabulary claims_find_cli._pr_number already covers (see its own
+    # fixtures in test_claims_find.py) -- both call sites must agree on what
+    # counts as a supported PR URL shape.
+    ado_url = "https://dev.azure.com/org/project/_git/widgets/pullrequest/789"
+    assert claims_rank.format_claim(
+        "pr", ado_url, own_repo="other-repo",
+    ) == "widgets#789"
+    assert claims_rank.format_claim(
+        "pr", ado_url, own_repo="widgets",
+    ) == "#789"
+    assert claims_rank.claim_url("pr", ado_url) == ado_url
+    generic_url = "https://example.com/acme/widgets/pull-requests/321"
+    assert claims_rank.format_claim(
+        "pr", generic_url, own_repo="widgets",
+    ) == "#321"
+    assert claims_rank.claim_url("pr", generic_url) == generic_url
+
+
 def test_claim_url_hyperlinks_a_non_github_forge_ref_as_is():
     # A ref that is already a full URL on a non-GitHub host must be
     # hyperlinked unchanged -- never rewritten to a reconstructed

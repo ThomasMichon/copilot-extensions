@@ -190,16 +190,22 @@ _GITHUB_PR_URL_RE = re.compile(
     r"^https?://github\.com/([^/\s]+/[^/\s]+)/(?:pull|issues)/(\d+)(?:[/?#].*)?$"
 )
 #: Generic PR/issue URL shape for any OTHER forge -- Gitea/Forgejo use
-#: ``pulls`` (plural); GitLab uses ``merge_requests``, optionally behind a
-#: literal ``/-/`` separator, with an arbitrary-depth ``group/subgroup/.../
-#: project`` namespace (not just a flat ``owner/repo``); all three (and
-#: GitHub) use ``issues`` for issue refs. Host-agnostic: it only extracts the
-#: owner/repo-ish path and the number for a short ``#N`` label (and the
-#: cross-repo check) -- it never reconstructs a URL for a foreign host (see
-#: :func:`claim_url`, which hyperlinks the ORIGINAL url as-is instead).
+#: ``pulls`` (plural); Azure DevOps uses ``pullrequest`` (see
+#: ``providers/azure_devops.py``'s ``_pr_web_url``) and some hosts use the
+#: generic ``pull-requests``; GitLab uses ``merge_requests``, optionally
+#: behind a literal ``/-/`` separator, with an arbitrary-depth
+#: ``group/subgroup/.../project`` namespace (not just a flat ``owner/repo``);
+#: all of the above (and GitHub) use ``issues`` for issue refs. The
+#: ``pull(?:s|-?requests?)?`` alternation mirrors
+#: :func:`claims_find_cli._pr_number`'s own established PR-URL-shape
+#: vocabulary, so both call sites agree on what counts as a supported PR URL.
+#: Host-agnostic: it only extracts the owner/repo-ish path and the number for
+#: a short ``#N`` label (and the cross-repo check) -- it never reconstructs a
+#: URL for a foreign host (see :func:`claim_url`, which hyperlinks the
+#: ORIGINAL url as-is instead).
 _GENERIC_PR_URL_RE = re.compile(
     r"^https?://[^/\s]+/([^/\s]+(?:/[^/\s]+)*?)/(?:-/)?"
-    r"(?:pull|pulls|merge_requests|issues)/(\d+)(?:[/?#].*)?$"
+    r"(?:pull(?:s|-?requests?)?|merge_requests|issues)/(\d+)(?:[/?#].*)?$"
 )
 
 
