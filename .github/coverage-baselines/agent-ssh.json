@@ -1,7 +1,7 @@
 {
   "asset": "agent-ssh.json",
-  "measured_commit": "bc3a26dd6c87e84bde4d7273c837c965e6b33e0e",
+  "measured_commit": "cde1cb1ab5f17358abb01a26cc6dd269e49dd562",
   "plugin": "agent-ssh",
-  "release_tag": "coverage-baselines-bc3a26dd6c87e84bde4d7273c837c965e6b33e0e",
+  "release_tag": "coverage-baselines-cde1cb1ab5f17358abb01a26cc6dd269e49dd562",
   "schema": "copilot-extensions.coverage-baseline-pointer"
 }
