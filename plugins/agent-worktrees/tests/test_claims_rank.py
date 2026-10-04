@@ -265,6 +265,29 @@ def test_format_claim_pr_parses_a_full_non_github_forge_url_ref():
     ) == "#17"
 
 
+def test_format_claim_pr_parses_a_canonical_gitlab_url_with_nested_groups():
+    # Canonical GitLab project URLs use a "/-/" separator before the verb
+    # and support an arbitrary-depth "group/subgroup/.../project" namespace,
+    # not just a flat "owner/repo" -- distinct from the simpler shape the
+    # other forge test above already covers.
+    nested_url = (
+        "https://gitlab.example.org/group/subgroup/project/-/merge_requests/3"
+    )
+    assert claims_rank.format_claim(
+        "pr", nested_url, own_repo="other-project",
+    ) == "project#3"
+    assert claims_rank.format_claim(
+        "pr", nested_url, own_repo="project",
+    ) == "#3"
+    assert claims_rank.claim_url("pr", nested_url) == nested_url
+    # "/-/issues/" is the same canonical shape for issues.
+    assert claims_rank.format_claim(
+        "bug",
+        "https://gitlab.example.org/group/subgroup/project/-/issues/9",
+        own_repo="project",
+    ) == "#9"
+
+
 def test_claim_url_hyperlinks_a_non_github_forge_ref_as_is():
     # A ref that is already a full URL on a non-GitHub host must be
     # hyperlinked unchanged -- never rewritten to a reconstructed

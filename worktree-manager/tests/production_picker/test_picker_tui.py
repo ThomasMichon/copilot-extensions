@@ -5268,13 +5268,12 @@ def test_manager_update_seg_appears_in_the_topbar_next_to_the_version():
 
 
 def test_manager_and_engine_update_segs_are_distinguishable_when_both_current():
-    """Regression: both indicators used to render a bare, unlabeled ✓ right
-    after the version string (`v{VERSION} ✓ ✓`), reading as one indicator
-    duplicated by a bug rather than two independent "current" verdicts for
-    two genuinely different things (the Manager binary itself vs. the
-    engine/marketplace payload). The Manager's own segment must carry a
-    distinguishing qualifier so the two never collide into indistinguishable
-    repeated glyphs."""
+    """The Manager's own update segment and the engine/marketplace update
+    segment are two independent "current" verdicts for two genuinely
+    different things (the Manager binary itself vs. the engine/marketplace
+    payload). The Manager's own segment must always carry its distinguishing
+    `mgr` qualifier, so the two never render as indistinguishable repeated
+    bare checkmarks."""
     from worktree_manager.production_picker.picker_tui.engine import PickerScreen
 
     s = PickerScreen(_fixture_source(), live=False)

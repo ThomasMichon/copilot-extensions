@@ -599,18 +599,15 @@ class PickerScreenRenderingMixin:
         from :meth:`_update_seg` (the engine/marketplace payload's staged
         state). Directly qualifies the ``v{VERSION}`` string it sits next
         to: ``idle`` shows nothing (never checked yet / non-GitHub source),
-        ``current`` shows a short ``mgr ✓`` (the ``mgr`` qualifier -- never
-        just a bare ✓ -- so it reads distinctly from :meth:`_update_seg`'s own
-        bare ✓ when both render adjacently in the topbar; prior to this, two
-        unlabeled identical checkmarks sitting side by side read as one
-        indicator duplicated by a bug, not two independent "current"
-        verdicts), ``available`` shows a short, focusable ``↻ Update
-        available`` button (Enter self-updates the Manager and restarts the
-        picker on it -- see zone ``"MUP"``). Kept intentionally terse (no
-        embedded version number or literal command) to match
-        :meth:`_update_seg`'s style and avoid overflowing the topbar; the
-        exact target version remains available via
-        ``manager_update_check.read_status()`` for anyone who wants it."""
+        ``current`` shows ``mgr✓`` (always carrying the ``mgr`` qualifier --
+        never a bare ✓ -- so it reads distinctly from :meth:`_update_seg`'s
+        own bare ✓ when both render adjacently in the topbar), ``available``
+        shows a short, focusable ``↻ Update available`` button (Enter
+        self-updates the Manager and restarts the picker on it -- see zone
+        ``"MUP"``). Kept intentionally terse (no embedded version number or
+        literal command) to match :meth:`_update_seg`'s style and avoid
+        overflowing the topbar; the exact target version remains available
+        via ``manager_update_check.read_status()`` for anyone who wants it."""
         st = getattr(self, "manager_update_state", "idle")
         if st == "idle":
             return None
