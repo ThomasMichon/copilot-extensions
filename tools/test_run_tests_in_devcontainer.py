@@ -1685,6 +1685,20 @@ def test_admission_resolve_wait_rejects_malformed_earlier_occurrence_even_with_l
         raise AssertionError("expected SystemExit")
 
 
+def test_admission_resolve_wait_rejects_negative_value() -> None:
+    # A negative value is well-formed (parses as a float), so the
+    # malformed-value check above doesn't catch it -- this needs its own
+    # range check, matching `acquire()`'s. It must live here (not only in
+    # `acquire()`), since `--list` never reaches `acquire()` at all.
+    canon = wrapper._canonicalize_flag
+    try:
+        wrapper._admission.resolve_admission_wait(["--admission-wait", "-1"], canon)
+    except SystemExit as exc:
+        assert "non-negative" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+
+
 def test_admission_acquire_rejects_negative_wait_with_system_exit() -> None:
     try:
         wrapper._admission.acquire(-1.0)
@@ -1703,14 +1717,19 @@ def test_admission_acquire_succeeds_when_uncontested(tmp_path: Path) -> None:
         lease.release()
 
 
-def test_admission_acquire_fails_fast_when_busy_and_wait_is_zero(tmp_path: Path) -> None:
+def test_admission_acquire_fails_fast_when_busy_and_wait_is_zero(tmp_path: Path, capsys) -> None:
+    # Preserves `run-plugin-tests.py`'s own documented exit code 3 for
+    # busy contention (unlike every other failure here, which exits 1 via
+    # a string `SystemExit` payload) -- so a wrapped run's exit code
+    # means the same thing a bare invocation's does.
     with mock.patch.object(wrapper._admission, "admission_dir", return_value=tmp_path):
         holder = wrapper._admission.acquire(0.0)
         try:
             try:
                 wrapper._admission.acquire(0.0)
             except SystemExit as exc:
-                assert "BUSY" in str(exc)
+                assert exc.code == 3
+                assert "BUSY" in capsys.readouterr().err
             else:
                 raise AssertionError("expected SystemExit")
         finally:
@@ -2388,6 +2407,24 @@ def test_main_rejects_malformed_admission_wait_even_for_list_only(monkeypatch) -
 
     try:
         wrapper.main(["--list", "--admission-wait", "bad"])
+    except SystemExit as exc:
+        assert "--admission-wait" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+    assert bring_up_calls == []
+
+
+def test_main_rejects_negative_admission_wait_even_for_list_only(monkeypatch) -> None:
+    # A negative `--admission-wait` is well-formed (parses as a float),
+    # so the malformed-value path above doesn't catch it -- only a
+    # separate range check does. With `--list`, `needs_admission()` is
+    # False and `acquire()` (which has its own range check) never runs,
+    # so that range check must live in `resolve_admission_wait` itself.
+    bring_up_calls: list[object] = []
+    monkeypatch.setattr(wrapper, "_bring_up", lambda *a, **k: bring_up_calls.append((a, k)))
+
+    try:
+        wrapper.main(["--list", "--admission-wait", "-1"])
     except SystemExit as exc:
         assert "--admission-wait" in str(exc)
     else:

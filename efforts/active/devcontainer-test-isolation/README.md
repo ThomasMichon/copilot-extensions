@@ -2471,3 +2471,30 @@ unconditional-except-`--list` policy. All tests, module-size (re-
 condensed back to the 1000-line cap), and docs-consistency checks still
 pass; a fresh Docker-backed end-to-end run confirmed the fix doesn't
 disturb the common case.
+
+### 2026-10-04 — Review round 9 (PR #5100): negative-wait range check, documented busy exit code, PR description
+The same review round that confirmed round 8's two fixes caught one more
+gap plus two documentation-only findings. The HIGH finding: a negative
+`--admission-wait` is well-formed (parses as a float), so round 8's
+malformed-value check in `resolve_admission_wait` didn't catch it -- only
+`acquire()`'s own range check did, and `--list` never reaches `acquire()`
+at all. `--list --admission-wait -1` therefore bypassed validation
+entirely and would have started a real container despite the
+fail-before-container contract. Moved the non-negative range check into
+`resolve_admission_wait` itself (alongside the malformed-value check),
+so it runs unconditionally regardless of whether `--list` later skips
+acquisition. A LOW finding alongside it: the busy-contention path raised
+`SystemExit` with a string, which Python's runtime turns into exit code
+1 -- silently breaking parity with `run-plugin-tests.py`'s own
+documented exit code 3 for the same condition. Fixed to print the
+`[BUSY]` message to stderr itself and raise `SystemExit(3)` directly,
+and updated the busy-path unit test to assert the exit code (not just the
+message text). The PR description itself was also out of date (still
+described the round-6/7-superseded "only `--list` exempt... wait,
+`--guards`/`--collect-only`/`--prepare-only` all exempt" contract, and
+presented the already-merged #5095 networking fixes as part of this
+diff) -- rewritten to describe only this PR's actually-shipped admission
+contract. All tests, module-size, and docs-consistency checks still
+pass; a fresh Docker-backed end-to-end run (plus direct negative-wait
+and busy-exit-code checks) confirmed the fixes don't disturb the common
+case.

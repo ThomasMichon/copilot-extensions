@@ -51,12 +51,14 @@ def needs_admission(passthrough: list[str], canonicalize) -> bool:
 def resolve_admission_wait(passthrough: list[str], canonicalize) -> float:
     """Last-occurrence-wins `--admission-wait` value (matching argparse
     semantics) -- default 0.0 (fail fast), the same default
-    `run-plugin-tests.py` itself uses. Rejects a malformed value
-    immediately (`SystemExit`), same as that script's own argparse would
-    -- silently falling back to the default here would let a bad value
-    reach `acquire()` (and so start real container work, or get masked
-    by an unrelated `[BUSY]` error) before the inner runner ever gets a
-    chance to reject it itself."""
+    `run-plugin-tests.py` itself uses. Rejects a malformed OR negative
+    value immediately (`SystemExit`), same as that script's own argparse
+    plus `acquire()`'s own range check would -- silently falling back to
+    the default here would let a bad value reach `acquire()` (and so
+    start real container work, or get masked by an unrelated `[BUSY]`
+    error) before the inner runner ever gets a chance to reject it
+    itself; validating only in `acquire()` would miss it entirely for
+    `--list`, which never calls `acquire()` at all."""
     value = 0.0
     for i, arg in enumerate(passthrough):
         name, eq, value_str = arg.partition("=")
@@ -68,15 +70,23 @@ def resolve_admission_wait(passthrough: list[str], canonicalize) -> float:
             value = float(value_str)
         except ValueError:
             raise SystemExit(f"--admission-wait: invalid float value: {value_str!r}") from None
+    if value < 0:
+        raise SystemExit(f"--admission-wait must be non-negative, got {value:g}")
     return value
 
 
 def acquire(wait_seconds: float) -> SingleInstance:
     """Acquire the host-wide test-runner lease, waiting up to
     `wait_seconds` (0 = fail fast, matching `run-plugin-tests.py`'s own
-    semantics). Raises `SystemExit` -- not `ValueError`/`AlreadyRunningError`
-    -- for every caller-facing failure, so the caller needs no extra
-    except clause and never sees a raw traceback for a bad CLI value."""
+    semantics). `wait_seconds` is expected to already be validated (see
+    `resolve_admission_wait`); this re-check only guards a caller that
+    bypasses that helper. Raises `SystemExit` for every caller-facing
+    failure, so the caller needs no extra except clause and never sees a
+    raw traceback for a bad CLI value -- except the busy-contention path,
+    which preserves `run-plugin-tests.py`'s own documented exit code 3 by
+    printing to stderr itself and exiting with that integer directly (a
+    string `SystemExit` payload, as every OTHER failure here uses, prints
+    to stderr but always exits 1)."""
     if wait_seconds < 0:
         raise SystemExit(f"--admission-wait must be non-negative, got {wait_seconds:g}")
     lease = SingleInstance(admission_dir(), service=_ADMISSION_SERVICE)
@@ -90,7 +100,9 @@ def acquire(wait_seconds: float) -> SingleInstance:
             if remaining > 0:
                 time.sleep(min(0.25, remaining))
                 continue
-            raise SystemExit(
+            print(
                 f"[BUSY] Another heavy plugin test run is active on the "
-                f"host: {exc}. Use --admission-wait SECONDS to wait for it."
-            ) from exc
+                f"host: {exc}. Use --admission-wait SECONDS to wait for it.",
+                file=sys.stderr,
+            )
+            raise SystemExit(3) from exc
