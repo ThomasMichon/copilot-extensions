@@ -178,30 +178,69 @@ def test_heavy_run_holds_admission_for_all_targets(monkeypatch) -> None:
     assert events == ["acquire", "run:alpha", "run:beta", "release"]
 
 
-def test_guards_remain_available_without_heavy_admission(monkeypatch) -> None:
+def test_guards_also_take_heavy_admission(monkeypatch) -> None:
+    # `--guards` still reaches `_ensure_venv()` and so can rebuild/delete
+    # the SHARED on-disk venv a concurrent bare admitted run may be
+    # relying on mid-execution -- it is not exempt.
+    class Lease:
+        def release(self) -> None:
+            pass
+
     monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
     monkeypatch.setattr(runner.shutil, "which", lambda _name: "uv")
+    acquire_calls: list[float] = []
     monkeypatch.setattr(
         runner,
         "_acquire_admission",
-        lambda _wait: pytest.fail("guard runs must not take the heavy-test slot"),
+        lambda wait: acquire_calls.append(wait) or Lease(),
     )
     monkeypatch.setattr(runner, "run_plugin", lambda *_args, **_kwargs: 0)
 
     assert runner.main(["alpha", "--guards"]) == 0
+    assert acquire_calls == [0.0]
 
 
-def test_prepare_only_remains_available_without_heavy_admission(monkeypatch) -> None:
+def test_collect_only_also_takes_heavy_admission(monkeypatch) -> None:
+    # `--collect-only` likewise reaches `_ensure_venv()` and so can
+    # rebuild/delete the SHARED on-disk venv -- it is not exempt either.
+    class Lease:
+        def release(self) -> None:
+            pass
+
     monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
     monkeypatch.setattr(runner.shutil, "which", lambda _name: "uv")
+    acquire_calls: list[float] = []
     monkeypatch.setattr(
         runner,
         "_acquire_admission",
-        lambda _wait: pytest.fail("a --prepare-only run must not take the heavy-test slot"),
+        lambda wait: acquire_calls.append(wait) or Lease(),
+    )
+    monkeypatch.setattr(runner, "run_plugin", lambda *_args, **_kwargs: 0)
+
+    assert runner.main(["alpha", "--collect-only"]) == 0
+    assert acquire_calls == [0.0]
+
+
+def test_prepare_only_takes_heavy_admission(monkeypatch) -> None:
+    # Like --guards/--collect-only, --prepare-only is NOT exempt: it can
+    # rebuild/delete the SHARED on-disk venv a concurrent bare admitted
+    # run may be relying on mid-execution.
+    class Lease:
+        def release(self) -> None:
+            pass
+
+    monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    monkeypatch.setattr(runner.shutil, "which", lambda _name: "uv")
+    acquire_calls: list[float] = []
+    monkeypatch.setattr(
+        runner,
+        "_acquire_admission",
+        lambda wait: acquire_calls.append(wait) or Lease(),
     )
     monkeypatch.setattr(runner, "run_plugin", lambda *_args, **_kwargs: 0)
 
     assert runner.main(["alpha", "--prepare-only"]) == 0
+    assert acquire_calls == [0.0]
 
 
 def test_run_plugin_prepare_only_never_invokes_pytest(monkeypatch, tmp_path: Path) -> None:
@@ -238,6 +277,28 @@ def test_host_state_requires_explicit_tier_opt_in(capsys) -> None:
         runner.main(["--allow-host-state"])
     assert exc.value.code == 2
     assert "--allow-host-state requires --allow-explicit-tiers" in capsys.readouterr().err
+
+
+def test_admission_wait_rejects_infinite_value(monkeypatch, capsys) -> None:
+    # `float("inf")` parses cleanly and isn't `< 0`, so it would otherwise
+    # slip past a bare negative check and poll forever under contention,
+    # defeating the documented bounded-wait contract.
+    monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    with pytest.raises(SystemExit) as exc:
+        runner.main(["alpha", "--admission-wait", "inf"])
+    assert exc.value.code == 2
+    assert "admission_wait must be a non-negative, finite number" in capsys.readouterr().err
+
+
+def test_admission_wait_rejects_nan_value(monkeypatch, capsys) -> None:
+    # `float("nan")` also parses cleanly, and `nan < 0` is False, so a
+    # bare negative check alone would silently accept it too.
+    monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    with pytest.raises(SystemExit) as exc:
+        runner.main(["alpha", "--admission-wait", "nan"])
+    assert exc.value.code == 2
+    assert "admission_wait must be a non-negative, finite number" in capsys.readouterr().err
+
 
 
 class _FakeCompletedProcess:

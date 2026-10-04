@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -68,6 +69,7 @@ VENV_ROOT = REPO / ".test-venvs" / sys.platform
 PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
 LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"
+TOOLS_DIR = REPO / "tools"
 
 # Plugins whose OWN test suites assert properties about OTHER plugins (a
 # repo-wide contract, not something scoped to their own diff) -- see
@@ -80,22 +82,20 @@ _CROSS_PLUGIN_CONTRACT_TESTERS = {"copilot-extensions-harness"}
 sys.path.insert(0, str(LEASE_LIB))
 from single_instance_lease import AlreadyRunningError, SingleInstance  # noqa: E402
 
-_ADMISSION_SERVICE = "copilot-extensions-test-runner"
-
-
-def _admission_dir() -> Path:
-    """Return a per-user, host-wide lock directory shared by all worktrees."""
-    if os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-    else:
-        base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
-    return base / "copilot-extensions" / "test-runner"
+# Shared with tools/_devcontainer_host_admission.py -- the devcontainer
+# wrapper's own hyphenated-filename-adjacent helper -- so both agree on
+# the SAME lock dir/service name without duplicating the constants by
+# hand (this script's own hyphenated filename can't be imported as a
+# module, which is why the shared module lives one level up instead).
+sys.path.insert(0, str(TOOLS_DIR))
+from _admission_protocol import ADMISSION_SERVICE as _ADMISSION_SERVICE  # noqa: E402
+from _admission_protocol import admission_dir as _admission_dir  # noqa: E402
 
 
 def _acquire_admission(wait_seconds: float) -> SingleInstance:
     """Acquire the host test slot, waiting for at most ``wait_seconds``."""
-    if wait_seconds < 0:
-        raise ValueError("admission wait must be non-negative")
+    if not math.isfinite(wait_seconds) or wait_seconds < 0:
+        raise ValueError("admission wait must be a non-negative, finite number")
     lease = SingleInstance(_admission_dir(), service=_ADMISSION_SERVICE)
     deadline = time.monotonic() + wait_seconds
     while True:
@@ -475,8 +475,8 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("test_timeout must be positive")
         if args.max_files_per_sub_suite <= 0:
             raise ValueError("max_files_per_sub_suite must be positive")
-        if args.admission_wait < 0:
-            raise ValueError("admission_wait must be non-negative")
+        if not math.isfinite(args.admission_wait) or args.admission_wait < 0:
+            raise ValueError("admission_wait must be a non-negative, finite number")
         if args.allow_host_state and not args.allow_explicit_tiers:
             raise ValueError(
                 "--allow-host-state requires --allow-explicit-tiers"
@@ -513,19 +513,27 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     lease: SingleInstance | None = None
-    needs_admission = not args.guards and not args.collect_only and not args.prepare_only
-    if needs_admission:
-        if args.admission_wait:
-            print(f"Waiting up to {args.admission_wait:g}s for the host test slot ...")
-        try:
-            lease = _acquire_admission(args.admission_wait)
-        except AlreadyRunningError as exc:
-            print(
-                f"[BUSY] Another heavy plugin test run is active: {exc}. "
-                "Use --admission-wait SECONDS to wait for it.",
-                file=sys.stderr,
-            )
-            return 3
+    # Every mode that reaches this point touches `_ensure_venv()` below --
+    # a real run, `--guards`, `--collect-only`, and `--prepare-only`
+    # alike -- and so can rebuild or delete the SHARED on-disk venv (via
+    # `--reinstall` or a drifted dependency fingerprint) a concurrent
+    # admitted run may be relying on mid-execution. Only `--list` is
+    # exempt, and it already returned above without reaching here. The
+    # devcontainer wrapper's own internal `--prepare-only` call is
+    # unaffected in practice: it runs inside a container with a fresh,
+    # always-uncontested tmpfs `$HOME`, so acquiring a lease there is a
+    # no-op, not a behavior change.
+    if args.admission_wait:
+        print(f"Waiting up to {args.admission_wait:g}s for the host test slot ...")
+    try:
+        lease = _acquire_admission(args.admission_wait)
+    except AlreadyRunningError as exc:
+        print(
+            f"[BUSY] Another heavy plugin test run is active: {exc}. "
+            "Use --admission-wait SECONDS to wait for it.",
+            file=sys.stderr,
+        )
+        return 3
 
     try:
         print(f"Test targets: {', '.join(targets)}")
