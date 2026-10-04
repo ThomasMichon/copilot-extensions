@@ -1,0 +1,9 @@
+{
+  "comment": "namespace-list no longer crashes when CodeSpace queries fail (missing codespace scope, no gh auth, network down); it now reports zero CodeSpaces instead of poisoning all other agent resolution with a non-zero exit",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
