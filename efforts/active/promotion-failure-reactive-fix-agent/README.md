@@ -2430,3 +2430,26 @@ workflow (`issues: labeled`, `workflow_dispatch`) is read from `main`,
 not `dev`, so this fix is inert on any live dispatch until that
 promotion lands. Monitoring both: the promotion itself, and the next
 live `ci-failure-fix-attempt` dispatch once it does.
+
+### 2026-10-04 — Fix confirmed live on main; still no new live dispatch
+
+Promotion PR #5152 (`release: promote dev 3d49da791938..18757c5c13da to
+main`) landed. **Note for future verification:** `git merge-base
+--is-ancestor <dev commit> origin/main` is the WRONG test for whether a
+commit has promoted -- this pipeline squash-merges a regenerated
+candidate branch onto `main`, so the original `dev` commit is never a
+git ancestor of `main` even once its content is there. Confirmed instead
+by reading the actual file content at `main`'s tip via the GitHub
+contents API: `.github/workflows/ci-failure-fix-attempt.md` on `main`
+now contains the in-place checkout, the `SAFE_OUTPUTS_BASE_BRANCH`
+consistency guard, and the `${RUNNER_TEMP}/gh-aw/base-sha.txt`
+read-only capture -- all three PR #5135 review rounds' fixes, live.
+
+No new `ci-failure-fix-attempt` run has occurred since the merge (the
+two most recent runs, 37173899003 and 37172501608, both predate it and
+are the already-diagnosed wrong-tree failures). The fix is live but
+unexercised -- still waiting on either a naturally-occurring `dev`
+validation failure (files a `ci-failure-signature` issue, fires the
+workflow automatically) or an operator-authorized `workflow_dispatch`
+against a real tracked issue. Continuing to monitor for the first live
+exercise of the corrected workflow.
