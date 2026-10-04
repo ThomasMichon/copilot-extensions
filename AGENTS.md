@@ -416,6 +416,17 @@ back to the bare runner above when Docker/the devcontainers CLI isn't
 available. See `TESTING.md` § *Optional devcontainer-based isolation* for
 the full mechanics.
 
+**Skip the wrapper if your own session is already running inside a
+container** (an `agent-containers` dispatched worker, a CI job container,
+etc. — check for `/.dockerenv`, `/run/.containerenv`, or a `docker`/
+`kubepods`/`containerd`/`lxc`/`libpod` tag in `/proc/1/cgroup`, the same
+markers `agent-dispatch`'s own `netinfo._in_container()` uses). Nesting a
+second container inside the first is redundant — the outer container is
+already the real OS-level boundary a fix needs — and commonly isn't even
+possible without privileged Docker-in-Docker access the outer container
+was deliberately never granted. The bare runner's process-level
+containment is the correct, sufficient choice there.
+
 **Per-plugin coverage** — what each plugin's suite exercises — lives in
 `TESTING.md` § *Per-plugin coverage*, not here (that enumeration drifts as
 plugins are added). The largest is **agent-worktrees**: a ~1400-test suite
