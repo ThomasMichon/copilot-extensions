@@ -130,7 +130,18 @@ jobs:
             echo "::error::This PR targets 'main' and is not the promotion pipeline's own PR. main only ever moves via a release/promote-* PR, or (rarely) a workflow-file-only bootstrap PR by the repo owner. Please retarget this PR's base branch to 'dev' -- see CONTRIBUTING.md > Release & Versioning."
             exit 1
           fi
-          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          # Merge-base-relative (three-dot semantics), not a literal
+          # base_sha..head_sha diff: matches GitHub's own "Files changed"
+          # tab and the `pulls.listFiles` API (used by
+          # base-branch-reminder.yml's equivalent recognition check) --
+          # "what this PR's own commits introduce," not "every difference
+          # between the current tips of base and head." A literal two-commit
+          # diff would wrongly reject this PR the moment `main` independently
+          # gains any unrelated file after this branch forked from it (that
+          # file would show up as "removed" relative to head, even though
+          # this PR never touched it), and would wrongly accept a PR that
+          # re-introduces a change base already carries identically.
+          changed="$(git diff --name-only "$(git merge-base "$BASE_SHA" "$HEAD_SHA")" "$HEAD_SHA")"
           if [ -z "$changed" ]; then
             echo "::error::No changed files detected between base and head -- refusing to land on main."
             exit 1
