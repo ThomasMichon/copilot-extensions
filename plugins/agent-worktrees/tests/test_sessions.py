@@ -1628,6 +1628,20 @@ def test_seed_pane_echo_ignores_a_transcript_line_that_gains_the_seed_text():
     assert driver.enter_sent() is False
 
 
+@pytest.mark.parametrize("wrap", ["/src/main.py", "./scripts/run.sh", "(and the tests)", "- then the docs"])
+def test_seed_pane_echo_keeps_a_punctuation_leading_wrapped_input_line(wrap):
+    """Legacy layout: a wrapped input line starting with ASCII punctuation is the
+    input continuing, not the transcript: a fully echoed seed submits."""
+    from agent_worktrees import pane_readiness
+
+    seed = f"Continue: inspect {wrap}"
+    echo = f" ● earlier output\n❯ Continue: inspect\n{wrap}\npress esc to interrupt"
+    assert wrap in pane_readiness.input_text(echo)
+    ready = " ● earlier output\n❯\npress esc to interrupt"
+    driver = _SeedDriver(ready_caps=[ready, ready], echo_caps=[echo])
+    assert _run_seed(driver, seed=seed)["submitted"] is True
+
+
 def test_seed_pane_echo_ignores_a_stale_box_left_above_a_shell_prompt():
     """Copilot exited after the seed was typed: its box, still holding the seed,
     sits above a shell prompt. That's no echo, so Enter never reaches the shell."""

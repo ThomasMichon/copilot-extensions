@@ -41,8 +41,10 @@ def input_region(capture: str) -> str:
 _LEFT_BORDER = re.compile("^\\s*[\u2500-\u259f]")
 #: The legacy layout's input prompt: a caret at the start of the line.
 _LEGACY_PROMPT = re.compile(r"^\s*[❯>]\s?")
-#: A transcript line (``● output``, ``○ step``...): never part of the input.
-_TRANSCRIPT_MARK = re.compile(r"^\s*[^\w\s❯>]")
+#: A transcript line (``● output``, ``○ step``, ``✓ done``...): never part of the
+#: input. Copilot marks those with a non-ASCII glyph; a wrapped input line can
+#: start with ASCII punctuation (``/src/main.py``, ``./x``, ``(note``, ``- item``).
+_TRANSCRIPT_MARK = re.compile(r"^\s*[^\x00-\x7f\w\s❯]")
 
 
 def input_text(capture: str) -> str:
