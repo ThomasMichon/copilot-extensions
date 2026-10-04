@@ -1,9 +1,0 @@
-{
-  "comment": "scope supervisor eligibility per label (fixes a newer-sibling-tasks starvation gap) and auto-recover stranded RELEASING spawn reservations with no session_handle",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "minor"
-    }
-  ]
-}

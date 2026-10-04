@@ -1,9 +1,0 @@
-{
-  "comment": "Carve out: skip the devcontainer wrapper when the session itself already runs inside a container",
-  "changes": [
-    {
-      "plugin": "copilot-extensions-harness",
-      "type": "patch"
-    }
-  ]
-}

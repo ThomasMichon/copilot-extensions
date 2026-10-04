@@ -1,9 +1,0 @@
-{
-  "comment": "lease_store: squash stale released lease refs to a minimal 2-commit history; wire into gc --lease-gc",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

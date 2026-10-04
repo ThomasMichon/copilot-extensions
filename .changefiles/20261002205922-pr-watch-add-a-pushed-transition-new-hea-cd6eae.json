@@ -1,9 +1,0 @@
-{
-  "comment": "pr-watch: add a 'pushed' transition (new head commit) for reviewer-side hibernation waits, plus a backward-compatible Baseline.head_sha cursor extension",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "minor"
-    }
-  ]
-}

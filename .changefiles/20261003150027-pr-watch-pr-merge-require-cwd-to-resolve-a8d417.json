@@ -1,9 +1,0 @@
-{
-  "comment": "pr-watch/pr-merge: require CWD to resolve to a tracked (claimant) worktree before addressing any repo, with guidance pointing toward the correct calling pattern on failure",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

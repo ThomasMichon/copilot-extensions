@@ -1,9 +1,0 @@
-{
-  "comment": "Fix effort-focus participant/slice matcher to strip markdown backticks anywhere in a cell/heading, not just at the edges",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

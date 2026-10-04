@@ -1,9 +1,0 @@
-{
-  "comment": "create-pr/push-changes/finalize: surface a push failure's stdout detail (e.g. a pre-push hook's own check output), not just stderr",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

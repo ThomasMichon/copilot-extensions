@@ -1,9 +1,0 @@
-{
-  "comment": "pr-watch: surface a live self-merge-bypass note (pr-status already did) instead of silently dropping it; pr-workflow.md self-merge guidance strengthened (ThomasMichon/copilot-extensions#3638)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "minor"
-    }
-  ]
-}
