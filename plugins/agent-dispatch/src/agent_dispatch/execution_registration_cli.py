@@ -34,7 +34,7 @@ def register_execution_commands(sub) -> None:
 
     rnp = sub.add_parser(
         "run",
-        help="hand a blocking wait to the layer (hibernate-the-wait): run '-- <cmd>' to completion, then resume the worktree-affinitied worker via agent-bridge",
+        help="hand a blocking wait to the layer (hibernate-the-wait): run '-- <cmd>' until it resolves or a repeated-timeout backstop gives up, then resume the worktree-affinitied worker via agent-bridge",
     )
     rnp.add_argument("--resume", metavar="WORKTREE")
     rnp.add_argument("--task", metavar="ID")

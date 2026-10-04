@@ -33,6 +33,23 @@ def test_resume_message_explicit_override_wins():
     assert hibernation.resume_message(spec, 0) == "wake up"
 
 
+def test_resume_message_gave_up_warning_survives_explicit_message():
+    # A custom spec.message is normally written assuming the awaited step
+    # DID resolve -- on a gave_up backstop it must never silently replace
+    # the warning that nothing actually happened.
+    spec = hibernation.RunSpec(command=("x",), message="wake up")
+    msg = hibernation.resume_message(spec, 124, gave_up=True)
+    assert "never resolved" in msg
+    assert "wake up" in msg
+
+
+def test_resume_message_gave_up_without_explicit_message():
+    spec = hibernation.RunSpec(command=("x",), task_id="t-1")
+    msg = hibernation.resume_message(spec, 124, gave_up=True)
+    assert "never resolved" in msg
+    assert "t-1" in msg
+
+
 # -- run_and_resume ----------------------------------------------------------
 
 
@@ -125,12 +142,10 @@ def test_run_and_resume_pure_timeout_still_reports_zero_reattempts():
 
 
 def test_run_and_resume_only_timeouts_never_wakes_but_still_returns(monkeypatch):
-    """If every attempt times out (the awaited condition genuinely never
-    arrives), the loop must still terminate on its own via the underlying
-    wait command's own bounded polling -- this just asserts the resumer is
-    never invoked across a realistic bounded run of timeouts terminated by an
-    eventual real error surfacing (e.g. auth expiry, code 3), which SHOULD
-    wake the worker."""
+    """With ``max_reattempts=None`` (unbounded re-arming), the loop re-arms on
+    every ``124`` indefinitely and only escalates once a non-timeout result
+    (a genuine transition, or an error) actually arrives -- here, an eventual
+    error (code 3), which wakes the resumer."""
     calls = []
 
     def runner(cmd):
@@ -144,10 +159,58 @@ def test_run_and_resume_only_timeouts_never_wakes_but_still_returns(monkeypatch)
         return True
 
     spec = hibernation.RunSpec(command=("agent-worktrees", "pr-watch", "42"), resume_worktree="wt")
-    report = hibernation.run_and_resume(spec, runner=runner, resumer=resumer)
+    report = hibernation.run_and_resume(
+        spec, runner=runner, resumer=resumer, max_reattempts=None,
+    )
     assert report["returncode"] == 3
     assert report["reattempts_on_timeout"] == 4
+    assert report["gave_up"] is False
     assert "exited with code 3" in resumed["message"]
+
+
+def test_run_and_resume_gives_up_after_max_reattempts_and_still_wakes(monkeypatch):
+    """Under the default cap, a wait condition that never resolves (every
+    attempt times out, with no eventual error to force an escalation) still
+    wakes the resumer once ``max_reattempts`` is hit, rather than hibernating
+    indefinitely."""
+    calls = []
+
+    def runner(cmd):
+        calls.append(cmd)
+        return 124  # never resolves, ever
+
+    resumed = {}
+
+    def resumer(worktree, message):
+        resumed["count"] = resumed.get("count", 0) + 1
+        resumed["message"] = message
+        return True
+
+    spec = hibernation.RunSpec(command=("agent-worktrees", "pr-watch", "42"), resume_worktree="wt")
+    report = hibernation.run_and_resume(spec, runner=runner, resumer=resumer)
+
+    assert len(calls) == hibernation.MAX_TIMEOUT_REATTEMPTS + 1
+    assert report["reattempts_on_timeout"] == hibernation.MAX_TIMEOUT_REATTEMPTS
+    assert report["returncode"] == 124
+    assert report["gave_up"] is True
+    assert resumed.get("count") == 1
+    assert "giving up" in resumed["message"]
+
+
+def test_run_and_resume_max_reattempts_zero_gives_up_immediately():
+    calls = []
+
+    def runner(cmd):
+        calls.append(cmd)
+        return 124
+
+    spec = hibernation.RunSpec(command=("c",), resume_worktree="wt")
+    report = hibernation.run_and_resume(
+        spec, runner=runner, resumer=lambda w, m: True, max_reattempts=0,
+    )
+    assert len(calls) == 1
+    assert report["gave_up"] is True
+    assert report["reattempts_on_timeout"] == 0
 
 
 # -- detached_run_argv -------------------------------------------------------

@@ -200,6 +200,16 @@ def run_wait(
                 # without firing -- only a later regression is a transition.
                 if base.checks_state == "" and snap.checks_state:
                     base = replace(base, checks_state=snap.checks_state)
+                # A re-run resets the terminal-outcome reference: once checks go
+                # back to "pending" (a fresh run in flight), the NEXT terminal
+                # result -- success or failure -- is a genuinely new outcome and
+                # must fire even if it lands on the same state a stale baseline
+                # already held (success -> pending -> success is a real
+                # completion a self-merge-eligible wait cares about, not a
+                # no-op; a static baseline that never tracked the intervening
+                # "pending" would otherwise suppress it indefinitely).
+                if snap.checks_state == "pending" and base.checks_state != "pending":
+                    base = replace(base, checks_state="pending")
                 if base.approved is None:
                     base = replace(base, approved=(
                         pc.effective_verdict(
