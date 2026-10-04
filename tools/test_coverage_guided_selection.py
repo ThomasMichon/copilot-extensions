@@ -39,6 +39,7 @@ from tools.coverage_guided_selection import baseline as baseline_mod  # noqa: E4
 from tools.coverage_guided_selection import correlation  # noqa: E402
 from tools.coverage_guided_selection import fallback, selection as select  # noqa: E402
 from tools.coverage_guided_selection import ancestor_resolution as ar
+from tools.coverage_guided_selection import debt  # noqa: E402
 
 
 def _synthetic_baseline() -> dict:
@@ -1249,5 +1250,99 @@ class TestRemapOrInvalidateBaseline:
         ar.remap_or_invalidate_baseline(repo, resolved, fork_commit)
 
         assert baseline == {"measured_commit": old_commit, "coverage": {"f.py": {"1": ["t"]}}}
+
+
+class TestAssessDebt:
+    def test_zero_debt_when_head_equals_measured_commit(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+
+        result = debt.assess_debt(repo, c1, head=c1)
+
+        assert result.commit_volume == 0
+        assert result.exceeded is False
+
+    def test_commit_volume_counts_commits_since_measured_commit(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+        (repo / "a.txt").write_text("2\n")
+        _commit(repo, "second")
+        (repo / "a.txt").write_text("3\n")
+        c3 = _commit(repo, "third")
+
+        result = debt.assess_debt(repo, c1, head=c3)
+
+        assert result.commit_volume == 2
+
+    def test_exceeded_when_commit_volume_crosses_threshold(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+        (repo / "a.txt").write_text("2\n")
+        c2 = _commit(repo, "second")
+
+        under = debt.assess_debt(repo, c1, head=c2, commit_volume_threshold=5)
+        over = debt.assess_debt(repo, c1, head=c2, commit_volume_threshold=0)
+
+        assert under.exceeded is False
+        assert over.exceeded is True
+        assert "commit_volume" in over.reasons[0]
+
+    def test_exceeded_when_age_crosses_threshold(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+
+        # `now` is injected explicitly rather than sleeping a real wall-clock
+        # interval -- deterministic and fast.
+        committed_at = float(
+            _run_git(["show", "-s", "--format=%ct", c1], cwd=repo).stdout.strip()
+        )
+
+        under = debt.assess_debt(
+            repo, c1, head=c1, age_threshold_seconds=3600, now=committed_at + 10
+        )
+        over = debt.assess_debt(
+            repo, c1, head=c1, age_threshold_seconds=3600, now=committed_at + 7200
+        )
+
+        assert under.exceeded is False
+        assert over.exceeded is True
+        assert "age_seconds" in over.reasons[0]
+
+    def test_neither_threshold_configured_never_exceeds(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+        (repo / "a.txt").write_text("2\n")
+        c2 = _commit(repo, "second")
+
+        result = debt.assess_debt(repo, c1, head=c2)
+
+        assert result.exceeded is False
+        assert result.reasons == ()
+        # Both dimensions are still measured/reported for observability even
+        # though neither is enforced.
+        assert result.commit_volume == 1
+        assert result.age_seconds >= 0.0
+
+    def test_as_dict_round_trips_through_json(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+
+        result = debt.assess_debt(repo, c1, head=c1, commit_volume_threshold=10)
+        json.dumps(result.as_dict())  # must not raise
+
+    def test_raises_for_an_unreachable_measured_commit(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        _commit(repo, "first")
+
+        with pytest.raises(debt.CoverageDebtError):
+            debt.assess_debt(repo, "0" * 40)
+
 
 
