@@ -392,8 +392,18 @@ yourself before publishing a plugin change.
 (Linux, Docker + the devcontainers CLI present):**
 
 ```bash
+git add <new/changed files>                          # see prerequisite below
 python tools/run_tests_in_devcontainer.py <plugin>   # same suite, inside a hardened, ephemeral, network-disconnected container
 ```
+
+**Prerequisite: `git add` any newly created source/test files first.** The
+wrapper snapshots only git-tracked (i.e. `git ls-files --cached`) paths by
+default — an untracked regression test you just wrote is silently omitted,
+so the run can pass without ever exercising it. Staging (`git add`) is
+enough; you don't need to commit. `--include-untracked` additionally
+sweeps in untracked-but-not-gitignored files, but stays an explicit opt-in
+rather than a default — it can scoop up an untracked secret-like file that
+isn't gitignored.
 
 It runs the exact suite above inside a hardened, network-disconnected,
 ephemeral container — a real OS-level boundary on top of the turn-key

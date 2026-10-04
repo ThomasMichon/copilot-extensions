@@ -109,7 +109,11 @@ installer. Know which kind you are changing.
    network-disconnected, ephemeral container, adding a real OS-level
    boundary the bare runner's process-level containment alone can't
    guarantee against. Fall back to the bare runner when that tooling isn't
-   present. See `AGENTS.md` § *Test Before PR Publication* and `TESTING.md`
+   present. **`git add` any newly created source/test files first** — the
+   wrapper snapshots only git-tracked paths by default, so an untracked
+   regression test is silently omitted and the run can pass without ever
+   exercising it; staging is enough, a commit isn't required.
+   See `AGENTS.md` § *Test Before PR Publication* and `TESTING.md`
    § *Optional devcontainer-based isolation*.
 
    **Fix every failing test you encounter — never label it "pre-existing" and
