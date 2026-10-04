@@ -1123,6 +1123,21 @@ class TestPRReminder:
         r = pc.pr_reminder(flow, "pr-watch")
         assert any("re-triggers review" in c for c in r.cautions)
 
+    def test_pr_watch_reason_overrides_the_generic_headline(self):
+        """Regression guard (ThomasMichon/copilot-extensions#3638): a
+        caller-supplied self-merge-bypass note must override pr-watch's own
+        generic 'watching the PR' headline the same way the catch-all
+        pr-status branch already does -- otherwise pr-watch stays the one
+        verb that silently drops this note even when a caller threads it
+        through."""
+        flow = _self_merge_flow()
+        note = "No verdict yet, but this identity holds Maintainer bypass rights."
+        r = pc.pr_reminder(flow, "pr-watch", reason=note)
+        assert r.headline == note
+        # Absent a reason, the original generic headline is unchanged.
+        r_default = pc.pr_reminder(flow, "pr-watch")
+        assert r_default.headline == "watching the PR"
+
     def test_policy_caution_surfaced_at_point_of_action(self):
         # #225: the repo's update/merge policy is surfaced in the reminder so an
         # agent sees it at the moment of action.

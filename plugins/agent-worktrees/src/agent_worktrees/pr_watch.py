@@ -63,6 +63,16 @@ def decorate_events(
     ``True``) forwards to :func:`pr_contract.merge_readiness` -- ``False``
     reports a bare comment as the ``"COMMENTED"`` verdict for a repo whose
     reviewer cannot render a binding one.
+
+    A ``pr-self-merge`` repo's raw ``eligible``/``reason`` pair here reflects
+    only the human-approval gate, which can read as a hard block even when
+    the acting identity actually holds a live Maintainer-bypass right on that
+    gate (ThomasMichon/copilot-extensions#3638). This function has no
+    provider/token access to resolve that bypass note itself -- the caller
+    (``pr_cli.py``'s ``wait`` dispatch) resolves it with a single live read
+    *after* :func:`run_wait` returns (never before a potentially long/
+    unbounded wait, which could report since-revoked authorization as
+    current fact) and merges it into the returned payload directly.
     """
     payload = {
         "repo": repo,
@@ -132,6 +142,10 @@ def run_wait(
     ``allow_stale_approval`` / ``review_blocking``) is forwarded to
     :func:`decorate_events` so the fired payload's ``merge`` block reports
     whether the caller must still grant merge consent.
+
+    This function has no provider/token access, so it never resolves a
+    self-merge-bypass note itself -- see :func:`decorate_events`'s docstring
+    for where/why that happens instead.
     """
     import time as _time
 

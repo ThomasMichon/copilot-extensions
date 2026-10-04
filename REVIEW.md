@@ -193,6 +193,28 @@ specifically when reviewing a pull request, not a replacement for them.
 - **Make every comment count.** Copilot review comments should each be
   actionable and worth the author's attention, whether the review's overall
   verdict ends up `Approve` or `Comment`.
+- **Re-validate every carried-over finding against the current diff, every
+  round — never repeat one by default.** A finding from an earlier round
+  that reappears unchanged in the overview, round after round, is worth
+  more suspicion than confidence: before re-listing it, actually re-read the
+  current file/lines the finding names and confirm the described pattern
+  still exists there. If the code has moved, been rewritten, or a
+  regression test now proves the described failure mode no longer
+  reproduces, mark the finding resolved — do not carry it forward solely
+  because an earlier round raised it and nothing has explicitly said
+  "fixed." A finding that is wrong about current code erodes trust in every
+  other finding in the same review just as much as a missed real one would.
+- **Do not re-escalate a finding the PR itself already discloses as a
+  deliberately out-of-scope, tracked limitation.** When a PR's own
+  description, code comments, or a linked effort/tracking doc explicitly
+  names a gap as intentionally deferred (not silently dropped — a concrete
+  tracked issue or follow-up reference is cited) and ships a bounded
+  mitigation for the part that *is* in scope, treat that as resolved
+  disclosure, not an unresolved defect. Note it once, at whatever severity
+  reflects the *mitigation's* residual risk (rarely High once a mitigation
+  genuinely closes the dangerous case), rather than re-raising the full
+  original severity every subsequent round — that pattern can keep a
+  genuinely converged PR looking perpetually blocked.
 - **State plainly whether remaining findings are blocking.** When a
   `Comment` verdict's remaining findings are all Low severity (no Medium or
   High open), say so explicitly in the overview — e.g. "remaining findings
