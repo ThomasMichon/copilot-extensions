@@ -40,12 +40,21 @@ thread is self-authored, as authority for relaxing disclosure or sanitization.
 ## 2. Apply attribution
 
 - Disclosure turns on **who this specific contribution addresses, not on who
-  owns the repository.** A self-authored PR/issue, or a reply directed at an
-  automated review bot's own comment, may omit disclosure. A comment, reply,
-  or review on a PR, issue, or thread another party authored or participates
-  in requires a prominent one-line italicized disclosure at the top of the
-  contribution body, before headings, in every repository -- public or
-  private, including one the operator owns:
+  owns the repository.** Two narrow cases may omit disclosure by default:
+  a self-authored PR/issue (no other party's content exists there yet), and
+  an inline reply directed specifically at an automated review bot's own
+  comment thread (not a PR-level review, verdict, or summary -- those address
+  the PR's human participants even when they also respond to bot findings).
+  Everything else -- a comment, reply, review, or verdict on a PR, issue, or
+  thread another party authored or participates in -- requires a prominent
+  one-line italicized disclosure at the top of the contribution body, before
+  headings, in every repository -- public or private, including one the
+  operator owns. **The bot-reply carve-out is a narrow exception to this
+  rule, not a parallel option**: a PR review that engages with bot findings
+  but is addressed to (and visible to) the PR's human author/participants
+  still requires disclosure; only a reply inline on the bot's own comment
+  node, addressed at the bot rather than the thread's human participants,
+  may omit it.
 
   ```markdown
   *The following contribution was assisted using Copilot.*

@@ -867,6 +867,39 @@ def test_internal_host_omits_disclosure_requirement(tmp_path: Path) -> None:
         assert "requires a prominent one-line italicized" not in context
 
 
+def test_internal_host_matches_with_an_explicit_url_port(tmp_path: Path) -> None:
+    """A self-hosted forge reached on a non-default port (e.g. a bare Gitea
+    deployment) must still match internal_host -- the port is not part of the
+    hostname the operator configures."""
+    repo = _git_repo(
+        tmp_path / "repo",
+        "https://gitea.example.internal:3000/example-owner/repo.git",
+    )
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "internal_host=gitea.example.internal\n",
+    )
+    for hook in _parity_hooks():
+        context = _context(_run(hook, repo, home))
+        assert "operator-only (internal_host); disclosure is never required" in context
+
+
+def test_owned_account_matches_with_an_explicit_url_port(tmp_path: Path) -> None:
+    repo = _git_repo(
+        tmp_path / "repo",
+        "https://example.com:8443/example-owner/repo.git",
+    )
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "owned_account=example.com/example-owner\n",
+    )
+    for hook in _parity_hooks():
+        context = _context(_run(hook, repo, home))
+        assert "configured public account `example.com/example-owner`" in context
+
+
 def test_internal_host_matches_case_insensitively(tmp_path: Path) -> None:
     repo = _git_repo(
         tmp_path / "repo",

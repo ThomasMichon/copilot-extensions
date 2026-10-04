@@ -223,6 +223,8 @@ function Get-RemoteAccount([string] $RepositoryRoot) {
     $Path = ''
     if ($Url -match '^[A-Za-z][A-Za-z0-9+.-]*://(?:[^/@]+@)?([^/]+)/(.*)$') {
         $HostName = $Matches[1]
+        $ColonIndex = $HostName.IndexOf(':')
+        if ($ColonIndex -ge 0) { $HostName = $HostName.Substring(0, $ColonIndex) }
         $Path = $Matches[2]
     } elseif ($Url -match '^[^@]+@([^:]+):(.*)$') {
         $HostName = $Matches[1]
@@ -497,7 +499,7 @@ function Invoke-Policy {
     } elseif (Test-InternalHost $RemoteHostValue) {
         $Kernel += 'The session-start repository''s host is configured as operator-only (internal_host); disclosure is never required there regardless of who authored what this contribution responds to. '
     } else {
-        $Kernel += "Disclosure turns on who this specific contribution addresses, not on who owns the repository: a self-authored PR/issue, or a reply directed at an automated review bot's own comment, may omit disclosure; a comment, reply, or review on a PR, issue, or thread another party authored or participates in requires a prominent one-line italicized AI-assistance disclosure at the top -- in every repository, public or private, including one the operator owns. "
+        $Kernel += "Disclosure turns on who this specific contribution addresses, not on who owns the repository: a self-authored PR/issue, or an inline reply to an automated review bot's own comment thread (not a PR-level review/verdict), may omit disclosure; everything else -- a comment, reply, review, or verdict on a PR, issue, or thread another party authored or participates in, including one that also engages with bot findings -- requires a prominent one-line italicized AI-assistance disclosure at the top, in every repository, public or private, including one the operator owns. "
     }
     $Kernel += 'Every public artifact must remain persona-neutral, use first-person singular and target-repo conventions, and be scrubbed of private/internal identifiers, credentials, paths, hosts, accounts, record IDs, and private rationale; use generic placeholders. Audit the live published surface after publication. '
 

@@ -303,6 +303,7 @@ remote_account() {
             authority="${url#*://}"
             authority="${authority%%/*}"
             host="${authority##*@}"
+            host="${host%%:*}"
             path="${url#*://}"
             path="${path#*/}"
             ;;
@@ -676,7 +677,7 @@ main() {
     elif host_is_internal "$remote_host_value"; then
         kernel+="The session-start repository's host is configured as operator-only (internal_host); disclosure is never required there regardless of who authored what this contribution responds to. "
     else
-        kernel+="Disclosure turns on who this specific contribution addresses, not on who owns the repository: a self-authored PR/issue, or a reply directed at an automated review bot's own comment, may omit disclosure; a comment, reply, or review on a PR, issue, or thread another party authored or participates in requires a prominent one-line italicized AI-assistance disclosure at the top -- in every repository, public or private, including one the operator owns. "
+        kernel+="Disclosure turns on who this specific contribution addresses, not on who owns the repository: a self-authored PR/issue, or an inline reply to an automated review bot's own comment thread (not a PR-level review/verdict), may omit disclosure; everything else -- a comment, reply, review, or verdict on a PR, issue, or thread another party authored or participates in, including one that also engages with bot findings -- requires a prominent one-line italicized AI-assistance disclosure at the top, in every repository, public or private, including one the operator owns. "
     fi
     kernel+="Every public artifact must remain persona-neutral, use first-person singular and target-repo conventions, and be scrubbed of private/internal identifiers, credentials, paths, hosts, accounts, record IDs, and private rationale; use generic placeholders. Audit the live published surface after publication. "
 
