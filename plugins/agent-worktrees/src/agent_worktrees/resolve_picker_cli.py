@@ -7,7 +7,7 @@ import atexit
 import dataclasses
 from pathlib import Path
 
-from . import git_ops, reciprocal_presentation, sessions, tracking
+from . import git_ops, reciprocal_presentation, resolve_machine_cli, sessions, tracking
 from . import config as cfg
 from .picker import ItemKind, MenuItem, pick
 
@@ -84,6 +84,14 @@ def _resolve_resume(*args, **kwargs):
 
 def _resolve_ssh_alias(*args, **kwargs):
     return _core()._resolve_ssh_alias(*args, **kwargs)
+
+
+# Called directly (not routed through _core()/__main__'s rebind surface):
+# both are new, pure, stateless helpers with no mockable side effects the
+# existing _core() indirection pattern is for, and __main__.py is already at
+# its grandfathered module-size ceiling.
+_resolve_ssh_target = resolve_machine_cli._resolve_ssh_target
+_wrap_remote_command = resolve_machine_cli._wrap_remote_command
 
 
 def _run_system_menu(*args, **kwargs):
@@ -229,7 +237,10 @@ def _run_machine_menu(config: cfg.Config) -> int | None:
         {
             "action": "remote",
             "ssh_alias": ssh_env.alias,
-            "remote_command": project,
+            "remote_command": _wrap_remote_command(
+                resolve_machine_cli._default_shell_for_env_name(ssh_env.name, ssh_env.shell),
+                project,
+            ),
             "machine": entry.key,
             "display_name": entry.display_name,
         }
@@ -540,14 +551,14 @@ def run_legacy_picker(context: ResolvePickerContext) -> int:
 
         if action == "remote":
             entry = value
-            ssh_alias = _resolve_ssh_alias(entry)
+            ssh_alias, shell = _resolve_ssh_target(entry)
             project = cfg.project_name()
             print(f"   Connecting to {entry.display_name} via {ssh_alias}...")
             _emit_plan(
                 {
                     "action": "remote",
                     "ssh_alias": ssh_alias,
-                    "remote_command": project,
+                    "remote_command": _wrap_remote_command(shell, project),
                     "machine": entry.key,
                     "display_name": entry.display_name,
                 }
