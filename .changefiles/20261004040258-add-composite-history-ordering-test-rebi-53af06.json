@@ -1,0 +1,9 @@
+{
+  "comment": "Add composite history-ordering test (rebind + bundle transfer + release) for worktree-claims-transitive-finalization's own Validation Plan",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
