@@ -851,6 +851,35 @@ win grows with build complexity.
   directory and confirmed the build correctly routed into a fresh
   alternate sibling directory instead of attempting (and failing) an
   in-place rename.
+- A sixteenth review round found 3 more issues: (1) the user-/system-level
+  uv.toml check never consulted PROJECT-level config (`uv.toml`/
+  `pyproject.toml`'s `[tool.uv]`), which uv itself checks FIRST -- a
+  project-only governed default was invisible, and a project-level
+  override could be silently skipped in favor of a lower-precedence
+  user-/system-level URL. Fixed with a new `_project_uv_toml_candidates`
+  that walks upward from the current working directory (stopping at the
+  first `uv.toml` or `pyproject.toml` found, exactly like `uv` itself),
+  checked before user-/system-level config and skipped entirely when
+  `UV_CONFIG_FILE` is set (that variable's own exclusivity). (2) the
+  provenance marker recorded the `--python` SELECTOR TEXT, not the
+  interpreter it actually resolves to -- reusing the same text (e.g.
+  `python3`, or a symlink) after `PATH` reordering or a repointed symlink
+  would silently match and reuse a venv built for a now-different
+  interpreter. Fixed with a new `_resolve_interpreter_identity`: asks `uv`
+  itself (`uv python find`, the same resolution `uv venv --python` uses)
+  then resolves any symlink in the result, persisting/comparing THAT
+  instead of the caller's raw text. (3) the build-requires verifier
+  ignored two meaningful parts of a PEP 508 requirement: a direct URL
+  reference (`name @ https://...`) has an EMPTY specifier and trivially
+  "passed" against any installed version, and an extras clause
+  (`name[extra]`) "passed" without the extra's own dependencies ever being
+  installed -- both violate the fail-closed contract. Fixed by rejecting
+  both outright in `_BUILD_REQUIRES_CHECK_SCRIPT`. 9 more unit tests (149
+  total, all passing). The marker schema change required trimming other
+  docstrings/comments to stay under the 1,000-line module cap (985 lines).
+  Smoke-tested for real again: built `agent-worktrees` fresh against the
+  live governed feed, confirming `uv python find` resolution works
+  end-to-end and the marker now records the resolved interpreter path.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 
