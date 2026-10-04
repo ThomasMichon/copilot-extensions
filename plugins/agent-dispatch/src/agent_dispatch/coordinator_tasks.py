@@ -54,6 +54,14 @@ HttpStructuredResult = Annotated[
     StructuredResult, BeforeValidator(_strict_structured_result)
 ]
 
+#: Event types that run periodically for every live task without ever
+#: transitioning its state (a heartbeat lease extension, a routine activity
+#: string update) -- excluded from `_emit`'s telemetry side effect so a
+#: configured telemetry spool doesn't accumulate misleading high-volume
+#: `kind: state_transition` records for them. The bus publish (the actual
+#: wake every `--subscribe` relay/poller needs) still fires unconditionally.
+_NO_TELEMETRY_EVENT_TYPES = frozenset({"task.heartbeat", "task.activity_updated"})
+
 
 class ProducerScopeBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -297,7 +305,15 @@ def register_task_routes(
     def _emit(event_type: str, task: dict) -> None:
         event_task = _event_task_dict(task)
         bus.publish({"type": event_type, "task": event_task})
-        telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
+        # Heartbeats and activity updates run periodically for every live
+        # task and never transition its state -- recording them as
+        # `kind: state_transition` telemetry would give a configured spool
+        # misleading, high-volume records for a mutation that is a no-op
+        # from telemetry's own perspective. The content-free bus wake above
+        # still fires unconditionally (the Picker's `--subscribe` relay
+        # still needs it to know something happened).
+        if event_type not in _NO_TELEMETRY_EVENT_TYPES:
+            telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
 
     def _emit_producer_event(event_type: str, detail: dict[str, object]) -> None:
         bus.publish({"type": event_type, "producer_fence": detail})
@@ -795,14 +811,15 @@ def register_task_routes(
 
     @app.post("/tasks/{task_id}/heartbeat")
     def heartbeat(task_id: str, body: WorkerBody) -> dict:
-        return _guard(lambda: queue.heartbeat(task_id, body.worker_id))
+        return _guard(lambda: queue.heartbeat(task_id, body.worker_id), "task.heartbeat")
 
     @app.post("/tasks/{task_id}/activity")
     def activity(task_id: str, body: ActivityBody) -> dict:
         return _guard(
             lambda: queue.set_activity(
                 task_id, body.activity, reservation_key=body.reservation_key
-            )
+            ),
+            "task.activity_updated",
         )
 
     @app.post("/tasks/{task_id}/owner-session")
@@ -895,6 +912,11 @@ def register_task_routes(
             msg = str(exc)
             status = 404 if msg.startswith("no such task") else 409
             raise HTTPException(status_code=status, detail=msg) from exc
+        # A board-sort-/liveness-relevant mutation (updates `lease_expires_at`/
+        # `last_seen_at`/`updated_at`): publish a content-free wake so the
+        # agent-dispatch relay's `--subscribe` fast path treats it as a
+        # trigger for a full re-fetch, the same as every other mutation here.
+        bus.publish({"type": "task.steer_taken", "task_id": task_id})
         key = "steers" if body.all_pending else "steer"
         return {"task_id": task_id, key: steer}
 
@@ -906,6 +928,11 @@ def register_task_routes(
     @app.post("/recover")
     def recover() -> dict:
         counts = queue.reconcile_liveness()
+        # Manual recovery can requeue, suspend, or dead-letter rows: publish
+        # a content-free wake so the agent-dispatch relay's `--subscribe`
+        # fast path treats it as a trigger for a full re-fetch, the same as
+        # every other mutation here.
+        bus.publish({"type": "task.recovered", **counts})
         return {"recovered": counts["requeued"], **counts}
 
     register_verification_routes(
