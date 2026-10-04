@@ -47,6 +47,7 @@ phase 1 "install ONLY $PLUGIN (the starting state)"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
+  "sandbox": { "enabled": false },
   "extraKnownMarketplaces": { "$MARKETPLACE_NAME": { "source": { "source": "github", "repo": "$MARKETPLACE_REPO" } } },
   "enabledPlugins": { "$PLUGIN@$MARKETPLACE_NAME": true }
 }
@@ -64,7 +65,7 @@ phase 2 "first-session provision (binstub on PATH; NO .kdbx)"
 _apply_uv_index_fixture
 PLUGIN_ARG=()
 [ -d "$INSTALLED_ROOT/$PLUGIN" ] && PLUGIN_ARG=( --plugin-dir "$INSTALLED_ROOT/$PLUGIN" )
-capture "session-provision" -- copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARG[@]}" || true
+capture "session-provision" -- copilot -p "Reply with the single word: ready." --allow-all --experimental "${PLUGIN_ARG[@]}" || true
 sleep 6
 # Trigger first-use so the binstub self-provisions the runtime, if the session
 # hook alone did not. (This is setup: we want the binstub callable so the eval

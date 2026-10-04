@@ -232,7 +232,7 @@ immutable root filesystem with size-bounded tmpfs workspace/home/scratch
 surfaces, drop all Linux capabilities, disable privilege escalation, apply
 CPU/memory/PID ceilings, and default to `network: none`. They must provide an
 explicit per-fleet `acp_command`; there is no implicit
-`--allow-all-tools` fallback.
+`--allow-all --experimental` fallback.
 
 The primary threat is a fallible worker issuing a mistaken/destructive command,
 including one suggested by prompt injection—not an omnipotent hostile tenant.

@@ -361,6 +361,10 @@ def _load_recipe_document(ref: str, *, base_dir: Path) -> Mapping[str, Any]:
         raise RegistrarError(
             f"extends: recipe file {ref!r} (resolved {path}) has invalid encoding: {exc}"
         ) from exc
+    except ValueError as exc:
+        raise RegistrarError(
+            f"extends: recipe ref {ref!r} could not be resolved to a path: {exc}"
+        ) from exc
     except OSError as exc:
         # Indeterminate, not invalid: a transient permission/read race on an
         # extends: target must not be classified the same as a genuinely

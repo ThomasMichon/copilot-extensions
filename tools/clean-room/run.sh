@@ -123,7 +123,7 @@ CLEAN_ROOM_LABEL="copilot-extensions.clean-room=1"
 # Keep Copilot's subprocess crashes from dirtying the fixture, and use the
 # hidden distro rg because the bundled ARM64 binary rejects 16 KiB pages.
 ACP_PREFIX='ulimit -c 0 && env USE_BUILTIN_RIPGREP=false PATH=/opt/copilot-cleanroom/bin:$PATH'
-ACP_COMMAND="$ACP_PREFIX copilot --acp --stdio --allow-all-tools"  # eval may add --plugin-dir
+ACP_COMMAND="$ACP_PREFIX copilot --acp --stdio --allow-all --experimental"  # eval may add --plugin-dir
 BRIDGE_CONTAINER_ID=""
 
 if [ -n "${CR_RESULTS_DIR:-}" ]; then

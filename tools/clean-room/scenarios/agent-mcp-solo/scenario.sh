@@ -70,6 +70,7 @@ phase 1 "install ONLY $PLUGIN"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
+  "sandbox": { "enabled": false },
   "extraKnownMarketplaces": { "$MARKETPLACE_NAME": { "source": { "source": "github", "repo": "$MARKETPLACE_REPO" } } },
   "enabledPlugins": { "$PLUGIN@$MARKETPLACE_NAME": true }
 }
@@ -95,7 +96,7 @@ _apply_uv_index_fixture
 mkdir -p "$HOME/mcp-repo" && ( cd "$HOME/mcp-repo" && git init -q && git config user.email t@example.invalid && git config user.name test && echo '# mcp' > README.md && git add -A && git commit -qm init )
 PLUGIN_ARG=()
 [ -d "$PLUGIN_DIR" ] && PLUGIN_ARG=( --plugin-dir "$PLUGIN_DIR" )
-( cd "$HOME/mcp-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARG[@]}" ) || true
+( cd "$HOME/mcp-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all --experimental "${PLUGIN_ARG[@]}" ) || true
 sleep 8
 if bash -lc 'command -v agent-mcp >/dev/null'; then
     pass "sessionStart/login shell exposes agent-mcp binstub"

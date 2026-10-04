@@ -47,7 +47,7 @@ def _inner_command(cmd: list[str]) -> list[str]:
 
 def test_plain_launch_appends_allow_all():
     cmd = m._build_launch_cmd(_config(), _args([]), "/w/wt")
-    assert cmd[-1] == "--allow-all"
+    assert cmd[-2:] == ["--allow-all", "--experimental"]
 
 
 def test_plain_launch_does_not_append_removed_no_sandbox_flag():
@@ -60,6 +60,7 @@ def test_plain_launch_does_not_append_removed_no_sandbox_flag():
 def test_acp_launch_skips_allow_all():
     cmd = m._build_launch_cmd(_config(), _args(["--acp", "--stdio"]), "/w/wt")
     assert "--allow-all" not in cmd
+    assert "--experimental" in cmd
     # ACP sessions get permissions managed by agent-bridge over the protocol.
     assert "--no-sandbox" not in cmd
 
@@ -147,6 +148,7 @@ def test_launch_skips_preference_flags_for_template_embedded_acp(tmp_path, monke
     cmd = m._build_launch_cmd(config, _args([]), "/w/wt")
     assert "--model" not in cmd
     assert "--allow-all" not in cmd
+    assert "--experimental" in cmd
 
 
 def test_launch_skips_whitespace_only_persisted_preference(tmp_path, monkeypatch):
@@ -167,11 +169,19 @@ def test_launch_skips_whitespace_only_persisted_preference(tmp_path, monkeypatch
 def test_existing_all_perm_flag_not_duplicated():
     # --allow-all-tools, --allow-all, and --yolo are each an all-permissions
     # stance the caller already expressed, so we must not append our default
-    # --allow-all on top of any of them.
+    # --allow-all on top of any of them.  --experimental is independent and
+    # still required so SDK extensions load.
     for flag in ("--allow-all-tools", "--allow-all", "--yolo"):
         cmd = m._build_launch_cmd(_config(), _args([flag]), "/w/wt")
         assert "--allow-all" not in [c for c in cmd if c != flag]
         assert cmd.count(flag) == 1
+        assert cmd.count("--experimental") == 1
+
+
+def test_existing_experimental_flag_not_duplicated():
+    cmd = m._build_launch_cmd(_config(), _args(["--experimental"]), "/w/wt")
+    assert cmd.count("--experimental") == 1
+    assert "--allow-all" in cmd
 
 
 def test_resume_uses_equals_form():
@@ -330,7 +340,7 @@ def test_setup_hook_builds_normalized_launch(monkeypatch):
     assert "tools" in hook_arg and "setup" in hook_arg
     assert "--config-root" in cmd
     assert "--runtime-python" in cmd
-    assert cmd[-1] == "--allow-all"
+    assert cmd[-2:] == ["--allow-all", "--experimental"]
 
 
 def test_setup_hook_absolute_path_preserved(monkeypatch):

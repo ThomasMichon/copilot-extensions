@@ -540,7 +540,12 @@ def test_resolve_extends_canonicalizes_an_absolute_symlinked_ref(tmp_path):
     )
     symlink_dir = tmp_path / "symlinked-elsewhere"
     symlink_path = symlink_dir.parent / "mid-symlink.json"
-    symlink_path.symlink_to(repo_real / "mid.json")
+    try:
+        symlink_path.symlink_to(repo_real / "mid.json")
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("file symlink creation is not permitted on this Windows host")
+        raise
 
     resolved = resolve_extends(
         {"extends": str(symlink_path)}, base_dir=tmp_path / "unrelated"

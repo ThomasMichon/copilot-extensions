@@ -297,7 +297,7 @@ agent-bridge send cleanroom-base "install agent-codespaces and report PASS/FAIL"
 ```
 
 The agent is a `command`-type provider agent whose transport is
-`docker exec -i cr-<image> bash -lc "copilot --acp --stdio --allow-all-tools"`.
+`docker exec -i cr-<image> bash -lc "copilot --acp --stdio --allow-all --experimental"`.
 The in-container Copilot authenticates via the injected `COPILOT_GITHUB_TOKEN`,
 so no token is embedded in the spawn command. Registration is TTL-scoped (1h)
 against the live daemon's provider API.

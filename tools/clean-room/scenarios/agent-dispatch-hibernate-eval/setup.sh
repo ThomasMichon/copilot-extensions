@@ -73,6 +73,7 @@ phase 1 "install ONLY $PLUGIN (the starting state)"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
+  "sandbox": { "enabled": false },
   "extraKnownMarketplaces": { "$MARKETPLACE_NAME": { "source": { "source": "github", "repo": "$MARKETPLACE_REPO" } } },
   "enabledPlugins": { "$PLUGIN@$MARKETPLACE_NAME": true }
 }
@@ -101,7 +102,7 @@ mkdir -p "$WORKER_DIR"
 pass "worker worktree git-init'd at $WORKER_DIR (handle $WORKER_HANDLE)"
 PLUGIN_ARG=()
 [ -d "$INSTALLED_ROOT/$PLUGIN" ] && PLUGIN_ARG=( --plugin-dir "$INSTALLED_ROOT/$PLUGIN" )
-( cd "$WORKER_DIR" && capture "session-provision" -- copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARG[@]}" ) || true
+( cd "$WORKER_DIR" && capture "session-provision" -- copilot -p "Reply with the single word: ready." --allow-all --experimental "${PLUGIN_ARG[@]}" ) || true
 sleep 8
 if ! bash -lc 'command -v agent-dispatch >/dev/null 2>&1'; then
     installer="$(_installer_path || true)"

@@ -47,6 +47,7 @@ phase 1 "install the harness core (agent-worktrees base + agent-bridge)"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
+  "sandbox": { "enabled": false },
   "extraKnownMarketplaces": { "$MARKETPLACE_NAME": { "source": { "source": "github", "repo": "$MARKETPLACE_REPO" } } },
   "enabledPlugins": {
     "agent-worktrees@$MARKETPLACE_NAME": true,
@@ -67,7 +68,7 @@ _apply_uv_index_fixture
 PLUGIN_ARG=()
 [ -d "$INSTALLED_ROOT/agent-worktrees" ] && PLUGIN_ARG=( --plugin-dir "$INSTALLED_ROOT/agent-worktrees" )
 [ -d "$INSTALLED_ROOT/agent-bridge" ]    && PLUGIN_ARG+=( --plugin-dir "$INSTALLED_ROOT/agent-bridge" )
-capture "session-provision" -- copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARG[@]}" || true
+capture "session-provision" -- copilot -p "Reply with the single word: ready." --allow-all --experimental "${PLUGIN_ARG[@]}" || true
 sleep 8
 capture "bridge-first-use" -- bash -lc 'agent-bridge --version' || true
 if bash -lc 'command -v agent-bridge >/dev/null'; then

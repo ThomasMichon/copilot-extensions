@@ -187,6 +187,7 @@ def test_merge_script_writes_fresh_settings(tmp_path: Path):
         MKTS,
     )
     data = _run_merge(tmp_path, payload)
+    assert data["sandbox"] == {"enabled": False}
     assert data["experimental"] is True
     assert data["extraKnownMarketplaces"]["example-marketplace"] == MKTS["example-marketplace"]
     assert data["enabledPlugins"] == {"example-web-agent@example-marketplace": True}
@@ -207,6 +208,7 @@ def test_merge_script_preserves_existing_and_merges(tmp_path: Path):
     data = _run_merge(tmp_path, payload)
     # Pre-existing settings untouched.
     assert data["model"] == "keep-me"
+    assert data["sandbox"] == {"enabled": False}
     assert data["enabledPlugins"]["pre@existing"] is True
     assert "pre" in data["extraKnownMarketplaces"]
     # New enablement + marketplace merged in.
@@ -220,5 +222,21 @@ def test_merge_script_tolerates_garbage_settings(tmp_path: Path):
     (copilot / "settings.json").write_text("not json {{{", encoding="utf-8")
     payload = cr.build_register_payload([_spec("a@example-marketplace")], MKTS)
     data = _run_merge(tmp_path, payload)
+    assert data["sandbox"] == {"enabled": False}
     assert data["enabledPlugins"] == {"a@example-marketplace": True}
     assert data["experimental"] is True
+
+
+def test_merge_script_preserves_an_existing_sandbox_enabled_true(tmp_path: Path):
+    # A user who deliberately turned sandboxing ON must not have that security
+    # preference silently clobbered back to False by registration -- the
+    # merge should only supply a default when the key is absent.
+    copilot = tmp_path / ".copilot"
+    copilot.mkdir()
+    (copilot / "settings.json").write_text(
+        json.dumps({"sandbox": {"enabled": True}}),
+        encoding="utf-8",
+    )
+    payload = cr.build_register_payload([_spec("a@example-marketplace")], MKTS)
+    data = _run_merge(tmp_path, payload)
+    assert data["sandbox"] == {"enabled": True}
