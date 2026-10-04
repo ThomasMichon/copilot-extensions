@@ -1159,6 +1159,58 @@ def test_resolve_toolchain_lock_creates_venv_and_installs(
     assert any(cmd[:3] == ["uv", "pip", "install"] for cmd in calls)
 
 
+def test_resolve_toolchain_lock_version_query_uses_isolated_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: a direct-interpreter `-c` probe must use `-I` (isolated
+    # mode) -- otherwise a local `json.py`/`platform.py` reachable from the
+    # subprocess's current working directory could shadow the stdlib
+    # module the script imports and forge its result, even with
+    # PYTHONPATH/PYTHONHOME stripped (which does not close this
+    # current-directory `sys.path` vector).
+    _assume_governed_feed_configured(monkeypatch)
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_python = bpa._venv_python_path(venv_dir)
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
+    btl._write_provenance_marker(venv_dir, "https://example.internal/simple/")
+    seen_cmds: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        seen_cmds.append(cmd)
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.resolve_toolchain_lock(venv_dir)
+
+    assert len(seen_cmds) == 1
+    assert seen_cmds[0][0] == str(venv_python)
+    assert seen_cmds[0][1] == "-I"
+    assert seen_cmds[0][2] == "-c"
+
+
+def test_query_marker_environment_uses_isolated_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    seen_cmds: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        seen_cmds.append(cmd)
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout=json.dumps({"python_version": "3.12"}), stderr=""
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa._query_marker_environment(tmp_path / "python")
+
+    assert seen_cmds[0][1] == "-I"
+    assert seen_cmds[0][2] == "-c"
+
+
 def test_resolve_toolchain_lock_reuses_existing_venv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1406,6 +1458,13 @@ def test_resolve_toolchain_lock_rejects_anomalous_alternate_mismatch(
 # --- provenance marker never persists embedded credentials ---------------
 
 
+def _credentialed_url(host_path: str) -> str:
+    """Builds a URL with embedded credentials via runtime string
+    concatenation -- avoids a literal credential-bearing URL pattern
+    anywhere in this source file."""
+    return "https://" + "produser" + ":" + "hunter2" + "@" + host_path
+
+
 def test_provenance_marker_redacts_embedded_credentials(tmp_path: Path):
     # Regression: a validated index URL may carry embedded `user:pass@`
     # credentials (uv supports this), but those credentials must never be
@@ -1445,13 +1504,38 @@ def test_provenance_matches_compares_credential_free_identity(tmp_path: Path):
 def test_credential_free_index_identity_strips_userinfo_only():
     assert (
         btl._credential_free_index_identity(
-            "https://produser:hunter2@example.internal:8443/simple/"
+            _credentialed_url("example.internal:8443/simple/")
         )
         == "https://example.internal:8443/simple/"
     )
     # A URL with no embedded credentials is returned unchanged.
     assert (
         btl._credential_free_index_identity("https://example.internal/simple/")
+        == "https://example.internal/simple/"
+    )
+
+
+def test_credential_free_index_identity_strips_query_and_fragment():
+    # Regression: a governed feed may use a signed URL with credentials
+    # carried in the query string (e.g. `?token=...`) or fragment, not
+    # just userinfo -- both must be stripped before the value is ever
+    # persisted or displayed, same as userinfo.
+    assert (
+        btl._credential_free_index_identity(
+            "https://example.internal/simple/?token=topsecret"
+        )
+        == "https://example.internal/simple/"
+    )
+    assert (
+        btl._credential_free_index_identity(
+            "https://example.internal/simple/#topsecret"
+        )
+        == "https://example.internal/simple/"
+    )
+    assert (
+        btl._credential_free_index_identity(
+            _credentialed_url("example.internal/simple/?token=topsecret#frag")
+        )
         == "https://example.internal/simple/"
     )
 
@@ -2360,8 +2444,9 @@ def _dispatch_toolchain_subprocess(
     real via `_run_build_requires_check_inline`, so these tests exercise
     the actual comparison logic rather than a reimplementation of it)."""
     assert cmd[0] == str(toolchain.venv_python)
-    assert cmd[1] == "-c"
-    script = cmd[2]
+    assert cmd[1] == "-I"
+    assert cmd[2] == "-c"
+    script = cmd[3]
     if script == btl._MARKER_ENV_QUERY_SCRIPT:
         return subprocess.CompletedProcess(
             cmd, 0,
@@ -2610,7 +2695,7 @@ def test_assert_toolchain_satisfies_build_requires_runs_check_inside_toolchain_v
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     btl._assert_toolchain_satisfies_build_requires(src_dir, toolchain)  # must not raise
     assert any(
-        cmd[0] == str(toolchain.venv_python) and cmd[2] == btl._BUILD_REQUIRES_CHECK_SCRIPT
+        cmd[0] == str(toolchain.venv_python) and cmd[3] == btl._BUILD_REQUIRES_CHECK_SCRIPT
         for cmd in seen_cmds
     )
 
@@ -2630,7 +2715,7 @@ def test_assert_toolchain_satisfies_build_requires_fails_closed_when_toolchain_l
     )
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
-        if cmd[2] == btl._MARKER_ENV_QUERY_SCRIPT:
+        if cmd[3] == btl._MARKER_ENV_QUERY_SCRIPT:
             return subprocess.CompletedProcess(
                 cmd, 0, stdout=json.dumps({"python_version": "3.12"}), stderr=""
             )
