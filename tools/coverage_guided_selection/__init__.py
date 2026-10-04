@@ -46,4 +46,10 @@ Four pieces, each independently testable:
   remapped -- inserted code can introduce new control flow (an early
   `return`, a new guard) that skips a line a test used to reach, and a
   line-coordinate shift alone can't prove that didn't happen.
+- `debt`: Phase 3 -- measures how stale a resolved baseline is relative to
+  the commit a selection is being made for, along two independently
+  tunable dimensions (commit-volume since `measured_commit`, and wall-clock
+  age), either of which crossing its own threshold trips the smoke/fallback
+  tier for the whole selection -- distinct from (and in addition to)
+  `selection.select_tests`'s own per-file/per-line fallback triggers.
 """
