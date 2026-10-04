@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import front_door_cli as _fdc
 from agent_worktrees import related_cli
 
 # Captured at collection time, before any per-test fixture (including this
@@ -1497,6 +1500,127 @@ def test_usable_manager_ignores_unregistered_path_command(monkeypatch, tmp_path)
         lambda *a, **k: pytest.fail("must not probe an unregistered PATH command"),
     )
     assert m._usable_worktree_manager() is None
+
+
+@pytest.mark.guard
+def test_manifest_with_leaked_pytest_tmp_path_command_is_rejected():
+    """copilot-extensions#5122: a test that fails to isolate
+    ``control_plane_providers_dir()`` can overwrite the real registry with its
+    own ``tmp_path``, wedging every project's interactive launch on the
+    machine until someone notices and hand-repairs the JSON file. A manifest
+    whose own file lives in the real, production registry (no pytest-sandbox
+    marker in its path) but whose ``command`` carries one anyway is an
+    unmistakable signature of exactly that -- parsing must reject it (and say
+    why) rather than select a dead path.
+
+    Uses a literal, non-``tmp_path`` ``source_path`` (this suite's own tests
+    otherwise run under a real pytest sandbox, which would make *any*
+    ``source_path`` carry a marker and silently defeat the check it's meant
+    to exercise)."""
+    payload = {
+        "schema_version": 1,
+        "provider": "worktree-manager",
+        "description": "worktree-manager",
+        "command": [
+            r"C:\Users\someone\AppData\Local\Temp\pytest-of-someone\pytest-42"
+            r"\test_foo0\localbin\worktree-manager.cmd"
+        ],
+        "minimum_version": "0.1.0-dev21",
+        "provider_root": "",
+    }
+    with pytest.raises(_fdc._LeakedTestTmpPathManifestError, match="pytest-of-"):
+        _fdc._parse_control_plane_provider_manifest(
+            payload,
+            source_path=r"C:\Users\someone\.agent-worktrees\control-plane-providers.d\worktree-manager.json",
+        )
+
+
+@pytest.mark.guard
+def test_manifest_with_leaked_pytest_tmp_path_provider_root_is_rejected():
+    """Same signature, but only ``provider_root`` (not ``command``) carries
+    the leaked path -- both fields must be checked, not just the one the
+    original incident happened to hit."""
+    payload = {
+        "schema_version": 1,
+        "provider": "worktree-manager",
+        "description": "worktree-manager",
+        "command": ["/usr/bin/worktree-manager"],
+        "minimum_version": "0.1.0-dev21",
+        "provider_root": "/home/someone/.cache/pytest-of-someone/pytest-42/test_foo0/root",
+    }
+    with pytest.raises(_fdc._LeakedTestTmpPathManifestError, match="pytest-of-"):
+        _fdc._parse_control_plane_provider_manifest(
+            payload,
+            source_path="/home/someone/.agent-worktrees/control-plane-providers.d/worktree-manager.json",
+        )
+
+
+@pytest.mark.guard
+def test_manifest_without_leaked_path_is_unaffected():
+    """A normal, legitimate install path must never trip the new guard."""
+    payload = {
+        "schema_version": 1,
+        "provider": "worktree-manager",
+        "description": "worktree-manager",
+        "command": ["/usr/bin/worktree-manager"],
+        "minimum_version": "0.1.0-dev21",
+        "provider_root": "/home/someone/.worktree-manager",
+    }
+    manifest = _fdc._parse_control_plane_provider_manifest(
+        payload,
+        source_path="/home/someone/.agent-worktrees/control-plane-providers.d/worktree-manager.json",
+    )
+    assert manifest.command == ("/usr/bin/worktree-manager",)
+
+
+@pytest.mark.guard
+def test_manifest_inside_a_pytest_sandbox_pointing_at_itself_is_not_leaked(monkeypatch, tmp_path):
+    """The general discovery path, exercised end-to-end: a manifest whose own
+    file AND whose ``command``/``provider_root`` all live under the SAME real
+    pytest ``tmp_path`` (exactly what every other test in this suite does via
+    ``_register_provider``) is a normal, correctly-isolated test fixture --
+    the new guard must never flag it, since ``source_path`` itself carries a
+    pytest-sandbox marker too."""
+    command = _register_provider(tmp_path)
+    monkeypatch.setenv(m._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(_provider_registry_dir(tmp_path)))
+    manifests = _fdc._discover_control_plane_provider_manifests()
+    assert manifests["worktree-manager"].command == command
+
+
+@pytest.mark.guard
+def test_discover_rejects_a_leaked_manifest_end_to_end(monkeypatch, capsys):
+    """Discovery-level repro of the real incident, not just the unit-level
+    parser check above: a manifest FILE living somewhere that does NOT itself
+    carry a pytest-sandbox marker (standing in for the real, production
+    registry -- ``tmp_path`` always carries one, since it is itself rooted
+    under ``pytest-of-<user>/pytest-<n>``, so it can't play that role) but
+    whose ``command`` does is rejected by ``_discover_control_plane_provider_manifests``
+    with a visible warning, and never silently swallowed as a generic parse
+    error that a passing test could mask."""
+    registry = Path(tempfile.mkdtemp(prefix="agent-worktrees-pr-registry-"))
+    try:
+        (registry / "worktree-manager.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "provider": "worktree-manager",
+                    "description": "worktree-manager",
+                    "command": [
+                        str(registry / "pytest-of-someone" / "pytest-42"
+                            / "test_foo0" / "localbin" / "worktree-manager.cmd")
+                    ],
+                    "minimum_version": "0.1.0-dev21",
+                    "provider_root": "",
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv(m._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(registry))
+        manifests = _fdc._discover_control_plane_provider_manifests()
+    finally:
+        shutil.rmtree(registry, ignore_errors=True)
+    assert manifests == {}
+    assert "pytest-of-" in capsys.readouterr().out
 
 
 def test_bare_falls_back_to_picker_when_manager_broken(monkeypatch, tmp_path):
