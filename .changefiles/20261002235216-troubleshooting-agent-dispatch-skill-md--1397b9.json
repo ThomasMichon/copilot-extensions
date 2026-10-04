@@ -1,9 +1,0 @@
-{
-  "comment": "troubleshooting-agent-dispatch SKILL.md: mention agent-bridge/agent-mcp catalog-argv placeholders in the Quick-checks intro note (both already used in the body, only agent-dispatch was previously documented)",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "dev"
-    }
-  ]
-}

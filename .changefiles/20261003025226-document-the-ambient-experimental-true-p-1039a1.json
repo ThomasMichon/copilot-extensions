@@ -1,9 +1,0 @@
-{
-  "comment": "Document the ambient experimental:true prerequisite for SDK extension loading (surfaced by clean-room live-session validation); add tools/clean-room/scenarios/agent-remote-driver-solo",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "dev"
-    }
-  ]
-}

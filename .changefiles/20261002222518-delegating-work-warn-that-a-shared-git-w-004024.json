@@ -1,9 +1,0 @@
-{
-  "comment": "delegating-work: warn that a shared git worktree is a coupled surface a delegate must never touch concurrently",
-  "changes": [
-    {
-      "plugin": "agent-conduct-guidance",
-      "type": "patch"
-    }
-  ]
-}

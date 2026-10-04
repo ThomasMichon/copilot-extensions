@@ -1,9 +1,0 @@
-{
-  "comment": "cmd_register/cmd_install: use the canonical-aware machines_yaml_path() for the registry-exists gate instead of a hardcoded legacy repo-root path, so machine-registry validation still runs once a repo migrates fully to the canonical in-repo machines.yaml and retires its root file",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

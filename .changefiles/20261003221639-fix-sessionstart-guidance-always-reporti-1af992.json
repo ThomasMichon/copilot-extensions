@@ -1,9 +1,0 @@
-{
-  "comment": "Fix sessionStart guidance always reporting unavailable: the catalog-producer subprocess timeout (10s) was tighter than the gate-check script's real runtime (~10-11s), and the two guidance producers ran sequentially instead of in parallel despite the hook's own 45s budget",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "claims_rank: recognize PR/issue URLs from any forge (Gitea/Forgejo 'pulls', GitLab 'merge_requests'), not just github.com; hyperlink the original URL as-is instead of reconstructing a github.com URL",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

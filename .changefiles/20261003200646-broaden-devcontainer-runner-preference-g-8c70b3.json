@@ -1,9 +1,0 @@
-{
-  "comment": "Broaden devcontainer-runner preference guidance from bug-fix-only to all pre-PR validation",
-  "changes": [
-    {
-      "plugin": "copilot-extensions-harness",
-      "type": "patch"
-    }
-  ]
-}

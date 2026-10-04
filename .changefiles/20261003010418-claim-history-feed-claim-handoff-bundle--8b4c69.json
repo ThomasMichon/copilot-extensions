@@ -1,9 +1,0 @@
-{
-  "comment": "claim_history: feed claim-handoff bundle accept transfers into the ownership ledger",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

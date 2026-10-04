@@ -1,9 +1,0 @@
-{
-  "comment": "lease_store: test squash_stale's concurrent-race safety (CAS skip on a mid-sweep re-acquire)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "create-pr: require a claimant worktree (CWD-derived) and refuse a different, also-registered --repo without a push mechanism, instead of silently pushing/opening against the caller's own repo while mislabeling the PR",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "pr-watch: add a checks_succeeded transition (selectable via --until or any) -- the terminal CI outcome checks_failed alone never covered, which could leave a self-merge-eligible wait with nothing left to fire on once CI goes green and no further review ever comes.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

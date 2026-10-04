@@ -1,9 +1,0 @@
-{
-  "comment": "Add suite-wide safety net (autouse conftest fixture) sandboxing USERPROFILE/HOME for self-install/self-update tests, so an unpatched call can never reach the real ~/.agent-worktrees/control-plane-providers.d registry (#5122 follow-up).",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

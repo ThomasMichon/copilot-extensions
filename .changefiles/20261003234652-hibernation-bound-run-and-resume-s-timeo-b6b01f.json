@@ -1,9 +1,0 @@
-{
-  "comment": "hibernation: bound run_and_resume's timeout re-arm loop (new MAX_TIMEOUT_REATTEMPTS default of 3, overridable via max_reattempts) -- a wait condition that never resolves (e.g. a gap in the wait command's own transition vocabulary) could previously hibernate a suspended task indefinitely; it now gives up and wakes the resumer with an explicit message after the cap.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "minor"
-    }
-  ]
-}
