@@ -28,7 +28,7 @@ from agent_procutil import no_window_flags
 
 from . import claimant as _claimant
 from . import config as cfg
-from . import git_ops, obligations, tracking
+from . import git_ops, obligations, tracking, tracking_claims
 
 log = logging.getLogger(__name__)
 
@@ -273,6 +273,7 @@ def _github_pr_view_args(ref: str) -> list[str] | None:
     ambiguous without a repo).
     """
     ref = (ref or "").strip()
+    ref = tracking_claims.decanonicalize_ref(ref)
     m = _GH_PR_URL.match(ref)
     if m:
         return [ref]
@@ -326,6 +327,7 @@ def _ado_pr_view_args(ref: str) -> list[str] | None:
     any other shape yields ``None`` (spare).
     """
     ref = (ref or "").strip()
+    ref = tracking_claims.decanonicalize_ref(ref)
     m = _ADO_PR_VSTS.match(ref)
     if m:
         return ["--id", m.group(2), "--org", f"https://{m.group(1)}/"]

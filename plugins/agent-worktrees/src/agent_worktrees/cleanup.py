@@ -41,7 +41,7 @@ from agent_procutil import no_window_flags
 from . import config as cfg
 from . import repos as repos_mod
 from . import sweep as sweep_mod
-from . import tracking
+from . import tracking, tracking_claims
 
 log = logging.getLogger(__name__)
 
@@ -303,6 +303,7 @@ def _pr_claim_target(
     ref: str, prcfg: cfg.PRConfig,
 ) -> tuple[str, str, int, str] | None:
     """Resolve a stored PR claim into provider, repo, number, and API base."""
+    ref = tracking_claims.decanonicalize_ref(ref)
     configured_provider = (getattr(prcfg, "provider", "") or "").strip().lower()
     api_base = (getattr(prcfg, "api_base", "") or "").strip()
     short = re.fullmatch(

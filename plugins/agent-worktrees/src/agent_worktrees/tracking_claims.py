@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import secrets
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
@@ -79,6 +80,7 @@ def format_claim_ref(
 def parse_claim_ref(ref: str) -> ClaimRef | None:
     if not ref:
         return None
+    ref = decanonicalize_ref(ref)
     body, _, session = ref.partition("#")
     session_val = session or None
     parts = body.split("/")
@@ -92,6 +94,85 @@ def parse_claim_ref(ref: str) -> ClaimRef | None:
             session=session_val,
         )
     return ClaimRef(worktree_id=body, session=session_val)
+
+
+#: Every claim kind this repo recognizes today (Phase 6 canonical-ref
+#: design, worktree-claims-transitive-finalization effort, 2026-10-04) --
+#: the union of ``claims_rank.DEFAULT_LABEL_PREFIX``'s keys plus the
+#: PR-like kinds (``claims_rank._PR_LIKE_KINDS``). Duplicated here rather
+#: than imported: ``claims_rank`` is deliberately import-free (pure
+#: arithmetic -- see its own module docstring), so this module owns its own
+#: copy of the vocabulary instead of creating a dependency the other way.
+CLAIM_KINDS: frozenset[str] = frozenset({
+    "worktree", "session", "codespace", "container", "task", "bridge",
+    "ssh", "effort", "pr", "bug", "issue",
+})
+
+#: ``<kind>:<system>:<key>`` -- the Phase 6 canonical, self-describing claim
+#: ref shape. ``kind`` is restricted to a bare lowercase token so a URL's
+#: own scheme (``https://...``) can never be mistaken for one (checked
+#: against :data:`CLAIM_KINDS` below, not just this regex's shape).
+_CANONICAL_REF_RE = re.compile(r"^([a-z][a-z0-9_-]*):([^:]*):(.+)$")
+
+
+def canonicalize_ref(kind: str, ref: str) -> str:
+    """Render ``ref`` (a claim of kind ``kind``) in the Phase 6 canonical,
+    self-describing ``"<kind>:<system>:<key>"`` form.
+
+    **Additive, never a replacement**: nothing persisted today is
+    rewritten by this function existing, and :func:`decanonicalize_ref`
+    losslessly recovers the exact legacy-shaped string from whatever this
+    returns -- every existing kind-specific parser (:func:`parse_claim_ref`,
+    ``claims_rank._parse_pr_like_ref``, ``cleanup._pr_claim_target``,
+    ``sweep.py``'s PR view-arg builders) keeps accepting its own native
+    shape completely unmodified; see the effort README's Phase 6 section
+    for the full design rationale and the "additive, not a breaking
+    rewrite" migration decision.
+
+    For ``worktree``/``session`` kinds, ``system`` is the owning machine
+    and ``key`` is ``project/worktree_id[#session]`` (the rest of
+    :func:`format_claim_ref`'s own grammar) -- this round-trips exactly
+    through :func:`decanonicalize_ref`. Every other kind (PR-like or
+    opaque) has no independently-meaningful "system" token today (a PR's
+    provider is already recoverable from its own ref shape; an opaque id
+    like a CodeSpace name carries no separate system at all), so ``system``
+    is left empty and ``key`` is the existing ref verbatim. Idempotent: a
+    ``ref`` already in canonical form is returned unchanged.
+    """
+    if decanonicalize_ref(ref) != ref:
+        return ref  # already canonical
+    if kind in ("worktree", "session"):
+        parsed = parse_claim_ref(ref)
+        if parsed and parsed.machine and parsed.project:
+            key = f"{parsed.project}/{parsed.worktree_id}"
+            if parsed.session:
+                key += f"#{parsed.session}"
+            return f"{kind}:{parsed.machine}:{key}"
+    return f"{kind}::{ref}"
+
+
+def decanonicalize_ref(ref: str) -> str:
+    """Inverse of :func:`canonicalize_ref`: if ``ref`` is in the Phase 6
+    canonical ``"<kind>:<system>:<key>"`` form, return the equivalent
+    legacy-shaped ref string so every existing kind-specific parser keeps
+    working completely unmodified -- each just unwraps at its own entry
+    point first (see :func:`canonicalize_ref`'s docstring for the call
+    sites). Returns ``ref`` unchanged for anything that isn't genuinely
+    canonical, including a string that only superficially matches the
+    three-colon-separated shape (e.g. a PR URL's ``https:`` scheme) where
+    the leading segment isn't one of :data:`CLAIM_KINDS`.
+    """
+    if not ref:
+        return ref
+    m = _CANONICAL_REF_RE.match(ref)
+    if not m:
+        return ref
+    kind, system, key = m.groups()
+    if kind not in CLAIM_KINDS:
+        return ref
+    if kind in ("worktree", "session"):
+        return f"{system}/{key}" if system else key
+    return key
 
 
 @dataclass

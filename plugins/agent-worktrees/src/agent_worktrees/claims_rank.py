@@ -186,6 +186,40 @@ DEFAULT_LABEL_PREFIX: dict[str, str] = {
 #: accepts all three.
 _PR_LIKE_KINDS = frozenset({"pr", "bug", "issue"})
 
+#: Phase 6 canonical-ref shape (``worktree-claims-transitive-finalization``
+#: effort, 2026-10-04): ``"<kind>:<system>:<key>"``. Duplicated from
+#: ``tracking_claims.decanonicalize_ref`` as a tiny local unwrap rather than
+#: an import -- this module stays import-free of siblings (see the module
+#: docstring) so it works against a plain dict ledger too. Every parser
+#: below unwraps at its own entry point, exactly mirroring
+#: ``tracking_claims``'s own call sites, so a canonical-form ref is accepted
+#: identically whether it reaches this module directly or via a sibling.
+_CANONICAL_REF_RE = re.compile(r"^([a-z][a-z0-9_-]*):([^:]*):(.+)$")
+_CLAIM_KINDS_FOR_CANON = frozenset({
+    "worktree", "session", "codespace", "container", "task", "bridge",
+    "ssh", "effort", "pr", "bug", "issue",
+})
+
+
+def _decanonicalize_ref(ref: str) -> str:
+    """Unwrap a Phase 6 canonical ``"<kind>:<system>:<key>"`` ref back to
+    its legacy shape, or return ``ref`` unchanged for anything else
+    (including a URL's own ``https:`` scheme, which never matches a known
+    kind). For ``"worktree"``, ``system`` (the machine) is re-prefixed onto
+    ``key`` to reconstruct the full ``machine/project/worktree_id[#session]``
+    legacy grammar; every other kind's ``key`` already IS its legacy ref."""
+    if not ref:
+        return ref
+    m = _CANONICAL_REF_RE.match(ref)
+    if not m:
+        return ref
+    found_kind, system, key = m.groups()
+    if found_kind not in _CLAIM_KINDS_FOR_CANON:
+        return ref
+    if found_kind == "worktree":
+        return f"{system}/{key}" if system else key
+    return key
+
 _GITHUB_PR_URL_RE = re.compile(
     r"^https?://github\.com/([^/\s]+/[^/\s]+)/(?:pull|issues)/(\d+)(?:[/?#].*)?$"
 )
@@ -240,12 +274,12 @@ def _parse_pr_like_ref(ref: str) -> tuple[str | None, str | None]:
     malformed/foreign ref)."""
     if not ref:
         return None, None
-    stripped = ref.strip()
+    stripped = _decanonicalize_ref(ref.strip())
     m = _GITHUB_PR_URL_RE.match(stripped) or _GENERIC_PR_URL_RE.match(stripped)
     if m:
         return m.group(1), m.group(2)
-    if "#" in ref:
-        owner_repo, _, number = ref.rpartition("#")
+    if "#" in stripped:
+        owner_repo, _, number = stripped.rpartition("#")
         number = number.strip()
         if number.isdigit():
             return (owner_repo.strip() or None), number
@@ -263,10 +297,10 @@ def claim_url(kind: str, ref: str) -> str | None:
     GitHub-only by the convention ``claims_cli``/create-pr writes it in) gets
     a synthesized ``github.com`` URL."""
     if kind in _PR_LIKE_KINDS:
-        stripped = ref.strip() if ref else ""
+        stripped = _decanonicalize_ref(ref.strip()) if ref else ""
         if stripped.startswith("http://") or stripped.startswith("https://"):
             return stripped
-        owner_repo, number = _parse_pr_like_ref(ref)
+        owner_repo, number = _parse_pr_like_ref(stripped)
         if owner_repo and number:
             path = "pull" if kind == "pr" else "issues"
             return f"https://github.com/{owner_repo}/{path}/{number}"
@@ -287,7 +321,7 @@ def _parse_worktree_ref(ref: str) -> tuple[str | None, str | None]:
     older or hand-added ref with no embedded project)."""
     if not ref:
         return None, None
-    body = ref.partition("#")[0]
+    body = _decanonicalize_ref(ref).partition("#")[0]
     parts = body.split("/")
     if len(parts) >= 3:
         return parts[1] or None, "/".join(parts[2:]) or None
