@@ -116,6 +116,23 @@ def seed_outcome(embodied: dict, *, created: bool, seed: str | None) -> tuple[st
         return "failed", False
     return None, True
 
+
+def pending_seed_report(embodied: dict, *, seed: str | None) -> dict:
+    """A launch with no seed of its own can still deliver the worktree's
+    pending seed (embody claims it). When embody typed it but couldn't
+    confirm the submit (``seed_unconfirmed``), it may sit as a draft in
+    Copilot's input and is deliberately not retried: report that to the
+    caller (never resend it). ``{}`` otherwise."""
+    if seed or not embodied.get("seed_unconfirmed"):
+        return {}
+    reason = embodied.get("seed_reason") or "unknown"
+    return {
+        "seed_delivery": "unconfirmed",
+        "warning": f"the worktree's pending seed was typed but not confirmed submitted "
+                   f"({reason}); it may sit as a draft in Copilot's input -- check the "
+                   "session (it was not resent)",
+    }
+
 # The daemon's own config dir, matching agent-bridge's ``effective_config_dir()``
 # default -- overridable the same way, via ``AGENT_BRIDGE_CONFIG_DIR``.
 _DEFAULT_BRIDGE_CONFIG_DIR = (

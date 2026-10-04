@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
-import { InFlightMessages, adoptSessionId, controlPlan, deliveryPlan, modeApplied, serializedRegister } from "./delivery.mjs";
+import { InFlightMessages, adoptSessionId, drainControls, drainInbox, serializedRegister } from "./delivery.mjs";
 import { firstLoadThisSession } from "./announce.mjs";
 import { makeBridgeEndpoint } from "./bridge-endpoint.mjs";
 import { processIdentity, resolveMetadataAsync } from "./metadata.mjs";
@@ -260,98 +260,26 @@ async function pollInbox() {
   if (!state.sessionId || !state.registered) return;
   state.delivering = true;
   try {
-    const data = await bridgeGetJson(
-      `/api/v1/live-sessions/${encodeURIComponent(state.sessionId)}/messages`,
-    );
-    const messages = data?.messages;
-    if (!Array.isArray(messages) || messages.length === 0) return;
-    const delivered = [];
-    let aborted = false;
-    for (const msg of messages) {
-      if (!msg || typeof msg.id !== "number") continue;
-      try {
-        const plan = deliveryPlan(msg);
-        // One abort per batch: a second interrupt in the same batch must not
-        // cancel the turn the first one just started.
-        if (plan.abortFirst && !aborted) {
-          aborted = true;
-          try {
-            await session.abort();
-          } catch (e) {
-            extLog(`abort failed before message ${msg.id}: ${e.message}`);
-          }
-          // The abort discarded every message still pending in the CLI;
-          // re-send those (oldest first) so the interrupt loses nothing.
-          for (const earlier of state.inFlight.takeBefore(msg.id)) {
-            await session.send({ ...deliveryPlan(earlier).options, mode: "immediate" });
-            state.inFlight.sent(earlier);
-          }
-        }
-        await session.send(plan.options);
-        state.inFlight.sent(msg);
-        delivered.push(msg.id);
-      } catch (e) {
-        // Stop the batch on the first send failure; unacked messages redeliver.
-        extLog(`deliver failed for message ${msg.id}: ${e.message}`);
-        break;
-      }
-    }
-    if (delivered.length > 0) {
-      await bridgeFetch(
-        "POST",
-        `/api/v1/live-sessions/${encodeURIComponent(state.sessionId)}/messages/ack`,
-        { ids: delivered },
-      );
-    }
+    await drainInbox(state.sessionId, {
+      getJson: bridgeGetJson, post: bridgeFetch, session, inFlight: state.inFlight, log: extLog,
+    });
   } finally {
     state.delivering = false;
   }
 }
 
 // Poll the bridge for session controls (a mode change: what `/autopilot on`
-// does from this terminal) and apply them through the CLI's own RPC. The poll
-// claims each control (it is returned once, and its requester can no longer
-// withdraw it), and every claimed control gets an outcome -- applied or
-// rejected -- so the bridge's `POST /mode` reports what really happened.
-// Controls are polled apart from messages, so they're never delivered as a
-// prompt; an older bridge without /controls just answers 404 (null here).
+// does from this terminal) and apply them through the CLI's own RPC
+// (``drainControls`` in delivery.mjs). Controls are polled apart from
+// messages, so they're never delivered as a prompt.
 async function pollControls() {
   if (state.controlling) return;
   if (!state.sessionId || !state.registered) return;
   state.controlling = true;
   try {
-    const data = await bridgeGetJson(
-      `/api/v1/live-sessions/${encodeURIComponent(state.sessionId)}/controls`,
-    );
-    const controls = data?.messages;
-    if (!Array.isArray(controls) || controls.length === 0) return;
-    const applied = [];
-    const rejected = [];
-    for (const c of controls) {
-      if (!c || typeof c.id !== "number") continue;
-      const plan = controlPlan(c);
-      if (plan.action === "skip") {
-        extLog(`control ${c.id} rejected: ${plan.reason}`);
-        rejected.push(c.id);
-        continue;
-      }
-      try {
-        const result = await session.rpc.mode.set({ mode: plan.mode });
-        if (modeApplied(result)) {
-          extLog(`control ${c.id}: mode set to ${plan.mode} (from ${c.sender || "bridge"})`);
-          applied.push(c.id);
-        } else {
-          extLog(`control ${c.id}: mode ${plan.mode} not applied (${result?.status || "no status"})`);
-          rejected.push(c.id);
-        }
-      } catch (e) {
-        extLog(`control ${c.id}: mode ${plan.mode} failed: ${e.message}`);
-        rejected.push(c.id);
-      }
-    }
-    const ack = `/api/v1/live-sessions/${encodeURIComponent(state.sessionId)}/controls/ack`;
-    if (applied.length > 0) await bridgeFetch("POST", ack, { ids: applied, applied: true });
-    if (rejected.length > 0) await bridgeFetch("POST", ack, { ids: rejected, applied: false });
+    await drainControls(state.sessionId, {
+      getJson: bridgeGetJson, post: bridgeFetch, session, log: extLog,
+    });
   } finally {
     state.controlling = false;
   }

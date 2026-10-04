@@ -430,8 +430,7 @@ class TestCmdEmbody:
         out = json.loads(capfd.readouterr().out)
         assert state["pending_seed"] is None  # not restored for an automatic retry
         assert out["seed_reason"] == outcome["reason"]
-        if live_pane:
-            assert out["seed_unconfirmed"] is True
+        assert out["seed_unconfirmed"] is True  # reported, on either path
 
     def test_explicit_seed_wins_and_supersedes_any_stale_pending_seed(
         self, monkeypatch, capfd, tmp_path,

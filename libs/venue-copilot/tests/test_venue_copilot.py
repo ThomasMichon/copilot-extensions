@@ -965,6 +965,24 @@ class TestDetachedRunner:
         assert rc == 0
         assert launch_timeouts == [expected]
 
+    def test_an_unconfirmed_pending_seed_is_reported_without_a_host_seed(self, monkeypatch) -> None:
+        """A launch with no seed of its own whose embody typed the worktree's
+        pending seed but couldn't confirm the submit reports it (a possible
+        draft); nothing is resent over the bridge."""
+        from venue_copilot import detached, refs
+
+        self._patch_bridge(monkeypatch)
+        monkeypatch.setattr(refs, "deliver_note", lambda *a, **k: pytest.fail("must not resend"))
+        adapter = _Adapter({"ok": True, "created": True, "session": "wt-anchor-repo",
+                            "seed_unconfirmed": True, "seed_reason": "seed-not-echoed"})
+        rc, payload = detached.launch_detached(
+            adapter, {**self._plan(), "anchor": False}, seed=None, driver=None, copilot_args=[],
+            ensure_mux=True, register_timeout=0.0, progress=lambda *a: None,
+        )
+        assert rc == 0
+        assert payload["seed_delivery"] == "unconfirmed"
+        assert "seed-not-echoed" in payload["warning"]
+
     def test_detached_launch_uses_register_timeout_when_larger(self, monkeypatch) -> None:
         from venue_copilot import detached
 

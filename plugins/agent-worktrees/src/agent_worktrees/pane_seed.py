@@ -136,7 +136,9 @@ def mux_seed_pane(
         for _ in range(2):
             at = _where()
             if not at:
-                return None
+                # Gone -- but after an attempted send that proves nothing about
+                # a partial draft it may have left: ambiguous, never "lost".
+                return False if tried else None
             if at == tried:
                 return False  # refused, but not because it moved: a real failure
             tried = at

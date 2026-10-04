@@ -567,7 +567,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         if (new_pane and seed)
         else {}
     )
-    pending_seed_mod.settle_claim(  # restored only if nothing was typed (else seed_reason)
+    unconfirmed = pending_seed_mod.settle_claim(  # restored only if nothing was typed
         cfg.tracking_dir() / f"{wt_id}.yaml", None if explicit_seed else claimed_seed, seed_result)
 
     verified = None
@@ -595,6 +595,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         "seed_ready": bool(seed_result.get("ready")) if seed else False,
         "seed_submitted": bool(seed_result.get("submitted")) if seed else False,
         "seed_reason": seed_result.get("reason") if seed else None,
+        **unconfirmed,  # a claimed pending seed typed but unconfirmed: a possible draft
         "mux_verified": verified,
         "verify_hint": (
             f"agent-bridge live-sessions | grep {wt_id}  "

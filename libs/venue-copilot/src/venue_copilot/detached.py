@@ -24,6 +24,7 @@ from . import (
     resolve_local_auth_token,
     seed_delivery,
     seed_outcome,
+    pending_seed_report,
     trust_folder_command,
     unstable_handle_warning,
     with_new_session,
@@ -341,7 +342,8 @@ def launch_detached(
                 "ref_files": notes.splitlines()[1:],
                 "refs_delivered": refs_delivered,
             }
-        seed_extra = {"seed_delivery": seed_delivery_status} if created and seed else {}
+        seed_extra = ({"seed_delivery": seed_delivery_status} if created and seed
+                      else pending_seed_report(embodied, seed=seed))
         return 0, _payload(
             True,
             plan,

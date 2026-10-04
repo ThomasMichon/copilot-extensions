@@ -16,6 +16,8 @@ import {
   adoptSessionId,
   serializedRegister,
   REJECTED_RETRY_MS,
+  drainInbox,
+  drainControls,
 } from "../extensions/agent-bridge/delivery.mjs";
 
 test("a same-process resume switches registration to the resumed id", () => {
@@ -337,4 +339,37 @@ test("modeApplied is false only when the CLI says the mode wasn't applied", () =
   assert.equal(modeApplied({ status: "applied", modelChanged: false, modeApplied: true }), true);
   assert.equal(modeApplied({ status: "rejected", modelChanged: false, modeApplied: false }), false);
   assert.equal(modeApplied(undefined), false);
+});
+
+test("an inbox delivery is acked under the id it was fetched for, even across a rename", async () => {
+  const state = { sessionId: "placeholder" };
+  let finishSend;
+  const posts = [];
+  const pending = drainInbox(state.sessionId, {
+    getJson: async (path) => ({ path, messages: [{ id: 1, sender: "a", body: "x", delivery: "queue" }] }),
+    post: async (method, path, body) => { posts.push([path, body]); return true; },
+    session: { send: () => new Promise((resolve) => { finishSend = resolve; }) },
+    inFlight: new InFlightMessages(),
+  });
+  await tick();
+  state.sessionId = "resumed";  // a resume renamed the session while the send was awaited
+  finishSend();
+  assert.deepEqual(await pending, [1]);
+  assert.deepEqual(posts, [["/api/v1/live-sessions/placeholder/messages/ack", { ids: [1] }]]);
+});
+
+test("a control is acked under the id it was claimed for, even across a rename", async () => {
+  const state = { sessionId: "placeholder" };
+  let finishSet;
+  const posts = [];
+  const pending = drainControls(state.sessionId, {
+    getJson: async () => ({ messages: [{ id: 7, kind: "control:set-mode", body: "autopilot" }] }),
+    post: async (method, path, body) => { posts.push([path, body]); return true; },
+    session: { rpc: { mode: { set: () => new Promise((resolve) => { finishSet = resolve; }) } } },
+  });
+  await tick();
+  state.sessionId = "resumed";
+  finishSet({ modeApplied: true });
+  await pending;
+  assert.deepEqual(posts, [["/api/v1/live-sessions/placeholder/controls/ack", { ids: [7], applied: true }]]);
 });

@@ -1390,6 +1390,34 @@ def test_seed_keystrokes_are_refused_not_misdirected_when_the_pane_moves_after_l
     assert out["submitted"] is True
 
 
+def test_a_failed_send_followed_by_a_lost_pane_stays_ambiguous():
+    """A send the server refused (or that failed partway) may have left a
+    draft; a pane lookup failing right after proves nothing about that, so it
+    is a ``send-failed`` -- never ``pane-target-lost``, which callers treat as
+    "nothing typed" and would retry, typing a second copy."""
+    from types import SimpleNamespace
+
+    ready = "press esc to interrupt"
+    state = {"sent": False}
+
+    def locate(pane, mux, session_name=None):
+        return None if state["sent"] else "=wt-x:0.0"
+
+    def run(argv, **kw):
+        if argv[1] == "send-keys":
+            state["sent"] = True
+            return SimpleNamespace(stdout="", returncode=1)
+        return SimpleNamespace(stdout=ready, returncode=0)
+
+    with patch("subprocess.run", side_effect=run), patch("time.sleep"), \
+         patch("time.monotonic", side_effect=_Clock()), \
+         patch("agent_worktrees.sessions._mux_bin", return_value="psmux"), \
+         patch("agent_worktrees.sessions_pane_retire._mux_qualified_pane_target", side_effect=locate):
+        out = mux_seed_pane("%9", "Continue: build", session_name="wt-x",
+                            ready_timeout=100.0, poll_interval=0.0, settle=0.0)
+    assert out["reason"] == "send-failed" and out["submitted"] is False
+
+
 def test_seed_fails_closed_when_its_pane_disappears():
     ready = "press esc to interrupt"
     where = iter(["=wt-x:0.0", "=wt-x:0.0"])

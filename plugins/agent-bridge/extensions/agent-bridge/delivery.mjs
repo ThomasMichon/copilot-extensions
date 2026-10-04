@@ -259,3 +259,89 @@ export function serializedRegister(
   };
   return register;
 }
+
+// Deliver one batch of this session's bridge inbox into the CLI, then ack it.
+// ``sid`` is the id the poll started under, used for both the fetch and the
+// ack: a rename while a delivery is awaited must not redirect the ack to an id
+// whose registration hasn't committed (or was refused) -- the original queue
+// would keep the message and deliver it twice. A rollover that does commit in
+// between is followed by the bridge's alias forwarding. Best-effort and
+// ordered: the batch stops at the first send failure (unacked redelivers).
+export async function drainInbox(sid, { getJson, post, session, inFlight, log = () => {} }) {
+  const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}`;
+  const data = await getJson(`${base}/messages`);
+  const messages = data?.messages;
+  if (!Array.isArray(messages) || messages.length === 0) return [];
+  const delivered = [];
+  let aborted = false;
+  for (const msg of messages) {
+    if (!msg || typeof msg.id !== "number") continue;
+    try {
+      const plan = deliveryPlan(msg);
+      // One abort per batch: a second interrupt in the same batch must not
+      // cancel the turn the first one just started.
+      if (plan.abortFirst && !aborted) {
+        aborted = true;
+        try {
+          await session.abort();
+        } catch (e) {
+          log(`abort failed before message ${msg.id}: ${e.message}`);
+        }
+        // The abort discarded every message still pending in the CLI;
+        // re-send those (oldest first) so the interrupt loses nothing.
+        for (const earlier of inFlight.takeBefore(msg.id)) {
+          await session.send({ ...deliveryPlan(earlier).options, mode: "immediate" });
+          inFlight.sent(earlier);
+        }
+      }
+      await session.send(plan.options);
+      inFlight.sent(msg);
+      delivered.push(msg.id);
+    } catch (e) {
+      log(`deliver failed for message ${msg.id}: ${e.message}`);
+      break;
+    }
+  }
+  if (delivered.length > 0) await post("POST", `${base}/messages/ack`, { ids: delivered });
+  return delivered;
+}
+
+// Apply this session's claimed controls (a mode change) through the CLI's RPC
+// and report each outcome. The poll claims each control (returned once; its
+// requester can no longer withdraw it), and every claimed control gets an
+// outcome -- applied or rejected -- so the bridge's ``POST /mode`` reports what
+// really happened; acked under ``sid``, the id it was claimed under (see
+// ``drainInbox``). An older bridge without /controls answers 404 (null).
+export async function drainControls(sid, { getJson, post, session, log = () => {} }) {
+  const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}`;
+  const data = await getJson(`${base}/controls`);
+  const controls = data?.messages;
+  if (!Array.isArray(controls) || controls.length === 0) return;
+  const applied = [];
+  const rejected = [];
+  for (const c of controls) {
+    if (!c || typeof c.id !== "number") continue;
+    const plan = controlPlan(c);
+    if (plan.action === "skip") {
+      log(`control ${c.id} rejected: ${plan.reason}`);
+      rejected.push(c.id);
+      continue;
+    }
+    try {
+      const result = await session.rpc.mode.set({ mode: plan.mode });
+      if (modeApplied(result)) {
+        log(`control ${c.id}: mode set to ${plan.mode} (from ${c.sender || "bridge"})`);
+        applied.push(c.id);
+      } else {
+        log(`control ${c.id}: mode ${plan.mode} not applied (${result?.status || "no status"})`);
+        rejected.push(c.id);
+      }
+    } catch (e) {
+      log(`control ${c.id}: mode ${plan.mode} failed: ${e.message}`);
+      rejected.push(c.id);
+    }
+  }
+  const ack = `${base}/controls/ack`;
+  if (applied.length > 0) await post("POST", ack, { ids: applied, applied: true });
+  if (rejected.length > 0) await post("POST", ack, { ids: rejected, applied: false });
+}

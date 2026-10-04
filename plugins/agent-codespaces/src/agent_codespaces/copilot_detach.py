@@ -42,6 +42,7 @@ from venue_copilot import (
     bridge_probe_script,
     last_json,
     observe_commands,
+    pending_seed_report,
     read_seed,
     reserve_with_retry,
     seed_delivery,
@@ -783,7 +784,8 @@ def cmd_detach(
                if refs_note_text else {}),
             "resumed": not created,
             "seeded": bool(created and seed and seed_delivery_status in {"typed", "bridge"}),
-            **({"seed_delivery": seed_delivery_status} if created and seed else {}),
+            **({"seed_delivery": seed_delivery_status} if created and seed
+               else pending_seed_report(embodied, seed=seed)),
             **({"seed_delivery": "unconfirmed",
                 "warning": "a lost earlier launch attempt may have started this session; "
                            "its seed can't be confirmed -- check `agent-bridge result "
