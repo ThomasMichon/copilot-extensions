@@ -992,6 +992,76 @@ def test_internal_host_exemption_requires_every_mirrored_push_url_internal(
         assert "Disclosure turns on who this specific contribution addresses" in context
 
 
+def test_internal_host_exemption_follows_branch_push_remote_override(
+    tmp_path: Path,
+) -> None:
+    """`branch.<name>.pushRemote` overrides `origin` as the effective push
+    target Git itself would use -- an internal `origin` must not exempt a
+    branch whose actual push destination (via pushRemote) is external."""
+    repo = _git_repo(
+        tmp_path / "repo",
+        "https://gitea.example.internal/example-owner/repo.git",
+    )
+    subprocess.run(
+        [
+            "git", "-C", str(repo), "remote", "add", "upstream",
+            "https://github.com/example-owner/repo.git",
+        ],
+        check=True,
+    )
+    branch = subprocess.run(
+        ["git", "-C", str(repo), "symbolic-ref", "--short", "HEAD"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    subprocess.run(
+        [
+            "git", "-C", str(repo), "config", f"branch.{branch}.pushRemote",
+            "upstream",
+        ],
+        check=True,
+    )
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "internal_host=gitea.example.internal\n",
+    )
+    for hook in _parity_hooks():
+        context = _context(_run(hook, repo, home))
+        assert "operator-only (internal_host)" not in context
+        assert "Disclosure turns on who this specific contribution addresses" in context
+
+
+def test_internal_host_exemption_follows_remote_push_default_override(
+    tmp_path: Path,
+) -> None:
+    """`remote.pushDefault` overrides `origin` repo-wide, the same way
+    pushRemote overrides it per-branch."""
+    repo = _git_repo(
+        tmp_path / "repo",
+        "https://gitea.example.internal/example-owner/repo.git",
+    )
+    subprocess.run(
+        [
+            "git", "-C", str(repo), "remote", "add", "upstream",
+            "https://github.com/example-owner/repo.git",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "remote.pushDefault", "upstream"],
+        check=True,
+    )
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "internal_host=gitea.example.internal\n",
+    )
+    for hook in _parity_hooks():
+        context = _context(_run(hook, repo, home))
+        assert "operator-only (internal_host)" not in context
+        assert "Disclosure turns on who this specific contribution addresses" in context
+
+
 def test_owned_account_matches_with_an_explicit_url_port(tmp_path: Path) -> None:
     repo = _git_repo(
         tmp_path / "repo",

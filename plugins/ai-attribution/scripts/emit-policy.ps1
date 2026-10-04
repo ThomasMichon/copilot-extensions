@@ -209,7 +209,33 @@ function Read-PolicyConfig([string] $Path, [string] $Authority) {
     }
 }
 
+function Get-CurrentBranch([string] $RepositoryRoot) {
+    $Branch = (& git -C $RepositoryRoot symbolic-ref --quiet --short HEAD 2>$null | Select-Object -First 1)
+    return $Branch
+}
+
+function Get-GitConfigValue([string] $RepositoryRoot, [string] $Key) {
+    return (& git -C $RepositoryRoot config --get $Key 2>$null | Select-Object -First 1)
+}
+
 function Get-RemoteName([string] $RepositoryRoot) {
+    # Mirror git's OWN effective-push-remote resolution order -- `origin` is
+    # only the last-resort fallback, not the authoritative push target. A
+    # triangular workflow (fetch from one remote, push to another via
+    # branch.<name>.pushRemote or the repo-wide remote.pushDefault) means
+    # origin can be configured internal while a real `git push` on this
+    # branch actually publishes somewhere else entirely.
+    $Branch = Get-CurrentBranch $RepositoryRoot
+    if ($Branch) {
+        $PushRemote = Get-GitConfigValue $RepositoryRoot "branch.$Branch.pushRemote"
+        if ($PushRemote) { return $PushRemote }
+    }
+    $PushDefault = Get-GitConfigValue $RepositoryRoot 'remote.pushDefault'
+    if ($PushDefault) { return $PushDefault }
+    if ($Branch) {
+        $BranchRemote = Get-GitConfigValue $RepositoryRoot "branch.$Branch.remote"
+        if ($BranchRemote) { return $BranchRemote }
+    }
     & git -C $RepositoryRoot remote get-url origin 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) { return 'origin' }
     return (& git -C $RepositoryRoot remote 2>$null | Select-Object -First 1)

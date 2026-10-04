@@ -291,8 +291,42 @@ read_config() {
     done < <(printf '%s' "$content")
 }
 
+_current_branch() {
+    git -C "$repo_root" symbolic-ref --quiet --short HEAD 2>/dev/null || true
+}
+
+_git_config_value() {
+    git -C "$repo_root" config --get "$1" 2>/dev/null || true
+}
+
 _remote_name() {
-    local name
+    # Mirror git's OWN effective-push-remote resolution order -- `origin` is
+    # only the last-resort fallback, not the authoritative push target. A
+    # triangular workflow (fetch from one remote, push to another via
+    # `branch.<name>.pushRemote` or the repo-wide `remote.pushDefault`) means
+    # `origin` can be configured internal while a real `git push` on this
+    # branch actually publishes somewhere else entirely.
+    local branch push_remote push_default branch_remote name
+    branch="$(_current_branch)"
+    if [[ -n "$branch" ]]; then
+        push_remote="$(_git_config_value "branch.$branch.pushRemote")"
+        if [[ -n "$push_remote" ]]; then
+            printf '%s' "$push_remote"
+            return 0
+        fi
+    fi
+    push_default="$(_git_config_value "remote.pushDefault")"
+    if [[ -n "$push_default" ]]; then
+        printf '%s' "$push_default"
+        return 0
+    fi
+    if [[ -n "$branch" ]]; then
+        branch_remote="$(_git_config_value "branch.$branch.remote")"
+        if [[ -n "$branch_remote" ]]; then
+            printf '%s' "$branch_remote"
+            return 0
+        fi
+    fi
     if git -C "$repo_root" remote get-url origin >/dev/null 2>&1; then
         printf 'origin'
         return 0
