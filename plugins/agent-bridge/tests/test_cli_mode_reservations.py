@@ -718,6 +718,48 @@ def test_rollover_moves_delivered_messages_so_retries_stay_idempotent(tmp_db: Da
     assert (again, reason) == (mid, None)
 
 
+def test_an_identical_retry_racing_a_rollover_is_not_an_idempotency_conflict(
+    tmp_db: Database, monkeypatch,
+) -> None:
+    """A retry naming the original ``expected_session_id`` while a rollover
+    commits mid-check (between its handle resolutions, or right before the
+    check) still names the same session: it returns the original message."""
+    now = time.time()
+    _claimed_placeholder(tmp_db, now)
+    mid, reason = tmp_db.enqueue_live_message_if_fresh(
+        "placeholder", sender="op", body="seed", now=now + 2, idempotency_key="k1",
+        expected_session_id="placeholder")
+    assert reason is None and mid is not None
+    assert _register(tmp_db, "resumed-1", "wt-R", now + 3, pid=4242) == "live"
+    rolled: list[bool] = []
+
+    def roll_once() -> None:
+        if not rolled:
+            rolled.append(True)
+            assert _register(tmp_db, "resumed-2", "wt-R", now + 4, pid=4242) == "live"
+
+    real_resolve, real_read, resolves = tmp_db.resolve_live_session_id, tmp_db.execute_read, []
+
+    def resolve(sid):  # an older, read-by-read check: roll over between its reads
+        out = real_resolve(sid)
+        resolves.append(sid)
+        if len(resolves) == 2:
+            roll_once()
+        return out
+
+    def read(sql, params=()):
+        if "idempotency_key = ?" in sql:
+            roll_once()  # or right before the check reads anything
+        return real_read(sql, params)
+
+    monkeypatch.setattr(tmp_db, "resolve_live_session_id", resolve)
+    monkeypatch.setattr(tmp_db, "execute_read", read)
+    again, reason = tmp_db.enqueue_live_message_if_fresh(
+        "resumed-1", sender="op", body="seed", now=now + 5, idempotency_key="k1",
+        expected_session_id="placeholder")
+    assert rolled and (again, reason) == (mid, None)
+
+
 
 def test_a_rollover_after_the_purge_snapshot_keeps_its_alias(tmp_db: Database, monkeypatch) -> None:
     """The reaper listed the expired placeholder, then the same process

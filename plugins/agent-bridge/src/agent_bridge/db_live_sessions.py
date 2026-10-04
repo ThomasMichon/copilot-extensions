@@ -797,26 +797,32 @@ class _LiveSessionsMixin:
         if cur.rowcount == 1:
             return int(cur.lastrowid or 0), None
         if idempotency_key:
+            # The message and every canonical-id comparison in ONE statement
+            # (one snapshot): a rollover committing between separate reads
+            # would resolve the two handles differently and turn an identical
+            # retry into a false conflict.
+            msg_canon = (
+                "COALESCE((SELECT target_session_id FROM live_session_aliases "
+                "WHERE alias_session_id = live_messages.session_id), live_messages.session_id)"
+            )
             existing = self.execute_read(
-                "SELECT id, session_id, sender, body, reply_to, kind, delivery "
+                "SELECT id, sender, body, reply_to, kind, delivery, "
+                f"{msg_canon} = {_CANON} AS same_target, "
+                f"(? IS NULL OR {_CANON} = {_CANON}) AS same_expected "
                 "FROM live_messages WHERE idempotency_key = ?",
-                (idempotency_key,),
+                (session_id, session_id, expected_session_id, expected_session_id,
+                 expected_session_id, session_id, session_id, idempotency_key),
             )
             if existing:
                 original = existing[0]
                 same_request = (
-                    original["session_id"]
-                    in (session_id, self.resolve_live_session_id(session_id))
+                    bool(original["same_target"])
                     and original["sender"] == sender
                     and original["body"] == body
                     and original["reply_to"] == reply_to
                     and original["kind"] == kind
                     and original["delivery"] == delivery
-                    and (
-                        expected_session_id is None
-                        or self.resolve_live_session_id(expected_session_id)
-                        == self.resolve_live_session_id(session_id)
-                    )
+                    and bool(original["same_expected"])
                 )
                 if same_request:
                     return int(original["id"]), None
