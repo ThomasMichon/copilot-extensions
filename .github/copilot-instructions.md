@@ -102,9 +102,9 @@ These repo-specific rules must be followed by any change:
   agent specifically.
 - [`AGENTS.md`](../AGENTS.md) — repository structure, per-plugin lifecycles, and
   the complete "what NOT to do" list.
-- [`CONTRIBUTING.md`](../CONTRIBUTING.md) — git hooks and the full
-  contributor PR flow.
-- [`docs/pipelines.md`](../docs/pipelines.md) — the full versioning scheme
-  and per-plugin deploy pipelines.
+- [`CONTRIBUTING.md`](../CONTRIBUTING.md) — git hooks, the full
+  contributor PR flow, and per-plugin deploy pipelines.
+- [`docs/pipelines.md`](../docs/pipelines.md) — CI/CD gating, the full
+  versioning scheme, and the `dev` → `main` promotion pipeline.
 - [`docs/install-contract.md`](../docs/install-contract.md) — the install
   contract every runtime plugin must satisfy.

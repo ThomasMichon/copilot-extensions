@@ -17,8 +17,13 @@ of — link here rather than restating any of it.
 - **`main`** is a **generated, release-only** branch. It is never a PR merge
   target for ordinary contribution — a CI promotion pipeline wholesale-
   regenerates it from `dev`'s current tip on a green build (see
-  [Promotion: dev → main](#promotion-dev--main) below). Pushing to it
-  directly is blocked for everyone except that pipeline's own identity.
+  [Promotion: dev → main](#promotion-dev--main) below). `main` is PR-gated,
+  not push-gated: direct pushes are blocked for everyone, and only three
+  narrow, verified PR shapes are accepted — the promotion pipeline's own
+  PR, a workflow-file-ONLY bootstrap PR, or
+  `module-size-baseline-widen.yml`'s own automated PR (see
+  [Never admin-merge a PR into `main`](#never-admin-merge-a-pr-into-main)
+  below for exactly what each shape requires).
 
 If you (or a stale worktree/bookmark) still have a PR open against `main`,
 retarget it — `gh pr edit <#> --base dev` — then rebase onto current `dev`
@@ -217,7 +222,9 @@ Every workflow under `.github/workflows/`, what triggers it, and what it
 does. Grouped by role; see each file's own header comment for full
 rationale and any known limitations.
 
-**PR gating (runs on every PR against `dev` or `main`):**
+**PR-related gating** (not all run on every PR — `ci.yml` runs on every
+PR; the review and lockdown workflows target only `dev`; the reminder
+targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
@@ -241,7 +248,9 @@ rationale and any known limitations.
 | `validate-and-promote.yml` | `repository_dispatch: [dev-advanced]`, `workflow_dispatch` | The pipeline itself: `gate` (confirm the dispatch really reflects `dev`'s current tip) → full validation suite → `promote` (open a generated `release/promote-<run id>` PR against `main`, auto-merge via `APERTURE_RELEASE_TOKEN`). See [Promotion: dev → main](#promotion-dev--main). |
 | `purge-consumed-changefiles.yml` | `schedule` (daily), `repository_dispatch: [purge-changefiles-requested]` | Opens the routine "clear consumed changefiles on dev" housekeeping PR after a promotion consumes them. |
 
-**Scheduled sweeps and watchdogs (no PR involvement):**
+**Scheduled sweeps and watchdogs** (not triggered by PR events — though
+`module-size-baseline-widen.yml` itself opens/updates a PR as its own
+output, and `stale-branch-sweep.yml` acts on already-merged PRs' branches):
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
@@ -466,13 +475,18 @@ Each plugin has its own version triplet. The promotion pipeline's
 `tools/accumulate_bumps.py` is what actually writes these, consuming
 whatever changefiles are pending; nothing here is hand-edited directly.
 
-> **Mechanical shortcut:**
-> `python tools/accumulate_bumps.py --from-diff origin/main --apply` bumps
-> exactly what `check-version-bump.py` requires for a branch — every
-> touched plugin (all three files plus literal `__version__` fallbacks),
-> every plugin that vendors a changed lib, and the lib itself in all its
-> copies — each only when it is not already ahead of `origin/main`, so
-> re-run it after a rebase in which `main` consumed a prior `-devN`.
+> **Mechanical shortcut — release/recovery tooling only, not for an ordinary
+> contributor PR:** `python tools/accumulate_bumps.py --from-diff
+> origin/main --apply` bumps exactly what `check-version-bump.py` requires
+> for a branch — every touched plugin (all three files plus literal
+> `__version__` fallbacks), every plugin that vendors a changed lib, and
+> the lib itself in all its copies — each only when it is not already
+> ahead of `origin/main`. This writes version manifests **directly**, the
+> same way the promotion pipeline itself does, and does **not** consume or
+> even look at pending changefiles — using it on an ordinary `dev` PR
+> bypasses the changefile workflow above entirely. It exists for the
+> promotion pipeline's own use and for manual release-recovery scenarios,
+> not as a contributor-facing alternative to adding a changefile.
 > `--dry-run` shows the plan.
 
 > **General rule (applies to every plugin, present and future).** For a
