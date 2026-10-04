@@ -59,15 +59,18 @@ def may_switch_session_id(copilot_args: list[str]) -> bool:
 
 def unstable_handle_warning(
     daemon_port: int, copilot_args: list[str], *, health: Callable[[int], Any] | None = None,
+    rejoin: bool = False,
 ) -> str | None:
     """A warning when a resumed session's handle may not survive, else ``None``.
 
     A resume can re-register under a new id after its launch claimed a
     placeholder one. Only a daemon with live-session aliases keeps that
     placeholder resolving (and moves its claim) across the rename. Checked
-    before launching, so the launch reports it rather than a normal success. A
-    daemon that doesn't answer counts as old: the handle can't be vouched for."""
-    if not may_switch_session_id(copilot_args):
+    before launching, so the launch reports it rather than a normal success,
+    and again for a ``rejoin``: whatever flags it passed, the running session
+    may still be loading an earlier ``--resume``. A daemon that doesn't answer
+    counts as old: the handle can't be vouched for."""
+    if not rejoin and not may_switch_session_id(copilot_args):
         return None
     try:
         info = (health or _daemon_health)(daemon_port) or {}

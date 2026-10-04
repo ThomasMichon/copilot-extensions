@@ -60,6 +60,8 @@ def seams(monkeypatch):
     monkeypatch.setattr(detach, "model_copilot_args", lambda existing: [])
     monkeypatch.setattr(copilot_venue, "_ensure_agent_bridge_plugin", lambda n: None)
     monkeypatch.setattr(venue_copilot, "resolve_daemon_port", lambda *a, **k: 41234)
+    # A rejoin always probes the daemon's protocol: an alias-capable one here.
+    monkeypatch.setattr(venue_copilot, "_daemon_health", lambda port: {"protocol_version": 21})
     monkeypatch.setattr(owner, "ensure_owner_running", lambda cfg: True)
     monkeypatch.setattr(owner, "hold", lambda *a, **k: calls.holds.append((a, k)))
     monkeypatch.setattr(owner, "release", lambda *a, **k: calls.releases.append((a, k)))
@@ -1053,6 +1055,48 @@ def test_a_lost_create_result_then_a_rejoin_never_reports_the_seed_delivered(
     assert "agent-bridge send" in out["warning"]
     if with_refs:
         assert out["refs_delivered"] == "unconfirmed"
+
+
+@pytest.mark.parametrize("retry_reports, delivery", [
+    ({}, "unconfirmed"),  # no outcome: the lost attempt may have delivered it
+    ({"seeded": True}, "typed"),  # a concrete outcome stands
+    ({"seed_deferred": True, "seed_reason": "not-ready-timeout"}, "deferred"),
+])
+def test_a_lost_worktree_launch_result_without_a_host_seed_never_hides_the_pending_seed(
+    seams, monkeypatch, capsys, retry_reports, delivery,
+):
+    """A --worktree-id launch with no host seed whose first result was lost
+    may already have delivered the worktree's pending seed: the rejoining
+    retry reports it unconfirmed unless it reports a concrete outcome."""
+    rejoined = json.dumps({"ok": True, "created": False, "resumed": True,
+                           "session": "wt-wt-7", **retry_reports})
+    outcomes = [types.SimpleNamespace(exit_code=255, stdout="", stderr="ssh: connection reset"),
+                types.SimpleNamespace(exit_code=0, stdout=rejoined, stderr="")]
+
+    def fake(ns, *, remote_cmd_builder=None, result_sink=None, settle_on_disconnect=True):
+        seams.ssh.append(1)
+        return result_sink(outcomes.pop(0))
+
+    from venue_copilot import refs
+
+    monkeypatch.setattr(refs, "deliver_note", lambda *a, **k: pytest.fail("must not resend"))
+    assert detach.cmd_detach(_args(worktree_id="wt-7", seed=None), ssh_session=fake) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["seed_delivery"] == delivery
+
+
+def test_a_flagless_rejoin_on_a_daemon_without_aliases_reports_a_provisional_handle(
+    seams, monkeypatch, capsys,
+):
+    """No resume flag on this call, but the running worker may still be loading
+    an earlier --resume: once the launch is a rejoin, a protocol-20 daemon's
+    handle is reported provisional."""
+    monkeypatch.setattr(venue_copilot, "_daemon_health", lambda port: {"protocol_version": 20})
+    rejoined = json.dumps({"ok": True, "created": False, "resumed": True,
+                           "session": "wt-anchor-example-web"})
+    assert detach.cmd_detach(_args(seed=None), ssh_session=_ssh(seams, stdout=rejoined)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["session_handle"] == "provisional" and "live-session aliases" in out["handle_warning"]
 
 
 def test_the_reservation_outlives_every_launch_attempt_and_registration(seams, monkeypatch, capsys):

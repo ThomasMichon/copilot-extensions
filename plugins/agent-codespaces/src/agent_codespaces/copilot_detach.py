@@ -704,10 +704,15 @@ def cmd_detach(
         if seed_delivery_status == "failed":
             _progress("seed-draft", f"typed seed was not submitted ({embodied.get('seed_reason')}); "
                       "not resending: the draft may remain in Copilot's input")
+        if not created and not handle_warning:  # whatever its flags, a rejoin may rename
+            handle_warning = unstable_handle_warning(daemon_port, copilot_args, rejoin=True)
         # A lost earlier attempt may have created (and maybe seeded) the session
         # this rejoin found: its seed's fate is unknown, so never resend it
-        # blindly nor report it seeded.
-        seed_unconfirmed = bool(uncertain and seed and not created)
+        # blindly nor report it seeded. Without a host seed, a worktree launch's
+        # lost attempt may have delivered the worktree's pending seed -- unless
+        # this retry reports a concrete outcome for it, which then stands.
+        seed_unconfirmed = bool(uncertain and not created and (seed or (
+            not plan["anchor"] and not pending_seed_report(embodied, seed=None))))
         _progress("register", "waiting for the session to register with the host bridge")
         session_id = _await_claim(plan["scope_id"], reservation["reservation_id"], args.register_timeout)
         if not session_id:

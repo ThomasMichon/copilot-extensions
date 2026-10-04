@@ -26,6 +26,13 @@ from venue_copilot import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _alias_capable_daemon(monkeypatch):
+    """Hermetic: a launch (a rejoin always) may probe the host daemon's
+    protocol; answer as an alias-capable one unless a test says otherwise."""
+    monkeypatch.setattr("venue_copilot._daemon_health", lambda port: {"protocol_version": 21})
+
+
 class _FakeCompletedProcess:
     def __init__(self, stdout: str = "", returncode: int = 0, stderr: str = "") -> None:
         self.stdout = stdout
@@ -551,7 +558,9 @@ class TestDetachedRunner:
         assert "--copilot-arg=--no-ask-user" in launch
         assert released == [("anchor-repo@venue", "r1")]
 
-    def _launch_resume(self, monkeypatch, protocol: int | None) -> tuple[int, dict[str, Any], list]:
+    def _launch_resume(
+        self, monkeypatch, protocol: int | None, copilot_args: list[str] | None = None,
+    ) -> tuple[int, dict[str, Any], list]:
         from venue_copilot import detached
 
         def health(_port):
@@ -573,7 +582,8 @@ class TestDetachedRunner:
         steps: list = []
         rc, payload = detached.launch_detached(
             adapter, self._plan(), seed=None, driver=None,
-            copilot_args=["--resume=abc"], ensure_mux=True, register_timeout=0.0,
+            copilot_args=["--resume=abc"] if copilot_args is None else copilot_args,
+            ensure_mux=True, register_timeout=0.0,
             progress=lambda *a: steps.append(a),
         )
         return rc, payload, steps
@@ -589,6 +599,17 @@ class TestDetachedRunner:
         assert payload["session_handle"] == "provisional"
         assert "live-session aliases" in payload["handle_warning"]
         assert steps[0][0] == "handle"  # reported before anything was reserved or launched
+
+    def test_a_flagless_rejoin_on_a_daemon_without_aliases_reports_a_provisional_handle(
+        self, monkeypatch,
+    ) -> None:
+        """A rejoin passing no resume flag can still find a worker loading an
+        earlier --resume: once the launch reports a rejoin, the protocol is
+        rechecked, so a protocol-20 daemon's handle is reported provisional."""
+        rc, payload, _steps = self._launch_resume(monkeypatch, 20, copilot_args=[])
+        assert rc == 0
+        assert payload["session_handle"] == "provisional"
+        assert "live-session aliases" in payload["handle_warning"]
 
     def test_a_resume_on_an_alias_capable_daemon_reports_a_normal_handle(self, monkeypatch) -> None:
         rc, payload, steps = self._launch_resume(monkeypatch, 21)
