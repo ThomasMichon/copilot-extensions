@@ -388,6 +388,51 @@ def _resolve_declaration_paths(
     return replace(declaration, spec=spec)
 
 
+def _extends_chain_leaves_this_repo(
+    ref: object, *, base_dir: Path, repo_root: Path, _chain: tuple[str, ...] = ()
+) -> bool:
+    """Walk an ``extends:`` chain's *entire* resolved sequence of hops
+    (not just the immediate target) and report whether any of them lives
+    outside ``repo_root`` -- a ``global:`` recipe always counts as
+    outside. Used by :func:`read_declaration_file_set` to decide whether
+    an inherited ``script`` forge field needs the cross-repo rejection in
+    ``validate_script_forge_config``: a leaf's immediate ``extends:``
+    target can itself be same-repo while *its own* base lives in a third,
+    different repository, so checking only the first hop would miss that
+    case entirely.
+
+    Mirrors ``registrar_recipes._resolve_extends_tracking_cwd_origin``'s
+    own chain-walking shape (ref resolution, cycle/depth guards via
+    ``_chain``) but only to answer this one yes/no provenance question --
+    it never resolves placeholders or merges fields, so it carries none of
+    that function's own substitution/merge logic or risk.
+    """
+    if not isinstance(ref, str) or not ref:
+        return True  # malformed; let resolve_extends raise its own clear error later
+    if ref.startswith("global:"):
+        return True
+    from .registrar_recipes import _MAX_CHAIN_DEPTH, _ref_identity, resolve_recipe_ref
+
+    identity, ref_path = _ref_identity(ref, base_dir=base_dir)
+    if ref_path is None:
+        return True
+    if identity in _chain or len(_chain) >= _MAX_CHAIN_DEPTH:
+        # A cyclic/too-deep chain is `resolve_extends`'s own error to
+        # raise later -- don't manufacture a different one here.
+        return False
+    if not (ref_path == repo_root or repo_root in ref_path.parents):
+        return True
+    template = resolve_recipe_ref(ref, base_dir=base_dir)
+    if not isinstance(template, Mapping) or "extends" not in template:
+        return False
+    return _extends_chain_leaves_this_repo(
+        template.get("extends"),
+        base_dir=ref_path.parent,
+        repo_root=repo_root,
+        _chain=_chain + (identity,),
+    )
+
+
 def read_declaration_file_set(
     path: str | Path,
     *,
@@ -415,6 +460,43 @@ def read_declaration_file_set(
             f"{p}: declaration could not be read: {exc}"
         ) from exc
     data = dict(_decode(text, p.suffix, where=str(p)))
+    extends_present = "extends" in data
+    leaf_forge = data.get("forge")
+    leaf_forge = leaf_forge if isinstance(leaf_forge, Mapping) else {}
+    # Only meaningful when `extends_present`: a field *absent* from the
+    # leaf file's own raw `forge` mapping but present after merging below
+    # must have come from a base this file `extends:` -- possibly a
+    # different repository entirely. Threaded through so
+    # `expand_repository_issue_loop` can refuse a relative inherited
+    # `forge.command`/`forge.cwd` instead of silently resolving it against
+    # this (wrong) leaf repo root -- see "Resolve inherited script paths
+    # relative to their declaring repository". A base *within the same*
+    # repo as the leaf shares the same (correct) root, so only a
+    # genuinely cross-repo (or `global:`, which is never this repo)
+    # `extends:` ref needs this protection -- checked through the
+    # *entire* resolved chain (not just the leaf's immediate `extends:`
+    # target), since an intermediate same-repo hop can itself extend a
+    # base in a third, different repository.
+    cross_repo_extends = False
+    if extends_present:
+        this_repo_root = (
+            Path(repo_root).expanduser() if repo_root is not None else p.parent
+        )
+        try:
+            this_repo_root = this_repo_root.resolve()
+            cross_repo_extends = _extends_chain_leaves_this_repo(
+                data.get("extends"), base_dir=this_repo_root, repo_root=this_repo_root
+            )
+        except (OSError, RuntimeError, ValueError, RegistrarError):
+            # Can't prove every hop shares this repo root -- treat it as
+            # cross-repo (the safer default) rather than silently
+            # assuming same-repo.
+            cross_repo_extends = True
+    inherited_script_fields = frozenset(
+        field
+        for field in ("command", "cwd")
+        if cross_repo_extends and field not in leaf_forge
+    )
     if "extends" in data:
         from .registrar_recipes import resolve_extends
 
@@ -427,7 +509,9 @@ def read_declaration_file_set(
     elif data.get("kind") == "repository-issue-loop":
         from .repository_issue_loops import expand_repository_issue_loop
 
-        declarations = expand_repository_issue_loop(data, repo_root=repo_root)
+        declarations = expand_repository_issue_loop(
+            data, repo_root=repo_root, inherited_script_fields=inherited_script_fields
+        )
     else:
         declarations = (
             load_declaration(

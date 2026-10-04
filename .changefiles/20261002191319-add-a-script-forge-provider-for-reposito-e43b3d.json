@@ -1,0 +1,9 @@
+{
+  "comment": "Add a script forge provider for repository_issue_loop (subprocess-backed backlog source)",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
