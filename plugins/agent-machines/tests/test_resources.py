@@ -342,6 +342,69 @@ def test_file_ensure_present_differing_is_advisory_and_deterministic(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# default_runner -- argv[0] resolution
+# --------------------------------------------------------------------------- #
+def test_default_runner_resolves_argv0_through_which(monkeypatch):
+    """A manager binary that only exists as a .cmd/.bat shim on Windows fails
+    to launch via bare-name CreateProcess (it only auto-appends .exe, unlike
+    shutil.which's PATHEXT-aware search) -- default_runner must pass the
+    which()-resolved, extension-qualified path, not the bare command name.
+    """
+    seen: dict[str, list[str]] = {}
+
+    def fake_which(name):
+        assert name == "winget"
+        return "C:/bootstrap/winget/winget.cmd"
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+
+        class _Proc:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return _Proc()
+
+    monkeypatch.setattr(R.shutil, "which", fake_which)
+    monkeypatch.setattr(R.subprocess, "run", fake_run)
+
+    R.default_runner(["winget", "pin", "list", "--id", "acme.tool", "--exact"])
+
+    assert seen["argv"] == [
+        "C:/bootstrap/winget/winget.cmd",
+        "pin",
+        "list",
+        "--id",
+        "acme.tool",
+        "--exact",
+    ]
+
+
+def test_default_runner_falls_back_to_bare_name_when_unresolvable(monkeypatch):
+    """A genuinely missing binary still reaches subprocess.run (and its
+    resulting error) unchanged -- resolution failure is not swallowed."""
+    seen: dict[str, list[str]] = {}
+
+    def fake_run(argv, **kwargs):
+        seen["argv"] = argv
+
+        class _Proc:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return _Proc()
+
+    monkeypatch.setattr(R.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(R.subprocess, "run", fake_run)
+
+    R.default_runner(["does-not-exist"])
+
+    assert seen["argv"] == ["does-not-exist"]
+
+
+# --------------------------------------------------------------------------- #
 # Apply -- package handler (through an injected runner)
 # --------------------------------------------------------------------------- #
 def _ctx(tmp_path, runner, plat="windows"):

@@ -248,6 +248,85 @@ def test_hosted_emitter_side_load_can_create_proposed_task(tmp_path, monkeypatch
     assert queue.list(status="proposed")[0].source == "emitter"
 
 
+def test_mcp_heartbeat_and_recover_publish_bus_events(tmp_path):
+    """Phase 3a audit: `dispatch_heartbeat`/`dispatch_recover` are MCP's own
+    transport for the same mutations the HTTP routes already cover -- wire
+    them through `_mutate`/a direct `bus.publish` the same way, and prove it
+    through this transport specifically (not just the HTTP route's own
+    test), since nothing else would fail if `_mutate(..., "task.heartbeat")`
+    were removed or mistyped."""
+    import asyncio
+
+    queue = TaskQueue(tmp_path / "tasks.db")
+    app = create_app(queue)
+    events: list[dict] = []
+    original = app.state.bus.publish
+
+    def _record(event: dict) -> None:
+        events.append(event)
+        original(event)
+
+    app.state.bus.publish = _record
+    url, stop = _boot(app)
+    try:
+        client = DispatchClient(url)
+        task = client.create("work")
+        client.claim("w1", repo=TEST_REPO)
+        client.start(task["id"], "w1")
+
+        result = asyncio.new_event_loop().run_until_complete(
+            _call(url, "dispatch_heartbeat", {"task_id": task["id"], "worker_id": "w1"})
+        )
+        assert not result.is_error
+        assert any(e["type"] == "task.heartbeat" for e in events)
+
+        events.clear()
+        result = asyncio.new_event_loop().run_until_complete(
+            _call(url, "dispatch_recover", {})
+        )
+        assert not result.is_error
+        assert any(e["type"] == "task.recovered" for e in events)
+    finally:
+        stop()
+
+
+def test_mcp_heartbeat_does_not_emit_telemetry(tmp_path):
+    """Same no-telemetry contract as `coordinator_tasks.py`'s own HTTP
+    `/tasks/{id}/heartbeat` route -- `dispatch_heartbeat` must still wake
+    the bus (the subscribe relay needs that; see the test above), but must
+    NOT record a `kind: state_transition` telemetry event for a periodic,
+    non-state-transitioning lease extension."""
+    import asyncio
+
+    from agent_dispatch import telemetry
+
+    queue = TaskQueue(tmp_path / "tasks.db")
+    app = create_app(queue)
+    url, stop = _boot(app)
+    try:
+        client = DispatchClient(url)
+        task = client.create("work")
+        client.claim("w1", repo=TEST_REPO)
+        client.start(task["id"], "w1")
+
+        seen: list[dict] = []
+        telemetry.set_telemetry_sink(seen.append)
+        try:
+            result = asyncio.new_event_loop().run_until_complete(
+                _call(
+                    url,
+                    "dispatch_heartbeat",
+                    {"task_id": task["id"], "worker_id": "w1"},
+                )
+            )
+            assert not result.is_error
+            assert seen == []
+        finally:
+            telemetry.clear_telemetry_sink()
+    finally:
+        stop()
+
+
 def test_mcp_rearm_spawn(coord):
     import asyncio
     import json

@@ -105,9 +105,13 @@ def register_verification_routes(
                 )
             else:
                 request = queue.request_submitted_verification(task_id, trigger="backfill")
-            return {"task_id": task_id, "queued": True, "request_id": request.id}
         except TaskError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        # Updates `updated_at`: publish a content-free wake so the
+        # agent-dispatch relay's `--subscribe` fast path treats it as a
+        # trigger for a full re-fetch.
+        bus.publish({"type": "task.verification_requested", "task_id": task_id})
+        return {"task_id": task_id, "queued": True, "request_id": request.id}
 
     @app.post("/tasks/{task_id}/event-note")
     def append_event_note(
@@ -159,7 +163,7 @@ def register_verification_routes(
     @app.post("/tasks/{task_id}/run-waiter/register")
     def register_run_waiter(task_id: str, body: RunWaiterRegisterBody) -> dict:
         try:
-            return queue.prepare_run_waiter(
+            result = queue.prepare_run_waiter(
                 task_id,
                 worker_id=body.worker_id,
                 host=body.host,
@@ -171,6 +175,12 @@ def register_verification_routes(
             msg = str(exc)
             status = 404 if msg.startswith("no such task") else 409
             raise HTTPException(status_code=status, detail=msg) from exc
+        # Can move a task from `started` to `suspended` and updates
+        # `updated_at`: publish a content-free wake so the agent-dispatch
+        # relay's `--subscribe` fast path treats it as a trigger for a full
+        # re-fetch.
+        bus.publish({"type": "task.run_waiter_registered", "task_id": task_id})
+        return result
 
     @app.post("/tasks/{task_id}/run-waiter/arm")
     def arm_run_waiter(task_id: str, body: RunWaiterArmBody) -> dict:

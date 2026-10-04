@@ -78,12 +78,23 @@ def register_status_routes(
                 name: health.to_dict() for name, health in loop_health.items()
             },
             "slot": _slot_descriptor(request.app.state),
+            # Phase 3a: advertises /events?ready_frame=1 support so a relay
+            # client can gate on genuine daemon support before waiting for
+            # the frame, rather than assuming every daemon it talks to is new
+            # enough (a daemon that doesn't advertise this never receives the
+            # request parameter either -- see client.py's stream_events()).
+            "events_ready_frame": True,
         }
 
     @app.get("/events")
-    async def events_stream() -> StreamingResponse:
+    async def events_stream(ready_frame: bool = False) -> StreamingResponse:
         async def gen():
-            async for event in bus.subscribe():
+            # Opt-in via the request only (never unconditional): an
+            # already-installed old client never sends ``ready_frame=1`` and
+            # therefore never receives this frame from any daemon, old or
+            # new -- see the design doc's version-skew rationale.
+            frame = {"type": "ready"} if ready_frame else None
+            async for event in bus.subscribe(ready_frame=frame):
                 yield sse_format(event)
 
         return StreamingResponse(gen(), media_type="text/event-stream")

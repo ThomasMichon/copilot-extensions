@@ -986,6 +986,55 @@ def test_global_backlog_triager_drives_through_the_generic_issue_loop(tmp_path):
     assert "attached to tracked effort" in task["prompt"]
 
 
+def test_global_issue_reproducer_drives_through_the_generic_issue_loop(tmp_path):
+    import json as _json
+
+    path = tmp_path / "reproducer.json"
+    path.write_text(
+        _json.dumps(
+            {
+                "extends": "global:issue-reproducer",
+                "name": "repro-backlog",
+                "repo": "example/project",
+                "source": "repro-backlog",
+                "cadence_seconds": 3600,
+                "task_label": "issue-repro",
+                "forge": {"provider": "github", "producer_login": "repro-bot"},
+                "reservation": {"label": "repro-reserved", "comment": True},
+                "pool": {
+                    "max_active_processes": 1,
+                    "body": {"agent": "repro-worker"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    declarations = read_declaration_file_set(path)
+    source = next(d for d in declarations if d.name == "repro-backlog-source")
+    config = source.spec["repository_issue_loop"]
+    provider = FakeProvider([_issue(17, labels=("bug", "needs-repro"))])
+
+    result = run_tick(
+        FakeClient(),
+        config,
+        provider=provider,
+        clock=lambda: 10_000,
+    )
+
+    task = result["created"][0]
+    assert provider.list_calls == 1
+    assert task["require_verification"] is True
+    assert task["evaluator_ref"] == "issue-reproducer"
+    assert task["title"] == "Attempt reproduction for repository issues #17"
+    assert task["goal"] == "Reproduce and classify repository issues #17"
+    assert "relevant reproduction strategies" in task["prompt"]
+    assert "durable issue evidence" in task["prompt"]
+    assert "strike marker convention" in task["prompt"]
+    assert "Do not turn this reproduction task into an implementation lane" in task["prompt"]
+    assert "implementation, required checks, review, merge, and issue closure" not in task["prompt"]
+
+
 def test_proposed_task_retries_transient_approve_failure():
     provider = FakeProvider([_issue(1)])
     client = FakeClient(fail_approve_once=True)
