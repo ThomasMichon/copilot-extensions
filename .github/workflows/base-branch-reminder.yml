@@ -38,6 +38,7 @@ on:
 permissions:
   contents: read
   issues: write
+  pull-requests: read
 
 concurrency:
   # Serializes the check-existing-comment-then-post sequence per PR: without
@@ -80,6 +81,24 @@ jobs:
             const marker = "<!-- base-branch-reminder -->";
             const pull_number = context.payload.pull_request.number;
 
+            // Re-fetch the PR's CURRENT state immediately before posting --
+            // the serializing concurrency group above means a queued run can
+            // execute minutes after its triggering event, by which time the
+            // author may have already retargeted to `dev` or closed the PR.
+            // The triggering event's payload is a snapshot from enqueue time,
+            // not proof of the current state.
+            const { data: current } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number,
+            });
+            if (current.state !== "open" || current.base.ref !== "main") {
+              core.info(
+                `PR is now state=${current.state} base=${current.base.ref}; no longer needs the reminder.`,
+              );
+              return;
+            }
+
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -110,9 +129,9 @@ jobs:
                 "instead (see CONTRIBUTING.md > Release & Versioning for the full policy, " +
                 "and why).",
               "",
-              "Could you retarget this PR's base branch to `dev`? You can do this from the " +
-                'PR\'s sidebar ("Edit" next to the branch comparison) without needing to ' +
-                "reopen or recreate it.",
+              "Could you retarget this PR's base branch to `dev`? Click \"Edit\" next to the " +
+                "PR title, change the base branch dropdown to `dev`, and confirm with " +
+                '"Change base" -- no need to reopen or recreate the PR.',
             ].join("\n");
 
             await github.rest.issues.createComment({
