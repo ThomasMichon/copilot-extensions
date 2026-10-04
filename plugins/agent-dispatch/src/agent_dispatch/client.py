@@ -7,11 +7,12 @@ snapshots) so callers stay decoupled from the server-side dataclasses.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import httpx
 from .client_completion_review import CompletionReviewMixin
+from .client_events import EventStreamClientMixin
 from .client_exclude import ClearExcludeClientMixin
 from .client_registrations import RegistrationClientMixin
 from .client_spawn_terminal import SpawnTerminalClientMixin
@@ -44,7 +45,7 @@ class DispatchUpgradeRequired(DispatchError):
         super().__init__(426, detail)
 
 
-class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin):
+class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, EventStreamClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(
@@ -75,11 +76,10 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, Complet
     @property
     def base_url(self) -> str:
         """The coordinator base URL this client is actually bound to --
-        never re-resolved. Lets a caller that needs a second request path
-        (e.g. a plain ``urllib`` fetch run alongside this client's own SSE
-        connection) target the exact same coordinator generation instead of
-        re-resolving ``active.json``/``AGENT_DISPATCH_URL`` independently,
-        which could observe a cutover between the two calls."""
+        never re-resolved. Lets a second request path (e.g. a plain
+        ``urllib`` fetch beside this client's SSE connection) target the
+        same coordinator generation instead of independently re-resolving
+        ``active.json``, which could observe a cutover mid-way."""
         return str(self._http.base_url).rstrip("/")
 
     def close(self) -> None:
@@ -1063,45 +1063,6 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, Complet
         )
 
     # -- supervisor registrations (RegistrationClientMixin) -----------------
-
-    def stream_events(self, *, ready_frame: bool = False) -> Iterator[dict]:
-        """Yield task events from the coordinator's SSE stream (blocking).
-
-        ``ready_frame=False`` (every existing caller, e.g. ``agent-dispatch
-        watch``) is byte-for-byte unchanged: no ``ready_frame`` query param is
-        ever sent, so no daemon -- old or new -- ever emits that control
-        frame to this call, and any ``type: "ready"`` frame that somehow
-        still arrives is filtered here regardless, never forwarded to the
-        caller. ``ready_frame=True`` (Phase 3a's own relay, exclusively) asks
-        the daemon to emit that frame immediately after subscription
-        registration and yields it to the caller as the first item -- the
-        daemon-side registration-vs-real-event race this handshake exists to
-        close. The read timeout is unbounded for this one long-lived GET
-        (the coordinator emits no periodic keepalive and a quiet board would
-        otherwise trip httpx's shared default timeout mid-stream)."""
-        params = {"ready_frame": "1"} if ready_frame else {}
-        timeout = httpx.Timeout(10.0, read=None)
-        with self._http.stream(
-            "GET", "/events", params=params, timeout=timeout
-        ) as resp:
-            if resp.status_code >= 400:
-                resp.read()
-                raise DispatchError(resp.status_code, resp.text)
-            for line in resp.iter_lines():
-                if not line.startswith("data:"):
-                    continue
-                payload = json.loads(line[len("data:") :].strip())
-                if payload.get("type") == "ready":
-                    if ready_frame:
-                        yield payload
-                        continue
-                    # Filtered for every other caller, regardless of whether
-                    # this request itself asked for it -- the filtering lives
-                    # here, not only in the relay's own consumer, so a future
-                    # control frame can never leak to `agent-dispatch watch`
-                    # or any other existing `stream_events()` consumer.
-                    continue
-                yield payload
 
 
 class ResolvingDispatchClient:

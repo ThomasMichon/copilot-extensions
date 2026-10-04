@@ -166,8 +166,8 @@ class _CoalescingEventQueue:
 
     Popping an item and clearing the event-pending flag (when that item is
     the event marker) happen as one atomic step under the same lock a
-    producer's :meth:`put_event` also takes -- a plain ``queue.Queue`` plus
-    a separately-locked boolean (an earlier version of this class) has a
+    producer's :meth:`put_event` also takes. A design using a plain
+    ``queue.Queue`` plus a separately-locked boolean instead would have a
     lost-wakeup race here: once ``get()`` has removed the marker from the
     queue but before it clears the flag, a producer's ``put_event()`` can
     observe the (still-true) flag and discard its own wake as "already

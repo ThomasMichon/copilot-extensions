@@ -204,9 +204,9 @@ def test_event_loop_recompute_tick_survives_continuous_event_traffic(
     """Continuous event traffic (events arriving faster than any single
     `queue.get()` timeout could elapse) must never starve already-due
     timer work. Once a fetch is deferred (`next_event_fetch_at` set), a
-    steady stream of further events previously kept re-entering the
-    `queue.get()` call with a real item every time, so `queue.Empty` (the
-    only path into `kind == "timer"`) could never fire and the recompute/
+    steady stream of further events re-entering the `queue.get()` call
+    with a real item every time would otherwise mean `queue.Empty` (the
+    only path into `kind == "timer"`) never fires, so the recompute/
     reconcile/pending-fetch timers would starve indefinitely. This proves
     the recompute tick still fires repeatedly even while events keep
     arriving back-to-back, faster than the recompute cadence itself."""
@@ -1069,13 +1069,13 @@ def test_reader_queue_never_coalesces_or_drops_control_items():
 
 
 def test_reader_queue_never_loses_a_wakeup_under_concurrent_racing(monkeypatch):
-    """Regression for a lost-wakeup race: in an earlier version of
-    `_CoalescingEventQueue`, popping an event marker off the queue and
-    clearing its pending flag were two separate locked steps -- a
-    producer's `put_event()` landing in the gap between them could observe
-    the (still-true) flag and silently discard its own wake, even though
-    the marker it thought it was coalescing into had already been popped
-    by the consumer, leaving that mutation invisible until the next long
+    """Regression for a lost-wakeup race: popping an event marker off the
+    queue and clearing its pending flag must happen atomically -- a design
+    that instead made them two separate locked steps would let a
+    producer's `put_event()` land in the gap between them, observe the
+    (still-true) flag, and silently discard its own wake, even though the
+    marker it thought it was coalescing into had already been popped by
+    the consumer, leaving that mutation invisible until the next long
     reconcile. This stress-tests many concurrent `put_event()` callers
     racing a draining consumer and proves no permanent wedge results: after
     the race settles, one more `put_event()` must still be observable via
