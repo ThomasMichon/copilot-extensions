@@ -1274,6 +1274,89 @@ def test_resolve_toolchain_lock_rebuilds_when_provenance_marker_mismatched(
     assert len(quarantined) == 1
 
 
+# --- provenance marker never persists embedded credentials ---------------
+
+
+def test_provenance_marker_redacts_embedded_credentials(tmp_path: Path):
+    # Regression: a validated index URL may carry embedded `user:pass@`
+    # credentials (uv supports this), but those credentials must never be
+    # written to the on-disk marker persisted into every shared venv.
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_dir.mkdir()
+    btl._write_provenance_marker(
+        venv_dir, "https://produser:hunter2@example.internal/simple/"
+    )
+    marker_text = (venv_dir / btl._PROVENANCE_MARKER_NAME).read_text(encoding="utf-8")
+    assert "hunter2" not in marker_text
+    assert "produser" not in marker_text
+    assert "https://example.internal/simple/" in marker_text
+
+
+def test_provenance_matches_compares_credential_free_identity(tmp_path: Path):
+    # The same credentialed URL, re-supplied on a later call (e.g. a
+    # second plugin build in the same promotion run), must still match
+    # even though its credentials never round-trip through the marker.
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_dir.mkdir()
+    btl._write_provenance_marker(
+        venv_dir, "https://produser:hunter2@example.internal/simple/"
+    )
+    assert btl._provenance_matches(
+        venv_dir, "https://produser:hunter2@example.internal/simple/"
+    )
+    # A DIFFERENT set of credentials against the same credential-free
+    # identity still matches -- only the host/path identity is compared,
+    # never the credentials themselves.
+    assert btl._provenance_matches(
+        venv_dir, "https://otheruser:otherpass@example.internal/simple/"
+    )
+    assert not btl._provenance_matches(venv_dir, "https://different.example/simple/")
+
+
+def test_credential_free_index_identity_strips_userinfo_only():
+    assert (
+        btl._credential_free_index_identity(
+            "https://produser:hunter2@example.internal:8443/simple/"
+        )
+        == "https://example.internal:8443/simple/"
+    )
+    # A URL with no embedded credentials is returned unchanged.
+    assert (
+        btl._credential_free_index_identity("https://example.internal/simple/")
+        == "https://example.internal/simple/"
+    )
+
+
+def test_resolve_toolchain_lock_quarantine_failure_message_redacts_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: the quarantine-failure diagnostic interpolates the
+    # validated index URL -- it must never leak embedded credentials into
+    # that message.
+    credentialed_url = "https://produser:hunter2@example.internal/simple/"
+    monkeypatch.setattr(
+        btl, "_validated_trusted_index_url", lambda env: credentialed_url  # noqa: ARG005
+    )
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_python = bpa._venv_python_path(venv_dir)
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("stale-unmarked-interpreter", encoding="utf-8")
+
+    real_rename = Path.rename
+
+    def failing_rename(self, target):  # noqa: ARG001
+        raise OSError("simulated quarantine failure")
+
+    monkeypatch.setattr(Path, "rename", failing_rename)
+    try:
+        with pytest.raises(bpa.ArtifactBuildError) as exc_info:
+            bpa.resolve_toolchain_lock(venv_dir)
+    finally:
+        monkeypatch.setattr(Path, "rename", real_rename)
+    assert "hunter2" not in str(exc_info.value)
+    assert "produser" not in str(exc_info.value)
+
+
 def test_resolve_toolchain_lock_venv_creation_failure_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1735,6 +1818,24 @@ def test_governed_feed_configured_when_trusted_host_has_trailing_dot_either_side
     )
 
 
+# --- HTTPS is required even for a trusted hostname ------------------------
+
+
+def test_governed_feed_not_configured_when_trusted_host_is_plain_http():
+    # Regression: an allowlisted HOSTNAME is not itself proof of identity
+    # over a plaintext connection -- a network attacker able to intercept
+    # `http://<trusted-host>/...` could impersonate the real governed feed.
+    assert not bpa._governed_feed_configured(
+        env={"UV_DEFAULT_INDEX": "http://example.internal/simple", _TRUST_VAR: "example.internal"}
+    )
+
+
+def test_governed_feed_configured_when_trusted_host_is_https():
+    assert bpa._governed_feed_configured(
+        env={"UV_DEFAULT_INDEX": "https://example.internal/simple", _TRUST_VAR: "example.internal"}
+    )
+
+
 # --- resolve_toolchain_lock concurrent-publisher race --------------------
 
 
@@ -1756,11 +1857,14 @@ def test_resolve_toolchain_lock_defers_to_winner(
             staging_python.parent.mkdir(parents=True, exist_ok=True)
             staging_python.write_text("", encoding="utf-8")
             # Simulate a concurrent publisher winning the race: publish a
-            # complete, marked venv at the real destination BEFORE this
+            # complete, marked venv -- carrying a MATCHING provenance
+            # marker, exactly as the real publish path writes one before
+            # its own rename -- at the real destination BEFORE this
             # call's own staging -> venv_dir rename happens.
             winner_python = bpa._venv_python_path(venv_dir)
             winner_python.parent.mkdir(parents=True, exist_ok=True)
             winner_python.write_text("", encoding="utf-8")
+            btl._write_provenance_marker(venv_dir, "https://example.internal/simple/")
             sentinel.write_text("winner", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         if cmd[:3] == ["uv", "pip", "install"]:
@@ -1777,6 +1881,47 @@ def test_resolve_toolchain_lock_defers_to_winner(
     # The "winner"'s venv must still be standing untouched -- our own
     # losing publisher must never have deleted/replaced it.
     assert sentinel.is_file()
+
+
+def test_resolve_toolchain_lock_rejects_race_winner_with_mismatched_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: a rename failure must NOT be treated as a benign lost
+    # race just because an interpreter now exists at the destination --
+    # two concurrent callers validating DIFFERENT indexes can both
+    # observe an absent destination before either publishes. If the
+    # "winner" here was actually sourced from a different index (no
+    # matching provenance marker), this caller must fail closed rather
+    # than silently trust a venv it never validated.
+    _assume_governed_feed_configured(monkeypatch)
+    venv_dir = tmp_path / "toolchain-venv"
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[:2] == ["uv", "venv"]:
+            staging_dir = Path(cmd[3])
+            staging_python = bpa._venv_python_path(staging_dir)
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
+            # Simulate a concurrent publisher winning the race, but from a
+            # DIFFERENT validated index -- its provenance marker does not
+            # match what THIS call validated.
+            winner_python = bpa._venv_python_path(venv_dir)
+            winner_python.parent.mkdir(parents=True, exist_ok=True)
+            winner_python.write_text("", encoding="utf-8")
+            btl._write_provenance_marker(venv_dir, "https://different.example/simple/")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa.resolve_toolchain_lock(venv_dir)
+
 
 
 def test_resolve_toolchain_lock_raises_on_genuine_rename_failure(
@@ -1939,6 +2084,44 @@ def test_resolve_toolchain_lock_strips_uv_constraint_and_override_vars(
         assert "UV_CONSTRAINT" not in env
         assert "UV_OVERRIDE" not in env
         assert "UV_BUILD_CONSTRAINT" not in env
+
+
+def test_resolve_toolchain_lock_strips_uv_insecure_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: `uv` honors `UV_INSECURE_HOST` to disable TLS
+    # certificate verification for a named host -- left ambient, it could
+    # let a network attacker impersonate even an allowlisted, HTTPS-only
+    # governed-feed hostname despite the scheme check in
+    # `_validated_trusted_index_url`.
+    monkeypatch.setattr(
+        btl, "_validated_trusted_index_url",
+        lambda env: "https://governed.example/simple/",  # noqa: ARG005
+    )
+    monkeypatch.setenv("UV_INSECURE_HOST", "governed.example")
+    venv_dir = tmp_path / "toolchain-venv"
+    seen_envs: list[dict] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        seen_envs.append(kwargs.get("env") or {})
+        if cmd[:2] == ["uv", "venv"]:
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.resolve_toolchain_lock(venv_dir)
+
+    for env in seen_envs[:2]:  # the uv venv and uv pip install calls
+        assert "UV_INSECURE_HOST" not in env
 
 
 def test_resolve_toolchain_lock_strips_pythonpath_and_pythonhome(

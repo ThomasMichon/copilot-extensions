@@ -94,12 +94,35 @@ def sanitize_subprocess_env(env: dict | None = None) -> dict:
 _PROVENANCE_MARKER_NAME = ".governed-feed-provenance.json"
 
 
+def _credential_free_index_identity(url: str) -> str:
+    """``url`` with any embedded ``user:pass@`` userinfo stripped --
+    `uv`/PEP 508 index URLs may legally carry credentials, but those
+    credentials must never be persisted to disk (a provenance marker
+    published into every shared venv) or interpolated into a diagnostic
+    message, per this effort's own "never log credentials" validation
+    rule. The raw, possibly-credentialed ``url`` is used ONLY for the
+    actual authenticated `uv venv`/`uv pip install --index-url`
+    invocations themselves in `resolve_toolchain_lock` -- never stored or
+    displayed; every persisted/displayed use goes through this function
+    first."""
+    parts = urllib.parse.urlsplit(url)
+    if not parts.username and not parts.password:
+        return url
+    netloc = parts.hostname or ""
+    if parts.port:
+        netloc = f"{netloc}:{parts.port}"
+    return urllib.parse.urlunsplit(parts._replace(netloc=netloc))
+
+
 def _write_provenance_marker(venv_dir: Path, validated_index_url: str) -> None:
-    """Records ``validated_index_url`` into ``venv_dir``'s own provenance
-    marker -- called on the staging directory BEFORE the atomic rename
-    that publishes it, so the marker and the venv it describes always
-    arrive together, never as two separate, racy writes."""
-    marker = {"validated_index_url": validated_index_url}
+    """Records ``validated_index_url``'s credential-free identity into
+    ``venv_dir``'s own provenance marker -- called on the staging
+    directory BEFORE the atomic rename that publishes it, so the marker
+    and the venv it describes always arrive together, never as two
+    separate, racy writes. Never persists embedded credentials to disk."""
+    marker = {
+        "validated_index_url": _credential_free_index_identity(validated_index_url)
+    }
     (venv_dir / _PROVENANCE_MARKER_NAME).write_text(
         json.dumps(marker), encoding="utf-8"
     )
@@ -107,9 +130,10 @@ def _write_provenance_marker(venv_dir: Path, validated_index_url: str) -> None:
 
 def _provenance_matches(venv_dir: Path, validated_index_url: str) -> bool:
     """Whether ``venv_dir``'s own provenance marker records EXACTLY
-    ``validated_index_url`` -- a missing, unreadable, or mismatched marker
-    (including a venv published before this check existed, which never
-    wrote one at all) returns ``False``, never treated as "probably fine"."""
+    ``validated_index_url``'s credential-free identity -- a missing,
+    unreadable, or mismatched marker (including a venv published before
+    this check existed, which never wrote one at all) returns ``False``,
+    never treated as "probably fine"."""
     marker_path = venv_dir / _PROVENANCE_MARKER_NAME
     try:
         data = json.loads(marker_path.read_text(encoding="utf-8"))
@@ -117,7 +141,8 @@ def _provenance_matches(venv_dir: Path, validated_index_url: str) -> bool:
         return False
     return (
         isinstance(data, dict)
-        and data.get("validated_index_url") == validated_index_url
+        and data.get("validated_index_url")
+        == _credential_free_index_identity(validated_index_url)
     )
 
 
@@ -377,20 +402,31 @@ def _effective_default_index_url(env: dict) -> str | None:
 
 
 def _validated_trusted_index_url(env: dict) -> str | None:
-    """The effective default index URL, but ONLY if it is both non-public
-    AND affirmatively trusted (see `_governed_feed_configured`'s own
-    docstring for the allowlist rationale) -- returns the concrete URL
+    """The effective default index URL, but ONLY if it is HTTPS, both
+    non-public AND affirmatively trusted (see `_governed_feed_configured`'s
+    own docstring for the allowlist rationale) -- returns the concrete URL
     (rather than just a bool) so a caller can pin `uv` to EXACTLY this one
     index at install time, instead of merely confirming "some index looks
     fine" and then trusting `uv`'s own ambient config to pick the real one
     used -- which could still consult an untrusted SUPPLEMENTAL index
     (`UV_INDEX`, or a plain `[[index]]` entry with no `default = true`)
-    that this check never validated."""
+    that this check never validated. The HTTPS requirement means an
+    allowlisted hostname alone is never sufficient: a plaintext
+    `http://<trusted-host>/...` URL is rejected even though its hostname
+    passes the allowlist, since a network attacker could otherwise
+    impersonate that host without ever needing to be trusted themselves."""
     trusted_hosts = _trusted_index_hosts(env)
     if not trusted_hosts:
         return None
     url = _effective_default_index_url(env)
     if not url or _is_public_pypi_url(url):
+        return None
+    # Require HTTPS: an allowlisted HOSTNAME is not itself proof of
+    # identity over a plaintext (or TLS-downgraded) connection -- a
+    # network attacker able to intercept `http://<trusted-host>/...`, or
+    # exploit an ambient TLS-disable setting, could impersonate the real
+    # governed feed while this still reports it as validated/trusted.
+    if urllib.parse.urlsplit(url).scheme != "https":
         return None
     host = _url_host(url)
     if host is None or host not in trusted_hosts:
@@ -506,8 +542,9 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
                 raise ArtifactBuildError(
                     f"{venv_dir}: existing toolchain venv does not carry "
                     "provenance matching the currently validated governed "
-                    f"index ({validated_index_url}), and it could not be "
-                    "quarantined for a rebuild"
+                    "index "
+                    f"({_credential_free_index_identity(validated_index_url)}), "
+                    "and it could not be quarantined for a rebuild"
                 )
     if not venv_python.is_file():
         venv_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -531,13 +568,21 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
         # requirement already satisfied, silently bypassing the validated
         # index entirely. Also strips `PYTHONPATH`/`PYTHONHOME` (the same
         # interpreter-redirection vectors stripped everywhere a specific
-        # interpreter is invoked directly -- see `sanitize_subprocess_env`).
-        # Used for BOTH the `uv venv` and `uv pip install` calls below.
+        # interpreter is invoked directly -- see `sanitize_subprocess_env`),
+        # and `UV_INSECURE_HOST` -- `uv` honors that to disable TLS
+        # certificate verification for a named host, which would let a
+        # network attacker impersonate even an allowlisted governed-feed
+        # hostname (the HTTPS-scheme requirement in
+        # `_validated_trusted_index_url` is otherwise meaningless if an
+        # ambient setting can disable the certificate check for that same
+        # host). Used for BOTH the `uv venv` and `uv pip install` calls
+        # below.
         sanitized_env = sanitize_subprocess_env(env)
         for var in (
             "UV_INDEX", "UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_CONFIG_FILE",
             "UV_EXTRA_INDEX_URL", "UV_FIND_LINKS", "UV_VENV_SEED",
             "UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE",
+            "UV_INSECURE_HOST",
         ):
             sanitized_env.pop(var, None)
         try:
@@ -583,16 +628,25 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             # clobbering it here would violate the "unchanged shared lock"
             # promise and could break an in-flight build. If the rename
             # itself fails, confirm a winner's venv is genuinely present
-            # (venv_python now exists) before treating it as a benign lost
-            # race -- a permission/filesystem/invalid-destination error
-            # with no real winner must still surface as a build failure,
-            # never a silently swallowed exception that leaves nothing at
-            # venv_dir for the version query below to find.
+            # (venv_python now exists) AND carries matching provenance
+            # before treating it as a benign lost race -- two concurrent
+            # callers validating DIFFERENT indexes can both observe an
+            # absent destination; without the provenance check, whichever
+            # loses the rename race would silently trust a venv sourced
+            # from the OTHER caller's (different) validated index. A
+            # permission/filesystem/invalid-destination error with no
+            # real, matching winner must still surface as a build
+            # failure, never a silently swallowed exception that leaves
+            # nothing trustworthy at venv_dir for the version query below
+            # to find.
             _write_provenance_marker(staging_venv_dir, validated_index_url)
             try:
                 staging_venv_dir.rename(venv_dir)
             except OSError as exc:
-                if not venv_python.is_file():
+                if not (
+                    venv_python.is_file()
+                    and _provenance_matches(venv_dir, validated_index_url)
+                ):
                     raise ArtifactBuildError(
                         f"could not publish toolchain venv {staging_venv_dir} "
                         f"to {venv_dir}: {exc}"
