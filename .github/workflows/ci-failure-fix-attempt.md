@@ -426,9 +426,15 @@ pre-agent-steps:
     # path the engine container mounts and the only path safe-outputs'
     # create-pull-request reads its patch from (gh-aw starts
     # `safeoutputs` with `-w $GITHUB_WORKSPACE`) -- a worktree anywhere
-    # else would be invisible to both. Capture the resulting SHA to an
-    # immutable file now; `post-steps` below reuses it instead of
-    # re-resolving a branch that can move while the agent runs.
+    # else would be invisible to both. Capture the resulting SHA to
+    # $RUNNER_TEMP/gh-aw now, before the agent runs -- that path is
+    # bind-mounted read-only into the agent's own sandboxed container
+    # (`--mount "${RUNNER_TEMP}/gh-aw:${RUNNER_TEMP}/gh-aw:ro"`), unlike
+    # $GITHUB_WORKSPACE itself, which the agent can freely write
+    # (including every path `post-steps`' own scope gate otherwise
+    # exempts, like `.verify-issue/`). A file the agent can overwrite is
+    # not a trustworthy comparison base for the gate that checks the
+    # agent's own output.
     env:
       GH_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       # safe-outputs.create-pull-request's own base-branch: below is
@@ -455,7 +461,8 @@ pre-agent-steps:
         git fetch origin "$BRANCH" --quiet
         git checkout --force --detach "origin/$BRANCH"
       fi
-      git rev-parse HEAD > "$GITHUB_WORKSPACE/.verify-issue/base-sha.txt"
+      mkdir -p "${RUNNER_TEMP}/gh-aw"
+      git rev-parse HEAD > "${RUNNER_TEMP}/gh-aw/base-sha.txt"
   - name: Decode the verified issue record
     env:
       BODY_B64: ${{ needs.verify-issue.outputs.body-b64 }}
@@ -484,10 +491,15 @@ post-steps:
     # ran, never a freshly re-fetched branch -- the branch can advance
     # during the agent's run, and comparing against that later tip would
     # misattribute upstream commits to the agent or miss files it touched
-    # that an advancing branch happens to also touch.
+    # that an advancing branch happens to also touch. Read it from
+    # $RUNNER_TEMP/gh-aw (read-only inside the agent's own sandbox), not
+    # anywhere under $GITHUB_WORKSPACE: the agent can write anywhere in
+    # the workspace, including paths this gate otherwise excludes, so a
+    # workspace-hosted baseline is not a trustworthy comparison point for
+    # a gate that checks the agent's own output.
     run: |
       set -euo pipefail
-      BASE=$(cat "$GITHUB_WORKSPACE/.verify-issue/base-sha.txt")
+      BASE=$(cat "${RUNNER_TEMP}/gh-aw/base-sha.txt")
       # Real review finding (PR #4155): comparing only `$BASE` vs `HEAD`
       # (committed history) ignores the normal state a `create-pull-request`
       # safe-output actually collects from -- uncommitted and untracked
