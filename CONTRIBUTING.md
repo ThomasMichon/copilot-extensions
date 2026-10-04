@@ -307,6 +307,24 @@ copilot-extensions finalize          # clean up the worktree
 > short-circuit earlier only when the stall is genuinely unresolvable (see
 > step 5), not as a default shortcut.
 
+**A finding that still shows "open" after you already fixed it is a known
+reviewer limitation, not a new regression — say so instead of silently
+re-fixing.** Copilot's review does not always re-validate a carried-over
+finding against the latest diff before re-listing it (see `REVIEW.md`'s own
+"re-validate every carried-over finding" directive, which addresses the
+reviewer side of this). When your own push genuinely already addressed a
+finding that reappears in the next round's overview unchanged, name the
+specific commit/line that fixed it in your next push's commit message or a
+reply on that finding's own thread, rather than spending another round
+re-touching code that is already correct — this both documents the
+discrepancy for anyone reading the history later and gives the next
+automatic pass a concrete anchor to re-check against. The same applies to a
+finding your PR already discloses as a deliberately out-of-scope, tracked
+limitation (a concrete issue reference, not a vague "known issue"): if it
+keeps getting re-raised at its original severity despite the disclosure and
+a bounded mitigation already shipped, point back at that disclosure rather
+than re-engineering the same already-accepted tradeoff every round.
+
 **Copilot code review can only ever render two outcomes: `Approve` or
 `Comment`.** (There is no "Request changes" capability in Copilot code
 review at all — confirmed against GitHub's own current docs, which state
@@ -444,7 +462,13 @@ each attempt real room to actually land before treating it as a timeout:
   own bypassed PRs those fields are a known tooling-wording gap
   (copilot-extensions#3638), not a live merge gate for this account. They
   are unrelated to whether Copilot has rendered a passing verdict yet;
-  track that separately via the PR's reviews.
+  track that separately via the PR's reviews. Both `pr-status --json` and
+  `pr-watch wait ... --json` surface a `self_merge_note` field (and, for
+  `pr-watch`, an accompanying stderr line) precisely when a live read
+  confirms the acting identity holds Maintainer-bypass rights on an
+  otherwise-required review — read that field, not `eligible`/`reason`
+  alone, before concluding a `pr-self-merge` repo's PR is genuinely blocked
+  on approval.
 - **Do not comment `@copilot review` (or similar) to request a fresh pass.**
   An `@copilot` mention on GitHub does not nudge the `copilot-pull-request-reviewer`
   bot -- it delegates a task to the separate Copilot **cloud coding agent**,
