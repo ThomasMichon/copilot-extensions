@@ -71,7 +71,7 @@
   "plugins/agent-worktrees/src/agent_worktrees/front_door_cli.py": 1066,
   "plugins/agent-worktrees/src/agent_worktrees/git_ops.py": 1731,
   "plugins/agent-worktrees/src/agent_worktrees/installer.py": 1780,
-  "plugins/agent-worktrees/src/agent_worktrees/pr_contract.py": 1562,
+  "plugins/agent-worktrees/src/agent_worktrees/pr_contract.py": 1592,
   "plugins/agent-worktrees/src/agent_worktrees/pr_ops.py": 2590,
   "plugins/agent-worktrees/src/agent_worktrees/providers/gitea.py": 1041,
   "plugins/agent-worktrees/src/agent_worktrees/providers/github.py": 1049,

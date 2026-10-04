@@ -84,6 +84,33 @@ class TestCursor:
         assert pc.Baseline.from_cursor("r13").head_sha == ""
         assert pc.Baseline.from_cursor("r1246.mc").head_sha == ""
 
+    def test_roundtrip_checks_state(self):
+        b = pc.Baseline(max_review_id=13, head_sha="abc123", checks_state="success")
+        cursor = b.to_cursor()
+        assert cursor == "r13..habc123.ksuccess"
+        parsed = pc.Baseline.from_cursor(cursor)
+        assert parsed.max_review_id == 13
+        assert parsed.head_sha == "abc123"
+        assert parsed.checks_state == "success"
+
+    def test_pre_checks_state_cursors_still_parse(self):
+        """A cursor minted before checks_state was encoded is a valid
+        shorter cursor; from_cursor must still parse it (reads by position)."""
+        assert pc.Baseline.from_cursor("r13").checks_state == ""
+        assert pc.Baseline.from_cursor("r1246.mc").checks_state == ""
+        assert pc.Baseline.from_cursor("r5.m.hdeadbeef").checks_state == ""
+
+    def test_roundtrip_checks_state_carries_a_known_baseline_across_re_arm(self):
+        """The real motivating case: a `--since <cursor>` re-arm that carries
+        a KNOWN checks_state (not the unknown ``""``) lets the next poll fire
+        `checks_succeeded`/`checks_failed` immediately instead of silently
+        adopting an already-changed value as a fresh "unknown" baseline."""
+        b = pc.Baseline(max_review_id=1, checks_state="pending")
+        parsed = pc.Baseline.from_cursor(b.to_cursor())
+        snap = pc.PRSnapshot(pr_state="open", checks_state="success")
+        events = pc.compute_events(parsed, snap, ("any",))
+        assert [e["event"] for e in events] == ["checks_succeeded"]
+
     def test_from_snapshot_high_water(self):
         snap = pc.PRSnapshot(
             reviews=(_rev(5, "APPROVED"), _rev(7, "COMMENT"), _rev(3, "PENDING")),
@@ -218,6 +245,38 @@ class TestComputeEvents:
         snap = pc.PRSnapshot(pr_state="closed", merged=True, checks_state="failure")
         assert "checks_failed" not in [
             e["event"] for e in pc.compute_events(base, snap, pc.DEFAULT_UNTIL)]
+
+    def test_checks_succeeded_fires_on_transition_to_success(self):
+        base = pc.Baseline(checks_state="pending")
+        snap = pc.PRSnapshot(pr_state="open", checks_state="success")
+        events = pc.compute_events(base, snap, ("any",))
+        assert [e["event"] for e in events] == ["checks_succeeded"]
+        assert events[0]["checks_state"] == "success"
+
+    def test_checks_succeeded_excluded_from_default_until(self):
+        # Not actionable on its own under the default (attention-needing)
+        # vocabulary -- a real review may still be expected. Selectable
+        # explicitly or via "any".
+        base = pc.Baseline(checks_state="pending")
+        snap = pc.PRSnapshot(pr_state="open", checks_state="success")
+        assert pc.compute_events(base, snap, pc.DEFAULT_UNTIL) == []
+
+    def test_checks_succeeded_not_refired_when_already_success(self):
+        base = pc.Baseline(checks_state="success")
+        snap = pc.PRSnapshot(pr_state="open", checks_state="success")
+        assert pc.compute_events(base, snap, ("any",)) == []
+
+    def test_checks_succeeded_unknown_baseline_does_not_fire(self):
+        # "" == not-yet-known: adopted by the caller, never fired here.
+        base = pc.Baseline(checks_state="")
+        snap = pc.PRSnapshot(pr_state="open", checks_state="success")
+        assert pc.compute_events(base, snap, ("any",)) == []
+
+    def test_checks_succeeded_not_fired_after_merge(self):
+        base = pc.Baseline(checks_state="pending")
+        snap = pc.PRSnapshot(pr_state="closed", merged=True, checks_state="success")
+        assert "checks_succeeded" not in [
+            e["event"] for e in pc.compute_events(base, snap, ("any",))]
 
     def test_approval_dismissed_fires_on_dismissed_approval(self):
         # Dismissal flips an existing (already-seen) review's flag, so baseline it.
