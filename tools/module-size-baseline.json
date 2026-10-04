@@ -66,7 +66,7 @@
   "plugins/agent-worktrees/scripts/versioned_runtime.py": 1415,
   "plugins/agent-worktrees/src/agent_worktrees/__main__.py": 7097,
   "plugins/agent-worktrees/src/agent_worktrees/claims_cli.py": 1023,
-  "plugins/agent-worktrees/src/agent_worktrees/config.py": 2165,
+  "plugins/agent-worktrees/src/agent_worktrees/config.py": 2178,
   "plugins/agent-worktrees/src/agent_worktrees/finalize.py": 2186,
   "plugins/agent-worktrees/src/agent_worktrees/front_door_cli.py": 1066,
   "plugins/agent-worktrees/src/agent_worktrees/git_ops.py": 1731,

@@ -1,0 +1,13 @@
+{
+  "comment": "load_machines_yaml: additively merge the canonical in-repo machines.yaml with the legacy repo-root one instead of returning only whichever is found first -- fixes a facility-wide regression (#7914) where adding the container-fleet registry silently hid every real machine from the multi-machine Picker and SSH mesh resolution",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
