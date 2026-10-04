@@ -2339,3 +2339,23 @@ own `compiler_version` metadata doesn't match the pin, mirroring
 drift. Recompiled clean; all guards and the full 81-test suite pass.
 This closes the last sub-item of the "pin the extension/action + set up
 auth" checklist entry — both halves are now resolved.
+
+### 2026-10-04 — First live dispatch diagnosed the wrong tree
+
+A `workflow_dispatch` of `ci-failure-fix-attempt` against tracked issue
+#5130 ran the agent and called `report_incomplete`. The agent was right
+to refuse a design-level module-size change, and wrong about the tree:
+the workspace was the default branch, where the guarded file was at its
+ceiling and passed. The failure is on `dev`. The agent job's own
+checkout is the workflow ref, and this workflow is registered from the
+default branch; the bash allowlist cannot switch branches. The scope
+gate also diffed against that default branch, so a `dev` checkout would
+have looked like the agent had edited every `dev`-only file.
+
+Fixed in the workflow source: `pre-agent-steps` now detaches at
+`origin/dev` before the engine starts, and the scope gate diffs against
+`origin/dev`. The prompt states that the workspace is already that tip.
+This does not yet prove a draft fix PR; it removes the reason the first
+live attempt could not see the failure. The trigger still reads the
+workflow from the default branch, so the fix is inert until that branch
+has the compiled lock.

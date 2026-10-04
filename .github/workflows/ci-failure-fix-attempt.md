@@ -416,6 +416,16 @@ jobs:
 # this and recommends writing the result to a FILE and referencing that
 # fixed path in the prompt instead, which is what this step now does.
 pre-agent-steps:
+  - name: Check out the contribution branch
+    # This workflow is registered from the default branch, so the agent
+    # job's own checkout is that branch. The failure under repair is on
+    # `dev`. Leave the workspace there or the agent diagnoses a tree the
+    # failing run never built, and its tool allowlist cannot switch
+    # branches itself.
+    run: |
+      set -euo pipefail
+      git fetch origin dev --quiet
+      git checkout --force --detach origin/dev
   - name: Decode the verified issue record
     env:
       BODY_B64: ${{ needs.verify-issue.outputs.body-b64 }}
@@ -440,18 +450,13 @@ pre-agent-steps:
 # always removed before any patch is built, regardless of this check.
 post-steps:
   - name: Enforce a machine-checked change-scope gate
-    # Real compile error (`gh aw compile`, CTR-006): direct
-    # `github.event.*` interpolation inside `run:` shell text is a
-    # template-injection risk gh-aw's own security scanner rejects
-    # unconditionally, regardless of whether this specific field is
-    # attacker-controlled -- route it through `env:` instead, which is
-    # never re-parsed as shell.
-    env:
-      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    # Diff against current `dev`, the branch the pull request targets.
+    # A merge-base with the default branch would treat every `dev`-only
+    # commit as the agent's own patch once the workspace is `dev`.
     run: |
       set -euo pipefail
-      git fetch origin "$DEFAULT_BRANCH" --quiet
-      BASE=$(git merge-base HEAD "origin/$DEFAULT_BRANCH")
+      git fetch origin dev --quiet
+      BASE=$(git rev-parse origin/dev)
       # Real review finding (PR #4155): comparing only `$BASE` vs `HEAD`
       # (committed history) ignores the normal state a `create-pull-request`
       # safe-output actually collects from -- uncommitted and untracked
@@ -1060,9 +1065,10 @@ not part of your fix, and is stripped from any patch regardless.
 `.verify-issue/body.txt` already carries the failing job name, the failing
 test node id (when the failing one was parseable), the run link and commit
 SHA, and a log excerpt. Treat
-this as your starting evidence, not your only evidence -- confirm it against
-the live repository state before acting (the `dev` branch has very likely
-moved forward since this issue was filed).
+this as your starting evidence, not your only evidence. Your workspace is
+already the current `dev` tip, not the default branch. The recorded commit
+SHA may be behind that tip -- confirm the failure still reproduces here
+before editing, and do not treat a default-branch tree as the one that failed.
 
 ## Your charter -- read this before touching anything
 
