@@ -204,17 +204,13 @@ def _alternate_toolchain_dir(
     toolchain identity (validated index + requested interpreter) that does
     NOT match whatever currently occupies the shared ``venv_dir`` slot.
 
-    `resolve_toolchain_lock` routes here instead of ever renaming or
-    otherwise disturbing an occupied ``venv_dir``: another process sharing
-    that same path may be actively building against it RIGHT NOW, and a
-    rename-aside ("quarantine") of a live, in-use venv is itself a race --
-    this effort's own prior quarantine design was found to have exactly
-    that hazard. Keying the alternate path on the identity itself (rather
-    than, say, a fresh disposable per-call directory) means repeat calls
-    in the SAME run with the exact same differing identity still land on
-    one shared, reusable path -- the "share one lock across a run" promise
-    degrades to a second, parallel shared slot in this (expected-rare)
-    mismatch case, rather than to a brand-new disposable venv per call."""
+    `resolve_toolchain_lock` routes here instead of renaming/disturbing an
+    occupied ``venv_dir``: another process may be actively building
+    against it RIGHT NOW, and a rename-aside ("quarantine") of a live venv
+    is itself a race (this effort's prior quarantine design had exactly
+    that flaw). Keying on the identity itself (not a disposable per-call
+    directory) means repeat calls with the same differing identity still
+    share one reusable path."""
     identity = _toolchain_identity_hash(validated_index_url, python)
     return venv_dir.parent / f".{venv_dir.name}.alt-{identity[:16]}"
 
@@ -222,18 +218,15 @@ def _alternate_toolchain_dir(
 def _occupied_by_other_identity(
     target_dir: Path, validated_index_url: str, python: str | None
 ) -> bool:
-    """Whether ``target_dir`` exists on disk but is NOT a complete,
-    provenance-matching venv for this EXACT (index, python) identity --
-    covers a mismatched/stale venv, AND an empty or partially-built
-    directory (e.g. a manually pre-created ``--toolchain-venv`` path, or
-    residue from a crashed prior run). A directory in either of these
-    shapes is never safe to treat as "absent": the eventual
-    staging-directory rename that publishes a freshly built venv would
-    land on an ALREADY-EXISTING destination, which Windows always
-    rejects (`Path.rename` has no POSIX-style "replace an empty
-    directory" behavior) -- so this must be detected and routed to the
-    alternate slot (or fail) BEFORE staging a build, not discovered only
-    when the publish rename itself fails."""
+    """Whether ``target_dir`` exists but is NOT a complete, provenance-
+    matching venv for this EXACT (index, python) identity -- covers a
+    mismatched/stale venv AND an empty/partially-built directory (e.g. a
+    manually pre-created ``--toolchain-venv`` path, or crash residue).
+    Neither shape is safe to treat as "absent": the eventual publish
+    rename would land on an ALREADY-EXISTING destination, which Windows
+    always rejects -- so this must be detected and routed to the
+    alternate slot BEFORE staging a build, not discovered only when the
+    rename itself fails."""
     if not target_dir.exists():
         return False
     venv_python = _venv_python_path(target_dir)
@@ -424,13 +417,39 @@ def _trusted_index_hosts(env: dict) -> set[str]:
     return {_normalize_hostname(h.strip()) for h in raw.split(",") if h.strip()}
 
 
+def _project_uv_toml_candidates() -> list[tuple[Path, bool]]:
+    """Project-level uv config, in uv's own HIGHEST precedence tier
+    (checked before user-/system-level config by `_effective_default_
+    index_url`) -- walks upward from the CURRENT WORKING DIRECTORY (never
+    a hardcoded root -- this is where `uv` itself would actually be
+    invoked from) looking for a `uv.toml` (preferred over a sibling
+    `pyproject.toml` in the same directory) or a `pyproject.toml` carrying
+    a `[tool.uv]` table, stopping at the FIRST directory where either is
+    found -- uv does not keep walking past the first project boundary it
+    locates. Returns ``(path, is_pyproject)`` pairs so the caller parses
+    each according to its own shape: a `pyproject.toml`'s uv config nests
+    under `[tool.uv]`, while a `uv.toml`'s is top-level."""
+    cwd = Path.cwd()
+    for directory in (cwd, *cwd.parents):
+        uv_toml = directory / "uv.toml"
+        if uv_toml.is_file():
+            return [(uv_toml, False)]
+        pyproject = directory / "pyproject.toml"
+        if pyproject.is_file():
+            return [(pyproject, True)]
+    return []
+
+
 def _effective_uv_toml_candidates(env: dict) -> list[Path]:
     """The uv.toml file(s) `uv` itself would actually read for index
     config in this environment, in `uv`'s own precedence order -- user-
     level first, then system-level -- matching this repo's own
     `install.ps1`/`install.sh` identical uv-config-discovery helpers
     (`Test-UvConfiguredIndex` / `_ensure_uv_index`), rather than a
-    partial, user-level-only reimplementation.
+    partial, user-level-only reimplementation. Project-level discovery
+    (which takes precedence over BOTH of these) is a separate concern --
+    see `_project_uv_toml_candidates` -- since it is cwd-based rather than
+    environment-based and has its own `pyproject.toml` shape to parse.
 
     ``UV_CONFIG_FILE`` is EXCLUSIVE in `uv`'s own config resolution: when
     set, `uv` reads ONLY that file and skips its normal project/user/
@@ -470,12 +489,27 @@ def _effective_default_index_url(env: dict) -> str | None:
     falls back to public PyPI for anything the supplemental index doesn't
     resolve, so neither is the effective default. Only `UV_DEFAULT_INDEX`/
     `UV_INDEX_URL`, the legacy `index-url` key, or an `[[index]]` entry
-    with `default = true` actually replace it."""
+    with `default = true` actually replace it.
+
+    Checks PROJECT-level config (`_project_uv_toml_candidates`) before
+    user-/system-level config, mirroring uv's own precedence -- a
+    project's own `uv.toml`/`pyproject.toml` can configure (or override)
+    the default index independently of whatever a user- or system-level
+    file says, and a check that only ever consulted user/system config
+    would both miss a project-only governed default and could select the
+    wrong (lower-precedence) URL when a project-level one should win.
+    Project discovery is skipped entirely when `UV_CONFIG_FILE` is set,
+    per that variable's own exclusivity (see `_effective_uv_toml_
+    candidates`'s docstring)."""
     for var in _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS:
         value = env.get(var)
         if value:
             return value
-    for candidate in _effective_uv_toml_candidates(env):
+    candidates: list[tuple[Path, bool]] = []
+    if not env.get("UV_CONFIG_FILE"):
+        candidates.extend(_project_uv_toml_candidates())
+    candidates.extend((path, False) for path in _effective_uv_toml_candidates(env))
+    for candidate, is_pyproject in candidates:
         if not candidate.is_file():
             continue
         try:
@@ -484,6 +518,11 @@ def _effective_default_index_url(env: dict) -> str | None:
             continue
         if not isinstance(data, dict):
             continue
+        if is_pyproject:
+            tool = data.get("tool")
+            data = tool.get("uv") if isinstance(tool, dict) else None
+            if not isinstance(data, dict):
+                continue
         index_url = data.get("index-url")
         if isinstance(index_url, str) and index_url:
             return index_url
@@ -551,69 +590,76 @@ def _governed_feed_configured(*, env: dict | None = None) -> bool:
     return _validated_trusted_index_url(env) is not None
 
 
+def _resolve_interpreter_identity(python: str | None) -> str:
+    """A canonical identity for whatever interpreter ``python`` would
+    ACTUALLY resolve to right now, used for provenance persistence/
+    comparison instead of the caller's selector TEXT -- a bare command
+    name or a symlink can resolve to a DIFFERENT interpreter later (PATH
+    reordered, symlink repointed), and a marker keyed on raw text would
+    silently match the stale one. Asks `uv` itself (`uv python find`,
+    the same resolution `uv venv --python` uses) then resolves any
+    symlink in the result. Never raises: a failed probe falls back to the
+    raw text (or `""`), which still fails closed overall -- an
+    approximate identity can only cause an unneeded rebuild, never a
+    false match."""
+    cmd = ["uv", "python", "find"]
+    if python:
+        cmd.append(python)
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, env=sanitize_subprocess_env()
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return str(Path(result.stdout.strip()).resolve())
+    except OSError:
+        pass
+    return python or ""
+
+
 def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> ToolchainLock:
     """Resolves one pinned build-toolchain venv and returns its exact
     installed ``setuptools``/``wheel``/``packaging`` versions.
 
-    If ``venv_dir`` already holds a venv from an earlier call in this same
-    process or a previous invocation of this script, AND that venv's own
-    provenance marker (`_provenance_matches`) confirms it was published
-    from EXACTLY the index AND requested interpreter validated for THIS
-    call, venv creation and package installation are skipped and only the
-    already-installed versions are read back -- this is how a caller
+    If ``venv_dir`` already holds a venv matching this call's EXACT
+    provenance (validated index AND resolved interpreter identity,
+    `_provenance_matches`), venv creation/install are skipped and only
+    the already-installed versions are read back -- this is how a caller
     shares ONE toolchain lock across several plugins in one promotion run
-    without this tool needing to build more than one plugin per process
-    invocation: pass the same ``venv_dir`` (``--toolchain-venv`` on the
-    CLI) to every invocation in that run.
+    by passing the same ``venv_dir`` (``--toolchain-venv``) to every
+    invocation.
 
-    An existing venv whose provenance does not match (a different
-    validated index, a different requested ``--python``, or no marker at
-    all -- e.g. published before this check existed) -- OR an existing
-    but EMPTY/partially-built directory at ``venv_dir`` (e.g. a manually
-    pre-created ``--toolchain-venv`` path, or residue from a crashed prior
-    run) -- is never trusted or built into directly: another process
-    sharing this exact path may be actively building against it right
-    now, and moving it aside out from under a live build is itself a race
-    this effort's own prior quarantine-based design was found to have;
-    building fresh directly into an already-existing-but-incomplete
-    directory would also make the eventual publish rename fail (Windows
-    rejects renaming onto an existing destination, even an empty one).
-    Instead, THIS call resolves into a separate, deterministic sibling
-    keyed on its own (index, python) identity (`_alternate_toolchain_dir`)
-    -- built fresh there if needed, or reused there if a prior call in
-    this same run already built that exact differing identity.
+    A venv at ``venv_dir`` that does NOT match (different index/python,
+    no marker, or an empty/partial directory -- e.g. manually pre-created,
+    or crash residue) is never trusted OR built into directly: another
+    process may be actively building against it right now, so moving it
+    aside is itself a race (this effort's prior quarantine design had
+    exactly that flaw), and building into an already-existing incomplete
+    directory would make the eventual publish rename fail (Windows
+    rejects renaming onto an existing destination). Instead THIS call
+    resolves into a deterministic sibling keyed on its own (index, python)
+    identity (`_alternate_toolchain_dir`).
 
-    Never resolves from an untrusted index: this call itself first
-    resolves the effective default index, verifying it is both non-public
-    AND affirmatively trusted by this machine's own explicit policy
-    (``_validated_trusted_index_url``), failing closed rather than letting
-    `uv venv`/`uv pip install` silently resolve `setuptools`/`wheel` from
-    an unverified index on a runner with no trust policy configured at
-    all. The install itself is then pinned to EXACTLY that one validated
-    URL (``--index-url`` plus ``--no-config``, with any ambient
-    supplemental-index environment variable stripped) -- never merely
-    "some index looked fine, trust `uv`'s own ambient config to pick the
-    real one," which could still let an untrusted SUPPLEMENTAL index
-    (`UV_INDEX`, or a plain `[[index]]` entry with no `default = true`)
-    supply the actual packages.
+    Never resolves from an untrusted index: first resolves the effective
+    default index, verifying it is both non-public AND affirmatively
+    trusted (`_validated_trusted_index_url`), failing closed rather than
+    letting `uv venv`/`uv pip install` silently resolve from an unverified
+    index. The install is pinned to EXACTLY that one validated URL
+    (``--index-url`` plus ``--no-config``, every ambient supplemental-
+    index variable stripped) -- never trusting `uv`'s own ambient config,
+    which could still consult an untrusted SUPPLEMENTAL index.
 
-    Built in a staging directory -- a genuinely unique one per call
-    (`tempfile.mkdtemp`, not merely PID-qualified, since two threads in the
-    same process share a PID) -- and published into its target directory
-    only via an atomic rename AFTER both `uv venv` and `uv pip install`
-    succeed -- never directly into the target -- so an interrupted or
-    partially failed setup never leaves a venv on disk that a later call's
-    own `venv_python.is_file()` reuse check would mistake for a complete,
-    already-installed one (which would otherwise skip straight to the
-    version query and fail there forever, requiring a manual delete to
-    recover)."""
+    Built in a unique staging directory (`tempfile.mkdtemp`, not merely
+    PID-qualified) and published via an atomic rename only AFTER both
+    `uv venv` and `uv pip install` succeed, so an interrupted setup never
+    leaves a venv a later reuse check would mistake for complete."""
     env = dict(os.environ)
     validated_index_url = _validated_trusted_index_url(env)
     if validated_index_url is None:
         raise ArtifactBuildError(
             "no affirmatively trusted governed package feed is configured "
             "on this machine (checked uv's effective default index -- "
-            "UV_DEFAULT_INDEX/UV_INDEX_URL or the user-level or "
+            "UV_DEFAULT_INDEX/UV_INDEX_URL, a project-level uv.toml/"
+            "pyproject.toml's [tool.uv], or the user-level or "
             "system-level uv.toml's (e.g. %PROGRAMDATA%, /etc/uv, "
             "/etc/xdg/uv) index-url / [[index]] default=true -- against "
             f"the explicit trust policy in {_TRUSTED_INDEX_HOSTS_ENV_VAR}) "
@@ -622,7 +668,8 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             "an unverified index"
         )
     target_dir = venv_dir
-    if _occupied_by_other_identity(target_dir, validated_index_url, python):
+    python_identity = _resolve_interpreter_identity(python)
+    if _occupied_by_other_identity(target_dir, validated_index_url, python_identity):
         # The shared slot exists but is NOT a complete, matching venv for
         # this exact (index, python) identity -- a different validated
         # index, a different requested --python, or an empty/partially-
@@ -633,8 +680,8 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
         # this call's own, differently-identified toolchain into its own
         # deterministic sibling path instead, entirely independent of
         # whatever currently lives at venv_dir.
-        target_dir = _alternate_toolchain_dir(venv_dir, validated_index_url, python)
-        if _occupied_by_other_identity(target_dir, validated_index_url, python):
+        target_dir = _alternate_toolchain_dir(venv_dir, validated_index_url, python_identity)
+        if _occupied_by_other_identity(target_dir, validated_index_url, python_identity):
             # This alternate path is itself keyed on this exact identity,
             # so finding it occupied by something else here is a genuine
             # anomaly (e.g. a hash collision, or manual tampering), never
@@ -654,30 +701,19 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
         )
         # Strip every ambient variable that could supply packages from
         # somewhere other than the one validated URL below -- `--no-config`
-        # only disables config FILES; `uv` still honors these as
-        # environment-based package sources (UV_EXTRA_INDEX_URL/
-        # UV_FIND_LINKS are flat-file/extra-index sources independent of
-        # the default-index machinery entirely, confirmed common on this
-        # repo's own clean-room runners), as a way to redirect a specific
-        # requirement to a direct URL regardless of index (`UV_CONSTRAINT`/
-        # `UV_OVERRIDE` for the main install, `UV_BUILD_CONSTRAINT` for any
-        # source-distribution build dependencies `uv pip install` itself
-        # needs), or, for `UV_VENV_SEED`, as a way for `uv venv` itself to
-        # pre-install setuptools/wheel/pip from whatever ambient source it
-        # would otherwise use -- which the later bare `uv pip install`
-        # could then leave untouched if it considers the unconstrained
-        # requirement already satisfied, silently bypassing the validated
-        # index entirely. Also strips `PYTHONPATH`/`PYTHONHOME` (the same
-        # interpreter-redirection vectors stripped everywhere a specific
-        # interpreter is invoked directly -- see `sanitize_subprocess_env`),
-        # and `UV_INSECURE_HOST` -- `uv` honors that to disable TLS
-        # certificate verification for a named host, which would let a
-        # network attacker impersonate even an allowlisted governed-feed
-        # hostname (the HTTPS-scheme requirement in
-        # `_validated_trusted_index_url` is otherwise meaningless if an
-        # ambient setting can disable the certificate check for that same
-        # host). Used for BOTH the `uv venv` and `uv pip install` calls
-        # below.
+        # only disables config FILES, not these environment-based package
+        # sources: UV_INDEX/UV_EXTRA_INDEX_URL/UV_FIND_LINKS (supplemental/
+        # flat-file sources independent of the default-index machinery),
+        # UV_CONSTRAINT/UV_OVERRIDE/UV_BUILD_CONSTRAINT (redirect a
+        # specific requirement to a direct URL), UV_VENV_SEED (lets `uv
+        # venv` pre-install from an ambient source the later bare `uv pip
+        # install` could then leave untouched), and UV_INSECURE_HOST
+        # (disables TLS verification for a named host, defeating the
+        # HTTPS-scheme requirement in `_validated_trusted_index_url`).
+        # Also strips `PYTHONPATH`/`PYTHONHOME` (same vectors stripped
+        # everywhere a specific interpreter is invoked directly -- see
+        # `sanitize_subprocess_env`). Used for BOTH `uv venv`/`uv pip
+        # install` below.
         sanitized_env = sanitize_subprocess_env(env)
         for var in (
             "UV_INDEX", "UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_CONFIG_FILE",
@@ -714,39 +750,28 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
                     f"{install.stdout}\n{install.stderr}"
                 )
             # Only now, with BOTH steps verified successful, publish the
-            # venv into its real location via a single rename -- a retry
-            # after any earlier failure never finds a partially built
-            # target_dir, since target_dir never existed until this point.
-            # The provenance marker is written into the staging directory
-            # BEFORE the rename, so it is published atomically together
-            # with the venv it describes -- a later call reusing this
-            # exact path can verify it actually came from the currently-
-            # validated identity, never trusting mere interpreter presence
-            # (see the provenance check above).
-            # Never pre-delete an existing target_dir: a concurrent caller
-            # sharing this same path may have already published its OWN
-            # complete venv (and may already be building against it) --
-            # clobbering it here would violate the "unchanged shared lock"
-            # promise and could break an in-flight build. If the rename
-            # itself fails, confirm a winner's venv is genuinely present
-            # (venv_python now exists) AND carries matching provenance
-            # before treating it as a benign lost race -- two concurrent
-            # callers validating DIFFERENT identities can both observe an
-            # absent destination; without the provenance check, whichever
-            # loses the rename race would silently trust a venv sourced
-            # from the OTHER caller's (different) identity. A permission/
-            # filesystem/invalid-destination error with no real, matching
-            # winner must still surface as a build failure, never a
-            # silently swallowed exception that leaves nothing
-            # trustworthy at target_dir for the version query below to
-            # find.
-            _write_provenance_marker(staging_venv_dir, validated_index_url, python)
+            # venv via a single rename -- a retry after any earlier
+            # failure never finds a partially built target_dir, since it
+            # never existed until this point. The provenance marker is
+            # written into staging BEFORE the rename, so it publishes
+            # atomically with the venv it describes. Never pre-delete an
+            # existing target_dir: a concurrent caller sharing this path
+            # may already have published its OWN complete venv (maybe
+            # already building against it). If the rename fails, confirm
+            # a winner's venv is genuinely present AND carries matching
+            # provenance before treating it as a benign lost race -- two
+            # callers validating DIFFERENT identities could both observe
+            # an absent destination, so the provenance check guards
+            # against trusting a venv sourced from the OTHER caller's
+            # identity. A permission/filesystem error with no real,
+            # matching winner must still surface as a build failure.
+            _write_provenance_marker(staging_venv_dir, validated_index_url, python_identity)
             try:
                 staging_venv_dir.rename(target_dir)
             except OSError as exc:
                 if not (
                     venv_python.is_file()
-                    and _provenance_matches(target_dir, validated_index_url, python)
+                    and _provenance_matches(target_dir, validated_index_url, python_identity)
                 ):
                     raise ArtifactBuildError(
                         f"could not publish toolchain venv {staging_venv_dir} "
@@ -794,7 +819,16 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
 #: and prints a single JSON result line: ``{"ok": true}`` or
 #: ``{"ok": false, "error": "..."}``. Stops at the first unsatisfied/
 #: unparseable/unlocked requirement, mirroring the prior in-process
-#: implementation's own fail-fast behavior.
+#: implementation's own fail-fast behavior. A requirement's version
+#: SPECIFIER is not its only meaningful constraint: a direct URL reference
+#: (``name @ https://...``) has an EMPTY specifier and would otherwise
+#: trivially "pass" against any installed version despite actually
+#: requiring a specific alternate source this toolchain never installs
+#: from; an extras clause (``name[extra]``) would otherwise "pass" without
+#: the extra's own additional dependencies ever being installed, since
+#: this toolchain only ever installs the bare locked packages. Both are
+#: rejected outright (fail closed) rather than silently treated as
+#: satisfied.
 _BUILD_REQUIRES_CHECK_SCRIPT = (
     "import json, sys\n"
     "from packaging.requirements import InvalidRequirement, Requirement\n"
@@ -820,6 +854,21 @@ _BUILD_REQUIRES_CHECK_SCRIPT = (
     "        environment=marker_environment\n"
     "    ):\n"
     "        continue  # this constraint does not apply in this environment\n"
+    "    if req.url:\n"
+    "        _fail(\n"
+    "            f'declares an applicable build requirement {raw!r} as a '\n"
+    "            'direct URL reference -- this locked toolchain only '\n"
+    "            'ever installs from the validated governed index, never '\n"
+    "            'an arbitrary direct URL, so this cannot be verified as '\n"
+    "            'satisfied'\n"
+    "        )\n"
+    "    if req.extras:\n"
+    "        _fail(\n"
+    "            f'declares an applicable build requirement {raw!r} with '\n"
+    "            f'extra(s) {sorted(req.extras)!r} -- this locked toolchain '\n"
+    "            'only ever installs the bare locked packages, never any '\n"
+    "            'extra, so this cannot be verified as satisfied'\n"
+    "        )\n"
     "    canonical_name = canonicalize_name(req.name)\n"
     "    locked_version_str = locked.get(canonical_name)\n"
     "    if locked_version_str is None:\n"

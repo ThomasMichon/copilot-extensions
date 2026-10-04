@@ -1117,9 +1117,18 @@ def _assume_governed_feed_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     own module-load comment above for why that distinction matters here.
     `resolve_toolchain_lock` itself now calls `_validated_trusted_index_url`
     directly (not `_governed_feed_configured`), so that's the function
-    patched here."""
+    patched here.
+
+    Also bypasses `_resolve_interpreter_identity` (which otherwise shells
+    out to `uv python find`) with an identity passthrough -- tests
+    exercising THAT specific resolution behavior override this again with
+    their own dedicated mock; every other test below just wants its given
+    `python` argument treated as a stable identity, unchanged."""
     monkeypatch.setattr(
         btl, "_validated_trusted_index_url", lambda env: "https://example.internal/simple/"  # noqa: ARG005
+    )
+    monkeypatch.setattr(
+        btl, "_resolve_interpreter_identity", lambda python: python or ""
     )
 
 
@@ -1423,6 +1432,103 @@ def test_resolve_toolchain_lock_treats_different_python_as_mismatch(
     assert lock.venv_python.read_text(encoding="utf-8") == "py312-build"
     assert "--python" in build_cmds[0]
     assert build_cmds[0][build_cmds[0].index("--python") + 1] == "/usr/bin/python3.12"
+
+
+# --- _resolve_interpreter_identity: text selector vs resolved identity ----
+
+
+def test_resolve_interpreter_identity_queries_uv_python_find(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    real_interpreter = tmp_path / "real-python"
+    real_interpreter.write_text("", encoding="utf-8")
+    seen_cmds: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        seen_cmds.append(cmd)
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout=str(real_interpreter) + "\n", stderr=""
+        )
+
+    monkeypatch.setattr(btl.subprocess, "run", fake_run)
+    identity = btl._resolve_interpreter_identity("python3.12")
+
+    assert seen_cmds == [["uv", "python", "find", "python3.12"]]
+    assert identity == str(real_interpreter.resolve())
+
+
+def test_resolve_interpreter_identity_falls_back_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Regression: a failed probe (nonzero exit, or `uv` itself missing)
+    # must never crash the caller -- it falls back to the raw selector
+    # text, which still fails closed overall (a merely-approximate
+    # identity can only cause an unnecessary rebuild, never a false
+    # match).
+    monkeypatch.setattr(
+        btl.subprocess, "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="not found"),  # noqa: ARG005
+    )
+    assert btl._resolve_interpreter_identity("python3.12") == "python3.12"
+    assert btl._resolve_interpreter_identity(None) == ""
+
+    def raise_oserror(cmd, **kwargs):  # noqa: ARG001
+        raise OSError("uv not found")
+
+    monkeypatch.setattr(btl.subprocess, "run", raise_oserror)
+    assert btl._resolve_interpreter_identity("python3.12") == "python3.12"
+
+
+def test_resolve_toolchain_lock_detects_resolved_interpreter_change_despite_same_selector_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression (the core scenario motivating resolved-identity
+    # tracking): the SAME selector text (e.g. a symlink, or a bare
+    # command resolved via PATH) can resolve to a genuinely DIFFERENT
+    # real interpreter over time. A marker keyed on resolved identity
+    # (not raw text) must detect this and route to a fresh build, never
+    # silently reuse the stale venv.
+    monkeypatch.setattr(
+        btl, "_validated_trusted_index_url", lambda env: "https://example.internal/simple/"  # noqa: ARG005
+    )
+    resolved = {"value": "/opt/pythons/3.10/bin/python"}
+    monkeypatch.setattr(
+        btl, "_resolve_interpreter_identity", lambda python: resolved["value"]  # noqa: ARG005
+    )
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_python = bpa._venv_python_path(venv_dir)
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("original-build", encoding="utf-8")
+    btl._write_provenance_marker(
+        venv_dir, "https://example.internal/simple/", resolved["value"]
+    )
+
+    # The SAME selector is used both times -- but the symlink it resolves
+    # to is simulated as having been repointed in between.
+    resolved["value"] = "/opt/pythons/3.11/bin/python"
+    build_cmds: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[:2] == ["uv", "venv"]:
+            build_cmds.append(cmd)
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("rebuilt-after-repoint", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    lock = bpa.resolve_toolchain_lock(venv_dir, python="python3")
+
+    assert len(build_cmds) == 1
+    assert venv_python.read_text(encoding="utf-8") == "original-build"
+    assert lock.venv_python.read_text(encoding="utf-8") == "rebuilt-after-repoint"
 
 
 def test_resolve_toolchain_lock_rejects_anomalous_alternate_mismatch(
@@ -2041,6 +2147,82 @@ def test_governed_feed_uv_config_file_governed_is_honored(
     )
 
 
+# --- project-level uv.toml/pyproject.toml config discovery ---------------
+
+
+def test_governed_feed_project_uv_toml_takes_precedence_over_user(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: a project-level uv.toml (found by walking up from the
+    # current working directory) must be consulted BEFORE user-/system-
+    # level config, and its own index wins even when a DIFFERENT
+    # (otherwise also-governed) index is configured at the user level.
+    monkeypatch.setattr(bpa.sys, "platform", "win32")
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "uv.toml").write_text(
+        'index-url = "https://project.internal/simple/"\n', encoding="utf-8"
+    )
+    user_uv_toml = tmp_path / "appdata" / "uv" / "uv.toml"
+    user_uv_toml.parent.mkdir(parents=True)
+    user_uv_toml.write_text(
+        'index-url = "https://user.internal/simple/"\n', encoding="utf-8"
+    )
+    monkeypatch.chdir(project_dir)
+    assert btl._effective_default_index_url(
+        {"APPDATA": str(tmp_path / "appdata")}
+    ) == "https://project.internal/simple/"
+
+
+def test_governed_feed_project_pyproject_tool_uv_section_is_honored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # A pyproject.toml's own [tool.uv] table is the project-level
+    # equivalent of a dedicated uv.toml, nested under `tool.uv` rather
+    # than top-level.
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "pyproject.toml").write_text(
+        '[tool.uv]\nindex-url = "https://project.internal/simple/"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(project_dir)
+    assert btl._effective_default_index_url({}) == "https://project.internal/simple/"
+
+
+def test_governed_feed_project_pyproject_without_tool_uv_table_is_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # A pyproject.toml with no [tool.uv] table at all carries no uv
+    # config -- must not be mistaken for an empty-but-present index.
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\n', encoding="utf-8"
+    )
+    monkeypatch.chdir(project_dir)
+    assert btl._effective_default_index_url({}) is None
+
+
+def test_governed_feed_project_discovery_skipped_when_uv_config_file_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # UV_CONFIG_FILE's exclusivity (uv skips ALL normal discovery once
+    # set) must suppress project-level discovery too, not just user/
+    # system config.
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    (project_dir / "uv.toml").write_text(
+        'index-url = "https://project.internal/simple/"\n', encoding="utf-8"
+    )
+    explicit_config = tmp_path / "explicit-uv.toml"
+    explicit_config.write_text("# no index configured here\n", encoding="utf-8")
+    monkeypatch.chdir(project_dir)
+    assert btl._effective_default_index_url(
+        {"UV_CONFIG_FILE": str(explicit_config)}
+    ) is None
+
+
 # --- Test PyPI is treated as public --------------------------------------
 
 
@@ -2263,6 +2445,7 @@ def test_resolve_toolchain_lock_pins_install_to_validated_index_only(
         btl, "_validated_trusted_index_url",
         lambda env: "https://governed.example/simple/",  # noqa: ARG005
     )
+    monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python: python or "")
     monkeypatch.setenv("UV_INDEX", "https://untrusted.example/simple/")
     monkeypatch.setenv("UV_EXTRA_INDEX_URL", "https://untrusted.example/extra/")
     monkeypatch.setenv("UV_FIND_LINKS", "https://untrusted.example/links/")
@@ -2312,6 +2495,7 @@ def test_resolve_toolchain_lock_strips_uv_constraint_and_override_vars(
         btl, "_validated_trusted_index_url",
         lambda env: "https://governed.example/simple/",  # noqa: ARG005
     )
+    monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python: python or "")
     monkeypatch.setenv("UV_CONSTRAINT", "https://untrusted.example/constraints.txt")
     monkeypatch.setenv("UV_OVERRIDE", "https://untrusted.example/overrides.txt")
     monkeypatch.setenv("UV_BUILD_CONSTRAINT", "https://untrusted.example/build-constraints.txt")
@@ -2354,6 +2538,7 @@ def test_resolve_toolchain_lock_strips_uv_insecure_host(
         btl, "_validated_trusted_index_url",
         lambda env: "https://governed.example/simple/",  # noqa: ARG005
     )
+    monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python: python or "")
     monkeypatch.setenv("UV_INSECURE_HOST", "governed.example")
     venv_dir = tmp_path / "toolchain-venv"
     seen_envs: list[dict] = []
@@ -2550,6 +2735,50 @@ def test_build_wheel_rejects_toolchain_below_declared_build_requires(
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     with pytest.raises(bpa.ArtifactBuildError):
+        bpa.build_wheel(src_dir, tmp_path / "dist", toolchain=toolchain)
+
+
+def test_build_wheel_rejects_direct_url_build_requirement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: a direct URL reference (`name @ https://...`) has an
+    # EMPTY version specifier and would otherwise trivially "pass" against
+    # any installed version, despite actually requiring a specific
+    # alternate source this locked toolchain never installs from.
+    src_dir = tmp_path / "src"
+    _write_build_system_requires(
+        src_dir, ["setuptools @ https://example.internal/setuptools-90.0.0-py3-none-any.whl"]
+    )
+    toolchain = bpa.ToolchainLock(
+        tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
+    )
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError, match="direct URL"):
+        bpa.build_wheel(src_dir, tmp_path / "dist", toolchain=toolchain)
+
+
+def test_build_wheel_rejects_build_requirement_with_extras(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: an extras clause (`name[extra]`) would otherwise "pass"
+    # without the extra's own additional dependencies ever being
+    # installed, since this locked toolchain only ever installs the bare
+    # locked packages.
+    src_dir = tmp_path / "src"
+    _write_build_system_requires(src_dir, ["setuptools[extra_feature]>=60.0.0"])
+    toolchain = bpa.ToolchainLock(
+        tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
+    )
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError, match="extra"):
         bpa.build_wheel(src_dir, tmp_path / "dist", toolchain=toolchain)
 
 
