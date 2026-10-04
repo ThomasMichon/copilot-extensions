@@ -239,13 +239,15 @@ order.
 - [x] Implement coverage-debt accounting (age and/or commit-volume since the
       resolved baseline) with a tunable threshold, per the vision's own
       Behavior. **Done** (`tools/coverage_guided_selection/debt.py`,
-      2026-10-03): `assess_debt` measures both dimensions independently
-      (git `rev-list --count` for commit-volume, committer-date delta for
-      age) against the resolved baseline's `measured_commit`; either
-      configured threshold crossing trips `exceeded` for the *whole*
-      selection, distinct from `selection.select_tests`'s own per-
-      file/per-line triggers. A `None` threshold is measured-but-not-
-      enforced, never silently defaulted.
+      2026-10-03): `assess_debt` measures commit-volume (`git rev-list
+      --count`) against `measured_commit` and age against the baseline's
+      own `generated_at` timestamp (review caught an initial version that
+      wrongly anchored age to the commit's own git timestamp instead --
+      fixed, with a regression proving re-collecting against the same old
+      commit resets reported age); either configured threshold crossing
+      trips `exceeded` for the *whole* selection, distinct from
+      `selection.select_tests`'s own per-file/per-line triggers. A `None`
+      threshold is measured-but-not-enforced, never silently defaulted.
 - [ ] **Curate and validate the fallback set itself**, not just its trigger
       conditions: today `worktrees-smoke` only has `--collect-only` (no real
       execution) plus the always-run structural `--guards` step, neither of

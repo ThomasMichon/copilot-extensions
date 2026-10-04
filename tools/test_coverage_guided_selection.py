@@ -1253,12 +1253,14 @@ class TestRemapOrInvalidateBaseline:
 
 
 class TestAssessDebt:
+    _GENERATED_AT = "2026-01-01T00:00:00+00:00"
+
     def test_zero_debt_when_head_equals_measured_commit(self, tmp_path):
         repo = _init_repo(tmp_path)
         (repo / "a.txt").write_text("1\n")
         c1 = _commit(repo, "first")
 
-        result = debt.assess_debt(repo, c1, head=c1)
+        result = debt.assess_debt(repo, c1, self._GENERATED_AT, head=c1)
 
         assert result.commit_volume == 0
         assert result.exceeded is False
@@ -1272,7 +1274,7 @@ class TestAssessDebt:
         (repo / "a.txt").write_text("3\n")
         c3 = _commit(repo, "third")
 
-        result = debt.assess_debt(repo, c1, head=c3)
+        result = debt.assess_debt(repo, c1, self._GENERATED_AT, head=c3)
 
         assert result.commit_volume == 2
 
@@ -1283,8 +1285,12 @@ class TestAssessDebt:
         (repo / "a.txt").write_text("2\n")
         c2 = _commit(repo, "second")
 
-        under = debt.assess_debt(repo, c1, head=c2, commit_volume_threshold=5)
-        over = debt.assess_debt(repo, c1, head=c2, commit_volume_threshold=0)
+        under = debt.assess_debt(
+            repo, c1, self._GENERATED_AT, head=c2, commit_volume_threshold=5
+        )
+        over = debt.assess_debt(
+            repo, c1, self._GENERATED_AT, head=c2, commit_volume_threshold=0
+        )
 
         assert under.exceeded is False
         assert over.exceeded is True
@@ -1297,20 +1303,71 @@ class TestAssessDebt:
 
         # `now` is injected explicitly rather than sleeping a real wall-clock
         # interval -- deterministic and fast.
-        committed_at = float(
-            _run_git(["show", "-s", "--format=%ct", c1], cwd=repo).stdout.strip()
-        )
+        generated_at_s = debt.datetime.fromisoformat(self._GENERATED_AT).timestamp()
 
         under = debt.assess_debt(
-            repo, c1, head=c1, age_threshold_seconds=3600, now=committed_at + 10
+            repo, c1, self._GENERATED_AT, head=c1,
+            age_threshold_seconds=3600, now=generated_at_s + 10,
         )
         over = debt.assess_debt(
-            repo, c1, head=c1, age_threshold_seconds=3600, now=committed_at + 7200
+            repo, c1, self._GENERATED_AT, head=c1,
+            age_threshold_seconds=3600, now=generated_at_s + 7200,
         )
 
         assert under.exceeded is False
         assert over.exceeded is True
         assert "age_seconds" in over.reasons[0]
+
+    def test_age_is_anchored_to_generated_at_not_the_commits_own_timestamp(self, tmp_path):
+        # Regression (Copilot review on PR #5146): a commit can sit for
+        # days before CI finally collects coverage against it. Age must
+        # reflect when the baseline was EARNED (`generated_at`), not the
+        # commit's own, potentially much older or newer, commit time --
+        # otherwise a freshly-collected baseline would report a stale (or
+        # falsely fresh) age driven by the commit's timestamp instead of
+        # when collection actually ran.
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+
+        fresh_generated_at = "2026-06-01T00:00:00+00:00"
+        now = debt.datetime.fromisoformat(fresh_generated_at).timestamp() + 5
+
+        result = debt.assess_debt(
+            repo, c1, fresh_generated_at, head=c1,
+            age_threshold_seconds=3600, now=now,
+        )
+
+        assert result.exceeded is False
+        assert result.age_seconds < 3600
+        assert abs(result.age_seconds - 5) < 1e-3
+
+    def test_recollecting_against_the_same_old_commit_resets_age(self, tmp_path):
+        # Regression (Copilot review on PR #5146): re-running coverage
+        # collection against the SAME commit must reset reported age to
+        # near-zero -- a stale baseline for an unchanged commit must become
+        # fresh again once re-collected, which anchoring age to the
+        # commit's own timestamp could never allow.
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+
+        first_collection_at = "2026-01-01T00:00:00+00:00"
+        recollection_at = "2026-06-01T00:00:00+00:00"
+        now = debt.datetime.fromisoformat(recollection_at).timestamp()
+
+        stale = debt.assess_debt(
+            repo, c1, first_collection_at, head=c1,
+            age_threshold_seconds=3600, now=now,
+        )
+        fresh = debt.assess_debt(
+            repo, c1, recollection_at, head=c1,
+            age_threshold_seconds=3600, now=now,
+        )
+
+        assert stale.exceeded is True
+        assert fresh.exceeded is False
+        assert fresh.age_seconds < stale.age_seconds
 
     def test_neither_threshold_configured_never_exceeds(self, tmp_path):
         repo = _init_repo(tmp_path)
@@ -1319,7 +1376,7 @@ class TestAssessDebt:
         (repo / "a.txt").write_text("2\n")
         c2 = _commit(repo, "second")
 
-        result = debt.assess_debt(repo, c1, head=c2)
+        result = debt.assess_debt(repo, c1, self._GENERATED_AT, head=c2)
 
         assert result.exceeded is False
         assert result.reasons == ()
@@ -1333,7 +1390,9 @@ class TestAssessDebt:
         (repo / "a.txt").write_text("1\n")
         c1 = _commit(repo, "first")
 
-        result = debt.assess_debt(repo, c1, head=c1, commit_volume_threshold=10)
+        result = debt.assess_debt(
+            repo, c1, self._GENERATED_AT, head=c1, commit_volume_threshold=10
+        )
         json.dumps(result.as_dict())  # must not raise
 
     def test_raises_for_an_unreachable_measured_commit(self, tmp_path):
@@ -1342,7 +1401,8 @@ class TestAssessDebt:
         _commit(repo, "first")
 
         with pytest.raises(debt.CoverageDebtError):
-            debt.assess_debt(repo, "0" * 40)
+            debt.assess_debt(repo, "0" * 40, self._GENERATED_AT)
+
 
 
 
