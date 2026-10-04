@@ -112,7 +112,11 @@ done < <(git diff --cached --name-only --diff-filter=d -z)
 if [[ ${#STAGED_ALL[@]} -gt 0 ]]; then
     if [[ ${#PY[@]} -eq 0 ]]; then
         echo "pre-commit: python not found -- skipping large-file check" >&2
-    elif ! "${PY[@]}" "$ROOT/tools/check-large-files.py" "${STAGED_ALL[@]}"; then
+    # "--" before the file list: a staged file whose name happens to look
+    # like a flag (e.g. a file literally named "--all") must never be
+    # parsed as one, which would silently switch the guard into full-tree
+    # mode (checking HEAD) instead of checking the actual staged paths.
+    elif ! "${PY[@]}" "$ROOT/tools/check-large-files.py" -- "${STAGED_ALL[@]}"; then
         echo "" >&2
         echo "pre-commit: large-file check failed (see errors above)." >&2
         echo "  Store a large generated artifact as a Release asset/CI artifact" >&2

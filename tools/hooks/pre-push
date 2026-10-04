@@ -81,4 +81,35 @@ COPILOT_EXTENSIONS_GUARD_BASE=origin/dev "${PY[@]}" "$ROOT/tools/check-no-intern
 # for everything else, and an outright ban on source maps/raw diffs) -- the
 # guard the main-history-rewrite effort's ~300MB of accumulated
 # coverage-baseline blobs never had. See tools/check-large-files.py.
-exec "${PY[@]}" "$ROOT/tools/check-large-files.py" --base origin/dev
+#
+# Reads the actual refs being pushed from stdin (the standard pre-push hook
+# protocol: "<local ref> <local sha> <remote ref> <remote sha>" per line) and
+# checks each non-deletion local sha explicitly as --head, rather than
+# assuming the currently checked-out HEAD is what's being pushed -- pushing a
+# non-checked-out branch, or several refs in one invocation, would otherwise
+# send content this hook never actually inspected. (No other check in this
+# file is ref-aware yet -- each still only ever looks at HEAD/the current
+# checkout; broadening all of them is a separate, larger change.) Nothing
+# else in this script reads stdin, so this is always safe to consume last.
+# `[ -t 0 ]` falls back to plain HEAD when run manually from a terminal
+# (no real push, nothing to read from stdin).
+large_files_failed=0
+if [ -t 0 ]; then
+    "${PY[@]}" "$ROOT/tools/check-large-files.py" --base origin/dev || large_files_failed=1
+else
+    any_ref=0
+    while read -r local_ref local_sha _remote_ref _remote_sha; do
+        [[ -n "$local_ref" ]] || continue
+        any_ref=1
+        # All-zero local sha means this ref is being deleted -- nothing new
+        # to check.
+        [[ "$local_sha" =~ ^0+$ ]] && continue
+        "${PY[@]}" "$ROOT/tools/check-large-files.py" --base origin/dev --head "$local_sha" || large_files_failed=1
+    done
+    if [[ "$any_ref" -eq 0 ]]; then
+        # Stdin was empty/closed (e.g. a non-interactive test harness) --
+        # fall back to plain HEAD so the guard still runs something.
+        "${PY[@]}" "$ROOT/tools/check-large-files.py" --base origin/dev || large_files_failed=1
+    fi
+fi
+exit "$large_files_failed"

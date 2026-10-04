@@ -227,3 +227,94 @@ def test_staged_mode_does_not_false_positive_on_working_tree_growth(repo: Path):
 
     assert result.returncode == 0, result.stdout + result.stderr
 
+
+def test_diff_scoped_mode_catches_an_oversized_file_added_then_deleted_in_range(repo: Path):
+    # The oversized blob is still permanently in the pushed history the
+    # instant the add commit lands, even though HEAD's own tree no longer
+    # references it -- a naive tree-to-tree diff would miss this entirely.
+    _write_bytes(repo, "src/small.txt", 10)
+    _commit_all(repo)
+    _git(repo, "branch", "-f", "base_marker", "HEAD")
+
+    _write_bytes(repo, "src/transient-big.json", 2 * 1024 * 1024)
+    _commit_all(repo)
+    (repo / "src" / "transient-big.json").unlink()
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "remove it again, same push")
+
+    result = _run(repo, "--base", "base_marker")
+
+    assert result.returncode == 1
+    assert "transient-big.json" in result.stdout
+
+
+def test_diff_scoped_mode_catches_an_always_blocked_file_added_then_deleted_in_range(repo: Path):
+    _write_bytes(repo, "src/small.txt", 10)
+    _commit_all(repo)
+    _git(repo, "branch", "-f", "base_marker", "HEAD")
+
+    _write_bytes(repo, "dist/transient.patch", 10)
+    _commit_all(repo)
+    (repo / "dist" / "transient.patch").unlink()
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "remove it again, same push")
+
+    result = _run(repo, "--base", "base_marker")
+
+    assert result.returncode == 1
+    assert "transient.patch" in result.stdout
+
+
+def test_diff_scoped_mode_catches_a_file_oversized_in_an_earlier_commit_then_shrunk(repo: Path):
+    # Same shape as the add-then-delete case, but shrunk back under cap
+    # rather than deleted outright -- the earlier, oversized blob is still
+    # what got pushed and must still be reported.
+    _write_bytes(repo, "src/small.txt", 10)
+    _commit_all(repo)
+    _git(repo, "branch", "-f", "base_marker", "HEAD")
+
+    _write_bytes(repo, "src/shrinks.json", 2 * 1024 * 1024)
+    _commit_all(repo)
+    _write_bytes(repo, "src/shrinks.json", 10)
+    _commit_all(repo)
+
+    result = _run(repo, "--base", "base_marker")
+
+    assert result.returncode == 1
+    assert "shrinks.json" in result.stdout
+
+
+def test_all_mode_respects_an_explicit_head_other_than_the_checkout(repo: Path):
+    _write_bytes(repo, "src/small.txt", 10)
+    _commit_all(repo)
+    _git(repo, "branch", "other")
+    _git(repo, "checkout", "-q", "other")
+    _write_bytes(repo, "src/big-on-other.json", 2 * 1024 * 1024)
+    _commit_all(repo)
+    _git(repo, "checkout", "-q", "-")  # back to the original branch; "other" not checked out
+
+    result = _run(repo, "--all", "--head", "other")
+
+    assert result.returncode == 1
+    assert "big-on-other.json" in result.stdout
+
+    # The currently-checked-out branch itself is unaffected.
+    result_default = _run(repo, "--all")
+    assert result_default.returncode == 0, result_default.stdout + result_default.stderr
+
+
+def test_explicit_staged_paths_requires_double_dash_for_flag_shaped_names(repo: Path):
+    # A staged file literally named "--all" must be checked as a path, not
+    # parsed as the --all flag (which would silently switch to full-tree
+    # mode against HEAD, never inspecting the actual staged content).
+    _write_bytes(repo, "src/small.txt", 10)
+    _commit_all(repo)
+    _write_bytes(repo, "--all", 2 * 1024 * 1024)
+    _git(repo, "add", "--", "--all")
+
+    result = _run(repo, "--", "--all")
+
+    assert result.returncode == 1
+    assert "--all" in result.stdout
+
+

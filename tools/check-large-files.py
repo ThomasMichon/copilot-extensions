@@ -30,32 +30,48 @@ map or a raw diff/patch file is a generated-or-derived artifact that never
 belongs hand-committed, regardless of size (none currently exist in the
 tree, so this has zero pre-existing debt to grandfather).
 
+**Diff mode checks every commit in the range individually, not just the net
+difference between the range's endpoints.** A naive tree-to-tree diff would
+miss a commit that adds an oversized/disallowed blob and a later commit in
+the *same push* that deletes or shrinks it -- the oversized blob is still
+permanently in the pushed history at that point, which is exactly the
+accumulation this guard exists to prevent (it is, verbatim, how the
+coverage-baseline bloat this guard follows up on actually happened: each
+promotion both added a new oversized baseline snapshot and left the
+previous one in history). For each commit newly reachable in the range,
+this diffs it against its own first parent (``git diff-tree``) and checks
+every path THAT commit touches at its own blob size -- not an object-level
+"is this blob content new to the whole repository" scan
+(``git rev-list --objects``), which would silently miss a rename/type-change
+whose content happens to be byte-identical to something already elsewhere
+in history (the content isn't new, even though the path is).
+
 Like ``check-module-size.py`` and ``check-effort-vision-structure.py``, this
-only checks files this diff actually adds, modifies, renames, or
-type-changes (staged files for pre-commit; the push/PR range for pre-push)
--- a pre-existing large file you didn't touch never blocks an unrelated
-change. Renames/type-changes are included (not just add/copy/modify): an
-oversized or disallowed file renamed to dodge detection must still be
-caught at its destination path. ``--all`` additionally offers a full-tree
-sweep for the unconditional CI guard job, so organic drift on trunk is
-still caught even outside any single diff.
+only checks the range's own commits -- nothing already on ``origin/dev``
+before this diff started ever blocks an unrelated change.
 
 Every size check reads the actual git blob -- the index for explicit staged
-paths, the given revision for diff/full-tree modes -- never the working
+paths, the object store for diff/full-tree modes -- never the working
 tree. This makes the guard immune to a working-tree/git mismatch (a staged
 oversized file whose working-tree copy is later shrunk or deleted without
 re-staging would otherwise slip through; conversely an unrelated
-working-tree edit could wrongly flag a safely-sized staged blob). Path
-lists come from NUL-delimited git output (``-z``), never the default
-quoted/escaped form, so a filename with non-ASCII characters, a tab, or a
+working-tree edit could wrongly flag a safely-sized staged blob). All git
+output is read NUL-delimited (``-z``) and decoded explicitly as UTF-8
+(never the ambient locale encoding, which can silently mis-decode a
+non-ASCII path on a non-UTF-8-locale platform) -- never the default quoted/
+locale-decoded form, so a filename with non-ASCII characters, a tab, or a
 newline can't be silently misread as missing and skipped.
 
 Usage::
 
-    check-large-files.py FILE [FILE ...]   # check exactly these paths against the INDEX (pre-commit, staged)
-    check-large-files.py                   # diff HEAD vs --base (default origin/dev), checked at --head
-    check-large-files.py --base <ref>       # diff vs an explicit base
-    check-large-files.py --all              # full-tree sweep (CI guards-full-sweep), checked at --head
+    check-large-files.py -- FILE [FILE ...]  # check exactly these paths against the INDEX (pre-commit, staged)
+                                              # the "--" is required so a staged file literally named
+                                              # "--all" (or any other flag-shaped name) is never parsed
+                                              # as an option instead of a path.
+    check-large-files.py                     # every blob new in HEAD vs --base (default origin/dev)
+    check-large-files.py --base <ref> [--head <ref>]
+    check-large-files.py --all [--head <ref>] # full-tree sweep at one revision (CI guards-full-sweep;
+                                               # default --head: HEAD)
 
 Exit code 0 = nothing over cap (or nothing to check), 1 = a checked file
 violates a cap or is an always-blocked extension.
@@ -88,102 +104,177 @@ IMAGE_EXTENSIONS = {
 ALWAYS_BLOCKED_EXTENSIONS = {".map", ".diff", ".patch"}
 
 
-def _git(*args: str) -> subprocess.CompletedProcess[str]:
+def _git_bytes(*args: str) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
         ["git", "-C", str(REPO), *args],
-        capture_output=True, text=True, check=False,
+        capture_output=True, check=False,
     )
 
 
+def _decode(raw: bytes) -> str:
+    """Decode git output explicitly as UTF-8 (git's own internal encoding
+    for paths/refs), never the ambient locale/code-page encoding a bare
+    ``text=True`` subprocess call would use -- the latter can silently
+    mis-decode a non-ASCII path on a non-UTF-8-locale platform (notably
+    Windows), making ``cat-file`` fail to resolve the (mis-decoded) path
+    and the oversized/disallowed file underneath it go uninspected.
+    ``surrogateescape`` preserves a non-UTF-8 byte sequence (a POSIX
+    filename is not guaranteed to be valid UTF-8) round-trippably instead
+    of raising or silently substituting it away.
+    """
+    return raw.decode("utf-8", errors="surrogateescape")
+
+
+def _git(*args: str) -> str:
+    return _decode(_git_bytes(*args).stdout)
+
+
 def _rev_parse(ref: str) -> str | None:
-    r = _git("rev-parse", "--verify", "--quiet", ref)
-    return r.stdout.strip() or None
+    r = _git_bytes("rev-parse", "--verify", "--quiet", ref)
+    out = _decode(r.stdout).strip()
+    return out or None
 
 
 def _merge_base(base: str, head: str) -> str | None:
-    r = _git("merge-base", base, head)
-    return r.stdout.strip() or None
-
-
-def _changed_files(base_ref: str, head_ref: str = "HEAD") -> list[str]:
-    """Files this branch's own commits add, modify, rename, or type-change,
-    relative to its merge-base with ``base_ref`` -- unaffected by how far
-    ``base_ref``'s own branch has since moved (triple-dot diff), so a PR is
-    never blamed for a file it never touched.
-
-    ``--diff-filter=d`` (exclude only Deletions) rather than an explicit
-    ``ACM`` allowlist: a rename or a type-change (``R``/``T``) must still be
-    checked at its destination path, or renaming an oversized/disallowed
-    file to dodge detection (e.g. a 2MB ``.png`` renamed to ``.json``, or a
-    small ``.txt`` renamed to ``.patch``) would silently bypass the guard.
-
-    Returns NUL-delimited, unquoted paths (``-z``) so a filename containing
-    non-ASCII characters, a tab, or a newline is never silently misread as
-    missing by the caller -- git quotes such names in plain ``--name-only``
-    output, which ``check_file`` would then fail to resolve to the real
-    tracked path.
-    """
-    head = _rev_parse(head_ref)
-    if head is None:
-        print(f"check-large-files: cannot resolve HEAD ({head_ref}); skipping.")
-        return []
-    base = _rev_parse(base_ref)
-    if base is None:
-        print(
-            f"check-large-files: base '{base_ref}' unavailable; "
-            "skipping (fetch it to enable the guard).",
-        )
-        return []
-    mbase = _merge_base(base, head) or base
-    r = _git("diff", "--name-only", "-z", "--diff-filter=d", f"{mbase}..{head}")
-    return [p for p in r.stdout.split("\0") if p]
-
-
-def _tracked_files() -> list[str]:
-    r = _git("ls-files", "-z")
-    return [p for p in r.stdout.split("\0") if p]
+    out = _git("merge-base", base, head).strip()
+    return out or None
 
 
 def _ext(path: str) -> str:
     return Path(path).suffix.lower()
 
 
-def _blob_size(rev: str, path: str) -> int | None:
-    """Size of ``path`` as recorded in git at ``rev``, or None if it doesn't
-    exist there (e.g. a path deleted later in the diff, or one git quotes
-    away under a stale/incorrect name). ``rev`` is either a commit-ish
-    (``"<sha>:<path>"``) or ``""`` for the index (``":<path>"``, stage 0) --
-    this is what makes the check immune to the working tree: a staged-but-
-    not-yet-committed oversized blob, or one whose working-tree copy was
-    since shrunk/deleted without re-staging, is read from the actual git
-    object that would be committed/pushed, never the filesystem.
+#: The well-known SHA of an empty git tree -- used as the "parent" for a
+#: root commit (one with no parent of its own) when diffing a single
+#: commit against its predecessor.
+EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+
+def _commits_in_range(mbase: str, head: str) -> list[str]:
+    out = _git("rev-list", f"{mbase}..{head}")
+    return [line for line in out.split("\n") if line]
+
+
+def _commit_touched_blobs(commit: str) -> list[tuple[str, int]]:
+    """``(path, size)`` for every path ``commit`` itself adds, modifies,
+    renames, or type-changes relative to its own first parent (or the
+    empty tree, for a root commit) -- i.e. this one commit's own diff, at
+    its own post-commit blob size. Checking per-commit rather than only the
+    whole range's net tree-to-tree difference is what makes a rename (same
+    blob content, same object id, merely a new path) still inspected at its
+    new path: ``git rev-list --objects`` considers such a blob *not new* to
+    the repository (the same content is already reachable via its old
+    path/commit), so it would otherwise never surface in an object-level
+    scan -- see the module docstring's new-blobs rationale, which this
+    function implements per-commit rather than for the whole range as one
+    object-reachability query.
     """
-    r = _git("cat-file", "-s", f"{rev}:{path}")
-    if r.returncode != 0:
-        return None
-    try:
-        return int(r.stdout.strip())
-    except ValueError:
-        return None
+    parent_r = _git_bytes("rev-parse", "--verify", "--quiet", f"{commit}^")
+    parent = _decode(parent_r.stdout).strip() or EMPTY_TREE_SHA
+    diff = _git("diff-tree", "--no-commit-id", "--name-only", "-r", "--diff-filter=d", parent, commit)
+    out: list[tuple[str, int]] = []
+    for path in diff.split("\n"):
+        if not path:
+            continue
+        r = _git_bytes("cat-file", "-s", f"{commit}:{path}")
+        if r.returncode != 0:
+            continue  # shouldn't happen for a path diff-tree just reported, but be defensive
+        try:
+            size = int(_decode(r.stdout).strip())
+        except ValueError:
+            continue
+        out.append((path, size))
+    return out
 
 
-def check_file(path: str, *, rev: str) -> str | None:
-    """Return a violation message for ``path`` as it exists at ``rev`` (a
-    commit-ish, or ``""`` for the index), or None if it passes (or doesn't
-    exist there -- e.g. a deleted file in a diff)."""
+def _new_blobs_in_range(base_ref: str, head_ref: str) -> list[tuple[str, int]] | None:
+    """Every ``(path, size)`` touched by any commit newly reachable in
+    ``<merge-base of base_ref and head_ref>..head_ref`` -- i.e. every file
+    this diff's own commits add, modify, rename, or type-change, each
+    checked at ITS OWN introducing commit's blob size. This includes a file
+    added then deleted or shrunk again later in the same range (see the
+    module docstring for why this must not be scoped to only the range's
+    net tree-to-tree difference), and a rename/type-change whose content is
+    byte-identical to something already elsewhere in history (merely
+    re-pathed, so its blob object itself isn't "new" to the repository --
+    see ``_commit_touched_blobs``). Returns None if ``base_ref``/
+    ``head_ref`` can't be resolved (caller should skip the check in that
+    case -- e.g. ``base_ref`` not fetched).
+    """
+    head = _rev_parse(head_ref)
+    if head is None:
+        print(f"check-large-files: cannot resolve head ({head_ref}); skipping.")
+        return None
+    base = _rev_parse(base_ref)
+    if base is None:
+        print(
+            f"check-large-files: base '{base_ref}' unavailable; "
+            "skipping (fetch it to enable the guard).",
+        )
+        return None
+    mbase = _merge_base(base, head) or base
+    out: list[tuple[str, int]] = []
+    for commit in _commits_in_range(mbase, head):
+        out.extend(_commit_touched_blobs(commit))
+    return out
+
+
+def _blobs_in_tree(rev: str) -> list[tuple[str, int]]:
+    """Every ``(path, size)`` tracked in the tree at ``rev`` -- the path
+    inventory and the size both come from the SAME snapshot (``ls-tree``),
+    unlike pairing ``ls-files`` (always the current index) with a separate
+    per-path lookup at an arbitrary ``rev``, which can drift out of sync
+    with each other.
+    """
+    r = _git_bytes("ls-tree", "-r", "-l", "-z", rev)
+    out: list[tuple[str, int]] = []
+    for record in _decode(r.stdout).split("\0"):
+        if not record:
+            continue
+        # "<mode> <type> <sha> <size>\t<path>"
+        meta, _, path = record.partition("\t")
+        if not path:
+            continue
+        fields = meta.split()
+        if len(fields) < 4 or fields[1] != "blob":
+            continue
+        try:
+            size = int(fields[3])
+        except ValueError:
+            continue
+        out.append((path, size))
+    return out
+
+
+def _staged_blobs(paths: list[str]) -> list[tuple[str, int]]:
+    """``(path, size)`` for each of ``paths`` as recorded in the INDEX
+    (stage 0) -- never the working tree. A staged oversized blob whose
+    working-tree copy is later shrunk or deleted without re-staging is
+    still what would actually be committed, and must still be caught; the
+    reverse (an unrelated working-tree edit growing a safely-sized staged
+    blob) must not false-positive.
+    """
+    out: list[tuple[str, int]] = []
+    for path in paths:
+        r = _git_bytes("cat-file", "-s", f":{path}")
+        if r.returncode != 0:
+            continue  # not in the index (e.g. a staged deletion) -- nothing to check
+        try:
+            size = int(_decode(r.stdout).strip())
+        except ValueError:
+            continue
+        out.append((path, size))
+    return out
+
+
+def violation_for(path: str, size: int) -> str | None:
     ext = _ext(path)
     if ext in ALWAYS_BLOCKED_EXTENSIONS:
-        size = _blob_size(rev, path)
-        if size is None:
-            return None
         return (
             f"{path}: '{ext}' files are never checked in (generated/derived "
             "artifacts -- a source map or raw diff/patch belongs in a build "
             "output or a one-off local workflow, not git history)"
         )
-    size = _blob_size(rev, path)
-    if size is None:
-        return None
     cap = IMAGE_CAP_BYTES if ext in IMAGE_EXTENSIONS else DEFAULT_CAP_BYTES
     if size > cap:
         kind = "image" if ext in IMAGE_EXTENSIONS else "non-image"
@@ -197,10 +288,23 @@ def check_file(path: str, *, rev: str) -> str | None:
     return None
 
 
-def check(paths: list[str], *, rev: str) -> list[str]:
+def check(blobs: list[tuple[str, int]]) -> list[str]:
+    """One violation message per distinct ``(path, size)`` pair that fails.
+
+    Deliberately NOT deduped by path alone: the same path can legitimately
+    appear at more than one size within a single diff-mode range (modified
+    more than once, or added oversized then shrunk again later in the same
+    push -- see the module docstring) and EVERY oversized occurrence must
+    be reported, not just whichever one a path-level dedup happened to keep
+    first.
+    """
     violations: list[str] = []
-    for path in sorted(set(paths)):
-        msg = check_file(path, rev=rev)
+    seen: set[tuple[str, int]] = set()
+    for path, size in sorted(blobs):
+        if (path, size) in seen:
+            continue
+        seen.add((path, size))
+        msg = violation_for(path, size)
         if msg:
             violations.append(msg)
     return violations
@@ -210,7 +314,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "paths", nargs="*", metavar="FILE",
-        help="Check exactly these paths, read from the index (pre-commit, staged files).",
+        help=(
+            "Check exactly these paths, read from the index (pre-commit, "
+            "staged files). Always pass '--' before the file list so a "
+            "staged file whose name happens to look like a flag (e.g. "
+            "'--all') is never parsed as one."
+        ),
     )
     parser.add_argument(
         "--base", default="origin/dev", metavar="REF",
@@ -218,28 +327,28 @@ def main() -> int:
     )
     parser.add_argument(
         "--head", default="HEAD", metavar="REF",
-        help="Diff head when no explicit paths are given (default: HEAD).",
+        help="Diff/sweep head (default: HEAD).",
     )
     parser.add_argument(
         "--all", action="store_true",
-        help="Full-tree sweep of every tracked file, ignoring --base/--head/FILE.",
+        help="Full-tree sweep at --head, ignoring --base/FILE.",
     )
     args = parser.parse_args()
 
     if args.all:
-        paths = _tracked_files()
-        scope_desc = "every tracked file"
-        rev = args.head
+        blobs = _blobs_in_tree(args.head)
+        scope_desc = f"every tracked file at {args.head}"
     elif args.paths:
-        paths = args.paths
+        blobs = _staged_blobs(args.paths)
         scope_desc = f"{len(args.paths)} staged file(s)"
-        rev = ""  # the index -- see _blob_size
     else:
-        paths = _changed_files(args.base, args.head)
-        scope_desc = f"this diff's {len(paths)} changed file(s)"
-        rev = args.head
+        found = _new_blobs_in_range(args.base, args.head)
+        if found is None:
+            return 0
+        blobs = found
+        scope_desc = f"this diff's {len(blobs)} newly-introduced blob(s)"
 
-    violations = check(paths, rev=rev)
+    violations = check(blobs)
     if violations:
         print("[FAIL] check-large-files:")
         for v in violations:
