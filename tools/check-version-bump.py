@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require a version bump whenever a plugin's content changes (CONTRIBUTING.md
+"""Require a version bump whenever a plugin's content changes (docs/pipelines.md
 § Release & Versioning).
 
 The marketplace only redeploys a plugin's runtime when its declared version
@@ -22,7 +22,7 @@ What requires a bump, for a push/PR diff (`<base>..HEAD`):
 
 What does **not** require a bump: repo-root files that are not vendored into any
 plugin -- `tools/`, `.github/`, the repo-root `docs/`, `CONTRIBUTING.md`,
-`README.md`, etc. (CONTRIBUTING.md § Version scheme). Also exempt, even under
+`README.md`, etc. (docs/pipelines.md § Version scheme). Also exempt, even under
 `plugins/<p>/`: build/venv/cache artifacts (`build/`, `dist/`, `.venv*/`,
 `.test-venvs/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`, `*.pyc`) and
 dev-hygiene files that never ship (`.gitignore`) -- none change the runtime

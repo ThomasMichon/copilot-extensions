@@ -499,7 +499,12 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > a shared, vendored `libs/<lib>/` requires one for **every** plugin that
 > vendors it. Repo-root files not vendored into any plugin (`tools/`,
 > `.github/`, repo-root `docs/`, `CONTRIBUTING.md`, `README.md`) need no
-> changefile.
+> changefile. **Also exempt, even under `plugins/<p>/`** (delegated to
+> `tools/check-version-bump.py`'s own ignore list): build/venv/cache
+> artifacts (`build/`, `dist/`, `.venv*/`, `.test-venvs/`, `__pycache__/`,
+> `.pytest_cache/`, `.ruff_cache/`, `*.pyc`/`*.pyo`) and dev-hygiene files
+> that never ship (`.gitignore`) — none of these change the runtime
+> payload, so none force a bump or need a changefile.
 >
 > **`worktree-manager` follows the same rule**, even though it is not a
 > marketplace plugin — see `check-vendored-libs-sync.py --list` and

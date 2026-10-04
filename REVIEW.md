@@ -17,8 +17,9 @@ Unlike [`.github/copilot-instructions.md`](.github/copilot-instructions.md)
 review-only.
 
 The full guides remain [`AGENTS.md`](AGENTS.md) (development guide),
-[`CONTRIBUTING.md`](CONTRIBUTING.md) (contribution boundary, versioning &
-release), and [`docs/patterns/README.md`](docs/patterns/README.md) (the
+[`CONTRIBUTING.md`](CONTRIBUTING.md) (contribution boundary & contributor
+process), [`docs/pipelines.md`](docs/pipelines.md) (CI/CD gating &
+versioning), and [`docs/patterns/README.md`](docs/patterns/README.md) (the
 numbered design principles and binding design invariants) -- those are the
 standing review authority; this file is a lens for applying them
 specifically when reviewing a pull request, not a replacement for them.

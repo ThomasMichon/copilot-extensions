@@ -433,7 +433,8 @@ contributor — because to a reader, you are.
 
 ## Reference
 
-`CONTRIBUTING.md` (versioning + release), `AGENTS.md` (dev guide),
+`CONTRIBUTING.md` (contributor process), `docs/pipelines.md` (CI/CD gating,
+versioning + release), `AGENTS.md` (dev guide),
 `TESTING.md` (running the suites), `docs/install-contract.md` (the runtime-plugin
 contract), `docs/architecture.md` (payload/runtime split, ports), `docs/patterns/`
 (how we build — shapes, principles, invariants, focused patterns), `visions/` (the

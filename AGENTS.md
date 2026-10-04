@@ -52,10 +52,10 @@ copilot-extensions/
     hooks.json | extensions/   # optional: session-start hook / session extension
     docs/                      # plugin docs
   libs/<lib>/                  # shared libs vendored into consuming venvs (ssh-manager, credential-relay, config-migrate, endpoint-rendezvous, versioned-runtime, zdd)
-  docs/                        # repo architecture (architecture.md), patterns/, plans/
+  docs/                        # repo architecture (architecture.md), pipelines.md (CI/CD & versioning), patterns/, plans/
   visions/                     # standing north-star visions (should-be)
   .github/plugin/marketplace.json   # marketplace catalog — the SINGLE SOURCE OF TRUTH for the plugin roster + versions
-  CONTRIBUTING.md              # full versioning and release docs
+  CONTRIBUTING.md              # contributor PR flow, code style, commit messages
 ```
 
 > **The roster is deliberately not enumerated here.** The canonical plugin list
