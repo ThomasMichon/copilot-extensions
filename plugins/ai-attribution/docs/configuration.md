@@ -79,16 +79,29 @@ keys are not repo-delegable and are ignored there.
 
 ## Ownership and internal-host inference
 
-The hook parses both host and owner from common HTTPS and SSH local git remotes,
-preferring `origin`. It makes no network call and performs no authentication.
-Both host and owner must match one host-qualified `owned_account`,
-case-insensitively. A bare owner shared across forges never unlocks the
-self-authored carve-out on its own -- that carve-out still depends on who this
-specific contribution actually addresses, not solely on repository ownership.
+The hook resolves the local git remote to inspect using the same effective
+push-remote precedence Git itself uses for `git push`: a per-branch
+`branch.<name>.pushRemote` override, then the repo-wide `remote.pushDefault`,
+then the current branch's tracked `branch.<name>.remote`, then `origin`, then
+-- only when it is the single unambiguous remote -- whatever one remote is
+configured. It never guesses among several unconfigured remotes, matching
+Git's own refusal to pick one. It makes no network call and performs no
+authentication.
 
-The parsed host is also compared, case-insensitively, against every configured
-`internal_host`. A match is a blanket disclosure exemption regardless of
-audience; it is independent of (and checked before) the ownership hint above.
+For `owned_account`, both host and owner from that resolved remote's **push**
+URL (not the fetch source -- a configured `pushurl` can differ) must match one
+host-qualified value, case-insensitively. A bare owner shared across forges
+never unlocks the self-authored carve-out on its own -- that carve-out still
+depends on who this specific contribution actually addresses, not solely on
+repository ownership.
+
+The resolved host is also compared, case-insensitively, against every
+configured `internal_host`. A match is a blanket disclosure exemption
+regardless of audience; it is independent of (and checked before) the
+ownership hint above. When the resolved remote has multiple configured push
+URLs (`git remote set-url --add --push`), every one of them must resolve to a
+configured `internal_host` for the exemption to apply -- one external mirror
+destination is enough to require disclosure.
 
 The resulting hints are anchored only to the repository named by the
 `sessionStart` payload. Both must be re-derived before publishing to any

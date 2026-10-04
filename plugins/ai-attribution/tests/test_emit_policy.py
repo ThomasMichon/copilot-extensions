@@ -1062,6 +1062,39 @@ def test_internal_host_exemption_follows_remote_push_default_override(
         assert "Disclosure turns on who this specific contribution addresses" in context
 
 
+def test_internal_host_exemption_refuses_ambiguous_multi_remote_fallback(
+    tmp_path: Path,
+) -> None:
+    """Git refuses to guess a push remote when several are configured and
+    none is named by pushRemote/pushDefault/branch-tracking/origin -- an
+    arbitrary first-remote pick here could wrongly grant the exemption off
+    whichever remote happens to be configured internal."""
+    repo = _git_repo(tmp_path / "repo")
+    subprocess.run(
+        [
+            "git", "-C", str(repo), "remote", "add", "first",
+            "https://gitea.example.internal/example-owner/repo.git",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git", "-C", str(repo), "remote", "add", "second",
+            "https://github.com/example-owner/repo.git",
+        ],
+        check=True,
+    )
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "internal_host=gitea.example.internal\n",
+    )
+    for hook in _parity_hooks():
+        context = _context(_run(hook, repo, home))
+        assert "operator-only (internal_host)" not in context
+        assert "Disclosure turns on who this specific contribution addresses" in context
+
+
 def test_owned_account_matches_with_an_explicit_url_port(tmp_path: Path) -> None:
     repo = _git_repo(
         tmp_path / "repo",
