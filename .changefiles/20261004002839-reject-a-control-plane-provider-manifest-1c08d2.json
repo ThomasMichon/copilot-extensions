@@ -1,0 +1,9 @@
+{
+  "comment": "Reject a control-plane provider manifest whose command/provider_root carries a leaked pytest tmp_path while the manifest file itself does not (the signature of a test that failed to isolate control_plane_providers_dir() and overwrote the real registry, #5122); warn with a pointed diagnostic instead of silently falling through to the install-trigger message.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

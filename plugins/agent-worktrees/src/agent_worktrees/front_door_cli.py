@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import os
 import platform
-import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 from . import config as cfg, git_ops, output
+from . import control_plane_providers as _cpp
 from . import installer as inst
 
 
@@ -523,8 +522,6 @@ _WORKTREE_MANAGER_BIN = "worktree-manager"
 _WORKTREE_MANAGER_MIN_PICKER_VERSION = (0, 1, 0, 21)
 _WORKTREE_MANAGER_ENGINE_ARGV_ENV = "WORKTREE_MANAGER_ENGINE_ARGV"
 _WORKTREE_MANAGER_ROOT_ENV = "WORKTREE_MANAGER_ROOT"
-_CONTROL_PLANE_PROVIDERS_SUBDIR = "control-plane-providers.d"
-_CONTROL_PLANE_PROVIDERS_DIR_ENV = "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR"
 _CONTROL_PLANE_PROVIDER_ENV = "AGENT_WORKTREES_CONTROL_PLANE_PROVIDER"
 _WORKTREE_MANAGER_REPO_URL = "https://github.com/ThomasMichon/copilot-extensions"
 _WORKTREE_MANAGER_INSTALL_SH = (
@@ -536,95 +533,16 @@ _WORKTREE_MANAGER_INSTALL_PS1 = (
     "copilot-extensions/main/worktree-manager/bootstrap.ps1)"
 )
 
-
-@dataclass(frozen=True)
-class _ControlPlaneProviderManifest:
-    provider: str
-    command: tuple[str, ...]
-    minimum_version: tuple[int, int, int, int]
-    minimum_version_text: str
-    description: str = ""
-    provider_root: str = ""
-    source_path: str = ""
-
-
-_CONTROL_PLANE_PROVIDER_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-
-
-def _parse_comparable_version(text: str) -> tuple[int, int, int, int] | None:
-    match = re.search(r"\b(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?\b", text)
-    if match is None:
-        return None
-    major, minor, patch = (int(match.group(i)) for i in range(1, 4))
-    dev = int(match.group(4)) if match.group(4) is not None else 1_000_000
-    return (major, minor, patch, dev)
-
-
-def _control_plane_providers_dir() -> Path:
-    configured = os.environ.get(_CONTROL_PLANE_PROVIDERS_DIR_ENV, "").strip()
-    if configured:
-        return Path(configured).expanduser()
-    return cfg.install_dir() / _CONTROL_PLANE_PROVIDERS_SUBDIR
-
-
-def _parse_control_plane_provider_manifest(
-    payload: object, *, source_path: str
-) -> _ControlPlaneProviderManifest:
-    if not isinstance(payload, dict):
-        raise ValueError("manifest root must be a JSON object")
-    schema_version = payload.get("schema_version")
-    if isinstance(schema_version, bool) or schema_version != 1:
-        raise ValueError("`schema_version` must be the integer 1")
-    provider = payload.get("provider")
-    if not isinstance(provider, str) or not _CONTROL_PLANE_PROVIDER_TOKEN_RE.fullmatch(provider):
-        raise ValueError("`provider` must be a safe-token string")
-    command = payload.get("command")
-    if (
-        not isinstance(command, list)
-        or not command
-        or any(not isinstance(part, str) or not part for part in command)
-    ):
-        raise ValueError("`command` must be a non-empty array of strings")
-    minimum_version_text = payload.get("minimum_version")
-    if not isinstance(minimum_version_text, str) or not minimum_version_text.strip():
-        raise ValueError("`minimum_version` must be a non-empty version string")
-    minimum_version = _parse_comparable_version(minimum_version_text.strip())
-    if minimum_version is None:
-        raise ValueError("`minimum_version` must parse as MAJOR.MINOR.PATCH[-devN]")
-    description = payload.get("description", "")
-    if not isinstance(description, str):
-        raise ValueError("`description` must be a string when present")
-    provider_root = payload.get("provider_root", "")
-    if not isinstance(provider_root, str):
-        raise ValueError("`provider_root` must be a string when present")
-    return _ControlPlaneProviderManifest(
-        provider=provider,
-        command=tuple(command),
-        minimum_version=minimum_version,
-        minimum_version_text=minimum_version_text.strip(),
-        description=description,
-        provider_root=provider_root,
-        source_path=source_path,
-    )
-
-
-def _discover_control_plane_provider_manifests() -> dict[str, _ControlPlaneProviderManifest]:
-    manifests: dict[str, _ControlPlaneProviderManifest] = {}
-    root = _core_helper("_control_plane_providers_dir", _control_plane_providers_dir)()
-    try:
-        entries = sorted(root.glob("*.json"))
-    except OSError:
-        return manifests
-    for path in entries:
-        try:
-            manifest = _parse_control_plane_provider_manifest(
-                json.loads(path.read_text(encoding="utf-8")),
-                source_path=str(path),
-            )
-        except (OSError, ValueError, TypeError):
-            continue
-        manifests.setdefault(manifest.provider, manifest)
-    return manifests
+# See control_plane_providers.py (extracted from this module to stay under
+# its own zero-headroom 1000-line cap): manifest parsing/discovery and the
+# leaked-pytest-tmp_path guard (copilot-extensions#5122).
+_ControlPlaneProviderManifest = _cpp._ControlPlaneProviderManifest
+_CONTROL_PLANE_PROVIDERS_DIR_ENV = _cpp._CONTROL_PLANE_PROVIDERS_DIR_ENV
+_parse_comparable_version = _cpp._parse_comparable_version
+_control_plane_providers_dir = _cpp._control_plane_providers_dir
+_LeakedTestTmpPathManifestError = _cpp._LeakedTestTmpPathManifestError
+_parse_control_plane_provider_manifest = _cpp._parse_control_plane_provider_manifest
+_discover_control_plane_provider_manifests = _cpp._discover_control_plane_provider_manifests
 
 
 def _select_control_plane_provider_manifest() -> _ControlPlaneProviderManifest | None:
