@@ -96,7 +96,7 @@ class TestPauseWorktree:
     ):
         """A claim pause reclaims must show up in the durable claim-history
         ledger immediately -- same as `claims sweep --apply` -- not just
-        flip silently in the YAML (2026-10-03 review finding)."""
+        flip silently in the YAML."""
         config, wid, _wt_path, _remote = pr_repo
         from agent_worktrees import claim_history, sweep
         from agent_worktrees import config as cfg_mod

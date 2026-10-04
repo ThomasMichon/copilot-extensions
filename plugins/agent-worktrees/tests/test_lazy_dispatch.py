@@ -262,6 +262,7 @@ def _deferred_only_global_names() -> frozenset[str]:
         ("list-sessions", ["list-sessions"]),
         ("reconcile-sessions", ["reconcile-sessions"]),
         ("picker-reconcile-local", ["picker-reconcile-local", "--json"]),
+        ("pause", ["pause", "--json"]),
     ],
 )
 def test_cluster_free_command_handler_body_runs_without_cluster(command, argv, monkeypatch, capsys):
