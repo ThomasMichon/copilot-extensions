@@ -1,0 +1,9 @@
+{
+  "comment": "Fix --at validation bypassing the JSON-error path for 'status --json'",
+  "changes": [
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}

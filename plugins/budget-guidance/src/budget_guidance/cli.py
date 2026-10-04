@@ -48,28 +48,28 @@ def _render_human(posture: dict[str, Any]) -> str:
 
 
 def _status(args: argparse.Namespace) -> int:
-    at = parse_instant(args.at, "--at") if args.at else datetime.now(timezone.utc)
-    config_path = Path(args.config).expanduser()
-    if not config_path.is_file():
-        posture = unavailable_posture(at, f"configuration not found: {config_path}")
-    else:
-        try:
+    try:
+        at = parse_instant(args.at, "--at") if args.at else datetime.now(timezone.utc)
+        config_path = Path(args.config).expanduser()
+        if not config_path.is_file():
+            posture = unavailable_posture(at, f"configuration not found: {config_path}")
+        else:
             posture = build_posture(parse_config(load_json(config_path)), at)
-        except ModelError as exc:
-            if args.json:
-                print(
-                    json.dumps(
-                        {
-                            "schema": "copilot-extensions.budget-posture-error",
-                            "version": 1,
-                            "error": str(exc),
-                        },
-                        sort_keys=True,
-                    )
+    except ModelError as exc:
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "schema": "copilot-extensions.budget-posture-error",
+                        "version": 1,
+                        "error": str(exc),
+                    },
+                    sort_keys=True,
                 )
-            else:
-                print(f"budget-guidance: invalid configuration: {exc}", file=sys.stderr)
-            return 2
+            )
+        else:
+            print(f"budget-guidance: invalid configuration: {exc}", file=sys.stderr)
+        return 2
     if args.json:
         print(json.dumps(posture, indent=2, sort_keys=True))
     else:

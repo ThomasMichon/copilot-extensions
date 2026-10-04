@@ -75,6 +75,13 @@ def test_invalid_config_is_a_machine_readable_error(tmp_path, capsys):
     assert error["schema"] == "copilot-extensions.budget-posture-error"
 
 
+def test_invalid_at_is_a_machine_readable_error(capsys):
+    assert main(["status", "--at", "not-a-timestamp", "--json"]) == 2
+    error = json.loads(capsys.readouterr().out)
+    assert error["schema"] == "copilot-extensions.budget-posture-error"
+    assert "--at must be a valid RFC 3339 instant" in error["error"]
+
+
 def test_huge_freshness_returns_modeled_configuration_error(tmp_path, capsys):
     config = tmp_path / "config.json"
     _write_config(config)
