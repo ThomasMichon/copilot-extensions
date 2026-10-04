@@ -1306,22 +1306,23 @@ def test_seed_targets_the_pane_inside_its_own_session_only():
         missing = mux_seed_pane("%1", "Continue: build", session_name="wt-other",
                                 ready_timeout=100.0, poll_interval=0.0, settle=0.0)
     assert ok["submitted"] is True
-    assert seen and all(target == "wt-new:0.0" for _verb, target in seen)
+    assert seen and all(target == "wt-new:0.%1" for _verb, target in seen)
     assert missing["reason"] == "pane-target-unresolved" and missing["sent"] is False
-    assert len(seen) == len([s for s in seen if s[1] == "wt-new:0.0"])  # nothing sent for wt-other
+    assert len(seen) == len([s for s in seen if s[1] == "wt-new:0.%1"])  # nothing sent for wt-other
 
 
 def test_seed_follows_its_pane_when_the_layout_changes_during_the_wait():
     """``session:window.pane`` is a position: when the pane moves mid-wait,
     readiness seen at the old position doesn't count, and every capture and
-    keystroke goes to where the pane is now, never to whatever took its place."""
+    keystroke goes to where the pane is now (bound to its id there), never to
+    whatever took its place."""
     ready = "press esc to interrupt"
-    where = iter(["=wt-x:0.0", "=wt-x:0.0", "=wt-x:0.1"])
+    where = iter(["=wt-x:0.0", "=wt-x:0.0", "=wt-x:1.0"])
     seen: list[tuple[str, str]] = []
     typed = {"done": False}
 
     def locate(pane, mux, session_name=None):
-        return next(where, "=wt-x:0.1")
+        return next(where, "=wt-x:1.0")
 
     def run(argv, **kw):
         from types import SimpleNamespace
@@ -1329,7 +1330,7 @@ def test_seed_follows_its_pane_when_the_layout_changes_during_the_wait():
         at = argv[argv.index("-t") + 1]
         seen.append((argv[1], at))
         if argv[1] == "capture-pane":
-            if at == "=wt-x:0.0":  # another Copilot now sits here, also ready
+            if at == "=wt-x:0.%9":  # read before the move: proves nothing now
                 return SimpleNamespace(stdout=ready, returncode=0)
             out = f"{ready}\nContinue: build" if typed["done"] else ready
             return SimpleNamespace(stdout=out, returncode=0)
@@ -1344,10 +1345,49 @@ def test_seed_follows_its_pane_when_the_layout_changes_during_the_wait():
         out = mux_seed_pane("%9", "Continue: build", session_name="wt-x",
                             ready_timeout=100.0, poll_interval=0.0, settle=0.0)
     assert out["submitted"] is True
-    assert [t for v, t in seen if v == "send-keys"] == ["=wt-x:0.1", "=wt-x:0.1"]
+    assert [t for v, t in seen if v == "send-keys"] == ["=wt-x:1.%9", "=wt-x:1.%9"]
     # Two stable polls at the new position before typing: the old one's didn't count.
     caps = [t for v, t in seen if v == "capture-pane"]
-    assert caps.index("=wt-x:0.1") >= 1 and caps[caps.index("=wt-x:0.1") + 1] == "=wt-x:0.1"
+    assert caps.index("=wt-x:1.%9") >= 1 and caps[caps.index("=wt-x:1.%9") + 1] == "=wt-x:1.%9"
+
+
+def test_seed_keystrokes_are_refused_not_misdirected_when_the_pane_moves_after_lookup():
+    """The pane moves to another window after the lookup but before the
+    keystroke: the mux server refuses ``session:window.%id`` (the pane isn't
+    in that window any more) instead of typing into whatever now sits at the
+    position, and the send is retried where the pane went."""
+    from types import SimpleNamespace
+
+    seed, ready = "Continue: build", "press esc to interrupt"
+    state = {"moved": False, "typed": False}
+    sends: list[tuple[str, list[str], int]] = []
+
+    def locate(pane, mux, session_name=None):
+        return "=wt-x:1.0" if state["moved"] else "=wt-x:0.0"
+
+    def run(argv, **kw):
+        at = argv[argv.index("-t") + 1]
+        if argv[1] == "send-keys" and "-l" in argv and not state["moved"]:
+            state["moved"] = True  # a layout change lands between lookup and keystroke
+        here = "=wt-x:1.%9" if state["moved"] else "=wt-x:0.%9"
+        rc = 0 if at == here else 1  # the server's own identity check
+        if argv[1] == "send-keys":
+            sends.append((at, argv[4:], rc))
+            state["typed"] |= rc == 0 and "-l" in argv
+            return SimpleNamespace(stdout="", returncode=rc)
+        out = f"{ready}\n{seed}" if state["typed"] else ready
+        return SimpleNamespace(stdout=out if rc == 0 else "", returncode=rc)
+
+    with patch("subprocess.run", side_effect=run), patch("time.sleep"), \
+         patch("time.monotonic", side_effect=_Clock()), \
+         patch("agent_worktrees.sessions._mux_bin", return_value="psmux"), \
+         patch("agent_worktrees.sessions_pane_retire._mux_qualified_pane_target", side_effect=locate):
+        out = mux_seed_pane("%9", seed, session_name="wt-x",
+                            ready_timeout=100.0, poll_interval=0.0, settle=0.0)
+    assert all(at.endswith(".%9") for at, _keys, _rc in sends)  # never a bare position
+    assert sends[0] == ("=wt-x:0.%9", ["-l", seed], 1)  # refused at the old window: typed nowhere
+    assert sends[1:] == [("=wt-x:1.%9", ["-l", seed], 0), ("=wt-x:1.%9", ["Enter"], 0)]
+    assert out["submitted"] is True
 
 
 def test_seed_fails_closed_when_its_pane_disappears():
@@ -1611,7 +1651,7 @@ def test_seed_pane_never_dismisses_a_nudge_at_a_position_the_pane_left():
         at = argv[argv.index("-t") + 1]
         seen.append((argv[1], at, argv[4:]))
         if argv[1] == "capture-pane":
-            if at == "=wt-x:0.0" or not state["dismissed"]:
+            if at == "=wt-x:0.%9" or not state["dismissed"]:
                 return SimpleNamespace(stdout=_DESKTOP_APP_NUDGE, returncode=0)
             return SimpleNamespace(stdout=f"{ready}\n{seed}" if state["typed"] else ready,
                                    returncode=0)
@@ -1624,11 +1664,11 @@ def test_seed_pane_never_dismisses_a_nudge_at_a_position_the_pane_left():
          patch("time.monotonic", side_effect=_Clock()), \
          patch("agent_worktrees.sessions._mux_bin", return_value="tmux"), \
          patch("agent_worktrees.sessions_pane_retire._mux_qualified_pane_target",
-               side_effect=lambda *a, **k: next(where, "=wt-x:0.1")):
+               side_effect=lambda *a, **k: next(where, "=wt-x:1.0")):
         out = mux_seed_pane("%9", seed, session_name="wt-x",
                             ready_timeout=100.0, poll_interval=0.0, settle=0.0)
     escapes = [at for verb, at, keys in seen if verb == "send-keys" and keys == ["Escape"]]
-    assert escapes == ["=wt-x:0.1"]  # never the old position
+    assert escapes == ["=wt-x:1.%9"]  # never the old position
     assert out["submitted"] is True
 
 

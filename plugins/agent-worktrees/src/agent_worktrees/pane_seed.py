@@ -48,6 +48,15 @@ def mux_seed_pane(
     def _where() -> str | None:
         return sessions_pane_retire._mux_qualified_pane_target(pane_id, mux_bin, session_name=session_name)
 
+    # ...and each command names the pane by its id inside that session and
+    # window (``session:window.%id``): the mux server resolves that only while
+    # this pane is still there, atomically with the command, so a pane swapped
+    # in after the lookup is never read or typed into -- the command fails.
+    def _bound(at: str) -> str:
+        if not pane_id.startswith("%") or "." not in at:
+            return at
+        return f"{at.rsplit('.', 1)[0]}.{pane_id}"
+
     target = _where()
     if not target:
         return {"ok": False, "pane": pane_id, "ready": False, "sent": False, "submitted": False,
@@ -56,7 +65,7 @@ def mux_seed_pane(
     def _cap(at: str) -> str:
         try:
             r = subprocess.run(
-                [mux_bin, "capture-pane", "-p", "-t", at],
+                [mux_bin, "capture-pane", "-p", "-t", _bound(at)],
                 capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace",
             )
             return (r.stdout or "") if r.returncode == 0 else ""
@@ -104,7 +113,7 @@ def mux_seed_pane(
             # captured nudge is discarded; the next poll captures it afresh.
             if _where() == target:
                 dismissed_nudge = True
-                pane_nudges.dismiss(mux_bin, target)
+                pane_nudges.dismiss(mux_bin, _bound(target))
         else:
             stable, last_ready_sig = 0, None
         if (pane_readiness.is_busy(region) or region != last_region) and idle_window > 0:
@@ -120,15 +129,25 @@ def mux_seed_pane(
                 "reason": "not-ready-timeout"}
 
     def _send(*a: str) -> bool | None:
-        """Send keys to the pane wherever it is now; ``None`` when it is gone."""
-        at = _where()
-        if not at:
-            return None
-        try:
-            r = subprocess.run([mux_bin, "send-keys", "-t", at, *a], capture_output=True, timeout=5)
-            return r.returncode == 0
-        except (OSError, subprocess.TimeoutExpired):
-            return False
+        """Send keys to the pane wherever it is now; ``None`` when it is gone.
+        A send the server refused because the pane left that window in the
+        meantime typed nothing anywhere, so it is retried once where it went."""
+        tried = None
+        for _ in range(2):
+            at = _where()
+            if not at:
+                return None
+            if at == tried:
+                return False  # refused, but not because it moved: a real failure
+            tried = at
+            try:
+                r = subprocess.run([mux_bin, "send-keys", "-t", _bound(at), *a],
+                                   capture_output=True, timeout=5)
+            except (OSError, subprocess.TimeoutExpired):
+                return False
+            if r.returncode == 0:
+                return True
+        return False
 
     # A distinctive head of the seed, whitespace-squashed so terminal soft-wrap
     # (a newline inserted mid-line in the captured buffer) can't defeat the echo
