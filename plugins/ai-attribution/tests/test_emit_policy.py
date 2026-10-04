@@ -1446,6 +1446,58 @@ def test_version_owner_markers_match_manifest_and_fallback() -> None:
     assert 'kernel="[owner: ai-attribution@$plugin_version]' in bash_source
 
 
+def test_hook_prefers_plugin_json_version_over_compiled_in_fallback(
+    tmp_path: Path,
+) -> None:
+    """A hook invoked from its real plugin layout emits plugin.json's version,
+    not its own compiled-in fallback literal -- this is the mechanism that
+    keeps a bumped plugin.json authoritative without a corresponding manual
+    edit to the hook's own fallback constant."""
+    fallback_version = json.loads(
+        (PLUGIN / "plugin.json").read_text(encoding="utf-8")
+    )["version"]
+    manifest_version = "9.9.9-dev99"
+    assert manifest_version != fallback_version
+
+    plugin_copy = tmp_path / "plugin-copy"
+    (plugin_copy / "scripts").mkdir(parents=True)
+    _write(
+        plugin_copy / "plugin.json",
+        json.dumps({"name": "ai-attribution", "version": manifest_version}),
+    )
+    for hook in _parity_hooks():
+        shutil.copy2(hook, plugin_copy / "scripts" / hook.name)
+
+    repo = _git_repo(tmp_path / "repo")
+    home = tmp_path / "home"
+    for hook in _parity_hooks():
+        copied_hook = plugin_copy / "scripts" / hook.name
+        context = _context(_run(copied_hook, repo, home))
+        assert f"[owner: ai-attribution@{manifest_version}]" in context
+        assert f"[owner: ai-attribution@{fallback_version}]" not in context
+
+
+def test_hook_falls_back_to_compiled_in_version_without_plugin_json(
+    tmp_path: Path,
+) -> None:
+    fallback_version = json.loads(
+        (PLUGIN / "plugin.json").read_text(encoding="utf-8")
+    )["version"]
+
+    plugin_copy = tmp_path / "plugin-copy"
+    (plugin_copy / "scripts").mkdir(parents=True)
+    # No plugin.json alongside this copy at all.
+    for hook in _parity_hooks():
+        shutil.copy2(hook, plugin_copy / "scripts" / hook.name)
+
+    repo = _git_repo(tmp_path / "repo")
+    home = tmp_path / "home"
+    for hook in _parity_hooks():
+        copied_hook = plugin_copy / "scripts" / hook.name
+        context = _context(_run(copied_hook, repo, home))
+        assert f"[owner: ai-attribution@{fallback_version}]" in context
+
+
 @pytest.mark.guard
 def test_setup_skill_structurally_owns_fallback_and_policy_setup() -> None:
     source = SETUP_SKILL.read_text(encoding="utf-8")

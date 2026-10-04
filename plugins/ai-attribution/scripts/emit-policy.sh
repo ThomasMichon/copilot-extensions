@@ -3,7 +3,7 @@
 
 set -uo pipefail
 
-plugin_version="0.1.0-dev16"
+plugin_version="0.1.0-dev16" # fallback; main() prefers plugin.json's own version
 max_payload_bytes=65536
 max_config_bytes=65536
 max_config_lines=200
@@ -118,6 +118,23 @@ path_contains_symlink() {
         [[ ! -L "$current" ]] || return 0
     done
     return 1
+}
+
+# Read the authoritative version from this plugin's own plugin.json, rather
+# than a hardcoded literal here, so the embedded `[owner: ai-attribution@...]`
+# marker tracks the version the release-promotion tooling actually bumps
+# (plugin.json, the marketplace entry, and projection owner tags) without
+# needing its own, easily-forgotten bump step. Pure-bash, bounded, and
+# symlink-safe to match this hook's dependency-free, defensive-parsing style;
+# falls back to the compiled-in literal on any unreadable/malformed manifest.
+_plugin_manifest_version() {
+    local manifest="$1" raw
+    [[ -f "$manifest" && -r "$manifest" ]] || return 0
+    path_contains_symlink "$manifest" && return 0
+    raw="$(LC_ALL=C head -c 4097 -- "$manifest" 2>/dev/null)" || return 0
+    (( ${#raw} <= 4096 )) || return 0
+    [[ "$raw" =~ \"version\"[[:space:]]*:[[:space:]]*\"([0-9]+\.[0-9]+\.[0-9]+(-dev[0-9]+)?)\" ]] || return 0
+    printf '%s' "${BASH_REMATCH[1]}"
 }
 
 utf8_is_valid() {
@@ -752,6 +769,16 @@ read_custom_instruction_configs() {
 
 main() {
     local config_home account guide kernel payload_cwd payload_nul=0
+    local script_dir plugin_root manifest_version
+
+    script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || script_dir=""
+    if [[ -n "$script_dir" ]]; then
+        plugin_root="$(cd -- "$script_dir/.." 2>/dev/null && pwd -P)" || plugin_root=""
+        if [[ -n "$plugin_root" ]]; then
+            manifest_version="$(_plugin_manifest_version "$plugin_root/plugin.json")"
+            [[ -n "$manifest_version" ]] && plugin_version="$manifest_version"
+        fi
+    fi
 
     IFS= LC_ALL=C read -r -d '' -n $((max_payload_bytes + 1)) json_text && payload_nul=1
     if (( payload_nul || ${#json_text} > max_payload_bytes )) ||

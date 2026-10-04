@@ -1,7 +1,7 @@
 # Emit the ai-attribution ambient policy for the session-start repository.
 
 $ErrorActionPreference = 'SilentlyContinue'
-$script:PluginVersion = '0.1.0-dev16'
+$script:PluginVersion = '0.1.0-dev16' # fallback; Invoke-Policy prefers plugin.json's own version
 $script:MaxPayloadBytes = 65536
 $script:MaxConfigBytes = 65536
 $script:MaxConfigLines = 200
@@ -72,6 +72,29 @@ function Test-PathContainsReparsePoint([string] $Path) {
         return $false
     } catch {
         return $true
+    }
+}
+
+# Read the authoritative version from this plugin's own plugin.json, rather
+# than a hardcoded literal here, so the embedded `[owner: ai-attribution@...]`
+# marker tracks the version the release-promotion tooling actually bumps
+# (plugin.json, the marketplace entry, and projection owner tags) without
+# needing its own, easily-forgotten bump step. Bounded and reparse-point-safe
+# to match this hook's dependency-free, defensive-parsing style; the caller
+# falls back to the compiled-in literal on any unreadable/malformed manifest.
+function Get-PluginManifestVersion([string] $ManifestPath) {
+    try {
+        if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) { return '' }
+        if (Test-PathContainsReparsePoint $ManifestPath) { return '' }
+        $File = Get-Item -LiteralPath $ManifestPath -Force -ErrorAction Stop
+        if ($File.Length -gt 4096) { return '' }
+        $Raw = [IO.File]::ReadAllText($ManifestPath, [Text.Encoding]::UTF8)
+        if ($Raw -match '"version"\s*:\s*"([0-9]+\.[0-9]+\.[0-9]+(?:-dev[0-9]+)?)"') {
+            return $Matches[1]
+        }
+        return ''
+    } catch {
+        return ''
     }
 }
 
@@ -518,6 +541,15 @@ function Read-OperatorConfig(
 }
 
 function Invoke-Policy {
+    try {
+        if ($PSScriptRoot) {
+            $PluginRoot = Split-Path -Parent $PSScriptRoot
+            $ManifestVersion = Get-PluginManifestVersion (Join-Path $PluginRoot 'plugin.json')
+            if ($ManifestVersion) { $script:PluginVersion = $ManifestVersion }
+        }
+    } catch {
+        # Keep the compiled-in fallback version on any resolution failure.
+    }
     try {
         $Stream = [Console]::OpenStandardInput()
         $Buffer = New-Object byte[] ($script:MaxConfigBytes + 1)
