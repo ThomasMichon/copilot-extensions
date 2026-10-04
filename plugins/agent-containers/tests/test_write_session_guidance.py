@@ -137,13 +137,32 @@ def test_main_always_emits_empty_object(monkeypatch, capsys):
     assert capsys.readouterr().out == "{}"
 
 
+def test_run_contributor_disables_powershell_updatecheck(monkeypatch, tmp_path):
+    # A real pwsh spawn isn't needed to verify this hardening: stub out
+    # _contributor_argv (so the test runs identically on every OS) and
+    # subprocess.run, then assert the env it receives disables PowerShell's
+    # update-check network call on every contributor invocation.
+    monkeypatch.setattr(
+        writer, "_contributor_argv", lambda *args: ["stand-in-shell"]
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        captured["env"] = kwargs.get("env")
+        return SimpleNamespace(returncode=0, stdout=b"{}")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    result = writer._run_contributor(tmp_path, "emit-command-catalog", b"{}")
+    assert result == ""
+    assert captured["env"]["POWERSHELL_UPDATECHECK"] == "Off"
+
+
 # This test's own real-process cost (pwsh -> python3 -> bash, three
 # interpreter/runtime startups chained together) is legitimately higher and
-# more CI-variance-prone than the rest of this suite's pure-unit tests (see
-# issue #4653: observed a >30s pytest-timeout CI flake with no reproducible
-# code-level hang -- local runs consistently complete in well under a
-# second). A dedicated, more generous timeout bounds that real variance
-# without masking an actual hang (a true deadlock would still fail this).
+# more CI-variance-prone than the rest of this suite's pure-unit tests. A
+# dedicated, more generous timeout bounds that real variance without masking
+# an actual hang (a true deadlock would still fail this).
 @pytest.mark.timeout(90)
 def test_powershell_wrapper_writes_bounded_session_file(tmp_path):
     shell = shutil.which("pwsh") or shutil.which("powershell.exe")
