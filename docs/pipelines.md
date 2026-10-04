@@ -506,13 +506,26 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > that never ship (`.gitignore`) — none of these change the runtime
 > payload, so none force a bump or need a changefile.
 >
-> **`worktree-manager` follows the same rule**, even though it is not a
-> marketplace plugin — see `check-vendored-libs-sync.py --list` and
-> `tools/changefile.py`'s own `--plugin` flag (it accepts any recognized
-> consumer identifier, not just a true plugin).
+> **`worktree-manager` follows the same rule, with a narrower footprint.**
+> It is a top-level, out-of-plugin consumer tree with no `plugin.json` and
+> no marketplace entry at all — its release version lives directly in its
+> own `pyproject.toml` (`[project].version`), with its `src/*/__init__.py`
+> `__version__` fallback as the "fourth file" equivalent. Any non-ignored
+> change under `worktree-manager/` (or to a shared lib it consumes, as a
+> real vendored copy or a `uv`-editable canonical-reference pointer)
+> requires a changefile naming it the same way a plugin's own content
+> change does (`python tools/changefile.py add --plugin worktree-manager
+> --type patch --comment "..."` — the `--plugin` flag name is historical;
+> it accepts any recognized consumer identifier).
 >
-> **Before editing a shared lib, find every REAL copy first:** `python
-> tools/check-vendored-libs-sync.py --list`.
+> **Before editing a shared lib, find every consumer first — two commands,
+> not one.** `python tools/check-vendored-libs-sync.py --list` enumerates
+> every REAL, physical vendored copy (`plugins/*/libs/*` and a standalone
+> consumer's own top-level `libs/*`), but a lib consumed *solely* through a
+> `uv`-editable canonical-reference pointer (no local copy at all) is
+> invisible to it. `python tools/check-version-bump.py --list` additionally
+> names those pointer-only consumers — check both before assuming you've
+> found every plugin a shared-lib change reaches.
 
 **All version files for a plugin must be bumped together in the same
 commit.** If any file is out of sync: a stale `plugin.json` makes

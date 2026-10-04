@@ -390,7 +390,7 @@ def test_violation_message_for_standalone_consumer_omits_impossible_fix(repo: Pa
     assert len(wtm_lines) == 1, result.stderr
     assert "plugin.json" not in wtm_lines[0]
     assert "marketplace.json" not in wtm_lines[0]
-    assert "pyproject.toml" in wtm_lines[0]
+    assert "changefile" in wtm_lines[0]
 
 
 def test_symlinked_pyproject_fails_closed_instead_of_dropping_consumer(repo: Path):

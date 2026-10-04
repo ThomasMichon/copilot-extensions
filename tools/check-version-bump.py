@@ -323,12 +323,12 @@ def check(base_ref: str, head_ref: str) -> tuple[int, list[str]]:
         if head_ver == base_ver:
             reasons = ", ".join(sorted(needing[plugin]))
             if (PLUGINS_DIR / plugin).is_dir():
-                fix = "bump it (plugin.json + pyproject.toml + marketplace.json, per CONTRIBUTING.md)"
+                fix = "add a changefile for it (python tools/changefile.py add --plugin <name> --type patch --comment '...'; see docs/pipelines.md § Release & Versioning)"
             else:
                 # A standalone, out-of-plugin consumer (e.g. worktree-manager)
                 # has neither a plugin.json nor a marketplace entry -- naming
                 # them here would prescribe an impossible fix (PR #4514 review).
-                fix = "bump its own pyproject.toml [project].version (+ source __version__ fallback)"
+                fix = "add a changefile naming it (python tools/changefile.py add --plugin <name> --type patch --comment '...'; see docs/pipelines.md § Release & Versioning)"
             violations.append(f"{plugin}: content changed ({reasons}) but version is still {head_ver} -- {fix}.")
     return (1 if violations else 0), violations
 
@@ -362,11 +362,13 @@ def main(argv: list[str] | None = None) -> int:
         for v in violations:
             print(f"  - {v}", file=sys.stderr)
         print(
-            "\nEvery plugin whose content changes must bump its version so the "
-            "marketplace redeploys it (an un-bumped change serves stale, "
-            "dotfiles #1025). Use a patch `-devN` bump (CONTRIBUTING.md § "
-            "'Default: bump patch with -devN'). A shared `libs/<lib>` change "
-            "must bump every plugin that vendors it.",
+            "\nThis standalone tool is retired from CI enforcement in favor of "
+            "tools/check-changefile-presence.py -- a touched plugin needs a "
+            "pending changefile, not a hand-applied version bump: "
+            "python tools/changefile.py add --plugin <name> --type patch "
+            "--comment '...' (see docs/pipelines.md § Release & Versioning). "
+            "A shared `libs/<lib>` change needs one for every plugin that "
+            "vendors it.",
             file=sys.stderr,
         )
         return 1
