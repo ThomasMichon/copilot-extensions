@@ -5267,6 +5267,32 @@ def test_manager_update_seg_appears_in_the_topbar_next_to_the_version():
     assert "\u2713" in text
 
 
+def test_manager_and_engine_update_segs_are_distinguishable_when_both_current():
+    """The Manager's own update segment and the engine/marketplace update
+    segment are two independent "current" verdicts for two genuinely
+    different things (the Manager binary itself vs. the engine/marketplace
+    payload). The Manager's own segment must always carry its distinguishing
+    `mgr` qualifier, so the two never render as indistinguishable repeated
+    bare checkmarks."""
+    from worktree_manager.production_picker.picker_tui.engine import PickerScreen
+
+    s = PickerScreen(_fixture_source(), live=False)
+    s.setup_sync_for_tests()
+    s.htab = 0
+    s.manager_update_state = "current"
+    s.update_state = "current"
+    text = "".join(row.plain for row in s.topbar(140))
+    # The engine segment's own bare checkmark is still present...
+    assert "\u2713" in text
+    # ...but the Manager's own segment is never a bare, unqualified checkmark
+    # -- it always carries its "mgr" qualifier, so the two never render as
+    # two identical, unlabeled glyphs.
+    assert "mgr\u2713" in text
+    # Exactly one bare (unqualified) checkmark remains: the engine's own.
+    assert text.count("\u2713") == 2  # "mgr✓" contributes one, the engine's own the other
+    assert text.replace("mgr\u2713", "").count("\u2713") == 1
+
+
 def test_manager_update_seg_stays_short_when_available():
     """Regression: the Manager's own "available" text used to name the
     remote version and the literal `worktree-manager update` command inline,
