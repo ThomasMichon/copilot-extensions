@@ -1466,6 +1466,7 @@ def _parse_claim_mapping(raw: dict) -> ResourceClaim:
         state=state,
         note=str(raw.get("note", "")),
         handoff_bundle=str(raw.get("handoff_bundle", "")),
+        revision=int(raw.get("revision", 0) or 0),
     )
 
 
@@ -1482,6 +1483,8 @@ def _claim_to_yaml_dict(claim: ResourceClaim) -> dict[str, object]:
         d["note"] = claim.note
     if claim.handoff_bundle:
         d["handoff_bundle"] = claim.handoff_bundle
+    if claim.revision:
+        d["revision"] = claim.revision
     return d
 
 

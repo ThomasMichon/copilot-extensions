@@ -170,9 +170,66 @@ class TestPauseWorktree:
         assert result.settled == []
         assert any(c["ref"] == "o/r#99" for c in result.remaining)
 
+    def test_toctou_race_survives_an_aba_release_and_re_add_through_the_real_path(
+        self, pr_repo, monkeypatch,
+    ):
+        """The sharpest version of the race: another process releases the
+        claim and re-adds it through the REAL `add_resource_claim` write
+        path, restoring byte-identical kind/ref/state/note/created_at
+        (nothing here changes except the hidden `revision` counter
+        `add_resource_claim` always bumps on reactivation). A pure content
+        fingerprint would see "nothing changed" and apply the stale
+        verdict; including `revision` must still catch it."""
+        config, wid, _wt_path, _remote = pr_repo
+        from agent_worktrees import config as cfg_mod
+        from agent_worktrees import sweep, tracking_claims
+
+        tracking_dir = Path(cfg_mod.tracking_dir())
+        yaml_path = tracking_dir / f"{wid}.yaml"
+        _add_claim(
+            tracking_dir, wid,
+            ResourceClaim(
+                kind="pr", ref="o/r#100", state="active",
+                created_at="2026-01-01T00:00:00", revision=1,
+            ),
+        )
+
+        monkeypatch.setattr(sweep, "claim_gone", lambda claim, config: True)
+        monkeypatch.setattr(sweep, "claim_safe", lambda claim, config: True)
+
+        real_make_resolvers = sweep.make_resolvers
+
+        def _make_resolvers_then_aba_race(race_config):
+            gone_of, safe_of = real_make_resolvers(race_config)
+            rec = tracking.load_record(yaml_path)
+            # Release, then immediately re-add through the real write path
+            # with the EXACT same kind/state/created_at -- only `revision`
+            # changes (add_resource_claim's own reactivate branch).
+            for c in rec.resources:
+                if c.ref == "o/r#100":
+                    c.state = "at-rest"
+            tracking.save_record(rec, yaml_path)
+            rec = tracking.load_record(yaml_path)
+            tracking_claims.add_resource_claim(
+                rec,
+                ResourceClaim(
+                    kind="pr", ref="o/r#100", state="active",
+                    created_at="2026-01-01T00:00:00",
+                ),
+            )
+            return gone_of, safe_of
+
+        monkeypatch.setattr(sweep, "make_resolvers", _make_resolvers_then_aba_race)
+
+        result = pause_mod.pause_worktree(wid, config)
+
+        assert result.settled == []
+        assert any(c["ref"] == "o/r#100" for c in result.remaining)
+
         rec = tracking.load_record(yaml_path)
-        claim = next(c for c in rec.resources if c.ref == "o/r#99")
+        claim = next(c for c in rec.resources if c.ref == "o/r#100")
         assert claim.state == "active"
+        assert claim.revision == 2
 
     def test_reports_a_genuinely_open_claim_without_erroring(self, pr_repo, monkeypatch):
         """The whole point: an unsettled, NOT provably-safe claim is reported,
@@ -264,7 +321,7 @@ class TestClaimFingerprint:
     def test_any_changed_field_changes_the_fingerprint(self):
         base = ResourceClaim(
             kind="pr", ref="o/r#1", state="active", note="n",
-            created_at="t1", handoff_bundle="",
+            created_at="t1", handoff_bundle="", revision=1,
         )
         original = pause_mod._claim_fingerprint(base)
         for field_name, new_value in [
@@ -273,10 +330,11 @@ class TestClaimFingerprint:
             ("note", "different"),
             ("created_at", "t2"),
             ("handoff_bundle", "bundle-1"),
+            ("revision", 2),
         ]:
             mutated = ResourceClaim(
                 kind="pr", ref="o/r#1", state="active", note="n",
-                created_at="t1", handoff_bundle="",
+                created_at="t1", handoff_bundle="", revision=1,
             )
             setattr(mutated, field_name, new_value)
             assert pause_mod._claim_fingerprint(mutated) != original, (

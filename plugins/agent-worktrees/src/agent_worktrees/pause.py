@@ -1,6 +1,5 @@
-"""``pause`` -- non-destructive worktree wrap-up (requested alongside the
-resource-obligation-settlement finalize gate: see issue #677 in a
-consuming harness repo).
+"""``pause`` -- non-destructive worktree wrap-up, an alternative to
+``finalize``'s all-or-nothing resource-obligation-settlement gate.
 
 ``finalize`` is intentionally all-or-nothing on its obligation gate: a
 worktree with any unsettled outbound claim either settles every one of
@@ -43,14 +42,17 @@ resume in this exact worktree) is still genuinely open -- leave it."
    record's lock must never block an unrelated claim writer for that long
    (the lock may never be held across network/git I/O at all -- see
    ``tracking._RecordLock``'s own scope invariant). Each cached verdict is
-   fenced against a **content fingerprint** of the exact claim it was
-   computed for (every identity/state field: kind, ref, state, note,
-   created_at, handoff_bundle) rather than a timestamp or a file-level
-   stat -- a single in-memory read pairs the fingerprint with the claim
-   deterministically (no separate stat() call to race against), and any
-   release-and-re-add of the same ref changes at least one of those
-   fields, so a stale verdict can never apply to a different incarnation
-   sharing the same ref. A settled **``pr``-kind** claim is recorded into
+   fenced against a fingerprint of the exact claim it was computed for
+   (every identity/state field: kind, ref, state, note, created_at,
+   handoff_bundle, **and** ``ResourceClaim.revision`` -- bumped by
+   :func:`tracking_claims.add_resource_claim` on every add/reactivate of a
+   ``ref``) rather than a timestamp or a file-level stat -- a single
+   in-memory read pairs the fingerprint with the claim deterministically
+   (no separate ``stat()`` call to race against), and the ``revision``
+   component specifically closes the ABA case a pure content comparison
+   cannot: a release immediately followed by a re-add that restores
+   byte-identical content still bumps ``revision``, so a stale verdict can
+   never apply to that reactivated claim. A settled **``pr``-kind** claim is recorded into
    the durable claim-history ledger (tagged with the owning record's own
    project, never the ambient one) the same way the fleet-wide sweep
    does, so ``claims history <ref>`` reflects it immediately --
@@ -194,19 +196,25 @@ def pause_worktree(
 
 
 def _claim_fingerprint(claim: tracking.ResourceClaim) -> str:
-    """Content fingerprint of every field that defines this claim's
-    identity/state (kind, ref, state, note, created_at, handoff_bundle).
+    """Fingerprint of every field that defines this claim's identity/state
+    (kind, ref, state, note, created_at, handoff_bundle, revision).
 
     Deterministic and computed from a single in-memory read -- unlike a
-    filesystem ``stat()``, there is no separate call to race against, and
-    unlike a single field (e.g. ``created_at``, whose ``_now_iso()`` stamp
-    has only one-second resolution), any release-and-re-add of the same
-    ``ref`` changes at least one of these fields, so a cached verdict can
-    never silently apply to a different incarnation sharing the same ref.
+    filesystem ``stat()``, there is no separate call to race against. The
+    content fields alone are not quite enough: a release immediately
+    followed by a re-add can restore byte-identical kind/ref/state/note/
+    created_at (an ABA rewrite -- timestamps are only one-second resolution
+    and some claims carry no timestamp at all), which a pure content
+    fingerprint cannot distinguish from "nothing happened." Including
+    ``revision`` closes that gap: :func:`tracking_claims.add_resource_claim`
+    bumps it on every add/reactivate of a ``ref`` (never on a settle/
+    release/sweep flip, which only ever makes a claim less live), so a
+    release-and-re-add always changes it even when every other field
+    round-trips to its original value.
     """
     raw = "\x00".join([
         claim.kind, claim.ref, claim.state, claim.note,
-        claim.created_at, claim.handoff_bundle,
+        claim.created_at, claim.handoff_bundle, str(claim.revision),
     ])
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 

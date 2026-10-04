@@ -104,6 +104,16 @@ class ResourceClaim:
     state: str = "active"
     note: str = ""
     handoff_bundle: str = ""
+    #: Bumped by :func:`add_resource_claim` on every add/reactivate of this
+    #: `ref` (never by a settle/release/sweep flip, which only ever makes a
+    #: claim less live). Exists so a caller computing a disposition verdict
+    #: outside a record lock (e.g. ``pause_worktree``'s reclaim-sweep
+    #: preview) can fence that verdict against the exact incarnation it was
+    #: computed for -- a release immediately followed by a re-add can
+    #: otherwise restore byte-identical kind/ref/state/note/created_at
+    #: (an ABA rewrite a pure content fingerprint cannot catch), while this
+    #: monotonic counter always changes across that reactivation.
+    revision: int = 0
 
     @property
     def is_live(self) -> bool:
@@ -326,11 +336,16 @@ def add_resource_claim(
             existing.note = claim.note
         if claim.created_at:
             existing.created_at = claim.created_at
+        # Bump unconditionally, even when every other field round-trips to
+        # an identical value (an ABA release+re-add) -- see the field's own
+        # docstring on ResourceClaim.
+        existing.revision += 1
         if reopens:
             reopen_finalized_owner(record, reason=f"reactivated claim {claim.ref}")
         if save:
             tracking.save_record(record)
         return existing
+    claim.revision += 1
     record.resources.append(claim)
     if reopens:
         reopen_finalized_owner(record, reason=f"new claim {claim.ref}")

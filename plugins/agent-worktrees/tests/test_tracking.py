@@ -4020,6 +4020,30 @@ class TestAddResourceClaim:
         loaded = load_record(tmp_path / "wt-A.yaml")
         assert [c.ref for c in loaded.resources] == ["anomalous-potato/copilot-extensions/wt-B"]
 
+    def test_revision_round_trips_through_yaml(self, tmp_path: Path):
+        rec = self._rec(tmp_path)
+        ref = "anomalous-potato/copilot-extensions/wt-D"
+        add_resource_claim(rec, ResourceClaim(kind="pr", ref=ref, state="active"), save=False)
+        add_resource_claim(
+            rec, ResourceClaim(kind="pr", ref=ref, state="at-rest"), save=False,
+        )
+        assert rec.resources[0].revision == 2
+        save_record(rec, tmp_path / "wt-A.yaml")
+        loaded = load_record(tmp_path / "wt-A.yaml")
+        assert loaded.resources[0].revision == 2
+
+    def test_missing_revision_defaults_to_zero_on_load(self, tmp_path: Path):
+        """A record written before this field existed must load cleanly."""
+        rec = self._rec(tmp_path)
+        add_resource_claim(
+            rec, ResourceClaim(kind="worktree", ref="legacy/ref"), save=False,
+        )
+        rec.resources[0].revision = 0  # simulate a pre-existing, unversioned claim
+        save_record(rec, tmp_path / "wt-A.yaml")
+        loaded = load_record(tmp_path / "wt-A.yaml")
+        assert loaded.resources[0].revision == 0
+
+
     def test_dedup_by_ref_refreshes(self, tmp_path: Path):
         rec = self._rec(tmp_path)
         ref = "anomalous-potato/copilot-extensions/wt-B"
@@ -4030,6 +4054,38 @@ class TestAddResourceClaim:
         assert len(rec.resources) == 1
         assert rec.resources[0].state == "released"
         assert rec.resources[0].note == "second"
+
+    def test_revision_bumps_on_every_add_and_reactivate(self, tmp_path: Path):
+        """A caller fencing a cached disposition verdict against the claim's
+        content (e.g. pause_worktree's reclaim-sweep preview) needs
+        `revision` to change on EVERY add/reactivate -- even an ABA
+        release-and-re-add that restores byte-identical kind/ref/state/
+        note/created_at must still bump it."""
+        rec = self._rec(tmp_path)
+        ref = "anomalous-potato/copilot-extensions/wt-C"
+
+        first = add_resource_claim(
+            rec, ResourceClaim(kind="pr", ref=ref, state="active", created_at="t1"),
+            save=False,
+        )
+        assert first.revision == 1
+
+        # Release, then re-add with IDENTICAL kind/state/created_at.
+        released = add_resource_claim(
+            rec, ResourceClaim(kind="pr", ref=ref, state="at-rest", created_at="t1"),
+            save=False,
+        )
+        assert released.revision == 2
+
+        reactivated = add_resource_claim(
+            rec, ResourceClaim(kind="pr", ref=ref, state="active", created_at="t1"),
+            save=False,
+        )
+        assert reactivated is released  # same in-place-updated entry
+        assert reactivated.revision == 3
+        assert reactivated.kind == "pr"
+        assert reactivated.state == "active"
+        assert reactivated.created_at == "t1"
 
     def test_complete_session_worktree_can_add_claim(self, tmp_path: Path):
         rec = self._rec(tmp_path)
