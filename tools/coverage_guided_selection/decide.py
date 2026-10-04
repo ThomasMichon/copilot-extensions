@@ -60,10 +60,20 @@ FRESH_SELECTION = "fresh diff-scoped selection"
 
 @dataclass(frozen=True)
 class SelectionDecision:
-    """The one auditable record of how a CI run chose its tests."""
+    """The one auditable record of how a CI run chose its tests.
+
+    `selected_tests` is `None` precisely when there is no curated evidence
+    at all to draw a subset from (no baseline ever resolved, or its asset
+    couldn't be fetched) -- the caller must run its own full/default test
+    suite in that case, never interpret `None` as "run nothing". A real
+    tuple (including a genuinely empty `()`) always means a curation step
+    actually ran and produced that exact set, zero tests included (e.g. an
+    exhausted runtime budget) -- a meaningfully different, evidenced
+    outcome from "no evidence existed to curate from" at all.
+    """
 
     mode: str  # "selected" | "fallback"
-    selected_tests: tuple[str, ...]
+    selected_tests: tuple[str, ...] | None
     reason: str
     #: The resolved baseline's own `measured_commit` (the `dev` commit
     #: coverage was collected against), or `None` if no baseline resolved.
@@ -79,7 +89,7 @@ class SelectionDecision:
     def as_dict(self) -> dict:
         return {
             "mode": self.mode,
-            "selected_tests": list(self.selected_tests),
+            "selected_tests": None if self.selected_tests is None else list(self.selected_tests),
             "reason": self.reason,
             "baseline_generation": self.baseline_generation,
             "baseline_commit_on_main": self.baseline_commit_on_main,
@@ -118,7 +128,7 @@ def decide(
     if resolved is None:
         return SelectionDecision(
             mode="fallback",
-            selected_tests=(),
+            selected_tests=None,
             reason=NO_BASELINE_AVAILABLE,
             baseline_generation=None,
             baseline_commit_on_main=None,
@@ -129,7 +139,7 @@ def decide(
     except BaselineFetchError as error:
         return SelectionDecision(
             mode="fallback",
-            selected_tests=(),
+            selected_tests=None,
             reason=f"{FETCH_FAILED_PREFIX}{error}",
             baseline_generation=resolved.baseline.get("measured_commit"),
             baseline_commit_on_main=resolved.baseline_commit,
@@ -144,14 +154,15 @@ def decide(
         age_threshold_seconds=age_threshold_seconds,
     )
 
-    remapped = remap_or_invalidate_baseline(
-        repo_root,
-        ResolvedBaseline(baseline=full_baseline, baseline_commit=resolved.baseline_commit),
-        fork_commit,
-    )
-
     if assessment.exceeded:
-        fb = compute_fallback_set(remapped, fallback_runtime_budget_s, eligible_tests=eligible_tests)
+        # Curate from the FULL earned baseline, never `remapped`: the
+        # remap/invalidate step (below) drops coverage for exactly the
+        # files this diff touches, so curating from it would shrink the
+        # fallback universe precisely on the risky files that most need
+        # coverage. Curation only needs the full, un-remapped per-test
+        # coverage/cost data; remapped line coordinates matter only to
+        # diff-scoped `select_tests`, not to `compute_fallback_set`.
+        fb = compute_fallback_set(full_baseline, fallback_runtime_budget_s, eligible_tests=eligible_tests)
         return SelectionDecision(
             mode="fallback",
             selected_tests=fb.selected_tests,
@@ -162,9 +173,17 @@ def decide(
             fallback_set=fb.as_dict(),
         )
 
+    remapped = remap_or_invalidate_baseline(
+        repo_root,
+        ResolvedBaseline(baseline=full_baseline, baseline_commit=resolved.baseline_commit),
+        fork_commit,
+    )
+
     sel = select_tests(remapped, changed_lines)
     if sel.fallback_triggered:
-        fb = compute_fallback_set(remapped, fallback_runtime_budget_s, eligible_tests=eligible_tests)
+        # Same reasoning as the debt-exceeded branch above: curate from the
+        # full baseline, not the remapped/invalidated one.
+        fb = compute_fallback_set(full_baseline, fallback_runtime_budget_s, eligible_tests=eligible_tests)
         reasons_str = "; ".join(
             f"{r.file}:{r.line} {r.reason}" for r in sel.fallback_reasons
         )

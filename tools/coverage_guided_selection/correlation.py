@@ -158,39 +158,71 @@ def fetch_baseline_asset(repo: str, pointer: dict) -> dict:
     actually fetches the real coverage map the pointer only ever points at.
 
     Performs real network I/O via ``gh release download``; raises
-    `BaselineFetchError` on any failure (a missing release/asset, a
-    malformed JSON payload) rather than returning a partial/empty baseline
-    a caller could mistake for "nothing covered" -- a genuinely empty
-    coverage map and a failed download must never look the same to a
-    caller deciding whether to trust a selection.
+    `BaselineFetchError` on any failure -- a missing `gh` executable (an
+    `OSError` subprocess itself would raise), a missing release/asset, a
+    malformed JSON payload, or a syntactically-valid-but-wrong document
+    (not a dict, missing `generated_at`, or whose own `plugin`/
+    `measured_commit` don't match the pointer that named it -- the
+    correlation invariant a pointer and its asset must agree on) -- rather
+    than returning a partial/empty/mismatched baseline a caller could
+    mistake for "nothing covered" or silently select against the wrong
+    generation.
     """
     release_tag = pointer.get("release_tag")
     asset = pointer.get("asset")
     if not release_tag or not asset:
         raise BaselineFetchError(f"pointer is missing release_tag/asset: {pointer!r}")
-    with tempfile.TemporaryDirectory() as tmp:
-        out = subprocess.run(
-            [
-                "gh", "release", "download", release_tag,
-                "--repo", repo, "--pattern", asset, "--dir", tmp, "--clobber",
-            ],
-            capture_output=True, text=True, check=False,
-        )
-        if out.returncode != 0:
-            raise BaselineFetchError(
-                f"gh release download {release_tag} --pattern {asset} failed: "
-                f"{out.stderr.strip()}"
-            )
-        asset_path = Path(tmp) / asset
-        try:
-            content = asset_path.read_text(encoding="utf-8")
-        except OSError as error:
-            raise BaselineFetchError(
-                f"downloaded asset not found at {asset_path}: {error}"
-            ) from error
     try:
-        return json.loads(content)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = subprocess.run(
+                [
+                    "gh", "release", "download", release_tag,
+                    "--repo", repo, "--pattern", asset, "--dir", tmp, "--clobber",
+                ],
+                capture_output=True, text=True, check=False,
+            )
+            if out.returncode != 0:
+                raise BaselineFetchError(
+                    f"gh release download {release_tag} --pattern {asset} failed: "
+                    f"{out.stderr.strip()}"
+                )
+            asset_path = Path(tmp) / asset
+            try:
+                content = asset_path.read_text(encoding="utf-8")
+            except OSError as error:
+                raise BaselineFetchError(
+                    f"downloaded asset not found at {asset_path}: {error}"
+                ) from error
+    except OSError as error:
+        # subprocess.run itself raises OSError (e.g. FileNotFoundError) when
+        # `gh` isn't on PATH at all -- must not bypass BaselineFetchError
+        # and reach decide()'s caller as an unhandled exception.
+        raise BaselineFetchError(f"failed to launch gh release download: {error}") from error
+
+    try:
+        baseline = json.loads(content)
     except json.JSONDecodeError as error:
         raise BaselineFetchError(
             f"downloaded asset {asset} is not valid JSON: {error}"
         ) from error
+
+    if not isinstance(baseline, dict):
+        raise BaselineFetchError(
+            f"downloaded asset {asset} is not a JSON object (got {type(baseline).__name__})"
+        )
+    if not baseline.get("generated_at"):
+        raise BaselineFetchError(f"downloaded asset {asset} is missing generated_at")
+    pointer_plugin = pointer.get("plugin")
+    if pointer_plugin is not None and baseline.get("plugin") != pointer_plugin:
+        raise BaselineFetchError(
+            f"downloaded asset's plugin {baseline.get('plugin')!r} does not match "
+            f"pointer's plugin {pointer_plugin!r} -- correlation invariant violated"
+        )
+    pointer_measured_commit = pointer.get("measured_commit")
+    if pointer_measured_commit is not None and baseline.get("measured_commit") != pointer_measured_commit:
+        raise BaselineFetchError(
+            f"downloaded asset's measured_commit {baseline.get('measured_commit')!r} does not "
+            f"match pointer's measured_commit {pointer_measured_commit!r} -- correlation "
+            "invariant violated"
+        )
+    return baseline

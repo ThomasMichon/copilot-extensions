@@ -391,10 +391,27 @@ baseline at all, a failed asset fetch, exceeded coverage-debt, or any
 per-file/per-line selection trigger (`no_baseline_entry`/
 `line_not_attributed`).
 
-16 new tests (`TestFetchBaselineAsset`, `TestDecide`) -- `decide()`'s own
+15 new tests (`TestFetchBaselineAsset`, `TestDecide`) -- `decide()`'s own
 tests monkeypatch its collaborators directly (each already has its own
 dedicated test class) rather than re-exercising them through real git/
 network I/O.
+
+**Review fixes (same PR, #5213):** `fetch_baseline_asset` now validates
+the downloaded document is a dict with a `generated_at` and a
+`plugin`/`measured_commit` agreeing with the pointer that named it (never
+trusting a syntactically-valid-but-wrong payload), and converts a
+subprocess-launch `OSError` (e.g. `gh` missing from `PATH`) into
+`BaselineFetchError` rather than letting it bypass the documented
+fetch-failure contract. `SelectionDecision.selected_tests` is `None`
+(never `()`) for the two "no curated evidence at all" cases (no baseline
+resolved, fetch failed) -- a caller must run its own full/default suite
+there, not interpret an empty tuple as "run nothing"; a real tuple
+(including a genuinely curated, budget-exhausted `()`) only ever comes
+from an actual curation step. Fallback curation in both remaining
+fallback paths (debt-exceeded, selection-triggered) now draws from the
+**full, un-remapped** baseline, not the fork-commit-remapped one --
+remapping drops coverage for exactly the files a diff touches, which
+would have shrunk the fallback universe precisely on the riskiest files.
 
 **Also noted, not caused by this work:** the operator flagged that
 `main`'s history was force-rewritten (via `git filter-repo`) to purge
