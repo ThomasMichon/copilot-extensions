@@ -128,6 +128,40 @@ def test_daemon_statuses_marks_a_failed_health_request_unreachable(tmp_path: Pat
     ]
 
 
+def test_daemon_statuses_requires_port_match_not_just_pid_for_active(
+    tmp_path: Path, monkeypatch
+):
+    """Copilot review finding: after PID reuse, the routing table's active
+    row can retain a stale endpoint whose pid a later, unrelated daemon
+    happens to reuse on a DIFFERENT port -- matching pid alone would
+    misreport that unrelated daemon as active."""
+    root = tmp_path / "root"
+    root.mkdir()
+
+    monkeypatch.setattr(
+        daemons_status.mux_daemon_cutover, "_iter_mux_daemon_pids", lambda: {101}
+    )
+    monkeypatch.setattr(
+        daemons_status.mux_daemon_cutover,
+        "_pid_matches_root",
+        lambda pid, *, root: True,
+    )
+    monkeypatch.setattr(
+        daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9999 ..."
+    )
+    # Routing table's active row still names pid 101, but on the OLD port
+    # (9101) -- not the port this pid is actually listening on now (9999).
+    monkeypatch.setattr(
+        routing, "read_table", lambda config_dir: _active_table(pid=101, port=9101)
+    )
+    _FakeControlClient.responses = {9999: {"status": "ready"}}
+    monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", _FakeControlClient)
+
+    statuses = daemons_status.daemon_statuses(root)
+
+    assert statuses[0]["active"] is False
+
+
 def test_daemon_statuses_scopes_to_requested_root(tmp_path: Path, monkeypatch):
     root = tmp_path / "root"
     root.mkdir()

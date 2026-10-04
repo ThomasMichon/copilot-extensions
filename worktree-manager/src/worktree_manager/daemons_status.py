@@ -103,7 +103,18 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
         entry: dict[str, Any] = {
             "pid": pid,
             "port": port,
-            "active": bool(active_endpoint is not None and active_endpoint.pid == pid),
+            # Matched on BOTH pid and port (copilot-extensions#5001 review
+            # finding): pid alone can misattribute "active" after PID reuse
+            # -- the routing table's active row could retain a now-stale
+            # endpoint while an unrelated, later daemon happens to reuse
+            # that exact pid on a different port. An unresolved port (None)
+            # never matches, so an unverifiable candidate is reported as
+            # not-active rather than guessed.
+            "active": bool(
+                active_endpoint is not None
+                and active_endpoint.pid == pid
+                and active_endpoint.port == port
+            ),
         }
         if port is None:
             entry["status"] = "unknown"
