@@ -445,3 +445,34 @@ def test_a_protocol_floor_never_sends_after_a_slow_retry_probe(monkeypatch, firs
     sent = [c for c in calls if c != "/health"]
     assert sent == (["/api/v1/sessions"] if first_failure == "refused" else [])
     assert clock[0] >= 1.0
+
+
+def test_a_protocol_floor_retries_a_health_read_timeout(monkeypatch):
+    """A /health probe that connects but times out reading (a bare TimeoutError
+    the client doesn't wrap) is an unanswered probe: retried within the grace,
+    and the request goes out only once the protocol is confirmed."""
+    import time as _time
+
+    from agent_bridge import session_targeting_cli as stc
+
+    clock = [0.0]
+    monkeypatch.setattr(_time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    monkeypatch.setattr(_time, "monotonic", lambda: clock[0])
+    calls: list[str] = []
+
+    class Client:
+        _base, _connect_grace = "http://d", 30.0
+        _reresolve = None
+
+        def _request(self, method, path, *a, **k):
+            calls.append(path)
+            if path == "/health":
+                if calls.count("/health") == 1:
+                    raise TimeoutError("The read operation timed out")
+                return {"protocol_version": 21}
+            return {"ok": True}
+
+    client = Client()
+    stc._hold_protocol_floor(client, 21)
+    assert client._request("POST", "/api/v1/live-sessions/s/messages") == {"ok": True}
+    assert calls == ["/health", "/health", "/api/v1/live-sessions/s/messages"]

@@ -111,7 +111,9 @@ def _hold_protocol_floor(client: Any, floor: int) -> None:
                     client._base = base.rstrip("/")
             try:
                 version = int((request("GET", "/health") or {}).get("protocol_version") or 0)
-            except (BridgeConnectionError, TypeError, ValueError):
+            except (BridgeConnectionError, OSError, TypeError, ValueError):
+                # OSError: a read timeout (TimeoutError) after connecting
+                # escapes the client's own wrapping; the probe is unanswered.
                 unanswered = BridgeConnectionError(
                     f"the bridge daemon at {client._base} didn't answer a protocol check in time; "
                     "the request was not sent")

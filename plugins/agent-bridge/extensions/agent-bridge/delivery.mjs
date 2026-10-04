@@ -200,29 +200,41 @@ export function adoptSessionId(state, eventSessionId, now = Date.now()) {
 // of the only id it serves revokes it: delivery stops (``registered`` false)
 // and shutdown no longer deregisters it; a later heartbeat re-registers it if
 // the other incarnation's row goes away.
-export function serializedRegister(state, post, onRegistered = () => {}, { now = Date.now } = {}) {
+//
+// ``ready`` (optional promise) holds every registration until it settles --
+// the session's metadata (machine, worktree): a placeholder registered
+// without it can't be recognized as the predecessor once a resume renames it,
+// so its handle and history would never follow the resumed session. Only
+// registration waits on it; ``close()`` stops the wait (nothing posted then).
+export function serializedRegister(
+  state, post, onRegistered = () => {}, { now = Date.now, ready = null } = {},
+) {
   let chain = Promise.resolve();
   let closed = false;
+  let stopWaiting;
+  const closing = new Promise((resolve) => { stopWaiting = resolve; });
   let lastOk = null;
   const posted = [];
   const once = async () => {
+    if (ready) await Promise.race([ready, closing]);
     for (;;) {
       const id = state.sessionId;
       if (!id || closed) return false;
       const result = await post(id);
-      const ok = result === true;
-      if (ok) {
+      if (result === true) {
         lastOk = id;
         if (!posted.includes(id)) posted.push(id);
+      } else if (result === "rejected") {
+        (state.rejectedIds ||= new Map()).set(id, now() + REJECTED_RETRY_MS);
+        // The id is another incarnation's -- whether or not it is still the
+        // current one: this process no longer serves it, and shutdown must not
+        // delete that row (even if an earlier, id-only registration of it was
+        // accepted).
+        if (posted.includes(id)) posted.splice(posted.indexOf(id), 1);
+        if (lastOk === id) lastOk = null;
       }
       if (state.sessionId !== id) continue; // renamed meanwhile
       if (result === "rejected") {
-        (state.rejectedIds ||= new Map()).set(id, now() + REJECTED_RETRY_MS);
-        // The id is another incarnation's: this process no longer serves it,
-        // and shutdown must not delete that row (even if an earlier, id-only
-        // registration of it was accepted).
-        if (posted.includes(id)) posted.splice(posted.indexOf(id), 1);
-        if (lastOk === id) lastOk = null;
         if (lastOk) {
           state.sessionId = lastOk; // keep a usable handle; refresh it, then ready
           continue;
@@ -230,6 +242,7 @@ export function serializedRegister(state, post, onRegistered = () => {}, { now =
         state.registered = false; // stop inbox, control and event delivery
         return false;
       }
+      const ok = result === true;
       if (ok && !state.registered) {
         state.registered = true;
         onRegistered(id);
@@ -240,6 +253,7 @@ export function serializedRegister(state, post, onRegistered = () => {}, { now =
   const register = () => (chain = chain.then(once, once));
   register.close = async () => {
     closed = true;
+    stopWaiting(); // a registration still waiting on ``ready`` never posts
     await chain.catch(() => {});
     return [...posted].reverse();
   };

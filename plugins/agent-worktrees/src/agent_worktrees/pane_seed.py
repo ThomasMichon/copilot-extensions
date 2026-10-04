@@ -97,8 +97,13 @@ def mux_seed_pane(
                     break
                 stable, last_ready_sig = 0, None  # moved under the second poll: confirm again
         elif not dismissed_nudge and pane_nudges.is_desktop_app_nudge(cap):
-            dismissed_nudge, stable, last_ready_sig = True, 0, None
-            pane_nudges.dismiss(mux_bin, target)
+            stable, last_ready_sig = 0, None
+            # Escape goes to a position: only if the pane is still where it was
+            # captured, else it could hit whatever moved there. A moved pane's
+            # captured nudge is discarded; the next poll captures it afresh.
+            if _where() == target:
+                dismissed_nudge = True
+                pane_nudges.dismiss(mux_bin, target)
         else:
             stable, last_ready_sig = 0, None
         if (pane_readiness.is_busy(region) or region != last_region) and idle_window > 0:

@@ -172,6 +172,12 @@ async function bridgeGetJson(path) {
   }
 }
 
+// Session metadata (machine, worktree, ...), resolved off the event loop from
+// load. Registration waits for it -- never readiness: see serializedRegister.
+const metadataReady = resolveMetadataAsync()
+  .then((meta) => { state.meta = meta; })
+  .catch((e) => extLog(`metadata resolution failed (degrading, session unaffected): ${e.message}`));
+
 const register = serializedRegister(
   state,
   async (id) => {
@@ -193,6 +199,7 @@ const register = serializedRegister(
     }
   },
   (id) => extLog(`registered live session ${id} with local bridge`),
+  { ready: metadataReady },
 );
 
 async function deregister() {
@@ -445,17 +452,13 @@ try {
   });
   state.base = endpoint.ep.base;
   state.token = endpoint.ep.token;
-  // state.meta starts unset -- resolveMetadataAsync() below fills it in the
+  // state.meta starts unset -- metadataReady (above) fills it in the
   // background. Deliberately NOT awaited here: this whole init block must
   // finish (and the extension report ready) without waiting on any child
-  // process. register()'s payload carries this process's identity
-  // (processIdentity()) from the start and spreads `...(state.meta || {})`, so
-  // the very first heartbeat may go out without machine/worktree metadata if
-  // it hasn't resolved yet -- self-correcting on the next HEARTBEAT_MS tick,
-  // which is a fully acceptable trade for never blocking readiness on it.
-  resolveMetadataAsync()
-    .then((meta) => { state.meta = meta; })
-    .catch((e) => extLog(`metadata resolution failed (degrading, session unaffected): ${e.message}`));
+  // process. Registration alone waits for it (it carries this process's
+  // identity, processIdentity(), and spreads `...(state.meta || {})`), so a
+  // placeholder is registered with its machine and worktree and a resume
+  // that renames it can fold it in. A failed lookup registers without them.
 
   if (!state.token) {
     extLog("no local agent-bridge auth token found; not registering (ok)");

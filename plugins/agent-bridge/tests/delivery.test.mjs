@@ -89,6 +89,49 @@ test("a revoked id is served again once the other incarnation's row is gone", as
   assert.deepEqual(await register.close(), ["resumed"]);
 });
 
+test("an old id refused after a rename is no longer deregistered at shutdown", async () => {
+  // The placeholder was registered; its in-flight heartbeat comes back refused
+  // (its row now belongs to another process) only after a resume renamed it.
+  const state = { sessionId: "placeholder", registered: false };
+  const { calls, post } = deferredPoster();
+  const register = serializedRegister(state, post);
+  const first = register();
+  await tick();
+  calls[0].resolve(true);
+  await first;
+  const beat = register();
+  await tick();
+  adoptSessionId(state, "resumed");
+  calls[1].resolve("rejected");  // the placeholder's heartbeat
+  await tick();
+  calls[2].resolve(true);  // the resumed id registers
+  await beat;
+  assert.deepEqual([state.sessionId, state.registered], ["resumed", true]);
+  assert.deepEqual(await register.close(), ["resumed"]);  // not the other process's placeholder row
+});
+
+test("registration waits for ready (the session metadata) and shutdown stops the wait", async () => {
+  const state = { sessionId: "placeholder", registered: false };
+  let release;
+  const ready = new Promise((resolve) => { release = resolve; });
+  const posts = [];
+  const register = serializedRegister(state, async (id) => { posts.push(id); return true; },
+    () => {}, { ready });
+  const first = register();
+  await tick();
+  assert.deepEqual(posts, []);  // nothing registers before the metadata settles
+  adoptSessionId(state, "resumed");  // a resume meanwhile: only the current id posts
+  release();
+  assert.equal(await first, true);
+  assert.deepEqual(posts, ["resumed"]);
+
+  const waiting = { sessionId: "s", registered: false };
+  const never = serializedRegister(waiting, async () => true, () => {}, { ready: new Promise(() => {}) });
+  never();
+  assert.deepEqual(await never.close(), []);  // close() doesn't hang on a slow lookup
+  assert.equal(waiting.registered, false);
+});
+
 test("shutdown drains a pending registration and returns every id to deregister", async () => {
   const state = { sessionId: "placeholder", registered: false };
   const { calls, post } = deferredPoster();

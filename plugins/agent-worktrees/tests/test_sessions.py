@@ -1560,6 +1560,42 @@ def test_seed_pane_dismisses_nudge_at_most_once():
     assert driver.sends.count(["Escape"]) == 1
 
 
+def test_seed_pane_never_dismisses_a_nudge_at_a_position_the_pane_left():
+    """The Escape goes to a position: when the pane moves between capturing the
+    nudge and dismissing it, the captured nudge is discarded (never an Escape
+    into whatever now sits at the old position) and the pane is captured anew."""
+    from types import SimpleNamespace
+
+    seed, ready = "Continue: build", "press esc to interrupt"
+    where = iter(["=wt-x:0.0", "=wt-x:0.0"])  # initial, first poll; then it moved
+    state = {"dismissed": False, "typed": False}
+    seen: list[tuple[str, str, list[str]]] = []
+
+    def run(argv, **kw):
+        at = argv[argv.index("-t") + 1]
+        seen.append((argv[1], at, argv[4:]))
+        if argv[1] == "capture-pane":
+            if at == "=wt-x:0.0" or not state["dismissed"]:
+                return SimpleNamespace(stdout=_DESKTOP_APP_NUDGE, returncode=0)
+            return SimpleNamespace(stdout=f"{ready}\n{seed}" if state["typed"] else ready,
+                                   returncode=0)
+        if argv[1] == "send-keys":
+            state["dismissed"] |= argv[4:] == ["Escape"]
+            state["typed"] |= "-l" in argv
+        return SimpleNamespace(stdout="", returncode=0)
+
+    with patch("subprocess.run", side_effect=run), patch("time.sleep"), \
+         patch("time.monotonic", side_effect=_Clock()), \
+         patch("agent_worktrees.sessions._mux_bin", return_value="tmux"), \
+         patch("agent_worktrees.sessions_pane_retire._mux_qualified_pane_target",
+               side_effect=lambda *a, **k: next(where, "=wt-x:0.1")):
+        out = mux_seed_pane("%9", seed, session_name="wt-x",
+                            ready_timeout=100.0, poll_interval=0.0, settle=0.0)
+    escapes = [at for verb, at, keys in seen if verb == "send-keys" and keys == ["Escape"]]
+    assert escapes == ["=wt-x:0.1"]  # never the old position
+    assert out["submitted"] is True
+
+
 class TestListWorktreeSessionsLifecycle:
     """``list_worktree_sessions`` stamps the ASSERTED lifecycle (``state`` +
     ``is_head``) onto each entry so a consumer (agent-bridge -> Neuron Forge)
