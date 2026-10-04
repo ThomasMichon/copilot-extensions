@@ -969,6 +969,21 @@ and vanishes the next time anything else promotes. If you're an agent about
 to reach for `--admin` against this repo's `main`: stop, re-read this
 section, and retarget to `dev` instead.
 
+#### If you opened a PR against `main` by mistake
+
+`main-gate` (above) only ever runs as part of `ci.yml`, a plain
+`pull_request`-triggered workflow — for a first-time or otherwise
+unapproved external contributor, GitHub holds that *entire* workflow run in
+`action_required` until a maintainer manually approves it, so such a
+contributor can get zero automated feedback at all. `.github/workflows/
+base-branch-reminder.yml` closes that specific gap: a narrow,
+`pull_request_target`-triggered job (not subject to the fork-approval gate)
+posts a one-time comment asking the author to retarget to `dev`, for any
+PR against `main` not authored by the repo owner. It never checks out or
+executes the PR's own code and never runs tests — its only effect is that
+one comment, so it adds no capability a non-collaborator didn't already
+have.
+
 ### If `main`'s history is force-rewritten
 
 `main` may occasionally have its history rewritten (e.g. a deliberate,

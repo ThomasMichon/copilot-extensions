@@ -13,8 +13,8 @@ import types
 import pytest
 
 import agent_worktrees.__main__ as m
+from agent_worktrees import cleanup, finalize, providers, tracking, tracking_claims
 from agent_worktrees import config as cfg
-from agent_worktrees import cleanup, finalize, providers, tracking
 
 
 def _seed_project(tmp_path, monkeypatch, machine="m", project="p"):
@@ -162,6 +162,26 @@ def test_claims_orphans_empty_message(tmp_path, monkeypatch, capfd):
 def test_pr_claim_target_parses_github_references(ref, expected):
     prcfg = types.SimpleNamespace(provider="github", api_base="")
     assert cleanup._pr_claim_target(ref, prcfg) == expected
+
+
+@pytest.mark.parametrize(
+    ("ref", "expected"),
+    [
+        (
+            "https://github.com/example/project/pull/42",
+            ("github", "example/project", 42, "github.com"),
+        ),
+        ("example/project#42", ("github", "example/project", 42, "")),
+    ],
+)
+def test_pr_claim_target_accepts_canonical_ref_form(ref, expected):
+    # Phase 6 canonical-ref encoding (worktree-claims-transitive-finalization
+    # effort, 2026-10-04): the same legacy refs above, wrapped in the new
+    # "<kind>:<system>:<key>" self-describing shape, must resolve
+    # identically -- _pr_claim_target unwraps it before parsing.
+    prcfg = types.SimpleNamespace(provider="github", api_base="")
+    canon = tracking_claims.canonicalize_ref("pr", ref)
+    assert cleanup._pr_claim_target(canon, prcfg) == expected
 
 
 def test_pr_claim_target_preserves_configured_github_enterprise_api():

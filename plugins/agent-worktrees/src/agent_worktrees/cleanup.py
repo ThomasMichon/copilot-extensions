@@ -41,7 +41,7 @@ from agent_procutil import no_window_flags
 from . import config as cfg
 from . import repos as repos_mod
 from . import sweep as sweep_mod
-from . import tracking
+from . import tracking, tracking_claims
 
 log = logging.getLogger(__name__)
 
@@ -303,6 +303,13 @@ def _pr_claim_target(
     ref: str, prcfg: cfg.PRConfig,
 ) -> tuple[str, str, int, str] | None:
     """Resolve a stored PR claim into provider, repo, number, and API base."""
+    # Reached only via reclaim_pr's dispatch table, keyed exclusively on
+    # kind="pr" -- restrict to that exact kind, not the broader
+    # PR_LIKE_KINDS, so a mismatched bug/issue-kind canonical ref can never
+    # be silently accepted as a PR target here.
+    ref = tracking_claims.decanonicalize_ref(
+        ref, expected_kinds=frozenset({"pr"}),
+    )
     configured_provider = (getattr(prcfg, "provider", "") or "").strip().lower()
     api_base = (getattr(prcfg, "api_base", "") or "").strip()
     short = re.fullmatch(

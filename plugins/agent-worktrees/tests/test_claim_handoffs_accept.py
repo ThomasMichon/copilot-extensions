@@ -16,6 +16,7 @@ from agent_worktrees import (
     claim_history,
     finalize,
     tracking,
+    tracking_claim_write,
 )
 from agent_worktrees.lease_config import LeaseSettings
 from agent_worktrees.lease_store import GitLeaseStore
@@ -589,3 +590,64 @@ def test_cli_accept_logs_and_returns_accepted_bundle(handoff_world, monkeypatch,
         "source": world["source"],
         "refs": [world["claims"][1].ref],
     })
+
+
+def test_full_lifecycle_history_is_ordered_across_rebind_and_bundle_transfer(
+    handoff_world,
+):
+    """worktree-claims-transitive-finalization Phase 3b's own Validation
+    Plan item: a PR handed off across worktrees/sessions (an agent-bridge
+    session rebind, then an explicit claim-handoff bundle transfer, then a
+    final release) must produce one complete, correctly-ordered history
+    via ``claims history <ref>`` -- no hop silently dropped, regardless of
+    which worktree record each event actually lives on. (The effort's own
+    agent-dispatch-redrive half of this scenario has no live code path to
+    simulate -- investigated and confirmed a no-op today, see this
+    effort's own Plan Phase 3b -- so this composite only covers the two
+    mechanisms that genuinely exist: rebind and bundle transfer.)
+    """
+    world = _setup_bundle(handoff_world)
+    pr_ref = world["claims"][1].ref
+
+    # Hop 1: an agent-bridge session rebind to the SOURCE worktree, before
+    # any bundle transfer -- the same implicit-reassignment path
+    # `test_link_handoff_default_save_feeds_history_after_its_own_save`
+    # exercises in isolation, here chained into a longer real lifecycle.
+    source_path = world["source_path"]
+    source_rec = tracking.load_record(source_path)
+    source_rec.sessions = [
+        tracking.SessionEntry("old-session", "t"),
+        tracking.SessionEntry("new-session", "t"),
+    ]
+    tracking.save_record(source_rec, source_path)
+    source_rec = tracking.load_record(source_path)
+    tracking.open_handoff(source_rec, "old-session", "token", save=False)
+    tracking.save_record(source_rec, source_path)
+    source_rec = tracking.load_record(source_path)
+    tracking.link_handoff(source_rec, "token", "new-session")  # save=True
+
+    # Hop 2: an explicit claim-handoff bundle transfer from source to
+    # consumer -- the same mechanism `test_accept_feeds_claim_history_for_pr_claim`
+    # exercises in isolation.
+    bundle = _offer(world, [pr_ref])[0]
+    claim_handoffs.accept(bundle.bundle_id, actor=world["consumer"], machine=MACHINE)
+
+    # Hop 3: the consumer releases the claim (e.g. the PR merged).
+    tracking_claim_write.apply_claim_release({
+        "worktree_id": "wt-consumer",
+        "yaml_path": str(world["consumer_path"]),
+        "ref": pr_ref,
+    })
+
+    events = claim_history.history_for_ref(pr_ref)
+    assert [e["event"] for e in events] == [
+        "reassigned", "released", "claimed", "released",
+    ]
+    reassigned, bundle_release, bundle_claim, final_release = events
+    assert reassigned["worktree_id"] == "wt-source"
+    assert "old-session -> new-session" in reassigned["note"]
+    assert bundle_release["worktree_id"] == "wt-source"
+    assert bundle.bundle_id in bundle_release["note"]
+    assert bundle_claim["worktree_id"] == "wt-consumer"
+    assert bundle.bundle_id in bundle_claim["note"]
+    assert final_release["worktree_id"] == "wt-consumer"
