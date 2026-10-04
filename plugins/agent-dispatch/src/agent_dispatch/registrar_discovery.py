@@ -388,6 +388,65 @@ def _resolve_declaration_paths(
     return replace(declaration, spec=spec)
 
 
+def _field_defining_hop_is_cross_repo(
+    field: str,
+    ref: object,
+    *,
+    base_dir: Path,
+    repo_root: Path,
+    _chain: tuple[str, ...] = (),
+) -> bool:
+    """Walk an ``extends:`` chain to find the *nearest* hop that actually
+    defines ``field`` in its own raw ``forge`` mapping, and report whether
+    that hop lives outside ``repo_root`` -- never merely whether *some*
+    hop somewhere in the chain is cross-repo. For a chain such as ``leaf
+    (repo A) -> mid (repo A, defines forge.command) -> base (repo B)``,
+    `mid`'s own same-repo definition is what the leaf actually inherits;
+    `base`'s unrelated repo never enters into it, so this must stop at
+    `mid` rather than keep walking to `base`. Returns ``False`` (not
+    cross-repo) once a same-repo hop defines the field, or once the
+    field is never defined anywhere in the chain at all (a missing-field
+    error, if any, is `validate_script_forge_config`'s own to raise).
+
+    Mirrors ``registrar_recipes._resolve_extends_tracking_cwd_origin``'s
+    own chain-walking shape (ref resolution, cycle/depth guards via
+    ``_chain``) but only to answer this one per-field provenance question
+    -- it never resolves placeholders or merges fields, so it carries
+    none of that function's own substitution/merge logic or risk.
+    """
+    if not isinstance(ref, str) or not ref:
+        return False  # malformed; let resolve_extends raise its own clear error later
+    from .registrar_recipes import _MAX_CHAIN_DEPTH, _ref_identity, resolve_recipe_ref
+
+    identity, ref_path = _ref_identity(ref, base_dir=base_dir)
+    if identity in _chain or len(_chain) >= _MAX_CHAIN_DEPTH:
+        # A cyclic/too-deep chain is `resolve_extends`'s own error to
+        # raise later -- don't manufacture a different one here.
+        return False
+    # `ref_path is None` only for a `global:` recipe (no on-disk file) --
+    # always outside this repo, by definition.
+    hop_is_cross_repo = ref_path is None or not (
+        ref_path == repo_root or repo_root in ref_path.parents
+    )
+    template = resolve_recipe_ref(ref, base_dir=base_dir)
+    if not isinstance(template, Mapping):
+        return False
+    hop_forge = template.get("forge")
+    hop_forge = hop_forge if isinstance(hop_forge, Mapping) else {}
+    if field in hop_forge:
+        return hop_is_cross_repo
+    if "extends" not in template:
+        return False
+    next_base_dir = ref_path.parent if ref_path is not None else base_dir
+    return _field_defining_hop_is_cross_repo(
+        field,
+        template.get("extends"),
+        base_dir=next_base_dir,
+        repo_root=repo_root,
+        _chain=_chain + (identity,),
+    )
+
+
 def read_declaration_file_set(
     path: str | Path,
     *,
@@ -415,6 +474,48 @@ def read_declaration_file_set(
             f"{p}: declaration could not be read: {exc}"
         ) from exc
     data = dict(_decode(text, p.suffix, where=str(p)))
+    extends_present = "extends" in data
+    leaf_forge = data.get("forge")
+    leaf_forge = leaf_forge if isinstance(leaf_forge, Mapping) else {}
+    # Only meaningful when `extends_present`: a field *absent* from the
+    # leaf file's own raw `forge` mapping but present after merging below
+    # must have come from a base this file `extends:` -- possibly a
+    # different repository entirely. Threaded through so
+    # `expand_repository_issue_loop` can refuse a relative inherited
+    # `forge.command`/`forge.cwd` instead of silently resolving it against
+    # this (wrong) leaf repo root -- see "Resolve inherited script paths
+    # relative to their declaring repository". Checked **per field**,
+    # following each field's own nearest-defining hop (not just whether
+    # *some* hop anywhere in the chain is cross-repo): a chain such as
+    # `leaf (repo A) -> mid (repo A, defines forge.command) -> base (repo
+    # B)` must NOT reject `forge.command`, since the hop that actually
+    # supplies it is same-repo -- `base`'s unrelated repo never enters
+    # into that field at all.
+    this_repo_root = (
+        Path(repo_root).expanduser() if repo_root is not None else p.parent
+    )
+    inherited_script_fields = set()
+    if extends_present:
+        try:
+            this_repo_root = this_repo_root.resolve()
+            for field in ("command", "cwd"):
+                if field in leaf_forge:
+                    continue
+                if _field_defining_hop_is_cross_repo(
+                    field,
+                    data.get("extends"),
+                    base_dir=this_repo_root,
+                    repo_root=this_repo_root,
+                ):
+                    inherited_script_fields.add(field)
+        except (OSError, RuntimeError, ValueError, RegistrarError):
+            # Can't prove every hop shares this repo root -- treat every
+            # field the leaf doesn't declare itself as cross-repo (the
+            # safer default) rather than silently assuming same-repo.
+            inherited_script_fields = {
+                field for field in ("command", "cwd") if field not in leaf_forge
+            }
+    inherited_script_fields = frozenset(inherited_script_fields)
     if "extends" in data:
         from .registrar_recipes import resolve_extends
 
@@ -427,7 +528,9 @@ def read_declaration_file_set(
     elif data.get("kind") == "repository-issue-loop":
         from .repository_issue_loops import expand_repository_issue_loop
 
-        declarations = expand_repository_issue_loop(data, repo_root=repo_root)
+        declarations = expand_repository_issue_loop(
+            data, repo_root=repo_root, inherited_script_fields=inherited_script_fields
+        )
     else:
         declarations = (
             load_declaration(

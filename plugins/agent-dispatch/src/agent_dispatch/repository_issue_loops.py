@@ -40,6 +40,10 @@ from .registrar import (
     _load_filters,
     load_declaration,
 )
+from .script_provider import (
+    SCRIPT_FORGE_KEYS, _backlog_identifier, build_provider, script_resource_namespace,
+    validate_repo_field, validate_script_forge_config,
+)
 from .worker_identities import load_worker_identity
 
 _TERMINAL = frozenset({"submitted", "completed", "abandoned", "dead_letter"})
@@ -54,9 +58,9 @@ _KNOWN_KEYS = frozenset(
         "evaluator_ref", "task_contract", "rehearsal_mode",
     }
 )
-_FORGE_KEYS = frozenset({"provider", "producer_login", "discovery_scope"})
+_FORGE_KEYS = frozenset({"provider", "producer_login", "discovery_scope"}) | SCRIPT_FORGE_KEYS
 #: Excludes "gitea" (stub only, gitea_provider_stub.py); add back once #4825 lands.
-_SUPPORTED_FORGE_PROVIDERS = frozenset({"github", "azure-devops"})
+_SUPPORTED_FORGE_PROVIDERS = frozenset({"github", "azure-devops", "script"})
 _RESERVATION_KEYS = frozenset({"label", "comment", "orphan_after_seconds"})
 _GITHUB_ISSUE_PAGE_SIZE = 100
 _GITHUB_MAX_ISSUE_PAGES = 10
@@ -153,9 +157,18 @@ def _strings(data: Mapping[str, Any], key: str) -> tuple[str, ...]:
         )
     return tuple(dict.fromkeys(value))
 
-def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -> dict[str, Any]:
+def validate_config(
+    data: Mapping[str, Any],
+    *,
+    cwd: str | Path | None = None,
+    inherited_script_fields: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
     """Validate/normalize a declaration. ``cwd`` (declaring repo root, if
-    known) threads a named ``worker_identity`` to its repo-local override."""
+    known) threads a named ``worker_identity`` to its repo-local override.
+    ``inherited_script_fields`` (``"command"``/``"cwd"``, or both) names
+    which `script`-provider forge fields were inherited from an `extends:`
+    base rather than declared by this file itself -- see
+    ``validate_script_forge_config``'s own handling."""
     if not isinstance(data, Mapping):
         raise RegistrarError("repository-issue-loop: expected a mapping")
     extra = sorted(set(data) - _KNOWN_KEYS)
@@ -220,12 +233,15 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         raise RegistrarError(
             "repository-issue-loop forge.producer_login: expected a non-empty string"
         )
-    discovery_scope = validate_discovery_scope(forge, provider=forge.get("provider"))
-    if not re.fullmatch(r"[^/\s]+/[^/\s]+", repo):
-        raise RegistrarError(
-            "repository-issue-loop repo: expected 'owner/name' (GitHub) or "
-            "'organization/project' (Azure DevOps)"
-        )
+    provider_name = forge.get("provider")
+    discovery_scope = validate_discovery_scope(forge, provider=provider_name)
+    script_config = validate_script_forge_config(
+        forge,
+        provider=provider_name,
+        repo_root=cwd,
+        inherited_script_fields=inherited_script_fields,
+    )
+    validate_repo_field(repo, provider=provider_name)
 
     reservation = data.get("reservation")
     if not isinstance(reservation, Mapping):
@@ -399,6 +415,7 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
             "provider": forge.get("provider"),
             "producer_login": producer_login,
             "discovery_scope": discovery_scope,
+            **(script_config or {}),
         },
         "reservation": {
             "label": label,
@@ -417,11 +434,21 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         "rehearsal_mode": rehearsal_mode,
     }
 
-def expand_repository_issue_loop(data: Mapping[str, Any], *, repo_root: str | Path | None = None) -> tuple[ProfileDeclaration, ...]:
+def expand_repository_issue_loop(
+    data: Mapping[str, Any],
+    *,
+    repo_root: str | Path | None = None,
+    inherited_script_fields: frozenset[str] = frozenset(),
+) -> tuple[ProfileDeclaration, ...]:
     """Expand into one emitter + one worker lane. ``repo_root`` resolves
     ``worker_identity`` here and is stamped as the emitter spec's ``cwd`` so
-    a later daemon tick's re-validation resolves the same override."""
-    config = validate_config(data, cwd=repo_root)
+    a later daemon tick's re-validation resolves the same override.
+    ``inherited_script_fields`` is forwarded to ``validate_config`` (see its
+    own docstring) -- registration-time only, since by the next tick the
+    already-registered (and by then necessarily valid) declaration is
+    re-validated straight from the stamped ``spec.repository_issue_loop``
+    dict, which carries no further `extends:` provenance to check."""
+    config = validate_config(data, cwd=repo_root, inherited_script_fields=inherited_script_fields)
     spec: dict[str, Any] = {
         "id": f"{config['name']}-source",
         "interval_seconds": config["tick_interval_seconds"],
@@ -463,6 +490,14 @@ def occurrence_epoch(now: float, cadence_seconds: float) -> int:
 
 def _resource_key(config: Mapping[str, Any], issue_number: int) -> str:
     provider = str(config["forge"]["provider"]).casefold()
+    if provider == "script":
+        # A script's own backlog identity (`_backlog_identifier`) is
+        # arbitrary, case-sensitive user data -- unlike a real forge's
+        # case-insensitive owner/name identifier, casefolding it would
+        # make e.g. `Queue-A` and `queue-a` collide.
+        repo = _backlog_identifier(config)
+        namespace = script_resource_namespace(config["forge"])
+        return f"forge:script:namespace:{namespace}:repository:{repo}:issue:{issue_number}"
     repo = str(config["repo"]).casefold()
     return f"forge:{provider}:repository:{repo}:issue:{issue_number}"
 
@@ -1150,19 +1185,26 @@ class AzureDevOpsProvider:
             self._set_tags(repo, issue, remaining)
 
 
-def _forge_provider_for(config: Mapping[str, Any]) -> ForgeProvider:
-    """Select the provider implementation named by ``config['forge']['provider']``."""
-    provider_name = config["forge"]["provider"]
-    producer_login = config["forge"]["producer_login"]
+def _forge_provider_for(
+    config: Mapping[str, Any], *, cwd: str | Path | None = None
+) -> ForgeProvider:
+    """Select the provider for ``config['forge']['provider']``; ``cwd`` lets
+    ``build_provider`` re-normalize a `script` provider's own repo-root-
+    relative fields for a caller that skipped `validate_config` (see its
+    own docstring)."""
+    forge = config["forge"]
+    provider_name = forge["provider"]
+    producer_login = forge["producer_login"]
     if provider_name == "github":
         return GitHubProvider(producer_login)
     if provider_name == "azure-devops":
         return AzureDevOpsProvider(
-            producer_login,
-            discovery_scope=config["forge"].get("discovery_scope"),
+            producer_login, discovery_scope=forge.get("discovery_scope")
         )
     if provider_name == "gitea":
         return GiteaProvider(producer_login)
+    if provider_name == "script":
+        return build_provider(forge, producer_login=producer_login, repo_root=cwd)
     raise RegistrarError(
         f"repository-issue-loop forge.provider: unsupported provider {provider_name!r}")
 
@@ -1284,7 +1326,7 @@ def plan(
             "eligible": [],
             "suppressed": True,
         }
-    issues = provider.list_open_issues(config["repo"])
+    issues = provider.list_open_issues(_backlog_identifier(config))
     eligible = _eligible(config, issues, now=now)
     return {
         "occurrence": epoch,
@@ -1312,7 +1354,7 @@ def run_tick(
     ``cwd`` (declaring repo root, if known) re-threads ``worker_identity``
     to its repo-local override rather than the daemon process's own cwd."""
     config = validate_config(config, cwd=cwd)
-    provider = provider or _forge_provider_for(config)
+    provider = provider or _forge_provider_for(config, cwd=cwd)
     now = clock()
     discovered = plan(client, config, provider=provider, now=now)
     if not dry_run:
@@ -1434,7 +1476,7 @@ def run_tick(
                 and matching_task.get("status") in _TERMINAL
             ):
                 provider.release(
-                    config["repo"],
+                    _backlog_identifier(config),
                     issue,
                     own,
                     "associated task became terminal before reservation claim",
@@ -1469,7 +1511,7 @@ def run_tick(
                     matching_task["id"],
                 )
                 provider.claim(
-                    config["repo"],
+                    _backlog_identifier(config),
                     issue,
                     own,
                     matching_task["id"],
@@ -1484,7 +1526,7 @@ def run_tick(
                 and matching_task.get("status") in _TERMINAL
             ):
                 provider.release(
-                    config["repo"],
+                    _backlog_identifier(config),
                     issue,
                     own,
                     "associated task became terminal while the issue remained open",
@@ -1514,7 +1556,7 @@ def run_tick(
                 and matching_task is None
             ):
                 provider.release(
-                    config["repo"],
+                    _backlog_identifier(config),
                     issue,
                     own,
                     "orphaned reservation had no matching task",
@@ -1579,7 +1621,7 @@ def run_tick(
     explicit_issue_numbers = tuple(int(n) for n in config.get("issue_numbers", ()))
     try:
         for issue in discovered["eligible"]:
-            provider.reserve(config["repo"], issue, reservation_base)
+            provider.reserve(_backlog_identifier(config), issue, reservation_base)
             key = _resource_key(config, issue.number)
             owner = _resource_owner(config, discovered["occurrence"])
             election = client.acquire_resource_reservation(
@@ -1589,7 +1631,7 @@ def run_tick(
             )
             if not election["granted"]:
                 provider.release(
-                    config["repo"],
+                    _backlog_identifier(config),
                     issue,
                     reservation_base,
                     "another repository issue loop won the coordinator election",
@@ -1605,7 +1647,7 @@ def run_tick(
         if explicit_issue_numbers and len(reserved) != len(explicit_issue_numbers):
             for issue in reserved:
                 provider.release(
-                    config["repo"],
+                    _backlog_identifier(config),
                     issue,
                     reservation_base,
                     "explicit issue set was not fully reservable",
@@ -1734,7 +1776,7 @@ def run_tick(
                         pass
                     try:
                         provider.release(
-                            config["repo"],
+                            _backlog_identifier(config),
                             issue,
                             reservation_base,
                             "resource reservation binding did not complete",
@@ -1756,7 +1798,7 @@ def run_tick(
                     pass
                 try:
                     provider.release(
-                        config["repo"],
+                        _backlog_identifier(config),
                         issue,
                         reservation_base,
                         "task creation did not complete",
@@ -1768,7 +1810,7 @@ def run_tick(
     claim_errors = []
     for issue in reserved:
         try:
-            provider.claim(config["repo"], issue, reservation_base, task["id"])
+            provider.claim(_backlog_identifier(config), issue, reservation_base, task["id"])
         except Exception as exc:
             claim_errors.append({"issue": issue.number, "error": str(exc)})
     return {
