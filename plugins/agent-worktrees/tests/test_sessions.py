@@ -1628,6 +1628,28 @@ def test_seed_pane_echo_ignores_a_transcript_line_that_gains_the_seed_text():
     assert driver.enter_sent() is False
 
 
+@pytest.mark.parametrize("rows", [9, 14])
+def test_seed_pane_echo_finds_the_caret_of_a_long_wrapped_legacy_input(rows):
+    """Legacy layout: an input wrapped onto many rows keeps its caret far above
+    the footer -- still the input, so a fully echoed seed submits."""
+    seed = "Continue: " + " ".join(f"step{n} of the long relay brief" for n in range(rows))
+    wrapped = [seed[i:i + 30] for i in range(0, len(seed), 30)]
+    assert len(wrapped) > rows
+    echo = " ● earlier output\n❯ " + "\n".join(wrapped) + "\npress esc to interrupt"
+    ready = " ● earlier output\n❯\npress esc to interrupt"
+    driver = _SeedDriver(ready_caps=[ready, ready], echo_caps=[echo])
+    assert _run_seed(driver, seed=seed)["submitted"] is True
+
+
+def test_long_legacy_scan_still_stops_at_the_transcript():
+    """The unbounded caret scan keeps its guard: a stale prompt above a
+    transcript line is never read as the input."""
+    from agent_worktrees import pane_readiness
+
+    pane = " ❯ Continue: stale\n ● output\n" + "plain row\n" * 12 + "press esc to interrupt"
+    assert pane_readiness.input_text(pane) == ""
+
+
 @pytest.mark.parametrize("seed", ["Diagnose the ╻▄ input border", "Diagnose the ╹▀ input border"])
 def test_seed_pane_echo_keeps_rail_glyphs_typed_in_the_input(seed):
     """Only a line that *starts* with a rail is the frame: a seed naming the

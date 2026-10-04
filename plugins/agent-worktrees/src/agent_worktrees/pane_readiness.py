@@ -64,7 +64,9 @@ def input_text(capture: str) -> str:
         return ""
     if not lines or not _is_interrupt_footer_row(lines[-1]):
         return ""
-    for i in range(len(lines) - 2, max(-1, len(lines) - 10), -1):
+    # No fixed row window: a long input wraps onto as many rows as it needs, so
+    # scan back to its caret; the transcript-boundary guard ends the search.
+    for i in range(len(lines) - 2, -1, -1):
         if _LEGACY_PROMPT.match(lines[i]):
             return "\n".join([_LEGACY_PROMPT.sub("", lines[i], count=1), *lines[i + 1:-1]])
         if _TRANSCRIPT_MARK.match(lines[i]):
