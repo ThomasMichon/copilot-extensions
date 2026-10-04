@@ -99,17 +99,20 @@ Each `versions/<version>/` slot is proven complete by its own
 `.install-complete` marker, written only as the **last** step of a fully
 successful copy + pointer materialization, and invalidated **before** any
 mutation of that slot begins (never left to the copy/removal step that
-follows, which can itself fail partway through on a locked file). A version
-is only ever reported installed (`current-version` published) when its slot
-carries that marker **and** every file the binstubs need to launch
-(`pyproject.toml`, `src/worktree_manager/__init__.py`,
-`src/worktree_manager/__main__.py`). This closes a real failure mode: a
-Windows `PermissionError` (WinError 32) from `shutil.rmtree`/`shutil.copytree`
-hitting a slot still held open by another process (a stranded or still-live
-mux-daemon pinned there) could otherwise leave an existing-but-empty slot on
-disk while `current-version` still correctly named it — every subsequent run
-then failed with `No module named worktree_manager`, indefinitely, since
-presence-only (`is_dir()`) checking treated that broken slot as valid forever.
+follows, which can itself fail partway through on a locked file) -- the
+marker is what proves the build itself completed. A version is reported
+installed (`current-version` published) only when its slot carries that
+marker **and** its key entrypoint files (`pyproject.toml`,
+`src/worktree_manager/__init__.py`, `src/worktree_manager/__main__.py`) --
+a cheap, independent check against *later* damage to an otherwise-complete
+slot, not an exhaustive scan of every module `__main__.py` imports. This
+closes a real failure mode: a Windows `PermissionError` (WinError 32) from
+`shutil.rmtree`/`shutil.copytree` hitting a slot still held open by another
+process (a stranded or still-live mux-daemon pinned there) could otherwise
+leave an existing-but-empty slot on disk while `current-version` still
+correctly named it — every subsequent run then failed with `No module named
+worktree_manager`, indefinitely, since presence-only (`is_dir()`) checking
+treated that broken slot as valid forever.
 
 If you hit `No module named worktree_manager`, the `worktree-manager` binstub
 itself is unusable (it runs `python -m worktree_manager` straight out of the

@@ -1561,10 +1561,12 @@ and the markerless corpse is tossed + rebuilt on the next run (automatic retry).
 > `self_install.py` cannot depend on `versioned_runtime.py`. It reimplements
 > the same "marker published only after a verified-complete build" invariant
 > directly: a per-slot `.install-complete` file, invalidated before
-> mutation and published only after every launch-critical file is confirmed
-> present, closing the identical corpse-slot hazard (there, a Windows
-> `PermissionError` from `shutil.rmtree`/`shutil.copytree` hitting a slot
-> still held open by another process) for this one standalone installer.
+> mutation and published only after its three key entrypoint files are
+> confirmed present (a cheap secondary check, not an exhaustive scan of
+> every module the package imports), closing the identical corpse-slot
+> hazard (there, a Windows `PermissionError` from
+> `shutil.rmtree`/`shutil.copytree` hitting a slot still held open by
+> another process) for this one standalone installer.
 
 ### POSIX parity (`.sh`)
 
