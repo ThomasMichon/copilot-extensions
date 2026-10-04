@@ -387,8 +387,41 @@ class _SessionLifecycleMixin:
                         from . import bridge_lock
                         bridge_lock.remove_sync(session_id)
                     self._set_container_launch_pending(session_id, False)
-                else:
+                elif rec.boundary == "local":
                     self._reap_host_record(rec, "session ended")
+                else:
+                    # Remote, non-container boundary (CodeSpace/mesh): mirror
+                    # the container branch above -- await and VERIFY the
+                    # far-side kill rather than firing it off via
+                    # _reap_host_record's fire-and-forget
+                    # _schedule_remote_reap. That path never joins the
+                    # background task, so an explicit end_session() could
+                    # return (and e.g. a short-lived caller's event loop could
+                    # close) before the SSH kill round-trip ever ran, silently
+                    # leaving the far-side Session Host + child alive on real
+                    # infrastructure (production-pollution risk for the
+                    # CodeSpace e2e smoke test specifically).
+                    self._kill_forward_sync(
+                        session_id,
+                        release_container_lock=False,
+                    )
+                    confirmed_dead = await self._remote_reap(
+                        rec,
+                        getattr(rec, "endpoint", None) or {},
+                    )
+                    if not confirmed_dead:
+                        self._mark_session_failed(
+                            session, trigger="remote_reap_inconclusive"
+                        )
+                        raise RemoteHostRecoveryPendingError(
+                            "Remote Session Host reap is inconclusive; "
+                            f"retained session {session_id} and target ownership"
+                        )
+                    with contextlib.suppress(Exception):
+                        self._host_index.remove(session_id)
+                    with contextlib.suppress(Exception):
+                        from . import bridge_lock
+                        bridge_lock.remove_sync(session_id)
 
         if (
             container
