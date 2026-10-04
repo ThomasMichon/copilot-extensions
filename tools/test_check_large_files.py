@@ -318,3 +318,32 @@ def test_explicit_staged_paths_requires_double_dash_for_flag_shaped_names(repo: 
     assert "--all" in result.stdout
 
 
+def test_diff_scoped_mode_catches_a_filename_with_special_characters(repo: Path):
+    # Same rationale as the --all-mode special-character test above, but
+    # for diff mode's own per-commit enumeration (git diff-tree), which has
+    # an independent code path and quoting behavior from --all's ls-tree.
+    _write_bytes(repo, "src/small.txt", 10)
+    _commit_all(repo)
+    _git(repo, "branch", "-f", "base_marker", "HEAD")
+
+    _write_bytes(repo, "docs/café notes.json", 2 * 1024 * 1024)
+    _commit_all(repo)
+
+    result = _run(repo, "--base", "base_marker")
+
+    assert result.returncode == 1
+    assert "café notes.json" in result.stdout
+
+
+def test_all_mode_fails_loudly_on_an_unresolvable_head(repo: Path):
+    # An ls-tree failure (e.g. a bad --head) must be a hard failure, never
+    # a silent [OK] from an empty-looking inventory.
+    _write_bytes(repo, "src/small.txt", 10)
+    _commit_all(repo)
+
+    result = _run(repo, "--all", "--head", "no-such-ref")
+
+    assert result.returncode == 1
+
+
+

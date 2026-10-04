@@ -168,12 +168,20 @@ def _commit_touched_blobs(commit: str) -> list[tuple[str, int]]:
     scan -- see the module docstring's new-blobs rationale, which this
     function implements per-commit rather than for the whole range as one
     object-reachability query.
+
+    ``diff-tree``'s own ``-z`` only affects its own output (no external
+    piped input to worry about, unlike the earlier ``rev-list --objects``
+    attempt), so this can safely use it for a filename containing
+    non-ASCII characters, a tab, or a newline -- git quotes such names in
+    plain ``--name-only`` output, which would otherwise make a lookup
+    against the (mis-parsed, quoted) name fail and silently skip the real
+    file.
     """
     parent_r = _git_bytes("rev-parse", "--verify", "--quiet", f"{commit}^")
     parent = _decode(parent_r.stdout).strip() or EMPTY_TREE_SHA
-    diff = _git("diff-tree", "--no-commit-id", "--name-only", "-r", "--diff-filter=d", parent, commit)
+    diff = _git_bytes("diff-tree", "--no-commit-id", "--name-only", "-r", "--diff-filter=d", "-z", parent, commit)
     out: list[tuple[str, int]] = []
-    for path in diff.split("\n"):
+    for path in _decode(diff.stdout).split("\0"):
         if not path:
             continue
         r = _git_bytes("cat-file", "-s", f"{commit}:{path}")
@@ -219,14 +227,23 @@ def _new_blobs_in_range(base_ref: str, head_ref: str) -> list[tuple[str, int]] |
     return out
 
 
-def _blobs_in_tree(rev: str) -> list[tuple[str, int]]:
+def _blobs_in_tree(rev: str) -> list[tuple[str, int]] | None:
     """Every ``(path, size)`` tracked in the tree at ``rev`` -- the path
     inventory and the size both come from the SAME snapshot (``ls-tree``),
     unlike pairing ``ls-files`` (always the current index) with a separate
     per-path lookup at an arbitrary ``rev``, which can drift out of sync
-    with each other.
+    with each other. Returns None (distinct from an empty list, which is a
+    legitimate empty tree) if ``rev`` doesn't resolve -- ``ls-tree`` against
+    an unknown ref prints nothing and exits nonzero, which must surface as
+    a genuine failure, never a silent "nothing to check" pass.
     """
     r = _git_bytes("ls-tree", "-r", "-l", "-z", rev)
+    if r.returncode != 0:
+        print(
+            f"check-large-files: 'git ls-tree {rev}' failed: "
+            f"{_decode(r.stderr).strip()}",
+        )
+        return None
     out: list[tuple[str, int]] = []
     for record in _decode(r.stdout).split("\0"):
         if not record:
@@ -336,7 +353,13 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.all:
-        blobs = _blobs_in_tree(args.head)
+        found_all = _blobs_in_tree(args.head)
+        if found_all is None:
+            # Distinct from "nothing to check": ls-tree itself failed (e.g.
+            # an unresolvable --head), which must be a hard failure, never
+            # a silent pass -- see _blobs_in_tree's docstring.
+            return 1
+        blobs = found_all
         scope_desc = f"every tracked file at {args.head}"
     elif args.paths:
         blobs = _staged_blobs(args.paths)
@@ -344,6 +367,9 @@ def main() -> int:
     else:
         found = _new_blobs_in_range(args.base, args.head)
         if found is None:
+            # Genuinely environmental (e.g. --base not fetched yet) --
+            # matches check-effort-vision-structure.py's own convention of
+            # skipping (not failing) when its base ref is unavailable.
             return 0
         blobs = found
         scope_desc = f"this diff's {len(blobs)} newly-introduced blob(s)"
