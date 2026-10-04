@@ -4685,10 +4685,10 @@ _NS_BAD_STATE_EXIT = 4
 
 
 def _cmd_namespace_list() -> int:
-    """Print a JSON list of `codespace:` namespace agent specs (#892 Inc 3)."""
-    from .resolver import CodespaceResolver
+    """Print `codespace:` agent specs; never raises (see resolver.list_specs_tolerant)."""
+    from .resolver import list_specs_tolerant
 
-    specs = asyncio.run(CodespaceResolver().list_specs())
+    specs = asyncio.run(list_specs_tolerant())
     print(json.dumps(specs))
     return 0
 

@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import sys
 import time
 from typing import TYPE_CHECKING
 from ._invoke import dispatch_argv
@@ -439,3 +440,38 @@ class CodespaceResolver:
         raise RuntimeError(
             f"Codespace '{cs.name}' is '{cs.state}' (not in a connectable state)."
         )
+
+
+async def list_specs_tolerant() -> list[dict]:
+    """``CodespaceResolver().list_specs()``, but never raises.
+
+    A codespace-listing failure (missing `codespace` OAuth scope, no `gh`
+    auth at all, network unreachable, etc.) must never be a hard requirement
+    for a host to resolve *any* agent -- CodeSpaces are optional, and a host
+    that doesn't use them (confirmed live, Lambda-Core, 2026-10-04) has no
+    reason to carry the `codespace` scope at all. Before this fix,
+    ``agent-codespaces namespace-list`` propagated any such failure as an
+    uncaught exception, crashing with a non-zero exit; agent-bridge's own
+    namespace-resolver consumer (``NamespaceListIncomplete`` on a non-zero
+    exit) then dropped the `codespace:` namespace for that one listing call
+    as designed -- but a confirmed, separate production incident that same
+    day showed bare-name agent resolution (``POST /api/v1/sessions``)
+    returning 404 for completely unrelated, purely-static agents while this
+    failure was live, starving the Intelligence Dampener reviewer-dispatch
+    pool for hours. Reporting zero codespaces here (the host's
+    genuinely-accurate state when it can't query them) instead of crashing
+    removes any chance of that class of failure recurring from this
+    specific subprocess boundary.
+    """
+    try:
+        return await CodespaceResolver().list_specs()
+    except Exception as exc:
+        print(
+            f"agent-codespaces: namespace-list could not query CodeSpaces "
+            f"({exc}); reporting zero CodeSpaces rather than failing closed "
+            f"-- CodeSpaces are optional and must never block other agent "
+            f"resolution",
+            file=sys.stderr,
+        )
+        return []
+
