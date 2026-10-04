@@ -44,6 +44,14 @@ ALL_TRANSITIONS = (
     "conflict",           # the PR became un-mergeable (mergeable true -> false)
     "mergeable",          # the PR became mergeable again (mergeable false -> true)
     "checks_failed",      # a required CI check rolled up to failure (#225)
+    "checks_succeeded",   # a required CI check rolled up to success -- the
+                           # terminal CI outcome ``checks_failed`` alone never
+                           # covers. Not in ``DEFAULT_UNTIL``: a green build
+                           # alone isn't actionable when a real review may
+                           # still be expected. Selectable explicitly or via
+                           # ``any`` -- the one thing a self-merge-eligible
+                           # wait with no further review coming has left to
+                           # fire on once CI finishes.
     "approval_dismissed", # an approving review was dismissed (#225)
     "merged",             # the PR became merged
     "closed",             # the PR closed without merging
@@ -153,7 +161,8 @@ class PRSnapshot:
     """Provider-neutral CI rollup for the head commit (#225): ``"success"`` |
     ``"failure"`` | ``"pending"`` | ``""`` (unknown / no checks configured). A
     provider that doesn't report it leaves ``""`` -- which never fires a
-    ``checks_failed`` transition, so the field is additive and safe."""
+    ``checks_failed``/``checks_succeeded`` transition, so the field is
+    additive and safe."""
     labels: tuple[str, ...] = ()
     title: str = ""
     draft: bool = False
@@ -253,8 +262,10 @@ class Baseline:
     ``None`` = not yet known (adopted without firing). Not in the cursor
     (tri-state, recomputed each poll)."""
     checks_state: str = ""
-    """Arm-time CI rollup a ``checks_failed`` transition diffs against (#225).
-    ``""`` = not yet known. Not encoded in the cursor (recomputed each poll)."""
+    """Arm-time CI rollup a ``checks_failed``/``checks_succeeded`` transition
+    diffs against (#225). ``""`` = not yet known. Encoded in the cursor as
+    the fourth ``k{checks_state}`` segment, so a ``--since``-re-armed wait
+    carries a known baseline forward instead of re-adopting."""
     approved: bool | None = None
     """Whether the PR had an effective approval at arm time (#225). ``None`` =
     not yet known. A True->dismissed regression fires ``approval_dismissed``."""
@@ -285,19 +296,21 @@ class Baseline:
     def to_cursor(self) -> str:
         """Compact, opaque, ASCII cursor (machine-facing -- stays ASCII).
 
-        Three ``.``-separated segments at most: ``r{id}``, then ``{flags}``
-        (``m``/``c``, possibly empty), then ``h{head_sha}`` -- each only
-        present when needed, so a cursor minted before the ``pushed``
-        transition existed stays a valid 1- or 2-segment cursor and still
-        parses (:meth:`from_cursor` reads by position, not by sniffing
+        Up to four ``.``-separated segments: ``r{id}``, then ``{flags}``
+        (``m``/``c``, possibly empty), then ``h{head_sha}``, then
+        ``k{checks_state}`` -- each only present when needed, so a cursor
+        minted before a later field existed stays a valid shorter cursor and
+        still parses (:meth:`from_cursor` reads by position, not by sniffing
         segment content)."""
         flags = ("m" if self.merged else "") + ("c" if self.closed else "")
-        out = f"r{self.max_review_id}"
-        if self.head_sha:
-            out += f".{flags}.h{self.head_sha}"
-        elif flags:
-            out += f".{flags}"
-        return out
+        parts = [f"r{self.max_review_id}"]
+        if self.head_sha or self.checks_state or flags:
+            parts.append(flags)
+        if self.head_sha or self.checks_state:
+            parts.append(f"h{self.head_sha}")
+        if self.checks_state:
+            parts.append(f"k{self.checks_state}")
+        return ".".join(parts)
 
     @classmethod
     def from_cursor(cls, cursor: str) -> Baseline:
@@ -314,6 +327,7 @@ class Baseline:
         s = parts[0]
         flags = parts[1] if len(parts) > 1 else ""
         head_sha = parts[2][1:] if len(parts) > 2 and parts[2].startswith("h") else ""
+        checks_state = parts[3][1:] if len(parts) > 3 and parts[3].startswith("k") else ""
         s = s.lstrip("r") or "0"
         try:
             rid = int(s)
@@ -324,6 +338,7 @@ class Baseline:
             merged="m" in flags,
             closed="c" in flags,
             head_sha=head_sha,
+            checks_state=checks_state,
         )
 
 
@@ -388,6 +403,21 @@ def compute_events(
             and "checks_failed" in want
         ):
             events.append({"event": "checks_failed", "checks_state": snap.checks_state})
+
+        # CI checks resolved to success: the symmetric terminal outcome
+        # ``checks_failed`` never covers. Same "known, non-terminal baseline
+        # only" scoping -- an already-green check at arm time does not alert,
+        # and re-firing on an unchanged success baseline would spam every
+        # poll. Not in ``DEFAULT_UNTIL`` (a plain green build isn't itself
+        # actionable when a real review is still expected), but selectable
+        # explicitly or via ``any`` -- the one thing a self-merge-eligible
+        # wait (no further review ever coming) has left to fire on.
+        if (
+            baseline.checks_state not in ("", "success")
+            and snap.checks_state == "success"
+            and "checks_succeeded" in want
+        ):
+            events.append({"event": "checks_succeeded", "checks_state": snap.checks_state})
 
         # An approving review was DISMISSED (#225): the approval regressed and a
         # dismissed approval is present. Distinct from a fresh changes-requested

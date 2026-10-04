@@ -1247,7 +1247,11 @@ expectation, not a silent one. See
 A worker that can only wait on a slow external condition (a review, a build, a PR
 becoming mergeable) shouldn't sit on a live session and its token budget. It hands
 the wait to the layer: `run` executes the blocking command and, when it resolves,
-resumes the worktree-affinitied worker via an agent-bridge nudge.
+resumes the worktree-affinitied worker via an agent-bridge nudge. A wait command
+exiting `124` (timed out, nothing changed) re-arms in place rather than waking the
+worker -- but only up to a bounded number of times (`MAX_TIMEOUT_REATTEMPTS`,
+default 3); past that, `run` gives up and resumes anyway with a `gave_up` report
+and an explicit "never resolved" message, rather than hibernating indefinitely.
 
 ```bash
 # foreground: run the wait, then nudge the worker to resume:

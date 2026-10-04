@@ -77,6 +77,42 @@ class TestRunWait:
         assert not res.matched
         assert res.payload["timed_out"] is True
 
+    def test_checks_succeeded_fires_after_baseline_adopts(self):
+        # Symmetric to checks_failed: unknown checks at arm time are adopted
+        # (pending), then a flip to success on a later poll wakes the caller
+        # -- but only under an explicit/`any` until, since it's excluded from
+        # DEFAULT_UNTIL.
+        snap0 = _snap(pr_state="open", checks_state="pending")
+        snap1 = _snap(pr_state="open", checks_state="success")
+        res = self._run([snap0, snap1], until=["any"])
+        assert res.matched
+        assert res.payload["transitions"] == ["checks_succeeded"]
+        assert res.payload["checks_state"] == "success"
+
+    def test_checks_succeeded_fires_again_after_a_rerun(self):
+        # A re-armed wait carrying an already-"success" baseline (e.g. a
+        # --since cursor from a prior poll) must still fire on a FRESH
+        # success that follows an intervening re-run (pending) -- a static
+        # baseline that never observed the "pending" in between would
+        # otherwise suppress this real, new completion forever.
+        snap0 = _snap(pr_state="open", checks_state="pending")
+        snap1 = _snap(pr_state="open", checks_state="success")
+        res = self._run(
+            [snap0, snap1],
+            baseline=pc.Baseline(checks_state="success"),
+            until=["any"],
+        )
+        assert res.matched
+        assert res.payload["transitions"] == ["checks_succeeded"]
+
+    def test_checks_succeeded_not_fired_under_default_until(self):
+        # DEFAULT_UNTIL excludes checks_succeeded -- CI alone going green
+        # isn't actionable when a real review may still be expected.
+        snap0 = _snap(pr_state="open", checks_state="success")
+        res = self._run([snap0], timeout=0.5)
+        assert not res.matched
+        assert res.payload["timed_out"] is True
+
     def test_auto_baseline_open_does_not_fire_on_existing_review(self):
         # A pre-existing approval at arm time must NOT fire under auto-baseline;
         # the second poll (a NEW approval) should.
