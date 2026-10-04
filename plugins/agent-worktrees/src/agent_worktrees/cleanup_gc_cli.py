@@ -831,6 +831,11 @@ def _print_gc_claim_history_mirror(result: dict[str, object], dry: bool) -> None
         return
     pushed = result.get("pushed", 0)
     print(f"Mirrored {pushed} claim-history event(s) across {len(refs)} ref(s).")
+    failed = result.get("failed") or []
+    if failed:
+        print(f"  {len(failed)} ref(s) left with events still pending (will retry next sweep):")
+        for entry in failed:
+            print(f"  · {entry['ref']}: {entry['error']}")
 
 
 def _run_lease_gc(args: argparse.Namespace) -> dict[str, object]:

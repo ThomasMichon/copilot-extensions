@@ -10,31 +10,48 @@ See :mod:`claim_history`'s own module docstring for the full scope note
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 
 from . import claim_history, output
 
 
+def _event_key(e: dict) -> tuple:
+    return (
+        e.get("ts"), e.get("event"), e.get("worktree_id"),
+        e.get("machine"), e.get("session_id"), e.get("note"),
+    )
+
+
 def _merge_events(local: list[dict], remote: list[dict]) -> list[dict]:
-    """Merge local + mirrored events for one ref into a single ordered,
-    deduplicated list. Dedup key is the full (ts, event, worktree_id,
-    machine, session_id, note) tuple -- a mirrored event this machine itself
-    pushed is naturally identical to its local record and collapses to one
-    entry; a genuinely distinct event (a different machine's own local
-    record for the same ref) is kept. Sorted by ``ts`` (stable for equal
-    timestamps, preserving each source's own relative order) since merging
-    two independently-ordered sources is not itself guaranteed sorted.
+    """Merge local + mirrored events for one ref into a single ordered list,
+    counting (not set-deduplicating) by the full (ts, event, worktree_id,
+    machine, session_id, note) tuple. ``record_event`` timestamps only to
+    the second, so two genuinely distinct transitions by the same
+    worktree/session within one second can share an identical key -- a
+    plain set-based dedup across the combined list would silently drop one
+    of those REAL local events whenever its mirrored copy also happened to
+    be present, not just the redundant mirrored copy of an event local
+    already has. Instead: keep every local event as-is (never deduplicated
+    against itself), and only add remote events beyond however many of
+    that same key local already accounts for -- a remote event this
+    machine itself mirrored collapses against its own local record, while
+    a key remote has MORE copies of than local (e.g. a second machine's
+    own write for the same ref) still surfaces the extra one(s). Sorted by
+    ``ts`` (stable for ties, preserving each source's own relative order)
+    since merging two independently-ordered sources is not itself
+    guaranteed sorted.
     """
-    seen: set[tuple] = set()
-    merged: list[dict] = []
-    for e in (*local, *remote):
-        key = (
-            e.get("ts"), e.get("event"), e.get("worktree_id"),
-            e.get("machine"), e.get("session_id"), e.get("note"),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        merged.append(e)
+    local_counts = Counter(_event_key(e) for e in local)
+    remote_counts = Counter(_event_key(e) for e in remote)
+    remote_by_key: dict[tuple, list[dict]] = {}
+    for e in remote:
+        remote_by_key.setdefault(_event_key(e), []).append(e)
+
+    merged = list(local)
+    for key, remote_count in remote_counts.items():
+        extra = remote_count - local_counts.get(key, 0)
+        if extra > 0:
+            merged.extend(remote_by_key[key][:extra])
     merged.sort(key=lambda e: str(e.get("ts", "")))
     return merged
 
