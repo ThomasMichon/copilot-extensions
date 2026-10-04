@@ -1,0 +1,9 @@
+{
+  "comment": "doctor: report mis-registered repos (registered-but-missing or non-git checkout paths), alongside plugin-catalog alignment",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}
