@@ -15,29 +15,44 @@ resume in this exact worktree) is still genuinely open -- leave it."
 1. Sync the worktree branch forward onto the latest default branch
    (:func:`git_collab.sync_forward` -- the same "pull forward / build on
    top of a just-merged PR" primitive ``agent-worktrees git sync`` already
-   exposes). A dirty tree or a genuine conflict stops it with the same
-   clear message ``sync_forward`` already gives; ``pause`` never guesses
-   past either.
+   exposes). This DOES update the branch's ref/HEAD (a rebase) -- "never
+   destructive" here means never removing the worktree directory or its
+   branch, never force-pushing, never touching permissions/trustedFolders,
+   not "never changes anything at all." A dirty tree or a genuine conflict
+   stops the sync with the same clear message ``sync_forward`` already
+   gives, and ``pause`` aborts immediately without touching the claim
+   ledger at all -- a failed sync must never still persist a claim
+   transition.
 2. Auto-settle this worktree's own claims that are **provably** resolved
    -- reusing the same gone+safe reclaim sweep the obligation gate's
-   self-heal path is built on (:func:`sweep.self_heal`), scoped to just
-   this one record rather than the fleet-wide ``claims sweep``.
+   self-heal path is built on, scoped to just this one record rather than
+   the fleet-wide ``claims sweep``. Provider/lease probes run *before* the
+   record lock is taken (mirroring ``claims_cli._claims_sweep``'s own
+   verdicts-first pattern) -- a probe can take tens of seconds, and this
+   record's lock must never block an unrelated claim writer for that long.
+   A settled claim is recorded into the durable claim-history ledger the
+   same way the fleet-wide sweep does, so ``claims history <ref>`` reflects
+   it immediately.
 3. Report every claim that remains genuinely open -- and stop there.
    Unlike ``finalize``, this is never an error: ``pause`` never requires
    ``--abandon``, never demands a ``--handoff-to`` recipient, and never
-   touches the worktree directory, branch, permissions, or trustedFolders
-   entry. The operator (or the agent driving this CLI) reads the report
-   and decides, claim by claim, via the existing ``claims settle``/
-   ``claims release`` commands -- ``pause`` only tidies and reports, it
-   never forces a disposition on a claim it can't prove is already safe.
+   removes the worktree directory or branch. The operator (or the agent
+   driving this CLI) reads the report and decides, claim by claim, via the
+   existing ``claims settle``/``claims release`` commands -- ``pause`` only
+   tidies and reports; it never forces a disposition on a claim it can't
+   prove is already safe, and an empty remaining-claims report is not by
+   itself a guarantee that ``finalize`` will now succeed (finalize also
+   checks claim-handoff bundles, provider/PR state, and whether the
+   branch's content actually landed upstream).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
-from . import config as cfg, git_collab, output, sweep, tracking
+from . import claim_history, git_collab, sweep, tracking
+from . import config as cfg
+from . import obligations as ob
 
 
 @dataclass
@@ -49,7 +64,11 @@ class PauseResult:
 
     @property
     def clean(self) -> bool:
-        """True when nothing remains open -- ``finalize`` would now succeed."""
+        """True when no unsettled, non-session claim remains open.
+
+        Not itself a guarantee that ``finalize`` will now succeed -- see
+        the module docstring's point 3.
+        """
         return not self.remaining
 
 
@@ -61,44 +80,82 @@ def pause_worktree(
 ) -> PauseResult:
     """Sync, auto-settle what's provably done, and report what's still open.
 
-    Never raises on a remaining open claim and never mutates the worktree's
-    directory/branch/permissions -- see the module docstring for the full
-    contract. A sync failure (dirty tree, conflict, missing upstream) is
-    reported via ``synced=False``; the claim ledger is left untouched in
-    that case so a retry after resolving the sync issue sees the same
-    state.
+    Never raises on a remaining open claim and never removes the worktree's
+    directory or branch -- see the module docstring for the full contract.
+    A sync failure (dirty tree, conflict, missing upstream) is reported via
+    ``synced=False`` and returns immediately, before any claim-ledger
+    access at all -- a failed sync must never still persist a claim
+    transition.
     """
     synced = git_collab.sync_forward(worktree_id, config, dry_run=dry_run)
+    if not synced:
+        return PauseResult(worktree_id=worktree_id, synced=False)
 
-    settled: list[dict[str, str]] = []
-    remaining: list[dict[str, str]] = []
+    tracking_dir = cfg.tracking_dir(getattr(config, "repo_name", None))
+    yaml_path = tracking_dir / f"{worktree_id}.yaml"
 
     if dry_run:
         # A dry run must not mutate the claim ledger either -- report the
         # current unsettled set as a preview of what a real run would be
         # left deciding on, without running the reclaim sweep at all.
-        yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+        remaining: list[dict[str, str]] = []
         if yaml_path.exists():
             record = tracking.load_record(yaml_path)
             remaining = _describe_unsettled(record)
-        return PauseResult(
-            worktree_id=worktree_id, synced=synced, settled=settled, remaining=remaining,
-        )
+        return PauseResult(worktree_id=worktree_id, synced=True, remaining=remaining)
 
-    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
-        return PauseResult(worktree_id=worktree_id, synced=synced)
+        return PauseResult(worktree_id=worktree_id, synced=True)
+
+    # Compute gone/safe verdicts OUTSIDE the record lock -- a provider/lease
+    # probe (e.g. a `gh`/`az` call per claim) can take tens of seconds, and
+    # this record's lock must never block an unrelated claim writer for
+    # that long (mirrors claims_cli._claims_sweep's own verdicts-first
+    # pattern, which this module reuses rather than duplicates).
+    preview = tracking.load_record(yaml_path)
+    gone_of, safe_of = sweep.make_resolvers(config)
+    verdicts: dict[str, tuple[bool | None, bool | None]] = {}
+    for claim in preview.resources:
+        if not claim.is_unsettled or tracking.claim_handoff_reservation(preview, claim):
+            continue
+        try:
+            gone = gone_of(claim)
+        except Exception:
+            gone = None
+        try:
+            safe = safe_of(claim)
+        except Exception:
+            safe = None
+        verdicts[claim.ref] = (gone, safe)
+
+    def _gone(claim: tracking.ResourceClaim) -> bool | None:
+        return verdicts.get(claim.ref, (None, None))[0]
+
+    def _safe(claim: tracking.ResourceClaim) -> bool | None:
+        return verdicts.get(claim.ref, (None, None))[1]
 
     with tracking._RecordLock(yaml_path, require_sidecar=True):
         record = tracking.load_record(yaml_path)
-        flipped = sweep.self_heal(record, config, path=yaml_path, save=True)
+        flipped = tracking.sweep_abandoned_obligations(
+            record, gone_of=_gone, safe_of=_safe, save=False,
+        )
+        if flipped:
+            tracking.save_record(record, yaml_path)
+            # Append immediately, still inside this record's own lock,
+            # using THIS record's own machine (never the ambient config's)
+            # -- only after the save is confirmed, so a persisted
+            # transition is never recorded as history before it's durable.
+            for c in flipped:
+                claim_history.record_event(
+                    kind=c.kind, ref=c.ref, worktree_id=record.worktree_id,
+                    machine=record.machine, event="released",
+                    note="merged" if c.state == ob.RELEASED else "abandoned",
+                )
         settled = [{"kind": c.kind, "ref": c.ref, "state": c.state} for c in flipped]
-        # self_heal persists on a real flip; reload is unnecessary since
-        # `record` was mutated in place by sweep_abandoned_obligations.
         remaining = _describe_unsettled(record)
 
     return PauseResult(
-        worktree_id=worktree_id, synced=synced, settled=settled, remaining=remaining,
+        worktree_id=worktree_id, synced=True, settled=settled, remaining=remaining,
     )
 
 

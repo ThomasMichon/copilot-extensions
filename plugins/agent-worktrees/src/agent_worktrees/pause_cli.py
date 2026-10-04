@@ -7,7 +7,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from . import config as cfg, output, pause as pause_mod
+from . import config as cfg
+from . import output
+from . import pause as pause_mod
 
 
 def _core():
@@ -21,7 +23,7 @@ def add_parsers(sub) -> None:
         "pause",
         help="Sync + tidy a worktree without finalizing it: settle provably-done "
         "claims, report what's still genuinely open, and stop -- never errors "
-        "on an open claim, never touches the worktree directory/branch.",
+        "on an open claim, never removes the worktree directory or branch.",
     )
     p.add_argument("worktree_id", nargs="?", default=None)
     p.add_argument(
@@ -96,8 +98,11 @@ def cmd_pause(args: argparse.Namespace) -> int:
 
         if not result.remaining:
             output.ok(
-                f"Worktree {result.worktree_id} is clean -- "
-                "'agent-worktrees finalize' would now succeed."
+                f"Worktree {result.worktree_id} has no unsettled, non-session "
+                "claim left open. (Not itself a guarantee 'finalize' will "
+                "succeed -- it also checks claim-handoff bundles, provider/PR "
+                "state, and whether the branch's content actually landed "
+                "upstream.)"
             )
             return 0
 
