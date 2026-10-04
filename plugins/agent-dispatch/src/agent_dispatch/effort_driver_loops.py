@@ -28,7 +28,8 @@ from .registrar import (
 )
 from .worker_identities import load_worker_identity
 
-_TERMINAL = frozenset({"submitted", "completed", "abandoned", "dead_letter"})
+_TERMINAL = frozenset({"completed", "abandoned", "dead_letter"})
+_ACTIVE_STATUSES = "proposed,queued,claimed,started,suspended,submitted"
 _KNOWN_KEYS = frozenset(
     {
         "name",
@@ -426,38 +427,31 @@ def _origin_ref(config: Mapping[str, Any], effort: ActiveEffort, occurrence: int
 
 def plan(client: Any, config: Mapping[str, Any], *, now: float) -> dict[str, Any]:
     occurrence = occurrence_epoch(now, config["cadence_seconds"])
-    tasks = client.list(
-        repo=config["repo"],
-        status=(
-            "proposed,queued,claimed,started,suspended,"
-            "submitted,completed,abandoned,dead_letter"
-        ),
-        limit=1000,
-    )
     efforts, missing = _discover_active_efforts(config)
     eligible: list[ActiveEffort] = []
     suppressed: list[str] = []
     for effort in efforts:
         exclusive_key = _exclusive_key(config, effort)
         origin_ref = _origin_ref(config, effort, occurrence)
-        active = [
-            task
-            for task in tasks
-            if task.get("exclusive_key") == exclusive_key
-            and task.get("status") not in _TERMINAL
-        ]
-        same_occurrence = [
-            task
-            for task in tasks
-            if task.get("origin_ref") == origin_ref
-        ]
+        active = client.list(
+            repo=config["repo"],
+            source=config["source"],
+            exclusive_key=exclusive_key,
+            status=_ACTIVE_STATUSES,
+            limit=1,
+        )
+        same_occurrence = client.list(
+            repo=config["repo"],
+            source=config["source"],
+            origin_ref=origin_ref,
+            limit=1,
+        )
         if active or same_occurrence:
             suppressed.append(effort.slug)
             continue
         eligible.append(effort)
     return {
         "occurrence": occurrence,
-        "tasks": tasks,
         "efforts": efforts,
         "eligible": eligible,
         "suppressed_efforts": suppressed,

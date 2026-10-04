@@ -39,7 +39,27 @@ class FakeClient:
 
     def list(self, **kwargs):
         self.list_calls.append(kwargs)
-        return list(self.tasks)
+        tasks = list(self.tasks)
+        if repo := kwargs.get("repo"):
+            tasks = [task for task in tasks if task.get("repo") == repo]
+        if source := kwargs.get("source"):
+            tasks = [task for task in tasks if task.get("source") == source]
+        if origin_ref := kwargs.get("origin_ref"):
+            tasks = [task for task in tasks if task.get("origin_ref") == origin_ref]
+        if exclusive_key := kwargs.get("exclusive_key"):
+            tasks = [
+                task for task in tasks if task.get("exclusive_key") == exclusive_key
+            ]
+        if status := kwargs.get("status"):
+            if isinstance(status, str):
+                status_values = {part.strip() for part in status.split(",") if part.strip()}
+            else:
+                status_values = set(status)
+            tasks = [task for task in tasks if task.get("status") in status_values]
+        limit = kwargs.get("limit")
+        if isinstance(limit, int):
+            tasks = tasks[:limit]
+        return tasks
 
     def create(self, title, **fields):
         task = {
@@ -159,3 +179,71 @@ def test_explicit_effort_slugs_require_every_named_effort_to_exist(tmp_path):
 
     assert result["created"] == []
     assert result["missing_effort_slugs"] == ["missing-effort"]
+
+
+def test_submitted_effort_task_suppresses_duplicate_creation_on_later_cadence(tmp_path):
+    _write_effort(
+        tmp_path,
+        "recipe-library",
+        title="agent-dispatch recipe library",
+        status="In Progress",
+    )
+    config = validate_config(
+        _config(tmp_path, effort_slugs=["recipe-library"]),
+        cwd=tmp_path,
+    )
+    client = FakeClient(
+        [
+            {
+                "id": "task-1",
+                "repo": "example/project",
+                "source": "effort-driver",
+                "status": "submitted",
+                "exclusive_key": (
+                    "effort-driver-loop:effort-driver:"
+                    "efforts\\active\\recipe-library\\README.md"
+                ),
+                "origin_ref": "older",
+            }
+        ]
+    )
+
+    result = run_tick(client, config, clock=lambda: 20_000, cwd=tmp_path)
+
+    assert result["created"] == []
+    assert result["suppressed_efforts"] == ["recipe-library"]
+
+
+def test_plan_looks_up_only_per_effort_keys_not_the_entire_task_corpus(tmp_path):
+    _write_effort(
+        tmp_path,
+        "recipe-library",
+        title="agent-dispatch recipe library",
+        status="In Progress",
+    )
+    client = FakeClient()
+    config = validate_config(
+        _config(tmp_path, effort_slugs=["recipe-library"]),
+        cwd=tmp_path,
+    )
+
+    run_tick(client, config, clock=lambda: 10_000, cwd=tmp_path)
+
+    assert client.list_calls == [
+        {
+            "repo": "example/project",
+            "source": "effort-driver",
+            "exclusive_key": (
+                "effort-driver-loop:effort-driver:"
+                "efforts\\active\\recipe-library\\README.md"
+            ),
+            "status": "proposed,queued,claimed,started,suspended,submitted",
+            "limit": 1,
+        },
+        {
+            "repo": "example/project",
+            "source": "effort-driver",
+            "origin_ref": "effort-driver/effort/recipe-library/occurrence/7200",
+            "limit": 1,
+        },
+    ]

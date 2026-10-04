@@ -1265,7 +1265,7 @@ suite green (3743 passed, 23 skipped, the one known flake above).
     carries durable PR + constituent-issue evidence; still-active and
     weak-evidence fixtures stay submitted.
 - Validation:
-  - focused Phase 8 tests: **121 passed**
+  - focused Phase 8 tests: **123 passed**
   - install contract: **OK**
   - full `agent-dispatch` suite: re-run twice via
     `python tools/run-plugin-tests.py agent-dispatch --timeout 600 --plugin-timeout 2400`;
@@ -1275,3 +1275,22 @@ suite green (3743 passed, 23 skipped, the one known flake above).
     this effort's operator brief). Isolated rerun of that single test passed
     immediately, confirming the failure shape stayed flaky-only-in-aggregate
     rather than a Phase 8 regression.
+
+### 2026-10-04 (same day) — Review feedback, round 1
+- Automated review caught two real duplicate-suppression bugs in the new
+  effort-driver loop, both fixed:
+  1. **Medium**: the first version treated `submitted` tasks as terminal for
+     per-effort suppression, so a task whose evaluator returned `noop` would
+     still allow the next cadence to create a duplicate effort-driver task for
+     the same still-active effort. Fixed by removing `submitted` from the
+     loop's terminal set and adding a regression test that a submitted task
+     suppresses re-creation on a later cadence.
+  2. **Medium**: the first version scanned the newest 1,000 tasks in the repo
+     and suppressed effort creation from that unfiltered corpus. Once the repo
+     had enough unrelated tasks, an older still-active effort task could fall
+     out of that window and the loop would emit a duplicate. Fixed by
+     discovering the active efforts first, then querying the queue per effort
+     key (`exclusive_key` for active-task suppression, `origin_ref` for
+     same-occurrence suppression) with `limit=1`, plus a regression test that
+     the plan uses those per-effort lookups rather than a whole-corpus scan.
+- Focused Phase 8 tests after the fixes: **123 passed**.
