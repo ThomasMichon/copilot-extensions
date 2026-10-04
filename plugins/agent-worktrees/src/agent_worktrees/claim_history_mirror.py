@@ -99,7 +99,7 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
-from . import claim_history
+from . import claim_history, handoff_trace
 from .lease_config import ConfigError, LeaseSettings, load_lease_settings
 from .lease_protocol import ProtocolError, canonical_json, ref_for, resource
 
@@ -514,23 +514,75 @@ def _ledger_id() -> str:
     incarnation," pragmatic rather than airtight against every possible
     on-disk corruption, but correct for the two cases that matter here:
     two genuinely independent machines, and a genuine reimage.
+
+    The whole check-then-mint-then-persist sequence is serialized by the
+    same cross-process advisory lock :mod:`claim_history` uses for its own
+    ledger appends -- two overlapping first sweeps racing to initialize
+    this sidecar must never each mint and persist a DIFFERENT id (the
+    second write winning silently would orphan whichever events the first
+    sweep already stamped and pushed under its own, now-overwritten id,
+    since no future read would ever match them again).
     """
     ledger_path = claim_history.history_path()
     id_path = _ledger_id_path()
-    if ledger_path.exists() and id_path.exists():
-        try:
-            existing = id_path.read_text(encoding="utf-8").strip()
-        except OSError:
-            existing = ""
-        if existing:
-            return existing
-    new_id = uuid.uuid4().hex
-    try:
+    lock_path = id_path.with_suffix(id_path.suffix + ".lock")
+    with handoff_trace._append_lock(lock_path):
+        if ledger_path.exists() and id_path.exists():
+            try:
+                existing = id_path.read_text(encoding="utf-8").strip()
+            except OSError:
+                existing = ""
+            if existing:
+                return existing
+        new_id = uuid.uuid4().hex
         id_path.parent.mkdir(parents=True, exist_ok=True)
-        id_path.write_text(new_id, encoding="utf-8")
+        tmp = id_path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+        try:
+            tmp.write_text(new_id, encoding="utf-8")
+            tmp.replace(id_path)
+        finally:
+            tmp.unlink(missing_ok=True)
+        return new_id
+
+
+def _ledger_id_readonly() -> str | None:
+    """Read-only sibling of :func:`_ledger_id` -- the persisted ledger
+    incarnation id if the sidecar already exists, else ``None``. NEVER
+    mints or writes one: a pure display/read path (e.g. ``claims history
+    --remote``'s own local/remote merge) must never have the side effect
+    of creating a fresh ledger identity merely by being invoked."""
+    id_path = _ledger_id_path()
+    if not id_path.exists():
+        return None
+    try:
+        existing = id_path.read_text(encoding="utf-8").strip()
     except OSError:
-        pass
-    return new_id
+        return None
+    return existing or None
+
+
+def local_identities_for_ref(kind: str, ref_value: str) -> list[dict]:
+    """Local events for ``(kind, ref_value)``, each stamped with the same
+    ``(seq, ledger_id)`` durable identity a sync sweep would use -- for
+    comparing against a resource's MIRRORED chain (e.g. ``claims history
+    --remote``'s own merge), never for pushing. Read-only: uses
+    :func:`_ledger_id_readonly`, so merely displaying history never mints
+    a ledger id as a side effect. A ``ledger_id`` of ``None`` here (no
+    sidecar yet -- this machine has never mirrored anything) means no
+    local event can be durably matched against a remote one; callers
+    should treat that as "no confirmed match," never a false one.
+    """
+    events = [
+        e for e in claim_history.history_for_ref(ref_value) if e.get("kind") == kind
+    ]
+    ledger_id = _ledger_id_readonly()
+    stamped = []
+    for i, e in enumerate(events):
+        entry = dict(e)
+        entry["seq"] = i
+        entry["ledger_id"] = ledger_id
+        stamped.append(entry)
+    return stamped
 
 
 def _current_project_worktree_ids() -> set[str]:
@@ -638,7 +690,18 @@ def sync_pending(
     failed: list[dict[str, object]] = []
     pushed_total = 0
 
-    for (k, ref_value), events in _grouped_events(kind=kind).items():
+    try:
+        grouped = _grouped_events(kind=kind)
+    except OSError as exc:
+        # The ledger-id sidecar's own init failed (disk full, permissions,
+        # ...) -- every event in this sweep is unstampable without it, so
+        # report that plainly rather than silently sweeping nothing.
+        return {
+            "available": True, "pushed": 0, "refs": [],
+            "failed": [{"ref": None, "kind": kind, "error": f"ledger id init failed: {exc}"}],
+        }
+
+    for (k, ref_value), events in grouped.items():
         eligible = [
             e for e in events
             if _event_eligible(e, project_name=project_name, owned_ids=owned_ids)
@@ -648,8 +711,8 @@ def sync_pending(
         if dry_run:
             try:
                 _tip, existing = mirror._fetch_chain(k, ref_value)
-            except _SnapshotUnavailable:
-                failed.append({"ref": ref_value, "kind": k, "error": "remote snapshot unavailable"})
+            except (_SnapshotUnavailable, ClaimHistoryMirrorError) as exc:
+                failed.append({"ref": ref_value, "kind": k, "error": str(exc)})
                 continue
             existing_ids = {_event_identity(e) for e in existing}
             pending = [e for e in eligible if _event_identity(e) not in existing_ids]

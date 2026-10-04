@@ -298,6 +298,71 @@ def test_ledger_id_changes_after_the_ledger_file_is_removed(monkeypatch):
     assert first != second
 
 
+def test_ledger_id_serializes_initialization(monkeypatch):
+    """Two overlapping first-time callers racing to initialize the ledger
+    id sidecar must never each mint and persist a DIFFERENT id -- the
+    whole check-then-mint-then-persist sequence is one locked critical
+    section."""
+    calls: list = []
+    real_lock = claim_history_mirror.handoff_trace._append_lock
+
+    def spy_lock(lock_path):
+        calls.append(lock_path)
+        return real_lock(lock_path)
+
+    monkeypatch.setattr(claim_history_mirror.handoff_trace, "_append_lock", spy_lock)
+    claim_history_mirror._ledger_id()
+    assert len(calls) == 1
+    id_path = claim_history_mirror._ledger_id_path()
+    assert calls[0] == id_path.with_suffix(id_path.suffix + ".lock")
+
+
+def test_ledger_id_readonly_is_none_before_any_initialization():
+    assert claim_history_mirror._ledger_id_readonly() is None
+
+
+def test_ledger_id_readonly_never_mints(monkeypatch):
+    """A pure display/read path must never have the side effect of
+    creating a fresh ledger identity merely by being invoked."""
+    assert claim_history_mirror._ledger_id_readonly() is None
+    assert not claim_history_mirror._ledger_id_path().exists()
+
+
+def test_ledger_id_readonly_returns_the_persisted_id_once_minted():
+    minted = claim_history_mirror._ledger_id()
+    assert claim_history_mirror._ledger_id_readonly() == minted
+
+
+# ── local_identities_for_ref ──────────────────────────────────────────────
+
+def test_local_identities_for_ref_is_none_ledger_id_before_any_sync():
+    claim_history.record_event(
+        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
+    )
+    stamped = claim_history_mirror.local_identities_for_ref("pr", "o/r#1")
+    assert len(stamped) == 1
+    assert stamped[0]["ledger_id"] is None
+    assert stamped[0]["seq"] == 0
+    # A read-only display call must never mint the sidecar.
+    assert not claim_history_mirror._ledger_id_path().exists()
+
+
+def test_local_identities_for_ref_matches_a_real_sync_sweeps_own_stamping(
+    settings: LeaseSettings, monkeypatch,
+):
+    monkeypatch.setattr(
+        claim_history_mirror, "mirror_settings", lambda origin=None: settings
+    )
+    claim_history.record_event(
+        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
+    )
+    claim_history_mirror.sync_pending()  # mints + uses the real ledger id
+    stamped = claim_history_mirror.local_identities_for_ref("pr", "o/r#1")
+    remote = mirror(settings).fetch("pr", "o/r#1")
+    assert stamped[0]["ledger_id"] == remote[0]["ledger_id"]
+    assert stamped[0]["seq"] == remote[0]["seq"]
+
+
 # ── _grouped_events ───────────────────────────────────────────────────────
 
 def test_grouped_events_stamps_a_stable_position_based_seq_and_ledger_id():
@@ -422,6 +487,31 @@ def test_sync_pending_dry_run_reports_nothing_once_already_mirrored(
     claim_history_mirror.sync_pending()
     result = claim_history_mirror.sync_pending(dry_run=True)
     assert result["refs"] == []
+
+
+def test_sync_pending_dry_run_reports_an_unreachable_store_as_failed_not_zero(
+    settings: LeaseSettings, monkeypatch
+):
+    """An unreachable store raises ``ClaimHistoryMirrorError`` from
+    ``_remote_oid``'s own checked ``ls-remote`` -- a NARROWER except
+    clause catching only ``_SnapshotUnavailable`` would let this escape
+    and abort the whole dry-run sweep instead of reporting the one
+    affected ref and continuing."""
+    monkeypatch.setattr(
+        claim_history_mirror, "mirror_settings", lambda origin=None: settings
+    )
+    claim_history.record_event(
+        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
+    )
+
+    def boom(self, ref):
+        raise claim_history_mirror.ClaimHistoryMirrorError("store unreachable")
+
+    monkeypatch.setattr(claim_history_mirror.ClaimHistoryMirror, "_remote_oid", boom)
+    result = claim_history_mirror.sync_pending(dry_run=True)
+    assert result["refs"] == []
+    assert len(result["failed"]) == 1
+    assert result["failed"][0]["ref"] == "o/r#1"
 
 
 def test_sync_pending_ignores_an_unsupported_kind_never_recorded_locally(

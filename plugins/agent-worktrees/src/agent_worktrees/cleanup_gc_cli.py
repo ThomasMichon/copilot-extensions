@@ -825,13 +825,24 @@ def _print_gc_claim_history_mirror(result: dict[str, object], dry: bool) -> None
     if not result.get("available"):
         return
     refs = result.get("refs") or []
+    failed = result.get("failed") or []
     if dry:
         pending = sum(int(r.get("pending", 0)) for r in refs)
-        print(f"Would mirror {pending} pending claim-history event(s) across {len(refs)} ref(s).")
+        confirmed = len(refs)
+        print(
+            f"Would mirror {pending} pending claim-history event(s) across "
+            f"{confirmed} ref(s) confirmed by a remote read."
+        )
+        if failed:
+            print(
+                f"  {len(failed)} ref(s) could not be inspected -- their true pending "
+                "count is UNKNOWN, not zero:"
+            )
+            for entry in failed:
+                print(f"  · {entry['ref']}: {entry['error']}")
         return
     pushed = result.get("pushed", 0)
     print(f"Mirrored {pushed} claim-history event(s) across {len(refs)} ref(s).")
-    failed = result.get("failed") or []
     if failed:
         print(f"  {len(failed)} ref(s) left with events still pending (will retry next sweep):")
         for entry in failed:
