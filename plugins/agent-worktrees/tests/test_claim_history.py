@@ -625,7 +625,11 @@ def test_cli_history_is_complete_and_ordered_across_a_real_session_rebind(
     )
     assert rc == 0
     out = capsys.readouterr().out
-    assert "claimed" in out and "reassigned" in out
+    # Exactly one of each event, in order, not merely present anywhere --
+    # a substring-only check would miss a duplicate or reversed render.
+    assert out.count("claimed") == 1
+    assert out.count("reassigned") == 1
+    assert out.index("claimed") < out.index("reassigned")
     assert "sess-a" in out and "sess-b" in out
 
 
