@@ -1551,6 +1551,16 @@ def test_seed_pane_echo_in_the_box_still_submits_under_a_stale_prompt():
     assert result["submitted"] is True
 
 
+def test_seed_pane_echo_keeps_box_and_block_glyphs_typed_in_the_input():
+    """Only the frame's left border is dropped: box/block characters in the
+    seed itself are its text, so a fully echoed seed still submits."""
+    seed = "█Use ░ and ┃ here"
+    driver = _SeedDriver(ready_caps=[_BOXED_INPUT, _BOXED_INPUT],
+                         echo_caps=[_BOXED_INPUT.replace("┃\n", f"┃ {seed}\n")])
+    result = _run_seed(driver, seed=seed)
+    assert result["submitted"] is True
+
+
 _DESKTOP_APP_NUDGE = (
     "│  the CLI, in a GitHub-native desktop app built for managing parallel  │\n"
     "│  agents.                                                             │\n"

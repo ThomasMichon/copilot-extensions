@@ -26,8 +26,9 @@ def input_region(capture: str) -> str:
     return "\n".join(lines[-8:])
 
 
-#: Box-drawing and block glyphs (the boxed input's borders and rails).
-_BOX_GLYPHS = re.compile("[\u2500-\u259f]")
+#: The boxed input's left frame border at the start of each interior line --
+#: only that one glyph: box/block characters typed in the input are text.
+_LEFT_BORDER = re.compile("^\\s*[\u2500-\u259f]")
 
 
 def input_text(capture: str, *, before: str | None = None) -> str:
@@ -35,7 +36,8 @@ def input_text(capture: str, *, before: str | None = None) -> str:
     transcript above it, where a resumed conversation can hold an earlier
     prompt with the same words.
 
-    Boxed input (CLI >= 1.0.89): the lines inside the box, borders dropped.
+    Boxed input (CLI >= 1.0.89): the lines inside the box, each without its
+    left frame border.
     Older layouts have no such boundary, so it is what the typing added: the
     lines of ``capture`` not already in ``before`` (the capture that confirmed
     readiness), counted as a multiset so an unchanged transcript line never
@@ -46,7 +48,7 @@ def input_text(capture: str, *, before: str | None = None) -> str:
     if top is not None:
         bottom = next((i for i in range(top + 1, len(lines)) if "╹▀" in lines[i]), None)
         if bottom is not None:
-            return "\n".join(_BOX_GLYPHS.sub("", line) for line in lines[top + 1:bottom])
+            return "\n".join(_LEFT_BORDER.sub("", line, count=1) for line in lines[top + 1:bottom])
     remaining: dict[str, int] = {}
     for line in (before or "").splitlines():
         if line.strip():
