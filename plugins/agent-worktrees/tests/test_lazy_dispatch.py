@@ -45,7 +45,7 @@ import _core_cluster_scan  # noqa: E402 -- must follow the sys.path insert above
 # which must be this module's own name so the handler-module cross-check
 # below (`handler_module != modname`) matches instead of dropping the entry.
 _ADD_PARSERS_MODULES = [
-    "resolve_cli", "finalize_cli", "pr_state_cli", "status_cli", "status_bar_cli",
+    "resolve_cli", "finalize_cli", "pause_cli", "pr_state_cli", "status_cli", "status_bar_cli",
     "status_updater_cli", "status_monitor_cli", "status_monitor_runtime",
     "pane_lifecycle", "handoff_cli", "handoff_successor_repair_cli", "handoff_cancel_cli", "list_cli", "claims_cli", "follow_ups_cli",
     "session_metadata_cli", "cleanup_gc_cli", "reap_cli", "reclaim_cli",

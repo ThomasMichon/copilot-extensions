@@ -1,0 +1,9 @@
+{
+  "comment": "Add a non-destructive 'pause' verb: sync forward, auto-settle provably-resolved claims, and report -- never error on -- any claim still genuinely open (see finalize's all-or-nothing obligation gate)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

@@ -251,6 +251,26 @@ branch, and pushes. `finalize` verifies the content actually landed before
 removing the worktree/branch — and defers the prune while a session is still
 live. Never hand-run `git merge`/`push`/`worktree remove`.
 
+#### Pausing instead of finalizing
+
+`finalize` is all-or-nothing on its obligation gate: any unsettled outbound
+claim (a pending `context-handoff` task, a leased CodeSpace, etc.) either
+blocks it outright, or `--abandon --handoff-to <recipient>` re-homes the
+*entire* set elsewhere. Neither fits "sync and tidy everything that's
+actually done, but leave this one claim open on purpose."
+
+```bash
+agent-worktrees pause   # sync forward, auto-settle provably-done claims, report the rest
+```
+
+`pause` syncs the branch forward (the same `git sync` primitive), auto-settles
+any claim the reclaim sweep can *prove* is already resolved (a merged PR, a
+released session, …), and then reports whatever remains genuinely open —
+without erroring, without `--abandon`, and without ever touching the
+directory, branch, or permissions. Settle an individual remaining claim with
+`claims settle <ref>` (or leave it open on purpose) and re-run `pause` or
+`finalize` when ready.
+
 ### 3b. PR mode — the `pr-*` command family
 
 When the repo is PR-gated, sign-off becomes **create-pr → review → merge →

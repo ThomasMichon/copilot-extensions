@@ -14,6 +14,7 @@ Usage (direct):
     agent-worktrees create [--json]       # programmatic: make a worktree, no launch
     agent-worktrees embody [--worktree-id <id> | --new] [--seed S]  # spawn mux+Copilot
     agent-worktrees finalize [worktree-id | --worktree-id ID] [--dry-run] [--json]
+    agent-worktrees pause [worktree-id | --worktree-id ID] [--dry-run] [--json]
     agent-worktrees mark-complete [worktree-id] [--title T] [--title-only]
     agent-worktrees status [--json]
     agent-worktrees cleanup [--clean] [--include-unused] [--max-age-days N]
@@ -5498,6 +5499,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
 
     finalize_cli.add_parsers(sub)
+    pause_cli.add_parsers(sub)
     pr_state_cli.add_parsers(sub)
 
     status_cli.add_parsers(sub)
@@ -5746,6 +5748,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'list-sessions': ('session_tracking_cli', 'cmd_list_sessions'),
     'machine-context': ('context_cli', 'cmd_machine_context'),
     'mark-complete': ('finalize_cli', 'cmd_mark_complete'),
+    'pause': ('pause_cli', 'cmd_pause'),
     'note-handoff': ('session_binding_cli', 'cmd_note_handoff'),
     'cancel-handoff': ('handoff_cancel_cli', 'cmd_cancel_handoff'),
     'pane-create': ('pane_lifecycle', 'cmd_pane_create'),
@@ -5852,6 +5855,7 @@ _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "list_cli",
     "maintenance_cli",
     "pane_lifecycle",
+    "pause_cli",
     "picker_profiles_cli",
     "picker_reconcile_cli",
     "pr_state_cli",
@@ -5996,7 +6000,9 @@ def _load_full_command_surface() -> None:
     global cmd_session_tail
     global cmd_session_transcript, cmd_set_pr, cmd_state_root_dispatch, cmd_status, cmd_status_context, cmd_status_monitor, cmd_status_monitor_restart, cmd_status_segment, cmd_sweep_finished_sessions, cmd_sweep_managed
     global cmd_status_updater, cmd_sync, cmd_uninstall, cmd_uninstall_plugins, cmd_update, cmd_validate, cmd_worktree_dispatch
+    global cmd_pause
     global cmd_worktree_lineage, cmd_worktree_status_bundle, context_cli, copilot_cli, copilot_identity_cli, finalize_cli, finalize_one, follow_ups_cli, front_door_cli, git_cli
+    global pause_cli
     global handoff_cli, handoff_diagnostics, handoff_successor_repair_cli, installation_cli, list_cli, maintenance_cli, doctor_render, picker_profiles_cli, plan_pre_launch, pr_cli
     global pr_state_cli, reap_cli, reap_orphan_launcher_shells, reclaim_cli, reclaim_one, related_cli, repos_cli, resolve_cli
     global identifier_blocklist_cli
@@ -6022,6 +6028,7 @@ def _load_full_command_surface() -> None:
         list_cli,
         maintenance_cli,
         doctor_render,
+        pause_cli,
         picker_profiles_cli,
         picker_reconcile_cli,
         pr_cli,
@@ -6159,6 +6166,7 @@ def _load_full_command_surface() -> None:
     cmd_create_pr = finalize_cli.cmd_create_pr
     cmd_attribution_audit = finalize_cli.cmd_attribution_audit
     cmd_mark_complete = finalize_cli.cmd_mark_complete
+    cmd_pause = pause_cli.cmd_pause
     cmd_set_pr = pr_state_cli.cmd_set_pr
     cmd_pr_ready = pr_state_cli.cmd_pr_ready
     cmd_pr_status = pr_state_cli.cmd_pr_status
@@ -6412,6 +6420,7 @@ def _load_full_command_surface() -> None:
         "pr-nudge": cmd_pr_nudge,
         "pr-complete": cmd_pr_complete,
         "mark-complete": cmd_mark_complete,
+        "pause": cmd_pause,
         "status": cmd_status,
         "effort-focus": cmd_effort_focus,
         "status-segment": cmd_status_segment,
