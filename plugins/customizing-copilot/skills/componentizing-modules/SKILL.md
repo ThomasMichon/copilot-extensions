@@ -239,6 +239,11 @@ ruff check --select F,E9 <every file you touched or created>
 python tools/check-module-size.py                # must still pass
 ```
 
+Prefer `python tools/run_tests_in_devcontainer.py <plugin>` over the first
+line above when Docker + the devcontainers CLI are available (Linux only;
+`git add` any newly created files first — see `AGENTS.md` § *Test Before PR
+Publication*).
+
 **`run-plugin-tests.py` groups a plugin's tests into sub-suites and stops at
 the first sub-suite that fails** — including a pre-existing, unrelated
 failure already in sub-suite 1 that has nothing to do with your change. A

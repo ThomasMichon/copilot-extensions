@@ -388,8 +388,10 @@ canonicalization, F3 binding invariants) so `--guards` runs them in
 sub-second-per-plugin. Copilot review is non-blocking, so run the relevant suite
 yourself before publishing a plugin change.
 
-**After fixing a bug, prefer the devcontainer-isolated runner when available
-(Linux, Docker + the devcontainers CLI present):**
+**Prefer the devcontainer-isolated runner for any pre-PR validation when
+available (Linux, Docker + the devcontainers CLI present)** — not just after
+a bug fix; any agent that genuinely has Docker + the devcontainers CLI
+should default to it over the bare runner:
 
 ```bash
 git add <new/changed files>                          # see prerequisite below
@@ -407,8 +409,8 @@ isn't gitignored.
 
 It runs the exact suite above inside a hardened, network-disconnected,
 ephemeral container — a real OS-level boundary on top of the turn-key
-runner's own process-level containment, so a fix that *looks* contained but
-still reaches outside its redirected roots (an absolute-path write, a raw
+runner's own process-level containment, so a change that *looks* contained
+but still reaches outside its redirected roots (an absolute-path write, a raw
 socket) can't leave evidence on, or depend on state from, this host. Fall
 back to the bare runner above when Docker/the devcontainers CLI isn't
 available. See `TESTING.md` § *Optional devcontainer-based isolation* for
