@@ -885,6 +885,24 @@ def test_internal_host_matches_with_an_explicit_url_port(tmp_path: Path) -> None
         assert "operator-only (internal_host); disclosure is never required" in context
 
 
+def test_internal_host_matches_an_unnamespaced_remote(tmp_path: Path) -> None:
+    """The internal_host exemption must not depend on account/owner parsing --
+    a bare `host/repo.git` remote (no owner segment) is still a valid host to
+    exempt, even though it can never resolve an owned_account."""
+    repo = _git_repo(
+        tmp_path / "repo",
+        "https://gitea.example.internal/repo.git",
+    )
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "internal_host=gitea.example.internal\n",
+    )
+    for hook in _parity_hooks():
+        context = _context(_run(hook, repo, home))
+        assert "operator-only (internal_host); disclosure is never required" in context
+
+
 def test_owned_account_matches_with_an_explicit_url_port(tmp_path: Path) -> None:
     repo = _git_repo(
         tmp_path / "repo",

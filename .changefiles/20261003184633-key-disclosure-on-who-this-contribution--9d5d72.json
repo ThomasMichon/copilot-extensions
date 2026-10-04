@@ -3,7 +3,7 @@
   "changes": [
     {
       "plugin": "ai-attribution",
-      "type": "minor"
+      "type": "patch"
     }
   ]
 }

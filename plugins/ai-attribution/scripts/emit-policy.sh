@@ -291,13 +291,44 @@ read_config() {
     done < <(printf '%s' "$content")
 }
 
-remote_account() {
-    local url authority host path owner first
+_remote_url() {
+    local url first
     url="$(git -C "$repo_root" remote get-url origin 2>/dev/null || true)"
     if [[ -z "$url" ]]; then
         first="$(git -C "$repo_root" remote 2>/dev/null | while IFS= read -r name; do printf '%s' "$name"; break; done)"
         [[ -n "$first" ]] && url="$(git -C "$repo_root" remote get-url "$first" 2>/dev/null || true)"
     fi
+    printf '%s' "$url"
+}
+
+_remote_host_of() {
+    local url="$1" authority host
+    case "$url" in
+        *://*)
+            authority="${url#*://}"
+            authority="${authority%%/*}"
+            host="${authority##*@}"
+            host="${host%%:*}"
+            ;;
+        *@*:*)
+            authority="${url%%:*}"
+            host="${authority##*@}"
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+    host_is_valid "$host" || return 0
+    printf '%s' "${host,,}"
+}
+
+remote_host() {
+    _remote_host_of "$(_remote_url)"
+}
+
+remote_account() {
+    local url authority host path owner
+    url="$(_remote_url)"
     case "$url" in
         *://*)
             authority="${url#*://}"
@@ -630,7 +661,7 @@ read_custom_instruction_configs() {
 }
 
 main() {
-    local config_home account guide kernel payload_cwd payload_nul=0
+    local config_home account guide kernel payload_cwd payload_nul=0 remote_host_value
 
     IFS= LC_ALL=C read -r -d '' -n $((max_payload_bytes + 1)) json_text && payload_nul=1
     if (( payload_nul || ${#json_text} > max_payload_bytes )) ||
@@ -671,13 +702,13 @@ main() {
     kernel="[owner: ai-attribution@$plugin_version] Before publishing, determine the audience of this specific contribution and the repository's host. "
 
     account="$(remote_account)"
-    remote_host_value="${account%%/*}"
+    remote_host_value="$(remote_host)"
     if [[ "$disclosure" == "always" ]]; then
         kernel+="Operator policy requires a prominent one-line italicized AI-assistance disclosure at the top of every contribution, including a self-authored one or an internal host. "
     elif host_is_internal "$remote_host_value"; then
         kernel+="The session-start repository's host is configured as operator-only (internal_host); disclosure is never required there regardless of who authored what this contribution responds to. "
     else
-        kernel+="Disclosure turns on who this specific contribution addresses, not on who owns the repository: a self-authored PR/issue, or an inline reply to an automated review bot's own comment thread (not a PR-level review/verdict), may omit disclosure; everything else -- a comment, reply, review, or verdict on a PR, issue, or thread another party authored or participates in, including one that also engages with bot findings -- requires a prominent one-line italicized AI-assistance disclosure at the top, in every repository, public or private, including one the operator owns. "
+        kernel+="Disclosure turns on who this specific contribution addresses, not on who owns the repository: a self-authored PR/issue with no other party's content or participation yet, or an inline reply to an automated review bot's own comment thread (not a PR-level review/verdict), may omit disclosure; everything else -- a comment, reply, review, or verdict on a PR, issue, or thread another party authored or participates in, including one that also engages with bot findings -- requires a prominent one-line italicized AI-assistance disclosure at the top, in every repository, public or private, including one the operator owns. "
     fi
     kernel+="Every public artifact must remain persona-neutral, use first-person singular and target-repo conventions, and be scrubbed of private/internal identifiers, credentials, paths, hosts, accounts, record IDs, and private rationale; use generic placeholders. Audit the live published surface after publication. "
 

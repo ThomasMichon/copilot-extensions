@@ -17,9 +17,13 @@ examples, logs, screenshots, and generated artifacts.
 ## 1. Classify the audience and host
 
 1. Determine whether this specific contribution is self-authored (your own PR,
-   issue, or an operator-initiated thread), a reply directed at an automated
-   review bot's own comment, or a response to a PR, issue, or thread another
-   party authored or participates in.
+   issue, or an operator-initiated thread, with no other party's content or
+   participation yet), an inline reply directed at an automated review bot's
+   own comment thread, or a response to a PR, issue, or thread another party
+   authored or participates in -- these categories are not mutually
+   exclusive by default (an operator-initiated thread can gain another
+   party's participation), so re-check which one actually applies at the
+   moment of publishing, not just at the thread's creation.
 2. Determine whether the target host is configured as an operator-only
    internal host (`internal_host`, e.g. a self-hosted forge where every
    participant is already a known operator/facility identity). An internal
