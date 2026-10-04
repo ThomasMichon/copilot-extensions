@@ -101,10 +101,13 @@ if [[ ${#STAGED_EFFORT_VISION[@]} -gt 0 ]]; then
 fi
 
 # --- 4. check-large-files on every staged file -------------------------------
+# --diff-filter=d (exclude only Deletions), not ACM: a rename or type-change
+# (R/T) must still be checked at its destination path, or renaming an
+# oversized/disallowed file to dodge detection would silently bypass this.
 STAGED_ALL=()
 while IFS= read -r -d '' f; do
     STAGED_ALL+=("$f")
-done < <(git diff --cached --name-only --diff-filter=ACM -z)
+done < <(git diff --cached --name-only --diff-filter=d -z)
 
 if [[ ${#STAGED_ALL[@]} -gt 0 ]]; then
     if [[ ${#PY[@]} -eq 0 ]]; then

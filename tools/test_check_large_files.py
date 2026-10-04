@@ -155,3 +155,75 @@ def test_deleted_file_in_diff_is_skipped(repo: Path):
     result = _run(repo, "--base", "base_marker")
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_renaming_an_oversized_image_to_a_disallowed_extension_is_caught(repo: Path):
+    # A 2MB file is within the image cap as a .png but would violate the
+    # default (non-image) cap under a renamed, non-image extension -- the
+    # rename itself must not let it dodge detection at its new path.
+    _write_bytes(repo, "docs/assets/picture.png", 2 * 1024 * 1024)
+    _commit_all(repo)
+    _git(repo, "branch", "-f", "base_marker", "HEAD")
+
+    _git(repo, "mv", "docs/assets/picture.png", "docs/assets/picture.json")
+    _git(repo, "commit", "-q", "-m", "rename to dodge the image cap")
+
+    result = _run(repo, "--base", "base_marker")
+
+    assert result.returncode == 1
+    assert "picture.json" in result.stdout
+
+
+def test_renaming_a_small_file_to_an_always_blocked_extension_is_caught(repo: Path):
+    _write_bytes(repo, "notes/small.txt", 10)
+    _commit_all(repo)
+    _git(repo, "branch", "-f", "base_marker", "HEAD")
+
+    _git(repo, "mv", "notes/small.txt", "notes/small.patch")
+    _git(repo, "commit", "-q", "-m", "rename to dodge the denylist")
+
+    result = _run(repo, "--base", "base_marker")
+
+    assert result.returncode == 1
+    assert "small.patch" in result.stdout
+
+
+def test_a_filename_with_special_characters_is_still_checked(repo: Path):
+    # Plain (non -z) git diff/ls-files output quotes non-ASCII/whitespace
+    # filenames -- the guard must use NUL-delimited output throughout so an
+    # oversized file under such a name is never silently treated as missing.
+    _write_bytes(repo, "docs/café notes.json", 2 * 1024 * 1024)
+    _commit_all(repo)
+
+    result = _run(repo, "--all")
+
+    assert result.returncode == 1
+    assert "café notes.json" in result.stdout
+
+
+def test_staged_mode_checks_the_index_not_the_working_tree(repo: Path):
+    # Stage an oversized file, then shrink its working-tree copy WITHOUT
+    # re-staging -- the index still holds the oversized blob that would
+    # actually be committed, so the check must still fail.
+    _write_bytes(repo, "src/staged-big.json", 2 * 1024 * 1024)
+    _git(repo, "add", "src/staged-big.json")
+    _write_bytes(repo, "src/staged-big.json", 10)  # shrink working tree only
+
+    result = _run(repo, "src/staged-big.json")
+
+    assert result.returncode == 1
+    assert "staged-big.json" in result.stdout
+
+
+def test_staged_mode_does_not_false_positive_on_working_tree_growth(repo: Path):
+    # The reverse of the above: a small staged blob whose working-tree copy
+    # has since grown past the cap (not yet re-staged) must still pass --
+    # the index, not an unstaged edit, is what would actually be committed.
+    _write_bytes(repo, "src/staged-small.json", 10)
+    _git(repo, "add", "src/staged-small.json")
+    _write_bytes(repo, "src/staged-small.json", 2 * 1024 * 1024)  # grow working tree only
+
+    result = _run(repo, "src/staged-small.json")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+

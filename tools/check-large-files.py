@@ -31,18 +31,31 @@ belongs hand-committed, regardless of size (none currently exist in the
 tree, so this has zero pre-existing debt to grandfather).
 
 Like ``check-module-size.py`` and ``check-effort-vision-structure.py``, this
-only checks files this diff actually adds or modifies (staged files for
-pre-commit; the push/PR range for pre-push) -- a pre-existing large file you
-didn't touch never blocks an unrelated change. ``--all`` additionally offers
-a full-tree sweep for the unconditional CI guard job, so organic drift on
-trunk is still caught even outside any single diff.
+only checks files this diff actually adds, modifies, renames, or
+type-changes (staged files for pre-commit; the push/PR range for pre-push)
+-- a pre-existing large file you didn't touch never blocks an unrelated
+change. Renames/type-changes are included (not just add/copy/modify): an
+oversized or disallowed file renamed to dodge detection must still be
+caught at its destination path. ``--all`` additionally offers a full-tree
+sweep for the unconditional CI guard job, so organic drift on trunk is
+still caught even outside any single diff.
+
+Every size check reads the actual git blob -- the index for explicit staged
+paths, the given revision for diff/full-tree modes -- never the working
+tree. This makes the guard immune to a working-tree/git mismatch (a staged
+oversized file whose working-tree copy is later shrunk or deleted without
+re-staging would otherwise slip through; conversely an unrelated
+working-tree edit could wrongly flag a safely-sized staged blob). Path
+lists come from NUL-delimited git output (``-z``), never the default
+quoted/escaped form, so a filename with non-ASCII characters, a tab, or a
+newline can't be silently misread as missing and skipped.
 
 Usage::
 
-    check-large-files.py FILE [FILE ...]   # check exactly these paths (pre-commit, staged)
-    check-large-files.py                   # diff HEAD vs --base (default origin/dev)
+    check-large-files.py FILE [FILE ...]   # check exactly these paths against the INDEX (pre-commit, staged)
+    check-large-files.py                   # diff HEAD vs --base (default origin/dev), checked at --head
     check-large-files.py --base <ref>       # diff vs an explicit base
-    check-large-files.py --all              # full-tree sweep (CI guards-full-sweep)
+    check-large-files.py --all              # full-tree sweep (CI guards-full-sweep), checked at --head
 
 Exit code 0 = nothing over cap (or nothing to check), 1 = a checked file
 violates a cap or is an always-blocked extension.
@@ -93,10 +106,22 @@ def _merge_base(base: str, head: str) -> str | None:
 
 
 def _changed_files(base_ref: str, head_ref: str = "HEAD") -> list[str]:
-    """Files this branch's own commits add or modify, relative to its
-    merge-base with ``base_ref`` -- unaffected by how far ``base_ref``'s own
-    branch has since moved (triple-dot diff), so a PR is never blamed for a
-    file it never touched.
+    """Files this branch's own commits add, modify, rename, or type-change,
+    relative to its merge-base with ``base_ref`` -- unaffected by how far
+    ``base_ref``'s own branch has since moved (triple-dot diff), so a PR is
+    never blamed for a file it never touched.
+
+    ``--diff-filter=d`` (exclude only Deletions) rather than an explicit
+    ``ACM`` allowlist: a rename or a type-change (``R``/``T``) must still be
+    checked at its destination path, or renaming an oversized/disallowed
+    file to dodge detection (e.g. a 2MB ``.png`` renamed to ``.json``, or a
+    small ``.txt`` renamed to ``.patch``) would silently bypass the guard.
+
+    Returns NUL-delimited, unquoted paths (``-z``) so a filename containing
+    non-ASCII characters, a tab, or a newline is never silently misread as
+    missing by the caller -- git quotes such names in plain ``--name-only``
+    output, which ``check_file`` would then fail to resolve to the real
+    tracked path.
     """
     head = _rev_parse(head_ref)
     if head is None:
@@ -110,33 +135,55 @@ def _changed_files(base_ref: str, head_ref: str = "HEAD") -> list[str]:
         )
         return []
     mbase = _merge_base(base, head) or base
-    r = _git("diff", "--name-only", "--diff-filter=ACM", f"{mbase}..{head}")
-    return [line.strip() for line in r.stdout.splitlines() if line.strip()]
+    r = _git("diff", "--name-only", "-z", "--diff-filter=d", f"{mbase}..{head}")
+    return [p for p in r.stdout.split("\0") if p]
 
 
 def _tracked_files() -> list[str]:
-    r = _git("ls-files")
-    return [line for line in r.stdout.splitlines() if line]
+    r = _git("ls-files", "-z")
+    return [p for p in r.stdout.split("\0") if p]
 
 
 def _ext(path: str) -> str:
     return Path(path).suffix.lower()
 
 
-def check_file(path: str) -> str | None:
-    """Return a violation message for ``path``, or None if it passes (or was
-    skipped because it no longer exists -- e.g. a deleted file in a diff)."""
-    full = REPO / path
-    if not full.is_file():
+def _blob_size(rev: str, path: str) -> int | None:
+    """Size of ``path`` as recorded in git at ``rev``, or None if it doesn't
+    exist there (e.g. a path deleted later in the diff, or one git quotes
+    away under a stale/incorrect name). ``rev`` is either a commit-ish
+    (``"<sha>:<path>"``) or ``""`` for the index (``":<path>"``, stage 0) --
+    this is what makes the check immune to the working tree: a staged-but-
+    not-yet-committed oversized blob, or one whose working-tree copy was
+    since shrunk/deleted without re-staging, is read from the actual git
+    object that would be committed/pushed, never the filesystem.
+    """
+    r = _git("cat-file", "-s", f"{rev}:{path}")
+    if r.returncode != 0:
         return None
+    try:
+        return int(r.stdout.strip())
+    except ValueError:
+        return None
+
+
+def check_file(path: str, *, rev: str) -> str | None:
+    """Return a violation message for ``path`` as it exists at ``rev`` (a
+    commit-ish, or ``""`` for the index), or None if it passes (or doesn't
+    exist there -- e.g. a deleted file in a diff)."""
     ext = _ext(path)
     if ext in ALWAYS_BLOCKED_EXTENSIONS:
+        size = _blob_size(rev, path)
+        if size is None:
+            return None
         return (
             f"{path}: '{ext}' files are never checked in (generated/derived "
             "artifacts -- a source map or raw diff/patch belongs in a build "
             "output or a one-off local workflow, not git history)"
         )
-    size = full.stat().st_size
+    size = _blob_size(rev, path)
+    if size is None:
+        return None
     cap = IMAGE_CAP_BYTES if ext in IMAGE_EXTENSIONS else DEFAULT_CAP_BYTES
     if size > cap:
         kind = "image" if ext in IMAGE_EXTENSIONS else "non-image"
@@ -150,10 +197,10 @@ def check_file(path: str) -> str | None:
     return None
 
 
-def check(paths: list[str]) -> list[str]:
+def check(paths: list[str], *, rev: str) -> list[str]:
     violations: list[str] = []
     for path in sorted(set(paths)):
-        msg = check_file(path)
+        msg = check_file(path, rev=rev)
         if msg:
             violations.append(msg)
     return violations
@@ -163,7 +210,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "paths", nargs="*", metavar="FILE",
-        help="Check exactly these paths (pre-commit, staged files).",
+        help="Check exactly these paths, read from the index (pre-commit, staged files).",
     )
     parser.add_argument(
         "--base", default="origin/dev", metavar="REF",
@@ -182,14 +229,17 @@ def main() -> int:
     if args.all:
         paths = _tracked_files()
         scope_desc = "every tracked file"
+        rev = args.head
     elif args.paths:
         paths = args.paths
         scope_desc = f"{len(args.paths)} staged file(s)"
+        rev = ""  # the index -- see _blob_size
     else:
         paths = _changed_files(args.base, args.head)
         scope_desc = f"this diff's {len(paths)} changed file(s)"
+        rev = args.head
 
-    violations = check(paths)
+    violations = check(paths, rev=rev)
     if violations:
         print("[FAIL] check-large-files:")
         for v in violations:
