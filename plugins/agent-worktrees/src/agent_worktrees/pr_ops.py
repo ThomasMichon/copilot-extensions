@@ -1393,7 +1393,7 @@ def _open_via_provider(
         if claimed_ref:
             claim_history.record_pr_event(
                 claimed_ref, worktree_id=record.worktree_id,
-                machine=record.machine, event="claimed")
+                machine=record.machine, event="claimed", project=record.repo)
     result["pr_opened"] = True
     result["url"] = pull.url
     result["number"] = pull.number
@@ -1816,8 +1816,8 @@ def _reconcile_active_pr(
             tracking.save_record(record)
         if released_ref:
             claim_history.record_pr_event(
-                released_ref, worktree_id=record.worktree_id,
-                machine=record.machine, event="released", note="merged")
+                released_ref, worktree_id=record.worktree_id, machine=record.machine,
+                event="released", note="merged", project=record.repo)
     else:
         # Provider confirms the PR is still genuinely open (a real read
         # succeeded and reported neither merged nor another terminal state)
@@ -1843,7 +1843,7 @@ def _reconcile_active_pr(
             if persisted:
                 claim_history.record_pr_event(
                     claimed_ref, worktree_id=record.worktree_id,
-                    machine=record.machine, event="claimed")
+                    machine=record.machine, event="claimed", project=record.repo)
 
 
 def _live_pr_state(
