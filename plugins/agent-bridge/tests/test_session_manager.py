@@ -1838,6 +1838,105 @@ async def test_end_with_recovered_live_host_deletes_after_confirmed_reap(
 
 
 @pytest.mark.asyncio
+async def test_end_session_codespace_boundary_awaits_confirmed_reap(
+    tmp_db,
+    monkeypatch,
+) -> None:
+    """A CodeSpace-boundary end_session must AWAIT and VERIFY the far-side
+    kill like the container-boundary path does -- not fire-and-forget it via
+    _reap_host_record's own _schedule_remote_reap, which never joins the
+    background task and can leave a real CodeSpace Session Host + child alive
+    if the caller (e.g. a short-lived test event loop) moves on first."""
+    target = SpawnTarget(type="codespace")
+    session = Session("session-1", "codespace", target)
+    session.status = SessionStatus.IDLE
+    manager = SessionManager(tmp_db)
+    manager._sessions[session.session_id] = session
+    tmp_db.create_session(
+        session_id=session.session_id,
+        name=session.name,
+        agent_name=None,
+        caller_id=None,
+        target_dir=None,
+        target_type="codespace",
+        status=SessionStatus.IDLE.value,
+        now=1,
+        target_json=target.to_json(),
+    )
+    manager._host_index.register(HostRecord(
+        session_id=session.session_id,
+        port=5000,
+        host_pid=300,
+        child_pid=123,
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+    ))
+
+    reap_called_with = []
+
+    async def confirmed_reap(rec, endpoint):
+        reap_called_with.append((rec.session_id, endpoint))
+        return True
+
+    monkeypatch.setattr(manager, "_remote_reap", confirmed_reap)
+
+    await manager.end_session(session.session_id, force=True)
+
+    # The real assertion: end_session awaited _remote_reap itself (not just
+    # scheduled it) -- it ran synchronously within this call, confirmed dead,
+    # and only then dropped the index record.
+    assert reap_called_with == [(session.session_id, {"kind": "codespace"})]
+    assert manager._host_index.get(session.session_id) is None
+
+
+@pytest.mark.asyncio
+async def test_end_session_codespace_boundary_raises_on_inconclusive_reap(
+    tmp_db,
+    monkeypatch,
+) -> None:
+    """An inconclusive far-side kill must retain the session/index record and
+    surface RemoteHostRecoveryPendingError -- the same contract the
+    container-boundary path already gets -- rather than silently reporting
+    success while the real CodeSpace Session Host may still be alive."""
+    target = SpawnTarget(type="codespace")
+    session = Session("session-1", "codespace", target)
+    session.status = SessionStatus.IDLE
+    manager = SessionManager(tmp_db)
+    manager._sessions[session.session_id] = session
+    tmp_db.create_session(
+        session_id=session.session_id,
+        name=session.name,
+        agent_name=None,
+        caller_id=None,
+        target_dir=None,
+        target_type="codespace",
+        status=SessionStatus.IDLE.value,
+        now=1,
+        target_json=target.to_json(),
+    )
+    manager._host_index.register(HostRecord(
+        session_id=session.session_id,
+        port=5000,
+        host_pid=300,
+        child_pid=123,
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+    ))
+
+    monkeypatch.setattr(
+        manager,
+        "_remote_reap",
+        AsyncMock(return_value=False),
+    )
+
+    with pytest.raises(RemoteHostRecoveryPendingError, match="inconclusive"):
+        await manager.end_session(session.session_id, force=True)
+
+    assert session.status == SessionStatus.FAILED
+    assert manager._host_index.get(session.session_id) is not None
+
+
+@pytest.mark.asyncio
 async def test_container_recreate_post_removal_failure_marks_predecessor_failed(
     tmp_db,
     monkeypatch,

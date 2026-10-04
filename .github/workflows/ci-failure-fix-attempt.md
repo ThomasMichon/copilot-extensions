@@ -416,6 +416,53 @@ jobs:
 # this and recommends writing the result to a FILE and referencing that
 # fixed path in the prompt instead, which is what this step now does.
 pre-agent-steps:
+  - name: Check out this repo's configured contribution branch
+    # The Actions checkout is this workflow's ref, which is GitHub's
+    # default branch -- not necessarily this repo's contribution branch.
+    # Read the real answer from the repo's own committed
+    # .agent-worktrees/config.yaml (`default_branch:`) rather than
+    # hardcoding a branch name or assuming the two match. This stays in
+    # $GITHUB_WORKSPACE (never a sibling worktree): that is the only
+    # path the engine container mounts and the only path safe-outputs'
+    # create-pull-request reads its patch from (gh-aw starts
+    # `safeoutputs` with `-w $GITHUB_WORKSPACE`) -- a worktree anywhere
+    # else would be invisible to both. Capture the resulting SHA to
+    # $RUNNER_TEMP/gh-aw now, before the agent runs -- that path is
+    # bind-mounted read-only into the agent's own sandboxed container
+    # (`--mount "${RUNNER_TEMP}/gh-aw:${RUNNER_TEMP}/gh-aw:ro"`), unlike
+    # $GITHUB_WORKSPACE itself, which the agent can freely write
+    # (including every path `post-steps`' own scope gate otherwise
+    # exempts, like `.verify-issue/`). A file the agent can overwrite is
+    # not a trustworthy comparison base for the gate that checks the
+    # agent's own output.
+    env:
+      GH_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      # safe-outputs.create-pull-request's own base-branch: below is
+      # compile-time frontmatter -- it cannot read a shell variable, so
+      # it cannot itself track whatever this step resolves at runtime.
+      # Hardcoding it to match is a silent coupling: if the repo's
+      # configured contribution branch ever changes, the agent would
+      # edit one branch while safe-outputs opens the patch against
+      # another, with no error, just a wrong-based PR. Fail loudly here
+      # instead, the same machine-enforced-gate pattern `post-steps`
+      # below already uses, rather than trusting a comment to keep the
+      # two in sync.
+      SAFE_OUTPUTS_BASE_BRANCH: dev
+    run: |
+      set -euo pipefail
+      mkdir -p "$GITHUB_WORKSPACE/.verify-issue"
+      BRANCH=$(sed -n 's/^default_branch: *//p' .agent-worktrees/config.yaml | head -1)
+      BRANCH=${BRANCH:-$GH_DEFAULT_BRANCH}
+      if [ "$BRANCH" != "$SAFE_OUTPUTS_BASE_BRANCH" ]; then
+        echo "::error::Configured contribution branch '$BRANCH' no longer matches safe-outputs' hardcoded base-branch '$SAFE_OUTPUTS_BASE_BRANCH' (frontmatter, compile-time only -- it cannot read this). Update the create-pull-request base-branch value in this file to match, then recompile."
+        exit 1
+      fi
+      if [ "$BRANCH" != "$GH_DEFAULT_BRANCH" ]; then
+        git fetch origin "$BRANCH" --quiet
+        git checkout --force --detach "origin/$BRANCH"
+      fi
+      mkdir -p "${RUNNER_TEMP}/gh-aw"
+      git rev-parse HEAD > "${RUNNER_TEMP}/gh-aw/base-sha.txt"
   - name: Decode the verified issue record
     env:
       BODY_B64: ${{ needs.verify-issue.outputs.body-b64 }}
@@ -440,18 +487,19 @@ pre-agent-steps:
 # always removed before any patch is built, regardless of this check.
 post-steps:
   - name: Enforce a machine-checked change-scope gate
-    # Real compile error (`gh aw compile`, CTR-006): direct
-    # `github.event.*` interpolation inside `run:` shell text is a
-    # template-injection risk gh-aw's own security scanner rejects
-    # unconditionally, regardless of whether this specific field is
-    # attacker-controlled -- route it through `env:` instead, which is
-    # never re-parsed as shell.
-    env:
-      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+    # Diff against the SHA `pre-agent-steps` captured before the agent
+    # ran, never a freshly re-fetched branch -- the branch can advance
+    # during the agent's run, and comparing against that later tip would
+    # misattribute upstream commits to the agent or miss files it touched
+    # that an advancing branch happens to also touch. Read it from
+    # $RUNNER_TEMP/gh-aw (read-only inside the agent's own sandbox), not
+    # anywhere under $GITHUB_WORKSPACE: the agent can write anywhere in
+    # the workspace, including paths this gate otherwise excludes, so a
+    # workspace-hosted baseline is not a trustworthy comparison point for
+    # a gate that checks the agent's own output.
     run: |
       set -euo pipefail
-      git fetch origin "$DEFAULT_BRANCH" --quiet
-      BASE=$(git merge-base HEAD "origin/$DEFAULT_BRANCH")
+      BASE=$(cat "${RUNNER_TEMP}/gh-aw/base-sha.txt")
       # Real review finding (PR #4155): comparing only `$BASE` vs `HEAD`
       # (committed history) ignores the normal state a `create-pull-request`
       # safe-output actually collects from -- uncommitted and untracked
@@ -1060,9 +1108,12 @@ not part of your fix, and is stripped from any patch regardless.
 `.verify-issue/body.txt` already carries the failing job name, the failing
 test node id (when the failing one was parseable), the run link and commit
 SHA, and a log excerpt. Treat
-this as your starting evidence, not your only evidence -- confirm it against
-the live repository state before acting (the `dev` branch has very likely
-moved forward since this issue was filed).
+this as your starting evidence, not your only evidence -- `pre-agent-steps`
+already checked out this repo's actual contribution branch (read from
+`.agent-worktrees/config.yaml`, not assumed), so this workspace is already
+that branch's tip, not GitHub's default branch. The recorded commit SHA may
+be behind that tip -- confirm the failure still reproduces here before
+editing.
 
 ## Your charter -- read this before touching anything
 
