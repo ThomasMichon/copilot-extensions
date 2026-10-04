@@ -43,3 +43,38 @@ def installation_suffix(path: Path | None = None) -> str:
     return hashlib.sha256(normalized_path(candidate).encode("utf-8")).hexdigest()[
         :SCOPED_SERVICE_HASH_LENGTH
     ]
+
+
+def apply_service_env_overlay(env: dict[str, str], install_dir_path: Path) -> dict[str, str]:
+    """Overlay ``service.env`` (token / host-port pins) onto ``env`` in place.
+
+    Every detached coordinator spawn -- the first-use bootstrap in
+    ``__main__.py`` AND a zero-downtime cutover's replacement in
+    ``coordinator_cli.py`` -- must apply this identically, so the durable,
+    installed config (most critically ``AGENT_DISPATCH_CONTROL_TOKEN`` /
+    ``_COMMAND``) is guaranteed regardless of which process happened to
+    trigger that particular spawn.
+
+    A cutover can be triggered from any process context -- the
+    systemd/Scheduled-Task supervisor (which loads ``service.env`` itself via
+    its unit's ``EnvironmentFile``), a plain CLI invocation, or a self-update
+    -- and only the supervisor's own happens to carry the durable settings
+    ambiently. Without this overlay, a replacement coordinator spawned from
+    any other context would come up missing the control-token command (and
+    any other installed pin), and evaluator/producer-scope registrations
+    would fail with ``control_authority_not_configured``.
+
+    Returns ``env`` for convenient chaining; mutates it in place.
+    """
+    env_file = install_dir_path / "service.env"
+    if env_file.is_file():
+        try:
+            for line in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
+                s = line.strip()
+                if not s or s.startswith("#") or "=" not in s:
+                    continue
+                k, v = s.split("=", 1)
+                env[k.strip()] = os.path.expandvars(v.strip())
+        except OSError:
+            pass
+    return env
