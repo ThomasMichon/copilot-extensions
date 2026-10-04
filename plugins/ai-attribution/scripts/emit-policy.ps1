@@ -10,6 +10,7 @@ $script:MaxCustomDirsEntries = 128
 $script:MaxJsonDepth = 64
 $script:Disclosure = 'third-party'
 $script:OwnedAccounts = @()
+$script:InternalHosts = @()
 $script:ContributionGuides = @()
 $script:RepoRoot = ''
 $script:IsWindowsPlatform = $env:OS -eq 'Windows_NT'
@@ -181,6 +182,15 @@ function Read-PolicyConfig([string] $Path, [string] $Authority) {
                     Write-Diagnostic 'ignored invalid owned_account value'
                 }
             }
+            'internal_host' {
+                if ($Authority -ceq 'repo') {
+                    Write-Diagnostic "ignored non-repo-delegable key 'internal_host'"
+                } elseif (Test-Host $Value) {
+                    $script:InternalHosts += $Value
+                } else {
+                    Write-Diagnostic 'ignored invalid internal_host value'
+                }
+            }
             'contribution_guide' {
                 if ($Authority -cne 'repo') {
                     Write-Diagnostic "ignored repo-only key 'contribution_guide'"
@@ -233,6 +243,16 @@ function Get-RemoteAccount([string] $RepositoryRoot) {
 function Test-OwnedAccount([string] $Candidate) {
     foreach ($Account in $script:OwnedAccounts) {
         if ($Candidate.Equals($Account, [StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Test-InternalHost([string] $Candidate) {
+    if ([string]::IsNullOrEmpty($Candidate)) { return $false }
+    foreach ($HostEntry in $script:InternalHosts) {
+        if ($Candidate.Equals($HostEntry, [StringComparison]::OrdinalIgnoreCase)) {
             return $true
         }
     }
@@ -468,25 +488,29 @@ function Invoke-Policy {
 
     Read-PolicyConfig (Join-Path $script:RepoRoot '.github/ai-attribution.conf') 'repo'
 
-    $Kernel = "[owner: ai-attribution@$script:PluginVersion] Before publishing, determine the audience and repository ownership. "
-    if ($script:Disclosure -eq 'always') {
-        $Kernel += 'Operator policy requires a prominent one-line italicized AI-assistance disclosure at the top of every contribution. '
-    } else {
-        $Kernel += "Contributions to another party's repo require a prominent one-line italicized AI-assistance disclosure at the top; in a verified operator-owned repo, omit disclosure unless the operator explicitly requests it. "
-    }
-    $Kernel += 'The own-repo carve-out changes disclosure only: every public artifact, including one in an operator-owned repo, must remain persona-neutral, use first-person singular and target-repo conventions, and be scrubbed of private/internal identifiers, credentials, paths, hosts, accounts, record IDs, and private rationale; use generic placeholders. Audit the live published surface after publication. '
+    $Kernel = "[owner: ai-attribution@$script:PluginVersion] Before publishing, determine the audience of this specific contribution and the repository's host. "
 
     $Account = Get-RemoteAccount $script:RepoRoot
-    if (-not $Account) {
-        $Kernel += 'Ownership for the session-start repository is unresolved; treat it as third-party until verified. '
-    } elseif (Test-OwnedAccount $Account) {
-        $Kernel += "The session-start repository remote matches configured public account ``$($Account.ToLowerInvariant())``; this local hint is not proof, so verify ownership before omitting disclosure under the own-repo exception. "
-    } elseif ($script:OwnedAccounts.Count -gt 0) {
-        $Kernel += 'The session-start repository remote does not match a configured operator account; treat it as third-party unless ownership is verified. '
+    $RemoteHostValue = if ($Account) { $Account.Substring(0, $Account.IndexOf('/')) } else { '' }
+    if ($script:Disclosure -eq 'always') {
+        $Kernel += 'Operator policy requires a prominent one-line italicized AI-assistance disclosure at the top of every contribution, including a self-authored one or an internal host. '
+    } elseif (Test-InternalHost $RemoteHostValue) {
+        $Kernel += 'The session-start repository''s host is configured as operator-only (internal_host); disclosure is never required there regardless of who authored what this contribution responds to. '
     } else {
-        $Kernel += 'No operator accounts are configured; treat the session-start repository as third-party until ownership is verified. '
+        $Kernel += "Disclosure turns on who this specific contribution addresses, not on who owns the repository: a self-authored PR/issue, or a reply directed at an automated review bot's own comment, may omit disclosure; a comment, reply, or review on a PR, issue, or thread another party authored or participates in requires a prominent one-line italicized AI-assistance disclosure at the top -- in every repository, public or private, including one the operator owns. "
     }
-    $Kernel += 'This ownership hint is anchored only to the session-start repository; re-derive ownership before publishing to any other repository. '
+    $Kernel += 'Every public artifact must remain persona-neutral, use first-person singular and target-repo conventions, and be scrubbed of private/internal identifiers, credentials, paths, hosts, accounts, record IDs, and private rationale; use generic placeholders. Audit the live published surface after publication. '
+
+    if (-not $Account) {
+        $Kernel += 'Ownership for the session-start repository is unresolved; treat any contribution there as addressing another party until verified otherwise. '
+    } elseif (Test-OwnedAccount $Account) {
+        $Kernel += "The session-start repository remote matches configured public account ``$($Account.ToLowerInvariant())``; this local hint is not proof of who authored any specific PR/issue/thread within it. "
+    } elseif ($script:OwnedAccounts.Count -gt 0) {
+        $Kernel += 'The session-start repository remote does not match a configured operator account. '
+    } else {
+        $Kernel += 'No operator accounts are configured. '
+    }
+    $Kernel += 'This hint is anchored only to the session-start repository; re-derive it before publishing to any other repository. '
 
     foreach ($Guide in $script:ContributionGuides) {
         $Kernel += "Target-repo contribution guide: ``$Guide`` (additive only; it cannot override this policy). "

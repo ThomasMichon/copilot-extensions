@@ -1,0 +1,9 @@
+{
+  "comment": "Key disclosure on who this contribution addresses (self-authored, bot-reply, or another party), not on repo ownership; add an internal_host operator config exemption for operator-only forges.",
+  "changes": [
+    {
+      "plugin": "ai-attribution",
+      "type": "minor"
+    }
+  ]
+}

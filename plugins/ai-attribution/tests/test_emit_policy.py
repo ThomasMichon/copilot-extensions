@@ -205,13 +205,13 @@ def test_no_config_emits_safe_defaults(tmp_path: Path) -> None:
     assert context.startswith(
         "[owner: ai-attribution@0.1.0-dev16] Before publishing"
     )
-    assert "another party's repo require" in context
-    assert "verified operator-owned repo, omit disclosure" in context
-    assert "own-repo carve-out changes disclosure only" in context
+    assert "Disclosure turns on who this specific contribution addresses" in context
+    assert "may omit disclosure" in context
+    assert "requires a prominent one-line italicized AI-assistance disclosure" in context
     assert "persona-neutral" in context
     assert "Audit the live published surface" in context
-    assert "session-start repository is unresolved" in context
-    assert "re-derive ownership before publishing to any other repository" in context
+    assert "treat any contribution there as addressing another party" in context
+    assert "re-derive it before publishing to any other repository" in context
 
 
 def test_payload_cwd_is_authoritative_when_process_cwd_differs(
@@ -600,7 +600,7 @@ def test_malformed_and_unreadable_config_keep_safe_policy(tmp_path: Path) -> Non
     (home / "config" / "ai-attribution" / "config.conf").mkdir(parents=True)
     result = _run(_native_hook(), repo, home)
     context = _context(result)
-    assert "another party's repo require" in context
+    assert "Disclosure turns on who this specific contribution addresses" in context
     assert result.stderr.count("ignored malformed line") == 2
     assert "ignored invalid disclosure value" in result.stderr
     assert "could not safely read config; safe defaults remain active" in result.stderr
@@ -848,7 +848,96 @@ def test_host_and_owner_match_case_insensitively_for_ssh_remote(
     )
     context = _context(_run(_native_hook(), repo, home))
     assert "configured public account `github.com/example-owner`" in context
-    assert "verify ownership before omitting disclosure" in context
+    assert "not proof of who authored any specific PR/issue/thread" in context
+
+
+def test_internal_host_omits_disclosure_requirement(tmp_path: Path) -> None:
+    repo = _git_repo(
+        tmp_path / "repo",
+        "https://gitea.example.internal/example-owner/repo.git",
+    )
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "internal_host=gitea.example.internal\n",
+    )
+    for hook in _parity_hooks():
+        context = _context(_run(hook, repo, home))
+        assert "operator-only (internal_host); disclosure is never required" in context
+        assert "requires a prominent one-line italicized" not in context
+
+
+def test_internal_host_matches_case_insensitively(tmp_path: Path) -> None:
+    repo = _git_repo(
+        tmp_path / "repo",
+        "https://Gitea.Example.Internal/example-owner/repo.git",
+    )
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "internal_host=gitea.example.internal\n",
+    )
+    context = _context(_run(_native_hook(), repo, home))
+    assert "operator-only (internal_host); disclosure is never required" in context
+
+
+def test_non_internal_host_requires_disclosure_for_third_party_audience(
+    tmp_path: Path,
+) -> None:
+    repo = _git_repo(
+        tmp_path / "repo",
+        "https://github.com/example-owner/repo.git",
+    )
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "internal_host=gitea.example.internal\n",
+    )
+    context = _context(_run(_native_hook(), repo, home))
+    assert "Disclosure turns on who this specific contribution addresses" in context
+    assert "operator-only (internal_host)" not in context
+
+
+def test_disclosure_always_overrides_internal_host(tmp_path: Path) -> None:
+    repo = _git_repo(
+        tmp_path / "repo",
+        "https://gitea.example.internal/example-owner/repo.git",
+    )
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "disclosure=always\ninternal_host=gitea.example.internal\n",
+    )
+    context = _context(_run(_native_hook(), repo, home))
+    assert "requires a prominent one-line italicized AI-assistance disclosure at the top of every contribution, including a self-authored one or an internal host" in context
+    assert "operator-only (internal_host)" not in context
+
+
+def test_internal_host_is_not_repo_delegable(tmp_path: Path) -> None:
+    repo = _git_repo(
+        tmp_path / "repo",
+        "https://github.com/example-owner/repo.git",
+    )
+    home = tmp_path / "home"
+    _write(
+        repo / ".github" / "ai-attribution.conf",
+        "internal_host=github.com\n",
+    )
+    result = _run(_native_hook(), repo, home)
+    context = _context(result)
+    assert "non-repo-delegable key 'internal_host'" in result.stderr
+    assert "operator-only (internal_host)" not in context
+
+
+def test_invalid_internal_host_value_is_rejected(tmp_path: Path) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    home = tmp_path / "home"
+    _write(
+        home / ".copilot" / "ai-attribution.conf",
+        "internal_host=evil*\n",
+    )
+    result = _run(_native_hook(), repo, home)
+    assert "ignored invalid internal_host value" in result.stderr
 
 
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="pwsh is not installed")

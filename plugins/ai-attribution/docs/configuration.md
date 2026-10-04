@@ -34,9 +34,10 @@ modules.
 
 | Key | Authority | Repeatable | Meaning |
 |-----|-----------|------------|---------|
-| `disclosure=third-party` | Operator only | No | Default: require disclosure for another party's repo; verified operator-owned repos omit it unless explicitly requested for the contribution. |
-| `disclosure=always` | Operator only | No | Tightening: require disclosure for every contribution. Once selected by a discovered layer, a later layer cannot weaken it. |
-| `owned_account=<public host>/<public account>` | Operator only | Yes | Host-qualified public forge account used as a local remote hint, for example `github.com/example-owner`. Host and owner must both match the remote, case-insensitively; the value remains a hint, not proof. |
+| `disclosure=third-party` | Operator only | No | Default: require disclosure for a contribution that comments on, replies to, or reviews a PR/issue/thread another party authored or participates in -- in any repository, public or private, including one the operator owns. A self-authored contribution, or a reply directed at an automated review bot's own comment, may omit it unless explicitly requested otherwise. |
+| `disclosure=always` | Operator only | No | Tightening: require disclosure for every contribution, including a self-authored one, a bot-reply, or one on an `internal_host`. Once selected by a discovered layer, a later layer cannot weaken it. |
+| `owned_account=<public host>/<public account>` | Operator only | Yes | Host-qualified public forge account used as a local remote hint, for example `github.com/example-owner`. Host and owner must both match the remote, case-insensitively; the value remains a hint, not proof of who authored any specific PR/issue/thread within it. |
+| `internal_host=<host>` | Operator only | Yes | An operator-only forge host (for example a self-hosted Gitea instance) where every participant is already a known operator/facility identity. Disclosure is never required there, regardless of audience -- a blanket exception, not a self-authorship inference. Overridden only by `disclosure=always`. |
 | `contribution_guide=<repo-relative path>` | Target repo only | Yes | Additive pointer to an existing regular file under the target repository, with no symlink/reparse-point path component. It cannot override plugin/operator policy. |
 
 Contribution-guide paths use `/` separators and narrow ASCII path segments
@@ -46,8 +47,9 @@ controls, non-ASCII text, missing files, and values longer than 160 characters
 are rejected. At most four valid paths are accepted, so repository data cannot
 consume the shared ambient-context budget.
 
-There is deliberately no key for literal private identifiers, credentials,
-hosts, accounts other than public ownership hints, or policy replacement.
+There is deliberately no key for literal private identifiers, credentials, or
+policy replacement, and no key for hosts/accounts other than the public
+ownership hints and internal-host exemptions above.
 
 ## Discovery and precedence
 
@@ -69,27 +71,36 @@ The hook starts with safe plugin defaults, then reads:
 4. `<session-start-repo>/.github/ai-attribution.conf`, with only
    repo-delegable keys.
 
-Operator values are additive/tightening: accounts accumulate and
-`disclosure=always` cannot be reset. Target-repo configuration is considered
-last only so its additive contribution-guide facts appear in the emitted
-kernel. Safety, publication, attribution, ownership, and sanitization keys are
-not repo-delegable and are ignored there.
+Operator values are additive/tightening: accounts and internal hosts
+accumulate, and `disclosure=always` cannot be reset. Target-repo configuration
+is considered last only so its additive contribution-guide facts appear in the
+emitted kernel. Safety, publication, attribution, ownership, and sanitization
+keys are not repo-delegable and are ignored there.
 
-## Ownership inference
+## Ownership and internal-host inference
 
 The hook parses both host and owner from common HTTPS and SSH local git remotes,
 preferring `origin`. It makes no network call and performs no authentication.
 Both host and owner must match one host-qualified `owned_account`,
-case-insensitively. A bare owner shared across forges never unlocks the own-repo
-exception.
+case-insensitively. A bare owner shared across forges never unlocks the
+self-authored carve-out on its own -- that carve-out still depends on who this
+specific contribution actually addresses, not solely on repository ownership.
 
-The resulting hint is anchored only to the repository named by the
-`sessionStart` payload. Ownership must be re-derived before publishing to any
-other repository. A validated configured host/account match may be named in
-ambient context; an unconfigured or private remote owner is never echoed there.
-Missing, invalid, or nonmatching ownership is classified as third-party without
-copying the literal owner. Even a match is only a hint, and the emitted guidance
-requires verification before using the disclosure-only own-repo exception.
+The parsed host is also compared, case-insensitively, against every configured
+`internal_host`. A match is a blanket disclosure exemption regardless of
+audience; it is independent of (and checked before) the ownership hint above.
+
+The resulting hints are anchored only to the repository named by the
+`sessionStart` payload. Both must be re-derived before publishing to any
+other repository. A validated configured host/account match, or a validated
+`internal_host` match, may be named in ambient context; an unconfigured or
+private remote owner is never echoed there.
+
+Missing, invalid, or nonmatching ownership is classified as addressing another
+party by default, without copying the literal owner. Even a match is only a
+hint, and the emitted guidance requires verifying who this specific
+contribution actually addresses before using the self-authored/bot-reply
+carve-out.
 
 ## Static fallback for launchers without plugin hooks
 

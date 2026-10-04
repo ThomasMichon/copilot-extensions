@@ -12,6 +12,7 @@ max_custom_dirs_entries=128
 max_json_depth=64
 disclosure="third-party"
 owned_accounts=""
+internal_hosts=""
 contribution_guides=""
 contribution_guide_count=0
 repo_root=""
@@ -262,6 +263,15 @@ read_config() {
                     diag "ignored invalid owned_account value"
                 fi
                 ;;
+            internal_host)
+                if [[ "$authority" == "repo" ]]; then
+                    diag "ignored non-repo-delegable key 'internal_host'"
+                elif host_is_valid "$value"; then
+                    internal_hosts="$(append_line "$internal_hosts" "$value")"
+                else
+                    diag "ignored invalid internal_host value"
+                fi
+                ;;
             contribution_guide)
                 if [[ "$authority" != "repo" ]]; then
                     diag "ignored repo-only key 'contribution_guide'"
@@ -323,6 +333,18 @@ account_is_owned() {
             return 0
         fi
     done <<< "$owned_accounts"
+    return 1
+}
+
+host_is_internal() {
+    local candidate="${1,,}"
+    local host
+    [[ -n "$candidate" ]] || return 1
+    while IFS= read -r host; do
+        if [[ -n "$host" && "$candidate" == "${host,,}" ]]; then
+            return 0
+        fi
+    done <<< "$internal_hosts"
     return 1
 }
 
@@ -645,25 +667,29 @@ main() {
 
     read_config "$repo_root/.github/ai-attribution.conf" "repo"
 
-    kernel="[owner: ai-attribution@$plugin_version] Before publishing, determine the audience and repository ownership. "
-    if [[ "$disclosure" == "always" ]]; then
-        kernel+="Operator policy requires a prominent one-line italicized AI-assistance disclosure at the top of every contribution. "
-    else
-        kernel+="Contributions to another party's repo require a prominent one-line italicized AI-assistance disclosure at the top; in a verified operator-owned repo, omit disclosure unless the operator explicitly requests it. "
-    fi
-    kernel+="The own-repo carve-out changes disclosure only: every public artifact, including one in an operator-owned repo, must remain persona-neutral, use first-person singular and target-repo conventions, and be scrubbed of private/internal identifiers, credentials, paths, hosts, accounts, record IDs, and private rationale; use generic placeholders. Audit the live published surface after publication. "
+    kernel="[owner: ai-attribution@$plugin_version] Before publishing, determine the audience of this specific contribution and the repository's host. "
 
     account="$(remote_account)"
-    if [[ -z "$account" ]]; then
-        kernel+="Ownership for the session-start repository is unresolved; treat it as third-party until verified. "
-    elif account_is_owned "$account"; then
-        kernel+="The session-start repository remote matches configured public account \`${account,,}\`; this local hint is not proof, so verify ownership before omitting disclosure under the own-repo exception. "
-    elif [[ -n "$owned_accounts" ]]; then
-        kernel+="The session-start repository remote does not match a configured operator account; treat it as third-party unless ownership is verified. "
+    remote_host_value="${account%%/*}"
+    if [[ "$disclosure" == "always" ]]; then
+        kernel+="Operator policy requires a prominent one-line italicized AI-assistance disclosure at the top of every contribution, including a self-authored one or an internal host. "
+    elif host_is_internal "$remote_host_value"; then
+        kernel+="The session-start repository's host is configured as operator-only (internal_host); disclosure is never required there regardless of who authored what this contribution responds to. "
     else
-        kernel+="No operator accounts are configured; treat the session-start repository as third-party until ownership is verified. "
+        kernel+="Disclosure turns on who this specific contribution addresses, not on who owns the repository: a self-authored PR/issue, or a reply directed at an automated review bot's own comment, may omit disclosure; a comment, reply, or review on a PR, issue, or thread another party authored or participates in requires a prominent one-line italicized AI-assistance disclosure at the top -- in every repository, public or private, including one the operator owns. "
     fi
-    kernel+="This ownership hint is anchored only to the session-start repository; re-derive ownership before publishing to any other repository. "
+    kernel+="Every public artifact must remain persona-neutral, use first-person singular and target-repo conventions, and be scrubbed of private/internal identifiers, credentials, paths, hosts, accounts, record IDs, and private rationale; use generic placeholders. Audit the live published surface after publication. "
+
+    if [[ -z "$account" ]]; then
+        kernel+="Ownership for the session-start repository is unresolved; treat any contribution there as addressing another party until verified otherwise. "
+    elif account_is_owned "$account"; then
+        kernel+="The session-start repository remote matches configured public account \`${account,,}\`; this local hint is not proof of who authored any specific PR/issue/thread within it. "
+    elif [[ -n "$owned_accounts" ]]; then
+        kernel+="The session-start repository remote does not match a configured operator account. "
+    else
+        kernel+="No operator accounts are configured. "
+    fi
+    kernel+="This hint is anchored only to the session-start repository; re-derive it before publishing to any other repository. "
 
     while IFS= read -r guide; do
         [[ -n "$guide" ]] && kernel+="Target-repo contribution guide: \`$guide\` (additive only; it cannot override this policy). "

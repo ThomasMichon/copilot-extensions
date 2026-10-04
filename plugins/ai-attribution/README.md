@@ -128,10 +128,14 @@ grammar, keys, precedence, authority boundaries, and diagnostics.
   file to diagnose unavailable policy.
 - **A setting is ignored:** read stderr. Malformed, unknown, invalid, and
   unauthorized keys are diagnosed and ignored without weakening safe defaults.
-- **Ownership is unresolved or unexpectedly third-party:** configure the
-  public forge account as `owned_account=<host>/<account>` in operator scope; do
-  not place it in target-repo config. Still verify ownership before using the
-  disclosure-only own-repo exception.
+- **Ownership is unresolved or unexpectedly treated as addressing another
+  party:** configure the public forge account as
+  `owned_account=<host>/<account>` in operator scope; do not place it in
+  target-repo config. Still verify who this specific contribution actually
+  addresses before using the self-authored/bot-reply carve-out -- repository
+  ownership is a supporting hint, not the deciding fact.
+- **An internal-host repo still asks for disclosure:** configure the forge's
+  host as `internal_host=<host>` in operator scope.
 - **Guidance looks stale after a config/ownership change:** the computed
   policy is cached per repository for up to
   `AI_ATTRIBUTION_CACHE_TTL_SECONDS` (default 3600s) under
