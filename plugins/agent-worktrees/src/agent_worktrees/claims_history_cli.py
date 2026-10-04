@@ -32,26 +32,25 @@ def _merge_events(local: list[dict], remote: list[dict]) -> list[dict]:
     of those REAL local events whenever its mirrored copy also happened to
     be present, not just the redundant mirrored copy of an event local
     already has. Instead: keep every local event as-is (never deduplicated
-    against itself), and only add remote events beyond however many of
-    that same key local already accounts for -- a remote event this
-    machine itself mirrored collapses against its own local record, while
-    a key remote has MORE copies of than local (e.g. a second machine's
-    own write for the same ref) still surfaces the extra one(s). Sorted by
-    ``ts`` (stable for ties, preserving each source's own relative order)
-    since merging two independently-ordered sources is not itself
-    guaranteed sorted.
+    against itself), and walk ``remote`` in ITS OWN original order,
+    consuming one "already accounted for by local" credit per matching key
+    before appending a genuinely extra remote-only copy -- grouping
+    same-key remote events together (as an earlier revision did) would
+    silently reorder a real same-second remote sequence (e.g. a
+    ``claimed, released, claimed`` trio becoming ``claimed, claimed,
+    released``) even with no local history to merge against at all. The
+    final sort by ``ts`` is stable, so ties preserve local-before-extras
+    and each extra's own relative order among themselves.
     """
     local_counts = Counter(_event_key(e) for e in local)
-    remote_counts = Counter(_event_key(e) for e in remote)
-    remote_by_key: dict[tuple, list[dict]] = {}
-    for e in remote:
-        remote_by_key.setdefault(_event_key(e), []).append(e)
-
     merged = list(local)
-    for key, remote_count in remote_counts.items():
-        extra = remote_count - local_counts.get(key, 0)
-        if extra > 0:
-            merged.extend(remote_by_key[key][:extra])
+    remaining = Counter(local_counts)
+    for e in remote:
+        key = _event_key(e)
+        if remaining[key] > 0:
+            remaining[key] -= 1
+            continue
+        merged.append(e)
     merged.sort(key=lambda e: str(e.get("ts", "")))
     return merged
 
