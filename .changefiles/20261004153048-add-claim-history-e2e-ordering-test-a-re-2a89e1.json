@@ -1,0 +1,9 @@
+{
+  "comment": "Add claim-history E2E ordering test: a real session rebind + claims-history CLI query proves every hop recorded, none dropped (worktree-claims-transitive-finalization effort, Phase 3b Validation Plan).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

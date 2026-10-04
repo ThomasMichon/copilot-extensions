@@ -545,6 +545,90 @@ def test_cli_remote_falls_back_to_unverified_local_history_when_the_lock_fails(
     assert "could not read" in err and "identity" in err
 
 
+# ── E2E: a real session rebind produces a complete, correctly-ordered
+# history via the public CLI query (Validation Plan, worktree-claims-
+# transitive-finalization effort) ─────────────────────────────────────
+
+def test_cli_history_is_complete_and_ordered_across_a_real_session_rebind(
+    tmp_tracking_dir, capsys,
+):
+    """Proves the Phase 3b query end-to-end for the one combination not
+    yet covered by a dedicated test: a claim's origin plus a REAL
+    ``agent-bridge`` session rebind (``apply_session_link_succession``,
+    the actual verb a live rebind calls -- not the lower-level
+    ``record_pr_claims_reassigned`` primitive directly), rendered back
+    out through ``claims history``'s own CLI entry point, proving every
+    hop is recorded, in order, with none silently dropped.
+
+    The other simulated half this effort's Validation Plan named --an
+    agent-dispatch task redrive-- is not exercised here: Phase 3b's own
+    investigation (see the effort README) found redrive has no live
+    worktree-reassignment code path today, so there is nothing to
+    simulate for that half.
+    """
+    from agent_worktrees import tracking_session_lifecycle_write
+    from agent_worktrees.tracking import (
+        ResourceClaim, SessionEntry, WorktreeRecord, load_record, save_record,
+    )
+
+    record_path = tmp_tracking_dir / "wt-rebind.yaml"
+    record = WorktreeRecord(
+        worktree_id="wt-rebind", branch="worktree/wt-rebind",
+        worktree_path="/tmp/wt-rebind", repo="test-repo", machine="machine-x",
+        platform="wsl", started_at="2026-01-01T00:00:00",
+        last_resumed_at="2026-01-01T00:00:00", resume_count=0, title=None,
+        status="active", completed_at=None,
+        sessions=[SessionEntry("sess-a", "2026-01-01T00:00:00")],
+    )
+    record.head_session = "sess-a"
+    save_record(record, record_path)
+
+    # Hop 1: the claim's origin.
+    claim_history.record_event(
+        kind="pr", ref="o/r#42", worktree_id="wt-rebind", machine="machine-x",
+        event="claimed", session_id="sess-a", note="opened",
+    )
+    record = load_record(record_path)
+    record.resources = [
+        ResourceClaim(kind="pr", ref="o/r#42", state=obligations.ACTIVE),
+    ]
+    record.sessions.append(SessionEntry("sess-b", "2026-01-02T00:00:00"))
+    save_record(record, record_path)
+
+    # Hop 2: a real session rebind, via the actual verb a live
+    # agent-bridge rebind dispatches through -- not the lower-level
+    # primitive directly.
+    result = tracking_session_lifecycle_write.apply_session_link_succession({
+        "worktree_id": "wt-rebind", "yaml_path": str(record_path),
+        "predecessor": "sess-a", "successor": "sess-b",
+        "predecessor_state": "handed-off",
+    })
+    assert result["ok"] is True
+
+    # Query: the public CLI entry point, JSON mode.
+    captured: dict = {}
+    rc = claims_history_cli.cmd_claims_history(
+        _ns(json=True), "o/r#42",
+        json_error=lambda *a, **k: 2,
+        json_output=lambda p: captured.setdefault("payload", p),
+    )
+    assert rc == 0
+    events = captured["payload"]["events"]
+    assert [e["event"] for e in events] == ["claimed", "reassigned"]
+    assert events[0]["session_id"] == "sess-a"
+    assert events[1]["session_id"] == "sess-b"
+    assert "sess-a -> sess-b" in events[1]["note"]
+    # Also prove the human-readable render carries both hops, none dropped.
+    rc = claims_history_cli.cmd_claims_history(
+        _ns(json=False), "o/r#42",
+        json_error=lambda *a, **k: 2, json_output=lambda *a: None,
+    )
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "claimed" in out and "reassigned" in out
+    assert "sess-a" in out and "sess-b" in out
+
+
 # ── _merge_events (the --remote local+mirrored merge) ───────────────────
 
 def test_merge_events_preserves_a_repeated_local_transition_at_second_granularity():
