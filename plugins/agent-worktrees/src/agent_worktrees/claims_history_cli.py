@@ -10,6 +10,7 @@ See :mod:`claim_history`'s own module docstring for the full scope note
 from __future__ import annotations
 
 import argparse
+import sys
 
 from . import claim_history, output
 
@@ -40,20 +41,26 @@ def _merge_events(local: list[dict], remote: list[dict]) -> list[dict]:
     preserves relative order for EQUAL keys, not for two items whose keys
     are simply out of order. Each kept remote-only event is instead
     inserted at the position implied by comparing its timestamp against
-    the events already placed (local's own order is scanned but never
-    altered); ties keep the already-placed event first.
+    the events already placed; every insertion starts searching right
+    AFTER the previous extra's own landing spot (never from the start),
+    so the kept extras can never be reordered relative to EACH OTHER
+    either -- a plain from-the-start scan could otherwise walk a later
+    extra past an earlier one whenever a local event's timestamp happened
+    to sit between them. Ties keep the already-placed event first.
     """
     local_ids = {_event_identity(e) for e in local if e.get("ledger_id") is not None}
     extras = [e for e in remote if _event_identity(e) not in local_ids]
     merged = list(local)
+    search_from = 0
     for extra in extras:
         ts = str(extra.get("ts", ""))
         idx = len(merged)
-        for i, placed in enumerate(merged):
-            if str(placed.get("ts", "")) > ts:
+        for i in range(search_from, len(merged)):
+            if str(merged[i].get("ts", "")) > ts:
                 idx = i
                 break
         merged.insert(idx, extra)
+        search_from = idx + 1
     return merged
 
 
@@ -80,7 +87,15 @@ def cmd_claims_history(
     if getattr(args, "remote", False):
         from . import claim_history_mirror
         events = claim_history_mirror.local_identities_for_ref("pr", ref)
+        failures_before = claim_history_mirror.read_failure_count()
         remote_events = claim_history_mirror.fetch_remote_history(ref)
+        if claim_history_mirror.read_failure_count() > failures_before:
+            print(
+                f"  ⚠️  claims history --remote: could not read {ref}'s mirrored "
+                "history (store unreachable or misconfigured) -- showing "
+                "local history only, which may be incomplete",
+                file=sys.stderr,
+            )
         events = _merge_events(events, remote_events)
     else:
         events = claim_history.history_for_ref(ref)

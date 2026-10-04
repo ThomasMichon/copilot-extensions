@@ -490,6 +490,32 @@ def test_cli_json_mode(capsys):
     assert len(captured["payload"]["events"]) == 1
 
 
+def test_cli_remote_warns_on_stderr_when_the_remote_read_fails(capsys, monkeypatch):
+    """A failed remote read must never look identical to "no ownership
+    history exists" -- the CLI warns (on stderr, never polluting JSON
+    stdout) distinguishing the two."""
+    from agent_worktrees import claim_history_mirror
+
+    claim_history.record_event(
+        kind="pr", ref="o/r#6", worktree_id="wt-a", machine="m", event="claimed",
+    )
+
+    def failing_fetch(ref_value, **kwargs):
+        claim_history_mirror._read_failures += 1
+        return []
+
+    monkeypatch.setattr(claim_history_mirror, "fetch_remote_history", failing_fetch)
+    captured: dict = {}
+    rc = claims_history_cli.cmd_claims_history(
+        _ns(json=True, remote=True), "o/r#6",
+        json_error=lambda *a, **k: 2, json_output=lambda p: captured.setdefault("payload", p),
+    )
+    assert rc == 0
+    assert len(captured["payload"]["events"]) == 1  # local history still shown
+    err = capsys.readouterr().err
+    assert "could not read" in err
+
+
 # ── _merge_events (the --remote local+mirrored merge) ───────────────────
 
 def test_merge_events_preserves_a_repeated_local_transition_at_second_granularity():
@@ -551,5 +577,21 @@ def test_merge_events_never_reorders_local_under_a_non_monotonic_clock():
          "machine": "m", "seq": 1, "ledger_id": "ledger-a"},  # clock moved backward
     ]
     merged = claims_history_cli._merge_events(local, remote=[])
+    assert [e["event"] for e in merged] == ["claimed", "released"]
+
+
+def test_merge_events_never_reorders_remote_only_extras_under_a_non_monotonic_clock():
+    """The remote-side counterpart: with NO local history at all, a
+    mirrored ``claimed, released`` pair recorded under a non-monotonic
+    clock (the release's own timestamp looking earlier than its claim's)
+    must still display in the chain's own recorded order, not reversed
+    by a from-the-start timestamp scan."""
+    remote = [
+        {"ts": "2026-10-03T12:00:05+00:00", "event": "claimed", "worktree_id": "wt-a",
+         "machine": "m", "seq": 0, "ledger_id": "ledger-a"},
+        {"ts": "2026-10-03T12:00:01+00:00", "event": "released", "worktree_id": "wt-a",
+         "machine": "m", "seq": 1, "ledger_id": "ledger-a"},
+    ]
+    merged = claims_history_cli._merge_events(local=[], remote=remote)
     assert [e["event"] for e in merged] == ["claimed", "released"]
 
