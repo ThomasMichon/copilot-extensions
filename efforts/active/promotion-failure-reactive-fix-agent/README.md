@@ -2375,3 +2375,58 @@ on. The captured SHA is written to an immutable file in
 `pre-agent-steps` and reused unchanged by the scope gate, instead of
 re-fetching a branch that can move while the agent runs (a second real
 review finding on the same PR).
+
+
+### 2026-10-04 — PR #5135 merged after five real review rounds
+
+The checkout correction above (read `default_branch` from
+`.agent-worktrees/config.yaml`, check out in place) went through five
+genuine review rounds before a real `APPROVED` verdict, each catching a
+distinct real defect rather than a style nit:
+
+1. The action-pin regression: an unqualified `gh aw compile` (no
+   `--action-tag`) silently swapped the pinned
+   `github/gh-aw/actions/setup@<sha>` for the mutable
+   `github/gh-aw-actions/setup@v0.89.21` tag. `tools/check-gh-aw-action-pins.py`
+   didn't catch it -- its prefix check only covers `github/gh-aw/actions/`,
+   not the `action`-mode `github/gh-aw-actions` path a bare compile can
+   emit. Fixed by recompiling with `--action-mode release --action-tag
+   <the original pinned SHA>`.
+2. The scope gate re-fetching a moving branch: comparing against a
+   freshly re-fetched `origin/<branch>` after the agent's run, rather
+   than the SHA actually checked out before it ran, let the gate
+   misattribute upstream commits landed mid-run to the agent (or miss
+   ones it touched that the branch also advanced past). Fixed by
+   capturing the SHA once in `pre-agent-steps`.
+3. Two inaccurate claims found and corrected in the journal/comments:
+   the compiled agent's bash allowlist actually permits `git
+   checkout`/`git switch` (the explicit pre-agent checkout establishes
+   the starting tree, not because switching is unavailable), and the PR
+   description still documented the abandoned sibling-worktree
+   implementation after the code had already moved past it.
+4. A genuinely new design gap the correction itself introduced:
+   `safe-outputs.create-pull-request`'s `base-branch: "dev"` is
+   compile-time frontmatter -- it cannot read the branch
+   `pre-agent-steps` resolves at runtime, so the two could silently
+   diverge if the configured contribution branch ever changes. Fixed
+   with a machine-enforced check that fails the run if they disagree,
+   rather than trusting a comment to keep them in sync.
+5. A real, High-severity security gap: the captured base SHA lived
+   under `$GITHUB_WORKSPACE/.verify-issue/`, which the agent's own
+   sandbox can freely write (that path is explicitly exempted from the
+   scope gate it feeds). An agent could overwrite its own comparison
+   baseline and hide an out-of-scope patch. Fixed by moving it to
+   `$RUNNER_TEMP/gh-aw`, which the compiled agent mounts read-only
+   (`--mount "${RUNNER_TEMP}/gh-aw:${RUNNER_TEMP}/gh-aw:ro"`, confirmed
+   in the compiled lock).
+
+Each round's finding was verified independently (the compiled lock's
+actual content, not just the review's claim) before being accepted or
+pushed back on. Merged as commit `18757c5c1`, not yet on `main` --
+queued behind the normal `validate-and-promote` pipeline (run
+37178902766 or its successor), the same bootstrap gotcha this effort
+already hit once for the original Phase 2 draft: a non-push/PR-triggered
+workflow (`issues: labeled`, `workflow_dispatch`) is read from `main`,
+not `dev`, so this fix is inert on any live dispatch until that
+promotion lands. Monitoring both: the promotion itself, and the next
+live `ci-failure-fix-attempt` dispatch once it does.
