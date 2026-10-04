@@ -28,6 +28,7 @@ from .ado_discovery_scope import (
 )
 from .gitea_provider_stub import GiteaProvider
 from .issue_loop_markers import _marker, _marker_plain, _parse_marker
+from .repository_issue_selection import eligible_issues, validate_issue_numbers
 from .repository_issue_task_contracts import (
     build_task_contract,
     validate_task_contract,
@@ -152,16 +153,6 @@ def _strings(data: Mapping[str, Any], key: str) -> tuple[str, ...]:
         )
     return tuple(dict.fromkeys(value))
 
-
-def _issue_numbers(data: Mapping[str, Any], key: str = "issue_numbers") -> tuple[int, ...]:
-    value = data.get(key, ())
-    if value in (None, (), []):
-        return ()
-    if not isinstance(value, (list, tuple)) or not all(isinstance(item, int) and item > 0 for item in value):
-        raise RegistrarError(f"repository-issue-loop {key}: expected a list of positive integers")
-    return tuple(dict.fromkeys(value))
-
-
 def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -> dict[str, Any]:
     """Validate/normalize a declaration. ``cwd`` (declaring repo root, if
     known) threads a named ``worker_identity`` to its repo-local override."""
@@ -200,7 +191,7 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
     batch_size = _number(data, "batch_size", default=1, minimum=1)
     if not float(batch_size).is_integer():
         raise RegistrarError("repository-issue-loop batch_size: expected an integer")
-    issue_numbers = _issue_numbers(data)
+    issue_numbers = validate_issue_numbers(data)
     if issue_numbers:
         batch_size = max(batch_size, len(issue_numbers))
     include = _strings(data, "include_labels")
@@ -1222,44 +1213,12 @@ def _eligible(
     *,
     now: float,
 ) -> list[Issue]:
-    selected_issue_numbers = tuple(int(n) for n in config.get("issue_numbers", ()))
-    selected_order = {number: index for index, number in enumerate(selected_issue_numbers)}
-    include = set(config["include_labels"])
-    exclude = set(config["exclude_labels"]) | {"bootstrap"}
-    priorities = {
-        label: index for index, label in enumerate(config["priority_labels"])
-    }
-
-    def rank(issue: Issue) -> tuple[int, float, int]:
-        issue_ranks = [priorities[label] for label in issue.labels if label in priorities]
-        return (
-            min(issue_ranks, default=len(priorities)),
-            issue.created_at,
-            issue.number,
-        )
-
-    selected = []
-    for issue in issues:
-        if selected_order and issue.number not in selected_order:
-            continue
-        labels = set(issue.labels)
-        if include and not include <= labels:
-            continue
-        if labels & exclude:
-            continue
-        if now - issue.updated_at < config["quiet_period_seconds"]:
-            continue
-        if any(
-            reservation.get("state") in {"reserved", "claimed"}
-            for reservation in _latest_reservations(issue).values()
-        ):
-            continue
-        selected.append(issue)
-    selected = (
-        sorted(selected, key=lambda issue: selected_order[issue.number])
-        if selected_order else sorted(selected, key=rank)
+    return eligible_issues(
+        config,
+        issues,
+        now=now,
+        latest_reservations=_latest_reservations,
     )
-    return selected[:config["batch_size"]]
 
 
 def _task_contract_fields(config: Mapping[str, Any], issues: list[Issue]) -> dict[str, str]:
@@ -1617,6 +1576,7 @@ def run_tick(
     task: dict[str, Any] | None = None
     create_attempted = False
     authoritative_absence = False
+    explicit_issue_numbers = tuple(int(n) for n in config.get("issue_numbers", ()))
     try:
         for issue in discovered["eligible"]:
             provider.reserve(config["repo"], issue, reservation_base)
@@ -1642,6 +1602,26 @@ def run_tick(
                 election["reservation"]["token"],
             )
             reserved.append(issue)
+        if explicit_issue_numbers and len(reserved) != len(explicit_issue_numbers):
+            for issue in reserved:
+                provider.release(
+                    config["repo"],
+                    issue,
+                    reservation_base,
+                    "explicit issue set was not fully reservable",
+                )
+                key, owner, token = resource_owners.pop(issue.number)
+                client.release_resource_reservation(key, owner, token)
+            return {
+                "occurrence": discovered["occurrence"],
+                "origin_ref": discovered["origin_ref"],
+                "exclusive_key": discovered["exclusive_key"],
+                "eligible": [issue.number for issue in discovered["eligible"]],
+                "reserved": [],
+                "lost": lost,
+                "created": [],
+                "suppressed": False,
+            }
         if not reserved:
             return {
                 "occurrence": discovered["occurrence"],

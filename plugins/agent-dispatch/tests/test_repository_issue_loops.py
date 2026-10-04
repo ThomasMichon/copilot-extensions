@@ -22,6 +22,7 @@ from agent_dispatch.repository_issue_loops import (
     _forge_provider_for,
     _latest_reservations,
     _marker,
+    _resource_key,
     expand_repository_issue_loop,
     occurrence_epoch,
     run_tick,
@@ -1094,6 +1095,47 @@ def test_global_effort_builder_groups_multiple_issues_into_one_effort_task(tmp_p
     assert "implementation, required checks, review, merge, and issue closure" not in task["prompt"]
 
 
+def test_explicit_issue_set_suppresses_creation_when_any_configured_issue_is_missing():
+    config = _config(issue_numbers=[17, 18], include_labels=["ready"])
+    provider = FakeProvider([_issue(17, labels=("ready",)), _issue(19, labels=("ready",))])
+
+    result = run_tick(
+        FakeClient(),
+        config,
+        provider=provider,
+        clock=lambda: 10_000,
+    )
+
+    assert result["created"] == []
+    assert result["eligible"] == []
+    assert result["reserved"] == []
+
+
+def test_explicit_issue_set_releases_partial_reservations_when_one_issue_loses_election():
+    config = _config(issue_numbers=[17, 18], include_labels=["ready"])
+    provider = FakeProvider([_issue(17, labels=("ready",)), _issue(18, labels=("ready",))])
+    client = FakeClient()
+    client.resource_reservations[_resource_key(config, 18)] = {
+        "key": _resource_key(config, 18),
+        "owner": "other-loop",
+        "token": "token-existing",
+        "task_id": None,
+    }
+
+    result = run_tick(
+        client,
+        config,
+        provider=provider,
+        clock=lambda: 10_000,
+    )
+
+    assert result["created"] == []
+    assert result["reserved"] == []
+    assert result["lost"] == [18]
+    assert 17 in [issue for issue, *_rest in provider.released]
+    assert _resource_key(config, 17) not in client.resource_reservations
+
+
 def test_proposed_task_retries_transient_approve_failure():
     provider = FakeProvider([_issue(1)])
     client = FakeClient(fail_approve_once=True)
@@ -1831,6 +1873,7 @@ def test_claim_does_not_reuse_a_different_loops_comment():
     [
         ({"source": ""}, "source"),
         ({"batch_size": 0}, "batch_size"),
+        ({"issue_numbers": [True]}, "issue_numbers: expected a list of positive integers"),
         ({"issue_numbers": ["17"]}, "issue_numbers: expected a list of positive integers"),
         ({"forge": {"provider": "other"}}, "only \\['azure-devops', 'github'\\]"),
         ({"forge": {"provider": "github"}}, "producer_login"),
