@@ -406,3 +406,42 @@ def test_a_protocol_floor_retries_a_starting_daemons_initializing_refusal(monkey
     with pytest.raises(BridgeClientError) as exc:
         client._request("POST", "/api/v1/sessions")
     assert exc.value.status == 503 and clock[0] >= 30.0
+
+
+@pytest.mark.parametrize("first_failure", ["refused", "unanswered-probe"])
+def test_a_protocol_floor_never_sends_after_a_slow_retry_probe(monkeypatch, first_failure):
+    """A retry's /health probe that answers only after the grace has run out
+    does not send the request late: the failure that started the retry stands."""
+    import time as _time
+
+    from agent_bridge import session_targeting_cli as stc
+    from agent_bridge.client import BridgeClientError, BridgeConnectionError
+
+    clock = [0.0]
+    monkeypatch.setattr(_time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    monkeypatch.setattr(_time, "monotonic", lambda: clock[0])
+    calls: list[str] = []
+
+    class Client:
+        _base, _connect_grace = "http://d", 1.0
+        _reresolve = None
+
+        def _request(self, method, path, *a, **k):
+            calls.append(path)
+            if path == "/health":
+                probes = calls.count("/health")
+                if probes == 1 and first_failure == "unanswered-probe":
+                    raise BridgeConnectionError("connection refused")
+                if probes > 1:
+                    clock[0] += 2.0  # the retry's probe is slow
+                return {"protocol_version": 21}
+            raise BridgeClientError(503, "the bridge daemon is initializing; retry shortly")
+
+    client = Client()
+    stc._hold_protocol_floor(client, 21)
+    expected = BridgeClientError if first_failure == "refused" else BridgeConnectionError
+    with pytest.raises(expected):
+        client._request("POST", "/api/v1/sessions")
+    sent = [c for c in calls if c != "/health"]
+    assert sent == (["/api/v1/sessions"] if first_failure == "refused" else [])
+    assert clock[0] >= 1.0

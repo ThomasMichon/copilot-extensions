@@ -652,6 +652,19 @@ def test_two_unknown_machines_never_inherit(tmp_db: Database) -> None:
     assert tmp_db.get_live_session("placeholder")["session_id"] == "placeholder"
 
 
+def test_rollover_matches_the_machine_name_case_insensitively(tmp_db: Database) -> None:
+    """A same-process resume that reports its host in another case (as the
+    incarnation check already allows) still inherits the claim and alias."""
+    now = time.time()
+    tmp_db.create_cli_mode_reservation("wt-R", now=now, ttl_seconds=300)
+    assert _register(tmp_db, "placeholder", "wt-R", now + 1, pid=4242, started=now,
+                     machine="HOST-1") == "live"
+    assert _register(tmp_db, "resumed", "wt-R", now + 2, pid=4242, started=now,
+                     machine="host-1") == "live"
+    assert tmp_db.get_live_session("resumed")["cli_mode"] == 1
+    assert tmp_db.get_live_session("placeholder")["session_id"] == "resumed"
+
+
 def test_an_alias_heartbeat_from_another_incarnation_never_overwrites_the_successor(
     tmp_db: Database,
 ) -> None:

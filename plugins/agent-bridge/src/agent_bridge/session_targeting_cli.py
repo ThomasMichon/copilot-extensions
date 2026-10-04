@@ -102,6 +102,7 @@ def _hold_protocol_floor(client: Any, floor: int) -> None:
     def _floored(method: str, path: str, *a: Any, **k: Any) -> Any:
         deadline = time.monotonic() + grace
         retrying = False
+        last_error: Exception | None = None
         while True:
             if retrying:
                 time.sleep(0.5)
@@ -111,15 +112,18 @@ def _hold_protocol_floor(client: Any, floor: int) -> None:
             try:
                 version = int((request("GET", "/health") or {}).get("protocol_version") or 0)
             except (BridgeConnectionError, TypeError, ValueError):
+                unanswered = BridgeConnectionError(
+                    f"the bridge daemon at {client._base} didn't answer a protocol check in time; "
+                    "the request was not sent")
                 if time.monotonic() >= deadline:
-                    raise BridgeConnectionError(
-                        f"the bridge daemon at {client._base} didn't answer a protocol check in time; "
-                        "the request was not sent") from None
-                retrying = True
+                    raise unanswered from None
+                retrying, last_error = True, last_error or unanswered
                 continue
             if version < floor:
                 raise BridgeClientError(426, f"the bridge daemon now at {client._base} predates protocol "
                                              f"{floor}; not sending the request there")
+            if last_error is not None and time.monotonic() >= deadline:
+                raise last_error  # a slow re-probe spent the budget: never send late
             try:
                 return request(method, path, *a, **k)
             except BridgeConnectionError as exc:
@@ -129,7 +133,7 @@ def _hold_protocol_floor(client: Any, floor: int) -> None:
                 if time.monotonic() >= deadline or (
                         method not in ("GET", "HEAD") and not _connection_refused(exc)):
                     raise
-                retrying = True
+                retrying, last_error = True, exc
             except BridgeClientError as exc:
                 # The daemon refused the request outright (it was not
                 # accepted): a retiring one ("draining") hands over to its
@@ -142,7 +146,7 @@ def _hold_protocol_floor(client: Any, floor: int) -> None:
                 if exc.status != 503 or not ("drain" in detail or "initializing" in detail) \
                         or time.monotonic() >= deadline:
                     raise
-                retrying = True
+                retrying, last_error = True, exc
 
     client._request = _floored
 

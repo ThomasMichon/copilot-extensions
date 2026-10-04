@@ -217,7 +217,7 @@ def _fold_in_predecessor(
         # Never fold back the session this id was already renamed into.
         "AND session_id NOT IN (SELECT target_session_id FROM live_session_aliases "
         "WHERE alias_session_id=?) "
-        "AND pid=? AND machine = ? AND CASE "
+        "AND pid=? AND machine = ? COLLATE NOCASE AND CASE "
         "WHEN ? IS NOT NULL AND process_started_at IS NOT NULL "
         "THEN ABS(process_started_at - ?) < ? "
         # A legacy predecessor (no start time): the same process registered it

@@ -57,6 +57,38 @@ test("a resumed id refused for a crashed predecessor's row keeps the placeholder
   assert.deepEqual(await register.close(), ["placeholder"]);
 });
 
+test("an accepted id-only registration later refused for the same id revokes delivery and cleanup", async () => {
+  // The first registration went out before this process's identity was known
+  // and was accepted onto another incarnation's row; the next heartbeat, with
+  // pid and start time, is refused for that very id.
+  const state = { sessionId: "resumed", registered: false };
+  let refuse = false;
+  const posts = [];
+  const post = async (id) => { posts.push(id); return refuse ? "rejected" : true; };
+  const register = serializedRegister(state, post);
+  assert.equal(await register(), true);
+  assert.equal(state.registered, true);
+  refuse = true;
+  assert.equal(await register(), false);
+  assert.deepEqual([state.sessionId, state.registered], ["resumed", false]);  // inbox/flush stop
+  assert.deepEqual(await register.close(), []);  // shutdown leaves the other process's row alone
+  assert.deepEqual(posts, ["resumed", "resumed"]);
+});
+
+test("a revoked id is served again once the other incarnation's row is gone", async () => {
+  const state = { sessionId: "resumed", registered: false };
+  let result = true;
+  const register = serializedRegister(state, async () => result);
+  await register();
+  result = "rejected";
+  await register();
+  assert.equal(state.registered, false);
+  result = true;  // the other row was purged: the next heartbeat registers it
+  assert.equal(await register(), true);
+  assert.equal(state.registered, true);
+  assert.deepEqual(await register.close(), ["resumed"]);
+});
+
 test("shutdown drains a pending registration and returns every id to deregister", async () => {
   const state = { sessionId: "placeholder", registered: false };
   const { calls, post } = deferredPoster();

@@ -25,6 +25,13 @@ import { exec, execFile } from "node:child_process";
 // Epoch seconds this process started (wall clock minus uptime), fixed once.
 const PROCESS_STARTED_AT = Date.now() / 1000 - process.uptime();
 
+// This process's identity, known at load with no subprocess, so every
+// registration -- the very first one included -- lets the bridge refuse a row
+// that belongs to another incarnation instead of accepting an id-only write.
+export function processIdentity() {
+  return { pid: process.pid, process_started_at: PROCESS_STARTED_AT };
+}
+
 // --- Async CLI runner (non-blocking; never freezes the event loop) ---
 // Mirrors the platform split the old synchronous runCli used (Windows
 // binstubs are .cmd -> need a shell; POSIX can exec the binary directly) --
@@ -75,10 +82,10 @@ export async function resolveMetadataAsync({ cwd = process.cwd(), env = process.
     branch: branch || null,
     // process.pid is the extension host process -- a liveness hint, not the
     // copilot PID. The durable key is session_id; liveness is heartbeat-based.
-    pid: process.pid,
-    // Constant for this process (also across an in-process resume), so the
-    // bridge can tell it from an unrelated process that later reuses the pid.
-    process_started_at: PROCESS_STARTED_AT,
+    // With the start time, constant for this process (also across an
+    // in-process resume), the bridge tells it from an unrelated process that
+    // later reuses the pid.
+    ...processIdentity(),
     role: null,
     // D4: who is steering this session, if an agent embodied it (set by
     // `agent-worktrees embody --driver`). Surfaces the "driven by <agent>"

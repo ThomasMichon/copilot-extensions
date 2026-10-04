@@ -196,7 +196,10 @@ export function adoptSessionId(state, eventSessionId, now = Date.now()) {
 // crashed predecessor's expired row awaiting purge) or false (unreachable,
 // retried by the next heartbeat). On a rejection after a rename, the process
 // keeps serving under the id it did register -- inbox, controls and events
-// go on -- and the refused id is retried after REJECTED_RETRY_MS.
+// go on -- and the refused id is retried after REJECTED_RETRY_MS. A rejection
+// of the only id it serves revokes it: delivery stops (``registered`` false)
+// and shutdown no longer deregisters it; a later heartbeat re-registers it if
+// the other incarnation's row goes away.
 export function serializedRegister(state, post, onRegistered = () => {}, { now = Date.now } = {}) {
   let chain = Promise.resolve();
   let closed = false;
@@ -215,10 +218,16 @@ export function serializedRegister(state, post, onRegistered = () => {}, { now =
       if (state.sessionId !== id) continue; // renamed meanwhile
       if (result === "rejected") {
         (state.rejectedIds ||= new Map()).set(id, now() + REJECTED_RETRY_MS);
-        if (lastOk && lastOk !== id) {
+        // The id is another incarnation's: this process no longer serves it,
+        // and shutdown must not delete that row (even if an earlier, id-only
+        // registration of it was accepted).
+        if (posted.includes(id)) posted.splice(posted.indexOf(id), 1);
+        if (lastOk === id) lastOk = null;
+        if (lastOk) {
           state.sessionId = lastOk; // keep a usable handle; refresh it, then ready
           continue;
         }
+        state.registered = false; // stop inbox, control and event delivery
         return false;
       }
       if (ok && !state.registered) {

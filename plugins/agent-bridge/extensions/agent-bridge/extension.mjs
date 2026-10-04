@@ -28,7 +28,7 @@ import { joinSession } from "@github/copilot-sdk/extension";
 import { InFlightMessages, adoptSessionId, controlPlan, deliveryPlan, modeApplied, serializedRegister } from "./delivery.mjs";
 import { firstLoadThisSession } from "./announce.mjs";
 import { makeBridgeEndpoint } from "./bridge-endpoint.mjs";
-import { resolveMetadataAsync } from "./metadata.mjs";
+import { processIdentity, resolveMetadataAsync } from "./metadata.mjs";
 
 // --- Constants ---
 const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
@@ -177,7 +177,8 @@ const register = serializedRegister(
   async (id) => {
     if (!state.base || !state.token) return false;
     try {
-      const res = await fetchBridge("POST", "/api/v1/live-sessions", { session_id: id, ...(state.meta || {}) });
+      const body = { session_id: id, ...processIdentity(), ...(state.meta || {}) };
+      const res = await fetchBridge("POST", "/api/v1/live-sessions", body);
       if (res.ok) return true;
       if (res.status === 409) {
         const body = await res.json().catch(() => null);
@@ -447,10 +448,11 @@ try {
   // state.meta starts unset -- resolveMetadataAsync() below fills it in the
   // background. Deliberately NOT awaited here: this whole init block must
   // finish (and the extension report ready) without waiting on any child
-  // process. register()'s payload spreads `...(state.meta || {})`, so the
-  // very first heartbeat may go out with only session_id if metadata hasn't
-  // resolved yet -- self-correcting on the next HEARTBEAT_MS tick, which is a
-  // fully acceptable trade for never blocking readiness on it.
+  // process. register()'s payload carries this process's identity
+  // (processIdentity()) from the start and spreads `...(state.meta || {})`, so
+  // the very first heartbeat may go out without machine/worktree metadata if
+  // it hasn't resolved yet -- self-correcting on the next HEARTBEAT_MS tick,
+  // which is a fully acceptable trade for never blocking readiness on it.
   resolveMetadataAsync()
     .then((meta) => { state.meta = meta; })
     .catch((e) => extLog(`metadata resolution failed (degrading, session unaffected): ${e.message}`));
