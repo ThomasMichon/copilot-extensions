@@ -1,0 +1,9 @@
+{
+  "comment": "Topbar: distinguish the Manager's own update-state indicator (mgr-prefixed) from the engine/marketplace indicator so both 'current' states never render as two identical, unlabeled checkmarks",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

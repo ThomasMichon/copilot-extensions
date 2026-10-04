@@ -179,14 +179,24 @@ DEFAULT_LABEL_PREFIX: dict[str, str] = {
     "effort": "EFF",
 }
 
-#: Kinds whose ``ref`` is a GitHub PR/issue reference -- either the
+#: Kinds whose ``ref`` is a PR/issue reference -- either the
 #: ``"owner/repo#N"`` shape ``claims_cli``/the create-pr auto-claim writes, or
-#: a full GitHub URL (e.g. a hand-added claim, or a ref recovered from an
-#: external system). :func:`_parse_pr_like_ref` accepts both.
+#: a full PR/issue URL from GitHub OR any other forge (e.g. a hand-added
+#: claim, or a ref recovered from an external system). :func:`_parse_pr_like_ref`
+#: accepts all three.
 _PR_LIKE_KINDS = frozenset({"pr", "bug", "issue"})
 
 _GITHUB_PR_URL_RE = re.compile(
     r"^https?://github\.com/([^/\s]+/[^/\s]+)/(?:pull|issues)/(\d+)(?:[/?#].*)?$"
+)
+#: Generic PR/issue URL shape for any OTHER forge -- Gitea/Forgejo use
+#: ``pulls`` (plural), GitLab uses ``merge_requests``; both (and GitHub) use
+#: ``issues`` for issue refs. Host-agnostic: it only extracts the owner/repo
+#: pair and the number for a short ``#N`` label (and the cross-repo check) --
+#: it never reconstructs a URL for a foreign host (see :func:`claim_url`,
+#: which hyperlinks the ORIGINAL url as-is instead).
+_GENERIC_PR_URL_RE = re.compile(
+    r"^https?://[^/\s]+/([^/\s]+/[^/\s]+)/(?:pull|pulls|merge_requests|issues)/(\d+)(?:[/?#].*)?$"
 )
 
 
@@ -214,12 +224,15 @@ def _is_cross_repo(own_repo: str | None, candidate_repo: str | None) -> bool:
 
 def _parse_pr_like_ref(ref: str) -> tuple[str | None, str | None]:
     """``(owner_repo, number)`` from a PR/bug/issue ``ref`` -- either the
-    ``"owner/repo#N"`` shape (repo optional: a bare ``"#N"`` is valid too) or
-    a full GitHub PR/issue URL. ``(None, None)`` when neither shape matches
-    (never raises on a malformed/foreign ref)."""
+    ``"owner/repo#N"`` shape (repo optional: a bare ``"#N"`` is valid too), a
+    full GitHub PR/issue URL, or a full PR/issue URL from any other forge
+    (Gitea/Forgejo's ``pulls``, GitLab's ``merge_requests``, or ``issues`` on
+    any of them). ``(None, None)`` when no shape matches (never raises on a
+    malformed/foreign ref)."""
     if not ref:
         return None, None
-    m = _GITHUB_PR_URL_RE.match(ref.strip())
+    stripped = ref.strip()
+    m = _GITHUB_PR_URL_RE.match(stripped) or _GENERIC_PR_URL_RE.match(stripped)
     if m:
         return m.group(1), m.group(2)
     if "#" in ref:
@@ -234,9 +247,16 @@ def claim_url(kind: str, ref: str) -> str | None:
     """The fully-qualified URL a claim's short label can hyperlink to, or
     ``None`` when this claim kind/ref carries no independently-resolvable
     URL (a CodeSpace name, a dispatch task id, an unqualified ``"#N"`` PR ref
-    with no repo to build a URL from). GitHub PR/bug/issue refs are the only
-    kind resolved today; a raw URL ref (any kind) is passed through as-is."""
+    with no repo to build a URL from). A ref that is ALREADY a full URL (any
+    forge/host) is hyperlinked as-is -- never rewritten to a reconstructed
+    ``github.com`` URL, which would silently point a non-GitHub ref at the
+    wrong site. Only the bare ``"owner/repo#N"`` shorthand (which is
+    GitHub-only by the convention ``claims_cli``/create-pr writes it in) gets
+    a synthesized ``github.com`` URL."""
     if kind in _PR_LIKE_KINDS:
+        stripped = ref.strip() if ref else ""
+        if stripped.startswith("http://") or stripped.startswith("https://"):
+            return stripped
         owner_repo, number = _parse_pr_like_ref(ref)
         if owner_repo and number:
             path = "pull" if kind == "pr" else "issues"
@@ -285,9 +305,10 @@ def format_claim(
       ordinary GitHub-sourced case. ``"#2481"`` same-repo (or repo
       unknown); ``"sample-repo#2481"`` cross-repo (short repo name, no
       owner -- the number alone is the point, the repo name is the only
-      NEW information cross-repo actually adds). Parses a full GitHub URL
-      ref the same as the ``"owner/repo#N"`` shape
-      (:func:`_parse_pr_like_ref`). A plugin-contributed
+      NEW information cross-repo actually adds). Parses a full PR/issue URL
+      ref -- from GitHub or any other forge (Gitea/Forgejo, GitLab) -- the
+      same as the ``"owner/repo#N"`` shape (:func:`_parse_pr_like_ref`). A
+      plugin-contributed
       ``label_overrides[kind]`` (e.g. an ADO-sourced "bug" wanting to read
       distinctly from a native GitHub issue) still applies and IS
       prefixed -- only the unlabeled default is bare.
