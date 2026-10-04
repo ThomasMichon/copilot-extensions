@@ -183,6 +183,24 @@ def test_claim_add_feeds_history_for_pr_kind(record_path):
     assert events[0]["machine"] == "machine-x"
 
 
+def test_claim_add_stamps_the_owning_records_own_project_not_ambient_config(
+    record_path, monkeypatch,
+):
+    """``claims add --owner-ref`` resolves ANOTHER project's tracking
+    record and dispatches here, possibly from a process whose ambient
+    config names a different project entirely (or a daemon invocation
+    with no project context of its own). The stamped ``project`` must be
+    the record's own ``repo`` -- never whatever ``current_project_name()``
+    happens to report."""
+    monkeypatch.setattr(claim_history, "current_project_name", lambda: "ambient-project")
+    tracking_claim_write.apply_claim_add({
+        "worktree_id": "wt-claim", "yaml_path": str(record_path),
+        "kind": "pr", "ref": "o/r#10",
+    })
+    events = claim_history.history_for_ref("o/r#10")
+    assert events[0]["project"] == "example"  # record_path's own WorktreeRecord.repo
+
+
 def test_claim_add_uses_the_caller_supplied_session_id(record_path):
     """The verb normally runs in the resident daemon, whose own
     environment explicitly strips COPILOT_AGENT_SESSION_ID -- the CLI
@@ -518,4 +536,20 @@ def test_merge_events_keeps_every_remote_event_when_local_has_no_ledger_id():
     remote = [dict(local[0], ledger_id="ledger-b")]
     merged = claims_history_cli._merge_events(local, remote)
     assert len(merged) == 2
+
+
+def test_merge_events_never_reorders_local_under_a_non_monotonic_clock():
+    """A later local event recorded with an EARLIER-looking timestamp than
+    an event before it (a clock adjustment) must never be reordered by
+    the merge -- a plain ``sort(key=ts)`` would silently invert them even
+    with an empty remote side, contradicting plain local history (which
+    never resorts by ts at all)."""
+    local = [
+        {"ts": "2026-10-03T12:00:05+00:00", "event": "claimed", "worktree_id": "wt-a",
+         "machine": "m", "seq": 0, "ledger_id": "ledger-a"},
+        {"ts": "2026-10-03T12:00:01+00:00", "event": "released", "worktree_id": "wt-a",
+         "machine": "m", "seq": 1, "ledger_id": "ledger-a"},  # clock moved backward
+    ]
+    merged = claims_history_cli._merge_events(local, remote=[])
+    assert [e["event"] for e in merged] == ["claimed", "released"]
 
