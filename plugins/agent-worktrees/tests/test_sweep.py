@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import types
 
-from agent_worktrees import obligations, sweep, tracking
+from agent_worktrees import obligations, sweep, tracking, tracking_claims
 
 
 def _rec(*states: str) -> tracking.WorktreeRecord:
@@ -251,6 +251,13 @@ def test_github_pr_view_args_recognizes_forms():
         "https://my-org.visualstudio.com/Example-Web/_git/example-web/pullrequest/9") is None
     assert sweep._github_pr_view_args("123") is None
     assert sweep._github_pr_view_args("") is None
+    # Phase 6 canonical form (worktree-claims-transitive-finalization,
+    # 2026-10-04) unwraps to the identical legacy shapes above.
+    assert sweep._github_pr_view_args(
+        tracking_claims.canonicalize_ref("pr", "o/r#34")) == ["34", "--repo", "o/r"]
+    assert sweep._github_pr_view_args(
+        tracking_claims.canonicalize_ref("pr", "https://github.com/o/r/pull/12")
+    ) == ["https://github.com/o/r/pull/12"]
 
 
 def test_pr_merged_true_only_on_merged(monkeypatch):
@@ -298,6 +305,13 @@ def test_ado_pr_view_args_recognizes_forms():
     assert sweep._ado_pr_view_args("o/r#34") is None
     assert sweep._ado_pr_view_args("123") is None
     assert sweep._ado_pr_view_args("") is None
+    # Phase 6 canonical form unwraps to the identical legacy ADO shape.
+    assert sweep._ado_pr_view_args(
+        tracking_claims.canonicalize_ref(
+            "pr",
+            "https://dev.azure.com/my-org/Example-Web/_git/example-web/pullrequest/2285417",
+        )
+    ) == ["--id", "2285417", "--org", "https://dev.azure.com/my-org/"]
 
 
 def test_ado_pr_merged_true_only_on_completed(monkeypatch):

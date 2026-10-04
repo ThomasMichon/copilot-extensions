@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import secrets
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
@@ -79,6 +80,7 @@ def format_claim_ref(
 def parse_claim_ref(ref: str) -> ClaimRef | None:
     if not ref:
         return None
+    ref = decanonicalize_ref(ref, expected_kinds=frozenset({"worktree", "session"}))
     body, _, session = ref.partition("#")
     session_val = session or None
     parts = body.split("/")
@@ -92,6 +94,170 @@ def parse_claim_ref(ref: str) -> ClaimRef | None:
             session=session_val,
         )
     return ClaimRef(worktree_id=body, session=session_val)
+
+
+#: Every claim kind this repo recognizes today (Phase 6 canonical-ref
+#: design, worktree-claims-transitive-finalization effort, 2026-10-04) --
+#: the union of ``claims_rank.DEFAULT_LABEL_PREFIX``'s keys plus the
+#: PR-like kinds (``claims_rank._PR_LIKE_KINDS``). Duplicated here rather
+#: than imported: ``claims_rank`` is deliberately import-free (pure
+#: arithmetic -- see its own module docstring), so this module owns its own
+#: copy of the vocabulary instead of creating a dependency the other way.
+#: NOT used to gate :func:`decanonicalize_ref`'s detection (the
+#: :data:`_CANONICAL_SENTINEL` below does that unambiguously, so a
+#: plugin-contributed kind via ``claim_kinds_registry`` round-trips too) --
+#: this is purely a convenience set for callers building an
+#: ``expected_kinds`` restriction.
+CLAIM_KINDS: frozenset[str] = frozenset({
+    "worktree", "session", "codespace", "container", "task", "bridge",
+    "ssh", "effort", "workdir", "pr", "bug", "issue",
+})
+
+#: The PR-like subset of :data:`CLAIM_KINDS` (mirrors
+#: ``claims_rank._PR_LIKE_KINDS``) -- exposed for the rare caller that
+#: actually accepts more than one PR-like kind. Most PR-only entry points
+#: (``cleanup._pr_claim_target``, ``sweep.py``'s PR view-arg builders) are
+#: reached only for ``kind="pr"`` in practice (their own dispatch tables
+#: key on it exclusively) and should restrict to ``frozenset({"pr"})``
+#: directly rather than this broader set -- see each call site's own
+#: comment for why.
+PR_LIKE_KINDS: frozenset[str] = frozenset({"pr", "bug", "issue"})
+
+#: A reserved, unambiguous marker prefixing every canonical ref -- chosen
+#: specifically so detection in :func:`decanonicalize_ref` never depends on
+#: guessing whether a leading token is "a known claim kind" (closed
+#: vocabulary, breaks for a plugin-contributed kind) or coincidentally
+#: matches an opaque legacy ref that already happens to read like
+#: ``"<kind>:<system>:<key>"`` (e.g. a pre-existing ``task`` ref literally
+#: named ``"pr::foo"``, or a bare worktree id ``"worktree::foo"``) --
+#: without this sentinel either case is silently misdetected as already
+#: canonical and decoded, corrupting the legacy value. No legacy ref in
+#: this codebase (or realistically producible by any adopter) starts with
+#: this literal prefix, so its presence alone is the ONLY signal
+#: :func:`decanonicalize_ref` needs; it no longer needs to validate the
+#: embedded kind against a closed vocabulary at all.
+#:
+#: **Reservation invariant (accepted residual risk):** this prefix is
+#: RESERVED -- no legitimate legacy ref value may ever literally equal or
+#: start with it. This is airtight for every opaque legacy ref this
+#: codebase produces today (CodeSpace names, container/task ids, PR
+#: shorthand/URLs, structured worktree/session refs) -- none of those
+#: generators ever emit this literal string. It is a documented
+#: convention, not independently enforced at every ref-creation call site
+#: (`claims_cli._claims_add` et al.), because :func:`canonicalize_ref` is
+#: not yet wired into any of them (see the effort's own "additive, no
+#: emission yet" migration decision) -- there is no live producer this
+#: invariant could currently be violated by. If a future change wires
+#: emission into a path that accepts arbitrary caller-supplied ref text,
+#: add validation there to reject a ref already carrying this prefix
+#: before it is ever persisted, closing the single remaining theoretical
+#: collision (a hand-crafted or otherwise coincidental legacy ref that
+#: happens to equal this exact sentinel-prefixed string).
+_CANONICAL_SENTINEL = "cref1:"
+
+#: ``cref1:<kind>:<system>:<key>`` -- the Phase 6 canonical, self-describing
+#: claim ref shape. The :data:`_CANONICAL_SENTINEL` above (not the bare
+#: ``kind`` token) is what makes this detectable without ambiguity.
+_CANONICAL_REF_RE = re.compile(
+    r"^cref1:([a-z][a-z0-9_-]*):([^:]*):(.+)$"
+)
+
+
+def canonicalize_ref(kind: str, ref: str) -> str:
+    """Render ``ref`` (a claim of kind ``kind``) in the Phase 6 canonical,
+    self-describing ``"cref1:<kind>:<system>:<key>"`` form.
+
+    **Additive, never a replacement**: nothing persisted today is
+    rewritten by this function existing, and :func:`decanonicalize_ref`
+    losslessly recovers the exact legacy-shaped string from whatever this
+    returns -- every existing kind-specific parser (:func:`parse_claim_ref`,
+    ``claims_rank._parse_pr_like_ref``, ``cleanup._pr_claim_target``,
+    ``sweep.py``'s PR view-arg builders) keeps accepting its own native
+    shape completely unmodified; see this change's own tracking effort's
+    README (in the downstream control-plane repo that coordinates this
+    plugin, not this repo) Phase 6 section for the full design rationale
+    and the "additive, not a breaking rewrite" migration decision.
+
+    For ``worktree``/``session`` kinds, ``system`` is the owning machine
+    and ``key`` is ``project/worktree_id[#session]`` (the rest of
+    :func:`format_claim_ref`'s own grammar) -- this round-trips exactly
+    through :func:`decanonicalize_ref`, UNLESS the machine name itself
+    contains a ``:`` (machine aliases carry no token restriction -- see
+    ``config.py``), which would corrupt the ``system``/``key`` split; that
+    case falls through to the opaque form below instead, which is always
+    lossless since it carries the original ref verbatim. Every other kind
+    (PR-like or opaque) has no independently-meaningful "system" token
+    today (a PR's provider is already recoverable from its own ref shape;
+    an opaque id like a CodeSpace name carries no separate system at all),
+    so ``system`` is left empty and ``key`` is the existing ref verbatim.
+    Idempotent: a ``ref`` already in canonical form **for this exact
+    ``kind``** is returned unchanged -- checked by matching the embedded
+    kind, not just "does this look canonical for *some* kind" (an opaque
+    ref for kind ``"task"`` that happens to already read like
+    ``"cref1:pr:...:..."`` must still be wrapped as ``task`` -- treating it
+    as already-canonical would silently mislabel it as a ``pr`` ref and
+    break the round trip). An empty ``ref`` is returned unchanged -- there
+    is nothing to canonicalize, and wrapping it (``"cref1:<kind>::"``)
+    would not round-trip: the canonical grammar's ``key`` segment requires
+    at least one character, so :func:`decanonicalize_ref` could never
+    recover an empty string from it.
+    """
+    if not ref:
+        return ref
+    m = _CANONICAL_REF_RE.match(ref)
+    if m and m.group(1) == kind:
+        return ref  # already canonical for this exact kind
+    if kind in ("worktree", "session"):
+        parsed = parse_claim_ref(ref)
+        if (
+            parsed and parsed.machine and parsed.project
+            and ":" not in parsed.machine
+        ):
+            key = f"{parsed.project}/{parsed.worktree_id}"
+            if parsed.session:
+                key += f"#{parsed.session}"
+            return f"{_CANONICAL_SENTINEL}{kind}:{parsed.machine}:{key}"
+    return f"{_CANONICAL_SENTINEL}{kind}::{ref}"
+
+
+def decanonicalize_ref(
+    ref: str, *, expected_kinds: frozenset[str] | None = None,
+) -> str:
+    """Inverse of :func:`canonicalize_ref`: if ``ref`` is in the Phase 6
+    canonical ``"cref1:<kind>:<system>:<key>"`` form, return the equivalent
+    legacy-shaped ref string so every existing kind-specific parser keeps
+    working completely unmodified -- each just unwraps at its own entry
+    point first (see :func:`canonicalize_ref`'s docstring for the call
+    sites). Returns ``ref`` unchanged for anything that isn't genuinely
+    canonical -- detection is the :data:`_CANONICAL_SENTINEL` prefix alone
+    (never a closed kind vocabulary -- see its own comment for why), so a
+    PR URL's ``https:`` scheme, a legacy opaque ref that coincidentally
+    looks like ``"<kind>:<system>:<key>"``, and a plugin-contributed
+    ``claim_kinds_registry`` kind are all handled correctly: the first two
+    never match (they lack the sentinel), the third round-trips like any
+    other kind.
+
+    ``expected_kinds``, when given, restricts unwrapping to a ref whose
+    embedded kind is actually one this CALL SITE is prepared to handle --
+    pass e.g. :data:`PR_LIKE_KINDS` from a PR-only parser (or, better,
+    the exact single kind a dispatch table actually reaches). Without it,
+    a canonical ref for an unrelated kind that happens to decode into
+    something shaped like this call site's own legacy grammar would be
+    silently accepted (e.g. a ``task``-kind ref unwrapping into something
+    that reads like a PR shorthand) -- always pass the narrowest kind set
+    a given parser actually understands.
+    """
+    if not ref:
+        return ref
+    m = _CANONICAL_REF_RE.match(ref)
+    if not m:
+        return ref
+    kind, system, key = m.groups()
+    if expected_kinds is not None and kind not in expected_kinds:
+        return ref
+    if kind in ("worktree", "session"):
+        return f"{system}/{key}" if system else key
+    return key
 
 
 @dataclass

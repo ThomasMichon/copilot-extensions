@@ -1,0 +1,9 @@
+{
+  "comment": "Add Phase 6 additive canonical claim-ref encoding (worktree-claims-transitive-finalization effort): tracking_claims.canonicalize_ref/decanonicalize_ref, wired into every existing PR/worktree ref parser",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

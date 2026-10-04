@@ -28,7 +28,7 @@ from agent_procutil import no_window_flags
 
 from . import claimant as _claimant
 from . import config as cfg
-from . import git_ops, obligations, tracking
+from . import git_ops, obligations, tracking, tracking_claims
 
 log = logging.getLogger(__name__)
 
@@ -273,6 +273,13 @@ def _github_pr_view_args(ref: str) -> list[str] | None:
     ambiguous without a repo).
     """
     ref = (ref or "").strip()
+    # Reached only via pr_merged/claim_gone/claim_safe's dispatch, keyed
+    # exclusively on kind="pr" -- restrict to that exact kind, not the
+    # broader PR_LIKE_KINDS, so a mismatched bug/issue-kind canonical ref
+    # can never be silently accepted/queried as a PR target here.
+    ref = tracking_claims.decanonicalize_ref(
+        ref, expected_kinds=frozenset({"pr"}),
+    )
     m = _GH_PR_URL.match(ref)
     if m:
         return [ref]
@@ -326,6 +333,13 @@ def _ado_pr_view_args(ref: str) -> list[str] | None:
     any other shape yields ``None`` (spare).
     """
     ref = (ref or "").strip()
+    # Reached only via pr_merged/claim_gone/claim_safe's dispatch, keyed
+    # exclusively on kind="pr" -- restrict to that exact kind, not the
+    # broader PR_LIKE_KINDS, so a mismatched bug/issue-kind canonical ref
+    # can never be silently accepted/queried as a PR target here.
+    ref = tracking_claims.decanonicalize_ref(
+        ref, expected_kinds=frozenset({"pr"}),
+    )
     m = _ADO_PR_VSTS.match(ref)
     if m:
         return ["--id", m.group(2), "--org", f"https://{m.group(1)}/"]
