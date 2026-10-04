@@ -318,16 +318,23 @@ def test_event_loop_serializes_every_writer_never_running_concurrently(
     construction -- there is only ever one writer active at a time, with no
     explicit lock needed -- rather than the design document's own literal
     snapshot-owner-lock mechanism (see `board_relay.py`'s own module
-    docstring for why). This test makes the event wake and the long
-    reconcile/recompute timers all fall due together (every interval set to
-    0), instruments every writer entry/exit with a shared counter (plus a
-    real sleep inside each call, so an actual overlap would be observable),
-    and asserts the maximum concurrent writer count ever seen is exactly
-    1."""
+    docstring for why).
+
+    This exercises all three writer paths, not just two: a real queued
+    event starts the event-woken fetch first (positive timer deadlines
+    mean `_event_loop` reads the queue before either timer is due, unlike
+    an all-zero-interval setup where every iteration would take the
+    already-due "timer" branch before ever touching the queue). That fetch
+    is blocked deliberately long enough for the recompute and long-reconcile
+    deadlines to become due while it is still "in flight", so both then run
+    (sequentially, on the very next iteration) immediately after it
+    returns. Every writer entry/exit is instrumented with a shared counter,
+    asserting the maximum concurrent writer count ever seen is exactly 1,
+    and the per-path call counts confirm all three writers actually ran."""
     monkeypatch.setattr(board_relay, "DEBOUNCE_WINDOW_SECONDS", 0.0)
     monkeypatch.setattr(board_relay, "MIN_REFETCH_INTERVAL_SECONDS", 0.0)
-    monkeypatch.setattr(board_relay, "RECOMPUTE_INTERVAL_SECONDS", 0.0)
-    monkeypatch.setattr(board_relay, "LONG_RECONCILE_SECONDS", 0.0)
+    monkeypatch.setattr(board_relay, "RECOMPUTE_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setattr(board_relay, "LONG_RECONCILE_SECONDS", 0.05)
 
     reader = _reader_with(("event", {"type": "task.progress"}))
 
@@ -345,39 +352,57 @@ def test_event_loop_serializes_every_writer_never_running_concurrently(
 
     class FakeSnapshot:
         def __init__(self):
-            self.calls = 0
+            self.full_refetch_calls = 0
+            self.recompute_calls = 0
 
         def full_refetch(self):
             _enter()
             try:
-                time.sleep(0.02)
-                self.calls += 1
-                return [{"id": "t1", "v": self.calls}]
+                self.full_refetch_calls += 1
+                if self.full_refetch_calls == 1:
+                    # The event-woken fetch (the first call): block long
+                    # enough that the recompute/reconcile deadlines become
+                    # due while this is still in flight, proving they
+                    # still never run concurrently with it.
+                    time.sleep(0.08)
+                # A distinct value tag per writer kind (not just a bare
+                # counter) guarantees every call's row genuinely differs
+                # from whatever the prior writer emitted, so `_diff_rows`
+                # always produces a delta here -- a counter alone can
+                # coincidentally collide in value with a *different*
+                # writer's own counter and get silently treated as
+                # unchanged (no delta, no frame emitted), undercounting
+                # this test's own stop-after-N-frames budget.
+                return [{"id": "t1", "v": f"full-{self.full_refetch_calls}"}]
             finally:
                 _exit()
 
         def recompute_only(self):
             _enter()
             try:
-                time.sleep(0.02)
-                self.calls += 1
-                return [{"id": "t1", "v": self.calls}]
+                self.recompute_calls += 1
+                return [{"id": "t1", "v": f"recompute-{self.recompute_calls}"}]
             finally:
                 _exit()
 
-    # Enough frames to let the one queued event, then at least one
-    # recompute tick and one long reconcile (all due immediately with every
-    # interval at 0), each actually run.
+    snapshot = FakeSnapshot()
+    # Enough frames for the event-woken fetch, the recompute tick, and the
+    # long reconcile to each actually run and emit.
     stop = _StopAfter(limit=3)
     monkeypatch.setattr(board_cli, "_emit_frame", stop)
 
     rc = board_relay._event_loop(
-        None, None, reader, FakeSnapshot(), [], interval=0.0
+        None, None, reader, snapshot, [], interval=0.0
     )
 
     assert rc == 0
     assert len(stop.emitted) == 3
     assert state["max_active"] == 1
+    # All three writer paths actually ran: the event-woken fetch and the
+    # long reconcile both call full_refetch() (calls 1 and 2), and the
+    # recompute tick ran exactly once.
+    assert snapshot.full_refetch_calls == 2
+    assert snapshot.recompute_calls == 1
     assert state["active"] == 0  # every entry was matched by an exit
 
 
@@ -585,6 +610,27 @@ def test_daemon_supports_ready_frame_rejects_the_draining_flag_too():
         board_relay._daemon_supports_ready_frame(DrainingClient())
 
 
+def test_daemon_supports_ready_frame_rejects_a_demoted_passive_slot():
+    """ZDD's own cutover flips `active.json` to the new generation *before*
+    calling the predecessor's `/drain` -- so there is a real window where
+    the old daemon has already been demoted (`slot.role: "passive"`) but
+    still reports `status: "ok"`, `draining: false`. The `draining` check
+    alone would still accept that predecessor during exactly this window;
+    the `slot.role` check must reject it too."""
+
+    class DemotedPassiveClient:
+        def health(self):
+            return {
+                "status": "ok",
+                "draining": False,
+                "slot": {"role": "passive"},
+                "events_ready_frame": True,
+            }
+
+    with pytest.raises(board_relay.HealthCheckFailed):
+        board_relay._daemon_supports_ready_frame(DemotedPassiveClient())
+
+
 def test_daemon_supports_ready_frame_accepts_a_healthy_coordinator():
     """A non-draining, capability-advertising coordinator is unaffected by
     the draining check."""
@@ -594,6 +640,21 @@ def test_daemon_supports_ready_frame_accepts_a_healthy_coordinator():
             return {"status": "ok", "events_ready_frame": True}
 
     assert board_relay._daemon_supports_ready_frame(HealthyClient()) is True
+
+
+def test_daemon_supports_ready_frame_accepts_the_active_slot():
+    """An `active`-role slot (the common, non-cutover case) is unaffected
+    by the passive-slot check."""
+
+    class ActiveClient:
+        def health(self):
+            return {
+                "status": "ok",
+                "slot": {"role": "active"},
+                "events_ready_frame": True,
+            }
+
+    assert board_relay._daemon_supports_ready_frame(ActiveClient()) is True
 
 
 def test_connect_folds_a_draining_coordinator_into_disconnected(monkeypatch):

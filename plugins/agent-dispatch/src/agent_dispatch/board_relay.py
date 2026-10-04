@@ -111,16 +111,25 @@ class HealthCheckFailed(Exception):
 
 def _daemon_supports_ready_frame(client: DispatchClient) -> bool:
     """Raises :class:`HealthCheckFailed` if ``health()`` itself fails -- or if
-    the daemon reports it is already **draining** (a zero-downtime
-    coordinator-generation cutover's flip-then-drain window) -- so the
+    the daemon reports it is already **draining**, or is a demoted
+    **passive** slot (``health["slot"]["role"] == "passive"``) -- so the
     caller routes a transient failure through its own reconnect/retry path
     rather than treating it as "capability not advertised" (which would
     permanently disable the relay instead of retrying) or, worse, treating
-    a draining predecessor as a legitimately connectable target. Without
-    this, a reconnect attempt that resolves the predecessor's endpoint just
-    before the routing-table flip could finish against that draining
-    generation, stop the fallback poller, and promote a snapshot that goes
-    stale the moment the predecessor actually retires."""
+    a predecessor generation as a legitimately connectable target.
+
+    Both checks matter for the same zero-downtime cutover, at two different
+    points in it: ZDD's own cutover flips ``active.json`` to the new
+    generation *first* and only afterward calls the predecessor's
+    ``/drain`` (`libs/zdd/src/zdd/cutover.py`'s own sequencing) -- so there
+    is a real window where the old daemon has already been demoted
+    (``slot.role: "passive"``) but still reports ``status: "ok"``,
+    ``draining: false``. Checking only ``draining`` would still accept that
+    predecessor during exactly this window. Without either check, a
+    reconnect attempt that resolves the predecessor's endpoint during the
+    flip-then-drain window could finish against that generation, stop the
+    fallback poller, and promote a snapshot that goes stale the moment the
+    predecessor actually retires."""
     try:
         health = client.health()
     except Exception as exc:
@@ -129,6 +138,11 @@ def _daemon_supports_ready_frame(client: DispatchClient) -> bool:
         health.get("status") == "draining" or health.get("draining")
     ):
         raise HealthCheckFailed("daemon is draining (coordinator cutover in progress)")
+    slot = health.get("slot") if isinstance(health, dict) else None
+    if isinstance(slot, dict) and slot.get("role") == "passive":
+        raise HealthCheckFailed(
+            "daemon is a demoted passive slot (coordinator cutover in progress)"
+        )
     return bool(isinstance(health, dict) and health.get("events_ready_frame"))
 
 
