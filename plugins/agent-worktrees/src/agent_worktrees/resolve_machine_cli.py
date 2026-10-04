@@ -180,7 +180,7 @@ def _emit_remote_plan_for_env(
         for ssh_env in entry.ssh_environments:
             if ssh_env.name == want:
                 ssh_alias = ssh_env.alias
-                shell = ssh_env.shell or ("pwsh" if want == "windows" else "bash")
+                shell = _default_shell_for_env_name(want, ssh_env.shell)
                 break
         if not ssh_alias:
             return None
@@ -203,12 +203,20 @@ def _emit_remote_plan_for_env(
     return 0
 
 
+def _default_shell_for_env_name(env_name: str, shell: str) -> str:
+    """The effective shell for an SSH environment: the configured ``shell``
+    (per ``machines.yaml``'s own documented default), or -- when unset --
+    ``"pwsh"`` for a ``windows`` environment, ``"bash"`` otherwise (matching
+    ``plugins/agent-bridge/docs/machine-config.md``'s own ``shell`` default).
+    """
+    return shell or ("pwsh" if env_name == "windows" else "bash")
+
+
 def _resolve_ssh_target(entry: cfg.MachineEntry) -> tuple[str, str]:
     """Pick the best SSH ``(alias, shell)`` for a remote machine. ``shell`` is
     the matching ``machines.yaml`` ``ssh.environments[].shell`` value (e.g.
-    ``"bash"``/``"pwsh"``), defaulting to ``"pwsh"`` for a ``windows``
-    environment or ``"bash"`` for any other when the config leaves ``shell``
-    unset."""
+    ``"bash"``/``"pwsh"``), defaulting per :func:`_default_shell_for_env_name`
+    when the config leaves ``shell`` unset."""
     if not entry.ssh_environments:
         return entry.key, ""
 
@@ -216,20 +224,25 @@ def _resolve_ssh_target(entry: cfg.MachineEntry) -> tuple[str, str]:
     if "windows" in env_lower:
         for ssh_env in entry.ssh_environments:
             if ssh_env.name == "windows":
-                return ssh_env.alias, (ssh_env.shell or "pwsh")
+                return ssh_env.alias, _default_shell_for_env_name("windows", ssh_env.shell)
     else:
         for ssh_env in entry.ssh_environments:
             if ssh_env.name in ("linux", "wsl"):
-                return ssh_env.alias, (ssh_env.shell or "bash")
+                return ssh_env.alias, _default_shell_for_env_name(ssh_env.name, ssh_env.shell)
 
     first = entry.ssh_environments[0]
-    default_shell = "pwsh" if first.name == "windows" else "bash"
-    return first.alias, (first.shell or default_shell)
+    return first.alias, _default_shell_for_env_name(first.name, first.shell)
 
 
 def _resolve_ssh_alias(entry: cfg.MachineEntry) -> str:
     """Pick the best SSH alias for a remote machine."""
     return _resolve_ssh_target(entry)[0]
+
+
+#: Documented supported POSIX remote-shell values
+#: (``plugins/agent-bridge/docs/machine-config.md``) that support a
+#: ``-lc <command>`` login-shell invocation.
+_POSIX_LOGIN_SHELLS = ("bash", "sh", "zsh")
 
 
 def _wrap_remote_command(shell: str, command: str) -> str:
@@ -238,28 +251,30 @@ def _wrap_remote_command(shell: str, command: str) -> str:
 
     That invocation shape is non-login AND non-interactive for the remote
     shell: on a POSIX target, neither ``~/.profile`` (login-shell-only) nor a
-    ``~/.bashrc`` entry placed after the interactive-shell guard ever runs for
-    it -- so anything relying on a PATH addition made there (``uv``,
-    ``copilot``, ``gh``, or any other tool installed to ``~/.local/bin``) is
-    unreachable, even though it works fine from an actual interactive/login
-    session. Hit live resuming a worktree over SSH to a machine with no
-    ``~/.bashrc`` at all (only a login-only ``~/.profile``): the remote
-    Worktree Manager's own ``--version`` health check couldn't find ``uv``
-    under the bare PATH, which cascaded into the direct-launch fallback not
-    finding ``copilot``/``gh`` either.
+    ``~/.bashrc``/``~/.zshrc`` entry placed after the interactive-shell guard
+    ever runs for it -- so anything relying on a PATH addition made there
+    (``uv``, ``copilot``, ``gh``, or any other tool installed to
+    ``~/.local/bin``) is unreachable, even though it works fine from an
+    actual interactive/login session. Hit live resuming a worktree over SSH
+    to a machine with no ``~/.bashrc`` at all (only a login-only
+    ``~/.profile``): the remote Worktree Manager's own ``--version`` health
+    check couldn't find ``uv`` under the bare PATH, which cascaded into the
+    direct-launch fallback not finding ``copilot``/``gh`` either.
 
-    Forcing a login shell (``bash -lc``) makes the POSIX target source
-    ``~/.profile`` (and ``~/.bash_profile``/``~/.bash_login`` if present)
-    before running ``command``, matching what an interactive session already
-    gets. Windows (``pwsh``) targets are left untouched -- this exact
-    non-login-shell PATH gap is POSIX-specific; PowerShell's own
-    profile-loading rules differ and are out of scope here. Only wraps for an
-    EXPLICIT ``"bash"``/``"sh"`` -- never guesses for an unrecognized/empty
-    ``shell`` value, since wrapping a non-POSIX target in ``bash -lc`` would
-    break it outright (see :func:`_resolve_ssh_target`, which already
-    defaults an unset ``shell`` sensibly before calling this)."""
-    if shell in ("bash", "sh"):
-        return f"bash -lc {shlex.quote(command)}"
+    Forcing a login shell (``<shell> -lc``, using the CONFIGURED shell
+    itself -- never a hardcoded ``bash`` substituted for a different
+    configured one) makes the POSIX target source its own login-shell
+    startup files before running ``command``, matching what an interactive
+    session already gets. Windows (``pwsh``) targets are left untouched --
+    this exact non-login-shell PATH gap is POSIX-specific; PowerShell's own
+    profile-loading rules differ and are out of scope here. Only wraps for
+    an EXPLICIT, documented POSIX shell (:data:`_POSIX_LOGIN_SHELLS`) --
+    never guesses for an unrecognized/empty ``shell`` value, since wrapping
+    a non-POSIX target in a POSIX login shell would break it outright (see
+    :func:`_resolve_ssh_target`, which already defaults an unset ``shell``
+    sensibly before calling this)."""
+    if shell in _POSIX_LOGIN_SHELLS:
+        return f"{shell} -lc {shlex.quote(command)}"
     return command
 
 

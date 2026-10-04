@@ -112,7 +112,11 @@ def test_wrap_remote_command_wraps_explicit_posix_shells():
     assert rmc._wrap_remote_command("bash", "aperture-labs") == (
         "bash -lc aperture-labs"
     )
-    assert rmc._wrap_remote_command("sh", "aperture-labs") == "bash -lc aperture-labs"
+    # Invokes the CONFIGURED shell itself -- never hardcodes bash for a
+    # different configured one (sh/zsh are both documented supported
+    # remote-shell values, machine-config.md).
+    assert rmc._wrap_remote_command("sh", "aperture-labs") == "sh -lc aperture-labs"
+    assert rmc._wrap_remote_command("zsh", "aperture-labs") == "zsh -lc aperture-labs"
 
 
 def test_wrap_remote_command_quotes_the_inner_command():

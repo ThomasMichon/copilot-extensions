@@ -237,7 +237,10 @@ def _run_machine_menu(config: cfg.Config) -> int | None:
         {
             "action": "remote",
             "ssh_alias": ssh_env.alias,
-            "remote_command": _wrap_remote_command(ssh_env.shell, project),
+            "remote_command": _wrap_remote_command(
+                resolve_machine_cli._default_shell_for_env_name(ssh_env.name, ssh_env.shell),
+                project,
+            ),
             "machine": entry.key,
             "display_name": entry.display_name,
         }
