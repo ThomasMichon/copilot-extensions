@@ -75,6 +75,11 @@ def add_parsers(sub) -> None:
         "--lease-kind", default=None,
         help="With --lease-gc: restrict to one lease kind (codespace/container/task/...); "
              "default every kind")
+    p.add_argument(
+        "--mirror-claim-history", action="store_true",
+        help="Also push any locally-recorded, not-yet-mirrored claim_history "
+             "events (refs/agent-worktrees/claim-history/v1) to the shared "
+             "store -- opt-in (network + force-push), resumable, idempotent")
     p = sub.add_parser("sweep-managed", help="Machine-readable managed-worktree leak sweep for external control planes")
     p.add_argument("--dry-run", action="store_true", help="Report what would be removed without removing anything")
     p.add_argument("--json", action="store_true", help="Emit the managed sweep result as JSON")
@@ -670,26 +675,36 @@ def cmd_gc(args: argparse.Namespace) -> int:
 
     One command, three sweeps, then a prune:
 
-      1. **Tracked reap** -- the same prune-safety verdict as ``cleanup``
+      1. **Claim-history mirror sync** (opt-in, ``--mirror-claim-history``)
+         -- pushes every locally-recorded, not-yet-mirrored
+         :mod:`claim_history` event (``refs/agent-worktrees/claim-history/v1``,
+         same shared store as the lease refs) to its own append-only remote
+         ref, so PR ownership history survives this machine's own cleanup
+         instead of evaporating with it (worktree-claims-transitive-finalization
+         Phase 3b). Deliberately runs FIRST, before any reap/sweep step
+         below can delete the tracking records a legacy (unstamped) event's
+         eligibility falls back to. Stateless, idempotent, and a silent
+         no-op when no store is configured.
+      2. **Tracked reap** -- the same prune-safety verdict as ``cleanup``
          (finalized/merged/clean; ``--include-unused`` / ``--include-conversations``
          widen it). Never touches a dirty / ahead / follow-up / active / system
          worktree. ``--dry-run`` lists without removing.
-      2. **Managed (system/bridge) sweep** -- reaps *leaked* daemon-owned
+      3. **Managed (system/bridge) sweep** -- reaps *leaked* daemon-owned
          worktrees that routine cleanup skips: only the provably dead ones
          (FINAL or UNUSED, no active mux/session/attach, no follow-up, idle past
          the grace window). Skip with ``--no-managed`` (#1069).
-      3. **Orphan-directory sweep** -- removes *effectively-empty* on-disk
+      4. **Orphan-directory sweep** -- removes *effectively-empty* on-disk
          directories under the worktree roots that are neither a registered git
          worktree nor a tracking record (leftovers from interrupted/forced
          removals), with a locked-directory retry/skip; a leftover holding real
          files is reported, never auto-deleted.
-      4. **Orphaned launcher-shell reap** -- terminates pwsh/python
+      5. **Orphaned launcher-shell reap** -- terminates pwsh/python
          ``-m agent_worktrees`` scaffolding stranded by a force-closed terminal
          (parent exited, nothing live under it, idle past the grace window).
          Service-safe (positive launcher-signature only). Skip with
          ``--no-reap-shells`` (copilot-extensions #102).
-      5. ``git worktree prune`` to drop stale registrations.
-      6. **Lease-ref squash** (opt-in, ``--lease-gc``) -- collapses each
+      6. ``git worktree prune`` to drop stale registrations.
+      7. **Lease-ref squash** (opt-in, ``--lease-gc``) -- collapses each
          RELEASED cross-machine lease ref (``refs/agent-worktrees/leases/v1``)
          past ``--lease-retention-days`` (default 30) to a minimal 2-commit
          history, so its per-acquire/renew/release chain stops growing
@@ -700,8 +715,8 @@ def cmd_gc(args: argparse.Namespace) -> int:
 
     Idempotent: a second run right after the first finds nothing to do.
 
-    ``--json`` reports the managed + orphan + shell + lease sweeps
-    (machine-readable); the tracked reap runs in text mode.
+    ``--json`` reports the managed + orphan + shell + lease + claim-history
+    mirror sweeps (machine-readable); the tracked reap runs in text mode.
     """
     from . import gc as gc_mod
 
@@ -714,7 +729,23 @@ def cmd_gc(args: argparse.Namespace) -> int:
     do_managed = not getattr(args, "no_managed", False) and not orphans_only
     do_shells = not getattr(args, "no_reap_shells", False) and not orphans_only
 
-    # 1. Tracked reap -- reuse the cleanup verdict machinery (one fetch, full
+    # 1. Claim-history mirror sync (opt-in, network + force-push to the
+    #    shared store -- worktree-claims-transitive-finalization Phase
+    #    3b's remote-mirroring item). Deliberately FIRST, before any
+    #    reap/sweep step below: a legacy (unstamped) event's eligibility
+    #    falls back to the CURRENTLY-LIVE tracking records
+    #    (_current_project_worktree_ids), and the tracked reap / managed
+    #    sweep steps that follow can delete those same records (e.g.
+    #    reaping the second half of a paired worktree, or a managed-leak
+    #    sweep) -- syncing after that would silently and permanently
+    #    exclude their events from every future sweep too.
+    history_mirror = (
+        _run_claim_history_mirror(args)
+        if getattr(args, "mirror_claim_history", False)
+        else None
+    )
+
+    # 2. Tracked reap -- reuse the cleanup verdict machinery (one fetch, full
     #    safety). Skipped in --json mode (its output is text) and --orphans-only.
     if not json_mode and not orphans_only:
         cmd_cleanup(
@@ -730,7 +761,7 @@ def cmd_gc(args: argparse.Namespace) -> int:
             )
         )
 
-    # 2. Managed (system/bridge) leak sweep -- the daemon-owned kinds cleanup
+    # 3. Managed (system/bridge) leak sweep -- the daemon-owned kinds cleanup
     #    skips. Only provably-dead ones are reaped (#1069).
     grace_hours = getattr(args, "managed_grace_hours", None)
     managed_kwargs = {"dry_run": dry}
@@ -740,10 +771,10 @@ def cmd_gc(args: argparse.Namespace) -> int:
         _core_helper("sweep_managed_worktrees", sweep_managed_worktrees)(**managed_kwargs) if do_managed else {"removed": [], "skipped": []}
     )
 
-    # 3. Orphan-directory sweep (the GC-specific capability).
+    # 4. Orphan-directory sweep (the GC-specific capability).
     orphans = gc_mod.sweep_orphans(repo, records, dry_run=dry)
 
-    # 4. Orphaned launcher-shell reap (machine-wide; #102). Service-safe and
+    # 5. Orphaned launcher-shell reap (machine-wide; #102). Service-safe and
     #    idle-gated -- only pwsh/python launcher scaffolding stranded by a
     #    force-closed terminal is reaped.
     shells_grace = getattr(args, "reap_shells_grace_hours", None)
@@ -756,11 +787,11 @@ def cmd_gc(args: argparse.Namespace) -> int:
         else {"available": False, "reaped": [], "candidates": [], "skipped": [], "errors": []}
     )
 
-    # 5. Prune stale worktree registrations.
+    # 6. Prune stale worktree registrations.
     if not dry:
         git_ops.prune_worktrees(cwd=repo.anchor)
 
-    # 6. Lease-ref squash (opt-in, network + force-push to the lease store).
+    # 7. Lease-ref squash (opt-in, network + force-push to the lease store).
     lease_gc = _run_lease_gc(args) if getattr(args, "lease_gc", False) else None
 
     if json_mode:
@@ -773,6 +804,8 @@ def cmd_gc(args: argparse.Namespace) -> int:
         }
         if lease_gc is not None:
             payload["lease_gc"] = lease_gc
+        if history_mirror is not None:
+            payload["claim_history_mirror"] = history_mirror
         print(json.dumps(payload, indent=2))
         return 0
     if do_managed:
@@ -782,7 +815,57 @@ def cmd_gc(args: argparse.Namespace) -> int:
         _print_gc_shells(shells, dry)
     if lease_gc is not None:
         _print_gc_lease(lease_gc, dry)
+    if history_mirror is not None:
+        _print_gc_claim_history_mirror(history_mirror, dry)
     return 0
+
+
+def _run_claim_history_mirror(args: argparse.Namespace) -> dict[str, object]:
+    """Push pending claim_history events (step 7 of ``gc``), degrading to a
+    reported no-op when no shared store is configured for this project --
+    this sweep is opt-in and must never fail an otherwise-successful ``gc``.
+    """
+    from . import claim_history_mirror
+
+    try:
+        return claim_history_mirror.sync_pending(dry_run=getattr(args, "dry_run", False))
+    except Exception as exc:
+        # The "never fail gc" contract above must hold even for a failure
+        # sync_pending() itself didn't anticipate (an import-time error, a
+        # non-ConfigError failure inside settings resolution, ...) -- not
+        # just the ones it already catches internally.
+        return {
+            "available": True, "pushed": 0, "refs": [],
+            "failed": [{"ref": None, "kind": None, "error": str(exc)}],
+        }
+
+
+def _print_gc_claim_history_mirror(result: dict[str, object], dry: bool) -> None:
+    if not result.get("available"):
+        return
+    refs = result.get("refs") or []
+    failed = result.get("failed") or []
+    if dry:
+        pending = sum(int(r.get("pending", 0)) for r in refs)
+        confirmed = len(refs)
+        print(
+            f"Would mirror {pending} pending claim-history event(s) across "
+            f"{confirmed} ref(s) confirmed by a remote read."
+        )
+        if failed:
+            print(
+                f"  {len(failed)} ref(s) could not be inspected -- their true pending "
+                "count is UNKNOWN, not zero:"
+            )
+            for entry in failed:
+                print(f"  · {entry['ref']}: {entry['error']}")
+        return
+    pushed = result.get("pushed", 0)
+    print(f"Mirrored {pushed} claim-history event(s) across {len(refs)} ref(s).")
+    if failed:
+        print(f"  {len(failed)} ref(s) left with events still pending (will retry next sweep):")
+        for entry in failed:
+            print(f"  · {entry['ref']}: {entry['error']}")
 
 
 def _run_lease_gc(args: argparse.Namespace) -> dict[str, object]:
