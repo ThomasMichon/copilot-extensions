@@ -25,7 +25,10 @@
   root modules),
   [#3390](https://github.com/ThomasMichon/copilot-extensions/issues/3390)
   (relocate terminal-profile handling — `profiles.py`/`terminal_fragment.py` —
-  out of agent-worktrees, matching the Mux/AHP precedent)
+  out of agent-worktrees, matching the Mux/AHP precedent),
+  [#5210](https://github.com/ThomasMichon/copilot-extensions/issues/5210)
+  ("Launch in new window" re-owns terminal-spawning mechanics Phase 3b already
+  relocated, and bypasses mux-daemon registration as a result)
 - **Vision:** **vision-closing** against three already-stated visions (no
   revision needed to close their delta vs. reality; the recent
   `session-hosting` split narrowed which of these visions govern the
@@ -928,6 +931,58 @@ worktree-manager.
       does not land, since it already covers this exact scope.
 - [ ] Keep configuration examples synthetic and repository-neutral.
 
+### Phase 9 — Relocate "Launch in new window" terminal spawning out of agent-worktrees (Planned — #5210)
+
+Continues the Phase 3b/3e relocation precedent for a capability that landed
+*after* Phase 3b closed and re-introduced the exact violation that phase
+eliminated. **Symptom** (confirmed live, 2026-10-04): a worktree opened via the
+Picker's "Launch in new window" action has a genuinely live, attached psmux
+session, but Worktree Manager's `mux-mapping.json` live-session registry never
+learns about it — the entry stays `"live": false` at a stale pre-launch
+timestamp, because this launch path never runs
+`Invoke-ManagedMuxRegister`/`mux-daemon register`.
+
+**Root cause:** `agent-worktrees copilot --headed`
+(`plugins/agent-worktrees/src/agent_worktrees/copilot_cli.py` +
+`headed_launch.py`, added by #4593, 2026-09-29 — three days after Phase 3b's
+relocation closed) creates/resumes the session in-process via
+`cmd_embody`/`sessions.mux_new_session`, then pops a new, visible OS terminal
+window **itself** (`headed_launch._windows_spawn`: `wt.exe new-tab` /
+`CREATE_NEW_CONSOLE`; `_posix_spawn` for POSIX terminals) instead of going
+through `worktree-manager/bin/launch-session.{ps1,sh}` — the only place that
+performs the mux-daemon registration. This is exactly the "GUI window"
+presentation concern the `session-hosting` vision already assigns to the
+Worktree Manager, re-introduced into agent-worktrees.
+
+- [ ] **Step 1 — relocate terminal-spawning mechanics.** Move
+      `headed_launch._windows_spawn`/`_posix_spawn` (the `wt.exe`/
+      `CREATE_NEW_CONSOLE`/`osascript`/POSIX-terminal-emulator probing) from
+      `plugins/agent-worktrees` into `worktree-manager/bin`/
+      `worktree-manager/src`, alongside the already-relocated
+      `launch-session.{ps1,sh}`.
+- [ ] **Step 2 — make "new window" a launch-plan modifier, not a dedicated
+      verb.** Worktree Manager's own launcher gains a "new window" modifier
+      composable with its existing Resume/Bare/No-mux options (mirroring how
+      `--no-mux`/`--bare-resume` already compose): it opens the new OS window
+      running the *same* `launch-session.{ps1,sh}` plan execution used for
+      every other launch, so `Invoke-ManagedMuxRegister` always runs
+      regardless of which window modifier was chosen. Update
+      `picker_tui/headed_actions.py`'s "Launch in new window" Actions verb to
+      invoke this modifier instead of `agent-worktrees copilot --headed`.
+- [ ] **Step 3 — retire the agent-worktrees terminal-popping path.** Once the
+      Picker no longer depends on it, remove `headed_launch.py`'s
+      platform-terminal-emulator knowledge and `copilot --headed`'s
+      window-popping responsibility from agent-worktrees (keep attach-only
+      semantics there, if any caller still needs a bare attach), closing the
+      Non-Goal the `session-hosting` vision already states ("Not a
+      configuration mode of agent-worktrees").
+- [ ] **Step 4 — regression coverage.** Add a test asserting a "new window"
+      launch registers a live mux-daemon mapping identical to an ordinary
+      Resume launch (extending the Phase 3b-era
+      `test_terminal_decoupling.py`/launcher-script regression style), so a
+      future new launch-plan modifier can't silently bypass registration
+      again.
+
 ### Bug sweep — linked open bugs (2026-09-24)
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
@@ -956,6 +1011,11 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   rejection.
 - **Non-agentic + idempotent.** `setup` is dry-run by default and re-runnable;
   re-running the bootstrap one-liner is version-gated (a no-op when current).
+- **"New window" registers like every other launch.** A launch using the
+  relocated "new window" modifier (Phase 9) produces a `mux-mapping.json`
+  entry with `"live": true` and a fresh `observed_at`, identical in shape and
+  timing to an ordinary Resume/Bare/No-mux launch — proved by a regression
+  test, not only manual confirmation.
 
 ## Coordination
 
@@ -989,6 +1049,25 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-04** — Filed Phase 9 and issue #5210: an operator-reported symptom
+  ("Launch in new window" doesn't set up mux instances correctly with the
+  status monitor) traced to `agent-worktrees copilot --headed`/
+  `headed_launch.py` (added by #4593, 2026-09-29) re-owning terminal-window-
+  spawning mechanics — exactly the class of thing Phase 3b relocated out of
+  agent-worktrees three days earlier (closed 2026-09-26, PR #3891). Confirmed
+  live: four worktrees launched via "Launch in new window" had genuinely live,
+  attached psmux sessions while `mux-mapping.json` still showed `"live":
+  false"` at a stale pre-launch timestamp, because this path never runs
+  `worktree-manager/bin/launch-session.{ps1,sh}`'s
+  `Invoke-ManagedMuxRegister`. No vision revision needed — `session-hosting`
+  already states the governing boundary ("both the Mux presentation layer and
+  the AHP backend are owned and driven by the Worktree Manager... rather than
+  by agent-worktrees"); this phase closes a reality gap against it, the same
+  as Phase 3b/3e. Planned as a 4-step relocation (move the spawn mechanics,
+  make "new window" a launch-plan modifier instead of a dedicated verb,
+  retire the agent-worktrees path, add regression coverage) rather than a
+  one-line bug-sweep item, since it is architecturally identical to Phase
+  3b/3e's own work. Next: submit this plan for review, then execute Step 1.
 - **2026-10-03** — Landed the dedicated mis-registered-repos doctor check
   (Phase 7's remaining `doctor`/validation-breadth gap), closing
   installer §`health-doctoring-and-validation`'s last open item for this
