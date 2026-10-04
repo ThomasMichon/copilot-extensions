@@ -44,31 +44,13 @@ from .worker_identities import load_worker_identity
 _TERMINAL = frozenset({"submitted", "completed", "abandoned", "dead_letter"})
 _KNOWN_KEYS = frozenset(
     {
-        "name",
-        "kind",
-        "repo",
-        "source",
-        "cadence_seconds",
-        "tick_interval_seconds",
-        "quiet_period_seconds",
-        "include_labels",
-        "exclude_labels",
-        "priority_labels",
-        "batch_size",
-        "task_label",
-        "forge",
-        "reservation",
-        "pool",
-        "filters",
-        "owner",
-        "description",
-        "worker_guidance",
-        "worker_identity",
-        "allow_self_config_changes",
-        "require_verification",
-        "evaluator_ref",
-        "task_contract",
-        "rehearsal_mode",
+        "name", "kind", "repo", "source", "cadence_seconds",
+        "tick_interval_seconds", "quiet_period_seconds", "issue_numbers",
+        "include_labels", "exclude_labels", "priority_labels", "batch_size",
+        "task_label", "forge", "reservation", "pool", "filters", "owner",
+        "description", "worker_guidance", "worker_identity",
+        "allow_self_config_changes", "require_verification",
+        "evaluator_ref", "task_contract", "rehearsal_mode",
     }
 )
 _FORGE_KEYS = frozenset({"provider", "producer_login", "discovery_scope"})
@@ -171,6 +153,15 @@ def _strings(data: Mapping[str, Any], key: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(value))
 
 
+def _issue_numbers(data: Mapping[str, Any], key: str = "issue_numbers") -> tuple[int, ...]:
+    value = data.get(key, ())
+    if value in (None, (), []):
+        return ()
+    if not isinstance(value, (list, tuple)) or not all(isinstance(item, int) and item > 0 for item in value):
+        raise RegistrarError(f"repository-issue-loop {key}: expected a list of positive integers")
+    return tuple(dict.fromkeys(value))
+
+
 def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -> dict[str, Any]:
     """Validate/normalize a declaration. ``cwd`` (declaring repo root, if
     known) threads a named ``worker_identity`` to its repo-local override."""
@@ -183,14 +174,10 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
             f"known: {sorted(_KNOWN_KEYS)}"
         )
     if data.get("kind") != "repository-issue-loop":
-        raise RegistrarError(
-            "repository-issue-loop kind must be 'repository-issue-loop'"
-        )
+        raise RegistrarError("repository-issue-loop kind must be 'repository-issue-loop'")
     name = _string(data, "name")
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
-        raise RegistrarError(
-            "repository-issue-loop name: use letters, digits, '.', '_' or '-'"
-        )
+        raise RegistrarError("repository-issue-loop name: use letters, digits, '.', '_' or '-'")
     repo = _string(data, "repo")
     source = _string(data, "source")
     task_label = _string(data, "task_label")
@@ -212,9 +199,10 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         raise RegistrarError("repository-issue-loop evaluator_ref: expected a non-empty string")
     batch_size = _number(data, "batch_size", default=1, minimum=1)
     if not float(batch_size).is_integer():
-        raise RegistrarError(
-            "repository-issue-loop batch_size: expected an integer"
-        )
+        raise RegistrarError("repository-issue-loop batch_size: expected an integer")
+    issue_numbers = _issue_numbers(data)
+    if issue_numbers:
+        batch_size = max(batch_size, len(issue_numbers))
     include = _strings(data, "include_labels")
     exclude = _strings(data, "exclude_labels")
     priority = _strings(data, "priority_labels")
@@ -408,6 +396,7 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         "cadence_seconds": cadence,
         "tick_interval_seconds": tick_interval,
         "quiet_period_seconds": quiet,
+        "issue_numbers": list(issue_numbers),
         "include_labels": list(include),
         "exclude_labels": list(exclude),
         "priority_labels": list(priority),
@@ -1233,6 +1222,8 @@ def _eligible(
     *,
     now: float,
 ) -> list[Issue]:
+    selected_issue_numbers = tuple(int(n) for n in config.get("issue_numbers", ()))
+    selected_order = {number: index for index, number in enumerate(selected_issue_numbers)}
     include = set(config["include_labels"])
     exclude = set(config["exclude_labels"]) | {"bootstrap"}
     priorities = {
@@ -1249,6 +1240,8 @@ def _eligible(
 
     selected = []
     for issue in issues:
+        if selected_order and issue.number not in selected_order:
+            continue
         labels = set(issue.labels)
         if include and not include <= labels:
             continue
@@ -1262,7 +1255,11 @@ def _eligible(
         ):
             continue
         selected.append(issue)
-    return sorted(selected, key=rank)[: config["batch_size"]]
+    selected = (
+        sorted(selected, key=lambda issue: selected_order[issue.number])
+        if selected_order else sorted(selected, key=rank)
+    )
+    return selected[:config["batch_size"]]
 
 
 def _task_contract_fields(config: Mapping[str, Any], issues: list[Issue]) -> dict[str, str]:

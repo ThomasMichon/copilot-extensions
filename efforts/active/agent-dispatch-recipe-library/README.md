@@ -1150,6 +1150,12 @@ suite green (3743 passed, 23 skipped, the one known flake above).
   copying the per-issue triage/repro lanes from Phases 5/6 while still
   reusing the only existing standing engine that actually emits bounded issue
   sets.
+- To close the "named issue set" half of that contract concretely, the generic
+  `repository-issue-loop` declaration now accepts `issue_numbers: [...]` as a
+  provider-neutral selector. When present, eligibility is restricted to exactly
+  that explicit set (still honoring the loop's normal label/quiet-period/
+  reservation guards), so effort-builder can group the caller-selected issues
+  even when other eligible backlog items are present.
 - Added the built-in worker identity
   `agent_dispatch/identities/effort-builder.identity.md`. Its charter is
   deliberately explicit about the boundary the Request required: create or

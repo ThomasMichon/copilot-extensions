@@ -1047,7 +1047,7 @@ def test_global_effort_builder_groups_multiple_issues_into_one_effort_task(tmp_p
                 "repo": "example/project",
                 "source": "effort-backlog",
                 "cadence_seconds": 3600,
-                "batch_size": 2,
+                "issue_numbers": [17, 18],
                 "task_label": "effort-build",
                 "forge": {"provider": "github", "producer_login": "effort-bot"},
                 "reservation": {"label": "effort-reserved", "comment": True},
@@ -1067,6 +1067,7 @@ def test_global_effort_builder_groups_multiple_issues_into_one_effort_task(tmp_p
         [
             _issue(17, labels=("bug", "triage:accepted", "ready")),
             _issue(18, labels=("bug", "triage:accepted", "ready")),
+            _issue(19, labels=("bug", "triage:accepted", "ready")),
         ]
     )
 
@@ -1085,6 +1086,8 @@ def test_global_effort_builder_groups_multiple_issues_into_one_effort_task(tmp_p
     assert task["goal"] == "Group repository issues #17, #18 into tracked effort work"
     assert "- #17: Issue 17 (https://example.com/issues/17)" in task["prompt"]
     assert "- #18: Issue 18 (https://example.com/issues/18)" in task["prompt"]
+    assert "#19" not in task["title"]
+    assert "- #19: Issue 19" not in task["prompt"]
     assert "Group the selected issues into one coherent tracked effort" in task["prompt"]
     assert "Do not turn this effort-building task into an implementation lane" in task["prompt"]
     assert "that execution belongs to a separate worker" in task["prompt"]
@@ -1828,6 +1831,7 @@ def test_claim_does_not_reuse_a_different_loops_comment():
     [
         ({"source": ""}, "source"),
         ({"batch_size": 0}, "batch_size"),
+        ({"issue_numbers": ["17"]}, "issue_numbers: expected a list of positive integers"),
         ({"forge": {"provider": "other"}}, "only \\['azure-devops', 'github'\\]"),
         ({"forge": {"provider": "github"}}, "producer_login"),
         ({"task_contract": False}, "task_contract: expected a mapping"),
