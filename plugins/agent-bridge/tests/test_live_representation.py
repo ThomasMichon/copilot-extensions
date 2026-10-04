@@ -1320,3 +1320,41 @@ def test_two_merges_between_reader_polls_translate_from_the_readers_numbering() 
     store.alias("A", "B")
     log, moved = view._follow(cursor)  # the reader still hasn't advanced
     assert log is a and a.get_events(0)[moved - 1].data.get("text") == "c2"
+
+def test_an_ingest_racing_an_alias_lands_in_the_surviving_log() -> None:
+    """An ingest looked up the successor's log, then an alias merged that log away
+    before the ingest appended: the event must still reach the surviving log (it is
+    marked seen either way, so a retry would never deliver it)."""
+    import threading
+    import time as _time
+
+    from agent_bridge.live_representation import LiveEventStore
+
+    store = LiveEventStore()
+    store.ingest("old", [{"type": "user.message", "id": "e1", "data": {"content": "before"}}])
+    store.ingest("new", [{"type": "user.message", "id": "e2", "data": {"content": "successor"}}])
+    looked_up, release = threading.Event(), threading.Event()
+    real = store.get_or_create
+
+    def paused_after_lookup(session_id, **kw):
+        log = real(session_id, **kw)
+        if session_id == "new" and not looked_up.is_set():
+            looked_up.set()
+            release.wait(5)
+        return log
+
+    store.get_or_create = paused_after_lookup
+    ingest = threading.Thread(target=lambda: store.ingest(
+        "new", [{"type": "user.message", "id": "e3", "data": {"content": "raced"}}]))
+    ingest.start()
+    assert looked_up.wait(5)
+    alias = threading.Thread(target=lambda: store.alias("old", "new"))
+    alias.start()
+    _time.sleep(0.2)  # the alias, if it isn't serialized, copies and discards the log now
+    release.set()
+    ingest.join(5)
+    alias.join(5)
+    assert not ingest.is_alive() and not alias.is_alive()
+    texts = [e.data.get("content") or e.data.get("text") for e in store.get("new").get_events()]
+    assert "raced" in texts and store.get("old") is store.get("new")
+    assert store.ingest("new", [{"type": "user.message", "id": "e3", "data": {"content": "raced"}}]) == 0

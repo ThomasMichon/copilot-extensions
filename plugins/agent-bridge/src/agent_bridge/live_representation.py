@@ -47,6 +47,9 @@ from .events import EventLog, SseEvent
 # A session's live tail rarely revisits an id older than a few thousand events,
 # so a bounded FIFO caps memory without weakening the dedup in practice.
 _SEEN_ID_CAP = 4096
+#: How long an ingest that raced an alias waits for that merge to finish copying
+#: before it decides whether its event was copied (``LiveEventStore._land``).
+LATE_APPEND_MERGE_WAIT = 5.0
 
 
 def _text(value: Any) -> str | None:
@@ -697,11 +700,29 @@ class LiveEventStore:
             data = item.get("data")
             data = data if isinstance(data, dict) else {}
             for event_type, payload in translate_sdk_event(sdk_type, data):
-                appended_id = log.append(event_type, payload).id
+                log, appended_id = self._land(session_id, log, log.append(event_type, payload))
                 if isinstance(event_id, str) and event_id:
                     self._record_sdk_event(session_id, event_id, appended_id)
                 appended += 1
         return appended
+
+    def _land(self, session_id: str, log: EventLog, evt: SseEvent) -> tuple[EventLog, int]:
+        """Where *evt*, just appended to *log*, ends up: an alias may have merged
+        *log* away after this ingest looked it up. Once that merge has finished
+        copying, an event its id map doesn't hold arrived too late to be copied:
+        it is appended to the surviving log too (it is already marked seen, so a
+        retry would never deliver it). Returns the log to keep appending to."""
+        current = self.get(session_id)
+        if current is None or current is log:
+            return log, evt.id
+        try:
+            self.snapshot(session_id, timeout=LATE_APPEND_MERGE_WAIT)  # merges into it done copying
+        except MergePendingError:
+            pass
+        follow = log.merged_into
+        if follow is not None and follow[0] is current and evt.id in follow[1]:
+            return current, follow[1][evt.id]
+        return current, current.append(evt.event, evt.data, timestamp=evt.timestamp).id
 
 
 # -- D1: read a live session's reply turn from its represented stream --------
