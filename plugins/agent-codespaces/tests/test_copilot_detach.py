@@ -1089,6 +1089,7 @@ def test_a_worktree_launch_without_a_seed_still_budgets_for_its_pending_seed(
 @pytest.mark.parametrize("embody_says, delivery, seeded", [
     ({"seed_unconfirmed": True, "seed_reason": "enter-failed"}, "unconfirmed", False),
     ({"seed_deferred": True, "seed_reason": "not-ready-timeout"}, "deferred", False),
+    ({"seed_lost": True, "seed_reason": "not-ready-timeout"}, "lost", False),
     ({"seeded": True, "seed_submitted": True}, "typed", True),
 ])
 def test_a_pending_seed_outcome_is_reported_without_a_host_seed(

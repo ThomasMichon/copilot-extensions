@@ -141,6 +141,13 @@ def pending_seed_report(embodied: dict, *, seed: str | None) -> dict:
                        "for the next attach: the session is idle until you re-run this "
                        "launch or send the task with `agent-bridge send`",
         }
+    if embodied.get("seed_lost"):
+        return {
+            "seed_delivery": "lost",
+            "warning": f"the worktree's pending seed was never typed ({reason}) and could not "
+                       "be kept for the next attach: send the task to the session with "
+                       "`agent-bridge send`",
+        }
     if embodied.get("seed_submitted") or (not embodied.get("created") and embodied.get("seeded")):
         return {"seed_delivery": "typed"}
     return {}

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 
@@ -155,4 +155,25 @@ test("fake bin harness sanity: the stub script really does sleep", () => {
   const bin = process.platform === "win32" ? join(dir, "probe.cmd") : join(dir, "probe");
   const out = execFileSync(bin, [], { cwd: dir, encoding: "utf-8", shell: process.platform === "win32" }).trim();
   assert.equal(out, "ok");
+});
+
+// A failed `agent-worktrees get machine` (timeout, crash) must not leave the
+// session without a machine: a resume could then never be folded into its
+// placeholder, stranding messages sent to the launch handle. It falls back to
+// the hostname, as agent-worktrees' own machine detection does.
+test("resolveMetadataAsync falls back to the hostname when the machine lookup fails", async (t) => {
+  const { dir, write } = makeFakeBinDir();
+  write("git", 0, "main");
+  const isWin = process.platform === "win32";
+  const failing = join(dir, isWin ? "agent-worktrees.cmd" : "agent-worktrees");
+  writeFileSync(failing, isWin ? "@echo off\r\nexit /b 1\r\n" : "#!/bin/sh\nexit 1\n");
+  if (!isWin) chmodSync(failing, 0o755);
+
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${dir}${isWin ? ";" : ":"}${originalPath}`;
+  t.after(() => { process.env.PATH = originalPath; });
+
+  const meta = await resolveMetadataAsync({ cwd: dir, env: {} });
+
+  assert.equal(meta.machine, hostname().toLowerCase());
 });
