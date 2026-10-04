@@ -375,11 +375,7 @@ class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
                 except Exception:
                     detail = str(exc)
                 detail_text = str(detail).lower()
-                # Not ready yet, or a represented session's history momentarily
-                # mid-merge (a session-id change; the result routes): both are
-                # refusals of an unaccepted request, retried within the grace.
-                if exc.code == 503 and (
-                        "initializing" in detail_text or "history is merging" in detail_text):
+                if exc.code == 503 and any(w in detail_text for w in ("initializing", "merging")):
                     if readiness_deadline is None:
                         readiness_deadline = (
                             _time.monotonic() + self._connect_grace
