@@ -438,7 +438,7 @@ def test_poll_spawns_eligible_task_once(q, client):
 
 
 def test_eligible_scopes_the_200_limit_per_own_label_not_globally(q, client):
-    """aperture-labs#7890 section 1 regression: `client.list()` truncates at
+    """A per-label eligibility regression: `client.list()` truncates at
     `limit` (200) newest-first ACROSS THE WHOLE COORDINATOR -- every
     label/pool sharing it, not just this one. Flood the queue with 250
     newer, differently-labeled tasks (simulating heavy unrelated activity
@@ -1357,7 +1357,7 @@ def test_recover_stranded_cold_reservation_never_counts_toward_dead_letter(
 
 # -- recover_stranded_releasing_reservations: the no-handle releasing gap ---
 #
-# Confirmed live (aperture-labs#7890 section 1 / copilot-extensions#3179): a
+# Confirmed live (copilot-extensions#3179): a
 # RELEASING reservation that never recorded a session_handle (the spawn
 # itself crashed/errored before ever launching a body) has nothing an
 # automatic exact-absence proof could ever check -- there's no handle to

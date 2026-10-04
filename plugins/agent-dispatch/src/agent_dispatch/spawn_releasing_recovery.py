@@ -50,8 +50,8 @@ def recover_stranded_releasing_reservations(
     (from a spawn that crashed before ever recording a handle) sat
     ``releasing`` for 8+ hours, permanently blocking a PR review's
     ``exclusive_key`` across three separate fresh task recreations despite
-    the lane having free concurrency the entire time (aperture-labs#7890
-    section 1) -- `reserve_spawn` doctor/diagnosis tooling reported it
+    the lane having free concurrency the entire time -- `reserve_spawn`
+    doctor/diagnosis tooling reported it
     "healthy" the whole time, since it was never designed to look here.
 
     Deliberately narrower than the manual ``--force`` escape hatch: this

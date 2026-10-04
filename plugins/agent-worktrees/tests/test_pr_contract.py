@@ -160,7 +160,7 @@ class TestComputeEvents:
         events = pc.compute_events(pc.Baseline(), snap, pc.DEFAULT_UNTIL)
         assert [e["event"] for e in events] == ["closed"]
 
-    # --- "pushed" (aperture-labs#7890 follow-up: reviewer-side hibernation) --
+    # --- "pushed" (a reviewer-side hibernation follow-up) --
 
     def test_pushed_fires_on_new_head_sha(self):
         base = pc.Baseline(head_sha="abc123")

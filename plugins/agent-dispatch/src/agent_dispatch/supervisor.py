@@ -413,7 +413,7 @@ class Supervisor:
         page and this supervisor never even sees it to attempt a claim --
         regardless of how much free capacity its own lane has. A durably
         assigned PR-review task sat `queued` with zero wakes for hours this
-        way (aperture-labs#7890 section 1) while its own 4-slot lane had
+        way while its own 4-slot lane had
         room. Querying per-label pushes the ``LIMIT`` down to the
         coordinator's own `label=` filter (an indexed json_each EXISTS
         clause), so the page this supervisor actually sees is scoped to its
