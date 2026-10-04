@@ -1,0 +1,9 @@
+{
+  "comment": "componentizing-modules: point re-validate step at the devcontainer-isolated runner when available",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
