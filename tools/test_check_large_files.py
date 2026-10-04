@@ -2,20 +2,38 @@
 always-blocked source-map/diff/patch denylist).
 
 Drives the real ``tools/check-large-files.py`` as a subprocess inside a
-throwaway git repo, the same pattern ``test_check_module_size.py`` uses.
+throwaway git repo, the same pattern ``test_check_module_size.py`` uses --
+except for the single in-process unit test at the end of this file, which
+needs to mock a git subprocess call to exercise a failure path no amount of
+real repo setup can reliably reproduce (a successful blob lookup that then
+fails to read -- corrupting a real git object store on purpose is not a
+reliable, portable way to test this).
 
 Run:  python -m pytest tools/test_check_large_files.py
 """
 
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent / "check-large-files.py"
+
+
+def _load_module():
+    """Import check-large-files.py as a module (its hyphenated filename
+    isn't a valid Python identifier for a plain ``import``).
+    """
+    spec = importlib.util.spec_from_file_location("check_large_files", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -358,6 +376,95 @@ def test_staged_mode_handles_a_digit_colon_filename_correctly(repo: Path):
 
     assert result.returncode == 1
     assert "0:large.json" in result.stdout
+
+
+def test_staged_mode_handles_a_magic_pathspec_shaped_filename(repo: Path):
+    # A literal filename that happens to look like a git pathspec "magic"
+    # signature (e.g. ":(literal)...") must still be resolved as that exact
+    # path, not reinterpreted as the magic signature itself.
+    name = ":(literal)large.json"
+    _write_bytes(repo, name, 2 * 1024 * 1024)
+    _git(repo, "--literal-pathspecs", "add", "--", name)
+
+    result = _run(repo, "--", name)
+
+    assert result.returncode == 1
+    assert name in result.stdout
+
+
+def test_diff_scoped_mode_excludes_content_inherited_from_a_merges_other_parent(repo: Path):
+    # A feature branch merging its own (advanced) base branch in brings
+    # along content the base branch already introduced -- that content
+    # isn't new to the DIFF being checked and must not be blamed on the
+    # merge commit, even though a plain diff-vs-first-parent would
+    # otherwise see it as "touched" by the merge.
+    _write_bytes(repo, "src/small.txt", 10)
+    _commit_all(repo)  # common ancestor
+    _git(repo, "branch", "devbranch")
+    _git(repo, "branch", "feature")
+
+    _git(repo, "checkout", "-q", "devbranch")
+    _write_bytes(repo, "big-on-dev.json", 2 * 1024 * 1024)
+    _commit_all(repo)  # dev's own advance, not this PR's content
+
+    _git(repo, "checkout", "-q", "feature")
+    _write_bytes(repo, "feature-file.txt", 10)
+    _commit_all(repo)
+    _git(repo, "merge", "--no-edit", "-q", "devbranch")  # brings big-on-dev.json in
+
+    result = _run(repo, "--base", "devbranch")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_diff_scoped_mode_skips_submodule_gitlinks_without_error(repo: Path, tmp_path: Path):
+    # A submodule's gitlink entry (mode 160000) names a COMMIT in another
+    # repository, not a blob in this one -- cat-file -s on it fails, which
+    # must be treated as a deliberate, silent skip, never conflated with a
+    # genuine blob-read failure.
+    _write_bytes(repo, "src/small.txt", 10)
+    _commit_all(repo)
+    _git(repo, "branch", "-f", "base_marker", "HEAD")
+
+    sub = tmp_path.parent / f"{tmp_path.name}-sub"
+    sub.mkdir()
+    _git(sub, "init", "-q")
+    _git(sub, "config", "user.email", "test@example.com")
+    _git(sub, "config", "user.name", "Test")
+    (sub / "f.txt").write_text("hi")
+    _git(sub, "add", "-A")
+    _git(sub, "commit", "-q", "-m", "sub commit")
+
+    _git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "vendor/sub")
+    _git(repo, "commit", "-q", "-m", "add submodule")
+
+    result = _run(repo, "--base", "base_marker")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_commit_touched_blobs_raises_on_a_failed_blob_size_read(repo: Path):
+    # An in-process unit test (the only one in this file -- see the module
+    # docstring): a blob sha diff-tree itself just reported, that then
+    # fails a size read, must raise GitEnumerationError, never be silently
+    # skipped as though it were a legitimate non-blob (e.g. gitlink) entry.
+    _write_bytes(repo, "src/big.json", 2 * 1024 * 1024)
+    _commit_all(repo)
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+    module = _load_module()
+    real_run = subprocess.run
+
+    def _failing_cat_file(args, **kwargs):
+        if "cat-file" in args:
+            return subprocess.CompletedProcess(args, 1, b"", b"fatal: simulated failure")
+        return real_run(args, **kwargs)
+
+    with mock.patch.object(module, "REPO", repo), mock.patch("subprocess.run", side_effect=_failing_cat_file):
+        with pytest.raises(module.GitEnumerationError):
+            module._commit_touched_blobs(commit)
 
 
 

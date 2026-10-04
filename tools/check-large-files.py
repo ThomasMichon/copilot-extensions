@@ -175,6 +175,25 @@ def _ext(path: str) -> str:
 EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
+def _blob_at(rev: str, path: str) -> str | None:
+    """The blob sha recorded for ``path`` at ``rev``, or None if ``path``
+    doesn't exist there (including when ``rev`` doesn't name a real blob
+    for that path -- e.g. a directory, or absent entirely).
+    """
+    r = _git_bytes("rev-parse", "--verify", "--quiet", f"{rev}:{path}")
+    out = _decode(r.stdout).strip()
+    return out or None
+
+
+#: Blob-ish modes diff-tree's --raw output ever reports as a FILE entry.
+#: 160000 (a submodule gitlink, pointing at a commit in another repo, not a
+#: blob in this one) and 040000 (a tree -- shouldn't appear with -r, listed
+#: defensively) are deliberately excluded: `git cat-file -s` on a gitlink's
+#: "sha" fails because it names a commit, not a blob, which is a legitimate
+#: skip, never a guard failure, and must not be conflated with one.
+_REGULAR_FILE_MODES = {"100644", "100755", "120000"}
+
+
 def _commits_in_range(mbase: str, head: str) -> list[str]:
     out = _git_or_raise("rev-list", f"{mbase}..{head}")
     return [line for line in out.split("\n") if line]
@@ -194,26 +213,63 @@ def _commit_touched_blobs(commit: str) -> list[tuple[str, int]]:
     function implements per-commit rather than for the whole range as one
     object-reachability query.
 
-    ``diff-tree``'s own ``-z`` only affects its own output (no external
-    piped input to worry about, unlike the earlier ``rev-list --objects``
-    attempt), so this can safely use it for a filename containing
-    non-ASCII characters, a tab, or a newline -- git quotes such names in
-    plain ``--name-only`` output, which would otherwise make a lookup
-    against the (mis-parsed, quoted) name fail and silently skip the real
-    file. Raises :class:`GitEnumerationError` if ``diff-tree`` itself fails.
+    For a MERGE commit (more than one parent), a path is excluded if its
+    blob is UNCHANGED from any parent OTHER than the first -- diffing only
+    against the first parent would otherwise flag every file a merge
+    brings in from a second parent (e.g. a long-lived feature branch
+    merging its base branch in) as "newly touched" by this commit, even
+    though that content already existed on the base and is not this
+    branch's own new content; only a file the merge's own conflict
+    resolution actually changed (different from EVERY parent) is this
+    commit's own responsibility.
+
+    ``git diff-tree --raw`` (rather than ``--name-only``) gives the new
+    blob sha and file mode directly, which both (a) lets a submodule
+    gitlink (mode ``160000``) be excluded deliberately rather than treated
+    as an unreadable blob (see ``_REGULAR_FILE_MODES``), and (b) saves a
+    separate ``cat-file``/lookup round-trip per path to learn the sha.
+    Its own ``-z`` only affects its own output (no external piped input to
+    worry about, unlike the earlier ``rev-list --objects`` attempt), so
+    this can safely use it for a filename containing non-ASCII characters,
+    a tab, or a newline -- git quotes such names in plain ``--name-only``
+    output, which would otherwise make a lookup against the (mis-parsed,
+    quoted) name fail and silently skip the real file. Raises
+    :class:`GitEnumerationError` if any underlying git command fails,
+    including a blob-size read for a path this function itself just
+    confirmed is a real, non-gitlink blob -- never silently skipped.
     """
-    parent_r = _git_bytes("rev-parse", "--verify", "--quiet", f"{commit}^")
-    parent = _decode(parent_r.stdout).strip() or EMPTY_TREE_SHA
-    diff = _git_or_raise(
-        "diff-tree", "--no-commit-id", "--name-only", "-r", "--diff-filter=d", "-z", parent, commit,
+    parents_out = _git_or_raise("rev-parse", f"{commit}^@")
+    all_parents = [p for p in parents_out.split("\n") if p]
+    first_parent = all_parents[0] if all_parents else EMPTY_TREE_SHA
+    other_parents = all_parents[1:]
+
+    raw = _git_or_raise(
+        "diff-tree", "--no-commit-id", "--raw", "-r", "--diff-filter=d", "-z", first_parent, commit,
     )
+    parts = raw.split("\0")
     out: list[tuple[str, int]] = []
-    for path in diff.split("\0"):
-        if not path:
+    i = 0
+    while i + 1 < len(parts):
+        meta, path = parts[i], parts[i + 1]
+        i += 2
+        if not meta:
             continue
-        r = _git_bytes("cat-file", "-s", f"{commit}:{path}")
+        # ":<old_mode> <new_mode> <old_sha> <new_sha> <status>" (no rename/
+        # copy detection requested, so exactly one path per record).
+        fields = meta.lstrip(":").split(" ")
+        if len(fields) < 5:
+            continue
+        new_mode, new_sha = fields[1], fields[3]
+        if new_mode not in _REGULAR_FILE_MODES:
+            continue  # e.g. a submodule gitlink -- not a blob in this repo, deliberate skip
+        if other_parents and any(_blob_at(p, path) == new_sha for p in other_parents):
+            continue  # unchanged from another parent -- inherited, not this commit's own content
+        r = _git_bytes("cat-file", "-s", new_sha)
         if r.returncode != 0:
-            continue  # shouldn't happen for a path diff-tree just reported, but be defensive
+            raise GitEnumerationError(
+                f"'git cat-file -s {new_sha}' (path {path!r} at {commit}) failed: "
+                f"{_decode(r.stderr).strip()}"
+            )
         try:
             size = int(_decode(r.stdout).strip())
         except ValueError:
@@ -307,15 +363,31 @@ def _staged_blobs(paths: list[str]) -> list[tuple[str, int]]:
     a file genuinely named ``0:large.json``) can be misparsed as an
     explicit-stage reference to a *different* path (stage 0 of
     ``large.json``), silently checking the wrong file -- or none at all.
-    Raises :class:`GitEnumerationError` only if ``ls-files`` itself fails
-    outright (a path simply absent from the index -- e.g. a staged
-    deletion -- is a legitimate, silent no-op, not a failure).
+    ``--literal-pathspecs`` (a global git option, passed before the
+    subcommand) additionally disables git's OWN pathspec "magic" prefix
+    syntax for the ``ls-files`` arguments themselves -- without it, a file
+    literally named e.g. ``:(literal)large.json`` would be reinterpreted as
+    a magic pathspec signature rather than that literal filename, and its
+    real index entry would never be looked up at all.
+    Raises :class:`GitEnumerationError` if ``ls-files`` fails outright, or
+    if a path it resolved to a real index entry then fails a blob-size
+    read (shouldn't happen for a sha ls-files itself just reported, but
+    must never be silently skipped if it somehow does) -- a path simply
+    ABSENT from the index (e.g. a staged deletion) is a different, always
+    legitimate, silent no-op.
     """
     if not paths:
         return []
-    r = _git_or_raise("ls-files", "--stage", "-z", "--", *paths)
+    ls_files = subprocess.run(
+        ["git", "--literal-pathspecs", "-C", str(REPO), "ls-files", "--stage", "-z", "--", *paths],
+        capture_output=True, check=False,
+    )
+    if ls_files.returncode != 0:
+        raise GitEnumerationError(
+            f"'git ls-files --stage' failed: {_decode(ls_files.stderr).strip()}"
+        )
     shas: dict[str, str] = {}
-    for record in r.split("\0"):
+    for record in _decode(ls_files.stdout).split("\0"):
         if not record:
             continue
         # "<mode> <sha> <stage>\t<path>"
@@ -331,7 +403,10 @@ def _staged_blobs(paths: list[str]) -> list[tuple[str, int]]:
             continue  # not in the index (e.g. a staged deletion) -- nothing to check
         r2 = _git_bytes("cat-file", "-s", sha)
         if r2.returncode != 0:
-            continue
+            raise GitEnumerationError(
+                f"'git cat-file -s {sha}' (staged path {path!r}) failed: "
+                f"{_decode(r2.stderr).strip()}"
+            )
         try:
             size = int(_decode(r2.stdout).strip())
         except ValueError:
