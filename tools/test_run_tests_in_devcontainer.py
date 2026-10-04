@@ -30,6 +30,8 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parent / "run_tests_in_devcontainer.py"
 _previous_path = sys.path.copy()
 sys.path.insert(0, str(SCRIPT.parent))
@@ -41,6 +43,18 @@ try:
     _spec.loader.exec_module(wrapper)
 finally:
     sys.path[:] = _previous_path
+
+
+@pytest.fixture(autouse=True)
+def _devcontainer_cli_on_path(monkeypatch):
+    """`main()` resolves the devcontainer CLI itself (it hands the path to the
+    dependency-prep pass), even with every container step mocked -- so these
+    tests mustn't depend on the runner having it installed (ubuntu-latest
+    doesn't). A test of the missing-CLI path patches `which` again itself."""
+    real_which = wrapper.shutil.which
+    monkeypatch.setattr(wrapper.shutil, "which",
+                        lambda name, *a, **k: "/usr/bin/devcontainer" if name == "devcontainer"
+                        else real_which(name, *a, **k))
 
 
 def test_scrubbed_git_env_removes_repository_context_variables(monkeypatch) -> None:
