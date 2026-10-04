@@ -782,6 +782,30 @@ win grows with build complexity.
   mismatch on the shared venv and confirmed the rebuild landed in a
   correctly-marked alternate sibling directory while the original
   (mismatched) marker at the shared path was left completely untouched.
+- A fourteenth review round found 2 more issues: (1) `_credential_free_
+  index_identity` only stripped URL userinfo -- a governed feed using a
+  SIGNED URL (e.g. a `?token=...` query parameter) would still persist
+  that credential to disk despite the "credential-free" contract. Fixed
+  by also stripping the query string and fragment before the value is
+  ever persisted or displayed, same as userinfo; the raw URL (including
+  its original query/fragment) is still used for the actual authenticated
+  `uv` calls. (2) every direct `python -c <script>` subprocess invocation
+  (the marker-environment query, the toolchain version query, and the
+  build-requires check script) was vulnerable to a current-directory
+  `sys.path` injection: a local `json.py`/`platform.py` reachable from the
+  subprocess's cwd could shadow the stdlib module the script imports and
+  forge its result -- stripping `PYTHONPATH`/`PYTHONHOME` does not close
+  this vector, since Python historically prepends an empty/cwd entry to
+  `sys.path` for `-c` regardless. Fixed by adding `-I` (isolated mode) to
+  all three invocations, which excludes the current directory from
+  `sys.path`. Net +3 unit tests (137 total, all passing): one new test
+  covering query/fragment stripping, two new tests asserting `-I` appears
+  in the version-query and marker-environment-query command shapes (the
+  build-requires-check script's `-I` usage is already asserted by the
+  existing shared `_dispatch_toolchain_subprocess` test helper used across
+  many tests). Smoke-tested for real again: built `agent-worktrees` fresh
+  against the live governed feed with the isolated-mode queries active --
+  identical `lock_id` as prior rounds, confirming no behavioral regression.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 

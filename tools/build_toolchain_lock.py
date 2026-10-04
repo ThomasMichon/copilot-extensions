@@ -63,7 +63,13 @@ _LOCKED_TOOLCHAIN_PACKAGES = ("setuptools", "wheel", "packaging")
 #: toolchain version/marker-environment queries, and the final `uv build
 #: --no-build-isolation` build itself in `build_python_artifacts.py`) --
 #: this repo's own managed-runtime probes apply the same isolation (see
-#: `plugins/agent-worktrees/scripts/install.sh:1025-1031`).
+#: `plugins/agent-worktrees/scripts/install.sh:1025-1031`). This is a
+#: DIFFERENT vector from the `-I` (isolated mode) flag also passed to
+#: every direct `python -c <script>` invocation in this module: `-I`
+#: closes the CURRENT-DIRECTORY `sys.path` injection a local `json.py`/
+#: `platform.py` could otherwise exploit to forge a `-c` script's own
+#: stdlib imports, which stripping these two environment variables alone
+#: does not prevent.
 _PYTHON_RUNTIME_ENV_VARS = ("PYTHONPATH", "PYTHONHOME")
 
 
@@ -96,23 +102,25 @@ _PROVENANCE_MARKER_NAME = ".governed-feed-provenance.json"
 
 
 def _credential_free_index_identity(url: str) -> str:
-    """``url`` with any embedded ``user:pass@`` userinfo stripped --
-    `uv`/PEP 508 index URLs may legally carry credentials, but those
-    credentials must never be persisted to disk (a provenance marker
+    """``url`` with any embedded ``user:pass@`` userinfo, query string, AND
+    fragment stripped -- `uv`/PEP 508 index URLs may legally carry
+    credentials in any of these three places (e.g. a governed feed using a
+    signed URL with a `?token=...` query parameter, not just userinfo),
+    but none of them must ever be persisted to disk (a provenance marker
     published into every shared venv) or interpolated into a diagnostic
     message, per this effort's own "never log credentials" validation
-    rule. The raw, possibly-credentialed ``url`` is used ONLY for the
-    actual authenticated `uv venv`/`uv pip install --index-url`
-    invocations themselves in `resolve_toolchain_lock` -- never stored or
-    displayed; every persisted/displayed use goes through this function
-    first."""
+    rule. The raw, possibly-credentialed ``url`` (including its original
+    query/fragment) is used ONLY for the actual authenticated `uv venv`/
+    `uv pip install --index-url` invocations themselves in
+    `resolve_toolchain_lock` -- never stored or displayed; every
+    persisted/displayed use goes through this function first."""
     parts = urllib.parse.urlsplit(url)
-    if not parts.username and not parts.password:
+    if not parts.username and not parts.password and not parts.query and not parts.fragment:
         return url
     netloc = parts.hostname or ""
     if parts.port:
         netloc = f"{netloc}:{parts.port}"
-    return urllib.parse.urlunsplit(parts._replace(netloc=netloc))
+    return urllib.parse.urlunsplit(parts._replace(netloc=netloc, query="", fragment=""))
 
 
 def _toolchain_identity_hash(validated_index_url: str, python: str | None) -> str:
@@ -263,7 +271,7 @@ def _query_marker_environment(python_exe: Path) -> dict:
     may be a different Python than ``--python`` locked into the toolchain
     venv."""
     result = subprocess.run(
-        [str(python_exe), "-c", _MARKER_ENV_QUERY_SCRIPT],
+        [str(python_exe), "-I", "-c", _MARKER_ENV_QUERY_SCRIPT],
         capture_output=True, text=True, env=sanitize_subprocess_env(),
     )
     if result.returncode != 0:
@@ -704,7 +712,7 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
 
     query = subprocess.run(
         [
-            str(venv_python), "-c",
+            str(venv_python), "-I", "-c",
             "import importlib.metadata as m, json, sys\n"
             "print(json.dumps({p: m.version(p) for p in sys.argv[1:]}))",
             *_LOCKED_TOOLCHAIN_PACKAGES,
@@ -858,7 +866,7 @@ def _assert_toolchain_satisfies_build_requires(
         }
     )
     result = subprocess.run(
-        [str(toolchain.venv_python), "-c", _BUILD_REQUIRES_CHECK_SCRIPT],
+        [str(toolchain.venv_python), "-I", "-c", _BUILD_REQUIRES_CHECK_SCRIPT],
         input=payload, capture_output=True, text=True,
         env=sanitize_subprocess_env(),
     )
