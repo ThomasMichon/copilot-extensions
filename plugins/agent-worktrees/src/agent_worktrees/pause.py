@@ -41,13 +41,18 @@ resume in this exact worktree) is still genuinely open -- leave it."
    record lock is taken (mirroring ``claims_cli._claims_sweep``'s own
    verdicts-first pattern) -- a probe can take tens of seconds, and this
    record's lock must never block an unrelated claim writer for that long.
-   The cached verdicts are fenced against the record file's own
-   ``(mtime_ns, size)``, captured right after the preview read: if another
-   process writes the record at all between the preview and the lock, the
-   sweep is skipped entirely for this pass (a per-claim fence keyed on a
-   single field -- e.g. ``created_at``, whose ``_now_iso()`` stamp has
-   only one-second resolution -- cannot reliably distinguish a released
-   and immediately re-added claim sharing the same ref, kind, and
+   The preview read and its paired ``stat()`` are themselves taken under
+   one short, immediately-released lock acquisition -- without it, a
+   writer could replace the file in the gap between an unlocked
+   ``load_record()`` and the following ``stat()``, leaving the preview
+   content paired with a *newer* file's stat and defeating the staleness
+   check below by construction. The cached verdicts are then fenced
+   against that paired record file's own ``(mtime_ns, size)``: if another
+   process writes the record at all between the preview and the main
+   lock, the sweep is skipped entirely for this pass (a per-claim fence
+   keyed on a single field -- e.g. ``created_at``, whose ``_now_iso()``
+   stamp has only one-second resolution -- cannot reliably distinguish
+   a released and immediately re-added claim sharing the same ref, kind, and
    timestamp from the original). A later ``pause`` retries with a fresh
    preview. A settled claim is recorded into the durable claim-history
    ledger (tagged with the owning record's own project, never the
@@ -133,8 +138,18 @@ def pause_worktree(
     # this record's lock must never block an unrelated claim writer for
     # that long (mirrors claims_cli._claims_sweep's own verdicts-first
     # pattern, which this module reuses rather than duplicates).
-    preview = tracking.load_record(yaml_path)
-    preview_stat = yaml_path.stat()
+    #
+    # Take the SAME short record lock around the preview read and its
+    # paired stat, then release it immediately: without this, a writer
+    # could replace the file between an unlocked `load_record()` and the
+    # following `stat()`, leaving `preview` describing the OLD content
+    # while `preview_stat` already describes the NEW file -- the later
+    # staleness check would then wrongly see "unchanged" and apply a
+    # cached verdict to a claim that was, in fact, rewritten underneath
+    # the preview.
+    with tracking._RecordLock(yaml_path, require_sidecar=True):
+        preview = tracking.load_record(yaml_path)
+        preview_stat = yaml_path.stat()
     gone_of, safe_of = sweep.make_resolvers(config)
     verdicts: dict[str, tuple[bool | None, bool | None]] = {}
     for claim in preview.resources:
