@@ -393,6 +393,16 @@ out" means *safe*, not *deleted*. Three properties keep this honest and cheap:
   still owe?* and *which worktree is answerable for this resource?* — the
   legibility of `resource-claims` extended from "who holds what" to "who still owes
   what."
+- **Finalize is a live validation, never a one-way lock.** "Finalized" means
+  *safe to prune right now* — re-derived on every call, not a state a worktree
+  is latched into once and done. A direct resource the worktree still owns
+  (e.g. an open pull request) is live-reconciled against its true remote state
+  as part of the same finalize call that checks it, so a merge the worktree
+  hasn't separately observed yet never blocks finalize artificially. Adding a
+  claim, or resuming work, on an already-finalized worktree simply
+  **un-finalizes it** by the same local-balance check above — there is no
+  separate "locked" state finalize must be fought out of, and no risk of a
+  stale `FINAL` marker outliving new, genuinely unsettled work.
 
 ### externally-observable
 Beyond the fabric's own picker legibility, each layer's lifecycle is
@@ -818,3 +828,16 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   asserted-vs-derived separation and the ground layer's ownership are
   unchanged — only the *shape* of the asserted side deepens from a flag to a
   bounded collection whose reduction still answers the coarse question.
+- **2026-10-04** — Extended §Concepts/`resource-accountability` with
+  *finalize is a live validation, never a one-way lock*: re-derived on every
+  call (never latched), a direct resource live-reconciled against its true
+  remote state as part of the same call, and a new/resumed claim on an
+  already-finalized worktree simply un-finalizes it rather than fighting a
+  separate locked state. Mined from the `worktree-claims-transitive-
+  finalization` effort's own Phase 0: the shipped mechanism (bottom-up
+  settlement, live PR-reconcile-before-gate, non-sticky un-finalize) already
+  matched `resource-accountability`'s existing "settle incrementally, assert
+  locally" language in full by the time this effort started investigating
+  it — the one genuinely missing piece was this explicit "never a lock"
+  framing, not a graph-walk primitive the effort's own header had assumed
+  was needed (confirmed absent, not added).
