@@ -186,11 +186,16 @@ def _cmd_send(args: argparse.Namespace) -> None:
     live = client.resolve_live_session(target)
     if live:
         expected_session_id = getattr(args, "expected_session_id", None)
-        # Alias-aware: a renamed (resumed) session still is the expected one;
-        # the server re-checks this atomically when enqueuing.
+        # The delivery carries expected_session_id, which an alias-aware daemon checks
+        # atomically when enqueuing. Two lookups here could straddle a rollover that
+        # moves both handles, and refuse a send to the very session expected, so
+        # this client-side precheck is only for older daemons.
+        from .protocol import LIVE_SESSION_ALIAS_PROTOCOL_VERSION
+
+        precheck = expected_session_id and not client.daemon_supports(LIVE_SESSION_ALIAS_PROTOCOL_VERSION)
         expected = (client.resolve_live_session(expected_session_id) or {}).get(
-            "session_id") if expected_session_id else None
-        if expected_session_id and live["session_id"] not in (expected_session_id, expected):
+            "session_id") if precheck else None
+        if precheck and live["session_id"] not in (expected_session_id, expected):
             print(
                 f"[FAIL] Target {target!r} now resolves to session "
                 f"{live['session_id']!r}, not expected session "

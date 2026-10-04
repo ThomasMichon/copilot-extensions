@@ -1628,15 +1628,17 @@ def test_seed_pane_echo_ignores_a_transcript_line_that_gains_the_seed_text():
     assert driver.enter_sent() is False
 
 
-@pytest.mark.parametrize("wrap", ["/src/main.py", "./scripts/run.sh", "(and the tests)", "- then the docs"])
-def test_seed_pane_echo_keeps_a_punctuation_leading_wrapped_input_line(wrap):
-    """Legacy layout: a wrapped input line starting with ASCII punctuation is the
-    input continuing, not the transcript: a fully echoed seed submits."""
+@pytest.mark.parametrize("wrap", ["/src/main.py", "./scripts/run.sh", "(and the tests)", "- then the docs",
+                                  "→ then fix the tests", "✅ and confirm", "> quoted context"])
+def test_seed_pane_echo_keeps_a_wrapped_input_line_whatever_it_starts_with(wrap):
+    """Legacy layout: a wrapped input line can start with anything -- punctuation,
+    a glyph, even a caret. The input is identified by content (the caret line and
+    everything down to the footer reads as the seed), so a fully echoed seed submits."""
     from agent_worktrees import pane_readiness
 
     seed = f"Continue: inspect {wrap}"
     echo = f" ● earlier output\n❯ Continue: inspect\n{wrap}\npress esc to interrupt"
-    assert wrap in pane_readiness.input_text(echo)
+    assert pane_readiness.seed_echoed(echo, seed)
     ready = " ● earlier output\n❯\npress esc to interrupt"
     driver = _SeedDriver(ready_caps=[ready, ready], echo_caps=[echo])
     assert _run_seed(driver, seed=seed)["submitted"] is True
@@ -1670,13 +1672,16 @@ def test_seed_pane_echo_finds_the_caret_of_a_long_wrapped_legacy_input(rows):
     assert _run_seed(driver, seed=seed)["submitted"] is True
 
 
-def test_long_legacy_scan_still_stops_at_the_transcript():
-    """The unbounded caret scan keeps its guard: a stale prompt above a
-    transcript line is never read as the input."""
+def test_a_legacy_stale_prompt_or_partial_input_is_never_the_echo():
+    """Content identification is exact: a stale prompt in the transcript has
+    transcript lines between it and the footer, and a half-typed seed isn't the seed."""
     from agent_worktrees import pane_readiness
 
-    pane = " ❯ Continue: stale\n ● output\n" + "plain row\n" * 12 + "press esc to interrupt"
-    assert pane_readiness.input_text(pane) == ""
+    pane = " ❯ Continue: stale\n ● output\n" + "plain row\n" * 12 + "❯\npress esc to interrupt"
+    assert not pane_readiness.seed_echoed(pane, "Continue: stale")
+    assert not pane_readiness.seed_echoed("❯ Continue: sta\npress esc to interrupt", "Continue: stale")
+    assert not pane_readiness.seed_echoed("❯ Continue: stale\nCopilot exited\n$ ", "Continue: stale")
+    assert pane_readiness.seed_echoed("❯ Continue: stale\npress esc to interrupt", "Continue: stale")
 
 
 @pytest.mark.parametrize("seed", ["Diagnose the ╻▄ input border", "Diagnose the ╹▀ input border"])

@@ -273,10 +273,11 @@ def test_an_unanswered_protocol_check_is_retried_never_skipped(monkeypatch):
     assert posted == [f"{old_base}/api/v1/live-sessions/sess1/messages"]
 
 
-def _expected_session_send(monkeypatch, resolved: dict, expected: str):
+def _expected_session_send(monkeypatch, resolved: dict, expected: str, daemon_version: int = 20):
     from agent_bridge import session_targeting_cli as stc
 
     client = BridgeClient("http://127.0.0.1:57585", "tok")
+    monkeypatch.setattr(client, "daemon_supports", lambda version: version <= daemon_version)
     monkeypatch.setattr(client, "resolve_live_session", lambda handle: resolved.get(handle))
     delivered = []
     monkeypatch.setattr(stc, "_deliver_to_live_session",
@@ -476,3 +477,29 @@ def test_a_protocol_floor_retries_a_health_read_timeout(monkeypatch):
     stc._hold_protocol_floor(client, 21)
     assert client._request("POST", "/api/v1/live-sessions/s/messages") == {"ok": True}
     assert calls == ["/health", "/health", "/api/v1/live-sessions/s/messages"]
+
+@pytest.mark.parametrize("daemon_version, refused", [(21, False), (20, True)])
+def test_send_leaves_the_expected_session_check_to_an_alias_aware_daemon(
+        monkeypatch, capsys, daemon_version, refused):
+    """Two lookups can straddle a rollover that moves both handles (``placeholder``
+    and the target): on an alias-aware daemon the client sends with
+    ``expected_session_id`` and lets the atomic enqueue check decide; an older
+    daemon still gets the client-side precheck."""
+    client = BridgeClient("http://127.0.0.1:57585", "tok")
+    monkeypatch.setattr(client, "daemon_supports", lambda version: version <= daemon_version)
+    resolved = iter([{"session_id": "resumed-1"}, {"session_id": "resumed-2"}])  # rolled over between
+    monkeypatch.setattr(client, "resolve_live_session", lambda _h: next(resolved))
+    sent: list = []
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    from agent_bridge import session_targeting_cli as stc
+    monkeypatch.setattr(stc, "_deliver_to_live_session",
+                        lambda _c, args, sid, prompt: sent.append((sid, args.expected_session_id)))
+    args = argparse.Namespace(target="wt-handle", prompt="hello", prompt_file=None, new=False,
+                              expected_session_id="placeholder")
+    if refused:
+        with pytest.raises(SystemExit):
+            m._cmd_send(args)
+        assert sent == [] and "not expected session" in capsys.readouterr().err
+    else:
+        m._cmd_send(args)
+        assert sent == [("resumed-1", "placeholder")]  # the daemon checks it atomically

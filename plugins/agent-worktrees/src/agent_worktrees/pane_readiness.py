@@ -41,43 +41,56 @@ def input_region(capture: str) -> str:
 _LEFT_BORDER = re.compile("^\\s*[\u2500-\u259f]")
 #: The legacy layout's input prompt: a caret at the start of the line.
 _LEGACY_PROMPT = re.compile(r"^\s*[❯>]\s?")
-#: A transcript line (``● output``, ``○ step``, ``✓ done``...): never part of the
-#: input. Copilot marks those with a non-ASCII glyph; a wrapped input line can
-#: start with ASCII punctuation (``/src/main.py``, ``./x``, ``(note``, ``- item``).
-_TRANSCRIPT_MARK = re.compile(r"^\s*[^\x00-\x7f\w\s❯]")
+
+
+def _squash(text: str) -> str:
+    """Whitespace removed, so terminal soft-wrap can't defeat a comparison."""
+    return re.sub(r"\s+", "", text)
 
 
 def input_text(capture: str) -> str:
-    """The editable input's text, to echo-verify a typed seed -- never the
-    transcript above it, where a resumed conversation can hold an earlier
-    prompt with the same words (or a changing line that gains them).
-
-    Boxed input (CLI >= 1.0.89): the lines inside the box, each without its
-    left frame border. Older layouts: the caret prompt line directly above the
-    live interrupt footer, and its wrapped continuation. Without such a
-    positively identified input it is ``""``: fail closed, nothing verified.
+    """The boxed input's text (CLI >= 1.0.89): the lines inside a *live* box,
+    each without its left frame border -- never the transcript above it,
+    where a resumed conversation can hold an earlier prompt with the same
+    words. ``""`` without a live box: fail closed, nothing verified. (Older
+    layouts have no frame; :func:`seed_echoed` identifies their input by content.)
     """
     lines = [line.rstrip() for line in capture.splitlines() if line.strip()]
     top = max((i for i, line in enumerate(lines) if _top_rail(line)), default=None)
-    if top is not None:
-        # Only a live box is input: one left above a shell prompt (Copilot exited
-        # after the seed was typed) is a stale draft, and Enter would go to the shell.
-        if not _live_box(capture):
-            return ""
-        bottom = next((i for i in range(top + 1, len(lines)) if _bottom_rail(lines[i])), None)
-        if bottom is not None:
-            return "\n".join(_LEFT_BORDER.sub("", line, count=1) for line in lines[top + 1:bottom])
+    # Only a live box is input: one left above a shell prompt (Copilot exited
+    # after the seed was typed) is a stale draft, and Enter would go to the shell.
+    if top is None or not _live_box(capture):
         return ""
+    bottom = next((i for i in range(top + 1, len(lines)) if _bottom_rail(lines[i])), None)
+    if bottom is None:
+        return ""
+    return "\n".join(_LEFT_BORDER.sub("", line, count=1) for line in lines[top + 1:bottom])
+
+
+def seed_echoed(capture: str, seed: str) -> bool:
+    """Whether the editable input holds the typed *seed*, positively identified.
+
+    Boxed input: the live box's text holds the seed's head. Older layouts draw
+    no frame, and a wrapped input line can start with anything (``/src``,
+    ``→``, ``✅``, even ``>``), so no line's shape marks where the input
+    begins. There the input is identified by content instead: some caret line,
+    with every line below it down to the live interrupt footer, reads exactly
+    as the seed (whitespace aside). A stale prompt in the transcript can't
+    match, since transcript lines sit between it and the footer.
+    """
+    want = _squash(seed)
+    if not want:
+        return False
+    lines = [line.rstrip() for line in capture.splitlines() if line.strip()]
+    if any(_top_rail(line) for line in lines):
+        return want[:16] in _squash(input_text(capture))
     if not lines or not _is_interrupt_footer_row(lines[-1]):
-        return ""
-    # No fixed row window: a long input wraps onto as many rows as it needs, so
-    # scan back to its caret; the transcript-boundary guard ends the search.
-    for i in range(len(lines) - 2, -1, -1):
-        if _LEGACY_PROMPT.match(lines[i]):
-            return "\n".join([_LEGACY_PROMPT.sub("", lines[i], count=1), *lines[i + 1:-1]])
-        if _TRANSCRIPT_MARK.match(lines[i]):
-            break  # transcript reached before any prompt: no input found
-    return ""
+        return False
+    return any(
+        _LEGACY_PROMPT.match(lines[i])
+        and _squash("\n".join([_LEGACY_PROMPT.sub("", lines[i], count=1), *lines[i + 1:-1]])) == want
+        for i in range(len(lines) - 2, -1, -1)
+    )
 
 
 def is_busy(region: str) -> bool:

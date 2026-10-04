@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -219,6 +220,13 @@ def _to_info(row: dict[str, Any]) -> LiveSessionInfo:
     )
 
 
+def _require_finite_start(started: float | None) -> None:
+    """A process start time must be finite: NaN never compares as different from
+    a recorded one, so it would pass the identity checks for any process."""
+    if started is not None and not math.isfinite(started):
+        raise HTTPException(status_code=422, detail="process_started_at must be a finite timestamp")
+
+
 @router.post("", response_model=LiveSessionInfo)
 async def register_live_session(
     body: RegisterLiveSessionRequest, request: Request
@@ -228,6 +236,7 @@ async def register_live_session(
     Idempotent: a re-POST for the same ``session_id`` upserts the row and
     refreshes ``updated_at``, which is how the extension heartbeats liveness.
     """
+    _require_finite_start(body.process_started_at)
     db = _db(request)
     now = time.time()
     prior = db.get_live_session(body.session_id)
@@ -543,6 +552,7 @@ async def deregister_live_session(
     passes its own ``pid``/``process_started_at``: a row another process has
     since registered under the id is then left alone.
     """
+    _require_finite_start(process_started_at)
     db = _db(request)
     # Only the call that deletes the exact registration drops the represented
     # log: a late DELETE through a retired id (or one that lost a race with a

@@ -167,17 +167,17 @@ def mux_seed_pane(
         return _lost(ready=True)
     time.sleep(settle)
 
-    # Echo-verify: press Enter only once the seed's head is visible in the
-    # editable input -- not anywhere in the pane, where a resumed transcript can
-    # show an earlier prompt with the same head -- so a partially-eaten or lost
-    # seed is never submitted as a bogus turn.
+    # Echo-verify: press Enter only once the editable input positively holds the
+    # seed -- not anywhere in the pane, where a resumed transcript can show an
+    # earlier prompt with the same words -- so a partially-eaten or lost seed is
+    # never submitted as a bogus turn.
     echoed = False
     if sent and head:
         for _ in range(4):
             at = _where()
             if not at:
                 return _lost(ready=True, sent=True)
-            if head in _squash(pane_readiness.input_text(_cap(at))):
+            if pane_readiness.seed_echoed(_cap(at), seed):
                 echoed = True
                 break
             time.sleep(poll_interval)

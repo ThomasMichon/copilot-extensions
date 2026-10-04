@@ -538,7 +538,7 @@ class RegisterLiveSessionRequest(BaseModel):
     role: str | None = None
     driven_by: str | None = None
     venue: LiveSessionVenue | None = None
-    process_started_at: float | None = None  # with pid: one process instance, even across a resume
+    process_started_at: float | None = None  # with pid: one process instance; routes refuse non-finite
 
 
 class LiveSessionInfo(BaseModel):

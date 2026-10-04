@@ -581,6 +581,21 @@ def test_a_deregister_leaves_a_replacement_registered_by_another_process(
     assert c.get("/api/v1/live-sessions/B").status_code == 404
 
 
+@pytest.mark.parametrize("started", ["NaN", "Infinity", "-Infinity"])
+def test_a_non_finite_process_start_is_refused(client_with_store: TestClient, started: str) -> None:
+    """NaN never compares as different (``abs(nan - x) >= tol`` is false), so it would
+    pass for any process: a registration or deregistration carrying one is refused."""
+    c = client_with_store
+    c.post("/api/v1/live-sessions", json={"session_id": "A", "pid": 2222, "process_started_at": 500.0})
+    r = c.post("/api/v1/live-sessions", content=(
+        '{"session_id": "A", "pid": 2222, "process_started_at": %s}' % started),
+        headers={"Content-Type": "application/json"})
+    assert r.status_code == 422
+    assert c.delete("/api/v1/live-sessions/A", params={"pid": 2222, "process_started_at": started.lower()}
+                    ).status_code == 422
+    assert c.get("/api/v1/live-sessions/A").status_code == 200  # untouched
+
+
 def test_result_routes_answer_a_merge_still_copying_with_a_retryable_503(
     client_with_store: TestClient, monkeypatch,
 ) -> None:
