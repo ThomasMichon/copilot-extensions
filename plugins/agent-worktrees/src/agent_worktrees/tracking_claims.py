@@ -136,6 +136,23 @@ PR_LIKE_KINDS: frozenset[str] = frozenset({"pr", "bug", "issue"})
 #: this literal prefix, so its presence alone is the ONLY signal
 #: :func:`decanonicalize_ref` needs; it no longer needs to validate the
 #: embedded kind against a closed vocabulary at all.
+#:
+#: **Reservation invariant (accepted residual risk):** this prefix is
+#: RESERVED -- no legitimate legacy ref value may ever literally equal or
+#: start with it. This is airtight for every opaque legacy ref this
+#: codebase produces today (CodeSpace names, container/task ids, PR
+#: shorthand/URLs, structured worktree/session refs) -- none of those
+#: generators ever emit this literal string. It is a documented
+#: convention, not independently enforced at every ref-creation call site
+#: (`claims_cli._claims_add` et al.), because :func:`canonicalize_ref` is
+#: not yet wired into any of them (see the effort's own "additive, no
+#: emission yet" migration decision) -- there is no live producer this
+#: invariant could currently be violated by. If a future change wires
+#: emission into a path that accepts arbitrary caller-supplied ref text,
+#: add validation there to reject a ref already carrying this prefix
+#: before it is ever persisted, closing the single remaining theoretical
+#: collision (a hand-crafted or otherwise coincidental legacy ref that
+#: happens to equal this exact sentinel-prefixed string).
 _CANONICAL_SENTINEL = "cref1:"
 
 #: ``cref1:<kind>:<system>:<key>`` -- the Phase 6 canonical, self-describing

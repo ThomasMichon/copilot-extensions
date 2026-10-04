@@ -229,6 +229,20 @@ def test_decanonicalize_does_not_misdetect_legacy_refs_shaped_like_bare_kind_gra
         assert decanonicalize_ref(legacy) == legacy
 
 
+def test_canonicalize_documents_the_reserved_sentinel_as_accepted_residual_risk():
+    # The cref1: sentinel is a RESERVED prefix: no legitimate legacy ref is
+    # ever expected to literally start with it (see
+    # tracking_claims._CANONICAL_SENTINEL's own comment for the full
+    # rationale and why this is airtight for every ref this codebase
+    # produces today). This test documents the one remaining theoretical
+    # edge the reservation accepts rather than hides: a legacy ref that
+    # coincidentally equals an already-canonical-looking string for the
+    # SAME kind is treated as already canonical (idempotent short-circuit)
+    # -- a deliberate, documented tradeoff, not an oversight.
+    coincidental_legacy = canonicalize_ref("task", "foo")  # "cref1:task::foo"
+    assert canonicalize_ref("task", coincidental_legacy) == coincidental_legacy
+
+
 def test_worktree_ref_with_colon_in_machine_name_falls_back_to_opaque_form():
     # A machine alias may contain a colon (config.py imposes no token
     # restriction on it); the structured canonical form's "system" segment
