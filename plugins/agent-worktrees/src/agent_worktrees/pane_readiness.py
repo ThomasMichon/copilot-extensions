@@ -26,6 +26,40 @@ def input_region(capture: str) -> str:
     return "\n".join(lines[-8:])
 
 
+#: Box-drawing and block glyphs (the boxed input's borders and rails).
+_BOX_GLYPHS = re.compile("[\u2500-\u259f]")
+
+
+def input_text(capture: str, *, before: str | None = None) -> str:
+    """The editable input's text, to echo-verify a typed seed -- never the
+    transcript above it, where a resumed conversation can hold an earlier
+    prompt with the same words.
+
+    Boxed input (CLI >= 1.0.89): the lines inside the box, borders dropped.
+    Older layouts have no such boundary, so it is what the typing added: the
+    lines of ``capture`` not already in ``before`` (the capture that confirmed
+    readiness), counted as a multiset so an unchanged transcript line never
+    counts, however often it repeats.
+    """
+    lines = [line.rstrip() for line in capture.splitlines() if line.strip()]
+    top = max((i for i, line in enumerate(lines) if "╻▄" in line), default=None)
+    if top is not None:
+        bottom = next((i for i in range(top + 1, len(lines)) if "╹▀" in lines[i]), None)
+        if bottom is not None:
+            return "\n".join(_BOX_GLYPHS.sub("", line) for line in lines[top + 1:bottom])
+    remaining: dict[str, int] = {}
+    for line in (before or "").splitlines():
+        if line.strip():
+            remaining[line.rstrip()] = remaining.get(line.rstrip(), 0) + 1
+    added = []
+    for line in lines:
+        if remaining.get(line, 0) > 0:
+            remaining[line] -= 1
+        else:
+            added.append(line)
+    return "\n".join(added)
+
+
 def is_busy(region: str) -> bool:
     """True when a status line in the live region says Copilot isn't taking
     input yet: the line *starts* with a busy verb (after an optional spinner

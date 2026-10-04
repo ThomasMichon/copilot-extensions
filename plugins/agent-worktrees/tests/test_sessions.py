@@ -1525,6 +1525,32 @@ def test_seed_pane_not_echoed_skips_enter():
     assert driver.enter_sent() is False
 
 
+_STALE_PROMPT = " ❯ Continue: do the thing from yesterday\n ● old transcript output\n"
+
+
+@pytest.mark.parametrize("layout", ["boxed", "legacy"])
+def test_seed_pane_echo_ignores_a_stale_prompt_in_the_transcript(layout):
+    """A resumed transcript can show an earlier prompt with the seed's head;
+    with the seed dropped (the input still empty), that is no echo: Enter is
+    never pressed on an unverified draft."""
+    seed = "Continue: do the thing"
+    pane = _STALE_PROMPT + (_BOXED_INPUT if layout == "boxed" else "press esc to interrupt\n")
+    driver = _SeedDriver(ready_caps=[pane, pane], echo_caps=[pane] * 4)
+    result = _run_seed(driver, seed=seed)
+    assert result["ready"] is True and result["sent"] is True
+    assert result["reason"] == "seed-not-echoed"
+    assert driver.enter_sent() is False
+
+
+def test_seed_pane_echo_in_the_box_still_submits_under_a_stale_prompt():
+    seed = "Continue: do the thing"
+    pane = _STALE_PROMPT + _BOXED_INPUT
+    driver = _SeedDriver(ready_caps=[pane, pane],
+                         echo_caps=[pane.replace("┃\n", f"┃ {seed}\n")])
+    result = _run_seed(driver, seed=seed)
+    assert result["submitted"] is True
+
+
 _DESKTOP_APP_NUDGE = (
     "│  the CLI, in a GitHub-native desktop app built for managing parallel  │\n"
     "│  agents.                                                             │\n"
