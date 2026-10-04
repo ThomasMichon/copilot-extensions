@@ -176,15 +176,10 @@ def _provenance_matches(
 ) -> bool:
     """Whether ``venv_dir``'s own provenance marker records EXACTLY
     ``validated_index_url``'s opaque identity AND the requested ``python``
-    interpreter -- a missing, unreadable, or mismatched marker (including
-    a venv published before this check existed, which never wrote one at
-    all, or one published for a DIFFERENT ``--python``) returns ``False``,
-    never treated as "probably fine". Omitting the requested interpreter
-    identity here would let a venv created with one Python version be
-    silently reused for a later call that explicitly asked for a
-    different one -- the toolchain's `marker_environment` and every
-    subsequent build would then run against the wrong interpreter despite
-    the caller's own `--python` selection."""
+    interpreter -- a missing, unreadable, or mismatched marker returns
+    ``False``, never "probably fine". Omitting the interpreter identity
+    would let a venv built for one Python version be silently reused for
+    a call that explicitly asked for a different one."""
     marker_path = venv_dir / _PROVENANCE_MARKER_NAME
     try:
         data = json.loads(marker_path.read_text(encoding="utf-8"))
@@ -418,17 +413,13 @@ def _trusted_index_hosts(env: dict) -> set[str]:
 
 
 def _project_uv_toml_candidates() -> list[tuple[Path, bool]]:
-    """Project-level uv config, in uv's own HIGHEST precedence tier
-    (checked before user-/system-level config by `_effective_default_
-    index_url`) -- walks upward from the CURRENT WORKING DIRECTORY (never
-    a hardcoded root -- this is where `uv` itself would actually be
-    invoked from) looking for a `uv.toml` (preferred over a sibling
-    `pyproject.toml` in the same directory) or a `pyproject.toml` carrying
-    a `[tool.uv]` table, stopping at the FIRST directory where either is
-    found -- uv does not keep walking past the first project boundary it
-    locates. Returns ``(path, is_pyproject)`` pairs so the caller parses
-    each according to its own shape: a `pyproject.toml`'s uv config nests
-    under `[tool.uv]`, while a `uv.toml`'s is top-level."""
+    """Project-level uv config, in uv's own HIGHEST precedence tier --
+    walks upward from the CURRENT WORKING DIRECTORY (never a hardcoded
+    root) looking for a `uv.toml` (preferred over a sibling
+    `pyproject.toml`) or a `pyproject.toml` carrying a `[tool.uv]` table,
+    stopping at the FIRST directory where either is found. Returns
+    ``(path, is_pyproject)`` pairs so the caller parses each according to
+    its own shape."""
     cwd = Path.cwd()
     for directory in (cwd, *cwd.parents):
         uv_toml = directory / "uv.toml"
@@ -616,6 +607,46 @@ def _resolve_interpreter_identity(python: str | None) -> str:
     return python or ""
 
 
+def _query_toolchain_versions(venv_python: Path) -> dict[str, str]:
+    """Queries ``venv_python`` for its own installed
+    ``_LOCKED_TOOLCHAIN_PACKAGES`` versions via `importlib.metadata`,
+    raising `ArtifactBuildError` if the query fails, produces unparseable
+    output, or any locked package is missing. Called BEFORE a freshly
+    built staging venv is published (marker written + renamed) -- never
+    only afterward -- so a broken install (malformed output, a missing
+    package) is caught while it is still disposable staging state, never
+    published as a "complete" venv a later reuse check would trust and
+    poison forever."""
+    query = subprocess.run(
+        [
+            str(venv_python), "-I", "-c",
+            "import importlib.metadata as m, json, sys\n"
+            "print(json.dumps({p: m.version(p) for p in sys.argv[1:]}))",
+            *_LOCKED_TOOLCHAIN_PACKAGES,
+        ],
+        capture_output=True, text=True, env=sanitize_subprocess_env(),
+    )
+    if query.returncode != 0:
+        raise ArtifactBuildError(
+            f"could not read installed toolchain versions from {venv_python}:\n"
+            f"{query.stdout}\n{query.stderr}"
+        )
+    try:
+        packages = json.loads(query.stdout)
+    except json.JSONDecodeError as exc:
+        raise ArtifactBuildError(
+            f"{venv_python}: toolchain version query produced non-JSON output: {exc}"
+        ) from exc
+    missing = [p for p in _LOCKED_TOOLCHAIN_PACKAGES if not packages.get(p)]
+    if missing:
+        raise ArtifactBuildError(
+            f"{venv_python}: locked toolchain venv is missing required "
+            f"package(s) {missing} -- refusing to record an incomplete "
+            "toolchain lock"
+        )
+    return packages
+
+
 def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> ToolchainLock:
     """Resolves one pinned build-toolchain venv and returns its exact
     installed ``setuptools``/``wheel``/``packaging`` versions.
@@ -629,29 +660,26 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
     invocation.
 
     A venv at ``venv_dir`` that does NOT match (different index/python,
-    no marker, or an empty/partial directory -- e.g. manually pre-created,
-    or crash residue) is never trusted OR built into directly: another
+    no marker, or an empty/partial directory -- manually pre-created, or
+    crash residue) is never trusted OR built into directly: another
     process may be actively building against it right now, so moving it
     aside is itself a race (this effort's prior quarantine design had
-    exactly that flaw), and building into an already-existing incomplete
-    directory would make the eventual publish rename fail (Windows
-    rejects renaming onto an existing destination). Instead THIS call
-    resolves into a deterministic sibling keyed on its own (index, python)
-    identity (`_alternate_toolchain_dir`).
+    exactly that flaw), and building into an existing incomplete
+    directory would make the publish rename fail (Windows rejects
+    renaming onto an existing destination). Instead THIS call resolves
+    into a deterministic sibling keyed on its own identity
+    (`_alternate_toolchain_dir`).
 
-    Never resolves from an untrusted index: first resolves the effective
-    default index, verifying it is both non-public AND affirmatively
-    trusted (`_validated_trusted_index_url`), failing closed rather than
-    letting `uv venv`/`uv pip install` silently resolve from an unverified
-    index. The install is pinned to EXACTLY that one validated URL
-    (``--index-url`` plus ``--no-config``, every ambient supplemental-
-    index variable stripped) -- never trusting `uv`'s own ambient config,
-    which could still consult an untrusted SUPPLEMENTAL index.
+    Never resolves from an untrusted index (`_validated_trusted_index_url`,
+    failing closed); the install is pinned to EXACTLY that one validated
+    URL, every ambient supplemental-index variable stripped -- never
+    trusting `uv`'s own ambient config.
 
-    Built in a unique staging directory (`tempfile.mkdtemp`, not merely
-    PID-qualified) and published via an atomic rename only AFTER both
-    `uv venv` and `uv pip install` succeed, so an interrupted setup never
-    leaves a venv a later reuse check would mistake for complete."""
+    Built in a unique staging directory and published via an atomic
+    rename only AFTER `uv venv`/`uv pip install` succeed AND the
+    staging venv's own installed versions are validated
+    (`_query_toolchain_versions`) -- so neither an interrupted setup nor
+    a broken install ever gets published as "complete"."""
     env = dict(os.environ)
     validated_index_url = _validated_trusted_index_url(env)
     if validated_index_url is None:
@@ -749,22 +777,25 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
                     f"uv pip install failed for toolchain venv {target_dir}:\n"
                     f"{install.stdout}\n{install.stderr}"
                 )
-            # Only now, with BOTH steps verified successful, publish the
-            # venv via a single rename -- a retry after any earlier
+            # Validate the STAGING venv BEFORE ever publishing it: a
+            # broken install (malformed query output, a missing package)
+            # is caught while this is still disposable staging state --
+            # validating only AFTER publish would let it poison the
+            # shared slot forever (every retry trusting the same broken
+            # venv and failing again, rather than rebuilding).
+            packages = _query_toolchain_versions(staging_venv_python)
+            # Publish via a single rename -- a retry after any earlier
             # failure never finds a partially built target_dir, since it
-            # never existed until this point. The provenance marker is
-            # written into staging BEFORE the rename, so it publishes
-            # atomically with the venv it describes. Never pre-delete an
-            # existing target_dir: a concurrent caller sharing this path
-            # may already have published its OWN complete venv (maybe
-            # already building against it). If the rename fails, confirm
-            # a winner's venv is genuinely present AND carries matching
-            # provenance before treating it as a benign lost race -- two
-            # callers validating DIFFERENT identities could both observe
-            # an absent destination, so the provenance check guards
-            # against trusting a venv sourced from the OTHER caller's
-            # identity. A permission/filesystem error with no real,
-            # matching winner must still surface as a build failure.
+            # never existed until now. The marker is written BEFORE the
+            # rename so it publishes atomically with the venv it
+            # describes. Never pre-delete an existing target_dir: a
+            # concurrent caller may already have published its OWN
+            # complete venv (maybe already building against it). If the
+            # rename fails, confirm a winner's venv is genuinely present
+            # AND carries matching provenance before treating it as a
+            # benign lost race; if so, re-query THAT (winning) venv --
+            # our own staging `packages` describes a venv that no longer
+            # exists at this path.
             _write_provenance_marker(staging_venv_dir, validated_index_url, python_identity)
             try:
                 staging_venv_dir.rename(target_dir)
@@ -777,36 +808,13 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
                         f"could not publish toolchain venv {staging_venv_dir} "
                         f"to {target_dir}: {exc}"
                     ) from exc
+                packages = _query_toolchain_versions(venv_python)
         finally:
             if staging_venv_dir.exists():
                 shutil.rmtree(staging_venv_dir, ignore_errors=True)
+    else:
+        packages = _query_toolchain_versions(venv_python)
 
-    query = subprocess.run(
-        [
-            str(venv_python), "-I", "-c",
-            "import importlib.metadata as m, json, sys\n"
-            "print(json.dumps({p: m.version(p) for p in sys.argv[1:]}))",
-            *_LOCKED_TOOLCHAIN_PACKAGES,
-        ],
-        capture_output=True, text=True, env=sanitize_subprocess_env(),
-    )
-    if query.returncode != 0:
-        raise ArtifactBuildError(
-            f"could not read installed toolchain versions from {venv_python}:\n"
-            f"{query.stdout}\n{query.stderr}"
-        )
-    try:
-        packages = json.loads(query.stdout)
-    except json.JSONDecodeError as exc:
-        raise ArtifactBuildError(
-            f"{venv_python}: toolchain version query produced non-JSON output: {exc}"
-        ) from exc
-    missing = [p for p in _LOCKED_TOOLCHAIN_PACKAGES if not packages.get(p)]
-    if missing:
-        raise ArtifactBuildError(
-            f"{target_dir}: locked toolchain venv is missing required package(s) "
-            f"{missing} -- refusing to record an incomplete toolchain lock"
-        )
     return ToolchainLock(venv_python, packages)
 
 

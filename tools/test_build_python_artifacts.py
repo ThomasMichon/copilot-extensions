@@ -2049,6 +2049,57 @@ def test_resolve_toolchain_lock_recovers_from_prior_interrupted_setup(
     assert lock.packages == {"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}
 
 
+def test_resolve_toolchain_lock_never_publishes_venv_failing_version_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: if the installed-versions query fails against the
+    # STAGING venv (malformed output, a missing package), the venv must
+    # never be published (marker written + renamed) -- otherwise every
+    # retry would see a "complete, matching" venv at venv_dir and reuse
+    # the same broken install forever, instead of rebuilding.
+    _assume_governed_feed_configured(monkeypatch)
+    venv_dir = tmp_path / "toolchain-venv"
+    attempt = {"n": 0}
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[:2] == ["uv", "venv"]:
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        # the version query itself -- missing "packaging" on the first
+        # attempt (simulating a broken/incomplete install), healthy on retry
+        attempt["n"] += 1
+        if attempt["n"] == 1:
+            return subprocess.CompletedProcess(
+                cmd, 0,
+                stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0"}),
+                stderr="",
+            )
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError, match="packaging"):
+        bpa.resolve_toolchain_lock(venv_dir)
+
+    # Never published: no marker, no interpreter at venv_dir, and no
+    # leftover staging directory.
+    assert not bpa._venv_python_path(venv_dir).is_file()
+    assert not venv_dir.exists()
+    assert list(tmp_path.glob(".toolchain-venv.staging-*")) == []
+
+    # A retry redoes the whole build and succeeds once the install is
+    # genuinely complete.
+    lock = bpa.resolve_toolchain_lock(venv_dir)
+    assert lock.packages == {"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}
+
+
 def test_resolve_toolchain_lock_leaves_no_staging_directory_behind(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

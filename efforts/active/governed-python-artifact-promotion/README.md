@@ -880,6 +880,29 @@ win grows with build complexity.
   Smoke-tested for real again: built `agent-worktrees` fresh against the
   live governed feed, confirming `uv python find` resolution works
   end-to-end and the marker now records the resolved interpreter path.
+- A seventeenth review round found 1 more issue: the venv was published
+  (provenance marker written, then renamed into place) BEFORE its
+  installed versions were actually validated -- the `importlib.metadata`
+  query ran only AFTER publish, outside the build branch. If that query
+  failed (malformed output, a missing package), the venv was already
+  published with a matching marker, so `_occupied_by_other_identity`
+  would treat it as complete and every retry would reuse the same broken
+  venv and fail again, rather than rebuilding -- the same class of
+  poisoning hazard earlier rounds fixed for the old quarantine design,
+  reintroduced via this different structural path. Fixed by extracting
+  the query into `_query_toolchain_versions` and calling it against the
+  STAGING venv BEFORE the marker is written or the rename attempted; a
+  failure there now simply discards the (never-published) staging
+  directory, exactly like a `uv venv`/`uv pip install` failure already
+  did. A lost publish race still re-queries the actual WINNING venv
+  rather than trusting the (now-discarded) staging copy. 1 more unit test
+  (150 total, all passing). Trimmed several more docstrings/comments to
+  stay under the 1,000-line module cap (993 lines -- this module is now
+  within ~1% of that cap; any further substantive finding will likely
+  require splitting a piece of it into a third module rather than
+  trimming comments further). Smoke-tested for real again: built
+  `agent-worktrees` fresh against the live governed feed with the
+  reordered validate-then-publish sequence active.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 
