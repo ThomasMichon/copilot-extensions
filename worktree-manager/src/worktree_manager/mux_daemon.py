@@ -464,7 +464,7 @@ def build_compute(
         if kind == mux_daemon_cutover.health_kind():
             if runtime is None:
                 raise ValueError("mux_daemon cutover control is unavailable")
-            return runtime.health()
+            return runtime.health(exclude_current_request=True)
         if kind == mux_daemon_cutover.drain_kind():
             if runtime is None:
                 raise ValueError("mux_daemon cutover control is unavailable")
@@ -740,16 +740,37 @@ class MuxDaemonRuntime:
         self.begin_drain()
         self.retire_requested = True
 
-    def health(self) -> dict:
+    def health(self, *, exclude_current_request: bool = False) -> dict:
+        """Report this daemon's own idle/load state for ``daemons status``.
+
+        Copilot review finding (copilot-extensions#5001): when reached over
+        the real wire, the health request itself is an accepted handler and
+        a touched subscriber for its own duration
+        (``CoalescingServer._on_request_accepted``/``touch``), so a naive
+        read of ``active_handler_count()``/``subscriber_count()`` there
+        always includes this very probe -- every reachable daemon would
+        report at least one attached client and ``busy=True`` even while
+        otherwise fully idle. ``exclude_current_request`` (set only by
+        :func:`build_compute`'s wire dispatch, mirroring the same
+        established pattern :meth:`_is_drained` already uses for
+        ``drain()``) excludes exactly that one contribution; a direct
+        in-process caller (no wire request in flight) leaves it ``False``
+        and gets an unadjusted, already-accurate read.
+        """
         from . import __version__
 
         attached_clients = self.server.subscriber_count() if self.server is not None else 0
-        busy = bool(self.server is not None and self.server.active_handler_count() > 0)
+        active_handlers = self.server.active_handler_count() if self.server is not None else 0
+        if exclude_current_request:
+            if attached_clients > 0:
+                attached_clients -= 1
+            if active_handlers > 0:
+                active_handlers -= 1
         return {
             "status": "draining" if self.draining else "ready",
             "version": __version__,
             "attached_clients": attached_clients,
-            "busy": busy,
+            "busy": active_handlers > 0,
         }
 
     def promote(self) -> dict:
