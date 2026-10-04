@@ -152,6 +152,28 @@ class TestEventLog:
         assert not thread.is_alive()
         assert [event.event for event in events] == ["raced"]
 
+    @pytest.mark.asyncio
+    async def test_a_merge_finished_before_registration_does_not_strand_the_reader(
+        self, event_log: EventLog
+    ) -> None:
+        """The reader chose this log, then it was merged away (``merged_into`` set,
+        its waiters woken) before the reader registered: that wake missed it, and
+        later events land on the surviving log. It returns at once to follow the
+        merge rather than sleep until its timeout."""
+        survivor = EventLog()
+
+        class MergeDuringRegistration(list):
+            def append(self, item) -> None:
+                super().append(item)
+                if len(self) == 1:  # merged right as the reader registers
+                    event_log.merged_into = (survivor, {0: 0})
+
+        event_log._waiters = MergeDuringRegistration()
+        started = time.monotonic()
+        events = await event_log.wait_for_events(after=0, timeout=10.0)
+        assert events == [] and time.monotonic() - started < 2.0
+        assert list(event_log._waiters) == []  # its registration is cleaned up
+
 
 class TestActiveToolCall:
     """Deriving the in-flight tool call for liveness markers."""

@@ -418,6 +418,15 @@ class EventLog:
             if events:
                 return events
             self._waiters.append(registration)
+        # A merge sets ``merged_into`` before waking this log's waiters: one that
+        # completed after the reader chose this log, but before it registered,
+        # woke nobody. Seen here, the reader returns now and follows the merge
+        # (a later merge wakes the registration above).
+        if self.merged_into is not None:
+            with self._lock:
+                if registration in self._waiters:
+                    self._waiters.remove(registration)
+            return self.get_events(after)
         try:
             await asyncio.wait_for(waiter.wait(), timeout=timeout)
             return self.get_events(after)
