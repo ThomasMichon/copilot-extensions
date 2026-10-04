@@ -86,6 +86,7 @@ phase 1 "install $PLUGIN"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
+  "sandbox": { "enabled": false },
   "extraKnownMarketplaces": { "$MARKETPLACE_NAME": { "source": { "source": "github", "repo": "$MARKETPLACE_REPO" } } },
   "enabledPlugins": { "$PLUGIN@$MARKETPLACE_NAME": true }
 }
@@ -104,7 +105,7 @@ _apply_uv_index_fixture
 mkdir -p "$HOME/ab-repo" && ( cd "$HOME/ab-repo" && git init -q && git config user.email t@e && git config user.name t && echo '# ab' > README.md && git add -A && git commit -qm init )
 PLUGIN_ARG=()
 [ -d "$INSTALLED_ROOT/$PLUGIN" ] && PLUGIN_ARG=( --plugin-dir "$INSTALLED_ROOT/$PLUGIN" )
-( cd "$HOME/ab-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARG[@]}" ) || true
+( cd "$HOME/ab-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all --experimental "${PLUGIN_ARG[@]}" ) || true
 sleep 8
 capture "provision" -- bash -lc '
   command -v agent-bridge >/dev/null 2>&1 && agent-bridge version >/dev/null 2>&1

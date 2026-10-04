@@ -127,7 +127,8 @@ def autopilot_worker_prompt(
     )
     return (
         f"You are a dispatched agent-dispatch **autopilot** worker (worker id: "
-        f"{worker_id}) with tools auto-approved (--allow-all-tools). "
+        f"{worker_id}) with auto-approved access and SDK extensions enabled "
+        f"(--allow-all --experimental). "
         f"Task {task_id} is queued for you. {route_note}{identity_note}"
         f"{charter_step}"
         f"Then: (1) read the task with `{ad} show {task_id}`; "
@@ -194,7 +195,8 @@ def interactive_worker_prompt(
     status_note = f" (current status: `{status}`)" if status else ""
     return (
         f"You are driving agent-dispatch task {task_id}{status_note} in this "
-        f"worktree, with tools auto-approved (--allow-all-tools). This session "
+        f"worktree, with auto-approved access and SDK extensions enabled "
+        f"(--allow-all --experimental). This session "
         f"is interactive -- an operator may be watching or will check in -- "
         f"not an unattended autopilot worker: you are NOT a named worker "
         f"identity and this task was NOT assigned to you through a pool. "
@@ -270,8 +272,8 @@ def fleet_autopilot_worker_prompt(
     )
     return (
         f"You are a fleet-dispatched agent-dispatch **autopilot** worker (worker "
-        f"id: {worker_id}) on this pool host with tools auto-approved "
-        f"(--allow-all-tools). Task {task_id} lives on the origin coordinator at "
+        f"id: {worker_id}) on this pool host with auto-approved access and SDK "
+        f"extensions enabled (--allow-all --experimental). Task {task_id} lives on the origin coordinator at "
         f"'{origin}'. Drive it there by running every agent-dispatch lifecycle "
         f"verb over SSH against the origin, ALWAYS passing your explicit owner id "
         f"'{owner}' (your working directory here cannot identify you to the "

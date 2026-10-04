@@ -55,6 +55,7 @@ phase 1 "install ONLY $PLUGIN"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
+  "sandbox": { "enabled": false },
   "extraKnownMarketplaces": { "$MARKETPLACE_NAME": { "source": { "source": "github", "repo": "$MARKETPLACE_REPO" } } },
   "enabledPlugins": { "$PLUGIN@$MARKETPLACE_NAME": true }
 }
@@ -80,7 +81,7 @@ _apply_uv_index_fixture
 mkdir -p "$HOME/cs-repo" && ( cd "$HOME/cs-repo" && git init -q && git config user.email t@e && git config user.name t && echo '# cs' > README.md && git add -A && git commit -qm init )
 PLUGIN_ARG=()
 [ -d "$INSTALLED_ROOT/$PLUGIN" ] && PLUGIN_ARG=( --plugin-dir "$INSTALLED_ROOT/$PLUGIN" )
-( cd "$HOME/cs-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARG[@]}" ) || true
+( cd "$HOME/cs-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all --experimental "${PLUGIN_ARG[@]}" ) || true
 sleep 8
 if [ -d "$HOME/.agent-codespaces" ] && { [ -d "$HOME/.agent-codespaces/versions" ] || [ -x "$HOME/.agent-codespaces/.venv/bin/python" ] || [ -e "$HOME/.local/bin/agent-codespaces" ]; }; then
     pass "agent-codespaces runtime deployed after first session"

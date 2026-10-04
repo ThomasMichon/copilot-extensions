@@ -123,6 +123,7 @@ mkdir -p "$HOME/.copilot"
 # or this plugin's own hook can set on the operator's behalf.
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
+  "sandbox": { "enabled": false },
   "experimental": true,
   "extraKnownMarketplaces": { "$MARKETPLACE_NAME": $MARKETPLACE_SOURCE },
   "enabledPlugins": { "$PLUGIN@$MARKETPLACE_NAME": true }
@@ -158,7 +159,7 @@ fi
 
 # =========================================================================
 phase 2 "live session writes a discovery descriptor (no model turn)"
-COPILOT_ARGV=(copilot --allow-all-tools)
+COPILOT_ARGV=(copilot --allow-all --experimental)
 [ -n "$PLUGIN_DIR" ] && [ -d "$PLUGIN_DIR" ] && COPILOT_ARGV+=(--plugin-dir "$PLUGIN_DIR")
 # Properly quote the argv into one string for `script -c` (which takes a
 # single shell command, not an argv array).

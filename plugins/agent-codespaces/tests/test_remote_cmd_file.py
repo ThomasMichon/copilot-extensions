@@ -51,7 +51,7 @@ class TestWriteRemoteCmdFile:
 
     def test_writes_content_and_is_deterministic(self, tmp_path, monkeypatch):
         monkeypatch.setattr(resolver, "_DISPATCH_DIR", tmp_path / "dispatch")
-        payload = "cd /workspaces/x && copilot --acp --stdio --allow-all-tools"
+        payload = "cd /workspaces/x && copilot --acp --stdio --allow-all --experimental"
 
         p1 = resolver._write_remote_cmd_file("cs-abc", payload)
         p2 = resolver._write_remote_cmd_file("cs-abc", payload)

@@ -1833,10 +1833,11 @@ class CodespacesConfig:
           missing-remote misconfiguration rather than silently launching in the
           wrong place.
 
-        ``--allow-all-tools`` is required for headless dispatch: there is no
-        human to answer interactive tool-permission prompts.
+        ``--allow-all --experimental`` are required for headless dispatch:
+        there is no human to answer interactive tool-permission prompts, and
+        SDK extensions do not load without ``--experimental``.
         """
-        copilot = "copilot --acp --stdio --allow-all-tools"
+        copilot = "copilot --acp --stdio --allow-all --experimental"
 
         if requested_repo is not None:
             folder, prepopulated = self.workspace_folder_for_request(

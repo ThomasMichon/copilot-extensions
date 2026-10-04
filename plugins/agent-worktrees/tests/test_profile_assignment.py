@@ -2104,4 +2104,4 @@ def test_selected_profile_remains_an_ordinary_launch_profile():
     )
     inner = _inner_command(command)
     assert inner[:1] == ["copilot"]
-    assert profile.copilot_args == inner[1:-1]
+    assert profile.copilot_args == inner[1:-2]

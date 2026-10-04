@@ -126,7 +126,7 @@ python examples/ado/probe.py examples/ado/transform.mcp.yaml \
 Run a dedicated agent (a fresh Copilot CLI session discovers the agent file):
 
 ```bash
-copilot --agent ado-transform --allow-all-tools \
+copilot --agent ado-transform --allow-all --experimental \
   -p 'List the 3 most recent PRs in example-web (Example-Web): id + title.'
 ```
 

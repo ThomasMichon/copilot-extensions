@@ -112,7 +112,13 @@ installer. Know which kind you are changing.
    present. **`git add` any newly created source/test files first** — the
    wrapper snapshots only git-tracked paths by default, so an untracked
    regression test is silently omitted and the run can pass without ever
-   exercising it; staging is enough, a commit isn't required.
+   exercising it; staging is enough, a commit isn't required. **A container
+   marker alone isn't sufficient reason to skip the wrapper** — a generic
+   dispatched-development or CI container may not be hardened or
+   network-disconnected the way the wrapper's own boundary is; only fall
+   back to the bare runner when nested Docker-in-Docker genuinely isn't
+   available, or that outer container's isolation is independently
+   verified equivalent. See `AGENTS.md` for the full criteria.
    See `AGENTS.md` § *Test Before PR Publication* and `TESTING.md`
    § *Optional devcontainer-based isolation*.
 
