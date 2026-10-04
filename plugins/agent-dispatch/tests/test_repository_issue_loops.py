@@ -1035,6 +1035,62 @@ def test_global_issue_reproducer_drives_through_the_generic_issue_loop(tmp_path)
     assert "implementation, required checks, review, merge, and issue closure" not in task["prompt"]
 
 
+def test_global_effort_builder_groups_multiple_issues_into_one_effort_task(tmp_path):
+    import json as _json
+
+    path = tmp_path / "effort-builder.json"
+    path.write_text(
+        _json.dumps(
+            {
+                "extends": "global:effort-builder",
+                "name": "effort-backlog",
+                "repo": "example/project",
+                "source": "effort-backlog",
+                "cadence_seconds": 3600,
+                "batch_size": 2,
+                "task_label": "effort-build",
+                "forge": {"provider": "github", "producer_login": "effort-bot"},
+                "reservation": {"label": "effort-reserved", "comment": True},
+                "pool": {
+                    "max_active_processes": 1,
+                    "body": {"agent": "effort-worker"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    declarations = read_declaration_file_set(path)
+    source = next(d for d in declarations if d.name == "effort-backlog-source")
+    config = source.spec["repository_issue_loop"]
+    provider = FakeProvider(
+        [
+            _issue(17, labels=("bug", "triage:accepted", "ready")),
+            _issue(18, labels=("bug", "triage:accepted", "ready")),
+        ]
+    )
+
+    result = run_tick(
+        FakeClient(),
+        config,
+        provider=provider,
+        clock=lambda: 10_000,
+    )
+
+    task = result["created"][0]
+    assert provider.list_calls == 1
+    assert task["require_verification"] is True
+    assert task["evaluator_ref"] == "effort-builder"
+    assert task["title"] == "Build tracked effort for repository issues #17, #18"
+    assert task["goal"] == "Group repository issues #17, #18 into tracked effort work"
+    assert "- #17: Issue 17 (https://example.com/issues/17)" in task["prompt"]
+    assert "- #18: Issue 18 (https://example.com/issues/18)" in task["prompt"]
+    assert "Group the selected issues into one coherent tracked effort" in task["prompt"]
+    assert "Do not turn this effort-building task into an implementation lane" in task["prompt"]
+    assert "Phase 8-style execution belongs to a separate worker" in task["prompt"]
+    assert "implementation, required checks, review, merge, and issue closure" not in task["prompt"]
+
+
 def test_proposed_task_retries_transient_approve_failure():
     provider = FakeProvider([_issue(1)])
     client = FakeClient(fail_approve_once=True)

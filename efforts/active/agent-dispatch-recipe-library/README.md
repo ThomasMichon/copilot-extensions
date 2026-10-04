@@ -391,14 +391,14 @@ below — read it before starting any Phase 3 work).
       confirmed via the evaluator's evidence/tag check.
 
 ### Phase 7 — Named recipe: effort-builder (Request item e)
-- [ ] Ship a global recipe (a `goal-driven` specialization): takes a query or
+- [x] Ship a global recipe (a `goal-driven` specialization): takes a query or
       a named set of triaged issues, groups related ones, carves/joins a
       tracked effort, and assigns the constituent issues to it — does not
       drive the effort itself.
-- [ ] Evaluator requires every named issue assigned to an effort, and that
+- [x] Evaluator requires every named issue assigned to an effort, and that
       effort in PR (this repo's own effort review-gate, or the consumer's
       equivalent).
-- [ ] Tests: a fixture set of related issues drives the recipe to a merged
+- [x] Tests: a fixture set of related issues drives the recipe to a merged
       effort-creation PR with all issues assigned.
 
 ### Phase 8 — Named recipe: effort-driver (Request item f)
@@ -1128,3 +1128,74 @@ suite green (3743 passed, 23 skipped, the one known flake above).
     sub-suite here; the longer-timeout rerun completed green with no code
     changes, confirming a local timing-budget issue rather than a Phase 6
     regression.
+
+### 2026-10-03 — Phase 7: effort-builder named recipe landed
+- Added a seventh built-in global recipe template,
+  `global:effort-builder`, with a new built-in
+  `worker_identity: effort-builder`, `require_verification: true`, an opaque
+  shared `evaluator_ref: effort-builder`, and a bounded `task_contract`
+  specialized to grouping multiple already-triaged issues into one tracked
+  effort.
+- **Design decision — why this still resolves to `kind: repository-issue-loop`
+  even though Request item (e) called it a `goal-driven` specialization:**
+  the materially new part of effort-builder is the *worker's posture and stop
+  condition*, not a different discovery engine. The standing loop still needs
+  the Phase 2 provider-neutral issue-list emitter to take either a query or a
+  named set of issues and reserve that bounded set as one occurrence. So the
+  shipped declaration remains a `repository-issue-loop` recipe, but its
+  contract is intentionally *goal-driven in shape*: one invocation spans
+  multiple related issues and stops once they are grouped into one effort and
+  that effort's plan artifact has reached the repository's review gate, rather
+  than implementing/fixing the issues through merge. This avoids mechanically
+  copying the per-issue triage/repro lanes from Phases 5/6 while still
+  reusing the only existing standing engine that actually emits bounded issue
+  sets.
+- Added the built-in worker identity
+  `agent_dispatch/identities/effort-builder.identity.md`. Its charter is
+  deliberately explicit about the boundary the Request required: create or
+  join one coherent effort, assign every named issue to it, and drive only the
+  effort-tracking artifact to the review gate; do **not** implement the
+  constituent bug fixes, close issues merely because an effort exists, or
+  archive/drive the effort itself (that remains Phase 8).
+- **Shared-vs-consumer evaluator split (same deliberate pattern as Phases 5/6):**
+  the shipped recipe fixes the reusable lifecycle contract
+  (`require_verification` + `evaluator_ref`) but does **not** hardcode one
+  repository's exact effort-assignment marker or review-gate evidence shape.
+  A consumer repo supplies its own trusted evaluator registration under
+  `evaluator_ref: effort-builder` to define what counts as "assigned to an
+  effort" and "that effort reached the repo's own review gate" (for this repo,
+  the planning-efforts convention is that the effort README itself is
+  submitted through a PR before execution).
+- Reused the existing provider-neutral issue-list emitter exactly as intended:
+  no new issue discovery code was added. The named recipe still flows through
+  the ordinary `repository-issue-loop` path and therefore keeps the same forge
+  adapter surface Phase 2 already established (GitHub + Azure DevOps today;
+  Gitea remains the deferred Phase 2 stub and is unchanged here).
+- Tests added:
+  - `test_registrar_recipes.py`: `global:effort-builder` resolves end to end,
+    stamps the expected verification fields, and the built-in identity
+    resolves.
+  - `test_repository_issue_loops.py`: an `extends: global:effort-builder`
+    declaration drives through the generic repository-issue-loop tick path
+    against a fixture pair of triaged issues, proving one created task spans
+    multiple related issues and carries the bounded effort-building contract
+    instead of the default implement-through-merge contract.
+  - `test_verification.py`: a fixture trusted script evaluator keyed by
+    `effort-builder` confirms completion only when every selected issue points
+    at the same effort and that effort has reached a review-gated state,
+    while mismatched-effort and pre-gate fixtures stay submitted. The passing
+    fixture models the effort-creation PR as already merged, satisfying the
+    "merged effort-creation PR with all issues assigned" validation shape.
+- Validation:
+  - focused Phase 7 tests: **161 passed**
+  - full `agent-dispatch` suite: **passed** via
+    `python tools/run-plugin-tests.py agent-dispatch --timeout 600 --plugin-timeout 2400`
+  - full-suite sub-run totals:
+    - 813 passed, 5 skipped
+    - 500 passed, 8 skipped
+    - 435 passed, 3 skipped
+    - 615 passed, 6 skipped
+    - 651 passed
+    - 792 passed
+    - 24 passed, 1 skipped
+  - none of the effort-noted unrelated flakes appeared in this run.

@@ -1,0 +1,9 @@
+{
+  "comment": "Ship effort-builder named recipe (Phase 7)",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
