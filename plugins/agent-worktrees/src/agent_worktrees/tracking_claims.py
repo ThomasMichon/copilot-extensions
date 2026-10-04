@@ -135,10 +135,10 @@ def canonicalize_ref(kind: str, ref: str) -> str:
     returns -- every existing kind-specific parser (:func:`parse_claim_ref`,
     ``claims_rank._parse_pr_like_ref``, ``cleanup._pr_claim_target``,
     ``sweep.py``'s PR view-arg builders) keeps accepting its own native
-    shape completely unmodified; see the ``worktree-claims-transitive-
-    finalization`` cross-repo tracking effort's README (aperture-labs
-    repo) Phase 6 section for the full design rationale and the
-    "additive, not a breaking rewrite" migration decision.
+    shape completely unmodified; see this change's own tracking effort's
+    README (in the downstream control-plane repo that coordinates this
+    plugin, not this repo) Phase 6 section for the full design rationale
+    and the "additive, not a breaking rewrite" migration decision.
 
     For ``worktree``/``session`` kinds, ``system`` is the owning machine
     and ``key`` is ``project/worktree_id[#session]`` (the rest of

@@ -1,11 +1,11 @@
 """Tests for the Phase 6 canonical claim-ref encoding.
 
 Phase 6 of ``worktree-claims-transitive-finalization``, 2026-10-04 -- a
-cross-repo *tracking-only* effort whose README/journal live in the
-``aperture-labs`` repo (not this one); the implementation itself lands
-here, in agent-worktrees. See that effort's README for the full design
-rationale and the four decisions this module's docstrings summarize
-inline.
+cross-repo *tracking-only* effort whose README/journal live in a separate
+downstream control-plane repo (not this one); the implementation itself
+lands here, in agent-worktrees. See that effort's README for the full
+design rationale and the four decisions this module's docstrings
+summarize inline.
 
 Validates the Validation Plan's own Phase 6 item: every existing persisted
 ref shape (the structured ``worktree``/``session`` grammar, a PR URL, the
@@ -30,9 +30,9 @@ from agent_worktrees.tracking_claims import (
 
 
 def test_worktree_ref_round_trips_through_canonical_form():
-    legacy = format_claim_ref("lambda-core", "aperture-labs", "wt-123", "sess1")
+    legacy = format_claim_ref("lambda-core", "example-project", "wt-123", "sess1")
     canon = canonicalize_ref("worktree", legacy)
-    assert canon == "worktree:lambda-core:aperture-labs/wt-123#sess1"
+    assert canon == "worktree:lambda-core:example-project/wt-123#sess1"
     assert decanonicalize_ref(canon) == legacy
     # And the canonical form parses identically to the legacy one.
     assert parse_claim_ref(canon) == parse_claim_ref(legacy)
@@ -84,16 +84,16 @@ def test_opaque_kind_ref_round_trips_through_canonical_form():
 
 
 def test_canonicalize_is_idempotent():
-    legacy = format_claim_ref("lambda-core", "aperture-labs", "wt-123")
+    legacy = format_claim_ref("lambda-core", "example-project", "wt-123")
     once = canonicalize_ref("worktree", legacy)
     twice = canonicalize_ref("worktree", once)
     assert once == twice
 
 
 def test_session_ref_round_trips_through_canonical_form():
-    legacy = format_claim_ref("lambda-core", "aperture-labs", "wt-123", "sess1")
+    legacy = format_claim_ref("lambda-core", "example-project", "wt-123", "sess1")
     canon = canonicalize_ref("session", legacy)
-    assert canon == "session:lambda-core:aperture-labs/wt-123#sess1"
+    assert canon == "session:lambda-core:example-project/wt-123#sess1"
     assert decanonicalize_ref(canon) == legacy
 
 
@@ -101,7 +101,7 @@ def test_session_ref_without_session_suffix_round_trips():
     # Regression: claims_rank's local duplicate unwrap only special-cased
     # "worktree", silently dropping the machine for a session ref with no
     # trailing "#session" (SESS m/p/w -> SESS p/w after canonicalization).
-    legacy = format_claim_ref("lambda-core", "aperture-labs", "wt-123")
+    legacy = format_claim_ref("lambda-core", "example-project", "wt-123")
     canon = canonicalize_ref("session", legacy)
     assert decanonicalize_ref(canon) == legacy
     assert claims_rank.format_claim("session", canon) == claims_rank.format_claim(
@@ -173,7 +173,7 @@ def test_decanonicalize_never_mistakes_a_url_scheme_for_a_kind():
 def test_decanonicalize_passes_through_plain_legacy_refs_unchanged():
     for ref in (
         "acme-org/sample-repo#2481",
-        "lambda-core/aperture-labs/wt-123#sess1",
+        "lambda-core/example-project/wt-123#sess1",
         "cs-a1c4-relay",
         "",
     ):
@@ -211,7 +211,7 @@ def test_claims_rank_format_claim_accepts_canonical_ref_in_generic_fallback():
 
 
 def test_claims_rank_format_claim_accepts_canonical_worktree_ref():
-    legacy = format_claim_ref("lambda-core", "aperture-labs", "wt-123")
+    legacy = format_claim_ref("lambda-core", "example-project", "wt-123")
     canon = canonicalize_ref("worktree", legacy)
     assert claims_rank.format_claim(
         "worktree", canon
