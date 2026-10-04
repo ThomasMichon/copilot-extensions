@@ -1068,6 +1068,59 @@ def test_reader_queue_never_coalesces_or_drops_control_items():
         q.get(timeout=0.01)
 
 
+def test_reader_queue_never_loses_a_wakeup_under_concurrent_racing(monkeypatch):
+    """Regression for a lost-wakeup race: in an earlier version of
+    `_CoalescingEventQueue`, popping an event marker off the queue and
+    clearing its pending flag were two separate locked steps -- a
+    producer's `put_event()` landing in the gap between them could observe
+    the (still-true) flag and silently discard its own wake, even though
+    the marker it thought it was coalescing into had already been popped
+    by the consumer, leaving that mutation invisible until the next long
+    reconcile. This stress-tests many concurrent `put_event()` callers
+    racing a draining consumer and proves no permanent wedge results: after
+    the race settles, one more `put_event()` must still be observable via
+    `get()`, and real progress (consumed events) must have happened
+    throughout, not stalled at zero."""
+    q = board_relay._CoalescingEventQueue()
+    stop = threading.Event()
+    consumed = {"events": 0}
+
+    def consumer() -> None:
+        while not stop.is_set():
+            try:
+                kind, _payload = q.get(timeout=0.001)
+            except queue.Empty:
+                continue
+            if kind == "event":
+                consumed["events"] += 1
+
+    def producer() -> None:
+        while not stop.is_set():
+            q.put_event()
+
+    consumer_thread = threading.Thread(target=consumer, daemon=True)
+    producer_threads = [
+        threading.Thread(target=producer, daemon=True) for _ in range(4)
+    ]
+    consumer_thread.start()
+    for t in producer_threads:
+        t.start()
+
+    time.sleep(0.3)
+    stop.set()
+    consumer_thread.join(timeout=5)
+    for t in producer_threads:
+        t.join(timeout=5)
+
+    # The queue must remain consistent and usable after the race settles --
+    # a fresh wake must still be observable (never permanently wedged with
+    # `_event_pending` stuck true/false out of sync with reality).
+    q.put_event()
+    assert q.get(timeout=1.0) == ("event", None)
+    # Real progress must have happened throughout the race, not stalled.
+    assert consumed["events"] > 0
+
+
 def test_run_relay_returns_0_on_keyboard_interrupt_during_initial_connect(
     monkeypatch,
 ):

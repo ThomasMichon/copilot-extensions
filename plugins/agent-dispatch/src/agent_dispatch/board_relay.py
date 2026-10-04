@@ -152,41 +152,69 @@ def _build_client(args) -> DispatchClient:
 
 
 class _CoalescingEventQueue:
-    """A ``queue.Queue`` wrapper that coalesces consecutive wake-only
-    ``("event", None)`` items at the producer side: once an unconsumed event
-    marker is already enqueued, a further wake is a no-op instead of growing
-    the queue -- so sustained heartbeat/activity traffic cannot accumulate
-    unboundedly while the control loop is busy fetching or sleeping (the
-    control loop already coalesces repeats it *reads*, via its debounce
-    drain, but nothing previously bounded how many could pile up in the
-    queue itself before being read). ``ready``/``disconnected`` control
-    items are never coalesced, capped, or dropped -- :meth:`put_control`
-    unconditionally enqueues every call. Exposes the same blocking
-    ``get(timeout=...)`` contract as ``queue.Queue`` (including raising
-    ``queue.Empty`` on timeout) so every existing consumer
-    (:func:`_wait_for_ready`, :func:`_event_loop`) needs no changes."""
+    """A condition-variable-backed FIFO that coalesces consecutive
+    wake-only ``("event", None)`` items at the producer side: once an
+    unconsumed event marker is already pending in the queue, a further wake
+    is a no-op instead of appending another one -- so sustained heartbeat/
+    activity traffic cannot accumulate unboundedly while the control loop
+    is busy fetching or sleeping (the control loop already coalesces
+    repeats it *reads*, via its debounce drain, but nothing previously
+    bounded how many could pile up before being read). ``ready``/
+    ``disconnected`` control items are never coalesced, capped, or dropped
+    -- :meth:`put_control` unconditionally appends every call, and every
+    item (event or control) is delivered in the order it was enqueued.
+
+    Popping an item and clearing the event-pending flag (when that item is
+    the event marker) happen as one atomic step under the same lock a
+    producer's :meth:`put_event` also takes -- a plain ``queue.Queue`` plus
+    a separately-locked boolean (an earlier version of this class) has a
+    lost-wakeup race here: once ``get()`` has removed the marker from the
+    queue but before it clears the flag, a producer's ``put_event()`` can
+    observe the (still-true) flag and discard its own wake as "already
+    coalesced," even though the marker it would have coalesced into is
+    already gone -- that mutation would then stay invisible until the next
+    long reconcile. Doing the pop-and-clear under the same lock
+    :meth:`put_event` takes to check-and-append closes that window: a
+    producer's call either runs entirely before the consumer's pop (and is
+    coalesced into the marker about to be popped, so its mutation is still
+    covered) or entirely after (and schedules a fresh marker), never
+    straddling it. Exposes the same blocking ``get(timeout=...)`` contract
+    as ``queue.Queue`` (including raising ``queue.Empty`` on timeout) so
+    every existing consumer (:func:`_wait_for_ready`, :func:`_event_loop`)
+    needs no changes."""
 
     def __init__(self) -> None:
-        self._queue: queue.Queue = queue.Queue()
         self._lock = threading.Lock()
+        self._cv = threading.Condition(self._lock)
+        self._items: list[tuple[str, object]] = []
         self._event_pending = False
 
     def put_event(self) -> None:
-        with self._lock:
+        with self._cv:
             if self._event_pending:
                 return
             self._event_pending = True
-        self._queue.put(("event", None))
+            self._items.append(("event", None))
+            self._cv.notify()
 
     def put_control(self, kind: str, payload) -> None:
-        self._queue.put((kind, payload))
+        with self._cv:
+            self._items.append((kind, payload))
+            self._cv.notify()
 
     def get(self, timeout: float):
-        item = self._queue.get(timeout=timeout)
-        if item[0] == "event":
-            with self._lock:
-                self._event_pending = False
-        return item
+        deadline = time.monotonic() + timeout
+        with self._cv:
+            while True:
+                if self._items:
+                    item = self._items.pop(0)
+                    if item[0] == "event":
+                        self._event_pending = False
+                    return item
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise queue.Empty()
+                self._cv.wait(timeout=remaining)
 
 
 class _Reader:
