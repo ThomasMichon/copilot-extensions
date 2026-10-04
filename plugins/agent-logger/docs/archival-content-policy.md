@@ -15,7 +15,7 @@ mechanism:
 | Category | Detected by |
 |---|---|
 | Python virtual environment | a `pyvenv.cfg` file at the environment root |
-| Git clone or linked worktree | a `.git` entry — a directory for a normal clone, or a regular `gitdir:`-pointer **file** for a linked worktree checkout |
+| Git clone or linked worktree | a `.git` entry named exactly `.git` — a directory for a normal clone, or any regular file (the linked-worktree `gitdir:` pointer shape; its content is not verified) |
 | `node_modules` tree | the directory name itself |
 | Chromium browser profile | a `Local State` file alongside a `Default`/`Profile N` subdirectory containing `Preferences` + a `Network` directory |
 
