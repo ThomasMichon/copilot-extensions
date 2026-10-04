@@ -1455,6 +1455,51 @@ def test_resolve_toolchain_lock_rejects_anomalous_alternate_mismatch(
         bpa.resolve_toolchain_lock(venv_dir)
 
 
+def test_resolve_toolchain_lock_treats_preexisting_empty_dir_as_occupied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: an empty (or partially-built) pre-existing directory at
+    # --toolchain-venv -- e.g. manually created by an operator, or residue
+    # from a crashed prior run -- is not detectable via `venv_python.
+    # is_file()` alone (it's False either way), but attempting to build
+    # directly into it would make the eventual publish rename fail
+    # (Windows rejects renaming onto an already-existing destination,
+    # even an empty one). Must be routed to the alternate slot instead,
+    # never attempted as a build target directly.
+    _assume_governed_feed_configured(monkeypatch)
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_dir.mkdir()  # exists, but empty -- no venv_python, no marker at all
+
+    build_cmds: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[:2] == ["uv", "venv"]:
+            build_cmds.append(cmd)
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("rebuilt", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    lock = bpa.resolve_toolchain_lock(venv_dir)
+
+    assert len(build_cmds) == 1
+    assert lock.venv_python.read_text(encoding="utf-8") == "rebuilt"
+    expected_alt = btl._alternate_toolchain_dir(
+        venv_dir, "https://example.internal/simple/", None
+    )
+    assert lock.venv_python == bpa._venv_python_path(expected_alt)
+    # The original empty directory itself was never touched/populated.
+    assert list(venv_dir.iterdir()) == []
+
+
 # --- provenance marker never persists embedded credentials ---------------
 
 
@@ -1466,39 +1511,67 @@ def _credentialed_url(host_path: str) -> str:
 
 
 def test_provenance_marker_redacts_embedded_credentials(tmp_path: Path):
-    # Regression: a validated index URL may carry embedded `user:pass@`
-    # credentials (uv supports this), but those credentials must never be
-    # written to the on-disk marker persisted into every shared venv.
+    # Regression: a validated index URL may carry embedded credentials
+    # (uv supports this), but those credentials must never be written to
+    # the on-disk marker persisted into every shared venv -- the marker
+    # stores only a one-way hash of the full URL, never the URL itself in
+    # any form.
     venv_dir = tmp_path / "toolchain-venv"
     venv_dir.mkdir()
     btl._write_provenance_marker(
-        venv_dir, "https://produser:hunter2@example.internal/simple/"
+        venv_dir, _credentialed_url("example.internal/simple/")
     )
     marker_text = (venv_dir / btl._PROVENANCE_MARKER_NAME).read_text(encoding="utf-8")
     assert "hunter2" not in marker_text
     assert "produser" not in marker_text
-    assert "https://example.internal/simple/" in marker_text
+    assert "example.internal" not in marker_text
 
 
-def test_provenance_matches_compares_credential_free_identity(tmp_path: Path):
-    # The same credentialed URL, re-supplied on a later call (e.g. a
-    # second plugin build in the same promotion run), must still match
-    # even though its credentials never round-trip through the marker.
+def test_provenance_matches_compares_full_url_identity(tmp_path: Path):
+    # The exact same credentialed URL, re-supplied on a later call (e.g. a
+    # second plugin build in the same promotion run), must still match.
     venv_dir = tmp_path / "toolchain-venv"
     venv_dir.mkdir()
     btl._write_provenance_marker(
-        venv_dir, "https://produser:hunter2@example.internal/simple/"
+        venv_dir, _credentialed_url("example.internal/simple/")
     )
     assert btl._provenance_matches(
-        venv_dir, "https://produser:hunter2@example.internal/simple/"
+        venv_dir, _credentialed_url("example.internal/simple/")
     )
-    # A DIFFERENT set of credentials against the same credential-free
-    # identity still matches -- only the host/path identity is compared,
-    # never the credentials themselves.
-    assert btl._provenance_matches(
-        venv_dir, "https://otheruser:otherpass@example.internal/simple/"
+    # A DIFFERENT set of credentials against the same host/path does NOT
+    # match -- the full URL (not a redacted host/path-only form) is what
+    # gets hashed and compared, so a rotated credential is treated as a
+    # genuinely different identity rather than silently reused.
+    assert not btl._provenance_matches(
+        venv_dir, "https://" + "otheruser" + ":" + "otherpass" + "@example.internal/simple/"
     )
     assert not btl._provenance_matches(venv_dir, "https://different.example/simple/")
+
+
+def test_provenance_matches_treats_differing_query_as_different_identity(
+    tmp_path: Path,
+):
+    # Regression: a query string can select a tenant/feed, not just carry
+    # a credential -- two URLs sharing a host and path but differing only
+    # by query parameter must be treated as genuinely different indexes,
+    # never silently conflated into the same reuse identity.
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_dir.mkdir()
+    btl._write_provenance_marker(venv_dir, "https://example.internal/simple/?feed=A")
+    assert btl._provenance_matches(venv_dir, "https://example.internal/simple/?feed=A")
+    assert not btl._provenance_matches(venv_dir, "https://example.internal/simple/?feed=B")
+    assert not btl._provenance_matches(venv_dir, "https://example.internal/simple/")
+
+
+def test_opaque_index_identity_is_not_reversible_to_the_raw_url():
+    digest = btl._opaque_index_identity(_credentialed_url("example.internal/simple/"))
+    assert "hunter2" not in digest
+    assert "produser" not in digest
+    assert "example.internal" not in digest
+    # Deterministic: the same input always hashes to the same identity.
+    assert digest == btl._opaque_index_identity(
+        _credentialed_url("example.internal/simple/")
+    )
 
 
 def test_credential_free_index_identity_strips_userinfo_only():

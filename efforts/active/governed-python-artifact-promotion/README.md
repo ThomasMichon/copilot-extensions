@@ -806,6 +806,51 @@ win grows with build complexity.
   many tests). Smoke-tested for real again: built `agent-worktrees` fresh
   against the live governed feed with the isolated-mode queries active --
   identical `lock_id` as prior rounds, confirming no behavioral regression.
+- A fifteenth review round found 2 more issues, the first a genuine flaw
+  in round 14's own fix: (1) stripping the ENTIRE query string from the
+  persisted/compared identity conflates distinct trusted index URLs that
+  merely SHARE a host and path -- a query parameter can select a tenant
+  or feed (e.g. `?feed=A` vs `?feed=B`), not just carry a credential, so a
+  venv installed from one would be silently considered valid for the
+  other. Fixed by replacing the stripped-string comparison with a new
+  `_opaque_index_identity`: a one-way hash of the FULL, unredacted URL
+  (userinfo, query, and fragment all included), persisted/compared
+  instead of any human-readable redacted form -- preserves full
+  distinguishing power (no two meaningfully different URLs collide)
+  while remaining safe to persist or display, since a hash cannot be
+  reversed to recover the original secret. `_credential_free_index_
+  identity` (the round-12/14 stripped-string helper) is now reserved
+  for human-readable DISPLAY only -- it is no longer used for any
+  persistence or identity comparison. A side effect: two validated URLs
+  differing only by embedded credentials (not query) are now ALSO
+  treated as different identities -- a credential rotation routes to a
+  fresh alternate slot rather than silently reusing the old one, which is
+  the correct, more conservative direction for a fail-closed contract.
+  (2) the occupied-shared-slot check tested only `venv_python.is_file()`,
+  so an existing but EMPTY or partially-built directory at
+  `--toolchain-venv` (e.g. manually pre-created by an operator, or
+  residue from a crashed prior run) was not detected as occupied -- the
+  code would then attempt to build directly into it, and the eventual
+  publish rename would fail (Windows rejects renaming onto an
+  already-existing destination, even an empty one), exactly the class of
+  bug round 10 fixed for the *default* no-`--toolchain-venv` path but
+  missed for an explicit, pre-existing `--toolchain-venv` path. Fixed with
+  a new `_occupied_by_other_identity` check: ANY existing directory that
+  is not a complete, provenance-matching venv for this exact identity
+  (mismatched, stale/unmarked, OR simply empty/partial) is now routed to
+  the alternate slot before staging ever begins, not discovered only when
+  the publish rename itself fails. 6 more unit tests (140 total, all
+  passing: 2 rewritten for the opaque-hash marker schema and the new
+  harsher credential-rotation semantics, 1 new covering the query-string
+  tenant-selector regression, 1 new covering the hash's one-way,
+  non-reversible property, 1 new covering the pre-existing-empty-
+  directory routing, plus removal of the no-longer-accurate "different
+  credentials still match" assertion). Smoke-tested for real again: built
+  `agent-worktrees` fresh against the live governed feed; then built a
+  SECOND plugin against a MANUALLY pre-created, empty `--toolchain-venv`
+  directory and confirmed the build correctly routed into a fresh
+  alternate sibling directory instead of attempting (and failing) an
+  in-place rename.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 
