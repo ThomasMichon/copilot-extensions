@@ -443,6 +443,26 @@ def test_diff_scoped_mode_skips_submodule_gitlinks_without_error(repo: Path, tmp
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_staged_mode_skips_submodule_gitlinks_without_error(repo: Path, tmp_path: Path):
+    # Staged-mode sibling of the diff-mode test above: adding/updating a
+    # submodule stages a mode-160000 gitlink entry too, and must be
+    # skipped the same way (not every call site shares one code path here).
+    sub = tmp_path.parent / f"{tmp_path.name}-sub2"
+    sub.mkdir()
+    _git(sub, "init", "-q")
+    _git(sub, "config", "user.email", "test@example.com")
+    _git(sub, "config", "user.name", "Test")
+    (sub / "f.txt").write_text("hi")
+    _git(sub, "add", "-A")
+    _git(sub, "commit", "-q", "-m", "sub commit")
+
+    _git(repo, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(sub), "vendor/sub")
+
+    result = _run(repo, "--", "vendor/sub")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_commit_touched_blobs_raises_on_a_failed_blob_size_read(repo: Path):
     # An in-process unit test (the only one in this file -- see the module
     # docstring): a blob sha diff-tree itself just reported, that then

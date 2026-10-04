@@ -370,11 +370,16 @@ def _staged_blobs(paths: list[str]) -> list[tuple[str, int]]:
     a magic pathspec signature rather than that literal filename, and its
     real index entry would never be looked up at all.
     Raises :class:`GitEnumerationError` if ``ls-files`` fails outright, or
-    if a path it resolved to a real index entry then fails a blob-size
-    read (shouldn't happen for a sha ls-files itself just reported, but
-    must never be silently skipped if it somehow does) -- a path simply
-    ABSENT from the index (e.g. a staged deletion) is a different, always
-    legitimate, silent no-op.
+    if a path it resolved to a real, regular-file index entry then fails a
+    blob-size read (shouldn't happen for a sha ls-files itself just
+    reported, but must never be silently skipped if it somehow does) -- a
+    path simply ABSENT from the index (e.g. a staged deletion) is a
+    different, always legitimate, silent no-op, and so is a staged
+    submodule gitlink (mode ``160000``, naming a commit in another repo's
+    object store, not a blob in this one -- see ``_REGULAR_FILE_MODES``,
+    shared with ``_commit_touched_blobs``'s own equivalent exclusion) or a
+    merge-conflict stage (1/2/3, never stage 0 -- this check only ever
+    means to look at the actual staged (stage 0) content).
     """
     if not paths:
         return []
@@ -393,9 +398,12 @@ def _staged_blobs(paths: list[str]) -> list[tuple[str, int]]:
         # "<mode> <sha> <stage>\t<path>"
         meta, _, path = record.partition("\t")
         fields = meta.split()
-        if len(fields) < 2:
+        if len(fields) < 3:
             continue
-        shas[path] = fields[1]
+        mode, sha, stage = fields[0], fields[1], fields[2]
+        if mode not in _REGULAR_FILE_MODES or stage != "0":
+            continue  # e.g. a submodule gitlink, or an unmerged conflict stage -- deliberate skip
+        shas[path] = sha
     out: list[tuple[str, int]] = []
     for path in paths:
         sha = shas.get(path)
