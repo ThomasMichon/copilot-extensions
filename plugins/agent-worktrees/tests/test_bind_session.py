@@ -935,3 +935,28 @@ def test_list_row_keeps_a_yielded_head_resumable(tmp_tracking_dir: Path, monkeyp
     row = m._worktree_to_dict(load_record(tmp_tracking_dir / "wt-yield.yaml"))
     assert row["last_session_id"] == "successor"
     assert "head_yielded" not in row
+
+
+def test_resume_reopens_a_yielded_head_over_a_newer_conversation(
+    tmp_tracking_dir: Path, tmp_session_state_dir: Path, monkeypatch_config, monkeypatch,
+) -> None:
+    """Resume's execution-time resolver agrees with the listing: the yielded
+    head is the target, ahead of a newer non-head conversation the filesystem
+    fallback would pick -- as long as it still has conversation data."""
+    from conftest import make_session_dir
+
+    from agent_worktrees import sessions
+
+    _save_record(tmp_tracking_dir, "wt-yres", "/tmp/src/wt-yres")
+    tracking.register_session("wt-yres", "orchestrator")
+    tracking.open_handoff(load_record(tmp_tracking_dir / "wt-yres.yaml"), "orchestrator", "t-x")
+    rec = load_record(tmp_tracking_dir / "wt-yres.yaml")
+    assert rec.resolved_head_session is None
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_session_state_dir)
+    monkeypatch.setattr(sessions, "find_latest_session_id_fast", lambda path, regs: "newer")
+
+    make_session_dir(tmp_session_state_dir, "orchestrator", "/tmp/src/wt-yres",
+                     has_events_file=False)  # a stub: not resumable
+    assert sessions.resolve_resume_target(rec) == "newer"
+    make_session_dir(tmp_session_state_dir, "orchestrator", "/tmp/src/wt-yres")
+    assert sessions.resolve_resume_target(rec) == "orchestrator"

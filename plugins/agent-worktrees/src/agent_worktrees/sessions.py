@@ -823,8 +823,10 @@ def resolve_resume_target(record) -> str | None:
     all three agree on one target:
 
       1. the record's **asserted lifecycle head** (``resolved_head_session``)
-         when it still has on-disk conversation data -- the authoritative
-         "current session" a handoff/cutover may have advanced; then
+         -- the authoritative "current session" a handoff/cutover may have
+         advanced -- or, with none, a **yielded head** (a handoff no successor
+         linked here; the same one the worktree listing shows), whichever
+         still has on-disk conversation data; then
       2. the **filesystem-latest** valid session
          (``find_latest_session_id_fast``) for un-annotated records; else
       3. ``None`` -- nothing resumable exists (a genuine cold start).
@@ -836,6 +838,10 @@ def resolve_resume_target(record) -> str | None:
     """
     try:
         head = getattr(record, "resolved_head_session", None)
+        if not head:
+            from .tracking_lifecycle import yielded_head_session
+
+            head = yielded_head_session(record)
     except Exception:
         head = None
     if head and session_has_conversation_data(head):
