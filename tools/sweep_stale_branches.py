@@ -18,10 +18,11 @@ pre-existing backlog on any other repo this pattern gets adopted in.
 Deliberately conservative, mirroring `tools/module-health-watchdog.py`'s own
 convention:
 
-- Only considers a PR with recorded GraphQL state **MERGED**; an open or
-  closed-unmerged PR's head branch is never treated as deletable, and its
-  branch name is explicitly vetoed even if a coincidentally-matching OID
-  would otherwise look deletable (reused/reopened branch names).
+- Only treats a branch as deletable when its **single most recent** PR
+  record (open, closed, or merged -- see ``_latest_pr_per_branch``) is a
+  MERGED one; an open or closed-unmerged PR's head branch is never treated
+  as deletable, and that veto wins even over a coincidentally-matching OID
+  from some older, now-superseded merge (reused/reopened branch names).
 - A branch name alone is never a stable identity: a name can be deleted and
   recreated, force-pushed with new commits, picked up by a brand-new open
   PR, or (for a same-named branch on a fork) never have belonged to this
@@ -37,9 +38,11 @@ convention:
   push rejection (a protected-branch hook declining the delete, a
   permission error, etc.) is a real failure. A fork-originated PR's
   `headRefName` never denotes a branch on this repo at all and is excluded
-  entirely. When a branch name has been reused across more than one
-  separately-merged PR over time, the **newest** merge (by `mergedAt`)
-  determines the expected OID, never an arbitrary one.
+  entirely. When a branch name has been reused across multiple PR records
+  over time (merged, then closed unmerged, then reopened, etc.), the
+  **single most recent** one (by event time) determines both whether the
+  branch is deletable at all and, if so, the expected OID -- never an
+  arbitrary record.
 - `--execute` refuses to push a deletion through a local git remote that
   doesn't resolve to the exact `--repo` host+path (`github.com` plus an
   exact owner/repo match, not a mere suffix), and scrubs ambient
@@ -157,34 +160,52 @@ class PullRequestHead:
     same_repo: bool
     state: str  # "OPEN", "CLOSED", or "MERGED" (gh's own GraphQL enum casing)
     merged_at: str  # ISO8601 (gh's own format, lexically sortable); "" if never merged
+    closed_at: str  # ISO8601; "" if still open (also set for a MERGED PR, but unused then)
 
 
-def _newest_merged_heads(pull_requests: list[PullRequestHead]) -> dict[str, str]:
-    """Same-repo, MERGED PRs' head branch name -> the **newest** (by
-    ``merged_at``) such PR's head OID.
+# Sentinel "event time" for an OPEN PR: an open PR is never resolved, so it
+# must always be treated as the most recent event for its branch name --
+# lexically greater than any real ISO8601 timestamp gh can report.
+_OPEN_EVENT_TIME_SENTINEL = "9999-12-31T23:59:59Z"
 
-    A branch name can be reused across multiple, separately-merged PRs over
-    a repo's history (delete, recreate, merge again). Picking an arbitrary
-    one (e.g. whichever `gh pr list` happens to return first) risks
-    comparing a still-present branch's current OID against a STALE older
-    merged PR's OID instead of the most recent one, so a genuinely
-    up-to-date, safely-deletable branch would never match and would be
-    silently skipped forever.
+
+def _latest_pr_per_branch(pull_requests: list[PullRequestHead]) -> dict[str, PullRequestHead]:
+    """Same-repository branch name -> its single most recently *resolved*
+    (or still-open) PR record.
+
+    A branch name can be reused across the repo's history: merged once,
+    recreated, then closed unmerged, or reopened, possibly more than once.
+    Comparing a still-present branch's current OID against whichever PR
+    record happens to come first in `gh pr list`'s own ordering -- or even
+    against only the newest MERGED record while ignoring a newer
+    closed-unmerged or still-open one -- can either miss a genuinely
+    deletable branch (stale OID) or, worse, delete a branch a more recent
+    non-merged PR still legitimately owns. This resolves exactly one
+    record per branch name: the most recent by event time (an OPEN PR's
+    event time is treated as unresolved/maximal -- it always wins), so a
+    caller only ever needs to ask "is THIS branch's latest record a merge,
+    and does its head OID match?" to decide deletability.
     """
-    newest: dict[str, tuple[str, str]] = {}  # branch -> (merged_at, head_oid)
+    latest: dict[str, tuple[str, PullRequestHead]] = {}  # branch -> (event_time, pr)
     for pr in pull_requests:
-        if not (pr.same_repo and pr.state == "MERGED" and pr.head_oid):
+        if not pr.same_repo:
             continue
-        current = newest.get(pr.branch)
-        if current is None or pr.merged_at > current[0]:
-            newest[pr.branch] = (pr.merged_at, pr.head_oid)
-    return {branch: head_oid for branch, (_merged_at, head_oid) in newest.items()}
+        if pr.state == "OPEN":
+            event_time = _OPEN_EVENT_TIME_SENTINEL
+        elif pr.state == "MERGED":
+            event_time = pr.merged_at
+        else:  # CLOSED, unmerged
+            event_time = pr.closed_at
+        current = latest.get(pr.branch)
+        if current is None or event_time > current[0]:
+            latest[pr.branch] = (event_time, pr)
+    return {branch: pr for branch, (_event_time, pr) in latest.items()}
 
 
 def plan_sweep(
     remote_branches: dict[str, str],
     merged_heads: dict[str, str],
-    open_branch_names: set[str],
+    non_merged_branch_names: set[str],
     all_pr_branch_names: set[str],
     protected_branches: set[str],
     flag_patterns: tuple[str, ...] = FLAG_PATTERNS,
@@ -194,29 +215,30 @@ def plan_sweep(
     ``remote_branches``: current branch name -> current commit OID on
     ``origin``, as of the moment the caller fetched it.
 
-    ``merged_heads``: a **same-repository, MERGED** PR's head branch name ->
-    the head commit OID that PR actually merged. A fork-originated or
-    non-merged (open/closed-unmerged) PR's head branch must never appear
-    here (callers are responsible for excluding it -- see
-    :func:`_pull_requests`).
+    ``merged_heads``: a **same-repository** branch name -> the head OID of
+    its single most recently resolved PR record, ONLY when that record is a
+    MERGED one (see :func:`_latest_pr_per_branch`). A branch whose most
+    recent record is anything else (open, closed-unmerged, or a
+    fork-originated PR) must never appear here (callers are responsible for
+    excluding it).
 
-    ``open_branch_names``: every branch name with a currently **OPEN** PR,
-    same-repo or not. Checked as an explicit veto, independent of the OID
-    match below: a branch name can be deleted and recreated with a brand
-    new open PR that coincidentally shares its old merged PR's head OID
-    (e.g. reopened from the same commit) -- this guards that case even
-    though it is not the primary identity check.
+    ``non_merged_branch_names``: every branch name whose single most recent
+    PR record is OPEN or CLOSED-unmerged. Checked as an explicit,
+    independent veto -- defense in depth alongside ``merged_heads``
+    already excluding these -- so a branch currently backing a live (open
+    or recently-closed-unmerged) PR is never deleted even if some older,
+    now-superseded merge happened to leave a matching OID lying around.
 
     ``deletable``: a branch whose *current* OID on origin still exactly
-    matches a merged PR's recorded head OID for that same branch name --
-    the identity check described in this module's docstring -- AND has no
-    currently open PR. A branch reused since (force-pushed, or picked up by
-    a new open PR with new commits) has a different current OID and is
-    correctly left alone regardless. Excludes anything in
-    ``protected_branches``. This is a *planning-time* decision only; the
-    actual deletion performs its own atomic compare-and-delete lease check
-    (see :func:`_delete_branch`), since a branch can still move between
-    planning and acting.
+    matches its most recent record's head OID -- the identity check
+    described in this module's docstring -- AND whose most recent record is
+    a merge (i.e. not vetoed by ``non_merged_branch_names``). A branch
+    reused since (force-pushed, or picked up by a new open/closed PR with
+    new commits) has a different current OID and is correctly left alone
+    regardless. Excludes anything in ``protected_branches``. This is a
+    *planning-time* decision only; the actual deletion performs its own
+    atomic compare-and-delete lease check (see :func:`_delete_branch`),
+    since a branch can still move between planning and acting.
 
     ``flagged``: a branch matching one of ``flag_patterns`` with **no** PR
     record at all (not even open or closed-unmerged) -- never deleted here,
@@ -226,7 +248,7 @@ def plan_sweep(
         branch
         for branch, current_oid in remote_branches.items()
         if branch not in protected_branches
-        and branch not in open_branch_names
+        and branch not in non_merged_branch_names
         and branch in merged_heads
         and merged_heads[branch] == current_oid
     )
@@ -269,7 +291,7 @@ def _pull_requests(repo: str, limit: int) -> list[PullRequestHead]:
     rows = _gh_json(
         [
             "pr", "list", "--repo", repo, "--state", "all",
-            "--json", "headRefName,headRefOid,isCrossRepository,state,mergedAt",
+            "--json", "headRefName,headRefOid,isCrossRepository,state,mergedAt,closedAt",
             "--limit", str(limit),
         ]
     )
@@ -286,6 +308,7 @@ def _pull_requests(repo: str, limit: int) -> list[PullRequestHead]:
             same_repo=not row["isCrossRepository"],
             state=row["state"],
             merged_at=row.get("mergedAt") or "",
+            closed_at=row.get("closedAt") or "",
         )
         for row in rows
     ]
@@ -421,7 +444,25 @@ def _existing_tracking_issue(repo: str) -> int | None:
     return rows[0]["number"] if rows else None
 
 
+#: GitHub's own issue-body hard cap is 65,536 characters. A representative
+#: backlog (the 3000+-branch scale this tool was built to sweep) could
+#: render well past that if every flagged branch were listed unbounded,
+#: permanently failing every create/edit attempt (and thus silently
+#: breaking the triage channel this issue exists to provide). Cap the
+#: listed entries and report an omitted count instead -- a run's own
+#: stdout always has the complete list regardless.
+MAX_FLAGGED_LISTED = 200
+
+
 def _file_or_update_tracking_issue(repo: str, flagged: list[str]) -> bool:
+    listed = flagged[:MAX_FLAGGED_LISTED]
+    omitted = len(flagged) - len(listed)
+    omitted_note = (
+        f"\n- ... and {omitted} more branch(es) not listed here (see this run's own "
+        "stdout, or re-run `python tools/sweep_stale_branches.py` locally, for the "
+        "complete list).\n"
+        if omitted > 0 else "\n"
+    )
     body = (
         "## Branches with no pull-request record at all\n\n"
         "The scheduled stale-branch sweep (`tools/sweep_stale_branches.py`, "
@@ -432,8 +473,9 @@ def _file_or_update_tracking_issue(repo: str, flagged: list[str]) -> bool:
         "auto-delete (a one-time manual sweep found genuinely live, "
         "minutes-old branches in exactly this shape); each needs per-case "
         "human/agent judgment before deletion.\n\n"
-        + "\n".join(f"- `{branch}`" for branch in flagged)
-        + "\n\nThis issue is updated in place on each scheduled run -- do not "
+        + "\n".join(f"- `{branch}`" for branch in listed)
+        + omitted_note
+        + "\nThis issue is updated in place on each scheduled run -- do not "
         "expect a new issue every time.\n"
     )
     existing = _existing_tracking_issue(repo)
@@ -524,8 +566,15 @@ def main() -> int:
         print(f"[ERROR] {error}", file=sys.stderr)
         return 1
 
-    merged_heads = _newest_merged_heads(pull_requests)
-    open_branch_names = {pr.branch for pr in pull_requests if pr.state == "OPEN"}
+    latest_per_branch = _latest_pr_per_branch(pull_requests)
+    merged_heads = {
+        branch: pr.head_oid
+        for branch, pr in latest_per_branch.items()
+        if pr.state == "MERGED" and pr.head_oid
+    }
+    non_merged_branch_names = {
+        branch for branch, pr in latest_per_branch.items() if pr.state != "MERGED"
+    }
     # "Has any PR record at all" must still count a fork-originated PR (its
     # branch isn't deletable here -- it isn't this repo's branch -- but a
     # same-named branch on THIS repo with no record of its own should not be
@@ -534,7 +583,7 @@ def main() -> int:
     all_pr_branch_names = {pr.branch for pr in pull_requests}
     protected = {default_branch, *DEFAULT_PROTECTED_EXTRA}
 
-    deletable, flagged = plan_sweep(remote_branches, merged_heads, open_branch_names, all_pr_branch_names, protected)
+    deletable, flagged = plan_sweep(remote_branches, merged_heads, non_merged_branch_names, all_pr_branch_names, protected)
 
     print(f"[INFO] {len(remote_branches)} remote branch(es) examined; protected: {sorted(protected)}.")
     print(f"[INFO] {len(deletable)} deletable (merged PR, branch unchanged since merge):")

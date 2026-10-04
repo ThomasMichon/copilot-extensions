@@ -1,8 +1,8 @@
 """Regression tests for the stale-branch sweep's pure decision logic
-(``plan_sweep``) and its `gh`/`git`-wrapping helpers' error handling.
-Mirrors ``tools/test_module_health_watchdog.py``'s convention: the actual
-branch deletion / issue filing I/O is exercised only through monkeypatched
-``subprocess.run``, never against a real repo.
+(``plan_sweep``, ``_latest_pr_per_branch``) and its `gh`/`git`-wrapping
+helpers' error handling. Mirrors ``tools/test_module_health_watchdog.py``'s
+convention: the actual branch deletion / issue filing I/O is exercised only
+through monkeypatched ``subprocess.run``, never against a real repo.
 
 Run:  python -m pytest tools/test_sweep_stale_branches.py
 """
@@ -37,10 +37,18 @@ def sweep():
     return _load_sweep()
 
 
-def _pr(sweep, branch, head_oid, *, same_repo=True, state="MERGED", merged_at="2026-01-01T00:00:00Z"):
+def _pr(sweep, branch, head_oid, *, same_repo=True, state="MERGED", event_at="2026-01-01T00:00:00Z"):
+    """Build a PullRequestHead with `event_at` routed to whichever field
+    `_latest_pr_per_branch` actually reads for that state (merged_at for
+    MERGED, closed_at for CLOSED; OPEN ignores both -- its sentinel always
+    wins regardless)."""
     return sweep.PullRequestHead(
-        branch=branch, head_oid=head_oid, same_repo=same_repo, state=state,
-        merged_at=merged_at if state == "MERGED" else "",
+        branch=branch,
+        head_oid=head_oid,
+        same_repo=same_repo,
+        state=state,
+        merged_at=event_at if state == "MERGED" else "",
+        closed_at=event_at if state == "CLOSED" else "",
     )
 
 
@@ -51,7 +59,7 @@ def test_plan_sweep_deletes_only_branches_whose_pr_is_merged(sweep):
     deletable, flagged = sweep.plan_sweep(
         remote_branches={"pr/already-merged": "sha1", "pr/still-open": "sha2", "main": "sha3", "dev": "sha4"},
         merged_heads={"pr/already-merged": "sha1"},
-        open_branch_names={"pr/still-open"},
+        non_merged_branch_names={"pr/still-open"},
         all_pr_branch_names={"pr/already-merged", "pr/still-open"},
         protected_branches={"main", "dev"},
     )
@@ -67,7 +75,7 @@ def test_plan_sweep_never_touches_protected_branches_even_if_merged(sweep):
     deletable, _flagged = sweep.plan_sweep(
         remote_branches={"main": "sha1", "dev": "sha2"},
         merged_heads={"main": "sha1", "dev": "sha2"},
-        open_branch_names=set(),
+        non_merged_branch_names=set(),
         all_pr_branch_names={"main", "dev"},
         protected_branches={"main", "dev"},
     )
@@ -82,7 +90,7 @@ def test_plan_sweep_skips_a_branch_whose_current_oid_no_longer_matches_the_merge
     deletable, _flagged = sweep.plan_sweep(
         remote_branches={"pr/reused": "new-sha"},
         merged_heads={"pr/reused": "old-sha"},
-        open_branch_names=set(),
+        non_merged_branch_names=set(),
         all_pr_branch_names={"pr/reused"},
         protected_branches=set(),
     )
@@ -90,15 +98,16 @@ def test_plan_sweep_skips_a_branch_whose_current_oid_no_longer_matches_the_merge
     assert deletable == []
 
 
-def test_plan_sweep_vetoes_a_branch_with_a_currently_open_pr_even_if_oid_matches(sweep):
+def test_plan_sweep_vetoes_a_branch_whose_latest_record_is_non_merged_even_if_oid_matches(sweep):
     # Regression: a branch name can be deleted and recreated with a brand
-    # new OPEN PR that coincidentally shares the old merged PR's head OID
-    # (e.g. reopened from the same commit). The open-PR veto must win even
-    # though the OID identity check alone would have said "deletable".
+    # new open/closed-unmerged PR that coincidentally shares the old merged
+    # PR's head OID (e.g. reopened from the same commit). The non-merged
+    # veto must win even though the OID identity check alone would have
+    # said "deletable".
     deletable, _flagged = sweep.plan_sweep(
         remote_branches={"pr/reopened": "sha1"},
         merged_heads={"pr/reopened": "sha1"},
-        open_branch_names={"pr/reopened"},
+        non_merged_branch_names={"pr/reopened"},
         all_pr_branch_names={"pr/reopened"},
         protected_branches=set(),
     )
@@ -110,7 +119,7 @@ def test_plan_sweep_flags_disposable_named_branches_with_no_pr_record(sweep):
     deletable, flagged = sweep.plan_sweep(
         remote_branches={"worktree/orphaned-123": "sha1", "feature/no-pr": "sha2", "random-unrelated-branch": "sha3"},
         merged_heads={},
-        open_branch_names=set(),
+        non_merged_branch_names=set(),
         all_pr_branch_names=set(),
         protected_branches={"main", "dev"},
     )
@@ -127,7 +136,7 @@ def test_plan_sweep_never_flags_a_disposable_named_branch_that_has_any_pr_record
     deletable, flagged = sweep.plan_sweep(
         remote_branches={"worktree/live-session": "sha1"},
         merged_heads={},
-        open_branch_names={"worktree/live-session"},
+        non_merged_branch_names={"worktree/live-session"},
         all_pr_branch_names={"worktree/live-session"},
         protected_branches={"main", "dev"},
     )
@@ -140,13 +149,64 @@ def test_plan_sweep_results_are_sorted(sweep):
     deletable, flagged = sweep.plan_sweep(
         remote_branches={"pr/zzz": "s1", "pr/aaa": "s2", "worktree/zzz": "s3", "worktree/aaa": "s4"},
         merged_heads={"pr/zzz": "s1", "pr/aaa": "s2"},
-        open_branch_names=set(),
+        non_merged_branch_names=set(),
         all_pr_branch_names={"pr/zzz", "pr/aaa"},
         protected_branches=set(),
     )
 
     assert deletable == ["pr/aaa", "pr/zzz"]
     assert flagged == ["worktree/aaa", "worktree/zzz"]
+
+
+# --- _latest_pr_per_branch ------------------------------------------------
+
+
+def test_latest_pr_per_branch_keeps_the_most_recently_merged_pr_for_a_reused_branch_name(sweep):
+    # Regression: a branch name reused across two separately-merged PRs
+    # over time must resolve to the NEWEST merge's head OID, not whichever
+    # happened to come first in `gh pr list`'s own ordering.
+    pull_requests = [
+        _pr(sweep, "pr/reused", "old-sha", event_at="2026-01-01T00:00:00Z"),
+        _pr(sweep, "pr/reused", "new-sha", event_at="2026-02-01T00:00:00Z"),
+    ]
+
+    latest = sweep._latest_pr_per_branch(pull_requests)
+
+    assert latest["pr/reused"].head_oid == "new-sha"
+    assert latest["pr/reused"].state == "MERGED"
+
+
+def test_latest_pr_per_branch_prefers_a_later_closed_unmerged_pr_over_an_earlier_merge(sweep):
+    # Regression for the real bug this fixed: if a branch was merged once,
+    # then later recreated under the same name and closed WITHOUT merging,
+    # the closed-unmerged record is the most recent one and must win --
+    # the branch must not be treated as deletable just because an older
+    # merge happens to still match its current OID.
+    pull_requests = [
+        _pr(sweep, "pr/reused", "sha-a", state="MERGED", event_at="2026-01-01T00:00:00Z"),
+        _pr(sweep, "pr/reused", "sha-a", state="CLOSED", event_at="2026-03-01T00:00:00Z"),
+    ]
+
+    latest = sweep._latest_pr_per_branch(pull_requests)
+
+    assert latest["pr/reused"].state == "CLOSED"
+
+
+def test_latest_pr_per_branch_treats_an_open_pr_as_always_most_recent(sweep):
+    pull_requests = [
+        _pr(sweep, "pr/reused", "sha-a", state="MERGED", event_at="2026-05-01T00:00:00Z"),
+        _pr(sweep, "pr/reused", "sha-b", state="OPEN"),
+    ]
+
+    latest = sweep._latest_pr_per_branch(pull_requests)
+
+    assert latest["pr/reused"].state == "OPEN"
+
+
+def test_latest_pr_per_branch_excludes_cross_repo_prs(sweep):
+    pull_requests = [_pr(sweep, "pr/fork", "sha1", same_repo=False)]
+
+    assert sweep._latest_pr_per_branch(pull_requests) == {}
 
 
 # --- _pull_requests ----------------------------------------------------
@@ -182,51 +242,29 @@ def test_pull_requests_preserves_state_for_every_pr(sweep, monkeypatch):
     }
 
 
+def test_pull_requests_preserves_merged_at_and_closed_at(sweep, monkeypatch):
+    rows = [
+        {"headRefName": "pr/merged", "headRefOid": "sha1", "isCrossRepository": False, "state": "MERGED", "mergedAt": "2026-02-01T00:00:00Z", "closedAt": "2026-02-01T00:00:00Z"},
+        {"headRefName": "pr/closed", "headRefOid": "sha2", "isCrossRepository": False, "state": "CLOSED", "mergedAt": None, "closedAt": "2026-03-01T00:00:00Z"},
+        {"headRefName": "pr/open", "headRefOid": "sha3", "isCrossRepository": False, "state": "OPEN", "mergedAt": None, "closedAt": None},
+    ]
+    monkeypatch.setattr(sweep, "_gh_json", lambda args: rows)
+
+    prs = sweep._pull_requests("owner/repo", limit=100)
+
+    by_branch = {p.branch: p for p in prs}
+    assert by_branch["pr/merged"].merged_at == "2026-02-01T00:00:00Z"
+    assert by_branch["pr/closed"].closed_at == "2026-03-01T00:00:00Z"
+    assert by_branch["pr/open"].merged_at == ""
+    assert by_branch["pr/open"].closed_at == ""
+
+
 def test_pull_requests_raises_truncated_result_when_row_count_hits_the_limit(sweep, monkeypatch):
     rows = [{"headRefName": f"pr/{i}", "headRefOid": "sha", "isCrossRepository": False, "state": "MERGED"} for i in range(3)]
     monkeypatch.setattr(sweep, "_gh_json", lambda args: rows)
 
     with pytest.raises(sweep.TruncatedResult):
         sweep._pull_requests("owner/repo", limit=3)
-
-
-def test_pull_requests_preserves_merged_at(sweep, monkeypatch):
-    rows = [
-        {"headRefName": "pr/merged", "headRefOid": "sha1", "isCrossRepository": False, "state": "MERGED", "mergedAt": "2026-02-01T00:00:00Z"},
-        {"headRefName": "pr/open", "headRefOid": "sha2", "isCrossRepository": False, "state": "OPEN", "mergedAt": None},
-    ]
-    monkeypatch.setattr(sweep, "_gh_json", lambda args: rows)
-
-    prs = sweep._pull_requests("owner/repo", limit=100)
-
-    assert {p.branch: p.merged_at for p in prs} == {"pr/merged": "2026-02-01T00:00:00Z", "pr/open": ""}
-
-
-# --- _newest_merged_heads -------------------------------------------------
-
-
-def test_newest_merged_heads_keeps_the_most_recently_merged_pr_for_a_reused_branch_name(sweep):
-    # Regression: a branch name reused across two separately-merged PRs
-    # over time must resolve to the NEWEST merge's head OID, not whichever
-    # happened to come first in `gh pr list`'s own ordering.
-    pull_requests = [
-        sweep.PullRequestHead(branch="pr/reused", head_oid="old-sha", same_repo=True, state="MERGED", merged_at="2026-01-01T00:00:00Z"),
-        sweep.PullRequestHead(branch="pr/reused", head_oid="new-sha", same_repo=True, state="MERGED", merged_at="2026-02-01T00:00:00Z"),
-    ]
-
-    merged_heads = sweep._newest_merged_heads(pull_requests)
-
-    assert merged_heads == {"pr/reused": "new-sha"}
-
-
-def test_newest_merged_heads_excludes_cross_repo_and_non_merged_prs(sweep):
-    pull_requests = [
-        sweep.PullRequestHead(branch="pr/fork", head_oid="sha1", same_repo=False, state="MERGED", merged_at="2026-01-01T00:00:00Z"),
-        sweep.PullRequestHead(branch="pr/open", head_oid="sha2", same_repo=True, state="OPEN", merged_at=""),
-        sweep.PullRequestHead(branch="pr/closed", head_oid="sha3", same_repo=True, state="CLOSED", merged_at=""),
-    ]
-
-    assert sweep._newest_merged_heads(pull_requests) == {}
 
 
 # --- _remote_branches ----------------------------------------------------
@@ -394,7 +432,6 @@ def test_delete_branch_scrubs_git_env(sweep, monkeypatch):
     assert "GIT_WORK_TREE" not in captured_env
 
 
-
 def test_delete_branch_treats_a_rejected_lease_as_a_safe_skip(sweep, monkeypatch):
     class _Rejected:
         returncode = 1
@@ -443,6 +480,49 @@ def test_delete_branch_reports_failure_on_a_real_error(sweep, monkeypatch, capsy
 
     assert sweep._delete_branch("origin", "pr/blocked", "expected-sha") is False
     assert "failed to delete" in capsys.readouterr().err
+
+
+# --- _file_or_update_tracking_issue (body size bound) ---------------------
+
+
+def test_file_or_update_tracking_issue_bounds_the_rendered_branch_list(sweep, monkeypatch):
+    # Regression: an unbounded list of a representative 3000+-branch
+    # backlog can exceed GitHub's 65,536-char issue-body limit, permanently
+    # failing every create/edit attempt. The body must stay bounded and
+    # report an omitted count instead of listing everything.
+    captured_bodies = []
+
+    class _Result:
+        returncode = 0
+        stdout = "https://github.com/owner/repo/issues/1\n"
+        stderr = ""
+
+    def _fake_run(args, **_kwargs):
+        if "--body" in args:
+            captured_bodies.append(args[args.index("--body") + 1])
+        return _Result()
+
+    monkeypatch.setattr(sweep, "_existing_tracking_issue", lambda repo: None)
+    monkeypatch.setattr(sweep.subprocess, "run", _fake_run)
+
+    many_branches = [f"worktree/branch-{i}" for i in range(5000)]
+    assert sweep._file_or_update_tracking_issue("owner/repo", many_branches) is True
+
+    body = captured_bodies[-1]
+    assert len(body) < 60000
+    assert "more branch(es) not listed" in body
+
+
+def test_file_or_update_tracking_issue_lists_everything_when_under_the_bound(sweep, monkeypatch):
+    class _Result:
+        returncode = 0
+        stdout = "https://github.com/owner/repo/issues/1\n"
+        stderr = ""
+
+    monkeypatch.setattr(sweep, "_existing_tracking_issue", lambda repo: None)
+    monkeypatch.setattr(sweep.subprocess, "run", lambda *a, **k: _Result())
+
+    assert sweep._file_or_update_tracking_issue("owner/repo", ["worktree/only-one"]) is True
 
 
 # --- _clear_tracking_issue -------------------------------------------------
@@ -547,6 +627,31 @@ def test_main_never_deletes_a_branch_whose_pr_is_merely_open(sweep, monkeypatch)
 
     def _boom(*_args, **_kwargs):
         raise AssertionError("must never delete a branch backing a still-open PR")
+
+    monkeypatch.setattr(sweep, "_delete_branch", _boom)
+    monkeypatch.setattr(sweep, "_clear_tracking_issue", lambda repo: True)
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--execute"])
+
+    assert sweep.main() == 0
+
+
+def test_main_never_deletes_a_branch_whose_latest_record_is_closed_unmerged(sweep, monkeypatch):
+    # Regression for the fourth review's finding: a branch merged once,
+    # then reused and closed WITHOUT merging, must never be deleted just
+    # because the older merge's OID still matches.
+    monkeypatch.setattr(
+        sweep, "_pull_requests",
+        lambda repo, limit: [
+            _pr(sweep, "pr/reused", "sha-a", state="MERGED", event_at="2026-01-01T00:00:00Z"),
+            _pr(sweep, "pr/reused", "sha-a", state="CLOSED", event_at="2026-03-01T00:00:00Z"),
+        ],
+    )
+    monkeypatch.setattr(sweep, "_remote_branches", lambda repo, limit: {"pr/reused": "sha-a"})
+    monkeypatch.setattr(sweep, "_default_branch", lambda repo: "main")
+    monkeypatch.setattr(sweep, "_verify_remote_matches_repo", lambda remote, repo: None)
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("must never delete a branch whose latest PR record is closed-unmerged")
 
     monkeypatch.setattr(sweep, "_delete_branch", _boom)
     monkeypatch.setattr(sweep, "_clear_tracking_issue", lambda repo: True)
