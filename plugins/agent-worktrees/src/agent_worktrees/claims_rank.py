@@ -187,28 +187,34 @@ DEFAULT_LABEL_PREFIX: dict[str, str] = {
 _PR_LIKE_KINDS = frozenset({"pr", "bug", "issue"})
 
 #: Phase 6 canonical-ref shape (``worktree-claims-transitive-finalization``
-#: effort, 2026-10-04): ``"<kind>:<system>:<key>"``. Duplicated from
-#: ``tracking_claims.decanonicalize_ref`` as a tiny local unwrap rather than
-#: an import -- this module stays import-free of siblings (see the module
-#: docstring) so it works against a plain dict ledger too. Every parser
-#: below unwraps at its own entry point, exactly mirroring
-#: ``tracking_claims``'s own call sites, so a canonical-form ref is accepted
-#: identically whether it reaches this module directly or via a sibling.
-_CANONICAL_REF_RE = re.compile(r"^([a-z][a-z0-9_-]*):([^:]*):(.+)$")
-_CLAIM_KINDS_FOR_CANON = frozenset({
-    "worktree", "session", "codespace", "container", "task", "bridge",
-    "ssh", "effort", "workdir", "pr", "bug", "issue",
-})
+#: effort, 2026-10-04): ``"cref1:<kind>:<system>:<key>"``. Duplicated from
+#: ``tracking_claims.decanonicalize_ref``/its own ``_CANONICAL_SENTINEL``
+#: as a tiny local unwrap rather than an import -- this module stays
+#: import-free of siblings (see the module docstring) so it works against
+#: a plain dict ledger too. Every parser below unwraps at its own entry
+#: point, exactly mirroring ``tracking_claims``'s own call sites, so a
+#: canonical-form ref is accepted identically whether it reaches this
+#: module directly or via a sibling. The ``cref1:`` sentinel (not a closed
+#: kind vocabulary) is what makes detection unambiguous -- see
+#: ``tracking_claims._CANONICAL_SENTINEL``'s own comment for why a closed
+#: vocabulary alone would both misparse a coincidentally-shaped legacy
+#: opaque ref and reject a plugin-contributed ``claim_kinds_registry``
+#: kind.
+_CANONICAL_REF_RE = re.compile(
+    r"^cref1:([a-z][a-z0-9_-]*):([^:]*):(.+)$"
+)
 
 
 def _decanonicalize_ref(
     ref: str, *, expected_kinds: frozenset[str] | None = None,
 ) -> str:
-    """Unwrap a Phase 6 canonical ``"<kind>:<system>:<key>"`` ref back to
-    its legacy shape, or return ``ref`` unchanged for anything else
-    (including a URL's own ``https:`` scheme, which never matches a known
-    kind). For ``"worktree"``/``"session"``, ``system`` (the machine) is
-    re-prefixed onto ``key`` to reconstruct the full
+    """Unwrap a Phase 6 canonical ``"cref1:<kind>:<system>:<key>"`` ref back
+    to its legacy shape, or return ``ref`` unchanged for anything else
+    (detection is the ``cref1:`` sentinel alone -- never a closed kind
+    vocabulary -- so a URL's own ``https:`` scheme and a coincidentally
+    colon-shaped legacy opaque ref both correctly fail to match). For
+    ``"worktree"``/``"session"``, ``system`` (the machine) is re-prefixed
+    onto ``key`` to reconstruct the full
     ``machine/project/worktree_id[#session]`` legacy grammar; every other
     kind's ``key`` already IS its legacy ref.
 
@@ -225,8 +231,6 @@ def _decanonicalize_ref(
     if not m:
         return ref
     found_kind, system, key = m.groups()
-    if found_kind not in _CLAIM_KINDS_FOR_CANON:
-        return ref
     if expected_kinds is not None and found_kind not in expected_kinds:
         return ref
     if found_kind in ("worktree", "session"):
@@ -284,10 +288,20 @@ def _parse_pr_like_ref(ref: str) -> tuple[str | None, str | None]:
     full GitHub PR/issue URL, or a full PR/issue URL from any other forge
     (Gitea/Forgejo's ``pulls``, GitLab's ``merge_requests``, or ``issues`` on
     any of them). ``(None, None)`` when no shape matches (never raises on a
-    malformed/foreign ref)."""
+    malformed/foreign ref).
+
+    Expects an already-legacy-shaped ``ref`` -- both call sites
+    (:func:`claim_url`, :func:`format_claim`) already unwrap any Phase 6
+    canonical form themselves, restricted to the EXACT kind they were
+    asked for (``expected_kinds=frozenset({kind})``), before calling this.
+    This function deliberately does NOT re-unwrap with the broader
+    ``_PR_LIKE_KINDS`` itself -- doing so would undo that exact-kind
+    restriction and let e.g. ``(kind="pr", ref="cref1:bug:...:owner/repo#42")``
+    be accepted and resolved as PR 42 instead of correctly rejected as a
+    mismatched self-description."""
     if not ref:
         return None, None
-    stripped = _decanonicalize_ref(ref.strip(), expected_kinds=_PR_LIKE_KINDS)
+    stripped = ref.strip()
     m = _GITHUB_PR_URL_RE.match(stripped) or _GENERIC_PR_URL_RE.match(stripped)
     if m:
         return m.group(1), m.group(2)

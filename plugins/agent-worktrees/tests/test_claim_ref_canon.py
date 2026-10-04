@@ -32,7 +32,7 @@ from agent_worktrees.tracking_claims import (
 def test_worktree_ref_round_trips_through_canonical_form():
     legacy = format_claim_ref("lambda-core", "example-project", "wt-123", "sess1")
     canon = canonicalize_ref("worktree", legacy)
-    assert canon == "worktree:lambda-core:example-project/wt-123#sess1"
+    assert canon == "cref1:worktree:lambda-core:example-project/wt-123#sess1"
     assert decanonicalize_ref(canon) == legacy
     # And the canonical form parses identically to the legacy one.
     assert parse_claim_ref(canon) == parse_claim_ref(legacy)
@@ -41,7 +41,7 @@ def test_worktree_ref_round_trips_through_canonical_form():
 def test_worktree_ref_round_trips_without_session():
     legacy = format_claim_ref("wheatley", "copilot-extensions", "wt-abc")
     canon = canonicalize_ref("worktree", legacy)
-    assert canon == "worktree:wheatley:copilot-extensions/wt-abc"
+    assert canon == "cref1:worktree:wheatley:copilot-extensions/wt-abc"
     assert decanonicalize_ref(canon) == legacy
 
 
@@ -51,14 +51,14 @@ def test_unqualified_worktree_ref_falls_back_to_opaque_canonical_form():
     # still round-trips losslessly.
     legacy = "bare-worktree-id"
     canon = canonicalize_ref("worktree", legacy)
-    assert canon == "worktree::bare-worktree-id"
+    assert canon == "cref1:worktree::bare-worktree-id"
     assert decanonicalize_ref(canon) == legacy
 
 
 def test_pr_shorthand_ref_round_trips_through_canonical_form():
     legacy = "acme-org/sample-repo#2481"
     canon = canonicalize_ref("pr", legacy)
-    assert canon == "pr::acme-org/sample-repo#2481"
+    assert canon == "cref1:pr::acme-org/sample-repo#2481"
     assert decanonicalize_ref(canon) == legacy
 
 
@@ -79,7 +79,7 @@ def test_opaque_kind_ref_round_trips_through_canonical_form():
         ("workdir", "pending-run:abc"),
     ):
         canon = canonicalize_ref(kind, legacy)
-        assert canon == f"{kind}::{legacy}"
+        assert canon == f"cref1:{kind}::{legacy}"
         assert decanonicalize_ref(canon) == legacy
 
 
@@ -93,7 +93,7 @@ def test_canonicalize_is_idempotent():
 def test_session_ref_round_trips_through_canonical_form():
     legacy = format_claim_ref("lambda-core", "example-project", "wt-123", "sess1")
     canon = canonicalize_ref("session", legacy)
-    assert canon == "session:lambda-core:example-project/wt-123#sess1"
+    assert canon == "cref1:session:lambda-core:example-project/wt-123#sess1"
     assert decanonicalize_ref(canon) == legacy
 
 
@@ -123,7 +123,7 @@ def test_decanonicalize_restricts_to_expected_kinds():
     # must reject (pass through unchanged, never unwrap) a "task"-kind
     # canonical ref that happens to decode into something PR-shaped.
     mismatched = canonicalize_ref("task", "owner/repo#42")
-    assert mismatched == "task::owner/repo#42"
+    assert mismatched == "cref1:task::owner/repo#42"
     assert (
         decanonicalize_ref(mismatched, expected_kinds=frozenset({"pr"}))
         == mismatched
@@ -158,14 +158,14 @@ def test_canonicalize_does_not_mistake_a_different_kinds_opaque_ref_as_already_c
     # break the round trip (the exact bug this guards against).
     opaque_legacy = "pr::foo"
     canon = canonicalize_ref("task", opaque_legacy)
-    assert canon == "task::pr::foo"
+    assert canon == "cref1:task::pr::foo"
     assert decanonicalize_ref(canon) == opaque_legacy
 
 
 def test_decanonicalize_never_mistakes_a_url_scheme_for_a_kind():
-    # "https" is not a known claim kind, so a PR/issue URL ref must pass
-    # through completely unchanged rather than being misparsed as
-    # kind="https", system="//github.com/acme-org/sample-repo/pull", ...
+    # A PR/issue URL ref must pass through completely unchanged -- it
+    # never starts with the cref1: sentinel, so detection never depends on
+    # (mis)parsing "https" as if it were a kind token at all.
     url = "https://github.com/acme-org/sample-repo/pull/2481"
     assert decanonicalize_ref(url) == url
 
@@ -216,3 +216,36 @@ def test_claims_rank_format_claim_accepts_canonical_worktree_ref():
     assert claims_rank.format_claim(
         "worktree", canon
     ) == claims_rank.format_claim("worktree", legacy)
+
+
+def test_decanonicalize_does_not_misdetect_legacy_refs_shaped_like_bare_kind_grammar():
+    # Without the cref1: sentinel, a legacy opaque ref that happens to
+    # already read like "<kind>:<system>:<key>" (e.g. a worktree ref
+    # literally named "worktree::foo", or a task ref literally named
+    # "pr::foo") would be misdetected as already-canonical and corrupted on
+    # unwrap. The sentinel means these are never mistaken for canonical
+    # form -- they pass through completely unchanged.
+    for legacy in ("worktree::foo", "pr::foo", "task:somesystem:somekey"):
+        assert decanonicalize_ref(legacy) == legacy
+
+
+def test_worktree_ref_with_colon_in_machine_name_falls_back_to_opaque_form():
+    # A machine alias may contain a colon (config.py imposes no token
+    # restriction on it); the structured canonical form's "system" segment
+    # can't represent that without corrupting the system/key split, so
+    # canonicalize_ref must fall back to the always-lossless opaque form.
+    legacy = format_claim_ref("lab:west", "example-project", "wt-123")
+    canon = canonicalize_ref("worktree", legacy)
+    assert canon == f"cref1:worktree::{legacy}"
+    assert decanonicalize_ref(canon) == legacy
+
+
+def test_canonicalize_round_trips_a_plugin_contributed_kind():
+    # Detection is the cref1: sentinel alone, never a closed CLAIM_KINDS
+    # vocabulary -- a plugin-contributed kind (via claim_kinds_registry,
+    # e.g. a hypothetical "ticket" kind) must round-trip identically to
+    # any built-in kind.
+    legacy = "ABC-123"
+    canon = canonicalize_ref("ticket", legacy)
+    assert canon == "cref1:ticket::ABC-123"
+    assert decanonicalize_ref(canon) == legacy
