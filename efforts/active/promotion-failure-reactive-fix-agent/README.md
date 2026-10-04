@@ -2352,10 +2352,12 @@ default branch; the bash allowlist cannot switch branches. The scope
 gate also diffed against that default branch, so a `dev` checkout would
 have looked like the agent had edited every `dev`-only file.
 
-Fixed in the workflow source: `pre-agent-steps` now detaches at
-`origin/dev` before the engine starts, and the scope gate diffs against
-`origin/dev`. The prompt states that the workspace is already that tip.
-This does not yet prove a draft fix PR; it removes the reason the first
-live attempt could not see the failure. The trigger still reads the
-workflow from the default branch, so the fix is inert until that branch
-has the compiled lock.
+A hardcoded `git checkout` of `dev` is the wrong fix: it ignores the
+repo's own `default_branch` and invents a second checkout path.
+`agent-worktrees create` already forks from that configured branch.
+The workflow step now calls that command (`--system --no-owner
+--no-pair`) and records the path. The agent is told to edit there, not
+the Actions checkout. Still open: the gh-aw engine's own working
+directory is the Actions checkout, so a sibling worktree is not yet the
+engine's edit root. That binding is the next slice, not another
+hand-rolled checkout.

@@ -416,16 +416,17 @@ jobs:
 # this and recommends writing the result to a FILE and referencing that
 # fixed path in the prompt instead, which is what this step now does.
 pre-agent-steps:
-  - name: Check out the contribution branch
-    # This workflow is registered from the default branch, so the agent
-    # job's own checkout is that branch. The failure under repair is on
-    # `dev`. Leave the workspace there or the agent diagnoses a tree the
-    # failing run never built, and its tool allowlist cannot switch
-    # branches itself.
+  - name: Create a worktree from the configured contribution branch
+    # The Actions checkout is this workflow's ref, which is GitHub's
+    # default branch. That is not this repo's contribution branch.
+    # agent-worktrees create reads `.agent-worktrees/config.yaml`
+    # `default_branch` and forks from that ref. Do not git-checkout a
+    # hardcoded branch here.
     run: |
       set -euo pipefail
-      git fetch origin dev --quiet
-      git checkout --force --detach origin/dev
+      mkdir -p "$GITHUB_WORKSPACE/.verify-issue"
+      uv run --project plugins/agent-worktrees agent-worktrees create --json --system --no-owner --no-pair --origin system \
+        > "$GITHUB_WORKSPACE/.verify-issue/worktree.json"
   - name: Decode the verified issue record
     env:
       BODY_B64: ${{ needs.verify-issue.outputs.body-b64 }}
@@ -450,13 +451,15 @@ pre-agent-steps:
 # always removed before any patch is built, regardless of this check.
 post-steps:
   - name: Enforce a machine-checked change-scope gate
-    # Diff against current `dev`, the branch the pull request targets.
-    # A merge-base with the default branch would treat every `dev`-only
-    # commit as the agent's own patch once the workspace is `dev`.
+    # Diff the worktree agent-worktrees just created, not the Actions
+    # checkout. That worktree is already the configured contribution
+    # branch; a merge-base with GitHub's default branch would treat
+    # every contribution-branch-only file as the agent's patch.
     run: |
       set -euo pipefail
-      git fetch origin dev --quiet
-      BASE=$(git rev-parse origin/dev)
+      WT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["worktree"]["path"])' "$GITHUB_WORKSPACE/.verify-issue/worktree.json")
+      cd "$WT"
+      BASE=$(git rev-parse HEAD)
       # Real review finding (PR #4155): comparing only `$BASE` vs `HEAD`
       # (committed history) ignores the normal state a `create-pull-request`
       # safe-output actually collects from -- uncommitted and untracked
@@ -1065,10 +1068,13 @@ not part of your fix, and is stripped from any patch regardless.
 `.verify-issue/body.txt` already carries the failing job name, the failing
 test node id (when the failing one was parseable), the run link and commit
 SHA, and a log excerpt. Treat
-this as your starting evidence, not your only evidence. Your workspace is
-already the current `dev` tip, not the default branch. The recorded commit
-SHA may be behind that tip -- confirm the failure still reproduces here
-before editing, and do not treat a default-branch tree as the one that failed.
+this as your starting evidence, not your only evidence. Do not edit the
+Actions checkout. `.verify-issue/worktree.json` names a worktree
+`agent-worktrees create` already made from this repo's configured
+contribution branch (`default_branch` in `.agent-worktrees/config.yaml`),
+not from GitHub's default branch. Do all inspection and edits in that
+path. The recorded commit SHA may be behind that tip -- confirm the
+failure still reproduces there before editing.
 
 ## Your charter -- read this before touching anything
 
