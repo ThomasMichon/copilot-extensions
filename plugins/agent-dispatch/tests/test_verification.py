@@ -759,6 +759,88 @@ def test_backlog_triager_verification_checks_repo_specific_label_schema_and_effo
     assert queue.get(duplicate_id).status == Status.COMPLETED
 
 
+def test_repository_issue_loop_issue_reproducer_requires_evidence_and_outcome_markers(
+    tmp_path,
+):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    script = tmp_path / "eval.py"
+    script.write_text(
+        "import json, re, sys\n"
+        "fixtures = {\n"
+        "  27: {\n"
+        "    'labels': ['bug', 'repro:confirmed'],\n"
+        "    'comments': ['Reproduction evidence: pytest tests/test_bug.py -k issue27\\nobserved the reported failure'],\n"
+        "  },\n"
+        "  28: {\n"
+        "    'labels': ['bug', 'repro:not-reproducible', 'repro:strike-1'],\n"
+        "    'comments': ['Reproduction evidence: tried on current dev with clean checkout\\nno failure reproduced'],\n"
+        "  },\n"
+        "  29: {\n"
+        "    'labels': ['bug', 'repro:not-reproducible'],\n"
+        "    'comments': ['Reproduction evidence: attempted reported steps only'],\n"
+        "  },\n"
+        "}\n"
+        "task = json.load(sys.stdin)['task']\n"
+        "payload = json.loads(task['payload_inline'])\n"
+        "keys = payload['repository_issue_loop']['resource_keys']\n"
+        "numbers = [int(re.search(r':issue:(\\d+)$', key).group(1)) for key in keys]\n"
+        "for number in numbers:\n"
+        "    issue = fixtures[number]\n"
+        "    labels = set(issue['labels'])\n"
+        "    comments = issue['comments']\n"
+        "    has_evidence = any('Reproduction evidence:' in comment for comment in comments)\n"
+        "    reproducible = 'repro:confirmed' in labels\n"
+        "    not_reproducible = 'repro:not-reproducible' in labels\n"
+        "    has_strike = any(label.startswith('repro:strike-') for label in labels)\n"
+        "    if has_evidence and reproducible:\n"
+        "        continue\n"
+        "    if has_evidence and not_reproducible and has_strike:\n"
+        "        continue\n"
+        "    json.dump({'decision': 'noop', 'reason': 'repro evidence/outcome schema incomplete'}, sys.stdout)\n"
+        "    break\n"
+        "else:\n"
+        "    json.dump({'decision': 'confirm', 'reason': 'repro evidence + outcome markers present'}, sys.stdout)\n",
+        encoding="utf-8",
+    )
+    _register_script(queue, str(script), evaluator_ref="issue-reproducer")
+    reproducible_id = _submitted_task(
+        queue,
+        "issue reproduced with evidence",
+        require_verification=True,
+        evaluator_ref="issue-reproducer",
+        payload_inline='{"repository_issue_loop":{"resource_keys":["forge:github:repository:example/project:issue:27"]}}',
+    )
+    not_reproducible_id = _submitted_task(
+        queue,
+        "issue not reproducible with strike",
+        require_verification=True,
+        evaluator_ref="issue-reproducer",
+        payload_inline='{"repository_issue_loop":{"resource_keys":["forge:github:repository:example/project:issue:28"]}}',
+    )
+    incomplete_id = _submitted_task(
+        queue,
+        "issue missing strike marker",
+        require_verification=True,
+        evaluator_ref="issue-reproducer",
+        payload_inline='{"repository_issue_loop":{"resource_keys":["forge:github:repository:example/project:issue:29"]}}',
+    )
+
+    reproducible = evaluate_submitted_task(
+        queue, reproducible_id, trigger="submitted"
+    )
+    not_reproducible = evaluate_submitted_task(
+        queue, not_reproducible_id, trigger="submitted"
+    )
+    incomplete = evaluate_submitted_task(queue, incomplete_id, trigger="submitted")
+
+    assert reproducible["applied"][0]["decision"] == "complete"
+    assert queue.get(reproducible_id).status == Status.COMPLETED
+    assert not_reproducible["applied"][0]["decision"] == "complete"
+    assert queue.get(not_reproducible_id).status == Status.COMPLETED
+    assert incomplete["applied"][0]["decision"] == "noop"
+    assert queue.get(incomplete_id).status == Status.SUBMITTED
+
+
 def test_future_scheduled_verification_uses_idle_interval_not_retry_interval(tmp_path):
     queue = TaskQueue(tmp_path / "tasks.db")
     task = queue.create(
