@@ -1,0 +1,9 @@
+{
+  "comment": "resolve: wrap a POSIX remote-resume command in a login shell (bash -lc) so a bare non-interactive SSH exec sources ~/.profile and finds ~/.local/bin (uv/copilot/gh); Windows (pwsh) targets are unaffected",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

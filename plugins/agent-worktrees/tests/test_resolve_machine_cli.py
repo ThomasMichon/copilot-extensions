@@ -97,3 +97,86 @@ def test_emit_remote_plan_for_env_still_unknown_for_unmatched_name(tmp_path):
         rc = rmc._emit_remote_plan_for_env(config, "some-other-box", "Win", [])
 
     assert rc is None
+
+
+# -- login-shell wrapping for a bare non-interactive SSH command-exec --------
+#
+# A bare `ssh host "cmd"` is a non-login, non-interactive shell for the
+# remote side: neither ~/.profile (login-only) nor a guarded ~/.bashrc entry
+# ever runs for it, so a POSIX host's `uv`/`copilot`/`gh` (installed to
+# ~/.local/bin, only ever on PATH via one of those) is unreachable. Hit live
+# resuming a worktree over SSH to a machine with no ~/.bashrc at all.
+
+
+def test_wrap_remote_command_wraps_explicit_posix_shells():
+    assert rmc._wrap_remote_command("bash", "aperture-labs") == (
+        "bash -lc aperture-labs"
+    )
+    assert rmc._wrap_remote_command("sh", "aperture-labs") == "bash -lc aperture-labs"
+
+
+def test_wrap_remote_command_quotes_the_inner_command():
+    wrapped = rmc._wrap_remote_command("bash", "aperture-labs list --json")
+    assert wrapped == "bash -lc 'aperture-labs list --json'"
+
+
+def test_wrap_remote_command_never_wraps_pwsh_or_unrecognized_shell():
+    # Wrapping a non-POSIX target in `bash -lc` would break it outright --
+    # never guess for pwsh, and never guess for an unrecognized/empty value
+    # either (only _resolve_ssh_target's own defaulting decides that).
+    assert rmc._wrap_remote_command("pwsh", "aperture-labs") == "aperture-labs"
+    assert rmc._wrap_remote_command("", "aperture-labs") == "aperture-labs"
+    assert rmc._wrap_remote_command("cmd", "aperture-labs") == "aperture-labs"
+
+
+def test_resolve_ssh_target_defaults_shell_from_environment_name():
+    # Real-world machines.yaml always sets `shell:` explicitly today, but a
+    # config that doesn't must still default sensibly: bash for a POSIX
+    # environment, pwsh for a windows one -- never the other way around.
+    posix_entry = _entry(
+        "borealis", envs=[("linux", "borealis")],
+    )
+    assert rmc._resolve_ssh_target(posix_entry) == ("borealis", "bash")
+
+    windows_entry = _entry(
+        "atlas-core", envs=[("windows", "atlas-core")],
+    )
+    assert rmc._resolve_ssh_target(windows_entry) == ("atlas-core", "pwsh")
+
+
+def test_emit_remote_plan_for_env_wraps_remote_command_for_posix_target(tmp_path):
+    entries = {
+        "borealis": _entry(
+            "borealis",
+            hostname="borealis",
+            envs=[("linux", "borealis")],
+        ),
+    }
+    config = _fake_config(tmp_path)
+    with patch.object(cfg, "load_machines_yaml", return_value=entries), \
+         patch.object(cfg, "project_name", return_value="aperture-labs"), \
+         patch.object(rmc, "_emit_plan") as emit_plan:
+        rc = rmc._emit_remote_plan_for_env(config, "borealis", "Linux", [])
+
+    assert rc == 0
+    (plan,) = emit_plan.call_args.args
+    assert plan["remote_command"] == "bash -lc aperture-labs"
+
+
+def test_emit_remote_plan_for_env_does_not_wrap_for_windows_target(tmp_path):
+    entries = {
+        "atlas-core": _entry(
+            "atlas-core",
+            hostname="atlas-core",
+            envs=[("windows", "atlas-core")],
+        ),
+    }
+    config = _fake_config(tmp_path)
+    with patch.object(cfg, "load_machines_yaml", return_value=entries), \
+         patch.object(cfg, "project_name", return_value="aperture-labs"), \
+         patch.object(rmc, "_emit_plan") as emit_plan:
+        rc = rmc._emit_remote_plan_for_env(config, "atlas-core", "Win", [])
+
+    assert rc == 0
+    (plan,) = emit_plan.call_args.args
+    assert plan["remote_command"] == "aperture-labs"
