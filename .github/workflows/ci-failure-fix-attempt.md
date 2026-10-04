@@ -431,11 +431,26 @@ pre-agent-steps:
     # re-resolving a branch that can move while the agent runs.
     env:
       GH_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      # Real review finding (PR #5135): `safe-outputs.create-pull-request`'s
+      # own `base-branch:` below is compile-time frontmatter -- it cannot
+      # read a shell variable, so it cannot itself track whatever this
+      # step resolves at runtime. Hardcoding it to match is a silent
+      # coupling: if the repo's configured contribution branch ever
+      # changes, the agent would edit one branch while safe-outputs opens
+      # the patch against another, with no error, just a wrong-based PR.
+      # Fail loudly here instead, the same machine-enforced-gate pattern
+      # `post-steps` below already uses, rather than trusting a comment to
+      # keep the two in sync.
+      SAFE_OUTPUTS_BASE_BRANCH: dev
     run: |
       set -euo pipefail
       mkdir -p "$GITHUB_WORKSPACE/.verify-issue"
       BRANCH=$(sed -n 's/^default_branch: *//p' .agent-worktrees/config.yaml | head -1)
       BRANCH=${BRANCH:-$GH_DEFAULT_BRANCH}
+      if [ "$BRANCH" != "$SAFE_OUTPUTS_BASE_BRANCH" ]; then
+        echo "::error::Configured contribution branch '$BRANCH' no longer matches safe-outputs' hardcoded base-branch '$SAFE_OUTPUTS_BASE_BRANCH' (frontmatter, compile-time only -- it cannot read this). Update the create-pull-request base-branch value in this file to match, then recompile."
+        exit 1
+      fi
       if [ "$BRANCH" != "$GH_DEFAULT_BRANCH" ]; then
         git fetch origin "$BRANCH" --quiet
         git checkout --force --detach "origin/$BRANCH"
