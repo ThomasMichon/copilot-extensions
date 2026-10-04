@@ -42,6 +42,17 @@ def canonical():
     return _load_canonical_materialize_main()
 
 
+def _symlink_to_or_skip(link: Path, target: Path, *, target_is_directory: bool = False) -> None:
+    """Create ``link -> target``, skipping the test if this machine's account
+    lacks symlink-creation privilege (``SeCreateSymbolicLinkPrivilege`` absent
+    on Windows without admin/Developer Mode) -- same convention already used
+    by ``test_pivot_registry.py``'s own symlink-tamper tests."""
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+
 def _canonical_lib(root: Path, lib: str, *, version: str, content: str) -> Path:
     pkg = lib.replace("-", "_")
     d = root / "libs" / lib
@@ -147,7 +158,7 @@ def test_uv_editable_parity_refuses_a_symlinked_canonical(tmp_path: Path, canoni
         (outside / "zdd").mkdir(parents=True)
         (outside / "zdd" / "__init__.py").write_text("smuggled = True\n", encoding="utf-8")
         shutil.rmtree(canon)
-        canon.symlink_to(outside / "zdd", target_is_directory=True)
+        _symlink_to_or_skip(canon, outside / "zdd", target_is_directory=True)
         _uv_editable_consumer(root, lib="zdd", raw_path="../libs/zdd")
 
     got_trusted, got_canonical = _run_uv_editable_scenario(

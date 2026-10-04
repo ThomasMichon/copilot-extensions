@@ -20,6 +20,17 @@ from worktree_manager import engine_client as ec
 from worktree_manager import self_install
 
 
+def _symlink_to_or_skip(link, target, *, target_is_directory: bool = False) -> None:
+    """Create ``link -> target``, skipping the test if this machine's account
+    lacks symlink-creation privilege (``SeCreateSymbolicLinkPrivilege`` absent
+    on Windows without admin/Developer Mode) -- same convention already used
+    by ``test_pivot_registry.py``'s own symlink-tamper tests."""
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+
 def _run_update(rest, monkeypatch, *, su_action="already-current", su_kwargs=None):
     from worktree_manager.self_install import SelfUpdateResult
     calls = {}
@@ -349,7 +360,7 @@ def test_fetch_via_tarball_refuses_a_symlink_pointing_outside_the_archive(tmp_pa
     # A real symlink under libs/ pointing OUTSIDE the archive tree entirely --
     # tarfile.add() (default dereference=False) stores this as an actual
     # symlink tar entry, not the target's dereferenced content.
-    (top / "libs" / "shared-lib" / "evil-link").symlink_to(outside_target)
+    _symlink_to_or_skip(top / "libs" / "shared-lib" / "evil-link", outside_target)
 
     archive_path = tmp_path / "payload.tar.gz"
     with tarfile.open(archive_path, "w:gz") as tf:
@@ -409,7 +420,7 @@ def test_fetch_via_tarball_refuses_a_symlinked_libs_root(tmp_path, monkeypatch):
         "[project]\nname='x'\nversion='9.9.9'\n"
     )
     top.mkdir(parents=True, exist_ok=True)
-    (top / "libs").symlink_to(outside, target_is_directory=True)
+    _symlink_to_or_skip(top / "libs", outside, target_is_directory=True)
 
     archive_path = tmp_path / "payload.tar.gz"
     with tarfile.open(archive_path, "w:gz") as tf:
@@ -445,8 +456,27 @@ def test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir(tmp_path, monk
     whose own worktree-manager/ subpath is a real (non-symlink) file
     within the symlinked-to target -- rdir.is_dir() already follows the
     symlink to find it, so payload itself would never be a symlink even
-    though the whole tree was reached via a symlinked parent."""
+    though the whole tree was reached via a symlinked parent.
+
+    Unlike the other two symlink-refusal tests above, this scenario's
+    symlink is created by ``tarfile``'s OWN extraction (inside
+    ``_fetch_via_tarball`` under test), not by this test's setup code --
+    so the usual ``_symlink_to_or_skip`` guard can't wrap it directly.
+    Probe the same underlying privilege first and skip identically if
+    it's unavailable (without this, a host lacking
+    ``SeCreateSymbolicLinkPrivilege`` silently fails to materialize the
+    symlink member at all, and the assertion below fails on an unrelated
+    "payload not found" error instead of exercising this check)."""
     import tarfile
+
+    probe_target = tmp_path / "symlink-probe-target"
+    probe_target.mkdir()
+    probe_link = tmp_path / "symlink-probe-link"
+    try:
+        probe_link.symlink_to(probe_target, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    probe_link.unlink()
 
     outside = tmp_path / "outside-extraction-root"
     (outside / "worktree-manager" / "src" / "worktree_manager").mkdir(parents=True)

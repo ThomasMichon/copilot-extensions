@@ -38,6 +38,19 @@ def test_mux_daemon_unknown_action(capsys):
     assert "unknown mux-daemon action" in capsys.readouterr().out
 
 
+def test_mux_daemon_status_delegates_to_daemons_cli(monkeypatch, capsys):
+    """``mux-daemon status`` (and its ``daemons status`` alias dispatched
+    from ``__main__``) both route into the shared Phase 1 observability
+    report (copilot-extensions#5001)."""
+    monkeypatch.setattr("worktree_manager.daemons_status.daemon_statuses", lambda: [])
+
+    assert main(["mux-daemon", "status"]) == 0
+    assert "no resident mux-daemons" in capsys.readouterr().out
+
+    assert main(["daemons", "status", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == []
+
+
 def test_mux_daemon_register_show_remove_roundtrip(capsys):
     rc = main(
         [

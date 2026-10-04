@@ -12,7 +12,20 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from worktree_manager import _trusted_pointer_materializer as mat
+
+
+def _symlink_to_or_skip(link: Path, target: Path, *, target_is_directory: bool = False) -> None:
+    """Create ``link -> target``, skipping the test if this machine's account
+    lacks symlink-creation privilege (``SeCreateSymbolicLinkPrivilege`` absent
+    on Windows without admin/Developer Mode) -- same convention already used
+    by ``test_pivot_registry.py``'s own symlink-tamper tests."""
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
 
 
 def _canonical_lib(root: Path, lib: str, *, version: str, content: str) -> Path:
@@ -63,7 +76,7 @@ def test_materialize_libs_dir_refuses_a_symlinked_canonical_src(tmp_path: Path):
     (outside / "zdd" / "__init__.py").write_text("smuggled = True\n", encoding="utf-8")
     import shutil
     shutil.rmtree(canon / "src")
-    (canon / "src").symlink_to(outside, target_is_directory=True)
+    _symlink_to_or_skip(canon / "src", outside, target_is_directory=True)
 
     libs_dir = tmp_path / "slot" / "libs"
     pointer_dir = _pointer(libs_dir, "zdd")
@@ -135,7 +148,7 @@ def test_materialize_libs_dir_refuses_a_symlinked_pointer_copy_directory(tmp_pat
     )
     libs_dir = tmp_path / "slot" / "libs"
     libs_dir.mkdir(parents=True)
-    (libs_dir / "zdd").symlink_to(target, target_is_directory=True)
+    _symlink_to_or_skip(libs_dir / "zdd", target, target_is_directory=True)
 
     log = mat.materialize_libs_dir(libs_dir, canonical_root=root)
 
@@ -150,7 +163,7 @@ def test_materialize_libs_dir_refuses_a_stray_symlink_anywhere_in_the_pointer_co
     outside = tmp_path / "outside-stray-target"
     outside.mkdir(parents=True)
     (pointer_dir / "docs").mkdir()
-    (pointer_dir / "docs" / "link").symlink_to(outside, target_is_directory=True)
+    _symlink_to_or_skip(pointer_dir / "docs" / "link", outside, target_is_directory=True)
 
     log = mat.materialize_libs_dir(libs_dir, canonical_root=root)
 
