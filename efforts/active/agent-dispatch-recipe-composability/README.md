@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`)
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-10-02
-- **Status:** Active <!-- Phase 1 done; Phase 2 in progress -->
+- **Status:** Active <!-- Phase 1 done; Phase 2 landed (PR #4993 merged); Phase 3 (docs) next -->
 - **Vision:** `visions/plugins/agent-dispatch/README.md` §*extend-any-declaration*
   (added by this effort's own Provenance entry) — generalizes *loop-recipes*
   and *The recipe* from "extend one of four named, plugin-shipped archetypes
@@ -235,14 +235,15 @@ fit an existing archetype.
       proving the full `list` → `reserve` → `claim` → `release` state
       transition persists to disk across four separate real subprocess
       invocations -- not just the per-op JSON shape in isolation.
-- [ ] Validate against the motivating consumer: a real script polling that
-      consumer's own REST API for pending work items, reserving/claiming/
-      releasing against it, proves the shape generalizes beyond a forge —
-      coordinate with that consumer's own effort for this validation round
-      rather than guessing at its API shape here.
-- [ ] **Known, tracked limitation:** `forge.command`/`forge.cwd` are
-      resolved against the **leaf declaration's own repo root** (the
-      outermost file's `cwd`, threaded via `run_tick`'s
+- [x] Deferred to the motivating consumer's own effort: validate against
+      the motivating consumer: a real script polling that consumer's own
+      REST API for pending work items, reserving/claiming/releasing
+      against it, proves the shape generalizes beyond a forge —
+      coordinate with that consumer's own effort for this validation
+      round rather than guessing at its API shape here.
+- [x] Deferred to `#5174`: **known, tracked limitation** — `forge.command`/
+      `forge.cwd` are resolved against the **leaf declaration's own repo
+      root** (the outermost file's `cwd`, threaded via `run_tick`'s
       `cwd=spec.get("cwd")`), never against the directory of whichever
       hop in an `extends:` chain actually *supplied* the override —
       unlike `kind: emitter`'s own `spec.cwd`, which Phase 1's
@@ -269,7 +270,7 @@ fit an existing archetype.
       `repository-issue-loop`'s own path-dependent fields, a change to
       already-merged, heavily-reviewed Phase 1 code (`registrar_recipes.py`)
       — deliberately not attempted inside Phase 2's own PR given its scope
-      and risk; tracked here as explicit follow-up work instead of a
+      and risk; tracked in `#5174` as explicit follow-up work instead of a
       silent gap.
 
 ### Phase 3 — Docs
@@ -324,6 +325,28 @@ detailed here once implementation starts, if it grows beyond what the Plan
 items above already specify._
 
 ## Journal
+
+### 2026-10-04 — PR #4993 merged: Phase 2 (`script` forge provider) complete
+- 25 automated review rounds processed across the push-fix loop
+  (case-sensitive script backlog keys; `forge.backlog` decoupling
+  script-reported backlog identity from the task's own routing `repo`;
+  cross-repo `extends:` inherited-script-path rejection, tracked to the
+  nearest field-defining hop; indeterminate-probe/PID-reuse/Windows-
+  separator/timeout-budget fixes in `procutil.py`/`script_provider.py`;
+  an eager `single_instance` import in `conftest.py` fixing an unrelated,
+  pre-existing subsuite-grouping-dependent CI flake). Full
+  `agent-dispatch` suite green (~4000 tests, all 7 sub-suites) after
+  every fix. Merged via the Maintainer self-merge bypass once round 25
+  returned zero new findings and every remaining item was independently
+  re-verified as already resolved in-code.
+- Remaining explicitly-deferred Phase 2 items (unchanged by this round):
+  validating against the motivating consumer's own emitter (left for
+  that consumer's own effort) and the `extends:`-chain per-hop
+  origin-tracking gap for `forge.command`/`forge.cwd` (bounded by the
+  cross-repo rejection above, not yet generalized into
+  `registrar_recipes.py`).
+- Next: Phase 3 (docs) — the worked `extends:` + `script`-provider
+  migration example in `plugins/agent-dispatch/README.md`.
 
 ### 2026-10-02 — Phase 2 landed: `script` forge provider
 - New `script_provider.py` module: `ScriptProvider` (implements
