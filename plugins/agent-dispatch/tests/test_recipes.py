@@ -455,3 +455,67 @@ def test_reviewer_dedup_preserves_forge_identity():
         "reviewer", {"repo": "https://gitlab.com/o/n.git", "pr": "5"}
     )
     assert recipes.dedup_key_for(github) != recipes.dedup_key_for(gitlab)
+
+
+def test_recipe_namespace_has_all_attributes_cmd_create_reads(monkeypatch):
+    """Regression test: _recipe_create_namespace must expose every attribute
+    that _cmd_create reads directly from the namespace. A missing attribute
+    causes AttributeError when a recipe kick path exercises that code branch
+    (e.g. remote_create_envelope was missing, causing #5091)."""
+    from agent_dispatch.recipes_cli import _recipe_create_namespace
+    from agent_dispatch.__main__ import build_parser
+
+    args = build_parser().parse_args(
+        ["recipes", "kick", "reviewer", "--param", "repo=o/n", "--param", "pr=7"]
+    )
+    rendered = recipes.render_recipe("reviewer", {"repo": "o/n", "pr": "7"})
+    ns = _recipe_create_namespace(args, rendered)
+
+    # Attributes _cmd_create reads directly from the namespace (not via getattr)
+    required_attrs = [
+        "payload_inline",
+        "remote_create_envelope",
+        "payload_file",
+        "producer_capability",
+        "source",
+        "producer_id",
+        "producer_generation",
+        "producer_request_id",
+        "claim",
+        "label",
+        "criteria_json",
+        "repo",
+        "proposed",
+        "exclude",
+        "affinity",
+        "payload_ref",
+        "target_machine",
+        "target_worktree",
+        "target_repo",
+        "not_before",
+        "machine",
+        "worktree",
+        "dedup_key",
+        "spawn",
+        "spawn_backend",
+        "spawn_agent",
+        "run_async",
+        "verify_timeout",
+        "url",
+        "token",
+        "require_verification",
+        "require",
+        "title",
+        "prompt",
+        "goal",
+        "done_criteria",
+        "origin_ref",
+        "evaluator_ref",
+    ]
+
+    missing = [attr for attr in required_attrs if not hasattr(ns, attr)]
+    assert missing == [], (
+        f"_recipe_create_namespace is missing attributes that _cmd_create reads: "
+        f"{missing}. A missing attribute causes AttributeError when the kick "
+        f"path exercises the corresponding code branch."
+    )

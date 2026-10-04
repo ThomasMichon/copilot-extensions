@@ -174,6 +174,7 @@ def _recipe_create_namespace(args: argparse.Namespace, rendered: Any) -> argpars
         payload_ref=None,
         payload_inline=None,
         payload_file=None,
+        remote_create_envelope=None,
         target_machine=None,
         target_worktree=None,
         target_repo=None,

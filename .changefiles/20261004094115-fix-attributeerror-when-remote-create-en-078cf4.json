@@ -1,0 +1,9 @@
+{
+  "comment": "Fix AttributeError when remote_create_envelope is missing from _recipe_create_namespace",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
