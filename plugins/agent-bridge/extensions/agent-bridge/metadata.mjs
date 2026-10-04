@@ -22,6 +22,9 @@
 // the single slowest one instead of their sum.
 import { exec, execFile } from "node:child_process";
 
+// Epoch seconds this process started (wall clock minus uptime), fixed once.
+const PROCESS_STARTED_AT = Date.now() / 1000 - process.uptime();
+
 // --- Async CLI runner (non-blocking; never freezes the event loop) ---
 // Mirrors the platform split the old synchronous runCli used (Windows
 // binstubs are .cmd -> need a shell; POSIX can exec the binary directly) --
@@ -73,6 +76,9 @@ export async function resolveMetadataAsync({ cwd = process.cwd(), env = process.
     // process.pid is the extension host process -- a liveness hint, not the
     // copilot PID. The durable key is session_id; liveness is heartbeat-based.
     pid: process.pid,
+    // Constant for this process (also across an in-process resume), so the
+    // bridge can tell it from an unrelated process that later reuses the pid.
+    process_started_at: PROCESS_STARTED_AT,
     role: null,
     // D4: who is steering this session, if an agent embodied it (set by
     // `agent-worktrees embody --driver`). Surfaces the "driven by <agent>"

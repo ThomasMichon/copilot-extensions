@@ -126,6 +126,26 @@ test("resolveMetadataAsync prefers an explicit AGENT_BRIDGE_SCOPE_ID", async (t)
   assert.equal(meta.worktree_id, "anchor-example-web@cs-1");
 });
 
+// The process start time is what lets the bridge tell this process apart from
+// an unrelated one that later reuses its pid, so it must never change.
+test("resolveMetadataAsync reports a fixed process start time", async (t) => {
+  const { dir, write } = makeFakeBinDir();
+  write("git", 0, "main");
+  write("agent-worktrees", 0, "anchor-example-web");
+
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${dir}${process.platform === "win32" ? ";" : ":"}${originalPath}`;
+  t.after(() => { process.env.PATH = originalPath; });
+
+  const first = await resolveMetadataAsync({ cwd: dir, env: {} });
+  const second = await resolveMetadataAsync({ cwd: dir, env: {} });
+
+  assert.equal(typeof first.process_started_at, "number");
+  assert.equal(first.process_started_at, second.process_started_at);
+  const expected = Date.now() / 1000 - process.uptime();
+  assert.ok(Math.abs(first.process_started_at - expected) < 2);
+});
+
 // Sanity check that the fake-binary harness itself is exercising a real
 // subprocess (not silently no-op-ing), so the timing assertion above is
 // actually meaningful.

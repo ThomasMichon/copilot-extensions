@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
-import { InFlightMessages, controlPlan, deliveryPlan, modeApplied } from "./delivery.mjs";
+import { InFlightMessages, adoptSessionId, controlPlan, deliveryPlan, modeApplied, serializedRegister } from "./delivery.mjs";
 import { firstLoadThisSession } from "./announce.mjs";
 import { makeBridgeEndpoint } from "./bridge-endpoint.mjs";
 import { resolveMetadataAsync } from "./metadata.mjs";
@@ -172,22 +172,35 @@ async function bridgeGetJson(path) {
   }
 }
 
-async function register() {
-  if (!state.sessionId) return;
-  const payload = { session_id: state.sessionId, ...(state.meta || {}) };
-  const ok = await bridgeFetch("POST", "/api/v1/live-sessions", payload);
-  if (ok && !state.registered) {
-    state.registered = true;
-    extLog(`registered live session ${state.sessionId} with local bridge`);
-  }
-}
+const register = serializedRegister(
+  state,
+  async (id) => {
+    if (!state.base || !state.token) return false;
+    try {
+      const res = await fetchBridge("POST", "/api/v1/live-sessions", { session_id: id, ...(state.meta || {}) });
+      if (res.ok) return true;
+      if (res.status === 409) {
+        const body = await res.json().catch(() => null);
+        if (body?.detail?.reason === "incarnation_mismatch") {
+          extLog(`bridge refused ${id} for this process (another incarnation's row); keeping the registered id`);
+          return "rejected";
+        }
+      }
+      return false;
+    } catch {
+      return false; // bridge down/unreachable -> the next heartbeat retries
+    }
+  },
+  (id) => extLog(`registered live session ${id} with local bridge`),
+);
 
 async function deregister() {
-  if (!state.sessionId) return;
-  await bridgeFetch(
-    "DELETE",
-    `/api/v1/live-sessions/${encodeURIComponent(state.sessionId)}`,
-  );
+  // Every id this process registered, once no registration is left in flight
+  // (a rename can leave the placeholder's row and the resumed one). An id
+  // folded into its successor is already gone; its DELETE is a no-op.
+  for (const id of await register.close()) {
+    await bridgeFetch("DELETE", `/api/v1/live-sessions/${encodeURIComponent(id)}`);
+  }
 }
 
 // Drain the represented-event queue to the bridge's ingest endpoint. Runs off
@@ -375,17 +388,17 @@ const session = await joinSession({
 });
 
 // Observe-only, non-blocking: the ONLY work done on the CLI event loop. Just
-// note that the session is alive and capture the session id if the env var was
-// missing. No I/O, no await -- returns immediately (hot-potato). Bridge writes
+// note that the session is alive and follow its session id (a missing env var,
+// or a resume that renamed the conversation). No I/O, no await -- returns immediately (hot-potato). Bridge writes
 // happen on the heartbeat timer below. Phase 5 will extend this to buffer
 // events into a bounded queue that a decoupled flusher drains to the bridge.
 session.on((event) => {
   try {
     state.lastEventAt = Date.now();
     state.inFlight.observe(event);
-    if (!state.sessionId && event?.sessionId) {
-      state.sessionId = event.sessionId;
-      // Late session id -> kick a one-off registration off the event loop.
+    if (adoptSessionId(state, event?.sessionId)) {
+      // A late id, or a resume that renamed this conversation: register it
+      // off the event loop (the bridge folds a renamed placeholder into it).
       setTimeout(() => register().catch(() => {}), 0);
     }
     // Represent (Phase 5): enqueue whitelisted events for the flusher. This is

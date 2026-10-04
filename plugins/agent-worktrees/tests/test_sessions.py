@@ -1275,10 +1275,94 @@ def _run_seed(driver, seed="Continue: build multi-account effort"):
     with patch("subprocess.run", side_effect=driver.run), \
          patch("time.sleep"), \
          patch("time.monotonic", side_effect=_Clock()), \
-         patch("agent_worktrees.sessions._mux_bin", return_value="tmux"):
+         patch("agent_worktrees.sessions._mux_bin", return_value="tmux"), \
+         patch("agent_worktrees.sessions_pane_retire._mux_qualified_pane_target",
+               return_value="=wt-x:0.0"):
         return mux_seed_pane(
-            "%9", seed, ready_timeout=100.0, poll_interval=0.0, settle=0.0,
+            "%9", seed, session_name="wt-x", ready_timeout=100.0, poll_interval=0.0, settle=0.0,
         )
+
+
+def test_seed_targets_the_pane_inside_its_own_session_only():
+    """psmux numbers ``%N`` per session: a bare ``-t %1`` typed one worktree's
+    seed into another worktree's live Copilot. Every capture/keystroke must use
+    the session-qualified target, and an unresolvable pane is never typed into."""
+    seen: list[tuple[str, str]] = []
+    ready = "press esc to interrupt"
+    driver = _SeedDriver(ready_caps=[ready, ready], echo_caps=[f"{ready}\nContinue: build"])
+
+    def _run(argv, **kw):
+        seen.append((argv[1], argv[argv.index("-t") + 1]))
+        return driver.run(argv, **kw)
+
+    with patch("subprocess.run", side_effect=_run), patch("time.sleep"), \
+         patch("time.monotonic", side_effect=_Clock()), \
+         patch("agent_worktrees.sessions._mux_bin", return_value="psmux"), \
+         patch("agent_worktrees.sessions_pane_retire._mux_qualified_pane_target",
+               side_effect=lambda pane, mux, session_name=None: (
+                   "wt-new:0.0" if (pane, session_name) == ("%1", "wt-new") else None)):
+        ok = mux_seed_pane("%1", "Continue: build", session_name="wt-new",
+                           ready_timeout=100.0, poll_interval=0.0, settle=0.0)
+        missing = mux_seed_pane("%1", "Continue: build", session_name="wt-other",
+                                ready_timeout=100.0, poll_interval=0.0, settle=0.0)
+    assert ok["submitted"] is True
+    assert seen and all(target == "wt-new:0.0" for _verb, target in seen)
+    assert missing["reason"] == "pane-target-unresolved" and missing["sent"] is False
+    assert len(seen) == len([s for s in seen if s[1] == "wt-new:0.0"])  # nothing sent for wt-other
+
+
+def test_seed_follows_its_pane_when_the_layout_changes_during_the_wait():
+    """``session:window.pane`` is a position: when the pane moves mid-wait,
+    readiness seen at the old position doesn't count, and every capture and
+    keystroke goes to where the pane is now, never to whatever took its place."""
+    ready = "press esc to interrupt"
+    where = iter(["=wt-x:0.0", "=wt-x:0.0", "=wt-x:0.1"])
+    seen: list[tuple[str, str]] = []
+    typed = {"done": False}
+
+    def locate(pane, mux, session_name=None):
+        return next(where, "=wt-x:0.1")
+
+    def run(argv, **kw):
+        from types import SimpleNamespace
+
+        at = argv[argv.index("-t") + 1]
+        seen.append((argv[1], at))
+        if argv[1] == "capture-pane":
+            if at == "=wt-x:0.0":  # another Copilot now sits here, also ready
+                return SimpleNamespace(stdout=ready, returncode=0)
+            out = f"{ready}\nContinue: build" if typed["done"] else ready
+            return SimpleNamespace(stdout=out, returncode=0)
+        if argv[1] == "send-keys" and "-l" in argv:
+            typed["done"] = True
+        return SimpleNamespace(stdout="", returncode=0)
+
+    with patch("subprocess.run", side_effect=run), patch("time.sleep"), \
+         patch("time.monotonic", side_effect=_Clock()), \
+         patch("agent_worktrees.sessions._mux_bin", return_value="tmux"), \
+         patch("agent_worktrees.sessions_pane_retire._mux_qualified_pane_target", side_effect=locate):
+        out = mux_seed_pane("%9", "Continue: build", session_name="wt-x",
+                            ready_timeout=100.0, poll_interval=0.0, settle=0.0)
+    assert out["submitted"] is True
+    assert [t for v, t in seen if v == "send-keys"] == ["=wt-x:0.1", "=wt-x:0.1"]
+    # Two stable polls at the new position before typing: the old one's didn't count.
+    caps = [t for v, t in seen if v == "capture-pane"]
+    assert caps.index("=wt-x:0.1") >= 1 and caps[caps.index("=wt-x:0.1") + 1] == "=wt-x:0.1"
+
+
+def test_seed_fails_closed_when_its_pane_disappears():
+    ready = "press esc to interrupt"
+    where = iter(["=wt-x:0.0", "=wt-x:0.0"])
+    driver = _SeedDriver(ready_caps=[ready, ready], echo_caps=[])
+    with patch("subprocess.run", side_effect=driver.run), patch("time.sleep"), \
+         patch("time.monotonic", side_effect=_Clock()), \
+         patch("agent_worktrees.sessions._mux_bin", return_value="tmux"), \
+         patch("agent_worktrees.sessions_pane_retire._mux_qualified_pane_target",
+               side_effect=lambda *a, **k: next(where, None)):
+        out = mux_seed_pane("%9", "Continue: build", session_name="wt-x",
+                            ready_timeout=100.0, poll_interval=0.0, settle=0.0)
+    assert out["reason"] == "pane-target-lost" and out["sent"] is False
+    assert driver.sends == []
 
 
 def test_seed_pane_not_ready_never_submits():
@@ -1296,18 +1380,19 @@ def test_seed_pane_not_ready_never_submits():
 def test_seed_pane_requires_two_consecutive_cues():
     # A single transient caret frame (then gone) is NOT enough; a flapping cue
     # keeps stability from reaching 2, so seeding still degrades to not-ready.
-    driver = _SeedDriver(ready_caps=["❯", "", "❯", "", "❯", ""], echo_caps=[])
+    cue = "press esc to interrupt"
+    driver = _SeedDriver(ready_caps=[cue, "", cue, "", cue, ""], echo_caps=[])
     result = _run_seed(driver)
     assert result["ready"] is False
     assert driver.sends == []
 
 
 def test_seed_pane_happy_path_submits():
-    # Stable caret (2 in a row) -> type -> the echo shows the seed head -> Enter.
+    # Stable live input footer (2 in a row) -> type -> echo shows seed head -> Enter.
     seed = "Continue: build multi-account effort"
     driver = _SeedDriver(
-        ready_caps=["❯", "❯"],
-        echo_caps=[f"❯ {seed}"],
+        ready_caps=["press esc to interrupt", "press esc to interrupt"],
+        echo_caps=[f"press esc to interrupt\n{seed}"],
     )
     result = _run_seed(driver, seed=seed)
     assert result["ready"] is True
@@ -1350,6 +1435,48 @@ def test_seed_pane_boxed_input_is_ready():
     assert result["submitted"] is True
 
 
+def test_seed_pane_waits_through_resuming_transcript_then_seeds():
+    # A resumed session redraws transcript history that can contain old caret
+    # glyphs. The live footer is still busy, so readiness must wait until a real
+    # input box appears at the bottom.
+    seed = "Continue: do the thing"
+    resuming_1 = (
+        " ❯ Thought\n"
+        " ● old transcript output\n"
+        " /work/repo                         Session: 0 AIC used\n"
+        " ◉ Resuming session...\n"
+    )
+    resuming_2 = resuming_1.replace("◉", "○")
+    driver = _SeedDriver(
+        ready_caps=[resuming_1, resuming_2, _BOXED_INPUT, _BOXED_INPUT],
+        echo_caps=[_BOXED_INPUT.replace("┃\n", f"┃ {seed}\n")],
+    )
+    result = _run_seed(driver, seed=seed)
+    assert result["ready"] is True
+    assert result["submitted"] is True
+
+
+def test_seed_pane_resuming_transcript_history_is_not_ready():
+    cap = (
+        " ❯ Thought\n"
+        " ● old transcript output\n"
+        " /work/repo                         Session: 0 AIC used\n"
+        " ◉ Resuming session...\n"
+    )
+    driver = _SeedDriver(ready_caps=[cap] * 6, echo_caps=[])
+    result = _run_seed(driver)
+    assert result["reason"] == "not-ready-timeout"
+    assert driver.sends == []
+
+
+def test_seed_pane_bare_shell_prompt_is_not_ready():
+    # A shell theme can use the same caret glyph as Copilot's old prompt.
+    driver = _SeedDriver(ready_caps=["/tmp\n❯"] * 6, echo_caps=[])
+    result = _run_seed(driver)
+    assert result["ready"] is False
+    assert driver.sends == []
+
+
 def test_seed_pane_never_types_into_a_selection_dialog():
     # A trust / extension-permission prompt shows its own "❯ 1. Yes" caret;
     # typing the seed there would pick options, so it is never "ready".
@@ -1386,7 +1513,10 @@ def test_seed_pane_not_echoed_skips_enter():
     # Ready + typed, but the seed never echoes back -> do NOT press Enter, so a
     # partially-eaten seed is never submitted as a bogus turn.
     seed = "Continue: build multi-account effort"
-    driver = _SeedDriver(ready_caps=["❯", "❯"], echo_caps=[])
+    driver = _SeedDriver(
+        ready_caps=["press esc to interrupt", "press esc to interrupt"],
+        echo_caps=[],
+    )
     result = _run_seed(driver, seed=seed)
     assert result["ready"] is True
     assert result["sent"] is True
@@ -1411,8 +1541,8 @@ def test_seed_pane_dismisses_desktop_app_nudge_then_seeds():
     # container (agent-dispatch-worker-operating-procedures Phase 3).
     seed = "Continue: build multi-account effort"
     driver = _SeedDriver(
-        ready_caps=[_DESKTOP_APP_NUDGE, "❯", "❯"],
-        echo_caps=[f"❯ {seed}"],
+        ready_caps=[_DESKTOP_APP_NUDGE, "press esc to interrupt", "press esc to interrupt"],
+        echo_caps=[f"press esc to interrupt\n{seed}"],
     )
     result = _run_seed(driver, seed=seed)
     assert result["ready"] is True
@@ -1848,3 +1978,141 @@ class TestMuxSessionIndex:
     def test_index_miss_still_falls_back(self):
         index = mux_session_index(["host-linux-1-a"])
         assert worktree_id_from_mux_session("wt-other", index=index) == "other"
+
+
+def test_boxed_input_is_ready_despite_busy_words_in_banner_or_transcript():
+    from agent_worktrees import pane_readiness
+
+    banner = _BOXED_INPUT.replace(" ~/repo ", " ~/loading-service ")
+    assert pane_readiness.ready_signature(banner) == "boxed-input"
+    transcript = " ● Finished loading the project configuration.\n" + _BOXED_INPUT
+    assert pane_readiness.ready_signature(transcript) == "boxed-input"
+    # A real status line above the box still holds readiness back.
+    assert pane_readiness.ready_signature(" ◐ Loading environment\n" + _BOXED_INPUT) is None
+
+
+def test_a_stale_box_above_a_shell_prompt_is_not_ready():
+    from agent_worktrees import pane_readiness
+
+    assert pane_readiness.ready_signature(_BOXED_INPUT + "Copilot exited\n/tmp\n❯\n") is None
+    assert pane_readiness.ready_signature(_BOXED_INPUT + "user@host:/tmp$ \n") is None
+    assert pane_readiness.ready_signature(_BOXED_INPUT) == "boxed-input"
+
+
+def test_a_stale_interrupt_footer_above_a_shell_is_not_ready():
+    from agent_worktrees import pane_readiness
+
+    assert pane_readiness.ready_signature("press esc to interrupt\nCopilot exited\n/tmp\n❯\n") is None
+    # A Copilot caret ABOVE the footer is fine.
+    assert pane_readiness.ready_signature("❯ \npress esc to interrupt\n") == "interrupt-footer"
+
+
+@pytest.mark.parametrize("prompt", ["$", "#", "%", "❯"])
+def test_a_bare_shell_prompt_holding_the_footer_words_is_not_ready(prompt):
+    """``$ press esc to interrupt`` typed at a bare prompt is a shell line, not
+    Copilot's footer: seeding it would run the seed as a shell command."""
+    from agent_worktrees import pane_readiness
+
+    assert pane_readiness.ready_signature(f"{prompt} press esc to interrupt\n") is None
+    assert pane_readiness.ready_signature(f"  {prompt} press esc to interrupt\n") is None
+
+
+@pytest.mark.parametrize("line", [
+    "user@host ~/esc/interrupt % echo hi",
+    "~/repo ❯ press esc to interrupt",
+    "~/esc/interrupt$ press esc to interrupt",
+    "press esc to interrupt now please",
+    "echo press esc to interrupt",
+])
+def test_only_the_footer_grammar_is_ready_never_a_prompt_with_typed_text(line):
+    from agent_worktrees import pane_readiness
+
+    assert pane_readiness.ready_signature(line + "\n") is None
+
+
+@pytest.mark.parametrize("line", [
+    "press esc to interrupt",
+    "Esc to interrupt",
+    "◐ press esc to interrupt",
+    "esc to interrupt · ctrl+c exit",
+])
+def test_copilots_own_footer_rows_are_ready(line):
+    from agent_worktrees import pane_readiness
+
+    assert pane_readiness.ready_signature(line + "\n") == "interrupt-footer"
+
+
+def test_ordinary_output_under_a_stale_prompt_is_not_ready():
+    """Only Copilot's own footer rows may sit under the box, and the legacy cue
+    must be the live bottom line -- not merely free of shell-like tails."""
+    from agent_worktrees import pane_readiness
+
+    assert pane_readiness.ready_signature(_BOXED_INPUT + "Connection closed\n") is None
+    assert pane_readiness.ready_signature("press esc to interrupt\nConnection closed\n") is None
+    assert pane_readiness.ready_signature(_BOXED_INPUT) == "boxed-input"
+
+
+def test_output_with_generic_key_words_under_a_box_is_not_ready():
+    """A footer row is a run of complete key-hint segments; ordinary output
+    that merely mentions Enter or help is not one."""
+    from agent_worktrees import pane_readiness
+
+    for later in ("Connection closed; press Enter to reconnect\n", "Press enter for help\n"):
+        assert pane_readiness.ready_signature(_BOXED_INPUT + later) is None
+    two_rows = _BOXED_INPUT + " shift+tab mode · ctrl+c exit\n"
+    assert pane_readiness.ready_signature(two_rows) == "boxed-input"
+
+
+def test_a_root_prompt_with_typed_text_under_a_stale_box_is_not_ready():
+    """``# echo ready`` reads like a "#" key hint, but it is a root shell prompt
+    with typed text: a stale box above it is scrollback, not live input."""
+    from agent_worktrees import pane_readiness
+
+    for prompt in ("# echo ready", "# ls", "$ echo ready", "% make test"):
+        assert pane_readiness.ready_signature(_BOXED_INPUT + prompt + "\n") is None, prompt
+
+
+def test_an_attached_powershell_or_cmd_prompt_is_not_ready():
+    from agent_worktrees import pane_readiness
+
+    for prompt in ("PS C:\\repo>", "PS C:\\repo> ", "C:\\repo>", "PS /home/u>"):
+        assert pane_readiness.ready_signature(_BOXED_INPUT + prompt + "\n") is None, prompt
+        assert pane_readiness.ready_signature(
+            "press esc to interrupt\n" + prompt + "\n"
+        ) is None, prompt
+    assert pane_readiness.ready_signature("press esc to interrupt\n") == "interrupt-footer"
+
+
+def test_a_shell_prompt_containing_the_footer_words_is_not_ready():
+    """A shell prompt whose path happens to contain "esc" and "interrupt" is not
+    Copilot's footer: typing the seed there would run it in the shell."""
+    from agent_worktrees import pane_readiness
+
+    for prompt in (
+        "user@host:~/escape-interrupt$",
+        "user@host:~/escape-interrupt$ ",
+        "root@box:/srv/esc-interrupt#",
+        "user@host ~/esc/interrupt %",
+        "user@host:~/escape-interrupt$ echo hi",
+        "PS C:\\esc\\interrupt> dir",
+        "C:\\esc\\interrupt> dir",
+    ):
+        assert pane_readiness.ready_signature(prompt + "\n") is None, prompt
+    assert pane_readiness.ready_signature("press esc to interrupt\n") == "interrupt-footer"
+
+
+def test_seed_readiness_never_outlasts_the_hard_cap():
+    busy = [f" /work/repo   Session\n ◉ Resuming session... {i}\n" for i in range(500)]
+    driver = _SeedDriver(ready_caps=busy, echo_caps=[])
+    with patch("subprocess.run", side_effect=driver.run), \
+         patch("time.sleep"), \
+         patch("time.monotonic", side_effect=_Clock()), \
+         patch("agent_worktrees.sessions._mux_bin", return_value="tmux"), \
+         patch("agent_worktrees.sessions_pane_retire._mux_qualified_pane_target",
+               return_value="=wt-x:0.0"):
+        result = mux_seed_pane(
+            "%9", "seed", ready_timeout=1000.0, hard_timeout=100.0,
+            poll_interval=0.0, settle=0.0,
+        )
+    assert result["reason"] == "not-ready-timeout"
+    assert 500 - len(driver.ready_caps) <= 10  # 100 s of 10 s clock ticks

@@ -914,3 +914,24 @@ class TestSessionRole:
     def test_parser_accepts_json_compatibility_flag(self):
         args = m.build_parser().parse_args(["session-role", "--json"])
         assert args.json is True
+
+
+def test_list_row_keeps_a_yielded_head_resumable(tmp_tracking_dir: Path, monkeypatch_config) -> None:
+    """A head that opened a handoff no successor ever linked here (it was
+    consumed from another checkout) stays the row's resumable session, so a
+    Resume reopens it instead of starting a blank one."""
+    _save_record(tmp_tracking_dir, "wt-yield", "/tmp/src/wt-yield")
+    tracking.register_session("wt-yield", "orchestrator")
+    rec = load_record(tmp_tracking_dir / "wt-yield.yaml")
+    tracking.open_handoff(rec, "orchestrator", "task-elsewhere")
+    rec = load_record(tmp_tracking_dir / "wt-yield.yaml")
+    assert rec.resolved_head_session is None  # the ledger still hides it as head
+
+    row = m._worktree_to_dict(rec)
+    assert row["last_session_id"] == "orchestrator"
+    assert row["head_yielded"] is True
+
+    tracking.register_session("wt-yield", "successor")  # a successor that does register wins
+    row = m._worktree_to_dict(load_record(tmp_tracking_dir / "wt-yield.yaml"))
+    assert row["last_session_id"] == "successor"
+    assert "head_yielded" not in row

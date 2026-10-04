@@ -106,6 +106,7 @@ def test_http_protocol_constant_fixture_matches_production() -> None:
         "cli_mode_unclaimed_release": (
             bridge_protocol.CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION
         ),
+        "live_session_alias": bridge_protocol.LIVE_SESSION_ALIAS_PROTOCOL_VERSION,
     }
 
 

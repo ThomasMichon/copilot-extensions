@@ -253,8 +253,20 @@ pending `0` key is the usual cause. `false` in `local_forwards_ready` usually
 means the host port is taken or a pre-`--forward` Owner is still running.
 A multi-line or long seed is written to `~/.agent-bridge/seeds/` on the venue and <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 seeded as a one-line pointer (tmux-typed input must be a single line). It
-succeeds only once the session is registered with the host bridge (and its seed
-submitted); a failure reports the screen (`pane_tail`) and stops what it started.
+succeeds once the session is registered with the host bridge. If the launch
+created a session but Copilot did not reach a confirmed input prompt in time,
+the command keeps the live session and delivers the seed over the existing
+host bridge's message lane; the JSON reports `seed_delivery: "bridge"` (or
+`"failed"` if that follow-up message could not be sent). A seed that may have
+reached Copilot's input without being submitted (typed but Enter failed, or a
+keystroke send that failed part-way) is never resent, since its draft may still
+be there: the session is kept and `seed_delivery` is `"failed"`.
+Only a created session
+that never registers is treated as unrepresented: the failure reports the screen
+(`pane_tail`) and stops what it started. `--register-timeout` covers the host
+bridge claim wait; the venue-side prompt wait can slide while Copilot is visibly
+busy, up to its own hard cap, and the launch transport timeout remains longer
+than that cap.
 The **Connection Owner** keeps the
 credential relay and the host-bridge forward alive while its mux session exists
 (checked from the host every couple of minutes, only after the

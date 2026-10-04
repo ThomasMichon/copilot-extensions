@@ -80,6 +80,7 @@ _HTTP_CAPABILITY_CONSTANTS = {
     "conditional_idle_end": "CONDITIONAL_IDLE_END_PROTOCOL_VERSION",
     "dispatch_task_session": "DISPATCH_TASK_SESSION_PROTOCOL_VERSION",
     "cli_mode_unclaimed_release": "CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION",
+    "live_session_alias": "LIVE_SESSION_ALIAS_PROTOCOL_VERSION",
 }
 
 # Git-evidence resolution (commit/blob lookups, opportunistic across a

@@ -246,6 +246,35 @@ def test_migration_v9_to_v10_adds_driven_by(tmp_path: Path) -> None:
         db.close()
 
 
+def test_migration_v23_to_v24_adds_live_session_aliases(tmp_path: Path) -> None:
+    """A pre-v24 database gains the live-session alias table."""
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        "CREATE TABLE schema_version (version INTEGER NOT NULL);"
+        "INSERT INTO schema_version (version) VALUES (23);"
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(db_path)
+    try:
+        ver = db.execute_read("SELECT version FROM schema_version")[0]["version"]
+        assert ver == SCHEMA_VERSION
+        db.execute_write(
+            "INSERT INTO live_session_aliases "
+            "(alias_session_id, target_session_id, created_at) VALUES (?, ?, ?)",
+            ("old", "new", 123.0),
+        )
+        rows = db.execute_read(
+            "SELECT target_session_id FROM live_session_aliases WHERE alias_session_id=?",
+            ("old",),
+        )
+        assert rows[0]["target_session_id"] == "new"
+    finally:
+        db.close()
+
+
 # -- Route layer ------------------------------------------------------------
 
 
@@ -379,6 +408,19 @@ def test_route_driven_by_surfaces(client: TestClient) -> None:
     assert client.get("/api/v1/live-sessions/cli-o").json()["driven_by"] is None
 
 
+def test_another_process_on_an_expired_row_gets_the_refusal_the_extension_reads(
+    client: TestClient, tmp_db: Database,
+) -> None:
+    """A crashed process's expired row: a resumed process (other pid) is
+    refused with ``detail.reason == "incarnation_mismatch"``, which the
+    extension reads to keep serving under the id it already registered."""
+    assert client.post("/api/v1/live-sessions", json={"session_id": "resumed", "pid": 11}).status_code == 200
+    tmp_db.execute_write("UPDATE live_sessions SET status='expired' WHERE session_id='resumed'")
+    r = client.post("/api/v1/live-sessions", json={"session_id": "resumed", "pid": 22})
+    assert r.status_code == 409
+    assert r.json()["detail"]["reason"] == "incarnation_mismatch"
+
+
 def test_route_register_is_heartbeat_upsert(client: TestClient) -> None:
     first = client.post(
         "/api/v1/live-sessions", json={"session_id": "s", "machine": "a"}
@@ -438,6 +480,22 @@ def test_db_update_live_turn_state(tmp_db: Database) -> None:
     row = tmp_db.get_live_session("cli-t")
     assert row["turn_state"] == "running"
     assert row["last_activity_at"] == now + 5
+
+
+def test_db_update_live_turn_state_follows_a_rollover_alias(tmp_db: Database) -> None:
+    """A rollover committed between the ack and the turn-state update still
+    lands the state on the successor, not the retired predecessor id."""
+    now = time.time()
+    tmp_db.register_live_session(
+        "cli-new", machine="m", cwd=None, worktree_id="wt-t", repo=None,
+        branch=None, pid=None, role=None, now=now,
+    )
+    tmp_db.execute_write(
+        "INSERT INTO live_session_aliases (alias_session_id, target_session_id, created_at) "
+        "VALUES (?, ?, ?)", ("cli-old", "cli-new", now),
+    )
+    tmp_db.update_live_turn_state("cli-old", turn_state="running", last_activity_at=now + 5)
+    assert tmp_db.get_live_session("cli-new")["turn_state"] == "running"
 
 
 def test_fresh_db_has_turn_state_columns(tmp_db: Database) -> None:

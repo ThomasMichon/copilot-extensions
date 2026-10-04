@@ -115,7 +115,7 @@ from . import (
     reclaim,
     sessions,
     sessions_pane_retire,  # noqa: F401 -- compatibility re-export (handoff_cutover.py tests patch m.sessions_pane_retire)
-    tracking,
+    tracking, tracking_lifecycle,
 )
 from . import claimant as claimant_mod
 from . import config as cfg
@@ -1162,8 +1162,7 @@ def _worktree_to_dict(
     registered_sessions = getattr(rec, "sessions", None)
     if registered_sessions is not None:
         d["session_count"] = len(registered_sessions)
-    head_session = getattr(rec, "resolved_head_session", None)
-    if head_session:
+    if head_session := tracking_lifecycle.listing_head_session(rec, d):
         d["last_session_id"] = head_session
     if rec.execution_leg_opaque or rec.session_backend_opaque:
         # Legacy ``session_backend:`` opaque records still surface through the

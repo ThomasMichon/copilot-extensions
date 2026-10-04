@@ -91,6 +91,13 @@ def test_cli_mode_unclaimed_release_capability_is_advertised() -> None:
     assert CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
 
 
+def test_live_session_alias_capability_is_advertised() -> None:
+    from agent_bridge.protocol import LIVE_SESSION_ALIAS_PROTOCOL_VERSION
+
+    assert LIVE_SESSION_ALIAS_PROTOCOL_VERSION == 21
+    assert LIVE_SESSION_ALIAS_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
+
+
 def _app(tmp_path):
     cfg = ServiceConfig(
         port=0,

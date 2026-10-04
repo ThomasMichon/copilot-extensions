@@ -668,3 +668,73 @@ def test_mode_changes_are_validated_and_controls_reserved(client: TestClient) ->
     r = client.post("/api/v1/live-sessions/cli-1/messages",
                     json={"sender": "a", "body": "autopilot", "kind": "control:set-mode"})
     assert r.status_code == 400
+
+
+# -- a session-id change (resume) keeps one handle, log and control path -----
+
+
+def _rollover_client(tmp_db: Database):
+    from agent_bridge.live_representation import LiveEventStore
+
+    app = FastAPI()
+    app.state.db = tmp_db
+    app.state.live_event_store = LiveEventStore()
+    app.include_router(live_sessions.router)
+    tmp_db.create_cli_mode_reservation("wt-R", now=time.time())
+    c = TestClient(app)
+    assert c.post("/api/v1/live-sessions", json={
+        "session_id": "placeholder", "worktree_id": "wt-R", "machine": "host-1", "pid": 4242}).status_code == 200
+    return c, app.state.live_event_store
+
+
+def _say(c: TestClient, sid: str, text: str, eid: str) -> None:
+    r = c.post(f"/api/v1/live-sessions/{sid}/events", json={"events": [
+        {"type": "assistant.message", "data": {"content": text}, "id": eid}]})
+    assert r.status_code == 200, r.text
+    assert r.json()["session_id"] == "resumed" or sid == "placeholder"
+
+
+def test_one_represented_log_spans_a_session_id_change(tmp_db: Database) -> None:
+    c, store = _rollover_client(tmp_db)
+    _say(c, "placeholder", "before", "e1")
+    waited_on = store.get("placeholder")  # what a waited send / open stream holds
+    assert c.post("/api/v1/live-sessions", json={
+        "session_id": "resumed", "worktree_id": "wt-R", "machine": "host-1", "pid": 4242}).status_code == 200
+    _say(c, "resumed", "reply", "e2")
+    _say(c, "placeholder", "late, via the old handle", "e3")
+    assert store.get("resumed") is waited_on and store.get("placeholder") is waited_on
+    texts = [e.data.get("text") for e in waited_on.get_events(0)]
+    assert "reply" in str(texts) and "late, via the old handle" in str(texts)
+    assert tmp_db.get_live_session_exact("placeholder") is None
+
+
+@pytest.mark.parametrize("applied", [True, False])
+def test_a_mode_change_follows_a_session_id_change_while_waiting(
+    tmp_db: Database, monkeypatch, applied: bool
+) -> None:
+    c, _store = _rollover_client(tmp_db)
+    monkeypatch.setattr(live_sessions, "MODE_POLL_SECONDS", 0.01)
+    real = tmp_db.live_control_state
+    state = {"rolled": False}
+
+    def control_state(sid, cid):
+        if not state["rolled"]:
+            state["rolled"] = True
+            assert tmp_db.register_live_session(
+                "resumed", machine="host-1", cwd=None, worktree_id="wt-R", repo=None,
+                branch=None, pid=4242, role=None, now=time.time()) == "live"
+            if applied:
+                tmp_db.claim_live_controls("resumed", time.time(), 3600)
+                tmp_db.ack_live_messages("resumed", [cid], time.time(), controls=True,
+                                         outcome="applied")
+        return real(sid, cid)
+
+    monkeypatch.setattr(tmp_db, "live_control_state", control_state)
+    out = c.post("/api/v1/live-sessions/placeholder/mode",
+                 json={"mode": "plan", "wait_timeout": 1}).json()
+    if applied:
+        assert (out["state"], out["session_id"]) == ("applied", "resumed")
+    else:
+        # Withdrawn under the new id, so it can never apply later.
+        assert out["state"] == "withdrawn"
+        assert c.get("/api/v1/live-sessions/resumed/controls").json()["messages"] == []

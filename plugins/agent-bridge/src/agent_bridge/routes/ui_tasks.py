@@ -43,7 +43,11 @@ WORKSPACES_TTL = 20.0
 #: Per-command budgets (seconds). Listing a big repo takes ~10s; create runs setup.
 LIST_TIMEOUT = 90.0
 CREATE_TIMEOUT = 180.0
-EMBODY_TIMEOUT = 240.0
+#: Above embody's seed-ready hard cap (900s: it keeps waiting while Copilot is
+#: busy) plus launch overhead, so a busy session is still seeded rather than
+#: the launcher being killed mid-wait with its session left unseeded.
+EMBODY_SEED_HARD_CAP = 900.0
+EMBODY_TIMEOUT = EMBODY_SEED_HARD_CAP + 120.0
 #: How long live PR titles/states and commit subjects are reused (seconds).
 PR_TTL = 120.0
 SUBJECT_TTL = 300.0

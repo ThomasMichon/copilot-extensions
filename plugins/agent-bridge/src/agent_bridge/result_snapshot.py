@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 import json
 import time
 from dataclasses import dataclass
@@ -23,6 +21,16 @@ from .models import (
     SessionStatus,
 )
 
+from .result_tokens import (  # noqa: F401 (ResultTokenError/ResultHistoryChangedError re-exported)
+    ResultHistoryChangedError,
+    ResultTokenError,
+    _decode_token,
+    _event_ref,
+    _position_token,
+    _span_ref,
+    _turn_ref,
+)
+
 if TYPE_CHECKING:
     from .db import Database
     from .events import EventLog
@@ -34,8 +42,6 @@ MAX_MAX_ITEMS = 100
 DEFAULT_MAX_TEXT_CHARS = 6000
 MAX_MAX_TEXT_CHARS = 20000
 _MAX_SCAN_EVENTS = 512
-_MAX_DETAIL_TOKEN_CHARS = 2048
-_TOKEN_PREFIX = "abr1."
 _TERMINAL_TOOL_STATUSES = frozenset(
     {
         "completed",
@@ -48,14 +54,6 @@ _TERMINAL_TOOL_STATUSES = frozenset(
         "canceled",
     }
 )
-
-
-class ResultTokenError(ValueError):
-    """An opaque result position or detail reference is malformed."""
-
-
-class ResultHistoryChangedError(ResultTokenError):
-    """A valid detail reference names a replaced event-log history."""
 
 
 @dataclass
@@ -89,110 +87,6 @@ def normalize_bounds(max_items: int, max_text_chars: int) -> tuple[int, int]:
     return (
         max(1, min(int(max_items), MAX_MAX_ITEMS)),
         max(256, min(int(max_text_chars), MAX_MAX_TEXT_CHARS)),
-    )
-
-
-def _encode_token(payload: dict[str, Any]) -> str:
-    raw = json.dumps(
-        {"v": 1, **payload}, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
-    encoded = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-    return _TOKEN_PREFIX + encoded
-
-
-def _decode_token(
-    token: str,
-    *,
-    source: str,
-    session_id: str,
-    kinds: frozenset[str],
-) -> dict[str, Any]:
-    if not token or len(token) > _MAX_DETAIL_TOKEN_CHARS or not token.startswith(
-        _TOKEN_PREFIX
-    ):
-        raise ResultTokenError("invalid result token")
-    encoded = token[len(_TOKEN_PREFIX):]
-    padding = "=" * (-len(encoded) % 4)
-    try:
-        raw = base64.b64decode(
-            encoded + padding, altchars=b"-_", validate=True
-        )
-        value = json.loads(raw.decode("utf-8"))
-    except (
-        binascii.Error,
-        ValueError,
-        TypeError,
-        UnicodeDecodeError,
-        json.JSONDecodeError,
-    ) as exc:
-        raise ResultTokenError("invalid result token") from exc
-    if not isinstance(value, dict) or value.get("v") != 1:
-        raise ResultTokenError("unsupported result token version")
-    if value.get("source") != source or value.get("session_id") != session_id:
-        raise ResultTokenError("result token targets a different session")
-    if value.get("kind") not in kinds:
-        raise ResultTokenError("result token has the wrong kind")
-    return value
-
-
-def _position_token(
-    source: str, session_id: str, continuity: str, event_id: int
-) -> str:
-    return _encode_token(
-        {
-            "kind": "position",
-            "source": source,
-            "session_id": session_id,
-            "continuity": continuity,
-            "event_id": event_id,
-        }
-    )
-
-
-def _event_ref(
-    source: str, session_id: str, continuity: str, event_id: int
-) -> str:
-    return _encode_token(
-        {
-            "kind": "event",
-            "source": source,
-            "session_id": session_id,
-            "continuity": continuity,
-            "event_id": event_id,
-        }
-    )
-
-
-def _span_ref(
-    source: str,
-    session_id: str,
-    continuity: str,
-    start_event_id: int,
-    end_event_id: int,
-    *,
-    scope: str | None = None,
-) -> str:
-    payload = {
-        "kind": "span",
-        "source": source,
-        "session_id": session_id,
-        "continuity": continuity,
-        "start_event_id": start_event_id,
-        "end_event_id": end_event_id,
-    }
-    if scope:
-        payload["scope"] = scope
-    return _encode_token(payload)
-
-
-def _turn_ref(session_id: str, turn_index: int) -> str:
-    return _encode_token(
-        {
-            "kind": "turn",
-            "source": "owned",
-            "session_id": session_id,
-            "turn_index": turn_index,
-        }
     )
 
 
@@ -452,6 +346,7 @@ def _incremental_events(
     position: str | None,
     max_items: int,
     budget: _TextBudget,
+    retired_ids: frozenset[str] = frozenset(),
 ) -> ResultIncrement:
     after_id: int | None = None
     decoded: dict[str, Any] | None = None
@@ -461,6 +356,7 @@ def _incremental_events(
             source=source,
             session_id=session_id,
             kinds=frozenset({"position"}),
+            retired_ids=retired_ids,
         )
         try:
             after_id = int(decoded["event_id"])
@@ -855,6 +751,7 @@ def build_represented_result_snapshot(
     position: str | None,
     max_items: int = DEFAULT_MAX_ITEMS,
     max_text_chars: int = DEFAULT_MAX_TEXT_CHARS,
+    retired_ids: frozenset[str] = frozenset(),
 ) -> DelegatedResultSnapshot:
     """Build a reduced-fidelity snapshot for a represented live session."""
     max_items, max_text_chars = normalize_bounds(max_items, max_text_chars)
@@ -884,6 +781,7 @@ def build_represented_result_snapshot(
         position=position,
         max_items=max_items,
         budget=incremental_budget,
+        retired_ids=retired_ids,
     )
 
     attention = ResultField(availability="partial", value=None)
@@ -1028,6 +926,7 @@ def expand_represented_result_ref(
     event_log: EventLog,
     session_id: str,
     token: str,
+    retired_ids: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     """Resolve one process-lifetime represented event or span reference."""
     decoded = _decode_token(
@@ -1035,6 +934,7 @@ def expand_represented_result_ref(
         source="represented",
         session_id=session_id,
         kinds=frozenset({"event", "span"}),
+        retired_ids=retired_ids,
     )
     continuity = event_log.continuity_id
     if not continuity or decoded.get("continuity") != continuity:

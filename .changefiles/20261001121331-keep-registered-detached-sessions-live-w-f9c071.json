@@ -1,0 +1,9 @@
+{
+  "comment": "Keep registered detached sessions live when typed seed delivery misses readiness",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

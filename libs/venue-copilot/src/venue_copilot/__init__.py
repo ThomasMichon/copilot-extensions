@@ -44,6 +44,77 @@ SEED_INLINE_MAX = 400
 SEED_DIR = "$HOME/.agent-bridge/seeds"  # marketplace-isolation: allow agent-bridge-management
 
 SESSION_SELECTORS = ("--resume", "-r", "--continue", "--session-id")
+#: Copilot flags that resume an existing conversation, which can re-register the
+#: running session under a new id after it first registered.
+RESUME_SELECTORS = ("--resume", "-r", "--continue")
+#: The bridge protocol whose live-session aliases carry a message queued for a
+#: placeholder id across such a rename (agent-bridge LIVE_SESSION_ALIAS_PROTOCOL_VERSION).
+LIVE_SESSION_ALIAS_PROTOCOL = 21
+
+
+def may_switch_session_id(copilot_args: list[str]) -> bool:
+    """Whether these Copilot args resume a conversation (so its id can change)."""
+    return any(a.split("=", 1)[0] in RESUME_SELECTORS for a in copilot_args)
+
+
+def unstable_handle_warning(
+    daemon_port: int, copilot_args: list[str], *, health: Callable[[int], Any] | None = None,
+) -> str | None:
+    """A warning when a resumed session's handle may not survive, else ``None``.
+
+    A resume can re-register under a new id after its launch claimed a
+    placeholder one. Only a daemon with live-session aliases keeps that
+    placeholder resolving (and moves its claim) across the rename. Checked
+    before launching, so the launch reports it rather than a normal success. A
+    daemon that doesn't answer counts as old: the handle can't be vouched for."""
+    if not may_switch_session_id(copilot_args):
+        return None
+    try:
+        info = (health or _daemon_health)(daemon_port) or {}
+        version = int(info.get("protocol_version") or 0)
+    except Exception:
+        version = 0
+    if version >= LIVE_SESSION_ALIAS_PROTOCOL:
+        return None
+    seen = f"protocol {version}" if version else "an unknown protocol"
+    return (
+        f"the host bridge daemon ({seen}) predates live-session aliases (protocol "
+        f"{LIVE_SESSION_ALIAS_PROTOCOL}): once the resumed conversation re-registers, the "
+        "returned session_id may stop resolving and messages to it are refused; address "
+        "the session by its worktree handle, or update agent-bridge and restart its daemon"
+    )
+
+
+def _daemon_health(daemon_port: int) -> dict[str, Any]:
+    from urllib.request import urlopen
+
+    with urlopen(f"http://127.0.0.1:{int(daemon_port)}/health", timeout=5.0) as resp:
+        return json.loads(resp.read().decode("utf-8") or "{}")
+
+
+#: Seed outcomes that prove no keystroke reached the pane (safe to deliver over
+#: the bridge instead). Any other unsubmitted outcome -- echoed but not entered,
+#: or a send-keys that failed part-way -- may have left a draft in Copilot's input.
+SEED_NEVER_TYPED_REASONS = frozenset({"not-ready-timeout", "pane-target-unresolved", "pane-target-lost"})
+
+
+def seed_outcome(embodied: dict, *, created: bool, seed: str | None) -> tuple[str | None, bool]:
+    """How a launcher follows up a venue's typed seed: ``(status, bridge_send)``.
+
+    ``"typed"`` when it was submitted. ``bridge_send`` only when nothing can have
+    been typed: the venue never tried (no ``seeded``/reason, an older venue) or
+    reports a reason in :data:`SEED_NEVER_TYPED_REASONS`. Otherwise a draft may
+    sit in Copilot's input and a bridge copy could run the task twice, so it
+    reports ``"failed"`` and sends nothing.
+    """
+    if not (created and seed):
+        return None, False
+    if embodied.get("seed_submitted"):
+        return "typed", False
+    reason = embodied.get("seed_reason")
+    if embodied.get("seeded") or (reason and reason not in SEED_NEVER_TYPED_REASONS):
+        return "failed", False
+    return None, True
 
 # The daemon's own config dir, matching agent-bridge's ``effective_config_dir()``
 # default -- overridable the same way, via ``AGENT_BRIDGE_CONFIG_DIR``.

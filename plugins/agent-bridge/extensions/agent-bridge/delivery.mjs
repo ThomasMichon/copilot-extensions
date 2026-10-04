@@ -162,3 +162,77 @@ export function controlPlan(msg) {
 export function modeApplied(result) {
   return !!result && result.modeApplied !== false;
 }
+
+// Follow the conversation this extension serves. Its id comes from SESSION_ID
+// or the first event; a resume in the same process then switches the events to
+// the resumed conversation's id. Registering that id while the placeholder is
+// still live is what lets the bridge fold the placeholder into it (its claim,
+// handle and queued messages), so a change is adopted, never ignored. Returns
+// true when the caller must register the (new) id.
+export const REJECTED_RETRY_MS = 5 * 60 * 1000;
+
+export function adoptSessionId(state, eventSessionId, now = Date.now()) {
+  if (!eventSessionId || eventSessionId === state.sessionId) return false;
+  // An id the bridge refused for this process (see serializedRegister) is
+  // tried again only after a while, not on every event.
+  const retryAt = state.rejectedIds && state.rejectedIds.get(eventSessionId);
+  if (retryAt !== undefined && now < retryAt) return false;
+  state.sessionId = eventSessionId;
+  state.registered = false;
+  return true;
+}
+
+// One registration at a time (initial, heartbeat, and the one a rename kicks
+// off all share it). Each request reads the id when its turn comes, and is
+// ready only if that is still the current id: a rename while it was in flight
+// registers the new id first. Serialized, a late request for the old id can't
+// land after the new one and fold the alias back. ``register.close()`` stops
+// admitting registrations, drains the one in flight, and resolves to every id
+// this process registered (newest first) -- what shutdown must deregister: a
+// DELETE sent before a pending registration lands would leave it behind.
+//
+// ``post(id)`` resolves to true (registered), "rejected" (the bridge refused
+// this process for that id: its row belongs to another incarnation, e.g. a
+// crashed predecessor's expired row awaiting purge) or false (unreachable,
+// retried by the next heartbeat). On a rejection after a rename, the process
+// keeps serving under the id it did register -- inbox, controls and events
+// go on -- and the refused id is retried after REJECTED_RETRY_MS.
+export function serializedRegister(state, post, onRegistered = () => {}, { now = Date.now } = {}) {
+  let chain = Promise.resolve();
+  let closed = false;
+  let lastOk = null;
+  const posted = [];
+  const once = async () => {
+    for (;;) {
+      const id = state.sessionId;
+      if (!id || closed) return false;
+      const result = await post(id);
+      const ok = result === true;
+      if (ok) {
+        lastOk = id;
+        if (!posted.includes(id)) posted.push(id);
+      }
+      if (state.sessionId !== id) continue; // renamed meanwhile
+      if (result === "rejected") {
+        (state.rejectedIds ||= new Map()).set(id, now() + REJECTED_RETRY_MS);
+        if (lastOk && lastOk !== id) {
+          state.sessionId = lastOk; // keep a usable handle; refresh it, then ready
+          continue;
+        }
+        return false;
+      }
+      if (ok && !state.registered) {
+        state.registered = true;
+        onRegistered(id);
+      }
+      return ok;
+    }
+  };
+  const register = () => (chain = chain.then(once, once));
+  register.close = async () => {
+    closed = true;
+    await chain.catch(() => {});
+    return [...posted].reverse();
+  };
+  return register;
+}
