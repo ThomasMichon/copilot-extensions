@@ -741,7 +741,16 @@ class MuxDaemonRuntime:
         self.retire_requested = True
 
     def health(self) -> dict:
-        return {"status": "draining" if self.draining else "ready"}
+        from . import __version__
+
+        attached_clients = self.server.subscriber_count() if self.server is not None else 0
+        busy = bool(self.server is not None and self.server.active_handler_count() > 0)
+        return {
+            "status": "draining" if self.draining else "ready",
+            "version": __version__,
+            "attached_clients": attached_clients,
+            "busy": busy,
+        }
 
     def promote(self) -> dict:
         self.admissions_open = True

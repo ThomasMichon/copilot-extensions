@@ -1440,6 +1440,33 @@ def test_ensure_status_monitor_running_scrubs_session_credentials(monkeypatch):
     assert env.get("SOME_OTHER_VAR") == "kept"
 
 
+def test_runtime_health_reports_version_attached_clients_and_busy(tmp_path):
+    """Phase 1 of copilot-extensions#5001 (``worktree-manager daemons
+    status``) needs each resident daemon's own self-reported version and
+    load, not just a bare ready/draining flag."""
+    from worktree_manager import __version__
+
+    runtime = mux_daemon.MuxDaemonRuntime(mux_daemon.registry_path(tmp_path))
+    runtime.start()
+    try:
+        assert runtime.server is not None
+        health = runtime.health()
+        assert health == {
+            "status": "ready",
+            "version": __version__,
+            "attached_clients": 0,
+            "busy": False,
+        }
+
+        runtime.server.subscribe("client-1")
+        runtime.begin_drain()
+        health = runtime.health()
+        assert health["status"] == "draining"
+        assert health["attached_clients"] == 1
+    finally:
+        runtime.shutdown()
+
+
 def test_scrub_session_credentials_is_case_insensitive():
     """Copilot review finding on PR #3839: Windows environment-variable
     names are case-insensitive, so a parent carrying `gh_token`,
