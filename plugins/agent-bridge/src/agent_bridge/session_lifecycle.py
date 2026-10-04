@@ -265,13 +265,25 @@ class _SessionLifecycleMixin:
     async def end_session(self, session_id: str, *, force: bool = False) -> None:
         """End a session -- shut down client and clean up all state.
 
-        Always removes the session (even mid-turn): teardown is best-effort so
-        ending never fails with a server error on a busy/hung session (#48).
-        Both the persisted-status update and the row delete are suppressed so a
+        Removes the session for a **local**-boundary session unconditionally
+        (even mid-turn): that teardown is best-effort so ending never fails
+        with a server error on a busy/hung session (#48). Both the
+        persisted-status update and the row delete are suppressed so a
         transient DB error (e.g. a locked SQLite file) can't surface as HTTP
         500. The ENDED status is written *before* the delete so that even if the
         row is not removed, a later restart rehydrate cleans it up rather than
         resurrecting the session as STOPPED/active.
+
+        For a **remote** (``container`` or ``codespace``) boundary, teardown
+        instead **awaits and verifies** the far-side kill before removing
+        anything -- it never fires the kill off in the background and
+        declares success, since an unconfirmed remote process is exactly how
+        a Session Host + its child silently survives on live infrastructure.
+        If that confirmation is inconclusive, this raises
+        :class:`RemoteHostRecoveryPendingError` and **retains** the session
+        and its index record instead of removing them, so the caller can
+        retry rather than losing track of a possibly-still-running remote
+        process.
 
         Refuses with SessionBusyError when the session is hosting active
         background sub-agents unless ``force`` is set -- ending kills the
@@ -387,8 +399,41 @@ class _SessionLifecycleMixin:
                         from . import bridge_lock
                         bridge_lock.remove_sync(session_id)
                     self._set_container_launch_pending(session_id, False)
-                else:
+                elif rec.boundary == "local":
                     self._reap_host_record(rec, "session ended")
+                else:
+                    # Remote, non-container boundary (CodeSpace/mesh): mirror
+                    # the container branch above -- await and VERIFY the
+                    # far-side kill rather than firing it off via
+                    # _reap_host_record's fire-and-forget
+                    # _schedule_remote_reap. That path never joins the
+                    # background task, so an explicit end_session() could
+                    # return (and e.g. a short-lived caller's event loop could
+                    # close) before the SSH kill round-trip ever ran, silently
+                    # leaving the far-side Session Host + child alive on real
+                    # infrastructure (production-pollution risk for the
+                    # CodeSpace e2e smoke test specifically).
+                    self._kill_forward_sync(
+                        session_id,
+                        release_container_lock=False,
+                    )
+                    confirmed_dead = await self._remote_reap(
+                        rec,
+                        getattr(rec, "endpoint", None) or {},
+                    )
+                    if not confirmed_dead:
+                        self._mark_session_failed(
+                            session, trigger="remote_reap_inconclusive"
+                        )
+                        raise RemoteHostRecoveryPendingError(
+                            "Remote Session Host reap is inconclusive; "
+                            f"retained session {session_id} and target ownership"
+                        )
+                    with contextlib.suppress(Exception):
+                        self._host_index.remove(session_id)
+                    with contextlib.suppress(Exception):
+                        from . import bridge_lock
+                        bridge_lock.remove_sync(session_id)
 
         if (
             container

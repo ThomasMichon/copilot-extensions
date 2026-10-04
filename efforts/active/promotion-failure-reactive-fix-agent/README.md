@@ -2339,3 +2339,39 @@ own `compiler_version` metadata doesn't match the pin, mirroring
 drift. Recompiled clean; all guards and the full 81-test suite pass.
 This closes the last sub-item of the "pin the extension/action + set up
 auth" checklist entry — both halves are now resolved.
+
+### 2026-10-04 — First live dispatch diagnosed the wrong tree
+
+A `workflow_dispatch` of `ci-failure-fix-attempt` against tracked issue
+#5130 ran the agent and called `report_incomplete`. The agent was right
+to refuse a design-level module-size change, and wrong about the tree:
+the workspace was the default branch, where the guarded file was at its
+ceiling and passed. The failure is on `dev`. The agent job's own
+checkout is the workflow ref, and this workflow is registered from the
+default branch, which left the agent on the wrong tree before it ever
+started reasoning. The scope gate also diffed against that default
+branch, so a `dev` checkout would have looked like the agent had edited
+every `dev`-only file.
+
+A hardcoded `git checkout` of `dev` is the wrong fix: it ignores the
+repo's own configured `default_branch` and invents a second checkout
+path with no relation to agent-worktrees' own config. First attempt:
+call `agent-worktrees create` instead, to fork from that configured
+branch properly. **Real review finding (PR #5135, second round):**
+wrong on two counts. `agent-worktrees create` cannot run on a fresh
+hosted runner at all -- project discovery needs a registered
+anchor/repos entry this ephemeral checkout never has, and `__main__.py`
+exits before dispatch when none is found. Worse, even if it could run,
+the resulting sibling worktree would be invisible to the rest of the
+workflow: gh-aw's compiled agent container mounts only
+`$GITHUB_WORKSPACE`, and `safeoutputs` is started with
+`-w $GITHUB_WORKSPACE` -- a sibling path the engine can't reach and
+`create-pull-request` can't read a patch from. **Corrected fix:** read
+`default_branch` directly from the repo's own checked-in
+`.agent-worktrees/config.yaml` (a one-line `sed`, no CLI, no registered
+project needed) and check that branch out in place, inside
+`$GITHUB_WORKSPACE` -- the one path every later step actually operates
+on. The captured SHA is written to an immutable file in
+`pre-agent-steps` and reused unchanged by the scope gate, instead of
+re-fetching a branch that can move while the agent runs (a second real
+review finding on the same PR).
