@@ -432,6 +432,7 @@ class ClaimHistoryMirror:
                 input_text="",
             ).stdout.strip()
             entries: list[dict] = []
+            incomplete = False
             current: str | None = oid
             while current:
                 raw = self._git(
@@ -440,6 +441,7 @@ class ClaimHistoryMirror:
                 marker = "\n\n"
                 if marker not in raw or not raw.endswith("\n"):
                     log.debug("claim-history mirror: malformed commit %s on %s", current, ref)
+                    incomplete = True
                     break
                 headers, encoded_message = raw.split(marker, 1)
                 message = encoded_message[:-1]
@@ -455,6 +457,7 @@ class ClaimHistoryMirror:
                     log.debug(
                         "claim-history mirror: unexpected shape at %s on %s", current, ref,
                     )
+                    incomplete = True
                     break
                 try:
                     entries.append(_parse_entry(message, expected=(item.kind, item.key)))
@@ -463,7 +466,18 @@ class ClaimHistoryMirror:
                         "claim-history mirror: unparsable entry at %s on %s: %s",
                         current, ref, exc,
                     )
+                    incomplete = True
                 current = parents[0] if parents else None
+            if incomplete:
+                # A malformed commit, an unexpected shape, or an
+                # unparsable entry means the chain we just walked is NOT
+                # the resource's true complete history -- treating it as
+                # a successful (if partial) read would let both a sweep
+                # report a clean sync and `claims history --remote` show
+                # an incomplete audit trail as if it were the whole
+                # story. Surface it the same way a transport failure
+                # does: retried, reported, never silently accepted.
+                raise _SnapshotUnavailable(f"{ref}'s chain read incompletely")
             entries.reverse()
             return oid, entries
 

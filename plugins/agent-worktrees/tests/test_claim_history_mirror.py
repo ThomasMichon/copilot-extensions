@@ -353,6 +353,36 @@ def test_parse_entry_rejects_an_entry_for_a_different_resource():
     claim_history_mirror._parse_entry(message, expected=("pr", "o/r#1"))
 
 
+def test_fetch_treats_an_unparsable_entry_as_an_incomplete_read_not_a_success(
+    settings: LeaseSettings,
+):
+    """A malformed/unparsable commit along the chain must never make
+    ``fetch()`` quietly return the entries that DID parse as if they were
+    the resource's whole, complete history -- that reads as a successful
+    sync/audit when it genuinely is not."""
+    m = mirror(settings)
+    m.push(_entry(0, event="claimed"))
+
+    item = claim_history_mirror.resource("pr", "o/r#1")
+    ref = claim_history_mirror.ref_for(m.settings.ref_prefix, item)
+    tip = m._remote_oid(ref)
+    # Append a syntactically-valid-looking but unparsable commit on top
+    # (wrong envelope), directly via git plumbing -- bypassing push()'s
+    # own serializer entirely, to simulate real-world corruption/a
+    # foreign writer.
+    origin = str(settings.origin)
+    git_dir = f"--git-dir={origin}"
+    tree = git(git_dir, "mktree", input_text="").stdout.strip()
+    bad_oid = git(
+        git_dir, "commit-tree", tree, "-p", tip,
+        input_text="not a claim-history envelope\n",
+    ).stdout.strip()
+    git(git_dir, "update-ref", ref, bad_oid)
+
+    assert m.fetch("pr", "o/r#1") == []
+    assert claim_history_mirror.read_failure_count() >= 1
+
+
 # ── _ledger_id ────────────────────────────────────────────────────────────
 
 def test_ledger_id_is_stable_across_calls():
