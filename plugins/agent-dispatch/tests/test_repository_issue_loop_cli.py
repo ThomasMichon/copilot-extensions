@@ -282,6 +282,147 @@ def test_status_routes_forge_reservations_through_the_configured_azure_devops_pr
     ]
 
 
+def _write_marker_script(path, marker_path):
+    """A real, executable script that records its own invoked argv[0] (the
+    path the runtime actually resolved and exec'd) plus the process cwd,
+    then responds with an empty issue list -- used to prove real
+    subprocess-level path resolution end to end, since ``ScriptProvider``'s
+    default ``popen=subprocess.Popen`` is bound at class-definition time, so
+    a later ``subprocess.Popen`` patch could not reach it."""
+    path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        f"with open({str(marker_path)!r}, 'w', encoding='utf-8') as f:\n"
+        "    f.write(sys.argv[0] + '\\n' + os.getcwd())\n"
+        "print(json.dumps({'issues': []}))\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def test_discover_normalizes_a_relative_script_command_against_the_repo_root(
+    tmp_path, monkeypatch, capsys
+):
+    """Regression guard: `discover` builds its provider directly from the
+    raw `spec.repository_issue_loop` (never routed through `run_tick`'s own
+    `validate_config(config, cwd=cwd)`), so an unfixed `_forge_provider_for`
+    would resolve a relative `forge.command` against this *process's* own
+    cwd rather than the declaring repo root -- and the provider it builds is
+    then handed straight into `run_tick` as `provider=`, so a later
+    `run_tick`-internal normalization could never repair it either."""
+    from agent_dispatch import __main__ as cli
+
+    repo_root = tmp_path / "repo"
+    declaration = repo_root / ".agent-dispatch" / "registrar" / "issues.json"
+    (repo_root / "scripts").mkdir(parents=True)
+    marker = tmp_path / "marker.txt"
+    _write_marker_script(repo_root / "scripts" / "fake.py", marker)
+    _write_loop(
+        declaration,
+        forge={
+            "provider": "script",
+            "producer_login": "issue-bot",
+            "command": ["scripts/fake.py"],
+        },
+    )
+    monkeypatch.setattr(cli, "_client", lambda _args: FakeClient())
+    monkeypatch.chdir(tmp_path)  # a cwd unrelated to the declaring repo root
+
+    assert main(["repository-issue-loop", "discover", str(declaration)]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["eligible"] == []
+    invoked_path, invoked_cwd = marker.read_text(encoding="utf-8").splitlines()
+    expected = str((repo_root / "scripts" / "fake.py").resolve())
+    assert invoked_path == expected
+    assert invoked_cwd == str(repo_root.resolve())
+
+
+def test_status_normalizes_a_relative_script_command_against_the_repo_root(
+    tmp_path, monkeypatch, capsys
+):
+    """Same regression guard as `discover`, for `status`/`doctor`'s own
+    separate forge-provider construction (`_repository_issue_loop_status`)."""
+    from agent_dispatch import __main__ as cli
+
+    repo_root = tmp_path / "repo"
+    declaration = repo_root / ".agent-dispatch" / "registrar" / "issues.json"
+    (repo_root / "scripts").mkdir(parents=True)
+    marker = tmp_path / "marker.txt"
+    _write_marker_script(repo_root / "scripts" / "fake.py", marker)
+    _write_loop(
+        declaration,
+        forge={
+            "provider": "script",
+            "producer_login": "issue-bot",
+            "command": ["scripts/fake.py"],
+        },
+    )
+    monkeypatch.setattr(cli, "_client", lambda _args, **_kwargs: FakeClient())
+    monkeypatch.chdir(tmp_path)  # a cwd unrelated to the declaring repo root
+
+    assert main(["repository-issue-loop", "status", str(declaration)]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["forge_error"] is None
+    invoked_path, invoked_cwd = marker.read_text(encoding="utf-8").splitlines()
+    expected = str((repo_root / "scripts" / "fake.py").resolve())
+    assert invoked_path == expected
+    assert invoked_cwd == str(repo_root.resolve())
+
+
+def _write_repo_recording_script(path, marker_path):
+    """A real, executable script that records the request body's own
+    ``repo`` field (the identifier `status`/`doctor`/`discover` actually
+    sent), then responds with an empty issue list."""
+    path.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "request = json.loads(sys.stdin.read())\n"
+        f"with open({str(marker_path)!r}, 'w', encoding='utf-8') as f:\n"
+        "    f.write(request['repo'])\n"
+        "print(json.dumps({'issues': []}))\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+
+
+def test_status_sends_forge_backlog_to_the_script_not_the_routing_repo(
+    tmp_path, monkeypatch, capsys
+):
+    """Regression guard: `status`/`doctor` must select the script's own
+    backlog identifier (`forge.backlog`, falling back to `repo`) the same
+    way `plan`/`run_tick` already do -- otherwise, once a declaration sets
+    `forge.backlog`, this command queries the live loop's wrong backlog and
+    can report missing reservations or a spurious forge error (see
+    'Status and doctor use the wrong backlog source')."""
+    from agent_dispatch import __main__ as cli
+
+    repo_root = tmp_path / "repo"
+    declaration = repo_root / ".agent-dispatch" / "registrar" / "issues.json"
+    (repo_root / "scripts").mkdir(parents=True)
+    marker = tmp_path / "marker.txt"
+    _write_repo_recording_script(repo_root / "scripts" / "fake.py", marker)
+    _write_loop(
+        declaration,
+        forge={
+            "provider": "script",
+            "producer_login": "issue-bot",
+            "command": ["scripts/fake.py"],
+            "backlog": "pending-work-items",
+        },
+    )
+    monkeypatch.setattr(cli, "_client", lambda _args, **_kwargs: FakeClient())
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["repository-issue-loop", "status", str(declaration)]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["forge_error"] is None
+    assert marker.read_text(encoding="utf-8") == "pending-work-items"
+
+
+
 def test_doctor_exposes_forge_failure_and_emitter_failure(
     tmp_path, monkeypatch, capsys
 ):
