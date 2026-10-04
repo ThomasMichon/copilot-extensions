@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -93,8 +94,8 @@ from _admission_protocol import admission_dir as _admission_dir  # noqa: E402
 
 def _acquire_admission(wait_seconds: float) -> SingleInstance:
     """Acquire the host test slot, waiting for at most ``wait_seconds``."""
-    if wait_seconds < 0:
-        raise ValueError("admission wait must be non-negative")
+    if not math.isfinite(wait_seconds) or wait_seconds < 0:
+        raise ValueError("admission wait must be a non-negative, finite number")
     lease = SingleInstance(_admission_dir(), service=_ADMISSION_SERVICE)
     deadline = time.monotonic() + wait_seconds
     while True:
@@ -474,8 +475,8 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("test_timeout must be positive")
         if args.max_files_per_sub_suite <= 0:
             raise ValueError("max_files_per_sub_suite must be positive")
-        if args.admission_wait < 0:
-            raise ValueError("admission_wait must be non-negative")
+        if not math.isfinite(args.admission_wait) or args.admission_wait < 0:
+            raise ValueError("admission_wait must be a non-negative, finite number")
         if args.allow_host_state and not args.allow_explicit_tiers:
             raise ValueError(
                 "--allow-host-state requires --allow-explicit-tiers"

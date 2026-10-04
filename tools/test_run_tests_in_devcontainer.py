@@ -1699,6 +1699,31 @@ def test_admission_resolve_wait_rejects_negative_value() -> None:
         raise AssertionError("expected SystemExit")
 
 
+def test_admission_resolve_wait_rejects_infinite_value() -> None:
+    # `float("inf")` is well-formed and isn't `< 0`, so neither check
+    # above catches it -- it needs its own `math.isfinite` guard, or a
+    # wait of `inf` would poll forever under contention.
+    canon = wrapper._canonicalize_flag
+    try:
+        wrapper._admission.resolve_admission_wait(["--admission-wait", "inf"], canon)
+    except SystemExit as exc:
+        assert "finite" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+
+
+def test_admission_resolve_wait_rejects_nan_value() -> None:
+    # `float("nan")` is also well-formed, and `nan < 0` is False, so a
+    # bare negative check alone would silently accept it too.
+    canon = wrapper._canonicalize_flag
+    try:
+        wrapper._admission.resolve_admission_wait(["--admission-wait", "nan"], canon)
+    except SystemExit as exc:
+        assert "finite" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+
+
 def test_admission_acquire_rejects_negative_wait_with_system_exit() -> None:
     try:
         wrapper._admission.acquire(-1.0)
@@ -1706,6 +1731,16 @@ def test_admission_acquire_rejects_negative_wait_with_system_exit() -> None:
         assert "non-negative" in str(exc)
     else:
         raise AssertionError("expected SystemExit")
+
+
+def test_admission_acquire_rejects_non_finite_wait_with_system_exit() -> None:
+    for bad_wait in (float("inf"), float("nan")):
+        try:
+            wrapper._admission.acquire(bad_wait)
+        except SystemExit as exc:
+            assert "finite" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
 
 
 def test_admission_acquire_succeeds_when_uncontested(tmp_path: Path) -> None:
@@ -2430,6 +2465,24 @@ def test_main_rejects_negative_admission_wait_even_for_list_only(monkeypatch) ->
     else:
         raise AssertionError("expected SystemExit")
     assert bring_up_calls == []
+
+
+def test_main_rejects_non_finite_admission_wait_even_for_list_only(monkeypatch) -> None:
+    # `inf`/`nan` both parse as valid floats and neither is `< 0`, so the
+    # negative-range check above doesn't catch them either -- each needs
+    # its own `math.isfinite` guard, enforced before `--list` can skip
+    # admission entirely.
+    for bad_wait in ("inf", "nan"):
+        bring_up_calls: list[object] = []
+        monkeypatch.setattr(wrapper, "_bring_up", lambda *a, **k: bring_up_calls.append((a, k)))
+
+        try:
+            wrapper.main(["--list", "--admission-wait", bad_wait])
+        except SystemExit as exc:
+            assert "--admission-wait" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+        assert bring_up_calls == []
 
 
 

@@ -279,6 +279,28 @@ def test_host_state_requires_explicit_tier_opt_in(capsys) -> None:
     assert "--allow-host-state requires --allow-explicit-tiers" in capsys.readouterr().err
 
 
+def test_admission_wait_rejects_infinite_value(monkeypatch, capsys) -> None:
+    # `float("inf")` parses cleanly and isn't `< 0`, so it would otherwise
+    # slip past a bare negative check and poll forever under contention,
+    # defeating the documented bounded-wait contract.
+    monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    with pytest.raises(SystemExit) as exc:
+        runner.main(["alpha", "--admission-wait", "inf"])
+    assert exc.value.code == 2
+    assert "admission_wait must be a non-negative, finite number" in capsys.readouterr().err
+
+
+def test_admission_wait_rejects_nan_value(monkeypatch, capsys) -> None:
+    # `float("nan")` also parses cleanly, and `nan < 0` is False, so a
+    # bare negative check alone would silently accept it too.
+    monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    with pytest.raises(SystemExit) as exc:
+        runner.main(["alpha", "--admission-wait", "nan"])
+    assert exc.value.code == 2
+    assert "admission_wait must be a non-negative, finite number" in capsys.readouterr().err
+
+
+
 class _FakeCompletedProcess:
     def __init__(self, stdout: str) -> None:
         self.stdout = stdout

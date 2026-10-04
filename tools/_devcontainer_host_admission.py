@@ -16,6 +16,7 @@ hand.
 
 from __future__ import annotations
 
+import math
 import sys
 import time
 from pathlib import Path
@@ -51,14 +52,19 @@ def needs_admission(passthrough: list[str], canonicalize) -> bool:
 def resolve_admission_wait(passthrough: list[str], canonicalize) -> float:
     """Last-occurrence-wins `--admission-wait` value (matching argparse
     semantics) -- default 0.0 (fail fast), the same default
-    `run-plugin-tests.py` itself uses. Rejects a malformed OR negative
-    value immediately (`SystemExit`), same as that script's own argparse
-    plus `acquire()`'s own range check would -- silently falling back to
-    the default here would let a bad value reach `acquire()` (and so
-    start real container work, or get masked by an unrelated `[BUSY]`
-    error) before the inner runner ever gets a chance to reject it
-    itself; validating only in `acquire()` would miss it entirely for
-    `--list`, which never calls `acquire()` at all."""
+    `run-plugin-tests.py` itself uses. Rejects a malformed, negative, OR
+    non-finite value immediately (`SystemExit`), same as that script's
+    own argparse plus `acquire()`'s own range check would -- silently
+    falling back to the default here would let a bad value reach
+    `acquire()` (and so start real container work, or get masked by an
+    unrelated `[BUSY]` error) before the inner runner ever gets a chance
+    to reject it itself; validating only in `acquire()` would miss it
+    entirely for `--list`, which never calls `acquire()` at all. `inf`
+    and `nan` both parse as valid floats and neither is `< 0`, so each
+    needs its own explicit `math.isfinite` check: `inf` would otherwise
+    poll forever under contention despite the documented bounded-wait
+    contract, and `nan` makes every later comparison against it False,
+    silently defeating both the deadline math and this very check."""
     value = 0.0
     for i, arg in enumerate(passthrough):
         name, eq, value_str = arg.partition("=")
@@ -70,8 +76,8 @@ def resolve_admission_wait(passthrough: list[str], canonicalize) -> float:
             value = float(value_str)
         except ValueError:
             raise SystemExit(f"--admission-wait: invalid float value: {value_str!r}") from None
-    if value < 0:
-        raise SystemExit(f"--admission-wait must be non-negative, got {value:g}")
+    if not math.isfinite(value) or value < 0:
+        raise SystemExit(f"--admission-wait must be a non-negative, finite number, got {value:g}")
     return value
 
 
@@ -87,8 +93,8 @@ def acquire(wait_seconds: float) -> SingleInstance:
     printing to stderr itself and exiting with that integer directly (a
     string `SystemExit` payload, as every OTHER failure here uses, prints
     to stderr but always exits 1)."""
-    if wait_seconds < 0:
-        raise SystemExit(f"--admission-wait must be non-negative, got {wait_seconds:g}")
+    if not math.isfinite(wait_seconds) or wait_seconds < 0:
+        raise SystemExit(f"--admission-wait must be a non-negative, finite number, got {wait_seconds:g}")
     lease = SingleInstance(admission_dir(), service=_ADMISSION_SERVICE)
     deadline = time.monotonic() + wait_seconds
     while True:

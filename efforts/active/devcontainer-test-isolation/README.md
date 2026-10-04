@@ -2498,3 +2498,22 @@ contract. All tests, module-size, and docs-consistency checks still
 pass; a fresh Docker-backed end-to-end run (plus direct negative-wait
 and busy-exit-code checks) confirmed the fixes don't disturb the common
 case.
+
+### 2026-10-04 — Review round 10 (PR #5100): reject non-finite --admission-wait everywhere
+A MEDIUM finding caught that round 9's non-negative range check still
+missed two values `float()` happily parses: `inf` and `nan`. Neither
+satisfies `value < 0` (`nan` makes every comparison False, and `inf`
+simply isn't negative), so `--admission-wait inf` would poll under
+contention forever despite the documented bounded-wait contract, and
+`--admission-wait nan` would bypass the promised host-side validation
+entirely while also silently breaking the deadline math downstream.
+Added an explicit `math.isfinite` guard alongside the non-negative check
+in BOTH `_devcontainer_host_admission.resolve_admission_wait`/`acquire`
+(the wrapper side) and `run-plugin-tests.py`'s own CLI validation block
+and `_acquire_admission` (the bare-script side, per the finding's own
+request to keep both invocation styles' semantics identical). Added
+regression tests for `inf` and `nan` in all four locations plus a
+`--list`-combined wrapper-level test, and live-validated all four
+combinations (wrapped + bare, `inf` + `nan`) against real Docker:
+immediate rejection, no container ever created. All tests, module-size,
+and docs-consistency checks still pass.
