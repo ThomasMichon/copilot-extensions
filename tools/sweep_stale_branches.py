@@ -36,9 +36,15 @@ convention:
   (the branch moved between planning and deleting) is treated as a safe
   skip ONLY when it is the lease's own stale-info rejection -- any other
   push rejection (a protected-branch hook declining the delete, a
-  permission error, etc.) is a real failure. A fork-originated PR's
-  `headRefName` never denotes a branch on this repo at all and is excluded
-  entirely. When a branch name has been reused across multiple PR records
+  permission error, etc.) is a real failure. A compare-and-delete lease
+  alone cannot catch a new PR opened against an already-planned-deletable
+  branch, since opening a PR never changes that branch's OID -- the actual
+  deletion also re-checks live, immediately before each delete, whether a
+  same-repository OPEN PR now has that branch as its head (see
+  `_has_open_pr`), and skips if so. A fork-originated PR's `headRefName`
+  never denotes a branch on this repo at all and is excluded entirely (both
+  from deletion and from counting toward "has any PR record" below). When
+  a branch name has been reused across multiple PR records
   over time (merged, then closed unmerged, then reopened, etc.), the
   **single most recent** one (by event time) determines both whether the
   branch is deletable at all and, if so, the expected OID -- never an
@@ -377,7 +383,7 @@ def _parse_git_remote_owner_repo(url: str) -> tuple[str, str] | None:
     segments = [segment for segment in path.strip("/").split("/") if segment]
     if not host or len(segments) != 2:
         return None
-    return host.lower(), f"{segments[0]}/{segments[1]}"
+    return host.lower(), f"{segments[0]}/{segments[1]}".lower()
 
 
 def _verify_remote_matches_repo(remote: str, repo: str) -> None:
@@ -404,12 +410,45 @@ def _verify_remote_matches_repo(remote: str, repo: str) -> None:
         )
 
 
-def _delete_branch(remote: str, branch: str, expected_oid: str) -> bool:
+def _has_open_pr(repo: str, branch: str) -> bool:
+    """True if ``repo`` currently has an OPEN PR whose head is ``branch``.
+
+    A compare-and-delete lease alone cannot catch this case: opening a new
+    PR against an existing branch does not change that branch's commit
+    OID, so a branch that was safely deletable at planning time can gain a
+    brand-new open PR later in the same run (sweeps over large backlogs can
+    take meaningful wall-clock time) without ever failing the lease. Must
+    be re-checked live, immediately before each delete.
+    """
+    out = subprocess.run(
+        ["gh", "pr", "list", "--repo", repo, "--head", branch, "--state", "open", "--json", "number"],
+        capture_output=True,
+        text=True,
+    )
+    if out.returncode != 0:
+        # Fail closed: an inability to confirm "no open PR" must never be
+        # treated as "confirmed none" -- skip the delete rather than risk
+        # closing a live PR on a transient `gh` hiccup.
+        return True
+    try:
+        rows = json.loads(out.stdout or "[]")
+    except json.JSONDecodeError:
+        return True
+    return len(rows) > 0
+
+
+def _delete_branch(remote: str, repo: str, branch: str, expected_oid: str) -> bool:
     """Delete ``branch`` on ``remote`` via an atomic compare-and-delete:
     ``git push --force-with-lease`` fails the update server-side unless the
     remote ref is still exactly at ``expected_oid`` at push time -- a real
     lease, not a separate check-then-act GET+DELETE (which a transient GET
-    failure or a race between the two calls could silently bypass)."""
+    failure or a race between the two calls could silently bypass). Also
+    re-checks live for a newly-opened PR immediately before deleting (see
+    :func:`_has_open_pr`) -- the lease alone cannot catch that case, since
+    opening a PR against an existing branch never changes its OID."""
+    if _has_open_pr(repo, branch):
+        print(f"[SKIP] {branch} now has an open PR (opened since planning) -- not deleting.")
+        return True
     lease = f"refs/heads/{branch}:{expected_oid}"
     out = subprocess.run(
         ["git", "push", remote, f"--force-with-lease={lease}", f":refs/heads/{branch}"],
@@ -575,12 +614,12 @@ def main() -> int:
     non_merged_branch_names = {
         branch for branch, pr in latest_per_branch.items() if pr.state != "MERGED"
     }
-    # "Has any PR record at all" must still count a fork-originated PR (its
-    # branch isn't deletable here -- it isn't this repo's branch -- but a
-    # same-named branch on THIS repo with no record of its own should not be
-    # misclassified as PR-less just because a fork PR happened to share the
-    # name).
-    all_pr_branch_names = {pr.branch for pr in pull_requests}
+    # "Has any PR record at all" must only count a SAME-REPOSITORY PR's
+    # branch -- a fork PR's `headRefName` belongs to the fork, not to a
+    # same-named branch in this repository, so counting it here would
+    # wrongly suppress triage for a local disposable branch that truly has
+    # no same-repo PR of its own.
+    all_pr_branch_names = {pr.branch for pr in pull_requests if pr.same_repo}
     protected = {default_branch, *DEFAULT_PROTECTED_EXTRA}
 
     deletable, flagged = plan_sweep(remote_branches, merged_heads, non_merged_branch_names, all_pr_branch_names, protected)
@@ -599,7 +638,7 @@ def main() -> int:
 
     failed = False
     for branch in deletable:
-        if not _delete_branch(args.remote, branch, merged_heads[branch]):
+        if not _delete_branch(args.remote, args.repo, branch, merged_heads[branch]):
             failed = True
 
     if flagged:

@@ -370,6 +370,21 @@ def test_verify_remote_matches_repo_rejects_a_lookalike_host(sweep, monkeypatch)
         sweep._verify_remote_matches_repo("origin", "owner/repo")
 
 
+def test_verify_remote_matches_repo_accepts_mixed_case_repo_against_canonical_casing_url(sweep, monkeypatch):
+    # Regression: the default --repo is mixed-case
+    # ("ThomasMichon/copilot-extensions"), and `origin` preserves that exact
+    # casing -- comparison must be case-insensitive on both sides, not just
+    # the URL side, or the default --execute run aborts immediately.
+    class _Result:
+        returncode = 0
+        stdout = "https://github.com/ThomasMichon/copilot-extensions.git\n"
+        stderr = ""
+
+    monkeypatch.setattr(sweep.subprocess, "run", lambda *a, **k: _Result())
+
+    sweep._verify_remote_matches_repo("origin", "ThomasMichon/copilot-extensions")  # must not raise
+
+
 def test_verify_remote_matches_repo_scrubs_git_env(sweep, monkeypatch):
     captured_env = {}
 
@@ -390,7 +405,59 @@ def test_verify_remote_matches_repo_scrubs_git_env(sweep, monkeypatch):
     assert "GIT_DIR" not in captured_env
 
 
+# --- _has_open_pr ---------------------------------------------------------
+
+
+def test_has_open_pr_true_when_gh_reports_a_match(sweep, monkeypatch):
+    class _Result:
+        returncode = 0
+        stdout = '[{"number": 42}]'
+        stderr = ""
+
+    monkeypatch.setattr(sweep.subprocess, "run", lambda *a, **k: _Result())
+
+    assert sweep._has_open_pr("owner/repo", "pr/reused") is True
+
+
+def test_has_open_pr_false_on_a_clean_empty_result(sweep, monkeypatch):
+    class _Result:
+        returncode = 0
+        stdout = "[]"
+        stderr = ""
+
+    monkeypatch.setattr(sweep.subprocess, "run", lambda *a, **k: _Result())
+
+    assert sweep._has_open_pr("owner/repo", "pr/reused") is False
+
+
+def test_has_open_pr_fails_closed_on_a_gh_error(sweep, monkeypatch):
+    # Must never treat "couldn't confirm" as "confirmed none" -- that would
+    # risk deleting a branch with a live PR on a transient `gh` hiccup.
+    class _Failed:
+        returncode = 1
+        stdout = ""
+        stderr = "some gh error"
+
+    monkeypatch.setattr(sweep.subprocess, "run", lambda *a, **k: _Failed())
+
+    assert sweep._has_open_pr("owner/repo", "pr/reused") is True
+
+
 # --- _delete_branch (atomic compare-and-delete lease) -------------------
+
+
+def _no_open_pr_then(push_result):
+    """Dispatch a fake `subprocess.run`: the `gh pr list` open-PR re-check
+    always reports none, the `git push` deletion gets `push_result`."""
+    def _fake_run(args, **_kwargs):
+        if args[0] == "gh":
+            class _NoOpenPr:
+                returncode = 0
+                stdout = "[]"
+                stderr = ""
+            return _NoOpenPr()
+        return push_result
+    return _fake_run
 
 
 def test_delete_branch_uses_force_with_lease_with_the_expected_oid(sweep, monkeypatch):
@@ -402,14 +469,37 @@ def test_delete_branch_uses_force_with_lease_with_the_expected_oid(sweep, monkey
         stderr = ""
 
     def _fake_run(args, **_kwargs):
+        if args[0] == "gh":
+            class _NoOpenPr:
+                returncode = 0
+                stdout = "[]"
+                stderr = ""
+            return _NoOpenPr()
         captured_args.append(args)
         return _Result()
 
     monkeypatch.setattr(sweep.subprocess, "run", _fake_run)
 
-    assert sweep._delete_branch("origin", "pr/done", "expected-sha") is True
+    assert sweep._delete_branch("origin", "owner/repo", "pr/done", "expected-sha") is True
     assert any("--force-with-lease=refs/heads/pr/done:expected-sha" in arg for arg in captured_args[0])
     assert ":refs/heads/pr/done" in captured_args[0]
+
+
+def test_delete_branch_skips_when_a_pr_was_opened_after_planning(sweep, monkeypatch):
+    # Regression: a compare-and-delete lease alone cannot catch this --
+    # opening a PR against an existing branch never changes its OID, so the
+    # lease would succeed and delete a branch a brand-new open PR now owns.
+    def _fake_run(args, **_kwargs):
+        assert args[0] == "gh", "must never reach git push when an open PR is found"
+        class _HasOpenPr:
+            returncode = 0
+            stdout = '[{"number": 99}]'
+            stderr = ""
+        return _HasOpenPr()
+
+    monkeypatch.setattr(sweep.subprocess, "run", _fake_run)
+
+    assert sweep._delete_branch("origin", "owner/repo", "pr/reused", "expected-sha") is True
 
 
 def test_delete_branch_scrubs_git_env(sweep, monkeypatch):
@@ -420,14 +510,20 @@ def test_delete_branch_scrubs_git_env(sweep, monkeypatch):
         stdout = ""
         stderr = ""
 
-    def _fake_run(*_args, **kwargs):
+    def _fake_run(args, **kwargs):
+        if args[0] == "gh":
+            class _NoOpenPr:
+                returncode = 0
+                stdout = "[]"
+                stderr = ""
+            return _NoOpenPr()
         captured_env.update(kwargs.get("env") or {})
         return _Result()
 
     monkeypatch.setattr(sweep.subprocess, "run", _fake_run)
     monkeypatch.setenv("GIT_WORK_TREE", "/somewhere/else")
 
-    sweep._delete_branch("origin", "pr/done", "expected-sha")
+    sweep._delete_branch("origin", "owner/repo", "pr/done", "expected-sha")
 
     assert "GIT_WORK_TREE" not in captured_env
 
@@ -438,9 +534,9 @@ def test_delete_branch_treats_a_rejected_lease_as_a_safe_skip(sweep, monkeypatch
         stdout = ""
         stderr = "! [rejected]          refs/heads/pr/moved (stale info)"
 
-    monkeypatch.setattr(sweep.subprocess, "run", lambda *a, **k: _Rejected())
+    monkeypatch.setattr(sweep.subprocess, "run", _no_open_pr_then(_Rejected()))
 
-    assert sweep._delete_branch("origin", "pr/moved", "old-sha") is True
+    assert sweep._delete_branch("origin", "owner/repo", "pr/moved", "old-sha") is True
 
 
 def test_delete_branch_treats_a_non_lease_rejection_as_a_real_failure(sweep, monkeypatch, capsys):
@@ -453,9 +549,9 @@ def test_delete_branch_treats_a_non_lease_rejection_as_a_real_failure(sweep, mon
         stdout = ""
         stderr = "! [remote rejected] refs/heads/pr/blocked (protected branch hook declined)"
 
-    monkeypatch.setattr(sweep.subprocess, "run", lambda *a, **k: _HookDeclined())
+    monkeypatch.setattr(sweep.subprocess, "run", _no_open_pr_then(_HookDeclined()))
 
-    assert sweep._delete_branch("origin", "pr/blocked", "expected-sha") is False
+    assert sweep._delete_branch("origin", "owner/repo", "pr/blocked", "expected-sha") is False
     assert "failed to delete" in capsys.readouterr().err
 
 
@@ -465,9 +561,9 @@ def test_delete_branch_treats_already_gone_as_success(sweep, monkeypatch):
         stdout = ""
         stderr = "error: unable to delete 'pr/gone': remote ref does not exist"
 
-    monkeypatch.setattr(sweep.subprocess, "run", lambda *a, **k: _AlreadyGone())
+    monkeypatch.setattr(sweep.subprocess, "run", _no_open_pr_then(_AlreadyGone()))
 
-    assert sweep._delete_branch("origin", "pr/gone", "expected-sha") is True
+    assert sweep._delete_branch("origin", "owner/repo", "pr/gone", "expected-sha") is True
 
 
 def test_delete_branch_reports_failure_on_a_real_error(sweep, monkeypatch, capsys):
@@ -476,9 +572,9 @@ def test_delete_branch_reports_failure_on_a_real_error(sweep, monkeypatch, capsy
         stdout = ""
         stderr = "error: failed to push some refs (permission denied)"
 
-    monkeypatch.setattr(sweep.subprocess, "run", lambda *a, **k: _RealFailure())
+    monkeypatch.setattr(sweep.subprocess, "run", _no_open_pr_then(_RealFailure()))
 
-    assert sweep._delete_branch("origin", "pr/blocked", "expected-sha") is False
+    assert sweep._delete_branch("origin", "owner/repo", "pr/blocked", "expected-sha") is False
     assert "failed to delete" in capsys.readouterr().err
 
 
@@ -636,7 +732,7 @@ def test_main_never_deletes_a_branch_whose_pr_is_merely_open(sweep, monkeypatch)
 
 
 def test_main_never_deletes_a_branch_whose_latest_record_is_closed_unmerged(sweep, monkeypatch):
-    # Regression for the fourth review's finding: a branch merged once,
+    # Regression: a branch merged once,
     # then reused and closed WITHOUT merging, must never be deleted just
     # because the older merge's OID still matches.
     monkeypatch.setattr(
@@ -702,7 +798,7 @@ def test_main_execute_returns_nonzero_when_a_deletion_fails(sweep, monkeypatch):
     monkeypatch.setattr(sweep, "_remote_branches", lambda repo, limit: {"pr/done": "sha1"})
     monkeypatch.setattr(sweep, "_default_branch", lambda repo: "main")
     monkeypatch.setattr(sweep, "_verify_remote_matches_repo", lambda remote, repo: None)
-    monkeypatch.setattr(sweep, "_delete_branch", lambda remote, branch, oid: False)
+    monkeypatch.setattr(sweep, "_delete_branch", lambda remote, repo, branch, oid: False)
     monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--execute"])
 
     assert sweep.main() == 1
