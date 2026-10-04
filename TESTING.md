@@ -62,11 +62,15 @@ python tools/run-plugin-tests.py agent-dispatch \
 Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
 than repeatedly importing file groups that contain no selected tests.
 
-Potentially heavy runs (everything except `--guards` and `--collect-only`) also
-take one host-wide admission lease shared by every checkout and worktree. A
-second run fails fast and names the live holder instead of competing for CPU,
-memory, and process slots. Use a bounded wait when joining an existing queue is
-preferable:
+Every run except `--list` also takes one host-wide admission lease shared by
+every checkout and worktree -- including `--guards`, `--collect-only`, and a
+bare `--prepare-only` pass, since each still rebuilds/updates the on-disk venv
+(and so can rebuild or delete it mid-run via `--reinstall` or a drifted
+dependency fingerprint) a concurrent admitted run may depend on. Only
+`--list` is exempt, since it returns before that venv-management path is ever
+reached. A second run fails fast and names the live holder instead of
+competing for CPU, memory, and process slots. Use a bounded wait when joining
+an existing queue is preferable:
 
 ```bash
 python tools/run-plugin-tests.py agent-worktrees --admission-wait 900
@@ -115,11 +119,17 @@ already-small, single-contract files is not required.
 runner above that additionally runs it inside a hardened, ephemeral
 devcontainer (`.devcontainer/test-isolation/devcontainer.json`, a named alternate config -- never the canonical `.devcontainer/devcontainer.json` root path, which would let a direct "Reopen in Container" pick up an empty, wrapper-only workspace by accident) -- a real OS-level
 filesystem/privilege boundary on top of (not instead of) the turn-key
-runner's own process-level containment. **Networking is NOT yet part of
-that boundary** -- the container keeps Docker's default bridge network with
-full outbound reach (a known, named, open design gap; see the effort
-README's Phase 1 journal), so a test can still open ordinary sockets and
-reach external or host/LAN services. The filesystem/privilege boundary
+runner's own process-level containment. **Networking is now part of that
+boundary for the real test run**: the wrapper first runs a dependency-
+preparation pass (`--prepare-only`, which drives the same venv-install path
+a real run would WITHOUT ever importing a single test module or
+`conftest.py` -- deliberately not `--collect-only`, which still runs
+pytest's own collection and would execute that module-level code with
+network access) while the container still
+has its default outbound reach, then disconnects the container from every
+attached network before running the real, now network-disconnected test
+pass -- a test can no longer open an ordinary socket to an external or
+host/LAN service during actual execution. The filesystem/privilege boundary
 exists for the case the turn-key runner cannot cover on its own: a buggy or
 adversarial test that escapes process-level containment via an absolute
 path write or a privilege a job object doesn't restrict. See
@@ -145,13 +155,15 @@ arguments) is passed through to `tools/run-plugin-tests.py` *inside* the
 container -- with one normalization (a `--base` value that resolves on
 the host is rewritten to its resolved commit SHA, or appended when
 changed-selection is active and `--base` was omitted entirely, before
-the in-container invocation is assembled; see below for why) and three
+the in-container invocation is assembled; see below for why) and two
 known exceptions to otherwise-transparent passthrough: `--allow-host-state`
-is rejected outright (see below), `--admission-wait`'s lease loses its
-host-wide coordination once run inside the container (see the Phase 2
-admission-lease gap below), and a `--max-memory-mb`/`--max-processes`/
+is rejected outright (see below), and a `--max-memory-mb`/`--max-processes`/
 `--max-temp-mb` value above the container's own fixed outer ceiling is
-rejected outright (see below). The wrapper:
+rejected outright (see below). `--admission-wait` is also consulted by
+the wrapper itself: it acquires the SAME host-wide lease
+`run-plugin-tests.py` would, on the HOST, before any container work
+begins (closing the Phase 2 admission-lease gap below), then still
+passes the flag through unchanged. The wrapper:
 
 1. Writes a per-invocation copy of `.devcontainer/test-isolation/devcontainer.json` with
    its workspace volume name made unique to this run, creates that volume
@@ -165,15 +177,17 @@ rejected outright (see below). The wrapper:
    and NOT untracked files either: this repository has no blanket
    `.gitignore` rule for `.env`-style config or arbitrary credential
    filenames, so an untracked-but-not-ignored secret file sitting in the
-   working tree would otherwise still be copied into a container that then
-   has outbound network access. Pass `--include-untracked` to additionally
+   working tree would otherwise still be copied into a container that has
+   outbound network access during its dependency-preparation pass. Pass
+   `--include-untracked` to additionally
    include untracked-but-not-gitignored files (e.g. to test a new,
    not-yet-committed file) -- a deliberate, explicit opt-in, never the
    default. `.git` is handled separately and deliberately minimally: rather
    than copying the real git database wholesale (which would carry every
    branch, stash, reflog, and unreachable object -- local-only content
    having nothing to do with the plugin suite being run, into a container
-   that can still reach the network), a `git bundle` containing only the
+   that can still reach the network during its dependency-preparation
+   pass), a `git bundle` containing only the
    object closure of `HEAD` and the `--changed` diff base (`--base`, or
    that runner's own
    `origin/main` default when `--base` isn't passed) is built and cloned
@@ -197,8 +211,17 @@ rejected outright (see below). The wrapper:
    contaminated calling environment can't silently redirect it to the wrong
    repository. The host checkout is only ever **read**, never mutated, by
    anything that happens afterward inside the container.
-3. Runs `tools/run-plugin-tests.py` inside the container via
-   `devcontainer exec` and propagates its exit code.
+3. Resolves every targeted plugin's venv dependencies first (a
+   `--prepare-only` pass -- never imports test code -- run with the
+   container's default outbound network reach), then disconnects the
+   container from every attached network, strips a passed-through
+   `--reinstall` (the prep pass already rebuilt the venv; the real pass
+   must reuse it, not rebuild it with no network left), then runs
+   `tools/run-plugin-tests.py` for real inside the now
+   network-disconnected container via `devcontainer exec` and
+   propagates its exit code. A request for only `--list` (which never
+   touches a venv) skips both the preparation pass and the network
+   disconnect.
 4. Tears the container AND its per-invocation volume down afterward (pass
    `--keep` to leave both running for debugging); a failed removal raises
    rather than silently reporting success, and a failed `devcontainer up`
@@ -210,10 +233,10 @@ The container itself runs with every Linux capability dropped
 only `/tmp`, `/run`, `$HOME`, and the size-bounded workspace volume
 writable, and hard resource ceilings (14 GiB memory with no extra swap, 4
 CPUs, a 512-process PID limit) -- no Docker socket is ever mounted in.
-Outbound networking is currently left at Docker's default bridge (a known,
-named, open design gap -- see the effort README's Phase 1 journal);
-everything else above has been validated against a real container, not
-merely asserted.
+Outbound networking is available only during the dependency-preparation
+pass above; the real pytest run is fully network-disconnected (see step 3) --
+everything above has been validated against a real container, not merely
+asserted.
 
 Because the workspace is a fresh copy rather than the live checkout, an
 uncommitted MODIFICATION to a tracked file is included (the copy reads the
@@ -265,30 +288,30 @@ snapshot even though the underlying commit object is present. A bare SHA
 has no such problem -- it resolves against any clone containing its
 object, named ref or not.
 
-Two of `run-plugin-tests.py`'s own flags cannot retain their documented
-semantics through this wrapper, for the same structural reason (a fresh,
+One of `run-plugin-tests.py`'s own flags cannot retain its documented
+semantics through this wrapper, for a structural reason (a fresh,
 credential-free tmpfs `$HOME` per container): `--allow-host-state` is
 rejected outright with a clear error (its whole contract is preserving
 the caller's real HOME/config/credentials, which this isolation boundary
 specifically does not expose) -- run `tools/run-plugin-tests.py` directly
-for that case instead. `--admission-wait`/the host-wide heavy-test-slot
-lease it waits for is a known, accepted residual gap: that lease lives
-under `$HOME`/`XDG_CACHE_HOME`, which is a fresh tmpfs per container
-invocation, so concurrent wrapped runs acquire unrelated per-container
-leases rather than coordinating against one shared host-wide slot. A
-genuine fix needs a host-side admission mechanism (acquired before
-container startup) rather than relying on the inner runner's own
-container-local lease; tracked as an open Phase 2 item, not silently
-worked around here.
+for that case instead. `--admission-wait`'s host-wide heavy-test-slot
+lease had the same structural problem (its lease lives under
+`$HOME`/`XDG_CACHE_HOME`, a fresh tmpfs per container invocation, so
+concurrent wrapped runs would otherwise acquire unrelated per-container
+leases instead of coordinating against one shared host-wide slot) --
+closed in Phase 2: the wrapper itself acquires that same host-wide lease
+on the HOST, before any container work begins, and holds it for the
+run's entire lifetime, so wrapped and bare invocations correctly
+serialize against each other.
 
-A third exception, for a different reason: the container itself enforces
+A second exception, for a different reason: the container itself enforces
 FIXED, lower outer resource ceilings (`--memory=14g`, `--pids-limit=512`,
 and `/tmp`'s own `size=6144m` tmpfs) regardless of what the inner runner's
 own `--max-memory-mb`/`--max-processes`/`--max-temp-mb` flags claim. A
 value above the matching outer ceiling would otherwise pass through
 unmodified, then be silently preempted by the container at the wrong
 moment (an OOM-kill, a hit `ENOSPC` on `/tmp`, or a stalled fork) instead
-of the clear, immediate rejection the other two exceptions already give
+of the clear, immediate rejection the other exception already gives
 -- so the wrapper rejects an over-the-ceiling value outright, before any
 container work begins, naming the exact flag/value/ceiling involved.
 

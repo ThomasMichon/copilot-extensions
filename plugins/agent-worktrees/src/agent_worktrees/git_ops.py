@@ -810,8 +810,19 @@ def merge_squash(branch: str, worktree_id: str, *, cwd: str | Path) -> bool:
 @dataclass
 class PushResult:
     """Outcome of :func:`push` -- truthy on success, but also carrying git's
-    stderr and a retry classification so callers can surface the *real* reason
-    a push failed instead of a generic "rejected".
+    stderr/stdout and a retry classification so callers can surface the *real*
+    reason a push failed instead of a generic "rejected".
+
+    Both streams matter: git's OWN protocol messages (``! [rejected] ...``,
+    ``error: failed to push some refs ...``) land on stderr, but a pre-push
+    hook's own check output is whatever THAT hook script wrote to -- many
+    (a plain ``print()``/``echo`` in a lint/contract check) write to stdout,
+    not stderr. Surfacing only ``stderr`` silently dropped exactly that
+    detail: a caller saw a bare "failed to push some refs" with no hint
+    which check failed, even though the hook had already printed the
+    specific ``[FAIL] ...`` reason to stdout (confirmed live: a
+    module-size-cap violation's full detail was invisible this way across
+    six retries).
 
     ``__bool__`` returns ``ok`` so every existing ``if git_ops.push(...)`` /
     ``pushed = git_ops.push(...)`` call keeps working unchanged.
@@ -819,6 +830,7 @@ class PushResult:
 
     ok: bool
     stderr: str = ""
+    stdout: str = ""
 
     def __bool__(self) -> bool:
         return self.ok
@@ -844,6 +856,28 @@ class PushResult:
             or "tip of your current branch is behind" in s
             or "the remote contains work that you do" in s
         )
+
+    @property
+    def failure_detail(self) -> str:
+        """Render both streams for a failed push's error message.
+
+        Never just ``stderr``: git's own protocol messages (``error: failed
+        to push some refs ...``) land on stderr, but a pre-push hook's own
+        check output is whatever THAT hook script wrote to -- many (a plain
+        ``print()``/``echo`` in a lint/contract check) write to stdout, not
+        stderr. Surfacing only stderr silently dropped exactly that detail: a
+        caller saw a bare "failed to push some refs" with no hint which check
+        failed or why, even though the hook had already printed the specific
+        reason -- confirmed live, a module-size-cap violation's full
+        ``[FAIL] ...`` detail was invisible this way across six retries.
+        Empty string when both streams are empty (nothing to add).
+        """
+        parts = []
+        if self.stdout and self.stdout.strip():
+            parts.append(f"git (stdout): {self.stdout.strip()}")
+        if self.stderr and self.stderr.strip():
+            parts.append(f"git (stderr): {self.stderr.strip()}")
+        return ("\n" + "\n".join(parts)) if parts else ""
 
 
 def push(
@@ -878,6 +912,7 @@ def push(
     # Retry without an injected auth override on failure (#900).
     attempts = [auth_args, []] if auth_args else [[]]
     last_stderr = ""
+    last_stdout = ""
     for prefix in attempts:
         try:
             result = git(
@@ -889,7 +924,8 @@ def push(
         if result.returncode == 0:
             return PushResult(ok=True)
         last_stderr = result.stderr or last_stderr
-    return PushResult(ok=False, stderr=last_stderr)
+        last_stdout = result.stdout or last_stdout
+    return PushResult(ok=False, stderr=last_stderr, stdout=last_stdout)
 
 
 # --- Cross-account authentication (#29) -------------------------------------

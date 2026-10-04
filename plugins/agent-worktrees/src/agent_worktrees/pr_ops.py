@@ -1000,7 +1000,7 @@ def create_pr(
                 f"Failed to push '{wt_branch}' to '{publish_remote}/{feature_branch}'. "
                 f"The squashed work is on '{wt_branch}'; tracking state left as "
                 f"'creating' for retry (re-run create-pr)."
-                + (f"\ngit: {pushed.stderr.strip()}" if pushed.stderr else "")
+                + pushed.failure_detail
             )}
     else:
         # Snapshot publish: the local worktree lands on the squashed commit
@@ -1033,7 +1033,7 @@ def create_pr(
                 f"work is on '{wt_branch}' (and the local '{feature_branch}' "
                 f"snapshot); tracking state left as 'creating' for retry "
                 f"(re-run create-pr)."
-                + (f"\ngit: {pushed.stderr.strip()}" if pushed.stderr else "")
+                + pushed.failure_detail
             )}
 
     # 7. Record the open state on the target PR (preserving any url/number

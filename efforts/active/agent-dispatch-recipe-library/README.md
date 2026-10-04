@@ -369,14 +369,16 @@ below — read it before starting any Phase 3 work).
       a stale-exit.
 
 ### Phase 5 — Named recipe: backlog-triager (Request item c)
-- [ ] Ship a global `extends:`-able recipe parameterizing
+- [x] Ship a global `extends:`-able recipe parameterizing
       `repository-issue-loop`: prompt requests classification, legitimacy
       check, and priority assignment; evaluator (via the verification-gate
       mechanism) confirms the issue carries the required triage label/marker
       schema and effort assignment.
-- [ ] Use Phase 2's GitHub/ADO/Gitea backlog-provider adapters for its
-      filterable issue-list emitter; no recipe-specific listing code.
-- [ ] Tests: end-to-end against a fixture issue, GitHub adapter first;
+- [x] Use Phase 2's existing provider-neutral backlog emitter surface --
+      GitHub + Azure DevOps adapters today, and the same generic hook the
+      deferred Gitea adapter will eventually plug into -- with no
+      recipe-specific listing code.
+- [x] Tests: end-to-end against a fixture issue, GitHub adapter first;
       confirm the evaluator's schema/marker check.
 
 ### Phase 6 — Named recipe: issue-reproducer (Request item d)
@@ -1013,3 +1015,58 @@ suite green (3743 passed, 23 skipped, the one known flake above).
     (`test_idle_headless_fleet_nudge_includes_remote_host`,
     `test_consume_baton_*` under a live Copilot CLI session) appeared in
     this run.
+
+### 2026-10-03 — Phase 5: backlog-triager named recipe landed
+- Added a fifth built-in global recipe template,
+  `global:backlog-triager`, as a `repository-issue-loop`
+  parameterization (`registrar_recipes.py`): common backlog-loop defaults
+  (`exclude_labels`, headless pool body) plus a new built-in
+  `worker_identity: backlog-triager`, `require_verification: true`, and a
+  shared opaque `evaluator_ref: backlog-triager`.
+- Added the built-in worker identity
+  `agent_dispatch/identities/backlog-triager.identity.md`. Its charter is
+  the shared/generic half only: classify the issue, confirm whether it is
+  a legitimate bug vs. a question/already-fixed/duplicate/out-of-scope
+  item, assign the repository's priority/triage markers, and ensure the
+  issue is attached to tracked effort work before considering triage
+  complete. It explicitly points at the repository's own same-repo
+  effort-linking convention (for this repo family, a direct
+  `efforts/active/<slug>/README.md` reference) rather than inventing a new
+  marker shape.
+- **Shared-vs-consumer evaluator split (the key design call):** the shipped
+  recipe fixes the global lifecycle contract (`require_verification` +
+  `evaluator_ref`) but does **not** hardcode any one repository's exact
+  triage label schema, comment/body markers, or effort-assignment policy.
+  Those are consumer-specific and are enforced by the consuming repo's own
+  trusted evaluator registration under `evaluator_ref: backlog-triager`
+  (repo-scoped or `all_repos`, as that consumer chooses). This mirrors the
+  reviewer recipe's own split between shared engine/lifecycle behavior and
+  consumer-supplied evaluator registration, and is the note Phase 9 docs
+  need to preserve when documenting migration/adoption.
+- Reused the existing provider-neutral issue-list emitter exactly as Phase 5
+  required: no new backlog-listing code was added. The new recipe resolves
+  to ordinary `kind: repository-issue-loop`, so it automatically uses
+  whatever forge provider that existing loop already routes to
+  (GitHub/Azure DevOps today; Gitea remains the Phase 2 stub and is still
+  validation-rejected, unchanged here).
+- Tests added:
+  - `test_registrar_recipes.py`: `global:backlog-triager` resolves end to
+    end, stamps the expected verification fields, and the built-in identity
+    resolves.
+  - `test_repository_issue_loops.py`: an `extends: global:backlog-triager`
+    declaration drives all the way through the generic repository-issue-loop
+    tick path against a fixture issue, proving the named recipe reuses the
+    existing issue-list emitter rather than bypassing it.
+  - `test_verification.py`: a fixture trusted script evaluator keyed by
+    `backlog-triager` confirms completion only when the selected issue's
+    labels include the required triage schema and its body carries an effort
+    marker (`efforts/active/.../README.md`); an otherwise-triaged issue
+    lacking that effort marker stays submitted.
+- Validation:
+  - focused Phase 5 tests: **152 passed**
+  - full `agent-dispatch` suite: **3810 passed, 23 skipped**
+  - local note: the default 300s per-sub-suite wall-clock budget in
+    `tools/run-plugin-tests.py` proved too tight for one deep Windows
+    sub-suite here; rerunning with `--timeout 600 --plugin-timeout 2400`
+    completed green with no code changes, confirming a local timing-budget
+    issue rather than a Phase 5 regression.
