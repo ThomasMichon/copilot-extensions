@@ -173,7 +173,7 @@ def _serialize_entry(entry: dict) -> str:
     return f"{_SENTINEL}\n{canonical_json(payload)}"
 
 
-def _parse_entry(message: str) -> dict:
+def _parse_entry(message: str, *, expected: tuple[str, str] | None = None) -> dict:
     prefix = _SENTINEL + "\n"
     if not message.startswith(prefix) or message.count("\n") != 1:
         raise ProtocolError("claim-history commit message has an invalid envelope")
@@ -198,6 +198,13 @@ def _parse_entry(message: str) -> dict:
             raise ProtocolError(f"claim-history field {key!r} must be a string")
     if not _REQUIRED_STR_KEYS.union(_OPTIONAL_KEYS, {"seq"}).issuperset(data):
         raise ProtocolError("claim-history commit payload has unknown fields")
+    if expected is not None and (data["kind"], data["ref"]) != expected:
+        # A well-formed entry for a DIFFERENT resource must never be
+        # accepted just because it happened to land on this ref's own
+        # chain (a bug or a malicious push) -- it would both appear in
+        # the wrong resource's history and let a coincidentally-matching
+        # (ledger_id, seq) suppress a genuinely pending event.
+        raise ProtocolError("claim-history entry's own (kind, ref) does not match this resource")
     return data
 
 
@@ -450,7 +457,7 @@ class ClaimHistoryMirror:
                     )
                     break
                 try:
-                    entries.append(_parse_entry(message))
+                    entries.append(_parse_entry(message, expected=(item.kind, item.key)))
                 except ProtocolError as exc:
                     log.debug(
                         "claim-history mirror: unparsable entry at %s on %s: %s",
@@ -514,7 +521,7 @@ class ClaimHistoryMirror:
 
 
 def _ledger_id_path() -> Path:
-    return claim_history.history_path().with_name("claim-history.ledger-id")
+    return claim_history._ledger_id_sidecar_path()
 
 
 def _ledger_id() -> str:
@@ -524,24 +531,24 @@ def _ledger_id() -> str:
     WITHIN one ledger's own lifetime: two independent machines' first
     events for the same PR both get ``seq=0``, and a reimaged machine
     starting a fresh, empty ledger would otherwise collide with its own
-    earlier incarnation's ``seq=0`` too. Minted fresh (and persisted)
-    whenever the ledger file itself doesn't exist yet alongside a prior id
-    -- the strongest available local signal of "this is a new
-    incarnation," pragmatic rather than airtight against every possible
-    on-disk corruption, but correct for the two cases that matter here:
-    two genuinely independent machines, and a genuine reimage.
+    earlier incarnation's ``seq=0`` too.
 
     The whole check-then-mint-then-persist sequence is serialized by the
-    same cross-process advisory lock :mod:`claim_history` uses for its own
-    ledger appends -- two overlapping first sweeps racing to initialize
-    this sidecar must never each mint and persist a DIFFERENT id (the
-    second write winning silently would orphan whichever events the first
-    sweep already stamped and pushed under its own, now-overwritten id,
-    since no future read would ever match them again).
+    SAME cross-process advisory lock :func:`claim_history.record_event`
+    uses for its own ledger appends (not a separate lock of this
+    sidecar's own) -- this is also what lets ``record_event`` safely
+    invalidate a stale sidecar the instant it recreates a deleted ledger
+    file (see :func:`claim_history._rotate_ledger_id_sidecar`): a
+    concurrent sweep's own mint-or-reuse read can never interleave with
+    that rotation. Two overlapping first sweeps racing to initialize this
+    sidecar must never each mint and persist a DIFFERENT id (the second
+    write winning silently would orphan whichever events the first sweep
+    already stamped and pushed under its own, now-overwritten id, since no
+    future read would ever match them again).
     """
     ledger_path = claim_history.history_path()
     id_path = _ledger_id_path()
-    lock_path = id_path.with_suffix(id_path.suffix + ".lock")
+    lock_path = ledger_path.with_suffix(ledger_path.suffix + ".lock")
     with handoff_trace._append_lock(lock_path):
         if ledger_path.exists() and id_path.exists():
             try:
@@ -650,28 +657,36 @@ def _grouped_events(kind: str | None = None) -> dict[tuple[str, str], list[dict]
     ledger_id = _ledger_id()
     try:
         with open(path, encoding="utf-8", errors="replace") as handle:
-            for raw in handle:
-                raw = raw.strip()
-                if not raw:
-                    continue
-                try:
-                    entry = json.loads(raw)
-                except Exception:
-                    continue
-                if not isinstance(entry, dict):
-                    continue
-                k, ref_value = entry.get("kind"), entry.get("ref")
-                if not isinstance(k, str) or not isinstance(ref_value, str):
-                    continue
-                if kind is not None and k != kind:
-                    continue
-                bucket = grouped.setdefault((k, ref_value), [])
-                stamped = dict(entry)
-                stamped["seq"] = len(bucket)
-                stamped["ledger_id"] = ledger_id
-                bucket.append(stamped)
-    except OSError:
-        return {}
+            lines = handle.readlines()
+    except OSError as exc:
+        # Distinguished from a ledger-id init failure (raised above, by
+        # _ledger_id() itself) by this wrapped message -- propagated to
+        # the caller (sync_pending) as a genuine read failure, never
+        # silently swallowed into an empty grouping: that would let
+        # sync_pending report available=True, pushed=0, failed=[] (a
+        # clean sweep) when the local backup source itself couldn't even
+        # be read.
+        raise OSError(f"claim-history ledger unreadable: {exc}") from exc
+    for raw in lines:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            entry = json.loads(raw)
+        except Exception:
+            continue
+        if not isinstance(entry, dict):
+            continue
+        k, ref_value = entry.get("kind"), entry.get("ref")
+        if not isinstance(k, str) or not isinstance(ref_value, str):
+            continue
+        if kind is not None and k != kind:
+            continue
+        bucket = grouped.setdefault((k, ref_value), [])
+        stamped = dict(entry)
+        stamped["seq"] = len(bucket)
+        stamped["ledger_id"] = ledger_id
+        bucket.append(stamped)
     return grouped
 
 
@@ -709,12 +724,15 @@ def sync_pending(
     try:
         grouped = _grouped_events(kind=kind)
     except OSError as exc:
-        # The ledger-id sidecar's own init failed (disk full, permissions,
-        # ...) -- every event in this sweep is unstampable without it, so
-        # report that plainly rather than silently sweeping nothing.
+        # Either the ledger-id sidecar's own init failed, or the ledger
+        # file itself couldn't be read (its own message already says
+        # which) -- every event in this sweep is unreadable without one of
+        # the two, so report that plainly rather than silently sweeping
+        # nothing (an empty grouping would look identical to a genuinely
+        # clean, fully-synced sweep).
         return {
             "available": True, "pushed": 0, "refs": [],
-            "failed": [{"ref": None, "kind": kind, "error": f"ledger id init failed: {exc}"}],
+            "failed": [{"ref": None, "kind": kind, "error": str(exc)}],
         }
 
     for (k, ref_value), events in grouped.items():

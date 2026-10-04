@@ -19,29 +19,41 @@ def _event_identity(e: dict) -> tuple:
 
 
 def _merge_events(local: list[dict], remote: list[dict]) -> list[dict]:
-    """Merge local + mirrored events for one ref into a single ordered
-    list, deduplicated ONLY by each event's own durable ``(ledger_id,
-    seq)`` identity -- never by matching display fields (``ts``,
-    ``event``, ``worktree_id``, ...). Two genuinely distinct events (a
-    claim released and re-claimed within the same second, or one event
-    from a different ledger incarnation entirely) can share identical
-    display fields; treating that as a match would silently drop a real
-    event. ``local`` is expected pre-stamped with its own identity (see
+    """Merge local + mirrored events for one ref into a single list,
+    deduplicated ONLY by each event's own durable ``(ledger_id, seq)``
+    identity -- never by matching display fields (``ts``, ``event``,
+    ``worktree_id``, ...). Two genuinely distinct events (a claim released
+    and re-claimed within the same second, or one event from a different
+    ledger incarnation entirely) can share identical display fields;
+    treating that as a match would silently drop a real event. ``local``
+    is expected pre-stamped with its own identity (see
     :func:`claim_history_mirror.local_identities_for_ref`) -- a local
     event with no ``ledger_id`` (this machine has never mirrored anything)
     can never be confirmed as any remote event's own mirror, so every
-    remote event is kept rather than guessed away. Preserves ``remote``'s
-    own original relative order among any events it keeps (a stable sort
-    by ``ts`` only re-orders across the two sources, by genuine time, not
-    within either one).
+    remote event is kept rather than guessed away.
+
+    Never reorders either source's own retained events against
+    themselves: ``local`` is already in true ledger-append order, which a
+    blind ``sort(key=ts)`` across the combined list could silently violate
+    under a non-monotonic clock (e.g. a later release recorded with an
+    earlier-looking timestamp than its own claim) -- a stable sort only
+    preserves relative order for EQUAL keys, not for two items whose keys
+    are simply out of order. Each kept remote-only event is instead
+    inserted at the position implied by comparing its timestamp against
+    the events already placed (local's own order is scanned but never
+    altered); ties keep the already-placed event first.
     """
     local_ids = {_event_identity(e) for e in local if e.get("ledger_id") is not None}
+    extras = [e for e in remote if _event_identity(e) not in local_ids]
     merged = list(local)
-    for e in remote:
-        if _event_identity(e) in local_ids:
-            continue
-        merged.append(e)
-    merged.sort(key=lambda e: str(e.get("ts", "")))
+    for extra in extras:
+        ts = str(extra.get("ts", ""))
+        idx = len(merged)
+        for i, placed in enumerate(merged):
+            if str(placed.get("ts", "")) > ts:
+                idx = i
+                break
+        merged.insert(idx, extra)
     return merged
 
 

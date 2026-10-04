@@ -215,6 +215,16 @@ def record_event(
         line = json.dumps(entry, ensure_ascii=True)
         with handoff_trace._append_lock(lock_path):
             path.parent.mkdir(parents=True, exist_ok=True)
+            if not path.exists():
+                # A freshly created (or recreated-after-deletion) ledger
+                # can never safely reuse a prior incarnation's mirror
+                # identity sidecar: its own seq numbering restarts at 0,
+                # which would collide with whatever that stale identity
+                # already mirrored (and silently suppress the real new
+                # event, or hide it as a false duplicate on display).
+                # Rotated under this SAME lock so it can never race a
+                # concurrent sync sweep's own identity read/mint.
+                _rotate_ledger_id_sidecar()
             with open(path, "a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
     except Exception as exc:
@@ -222,6 +232,27 @@ def record_event(
         _write_failures += 1
         log.debug("claim_history.record_event(%r, ref=%r) failed to write: %s",
                   event, ref, exc)
+
+
+def _ledger_id_sidecar_path() -> Path:
+    """Path of the mirror's own ledger-incarnation-id sidecar. Defined
+    here (not in ``claim_history_mirror.py``, which already imports this
+    module) purely so :func:`record_event` can invalidate it at the one
+    moment that matters -- recreating the ledger file -- without a
+    circular import; the mirror module's own ``_ledger_id_path()``
+    delegates back to this."""
+    return history_path().with_name("claim-history.ledger-id")
+
+
+def _rotate_ledger_id_sidecar() -> None:
+    """Best-effort: drop a stale ledger-incarnation-id sidecar so the next
+    read mints a fresh one for this genuinely new ledger incarnation.
+    Never raises -- a failure here degrades to a stale (but never
+    duplicated-looking) id surviving, not a blocked write."""
+    try:
+        _ledger_id_sidecar_path().unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def current_project_name() -> str | None:

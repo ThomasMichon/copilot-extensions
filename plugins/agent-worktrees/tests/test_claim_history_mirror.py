@@ -341,12 +341,27 @@ def test_parse_entry_rejects_a_non_integer_seq():
         claim_history_mirror._parse_entry(tampered)
 
 
+def test_parse_entry_rejects_an_entry_for_a_different_resource():
+    """A well-formed entry whose own ``(kind, ref)`` names a DIFFERENT
+    resource than the one it was fetched under must never be accepted --
+    it would appear in the wrong resource's history, and a coincidentally
+    matching identity could suppress a genuinely pending event."""
+    message = claim_history_mirror._serialize_entry(_entry(0, ref="o/r#1"))
+    with pytest.raises(ProtocolError):
+        claim_history_mirror._parse_entry(message, expected=("pr", "o/r#2"))
+    # The correct expectation still accepts it.
+    claim_history_mirror._parse_entry(message, expected=("pr", "o/r#1"))
+
+
 # ── _ledger_id ────────────────────────────────────────────────────────────
 
 def test_ledger_id_is_stable_across_calls():
-    first = claim_history_mirror._ledger_id()
     claim_history.record_event(
         kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
+    )
+    first = claim_history_mirror._ledger_id()
+    claim_history.record_event(
+        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="released",
     )
     second = claim_history_mirror._ledger_id()
     assert first == second
@@ -362,11 +377,46 @@ def test_ledger_id_changes_after_the_ledger_file_is_removed(monkeypatch):
     assert first != second
 
 
+def test_record_event_rotates_a_stale_ledger_id_when_recreating_the_file(
+    settings: LeaseSettings, monkeypatch,
+):
+    """If the ledger is deleted after a sync and ``record_event()``
+    recreates it before the next sweep, the NEW event must get a FRESH
+    ledger identity -- reusing the old sidecar would restart this
+    resource's own seq numbering at 0, colliding with whatever the old
+    identity already mirrored and silently suppressing the new event."""
+    monkeypatch.setattr(
+        claim_history_mirror, "mirror_settings", lambda origin=None: settings
+    )
+    claim_history.record_event(
+        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
+    )
+    claim_history_mirror.sync_pending()
+    old_mirrored = mirror(settings).fetch("pr", "o/r#1")
+    assert len(old_mirrored) == 1
+
+    # The ledger is lost (a reimage, a bad cleanup, ...) -- its sidecar is
+    # NOT independently deleted, simulating the exact stray-sidecar
+    # scenario.
+    claim_history.history_path().unlink(missing_ok=True)
+    claim_history.record_event(
+        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="released",
+    )
+
+    new_mirrored_count = claim_history_mirror.sync_pending()["pushed"]
+    assert new_mirrored_count == 1  # the new event is NOT suppressed as a false duplicate
+    fetched = mirror(settings).fetch("pr", "o/r#1")
+    assert [e["event"] for e in fetched] == ["claimed", "released"]
+    assert fetched[0]["ledger_id"] != fetched[1]["ledger_id"]
+
+
 def test_ledger_id_serializes_initialization(monkeypatch):
     """Two overlapping first-time callers racing to initialize the ledger
     id sidecar must never each mint and persist a DIFFERENT id -- the
     whole check-then-mint-then-persist sequence is one locked critical
-    section."""
+    section, and it must be the SAME lock record_event's own ledger
+    append path uses (so a concurrent rotate-on-recreate can never
+    interleave with a mint-or-reuse read)."""
     calls: list = []
     real_lock = claim_history_mirror.handoff_trace._append_lock
 
@@ -377,8 +427,8 @@ def test_ledger_id_serializes_initialization(monkeypatch):
     monkeypatch.setattr(claim_history_mirror.handoff_trace, "_append_lock", spy_lock)
     claim_history_mirror._ledger_id()
     assert len(calls) == 1
-    id_path = claim_history_mirror._ledger_id_path()
-    assert calls[0] == id_path.with_suffix(id_path.suffix + ".lock")
+    ledger_path = claim_history.history_path()
+    assert calls[0] == ledger_path.with_suffix(ledger_path.suffix + ".lock")
 
 
 def test_ledger_id_readonly_is_none_before_any_initialization():
@@ -576,6 +626,37 @@ def test_sync_pending_dry_run_reports_an_unreachable_store_as_failed_not_zero(
     assert result["refs"] == []
     assert len(result["failed"]) == 1
     assert result["failed"][0]["ref"] == "o/r#1"
+
+
+def test_sync_pending_reports_an_unreadable_ledger_rather_than_a_clean_sweep(
+    settings: LeaseSettings, monkeypatch
+):
+    """An ``OSError`` reading an EXISTING ledger must be reported as a
+    genuine read failure -- never silently degrade to an empty grouping,
+    which would make ``sync_pending()`` indistinguishable from a
+    genuinely clean, fully-synced sweep (``available=True, pushed=0,
+    failed=[]``)."""
+    monkeypatch.setattr(
+        claim_history_mirror, "mirror_settings", lambda origin=None: settings
+    )
+    claim_history.record_event(
+        kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m1", event="claimed",
+    )
+
+    import builtins
+    real_open = builtins.open
+
+    def flaky_open(path, *a, **k):
+        if str(path) == str(claim_history.history_path()):
+            raise OSError("permission denied")
+        return real_open(path, *a, **k)
+
+    monkeypatch.setattr(builtins, "open", flaky_open)
+    result = claim_history_mirror.sync_pending()
+    assert result["pushed"] == 0
+    assert len(result["failed"]) == 1
+    assert "unreadable" in result["failed"][0]["error"]
+
 
 
 def test_sync_pending_ignores_an_unsupported_kind_never_recorded_locally(
