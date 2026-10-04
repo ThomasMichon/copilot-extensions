@@ -743,9 +743,8 @@ class MuxDaemonRuntime:
     def health(self, *, exclude_current_request: bool = False) -> dict:
         """Report this daemon's own idle/load state for ``daemons status``.
 
-        Copilot review finding (copilot-extensions#5001): when reached over
-        the real wire, the health request itself is an accepted handler and
-        a touched subscriber for its own duration
+        When reached over the real wire, the health request itself is an
+        accepted handler and a touched subscriber for its own duration
         (``CoalescingServer._on_request_accepted``/``touch``), so a naive
         read of ``active_handler_count()``/``subscriber_count()`` there
         always includes this very probe -- every reachable daemon would

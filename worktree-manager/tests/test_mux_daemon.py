@@ -1468,15 +1468,15 @@ def test_runtime_health_reports_version_attached_clients_and_busy(tmp_path):
 
 
 def test_health_over_the_real_wire_excludes_its_own_probe_from_load(tmp_path):
-    """Copilot review finding: a health REQUEST is itself an accepted
-    handler and a touched subscriber for its own duration
-    (``CoalescingServer``'s accept-time counter / ``touch()``), so calling
-    ``runtime.health()`` directly in-process (the test above) can never
-    exercise that inflation -- only a real round trip over the wire can.
-    With exactly one genuinely attached (persistent) subscriber and no
-    other in-flight request, a real ``mux-cutover-health-v1`` call must
-    still report ``attached_clients == 1`` and ``busy is False``, not 2/
-    True from double-counting its own transient probe connection."""
+    """A health REQUEST is itself an accepted handler and a touched
+    subscriber for its own duration (``CoalescingServer``'s accept-time
+    counter / ``touch()``), so calling ``runtime.health()`` directly
+    in-process (the test above) can never exercise that inflation -- only a
+    real round trip over the wire can. With exactly one genuinely attached
+    (persistent) subscriber and no other in-flight request, a real
+    ``mux-cutover-health-v1`` call must still report ``attached_clients ==
+    1`` and ``busy is False``, not 2/True from double-counting its own
+    transient probe connection."""
     runtime = mux_daemon.MuxDaemonRuntime(mux_daemon.registry_path(tmp_path))
     runtime.start()
     try:
