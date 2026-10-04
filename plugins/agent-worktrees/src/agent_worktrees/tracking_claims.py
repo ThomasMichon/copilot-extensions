@@ -105,7 +105,7 @@ def parse_claim_ref(ref: str) -> ClaimRef | None:
 #: copy of the vocabulary instead of creating a dependency the other way.
 CLAIM_KINDS: frozenset[str] = frozenset({
     "worktree", "session", "codespace", "container", "task", "bridge",
-    "ssh", "effort", "pr", "bug", "issue",
+    "ssh", "effort", "workdir", "pr", "bug", "issue",
 })
 
 #: ``<kind>:<system>:<key>`` -- the Phase 6 canonical, self-describing claim
@@ -125,9 +125,10 @@ def canonicalize_ref(kind: str, ref: str) -> str:
     returns -- every existing kind-specific parser (:func:`parse_claim_ref`,
     ``claims_rank._parse_pr_like_ref``, ``cleanup._pr_claim_target``,
     ``sweep.py``'s PR view-arg builders) keeps accepting its own native
-    shape completely unmodified; see the effort README's Phase 6 section
-    for the full design rationale and the "additive, not a breaking
-    rewrite" migration decision.
+    shape completely unmodified; see the ``worktree-claims-transitive-
+    finalization`` cross-repo tracking effort's README (aperture-labs
+    repo) Phase 6 section for the full design rationale and the
+    "additive, not a breaking rewrite" migration decision.
 
     For ``worktree``/``session`` kinds, ``system`` is the owning machine
     and ``key`` is ``project/worktree_id[#session]`` (the rest of
@@ -137,10 +138,16 @@ def canonicalize_ref(kind: str, ref: str) -> str:
     provider is already recoverable from its own ref shape; an opaque id
     like a CodeSpace name carries no separate system at all), so ``system``
     is left empty and ``key`` is the existing ref verbatim. Idempotent: a
-    ``ref`` already in canonical form is returned unchanged.
+    ``ref`` already in canonical form **for this exact ``kind``** is
+    returned unchanged -- checked by matching the embedded kind, not just
+    "does this look canonical for *some* kind" (an opaque ref for kind
+    ``"task"`` that happens to already read like ``"pr:...:..."`` must
+    still be wrapped as ``task`` -- treating it as already-canonical would
+    silently mislabel it as a ``pr`` ref and break the round trip).
     """
-    if decanonicalize_ref(ref) != ref:
-        return ref  # already canonical
+    m = _CANONICAL_REF_RE.match(ref or "")
+    if m and m.group(1) == kind:
+        return ref  # already canonical for this exact kind
     if kind in ("worktree", "session"):
         parsed = parse_claim_ref(ref)
         if parsed and parsed.machine and parsed.project:

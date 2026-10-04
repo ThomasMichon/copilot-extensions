@@ -197,7 +197,7 @@ _PR_LIKE_KINDS = frozenset({"pr", "bug", "issue"})
 _CANONICAL_REF_RE = re.compile(r"^([a-z][a-z0-9_-]*):([^:]*):(.+)$")
 _CLAIM_KINDS_FOR_CANON = frozenset({
     "worktree", "session", "codespace", "container", "task", "bridge",
-    "ssh", "effort", "pr", "bug", "issue",
+    "ssh", "effort", "workdir", "pr", "bug", "issue",
 })
 
 
@@ -372,6 +372,12 @@ def format_claim(
         if label_overrides and kind in label_overrides
         else DEFAULT_LABEL_PREFIX.get(kind, kind)
     )
+    # Phase 6 canonical-ref support (worktree-claims-transitive-finalization
+    # effort, 2026-10-04): unwrap once up front so the generic
+    # ``#N``/bare-ref fallback below (the only branch with no kind-specific
+    # unwrap of its own) also accepts a canonical-form ref identically to
+    # its legacy shape, not just the worktree/PR-like branches.
+    ref = _decanonicalize_ref(ref) if ref else ref
     if kind == "worktree":
         project, worktree_id = _parse_worktree_ref(ref)
         if worktree_id:

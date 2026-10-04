@@ -1,5 +1,11 @@
-"""Tests for the Phase 6 canonical claim-ref encoding
-(worktree-claims-transitive-finalization effort, 2026-10-04).
+"""Tests for the Phase 6 canonical claim-ref encoding.
+
+Phase 6 of ``worktree-claims-transitive-finalization``, 2026-10-04 -- a
+cross-repo *tracking-only* effort whose README/journal live in the
+``aperture-labs`` repo (not this one); the implementation itself lands
+here, in agent-worktrees. See that effort's README for the full design
+rationale and the four decisions this module's docstrings summarize
+inline.
 
 Validates the Validation Plan's own Phase 6 item: every existing persisted
 ref shape (the structured ``worktree``/``session`` grammar, a PR URL, the
@@ -68,6 +74,7 @@ def test_opaque_kind_ref_round_trips_through_canonical_form():
         ("bridge", "wheatley"),
         ("ssh", "borealis"),
         ("effort", "worktree-claims-transitive-finalization"),
+        ("workdir", "pending-run:abc"),
     ):
         canon = canonicalize_ref(kind, legacy)
         assert canon == f"{kind}::{legacy}"
@@ -79,6 +86,17 @@ def test_canonicalize_is_idempotent():
     once = canonicalize_ref("worktree", legacy)
     twice = canonicalize_ref("worktree", once)
     assert once == twice
+
+
+def test_canonicalize_does_not_mistake_a_different_kinds_opaque_ref_as_already_canonical():
+    # An opaque "task" ref that happens to already read like another kind's
+    # canonical form ("pr::foo") must still be wrapped as task -- treating
+    # it as already-canonical would silently mislabel it as a pr ref and
+    # break the round trip (the exact bug this guards against).
+    opaque_legacy = "pr::foo"
+    canon = canonicalize_ref("task", opaque_legacy)
+    assert canon == "task::pr::foo"
+    assert decanonicalize_ref(canon) == opaque_legacy
 
 
 def test_decanonicalize_never_mistakes_a_url_scheme_for_a_kind():
@@ -111,6 +129,22 @@ def test_claims_rank_claim_url_accepts_canonical_pr_url():
     legacy = "https://github.com/acme-org/sample-repo/pull/2481"
     canon = canonicalize_ref("pr", legacy)
     assert claims_rank.claim_url("pr", canon) == legacy
+
+
+def test_claims_rank_format_claim_accepts_canonical_ref_in_generic_fallback():
+    # The generic (non-worktree, non-PR-like) branch of format_claim had no
+    # unwrap of its own -- a canonical codespace/container/task/ssh/workdir
+    # ref must render identically to its legacy shape, not fall through to
+    # the raw `kind:: <wrapped>` form.
+    for kind, legacy in (
+        ("codespace", "cs-a1c4-relay"),
+        ("task", "task-9f21#7"),
+        ("workdir", "pending-run:abc"),
+    ):
+        canon = canonicalize_ref(kind, legacy)
+        assert claims_rank.format_claim(kind, canon) == claims_rank.format_claim(
+            kind, legacy
+        )
 
 
 def test_claims_rank_format_claim_accepts_canonical_worktree_ref():
