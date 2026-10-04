@@ -1,0 +1,9 @@
+{
+  "comment": "ship the issue-reproducer global recipe and worker identity",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "minor"
+    }
+  ]
+}

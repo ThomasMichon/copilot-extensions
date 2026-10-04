@@ -943,6 +943,47 @@ def test_global_backlog_triager_resolves_to_repository_issue_loop_with_verificat
     assert spec["evaluator_ref"] == "backlog-triager"
 
 
+def test_global_issue_reproducer_resolves_to_repository_issue_loop_with_verification(
+    tmp_path,
+):
+    import json as _json
+
+    from agent_dispatch.registrar_discovery import read_declaration_file_set
+
+    path = tmp_path / "reproducer.json"
+    path.write_text(
+        _json.dumps(
+            {
+                "extends": "global:issue-reproducer",
+                "name": "repro-backlog",
+                "repo": "example/project",
+                "source": "repro-backlog",
+                "cadence_seconds": 3600,
+                "task_label": "issue-repro",
+                "forge": {"provider": "github", "producer_login": "repro-bot"},
+                "reservation": {"label": "repro-reserved"},
+                "pool": {
+                    "max_active_processes": 1,
+                    "body": {"agent": "repro-worker"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    declarations = read_declaration_file_set(path)
+
+    workers = next(d for d in declarations if d.name == "repro-backlog-workers")
+    assert workers.body.type == "headless"
+    assert workers.body.agent == "repro-worker"
+    source = next(d for d in declarations if d.name == "repro-backlog-source")
+    spec = source.spec["repository_issue_loop"]
+    assert spec["forge"]["provider"] == "github"
+    assert spec["worker_identity"] == "issue-reproducer"
+    assert spec["require_verification"] is True
+    assert spec["evaluator_ref"] == "issue-reproducer"
+
+
 def test_global_reviewer_resolves_to_reviewer_loop_with_standing_charter(tmp_path):
     import json as _json
 
@@ -1061,3 +1102,13 @@ def test_backlog_triager_builtin_identity_resolves():
     assert identity.name == "backlog-triager"
     assert "legitimate bug" in identity.rules
     assert "efforts/active/<slug>/README.md" in identity.rules
+
+
+def test_issue_reproducer_builtin_identity_resolves():
+    from agent_dispatch.worker_identities import load_worker_identity
+
+    identity = load_worker_identity("issue-reproducer")
+
+    assert identity.name == "issue-reproducer"
+    assert "relevant reproduction strategies" in identity.rules
+    assert "strike marker convention" in identity.rules
