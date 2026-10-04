@@ -1,0 +1,9 @@
+{
+  "comment": "test_e2e_delivery.py: isolate control-plane provider registry writes so the suite never overwrites a real ~/.agent-worktrees/control-plane-providers.d/worktree-manager.json",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
