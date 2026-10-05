@@ -40,6 +40,10 @@ COPILOT_EXTENSIONS_GUARD_BASE=origin/dev "${PY[@]}" "$ROOT/tools/check-no-intern
 # Every Windows process launch must be headless: an agent-procutil-adopting
 # plugin must not hand-roll process-creation flags (windows-launch-hardening).
 "${PY[@]}" "$ROOT/tools/check-headless-launch.py"
+# The Picker's Textual UI may only marshal a background producer's result
+# back to the render thread through Inbox.post()/background.run_background()
+# -- never a raw app.call_from_thread(...) (async+batched-only invariant).
+"${PY[@]}" "$ROOT/tools/check-picker-inbox-discipline.py"
 # Guard skill loadability: frontmatter validity + the 1024-char description limit
 # the Copilot CLI enforces (over it, a skill is silently dropped at load time).
 "${PY[@]}" "$ROOT/tools/check-skills.py"

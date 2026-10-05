@@ -565,6 +565,14 @@ jobs:
         run: >-
           python tools/check-headless-launch.py &&
           python -m pytest -q tools/test_check_headless_launch.py
+      - name: Picker inbox discipline
+        # The Picker's Textual-based Worktree Manager UI may only marshal a
+        # background producer's result back to the render thread through
+        # Inbox.post()/background.run_background() -- never a raw
+        # app.call_from_thread(...). See tools/check-picker-inbox-discipline.py.
+        run: >-
+          python tools/check-picker-inbox-discipline.py &&
+          python -m pytest -q tools/test_check_picker_inbox_discipline.py
       - name: Hook process hygiene
         # PowerShell command hooks already run inside PowerShell. Spawning a
         # second interpreter can surface Default Terminal windows on Windows.
