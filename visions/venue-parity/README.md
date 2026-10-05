@@ -95,33 +95,23 @@ the trust model and both postures are owned by the
   duplicated between them.
 
 - **Static-registry SSH/local dispatch is a venue too, not a side door.**
-  `agent-bridge`'s static-registry resolution (a bare or `machine/`-qualified
-  agent name, as opposed to a `codespace:`/`container:`-namespaced one) builds
-  its `SpawnTarget` directly, outside the `codespace:`/`container:` namespace-
-  resolver contract described above. It has its own two sub-shapes:
-  - **Local loopback** — the resolved machine is the dispatching machine
-    itself; the target is reclassified `type="local"` and reached without a
-    network hop at all.
-  - **Genuine remote SSH** — a different machine, reached over the same SSH
-    transport this vision already mandates. The remote `copilot --acp`
-    invocation is assembled by `transport._build_remote_cmd` in one of two
-    shapes depending on the target: when `target.project` is set (and the
-    dispatch didn't pin an explicit cwd), the command execs **that target
-    project's own `agent-worktrees`-generated binstub on the remote host**,
-    which resolves the concrete worktree and forwards any trailing args to
-    `copilot --acp` itself; otherwise the coordination layer composes a
-    direct `cd <cwd> && exec copilot --acp ...` command itself, the same way
-    it does for a CodeSpace/container launch. **Both shapes already forward
-    `target.copilot_args` into the final `copilot` invocation** — so both are
-    reachable through the same `--plugin-dir` append point `_own_plugin_args`
-    already uses for local loopback; neither currently populates it for a
-    genuine-remote `SpawnTarget` at all.
+  Dispatching to a registered agent name or alias (as opposed to a
+  `codespace:`/`container:`-namespaced one) is its own venue shape, outside
+  the `codespace:`/`container:` namespace-resolver contract described above.
+  The dividing line is the **SSH boundary**, not "same machine": a target is
+  **local loopback** only when both the resolved machine *and* its SSH
+  environment (platform) match the dispatcher exactly — a different
+  environment on the same physical machine (for example dispatching from
+  Windows to a WSL environment on that same box) is still reached over SSH
+  and carries the full remote-venue transport/relay requirements above, not
+  the loopback exemption. Every other static target is **genuine remote
+  SSH**, reached over the same SSH transport this vision already mandates,
+  whichever concrete launch shape the coordination layer composes for it.
 
   Both sub-shapes are owed the same venue-agnostic-launch guarantee as
-  `codespace:`/`container:` targets — a dispatched agent should carry the
-  same resolved plugins regardless of *how* it was addressed — but today
-  neither fully receives it (see the `plugin-dir-parity-for-static-targets`
-  feature below).
+  `codespace:`/`container:` targets: a dispatched agent carries the same
+  resolved plugins regardless of *how* it was addressed (see the
+  `plugin-dir-parity-for-static-targets` feature below).
 
 ## Features
 
@@ -160,20 +150,16 @@ auth, or coordination code.
 ### plugin-dir-parity-for-static-targets
 A dispatched agent's resolved `--plugin-dir` set — its target repo's own
 enabled `.ai`/`.claude` plugins, **and** any control-repo-declared related
-plugin (`related_plugins_for_repo`) — is the same regardless of whether the
-target was addressed as `codespace:<name>`, `container:<name>`, a bare
-static-registry agent name resolving to local loopback, or one resolving to
-genuine remote SSH. Concretely:
-- **Local loopback** gains `related_plugins_for_repo` resolution alongside
-  the repo-own resolution it already has (`_own_plugin_args`) — a same-
-  machine filesystem read, no staging required.
-- **Remote SSH** gains both: resolving what to stage (repo-own + control-
-  repo-declared) and staging any control-repo-owned payload onto the remote
-  host (reusing the existing SSH channel for an egress-free tar+base64 copy,
-  the same technique `agent-codespaces` already uses) before the remote
-  launch command is built, so the resulting `--plugin-dir` set reaches
-  `target.copilot_args` regardless of which of the two remote-launch shapes
-  above the target resolves to (project-binstub or direct-cwd).
+plugin — is the same regardless of whether the target was addressed as
+`codespace:<name>`, `container:<name>`, a bare static-registry agent name
+resolving to local loopback, or one resolving to genuine remote SSH:
+- **Local loopback** resolves both plugin kinds directly against the
+  dispatching machine's own filesystem — the same machine a loopback target
+  shares, so no staging is required.
+- **Remote SSH** resolves both plugin kinds and **stages** any control-
+  repo-owned payload onto the remote host before the launch, using the same
+  egress-free technique `agent-codespaces` already uses for CodeSpaces —
+  regardless of which concrete remote-launch shape the target resolves to.
 - **An elevated/privileged relay lane** (a dispatch that hands off to a
   separate privileged sub-daemon rather than running directly in the
   unprivileged SSH session used to reach it) is a **distinct** staging
@@ -258,16 +244,15 @@ shared back-channel with no venue-specific setup visible to the agent.
 - **2026-10-05** — Extended to the static-registry SSH/local dispatch path
   (#5286): investigation while designing a related-repo plugin-distribution
   mechanism found that `codespace:`/`container:` namespace-resolved targets
-  are the *only* dispatch shape with working `--plugin-dir` resolution today
-  — a bare static-registry agent resolving to local loopback gets only its
-  own repo's plugins (no control-repo-declared ones), and one resolving to
-  genuine remote SSH gets **no** plugin resolution at all, even though both
-  of remote SSH's own launch shapes (project-binstub and direct-cwd) already
-  forward `target.copilot_args` into the final `copilot` invocation — nothing
-  populates it for a genuine-remote `SpawnTarget` in the first place. Added
-  the `plugin-dir-parity-for-static-targets` feature and named the
+  were the *only* dispatch shape with working `--plugin-dir` resolution —
+  a bare static-registry agent resolving to local loopback got only its own
+  repo's plugins (no control-repo-declared ones), and one resolving to
+  genuine remote SSH got no plugin resolution at all. Added the
+  `plugin-dir-parity-for-static-targets` feature and named the
   elevated/privileged-relay lane as a distinct, explicitly-handled staging
   variant rather than an assumed extension of the plain SSH case. Scoped the
   SSH-endpoint/relay-back-channel transport requirements to *remote* venues
   only after review (local loopback shares the dispatching machine directly
-  and needs neither).
+  and needs neither), and defined the loopback/remote-SSH boundary by SSH
+  reachability (machine *and* environment) rather than machine identity
+  alone.
