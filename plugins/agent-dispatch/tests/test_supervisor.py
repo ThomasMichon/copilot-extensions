@@ -165,8 +165,8 @@ class QueueBackedClient:
             )
         )
 
-    def record_cold(self, key):
-        return asdict(self._q.record_cold(key))
+    def record_cold(self, key, *, release_exclusive=False):
+        return asdict(self._q.record_cold(key, release_exclusive=release_exclusive))
 
     def settle_spawn(
         self,

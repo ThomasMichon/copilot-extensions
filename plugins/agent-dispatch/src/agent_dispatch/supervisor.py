@@ -686,6 +686,14 @@ class Supervisor:
         The durable spawned reservation remains as the cold-session handle.
         Steering a suspended headless task settles that reservation and queues a
         fresh embodiment, so dormant tasks consume no live-process capacity.
+
+        A task suspended specifically on ``awaiting_steer`` additionally
+        releases its ``exclusive_key`` while cold: nothing is actually using
+        the exclusive resource (e.g. a headed browser) while purely waiting on
+        an operator answer, so a sibling task sharing the same key may claim a
+        fresh reservation and proceed instead of sitting queued behind it.
+        Resuming always reacquires the key (:meth:`Supervisor
+        .release_resumed_cold_tasks`), deferring if a sibling is using it.
         """
         cooled = 0
         attempted = 0
@@ -724,8 +732,9 @@ class Supervisor:
             except Exception:
                 log.exception("failed to cool dormant reservation %s", key)
             if stopped:
+                release_exclusive = bool(task.get("awaiting_steer"))
                 try:
-                    self.client.record_cold(key)
+                    self.client.record_cold(key, release_exclusive=release_exclusive)
                 except DispatchError:
                     log.exception("failed to record cold reservation %s", key)
                     self._cold_retry_after[key] = now + 60.0
@@ -734,9 +743,10 @@ class Supervisor:
                 self._cold_retry_after.pop(key, None)
                 cooled += 1
                 log.info(
-                    "cooled dormant worker for task %s (%s)",
+                    "cooled dormant worker for task %s (%s)%s",
                     task.get("id"),
                     key,
+                    " (released exclusive_key: awaiting_steer)" if release_exclusive else "",
                 )
             else:
                 self._cold_retry_after[key] = now + 60.0
@@ -913,12 +923,22 @@ class Supervisor:
                     task.get("id"),
                     local_sid,
                 )
-            except DispatchError:
+            except DispatchError as exc:
                 self._resume_retry_after[key] = now + _COLD_RESUME_RETRY_SECONDS
-                log.exception(
-                    "failed to finalize cold-task resume for %s",
-                    task.get("id"),
-                )
+                if "cannot reacquire its exclusive_key" in str(exc):
+                    # Expected, retriable: a sibling reservation is currently
+                    # using the shared exclusive resource (e.g. the one
+                    # headed browser this lane allows). Not an error.
+                    log.info(
+                        "deferring resume of cold task %s: exclusive_key "
+                        "still held by another active reservation",
+                        task.get("id"),
+                    )
+                else:
+                    log.exception(
+                        "failed to finalize cold-task resume for %s",
+                        task.get("id"),
+                    )
         return handled
 
     def recover_stranded_cold_reservations(self) -> int:

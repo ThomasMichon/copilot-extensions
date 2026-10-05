@@ -35,7 +35,7 @@ import sqlite3
 import uuid
 from collections.abc import Callable
 
-from .queue_records import SpawnReservation, SpawnState, Status, TaskError
+from .queue_records import ExclusiveKeyBusyError, SpawnReservation, SpawnState, Status, TaskError
 
 log = logging.getLogger("agent-dispatch.queue")
 
@@ -162,13 +162,11 @@ class SpawnReservationMixin:
                 active = conn.execute(
                     "SELECT * FROM spawn_reservations "
                     "WHERE exclusive_key = ? AND state IN (?, ?, ?, ?) "
+                    "AND (exclusive_released = 0 OR task_id = ?) "
                     "ORDER BY reserved_at ASC LIMIT 1",
                     (
-                        task.exclusive_key,
-                        SpawnState.RESERVING,
-                        SpawnState.SPAWNED,
-                        SpawnState.COLD,
-                        SpawnState.RELEASING,
+                        task.exclusive_key, SpawnState.RESERVING, SpawnState.SPAWNED,
+                        SpawnState.COLD, SpawnState.RELEASING, task_id,
                     ),
                 ).fetchone()
                 if active is not None:
@@ -303,6 +301,7 @@ class SpawnReservationMixin:
         conclusion_detail: str | None = None,
         claim_token: str | None = None,
         release_requested: bool = False,
+        exclusive_released: bool | None = None,
         guard: Callable[[sqlite3.Row], None] | None = None,
     ) -> SpawnReservation:
         ts = self._now(now)
@@ -369,40 +368,35 @@ class SpawnReservationMixin:
                     raise TaskError(
                         f"worktree {worktree!r} has in-flight cleanup {cleanup_claim['key']}"
                     )
-            conn.execute(
-                "UPDATE spawn_reservations SET state = ?, updated_at = ?, "
-                "session_handle = CASE WHEN ? IS NOT NULL THEN ? ELSE session_handle END, "
-                "worktree = CASE WHEN ? IS NOT NULL THEN ? ELSE worktree END, "
-                "inherited_worktree = CASE "
-                "WHEN inherited_worktree IS NOT NULL THEN inherited_worktree "
-                "WHEN worktree_ownership = 'reused' THEN worktree "
-                "ELSE inherited_worktree END, "
-                "detail = COALESCE(?, detail), "
-                "conclusion_state = CASE WHEN ? IS NOT NULL THEN ? "
-                "ELSE conclusion_state END, "
-                "conclusion_detail = CASE WHEN ? IS NOT NULL THEN ? "
-                "ELSE conclusion_detail END, "
-                "cleanup_claim_expires_at = CASE WHEN ? IS NOT NULL THEN 0 "
-                "ELSE cleanup_claim_expires_at END, "
-                "release_requested = CASE WHEN ? THEN 1 ELSE release_requested END "
-                "WHERE key = ?",
-                (
-                    to_state,
-                    ts,
-                    session_handle,
-                    session_handle,
-                    worktree,
-                    worktree,
-                    detail,
-                    conclusion_state,
-                    conclusion_state,
-                    conclusion_detail,
-                    conclusion_detail,
-                    claim_token,
-                    1 if release_requested else 0,
-                    key,
-                ),
-            )
+            try:
+                conn.execute(
+                    "UPDATE spawn_reservations SET state = ?, updated_at = ?, "
+                    "session_handle = CASE WHEN ? IS NOT NULL THEN ? ELSE session_handle END, "
+                    "worktree = CASE WHEN ? IS NOT NULL THEN ? ELSE worktree END, "
+                    "inherited_worktree = CASE "
+                    "WHEN inherited_worktree IS NOT NULL THEN inherited_worktree "
+                    "WHEN worktree_ownership = 'reused' THEN worktree "
+                    "ELSE inherited_worktree END, "
+                    "detail = COALESCE(?, detail), "
+                    "conclusion_state = CASE WHEN ? IS NOT NULL THEN ? "
+                    "ELSE conclusion_state END, "
+                    "conclusion_detail = CASE WHEN ? IS NOT NULL THEN ? "
+                    "ELSE conclusion_detail END, "
+                    "cleanup_claim_expires_at = CASE WHEN ? IS NOT NULL THEN 0 "
+                    "ELSE cleanup_claim_expires_at END, "
+                    "release_requested = CASE WHEN ? THEN 1 ELSE release_requested END, "
+                    "exclusive_released = COALESCE(?, exclusive_released) "
+                    "WHERE key = ?",
+                    (
+                        to_state, ts, session_handle, session_handle, worktree, worktree,
+                        detail, conclusion_state, conclusion_state, conclusion_detail,
+                        conclusion_detail, claim_token, 1 if release_requested else 0,
+                        None if exclusive_released is None else int(exclusive_released), key,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                conn.execute("ROLLBACK")
+                raise ExclusiveKeyBusyError(f"{key}: exclusive_key busy: {exc}") from exc
             if to_state in SpawnState.RELEASABLE and row["state"] in SpawnState.ACTIVE:
                 latest = conn.execute(
                     "SELECT key FROM spawn_reservations WHERE task_id = ? "
@@ -438,6 +432,7 @@ class SpawnReservationMixin:
             allowed_from=frozenset({SpawnState.RESERVING, SpawnState.SPAWNED, SpawnState.COLD}),
             session_handle=session_handle,
             worktree=worktree,
+            exclusive_released=False,
             now=now,
         )
 
@@ -525,12 +520,19 @@ class SpawnReservationMixin:
             conn.execute("COMMIT")
         return SpawnReservation._from_row(updated)
 
-    def record_cold(self, key: str, *, now: float | None = None) -> SpawnReservation:
-        """Mark a spawned headless body intentionally stopped and dormant."""
+    def record_cold(
+        self, key: str, *, release_exclusive: bool = False, now: float | None = None
+    ) -> SpawnReservation:
+        """Mark a spawned headless body intentionally stopped and dormant.
+
+        ``release_exclusive`` drops this reservation's ``exclusive_key`` hold
+        while cold, so a sibling may spawn; ``record_spawn`` reacquires it.
+        """
         return self._update_reservation(
             key,
             to_state=SpawnState.COLD,
             allowed_from=frozenset({SpawnState.SPAWNED, SpawnState.COLD}),
+            exclusive_released=release_exclusive or None,
             now=now,
         )
 
