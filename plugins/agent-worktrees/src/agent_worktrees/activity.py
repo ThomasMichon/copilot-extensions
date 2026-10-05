@@ -377,19 +377,43 @@ def _maybe_prune(path: Path) -> None:
         return
     marker = path.with_name(path.name + ".prune-marker")
     try:
-        if time.time() - marker.stat().st_mtime < _PRUNE_DEBOUNCE_SECONDS:
-            return
+        is_stale = time.time() - marker.stat().st_mtime >= _PRUNE_DEBOUNCE_SECONDS
     except OSError:
-        pass
-    try:
-        # Claim the debounce slot before dispatching (not after the prune
-        # completes) so a burst of concurrent log_event() calls -- across
-        # many processes -- can't all dispatch their own worker while one is
-        # already in flight.
-        marker.write_text("", encoding="utf-8")
-    except OSError:
+        is_stale = None  # marker doesn't exist yet
+    if is_stale is False:
+        return
+    if not _claim_prune_marker(marker, refresh_stale=bool(is_stale)):
         return
     _dispatch_background_prune(path)
+
+
+def _claim_prune_marker(marker: Path, *, refresh_stale: bool) -> bool:
+    """Atomically claim the debounce slot. Returns ``True`` only for the one
+    caller that wins the claim, so a burst of concurrent ``log_event()``
+    calls -- across many processes, all seeing the log large for the first
+    time -- dispatches at most one background prune, not one per caller.
+
+    Uses an exclusive create (``O_CREAT | O_EXCL``) for that common case.
+    Refreshing an existing-but-stale marker (the rarer, once-per-hour case)
+    is best-effort instead: a concurrent refresher can still race here, same
+    documented tradeoff as ``_prune()``'s own best-effort rewrite -- the
+    worst case is two redundant background prunes instead of one, never a
+    correctness issue.
+    """
+    try:
+        fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+        return True
+    except FileExistsError:
+        if not refresh_stale:
+            return False
+        try:
+            os.utime(marker, None)
+            return True
+        except OSError:
+            return False
+    except OSError:
+        return False
 
 
 def _dispatch_background_prune(path: Path) -> None:

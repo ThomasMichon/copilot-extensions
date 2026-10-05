@@ -324,6 +324,30 @@ def test_maybe_prune_redispatches_after_debounce_window_expires(
     assert len(dispatch_calls) == 2
 
 
+def test_claim_prune_marker_is_atomic_for_concurrent_first_claim(patch_install_dir: Path):
+    """Two callers racing on the SAME never-before-seen marker must not both
+    win -- only one dispatches, closing the race Copilot review flagged on
+    the original (non-atomic write_text) implementation."""
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    marker = log.with_name(log.name + ".prune-marker")
+
+    first = activity._claim_prune_marker(marker, refresh_stale=False)
+    second = activity._claim_prune_marker(marker, refresh_stale=False)
+
+    assert first is True
+    assert second is False
+
+
+def test_claim_prune_marker_refresh_stale_best_effort(patch_install_dir: Path):
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    marker = log.with_name(log.name + ".prune-marker")
+    marker.write_text("", encoding="utf-8")
+
+    assert activity._claim_prune_marker(marker, refresh_stale=True) is True
+
+
 def test_maybe_prune_skips_small_file(patch_install_dir: Path, monkeypatch):
     log = activity.log_path()
     log.parent.mkdir(parents=True, exist_ok=True)

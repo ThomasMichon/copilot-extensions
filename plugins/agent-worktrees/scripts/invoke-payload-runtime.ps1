@@ -108,18 +108,15 @@ function Invoke-BootTraceMaybePrune([string]$LogPath) {
     } catch { return }
     if (-not $script:python) { return }  # no runtime yet to dispatch the worker with
     $marker = "$LogPath.prune-marker"
+    $refreshStale = $false
     try {
         $markerInfo = Get-Item -LiteralPath $marker -ErrorAction Stop
         if (((Get-Date).ToUniversalTime() - $markerInfo.LastWriteTimeUtc).TotalSeconds -lt 3600) {
             return
         }
+        $refreshStale = $true
     } catch {}
-    try {
-        # Claim the debounce slot before dispatching (not after the prune
-        # completes), so a burst of launches in the same window can't each
-        # dispatch their own worker while one is already in flight.
-        [IO.File]::WriteAllText($marker, '')
-    } catch { return }
+    if (-not (Invoke-ClaimPruneMarker -Marker $marker -RefreshStale:$refreshStale)) { return }
     try {
         Start-Process -FilePath 'conhost.exe' -ArgumentList (@(
             '--headless', "`"$script:python`"", '-I', '-m', 'agent_worktrees',
@@ -127,6 +124,30 @@ function Invoke-BootTraceMaybePrune([string]$LogPath) {
         )) -WindowStyle Hidden -ErrorAction Stop | Out-Null
     } catch {}
 }
+
+# Atomically claims the debounce slot so a burst of concurrent launches --
+# all seeing the log large for the first time -- dispatches at most one
+# background prune, not one per launch. Mirrors the Python-side
+# activity._claim_prune_marker: an exclusive create (`CreateNew`, which
+# throws if the file already exists) handles that common case atomically.
+# Refreshing an existing-but-stale marker (the rarer, once-per-hour case) is
+# best-effort instead -- a concurrent refresher can still race here, same
+# documented tradeoff as the underlying prune's own posture; the worst case
+# is two redundant background prunes, never a correctness issue.
+function Invoke-ClaimPruneMarker([string]$Marker, [switch]$RefreshStale) {
+    try {
+        $fs = [IO.File]::Open($Marker, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
+        $fs.Dispose()
+        return $true
+    } catch [IO.IOException] {
+        if (-not $RefreshStale) { return $false }
+        try {
+            (Get-Item -LiteralPath $Marker).LastWriteTimeUtc = (Get-Date).ToUniversalTime()
+            return $true
+        } catch { return $false }
+    } catch { return $false }
+}
+
 
 
 function Write-BootTrace([string]$Phase, [string]$DispatchPath = '') {

@@ -116,18 +116,35 @@ boot_trace_maybe_prune() {
     (( size >= 524288 )) || return 0
     [[ -n "${AGENT_RT_PY:-}" ]] || return 0  # no runtime yet to dispatch the worker with
     local marker="${log_path}.prune-marker"
-    local marker_epoch now_epoch
+    local marker_epoch now_epoch refresh_stale=0
     marker_epoch="$(stat -c %Y -- "$marker" 2>/dev/null || stat -f %m -- "$marker" 2>/dev/null || true)"
     if [[ -n "$marker_epoch" ]]; then
         now_epoch="$(date +%s 2>/dev/null || echo 0)"
         (( now_epoch - marker_epoch < 3600 )) && return 0
+        refresh_stale=1
     fi
-    # Claim the debounce slot before dispatching (not after the prune
-    # completes), so a burst of launches in the same window can't each
-    # dispatch their own worker while one is already in flight.
-    : > "$marker" 2>/dev/null || return 0
+    boot_trace_claim_prune_marker "$marker" "$refresh_stale" || return 0
     ( PYTHONPATH="" "$AGENT_RT_PY" -I -m agent_worktrees activity-prune-worker \
         "$log_path" 7 >/dev/null 2>&1 & ) || true
+}
+
+# Atomically claims the debounce slot so a burst of concurrent launches --
+# all seeing the log large for the first time -- dispatches at most one
+# background prune, not one per launch. Mirrors the Python-side
+# activity._claim_prune_marker: `set -C` (noclobber) makes the shell's own
+# redirection fail if the marker already exists, giving an atomic exclusive
+# create for that common case. Refreshing an existing-but-stale marker (the
+# rarer, once-per-hour case, $2=1) is best-effort instead -- a concurrent
+# refresher can still race here, same documented tradeoff as the underlying
+# prune's own posture; the worst case is two redundant background prunes,
+# never a correctness issue.
+boot_trace_claim_prune_marker() {
+    local marker="$1" refresh_stale="$2"
+    if ( set -o noclobber; : > "$marker" ) 2>/dev/null; then
+        return 0
+    fi
+    [[ "$refresh_stale" == "1" ]] || return 1
+    touch -- "$marker" 2>/dev/null
 }
 
 boot_trace() {
