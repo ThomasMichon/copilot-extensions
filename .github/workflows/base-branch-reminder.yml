@@ -133,11 +133,11 @@ jobs:
             // Intended scope (unchanged from this workflow's original
             // design): this reminder only ever targets a NON-owner author's
             // ordinary PR against `main`. The signature check above is
-            // independent insurance for the three automated shapes
+            // independent insurance for the four automated shapes
             // specifically -- it is not a replacement for this outer scope
             // guard, and must stay a separate check: dropping this one
             // would also start reminding the repo owner's own ordinary (not
-            // one of the three automated-shape) PRs against `main`, which is
+            // one of the four automated-shape) PRs against `main`, which is
             // out of scope for this job (main-gate already gives the owner
             // direct, same-repo CI feedback in that case).
             if (PR_AUTHOR === REPO_OWNER) {

@@ -97,7 +97,13 @@ CMD_ARG_KEYS = ("command", "cmd", "script", "commandLine", "commandline", "input
 # suspected write. Mirrors cross_repo_guard. ``pull`` stays in this cheap
 # early-out list -- an unsafe (non-``--ff-only``) pull must still reach the
 # precise per-segment analysis below, which is where the real ``--ff-only``
-# exemption lives (see ``_GIT_FF_ONLY_FLAG``).
+# exemption lives (see ``_GIT_FF_ONLY_FLAG``). The optional ``-C <path>``
+# uses the same quoted-or-unquoted grammar as ``_GIT_SUBCOMMAND`` below
+# (``"[^"]*"|'[^']*'|\S+``, not a bare ``\S+``) -- an anchor path containing
+# a space (``-C "my anchor path" commit ...``) previously made ``\S+``
+# match only the first word, so the whole early-out failed to match and the
+# entire per-segment analysis below was skipped outright, silently
+# allowing the write (review finding on PR #5317).
 _WRITE_VERBS = re.compile(
     "|".join([
         "Set-Content", "Add-Content", "Out-File", "New-Item", "Remove-Item",
@@ -106,9 +112,9 @@ _WRITE_VERBS = re.compile(
         ">>?",
         r"\btee\b", r"\bsed\b\s+-i", r"\bcp\b", r"\bmv\b", r"\brm\b",
         r"\btouch\b", r"\bmkdir\b", r"\bdd\b", r"\btruncate\b", r"\bpatch\b",
-        r"git\s+(?:-C\s+\S+\s+)?(?:apply|commit|checkout|switch|reset|"
-        r"restore|clean|rm|mv|stash|merge|rebase|pull|cherry-pick|revert|"
-        r"add|init|branch)",
+        r"""git\s+(?:-C\s+(?:"[^"]*"|'[^']*'|\S+)\s+)?(?:apply|commit|checkout|switch|reset|"""
+        r"""restore|clean|rm|mv|stash|merge|rebase|pull|cherry-pick|revert|"""
+        r"""add|init|branch)""",
     ]),
     re.IGNORECASE,
 )

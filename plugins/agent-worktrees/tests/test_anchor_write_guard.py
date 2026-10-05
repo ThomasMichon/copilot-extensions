@@ -153,6 +153,29 @@ def test_shell_git_commit_into_anchor_denies(tmp_path, anchor):
     assert d and d["permissionDecision"] == "deny"
 
 
+def test_shell_git_commit_into_anchor_with_spaced_quoted_dashC_path_denies(tmp_path):
+    """A quoted ``-C "<anchor path with a space>"`` must still be caught by
+    the cheap early-out: a bare ``\\S+`` there only matched the first word
+    of the quoted path, so the whole early-out missed the match and the
+    entire per-segment analysis was skipped, silently allowing the write
+    (review finding on PR #5317)."""
+    root = _main_checkout(tmp_path, "my anchor repo")
+    spaced_anchor = [{"name": "myrepo", "path": str(root)}]
+    d = guard.decide(_shell(f'git -C "{root}" commit -m x', tmp_path),
+                     env={}, home=tmp_path, anchors=spaced_anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_branch_force_move_into_anchor_with_spaced_quoted_dashC_path_denies(
+    tmp_path,
+):
+    root = _main_checkout(tmp_path, "my anchor repo")
+    spaced_anchor = [{"name": "myrepo", "path": str(root)}]
+    d = guard.decide(_shell(f'git -C "{root}" branch -f main origin/main', tmp_path),
+                     env={}, home=tmp_path, anchors=spaced_anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
 def test_shell_read_into_anchor_allows(tmp_path, anchor):
     gp = anchor[0]["path"]
     assert guard.decide(_shell(f'cat "{gp}/README.md"', tmp_path),

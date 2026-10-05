@@ -434,7 +434,13 @@ correctly fails (locally: a non-zero exit with no useful message; via the
 API: `404 No common ancestor between <sha> and <sha>`). This is expected
 for every pre-rewrite commit, not a sign the rewrite dropped history or
 that your checkout is broken — `git filter-repo` rewrites every commit's
-tree-ids, so no pre-rewrite SHA appears anywhere in the rewritten line.
+**ID** (each commit's SHA depends on its parent's SHA, so once the root
+commit's ID changes, every descendant's ID changes too, all the way to the
+tip), so no pre-rewrite commit SHA appears anywhere in the rewritten line.
+(A commit's **tree** ID is a different thing and does *not* automatically
+change along with it — a tree ID depends only on its own entries, so a
+commit whose tree was untouched by the rewrite keeps the same tree ID even
+though its own commit ID changed.)
 
 To check whether a specific pre-rewrite change (e.g. a PR merged shortly
 before a rewrite) actually survived, don't try to re-derive ancestry across
@@ -446,11 +452,16 @@ gh api "repos/<owner>/<repo>/contents/<path>?ref=main" --jq '.content' \
   | base64 -d | grep '<expected string from that change>'
 ```
 
-(or just read the file at that ref with any `gh`/API content call). The
-rewrite is content-identical at every commit — only the SHAs and tree-ids
-changed — so this always gives a real answer where ancestry cannot. The
-one documented rewrite to date is the 2026-10-04 purge recorded in the
-repo README banner and
+(or just read the file at that ref with any `gh`/API content call). A
+history rewrite like this is only ever verified content-identical at the
+rewritten **tip** (its tree, as a whole, matches the pre-rewrite tip's tree
+byte-for-byte) — it is NOT content-identical commit-by-commit throughout
+history: the whole point is deliberately stripping specific oversized
+blobs from every historical commit that carried one, so a commit that only
+ever touched a since-stripped blob no longer resolves that blob's content.
+Every file that survives to the rewritten tip, though, is exactly what it
+was. The one documented rewrite to date is the 2026-10-04 purge recorded in
+the repo README banner and
 [`efforts/done/main-history-rewrite`](../efforts/done/main-history-rewrite/README.md);
 if you hit this exact "no common ancestor" symptom, check there first for
 the exact old→new SHA pair before assuming something new is wrong.
