@@ -222,8 +222,9 @@ function Install-AgentSshPackage {
     )
 
     if ($UvCommand) {
+        $resolvedVenueCopilot = Resolve-VenueCopilot
         foreach ($dependency in @('pyyaml>=6.0.3') + $Dependencies) {
-            if ($dependency -eq (Resolve-VenueCopilot)) {
+            if ($resolvedVenueCopilot -and $dependency -eq $resolvedVenueCopilot) {
                 $depResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -Arguments @('--python', $Python, '--reinstall-package', 'agent-venue-copilot', $dependency, '--quiet')
             } else {
                 $depResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -Arguments @('--python', $Python, $dependency, '--quiet')
@@ -690,7 +691,8 @@ function Get-CurrentSnapshotPath {
 
 function Acquire-StampPublicationLock {
     $lockPath = Join-Path $InstallDir '.stamp-publication.lock'
-    while ($true) {
+    $deadline = (Get-Date).AddSeconds(30)
+    while ((Get-Date) -lt $deadline) {
         try {
             return [System.IO.File]::Open(
                 $lockPath,
@@ -702,6 +704,7 @@ function Acquire-StampPublicationLock {
             Start-Sleep -Milliseconds 200
         }
     }
+    throw "Timed out acquiring stamp publication lock: $lockPath"
 }
 
 function Invoke-Stamp {

@@ -534,6 +534,11 @@ _current_snapshot() {
     cat "$INSTALL_DIR/payload-dir" 2>/dev/null || true
 }
 
+_write_stamped_version_marker() {
+    printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/stamped-version.$$.tmp"
+    mv -f "$INSTALL_DIR/stamped-version.$$.tmp" "$INSTALL_DIR/stamped-version"
+}
+
 _acquire_stamp_publication_lock() {
     local lock_base="$INSTALL_DIR/.stamp-publication.lock"
     if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
@@ -624,6 +629,28 @@ _published_snapshot_is_newer() {
     _version_gt "$current_version" "$source_version"
 }
 
+_snapshot_is_reusable() {
+    local current_snapshot="$1" source_kind="$2" source_path="$3" source_version="$4"
+    [[ "$source_kind" != "local" ]] || return 1
+    [[ -n "$current_snapshot" && -d "$current_snapshot" ]] || return 1
+    local rel
+    for rel in \
+        "scripts/installer-engine.sh" \
+        "scripts/installer-engine.ps1" \
+        "libs/agent-procutil/pyproject.toml" \
+        "libs/ssh-manager/pyproject.toml" \
+        "libs/venue-copilot/pyproject.toml" \
+        "libs/zdd/pyproject.toml" \
+        "libs/remote-login-shell/pyproject.toml"
+    do
+        [[ -f "$current_snapshot/$rel" ]] || return 1
+    done
+    [[ -f "$(_snapshot_version_marker "$current_snapshot")" ]] || return 1
+    [[ "$(cat "$(_snapshot_version_marker "$current_snapshot")" 2>/dev/null || true)" == "$source_version" ]] || return 1
+    [[ -f "$(_snapshot_source_marker "$current_snapshot")" ]] || return 1
+    [[ "$(cat "$(_snapshot_source_marker "$current_snapshot")" 2>/dev/null || true)" == "$source_path" ]] || return 1
+}
+
 _deploy_binstub() {
     write_simple_binstub \
         "agent-ssh" \
@@ -648,12 +675,14 @@ if [[ "$ACTION" == "stamp" ]]; then
     CURRENT_SNAPSHOT="$(_current_snapshot)"
     if _published_snapshot_is_newer "$CURRENT_SNAPSHOT" "$SOURCE_PATH" "$SRC_VERSION"; then
         _skip "Published snapshot $CURRENT_SNAPSHOT is newer than $SRC_VERSION; leaving payload-dir unchanged"
+        _write_stamped_version_marker
         _deploy_binstub
         exit 0
     fi
-    if [[ "$SOURCE_KIND" != "local" ]] && [[ -n "$CURRENT_SNAPSHOT" ]] && [[ -d "$CURRENT_SNAPSHOT" ]] && [[ -f "$CURRENT_SNAPSHOT/scripts/installer-engine.sh" ]] && [[ -f "$CURRENT_SNAPSHOT/scripts/installer-engine.ps1" ]] && [[ -f "$CURRENT_SNAPSHOT/libs/agent-procutil/pyproject.toml" ]] && [[ -f "$CURRENT_SNAPSHOT/libs/ssh-manager/pyproject.toml" ]] && [[ -f "$CURRENT_SNAPSHOT/libs/venue-copilot/pyproject.toml" ]] && [[ -f "$CURRENT_SNAPSHOT/libs/zdd/pyproject.toml" ]] && [[ -f "$CURRENT_SNAPSHOT/libs/remote-login-shell/pyproject.toml" ]] && [[ -f "$(_snapshot_version_marker "$CURRENT_SNAPSHOT")" ]] && [[ "$(cat "$(_snapshot_version_marker "$CURRENT_SNAPSHOT")" 2>/dev/null || true)" == "$SRC_VERSION" ]] && [[ -f "$(_snapshot_source_marker "$CURRENT_SNAPSHOT")" ]] && [[ "$(cat "$(_snapshot_source_marker "$CURRENT_SNAPSHOT")" 2>/dev/null || true)" == "$SOURCE_PATH" ]]; then
+    if _snapshot_is_reusable "$CURRENT_SNAPSHOT" "$SOURCE_KIND" "$SOURCE_PATH" "$SRC_VERSION"; then
         printf '%s\n' "$CURRENT_SNAPSHOT" > "$INSTALL_DIR/payload-dir.$$.tmp"
         mv -f "$INSTALL_DIR/payload-dir.$$.tmp" "$INSTALL_DIR/payload-dir"
+        _write_stamped_version_marker
         _deploy_binstub
         _ok "Stamped: reused snapshot $CURRENT_SNAPSHOT"
         exit 0
@@ -686,14 +715,14 @@ if [[ "$ACTION" == "stamp" ]]; then
     if _published_snapshot_is_newer "$CURRENT_SNAPSHOT" "$SOURCE_PATH" "$SRC_VERSION"; then
         rm -rf "$SNAPSHOT_TMP"
         _skip "Published snapshot $CURRENT_SNAPSHOT is newer than $SRC_VERSION; skipping older snapshot publication"
+        _write_stamped_version_marker
         _deploy_binstub
         exit 0
     fi
     mv -f "$SNAPSHOT_TMP" "$SNAPSHOT_DIR"
     printf '%s\n' "$SNAPSHOT_DIR" > "$INSTALL_DIR/payload-dir.$$.tmp"
     mv -f "$INSTALL_DIR/payload-dir.$$.tmp" "$INSTALL_DIR/payload-dir"
-    printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/stamped-version.$$.tmp"
-    mv -f "$INSTALL_DIR/stamped-version.$$.tmp" "$INSTALL_DIR/stamped-version"
+    _write_stamped_version_marker
     _deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
     exit 0

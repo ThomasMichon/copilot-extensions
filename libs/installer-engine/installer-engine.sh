@@ -252,8 +252,10 @@ write_deploy_manifest() {
     local service="$1" plugin="$2" install_path="$3" plugin_path="$4" venv_path="$5"
     local additional_json="${6:-}" source_path_override="${7:-}" version_override="${8:-}"
     local manifest="$install_path/deploy-manifest.json"
-    local kind ver commit branch dirty content_hash tmp provenance_path
+    local kind ver commit branch dirty content_hash tmp provenance_path provenance_json_path
     provenance_path="${source_path_override:-$plugin_path}"
+    provenance_json_path="${provenance_path//\\//}"
+    provenance_json_path="${provenance_json_path//\"/\\\"}"
     kind="$(_source_kind "$provenance_path")"
     ver="$version_override"
     if [[ -z "$ver" ]]; then
@@ -283,7 +285,7 @@ write_deploy_manifest() {
   "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
   "source": {
     "kind": "$kind",
-    "path": "$provenance_path",
+    "path": "$provenance_json_path",
     "repo": "copilot-extensions",
     "plugin": "$plugin",
     "version": "$ver",
