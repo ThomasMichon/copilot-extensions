@@ -140,8 +140,8 @@ capture policy; read as "beats" / "want" / "chosen.")
       each candidate, then falls back to the target worktree's own latest
       known session. This is `resolve-by-any-origin-reference` already
       realized for agent-dispatch task ids specifically.
-- [ ] **Verified gap (review):** that route's `dispatch:` namespace
-      resolver (`plugins/agent-dispatch/src/agent_dispatch/bridge_namespace_cli.py`,
+- [ ] That route's `dispatch:` namespace resolver
+      (`plugins/agent-dispatch/src/agent_dispatch/bridge_namespace_cli.py`,
       `_cmd_namespace_resolve`) only derives a worktree from a *claimed*
       task's `owner` or from the task record's own `target_machine`/
       `target_worktree` fields — never from a live **spawn reservation**.
@@ -163,16 +163,15 @@ capture policy; read as "beats" / "want" / "chosen.")
       bounded `--task`-less pass (`plugins/agent-dispatch/src/agent_dispatch/doctor.py:104-110`),
       so an unbounded scan of the whole backlog isn't the answer; this
       needs a real filtered query, not a client-side list-then-filter.
-- [ ] **Corrected from review:** `excludes` is an intentional anti-affinity
-      selector, not inherent evidence of a dead end — a task excluded from
-      one machine/worktree may still be claimable by another eligible
-      target (confirmed against `tests/test_selectors.py:24-42,68-81`).
-      Add a **neutral** `doctor` finding (e.g. `queued_with_excludes` —
-      visibility, not an assumed-blocked verdict) built on the Phase 3
-      seam. A stronger "genuinely dead-ended" diagnosis is in scope only
-      if it can first prove the exclusions eliminate every eligible
-      target; treat that as a stretch goal within this phase, not a
-      requirement for it to ship.
+- [ ] `excludes` is an intentional anti-affinity selector, not inherent
+      evidence of a dead end — a task excluded from one machine/worktree
+      may still be claimable by another eligible target (confirmed against
+      `tests/test_selectors.py:24-42,68-81`). Add a **neutral** `doctor`
+      finding (e.g. `queued_with_excludes` — visibility, not an
+      assumed-blocked verdict) built on the Phase 3 seam. A stronger
+      "genuinely dead-ended" diagnosis is in scope only if it can first
+      prove the exclusions eliminate every eligible target; treat that as
+      a stretch goal within this phase, not a requirement for it to ship.
 - [ ] This phase and Phase 4 share one filter implementation — build it
       once here, consume it from both `doctor` and `list`.
 
@@ -180,29 +179,28 @@ capture policy; read as "beats" / "want" / "chosen.")
 - [ ] Expose Phase 3's filter seam as `--awaiting-steer` and
       `--has-excludes` boolean filters on `agent-dispatch list`.
 
-### Phase 5 — audit (not duplicate) `show`'s existing liveness signals
-- [ ] **Corrected from review:** `show` already carries two liveness
-      surfaces — the task record's own `activity`/`activity_updated_at`,
-      and `tracking.enrich_task()`'s `embodiment.{turn_state,liveness,
-      updated_at}` overlay (`task_lifecycle_cli.py:107-119`,
-      `tracking.py:682-723`). A third, new signal would conflict rather
-      than help.
-- [ ] **Root cause verified (review, source-confirmed):** `show`
-      (`_cmd_show` in `task_lifecycle_cli.py`) calls only `enrich_task()`
-      — the interactive/worktree path, which shells `agent-bridge
-      live-sessions resolve` via `resolve_live_session()`. A **separate**
-      helper, `tracking.enrich_local_body_tasks()` (`tracking.py:399-435`),
-      already exists specifically for local-body sessions: it joins a
-      task to its live `agent-bridge sessions` row through the task's own
-      `spawned` reservation's `local-body:<session-id>` handle — exactly
-      the case `show` was missing. It's currently only wired into the bulk
-      `list` enrichment path, never into single-task `show`. Phase 5 is:
-      make `_cmd_show` also call `enrich_local_body_tasks()` (adapted for
-      a single task + that task's own reservation, not the whole board
-      batch) so `embodiment` is populated for a local-body task the same
-      way `list` already gets it — reuse the existing helper, never
-      duplicate its join logic or touch `resolve_live_session` (that path
-      is correct for its own, different session kind).
+### Phase 5 — reuse `show`'s existing local-body enrichment helper
+- [ ] `show` already carries two liveness surfaces — the task record's
+      own `activity`/`activity_updated_at`, and `tracking.enrich_task()`'s
+      `embodiment.{turn_state,liveness,updated_at}` overlay
+      (`task_lifecycle_cli.py:107-119`, `tracking.py:682-723`). A third,
+      new signal would conflict rather than help.
+- [ ] `show` (`_cmd_show` in `task_lifecycle_cli.py`) calls only
+      `enrich_task()` — the interactive/worktree path, which shells
+      `agent-bridge live-sessions resolve` via `resolve_live_session()`. A
+      **separate** helper, `tracking.enrich_local_body_tasks()`
+      (`tracking.py:399-435`), already exists specifically for local-body
+      sessions: it joins a task to its live `agent-bridge sessions` row
+      through the task's own `spawned` reservation's
+      `local-body:<session-id>` handle — exactly the case `show` was
+      missing. It's currently only wired into the bulk `list` enrichment
+      path, never into single-task `show`. Phase 5 is: make `_cmd_show`
+      also call `enrich_local_body_tasks()` (adapted for a single task +
+      that task's own reservation, not the whole board batch) so
+      `embodiment` is populated for a local-body task the same way `list`
+      already gets it — reuse the existing helper, never duplicate its
+      join logic or touch `resolve_live_session` (that path is correct
+      for its own, different session kind).
 
 ## Validation Plan
 
@@ -217,14 +215,19 @@ evidence only — never a substitute for an automated test.
       ACP-session path is unchanged. Supplemental: `agent-bridge peek
       <session_id>` against a real local-body session from a live
       downstream repro-queue fleet, if one is running during this phase.
-- [ ] **Phase 2:** two distinct test layers, not one — (a) a route-level
-      case in (or alongside) `test_dispatch_task_session_route.py` /
+- [ ] **Phase 2:** three distinct test layers — (a) a route-level case in
+      (or alongside) `test_dispatch_task_session_route.py` /
       `bridge_namespace_cli`'s own test covering the new spawn-reservation
       fallback specifically; (b) a **CLI-level** regression that invokes
       the chosen task-id `peek` surface, verifies it calls the endpoint
       (not a reimplemented chain), and verifies the resolved session
-      reaches Phase 1's renderer. Supplemental: dogfood against a live
-      pre-claim task.
+      reaches Phase 1's renderer; (c) an **older-daemon regression** —
+      this endpoint is versioned (`protocol.py:79-83`'s
+      `DISPATCH_TASK_SESSION_PROTOCOL_VERSION`, gated via
+      `client.py:574-584`'s `daemon_supports()`), so `peek` must check
+      daemon support before calling it rather than assuming the endpoint
+      is always available; test the degrade path against an older-daemon
+      fixture. Supplemental: dogfood against a live pre-claim task.
 - [ ] **Phase 3:** automated test in `test_doctor.py` confirming (a) a task
       manually given a stale `excludes` entry is reported by a default
       (`--repo`/`--label`, no `--task`) sweep as a neutral
@@ -335,4 +338,19 @@ _Pending — begin with Phase 1 implementation exploration._
   touch `resolve_live_session` at all.
 - Low (stale): Documentation impact, same bot-echo pattern as before.
 - All four real findings from the third round confirmed resolved.
+
+### 2026-10-05 — Plan PR #5264 fifth review round (COMMENTED, 1 new Low + 1 stale Low + 1 previously-missed Medium)
+- Low: removed the `**Corrected from review:**`/`**Verified gap
+  (review):**`/`**Root cause verified (review, source-confirmed):**`
+  qualifiers reintroduced on Phases 2/3/5 across the last three rounds —
+  each is timeless project fact, not a record of how the text changed;
+  restated plainly. Review history belongs only in this Journal — noted
+  explicitly this time since the same mistake recurred three times.
+- Medium (previously missed, flagged now since the surrounding text
+  changed): `GET /api/v1/dispatch-tasks/{id}/session` is version-gated
+  (`protocol.py`'s `DISPATCH_TASK_SESSION_PROTOCOL_VERSION`, checked via
+  `client.py`'s `daemon_supports()`) — Phase 2's plan assumed it's always
+  available. Added an older-daemon regression requirement to its
+  Validation Plan item.
+- Low (stale): Documentation impact, same bot-echo pattern.
 
