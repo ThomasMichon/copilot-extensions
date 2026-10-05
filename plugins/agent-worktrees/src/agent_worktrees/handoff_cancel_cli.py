@@ -11,6 +11,7 @@ import argparse
 import os
 
 from . import tracking
+from . import output
 from . import tracking_lifecycle
 from . import config as cfg
 from . import status_updater_cli
@@ -30,8 +31,6 @@ def _core_helper(name: str, local):
     return local
 
 
-def _json_output(*args, **kwargs):
-    return _core()._json_output(*args, **kwargs)
 
 
 def _activate_project_for_path(*args, **kwargs):
@@ -106,7 +105,7 @@ def cmd_cancel_handoff(args: argparse.Namespace) -> int:
         # for the wrong project and either miss the exact ledger entry or
         # target a coincidentally matching id in the wrong project.
         if not _activate_project_for_worktree_id(wt_id):
-            _json_output({
+            output._json_output({
                 "cancelled": False,
                 "reason": f"could not find the adopted project that owns worktree '{wt_id}'",
             })
@@ -114,7 +113,7 @@ def cmd_cancel_handoff(args: argparse.Namespace) -> int:
         try:
             wt_id = _resolve_worktree_id(wt_id)
         except Exception as exc:
-            _json_output({"cancelled": False, "reason": f"could not resolve worktree '{wt_id}': {exc}"})
+            output._json_output({"cancelled": False, "reason": f"could not resolve worktree '{wt_id}': {exc}"})
             return 1
     else:
         _activate_project_for_path(wdir)
@@ -123,12 +122,12 @@ def cmd_cancel_handoff(args: argparse.Namespace) -> int:
         except Exception:
             wt_id = None
     if not wt_id:
-        _json_output({"cancelled": False, "reason": "not a tracked worktree"})
+        output._json_output({"cancelled": False, "reason": "not a tracked worktree"})
         return 0
 
     token = (getattr(args, "token", None) or "").strip()
     if not token:
-        _json_output({"cancelled": False, "reason": "a token is required"})
+        output._json_output({"cancelled": False, "reason": "a token is required"})
         return 1
 
     try:
@@ -152,10 +151,10 @@ def cmd_cancel_handoff(args: argparse.Namespace) -> int:
                 if cancelled:
                     tracking.save_record(record, yaml_path)
     except Exception as exc:
-        _json_output({"cancelled": False, "worktree_id": wt_id, "reason": str(exc)})
+        output._json_output({"cancelled": False, "worktree_id": wt_id, "reason": str(exc)})
         return 1
 
-    _json_output({
+    output._json_output({
         "cancelled": cancelled,
         "worktree_id": wt_id,
         "token": token,

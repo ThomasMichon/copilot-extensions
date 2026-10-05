@@ -1,0 +1,9 @@
+{
+  "comment": "compatibility-root-decoupling Phase 2 slice 1: retire the core()/_json_output and _json_error compatibility-root indirection. Every caller now imports output.py directly; tests monkeypatch output._json_output/_json_error instead of the root module. No behavior change.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

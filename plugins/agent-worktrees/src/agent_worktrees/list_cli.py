@@ -9,7 +9,8 @@ from datetime import datetime
 from pathlib import Path
 
 from . import config as cfg
-from . import git_ops, list_cache, output, profile_assignment, reclaim, sessions, tracking
+from . import output
+from . import git_ops, list_cache, profile_assignment, reclaim, sessions, tracking
 from . import status_monitor_runtime
 
 
@@ -42,12 +43,8 @@ def _classify_records(*args, **kwargs):
     return _core()._classify_records(*args, **kwargs)
 
 
-def _json_error(*args, **kwargs):
-    return _core()._json_error(*args, **kwargs)
 
 
-def _json_output(*args, **kwargs):
-    return _core()._json_output(*args, **kwargs)
 
 
 def _normalize_path(*args, **kwargs):
@@ -326,7 +323,7 @@ def _refresh_list_record(rec: tracking.WorktreeRecord) -> None:
 def _list_error(args: argparse.Namespace, message: str) -> int:
     """Render list argument errors in the caller's selected output mode."""
     if getattr(args, "json", False) or getattr(args, "stream", False):
-        return _json_error(message)
+        return output._json_error(message)
     output.err(message)
     return 1
 
@@ -478,7 +475,7 @@ def cmd_list(args: argparse.Namespace) -> int:
                     _overlay_cached_state(raw, rec)
                     worktrees.append(raw)
             delegate_cli.annotate_delegate_graph(worktrees)
-            _json_output({"worktrees": worktrees})
+            output._json_output({"worktrees": worktrees})
             return 0
         _lc_key = None
         _project = None
@@ -505,7 +502,7 @@ def cmd_list(args: argparse.Namespace) -> int:
         if _lc_key and not getattr(args, "fresh", False):
             _cached = list_cache.read_fresh(_lc_key)
             if isinstance(_cached, dict) and "worktrees" in _cached:
-                _json_output(_cached)
+                output._json_output(_cached)
                 return 0
         profile_assignment.maintain()
         with cfg.cached_load_config_scope():
@@ -514,7 +511,7 @@ def cmd_list(args: argparse.Namespace) -> int:
             )
         if _lc_key:
             list_cache.write(_lc_key, _payload)
-        _json_output(_payload)
+        output._json_output(_payload)
         return 0
 
     if not records:

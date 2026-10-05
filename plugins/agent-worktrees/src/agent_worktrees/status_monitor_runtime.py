@@ -17,7 +17,7 @@ from pathlib import Path
 
 from agent_procutil import windowless_python
 
-from . import activity, locks, sessions_pane_retire, stale_runtime_reap, tracking
+from . import activity, locks, output, sessions_pane_retire, stale_runtime_reap, tracking
 from . import config as cfg
 from . import status_updater_cli
 
@@ -761,7 +761,7 @@ def cmd_reconcile_sessions(args: argparse.Namespace) -> int:
             reconciler.observe_mux(set(live))
     report = reconciler.step()
     report["mux_observed"] = reconciler.has_mux_observation
-    _core()._json_output(report)
+    output._json_output(report)
     return 0
 
 

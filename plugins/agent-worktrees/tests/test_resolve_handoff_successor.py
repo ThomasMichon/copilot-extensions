@@ -8,7 +8,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from agent_worktrees import __main__ as cli
+from agent_worktrees import output
 from agent_worktrees import handoff_successor_repair_cli as repair_cli
 from agent_worktrees import session_tracking_cli, sessions, tracking
 from agent_worktrees.tracking import SessionEntry, WorktreeRecord, load_record, save_record
@@ -45,7 +45,7 @@ def _terminal_bridge_record(tmp_tracking_dir: Path, *, worktree_path: str) -> Wo
 def _run(monkeypatch, tracking_dir: Path, **ns) -> dict:
     captured: dict = {}
     monkeypatch.setattr(session_tracking_cli, "_all_tracking_dirs", lambda: [tracking_dir])
-    monkeypatch.setattr(cli, "_json_output", lambda data: captured.update(data))
+    monkeypatch.setattr(output, "_json_output", lambda data: captured.update(data))
     rc = repair_cli.cmd_resolve_handoff_successor(argparse.Namespace(json=True, **ns))
     captured["_rc"] = rc
     return captured

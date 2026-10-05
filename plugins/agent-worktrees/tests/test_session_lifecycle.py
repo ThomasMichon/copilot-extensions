@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_worktrees import __main__ as cli
+from agent_worktrees import output
 from agent_worktrees import session_tracking_cli
 from agent_worktrees import tracking
 from agent_worktrees.tracking import (
@@ -754,7 +754,7 @@ class TestHeadSessionCommand:
         from agent_worktrees import __main__ as m
 
         captured: dict = {}
-        monkeypatch.setattr(m, "_json_output", lambda data: captured.update(data))
+        monkeypatch.setattr(output, "_json_output", lambda data: captured.update(data))
         args = argparse.Namespace(worktree_id=worktree_id, json=True)
         rc = m.cmd_head_session(args)
         captured["_rc"] = rc
@@ -890,7 +890,7 @@ class TestConcludeAndLinkCommands:
     def _run(monkeypatch, tracking_dir: Path, fn_name: str, **ns) -> dict:
         captured: dict = {}
         monkeypatch.setattr(session_tracking_cli, "_all_tracking_dirs", lambda: [tracking_dir])
-        monkeypatch.setattr(cli, "_json_output", lambda data: captured.update(data))
+        monkeypatch.setattr(output, "_json_output", lambda data: captured.update(data))
         rc = getattr(session_tracking_cli, fn_name)(argparse.Namespace(json=True, **ns))
         captured["_rc"] = rc
         return captured
@@ -1013,7 +1013,7 @@ class TestListSessionsEnvelopeHead:
             lambda record: [{"id": s.session_id} for s in record.sessions],
         )
         captured: dict = {}
-        monkeypatch.setattr(m, "_json_output", lambda data: captured.update(data))
+        monkeypatch.setattr(output, "_json_output", lambda data: captured.update(data))
         rc = m.cmd_list_sessions(argparse.Namespace(worktree_id="wt-1", json=True))
         assert rc == 0
         assert captured["head_session"] == "s1"
@@ -1028,7 +1028,7 @@ class TestListSessionsEnvelopeHead:
         _rec(tmp_tracking_dir, sessions=[SessionEntry("s1", "t")])
         monkeypatch.setattr(S, "list_worktree_sessions", lambda record: [])
         captured: dict = {}
-        monkeypatch.setattr(m, "_json_output", lambda data: captured.update(data))
+        monkeypatch.setattr(output, "_json_output", lambda data: captured.update(data))
         rc = m.cmd_list_sessions(argparse.Namespace(worktree_id=None, json=True))
         assert rc == 0
         # Per-session is_head covers the all-worktrees case; the envelope head is
@@ -1038,7 +1038,6 @@ class TestListSessionsEnvelopeHead:
     def test_all_projects_carries_resolved_provenance(
         self, tmp_path: Path, monkeypatch
     ):
-        from agent_worktrees import __main__ as m
         from agent_worktrees import sessions as S
 
         project_a = tmp_path / "project-a"
@@ -1087,7 +1086,7 @@ class TestListSessionsEnvelopeHead:
             lambda record: [{"id": entry.session_id} for entry in record.sessions],
         )
         captured: dict = {}
-        monkeypatch.setattr(m, "_json_output", lambda data: captured.update(data))
+        monkeypatch.setattr(output, "_json_output", lambda data: captured.update(data))
 
         rc = session_tracking_cli.cmd_list_sessions(argparse.Namespace(
             worktree_id=None,
@@ -1114,7 +1113,6 @@ class TestListSessionsEnvelopeHead:
     def test_conflicting_duplicate_session_provenance_is_unknown(
         self, tmp_path: Path, monkeypatch
     ):
-        from agent_worktrees import __main__ as m
         from agent_worktrees import sessions as S
 
         project_a = tmp_path / "project-a"
@@ -1149,7 +1147,7 @@ class TestListSessionsEnvelopeHead:
             lambda record: [{"id": entry.session_id} for entry in record.sessions],
         )
         captured: dict = {}
-        monkeypatch.setattr(m, "_json_output", lambda data: captured.update(data))
+        monkeypatch.setattr(output, "_json_output", lambda data: captured.update(data))
 
         rc = session_tracking_cli.cmd_list_sessions(argparse.Namespace(
             worktree_id=None,

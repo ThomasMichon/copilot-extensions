@@ -9,6 +9,7 @@ from pathlib import Path
 
 from . import config as cfg
 from . import git_ops, prune, sessions, tracking
+from . import output
 
 
 def _core():
@@ -83,10 +84,6 @@ def _sync_status_tag(info: git_ops.WorktreeStateInfo) -> str:
 
 def _local_claimant_alive(owner_ref: str) -> bool | None:
     return _core()._local_claimant_alive(owner_ref)
-
-
-def _json_output(value) -> None:
-    _core()._json_output(value)
 
 
 def _find_repo_dir():
@@ -629,7 +626,7 @@ def cmd_status_segment(args: argparse.Namespace) -> int:
     """Print the worktree status-bar segment (thin wrapper over the renderer)."""
     if getattr(args, "json", False):
         data = _status_segment_json(args.path, fetch=bool(args.fetch))
-        _json_output(data if data is not None else {"error": "not a tracked git worktree"})
+        output._json_output(data if data is not None else {"error": "not a tracked git worktree"})
         return 0
     line = _render_status_segment(
         args.path,

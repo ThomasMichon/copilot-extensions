@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import output
 from agent_worktrees import config as cfg
 from agent_worktrees import profile_assignment as assignment
 from agent_worktrees import tracking
@@ -1858,7 +1859,7 @@ def test_cache_only_and_cache_hit_lists_skip_assignment_maintenance(
         "maintain",
         lambda: pytest.fail("fast list path ran assignment maintenance"),
     )
-    monkeypatch.setattr(m, "_json_output", lambda _payload: None)
+    monkeypatch.setattr(output, "_json_output", lambda _payload: None)
 
     base = dict(
         json=True,

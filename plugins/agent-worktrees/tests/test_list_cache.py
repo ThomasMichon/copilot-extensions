@@ -8,6 +8,7 @@ import types
 import pytest
 
 from agent_worktrees import config as cfg
+from agent_worktrees import output
 from agent_worktrees import list_cache as lc
 
 
@@ -152,7 +153,7 @@ def test_cmd_list_json_coalesces_scans(_cache_home, monkeypatch):
     monkeypatch.setattr(sessions, "scan_sessions_fast", _scan)
 
     outputs = []
-    monkeypatch.setattr(m, "_json_output", lambda payload: outputs.append(payload))
+    monkeypatch.setattr(output, "_json_output", lambda payload: outputs.append(payload))
 
     def _ns(fresh=False):
         return types.SimpleNamespace(
@@ -217,7 +218,7 @@ def test_cmd_list_json_reuses_config_for_controller_rows(_cache_home, monkeypatc
 
     monkeypatch.setattr(cfg, "_load_config_uncached", _load_config_once)
     outputs = []
-    monkeypatch.setattr(m, "_json_output", outputs.append)
+    monkeypatch.setattr(output, "_json_output", outputs.append)
 
     m.cmd_list(
         types.SimpleNamespace(
@@ -274,7 +275,7 @@ def test_list_error_respects_plain_and_json_modes(monkeypatch):
     errors = []
     envelopes = []
     monkeypatch.setattr(m.output, "err", errors.append)
-    monkeypatch.setattr(m, "_json_error", lambda message: envelopes.append(message) or 1)
+    monkeypatch.setattr(output, "_json_error", lambda message: envelopes.append(message) or 1)
 
     assert m._list_error(
         types.SimpleNamespace(json=False, stream=False), "plain") == 1

@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import output
 from agent_worktrees import activity, tracking
 from agent_worktrees import status_updater_cli
 from agent_worktrees.tracking import WorktreeRecord, load_record, save_record
@@ -84,7 +85,7 @@ def _write_managed_mux_mapping(
 def _neutralize(monkeypatch, captured: dict) -> None:
     monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
     monkeypatch.setattr(m, "_spawn_status_updater", lambda wt, path: True)
-    monkeypatch.setattr(m, "_json_output", lambda data: captured.update(data))
+    monkeypatch.setattr(output, "_json_output", lambda data: captured.update(data))
 
 
 class TestBindSession:
@@ -493,7 +494,7 @@ class TestNoteHandoff:
         monkeypatch.setattr(m, "find_worktree_id_by_cwd", lambda c: "wt-hd", raising=False)
         monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
         captured = {}
-        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        monkeypatch.setattr(output, "_json_output", lambda o: captured.update(o))
         monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "sess-pred")
 
         rc = m.cmd_note_handoff(argparse.Namespace(
@@ -524,7 +525,7 @@ class TestNoteHandoff:
         m.tracking.set_disposition(record, paused=True, tracking_path=tmp_tracking_dir)
         monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
         monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hp")
-        monkeypatch.setattr(m, "_json_output", lambda o: None)
+        monkeypatch.setattr(output, "_json_output", lambda o: None)
         monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "sess-pred")
 
         rc = m.cmd_note_handoff(argparse.Namespace(
@@ -541,7 +542,7 @@ class TestNoteHandoff:
         monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
         monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: None)
         captured = {}
-        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        monkeypatch.setattr(output, "_json_output", lambda o: captured.update(o))
         rc = m.cmd_note_handoff(argparse.Namespace(
             task="t", title=None, worktree_dir="/tmp/nope",
             worktree_id=None, session_id="s"))
@@ -557,7 +558,7 @@ class TestCancelHandoff:
         monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
         monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
         captured = {}
-        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        monkeypatch.setattr(output, "_json_output", lambda o: captured.update(o))
         monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "sess-pred")
 
         # Open the handoff the same way note-handoff would.
@@ -590,7 +591,7 @@ class TestCancelHandoff:
         monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
         monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
         captured = {}
-        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        monkeypatch.setattr(output, "_json_output", lambda o: captured.update(o))
         monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "sess-pred")
 
         rc = m.cmd_note_handoff(argparse.Namespace(
@@ -630,7 +631,7 @@ class TestCancelHandoff:
         yaml_path = tmp_tracking_dir / "wt-hd.yaml"
         _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
         captured = {}
-        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        monkeypatch.setattr(output, "_json_output", lambda o: captured.update(o))
         m.tracking.register_session("wt-hd", "sess-pred", source="handoff")
         m.tracking.register_session("wt-hd", "sess-candidate", source="handoff")
 
@@ -667,7 +668,7 @@ class TestCancelHandoff:
         _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
         monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
         monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
-        monkeypatch.setattr(m, "_json_output", lambda o: None)
+        monkeypatch.setattr(output, "_json_output", lambda o: None)
         monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "sess-pred")
 
         m.cmd_note_handoff(argparse.Namespace(
@@ -705,7 +706,7 @@ class TestCancelHandoff:
         """
         yaml_path = tmp_tracking_dir / "wt-hd.yaml"
         _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
-        monkeypatch.setattr(m, "_json_output", lambda o: None)
+        monkeypatch.setattr(output, "_json_output", lambda o: None)
         m.tracking.register_session("wt-hd", "sess-pred", source="handoff")
         m.tracking.register_session("wt-hd", "sess-successor", source="handoff")
 
@@ -736,7 +737,7 @@ class TestCancelHandoff:
         overwrite sess-b's newer (still-pending) lineage."""
         yaml_path = tmp_tracking_dir / "wt-hd.yaml"
         _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
-        monkeypatch.setattr(m, "_json_output", lambda o: None)
+        monkeypatch.setattr(output, "_json_output", lambda o: None)
         m.tracking.register_session("wt-hd", "sess-a", source="handoff")
         m.tracking.register_session("wt-hd", "sess-b", source="handoff")
 
@@ -782,7 +783,7 @@ class TestCancelHandoff:
             lambda wt_id: activated.append(wt_id) or True,
         )
         captured = {}
-        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        monkeypatch.setattr(output, "_json_output", lambda o: captured.update(o))
 
         m.cmd_note_handoff(argparse.Namespace(
             task="task-explicit", title=None,
@@ -805,7 +806,7 @@ class TestCancelHandoff:
         monkeypatch.setattr(m.cfg, "active_project", lambda: None)
         monkeypatch.setattr(m, "_activate_project_for_worktree_id", lambda wt_id: False)
         captured = {}
-        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        monkeypatch.setattr(output, "_json_output", lambda o: captured.update(o))
 
         rc = m.cmd_cancel_handoff(argparse.Namespace(
             token="task-x", worktree_dir=None, worktree_id="wt-unknown"))
@@ -831,7 +832,7 @@ class TestCancelHandoff:
         _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
         monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
         monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
-        monkeypatch.setattr(m, "_json_output", lambda o: None)
+        monkeypatch.setattr(output, "_json_output", lambda o: None)
         m.tracking.register_session("wt-hd", "sess-pred", source="handoff")
         m.tracking.register_session("wt-hd", "sess-other", source="handoff")
 
@@ -855,7 +856,7 @@ class TestCancelHandoff:
         monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
         monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
         captured = {}
-        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        monkeypatch.setattr(output, "_json_output", lambda o: captured.update(o))
         _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
 
         rc = m.cmd_cancel_handoff(argparse.Namespace(
@@ -869,7 +870,7 @@ class TestCancelHandoff:
         monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
         monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: None)
         captured = {}
-        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        monkeypatch.setattr(output, "_json_output", lambda o: captured.update(o))
         rc = m.cmd_cancel_handoff(argparse.Namespace(
             token="t", worktree_dir="/tmp/nope", worktree_id=None))
         assert rc == 0
@@ -929,7 +930,7 @@ class TestSessionRole:
         monkeypatch.setattr(m, "_resolve_worktree_for_read",
                             lambda wid, wd=None, sid=None: None)
         captured = {}
-        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        monkeypatch.setattr(output, "_json_output", lambda o: captured.update(o))
         rc = m.cmd_session_role(argparse.Namespace(
             session_id="s", worktree_id=None, worktree_dir=None))
         assert rc == 0
