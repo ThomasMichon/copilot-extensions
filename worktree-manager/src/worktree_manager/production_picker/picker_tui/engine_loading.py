@@ -86,6 +86,10 @@ class PickerScreenLoadingMixin:
         # fetch here.
         self.manager_update_state = "idle"
         self.call_after_refresh(self._poll_manager_update_state)
+        # Local claims-orphanage (worktree-claims-transitive-finalization
+        # Phase 4 item 2) -- same deferred-first-check shape as the two
+        # polls above.
+        self.call_after_refresh(self._poll_orphan_state)
         # ~10 fps drives the SSH spinner and the slower live-glyph pulse.
         self.set_interval(0.1, self._tick)
     def _setup_skeleton(self):
@@ -137,6 +141,8 @@ class PickerScreenLoadingMixin:
         self.grid = {}
         self.applied = {}
         self._prof_unavailable = set()
+        # (self._orphans / self._orphans_checked_at are initialized in
+        # __init__, not here -- see that comment for why.)
     def _load_config_cache_scope(self):
         """This Picker instance's shared, TTL-bounded config-cache scope.
 

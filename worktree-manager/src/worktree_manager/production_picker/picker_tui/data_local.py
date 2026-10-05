@@ -248,6 +248,13 @@ def load(
     return [derive.norm(row, machine, env, **norm_source) for row in rows]
 
 
+def orphans(*, runner=None) -> list[dict]:
+    """This machine's durable claims-orphanage (worktree-claims-transitive-
+    finalization Phase 4 item 2) -- see ``engine_client.orphaned_obligations``
+    for why this is deliberately local-only, never fleet-aggregated."""
+    return engine_client.orphaned_obligations(context.project(), runner=runner)
+
+
 def _stamp_from_raw(rec, raw: dict, reconcile_row: dict | None) -> None:
     """Compatibility helper: merge Group C reconcile fields onto ``raw``."""
     _merge_reconcile_row(raw, reconcile_row)

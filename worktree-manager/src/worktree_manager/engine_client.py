@@ -842,6 +842,30 @@ def recent_worktree_messages(
     )
 
 
+def orphaned_obligations(project: str, *, runner=None) -> list[dict]:
+    """Return this machine's durable claims-orphanage for ``project``.
+
+    Mirrors ``agent-worktrees claims orphans --json``: obligations re-homed by
+    an ``--abandon`` finalize, awaiting ``claims cleanup`` -- a re-homed claim
+    with no worktree row of its own to attach to (worktree-claims-transitive-
+    finalization Phase 4 item 2). The orphanage registry is per-machine local
+    state (never git-synced), so this never reaches beyond the engine this
+    call targets -- there is no cross-machine aggregation to perform here.
+
+    Degrades to an empty list rather than raising on an older engine that
+    predates the ``claims orphans`` verb: this is a visibility nicety for the
+    Picker, never a required capability.
+    """
+    try:
+        obj = run_json(project, ["claims", "orphans", "--json"], runner=runner)
+    except EngineError:
+        return []
+    rows = obj.get("orphaned")
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)]
+
+
 def __getattr__(name: str):
     """Lazily resolve the re-exported `execution_leg_*` names (PEP 562).
 

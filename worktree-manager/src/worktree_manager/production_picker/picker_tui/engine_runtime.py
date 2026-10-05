@@ -80,6 +80,54 @@ class PickerScreenRuntimeMixin:
                 self.manager_update_state = state
 
         self._run_bg("manager-update-check", _work, _done, quiet=True)
+    #: Re-check the local claims-orphanage at most this often (seconds) --
+    #: an ``--abandon`` finalize re-homing an obligation is rare, so this is
+    #: a background courtesy poll, not a hot path.
+    _ORPHAN_POLL_SECS = 120.0
+    def _poll_orphan_state(self, *, force=False):
+        """Refresh ``self._orphans`` -- the local claims-orphanage summary
+        (worktree-claims-transitive-finalization Phase 4 item 2) -- off the
+        render thread. An orphaned obligation (re-homed by an ``--abandon``
+        finalize, awaiting ``claims cleanup``) has no live worktree row of
+        its own to surface on, so this is tracked as independent screen
+        state rather than folded into ``self.data`` -- read by
+        ``status_text()`` (the count chip) and the 'o' Orphanage screen.
+        Cached; ``force=True`` (the 'r' full-reload key) bypasses the cache.
+        Uses ``getattr`` defaults for its own cache attrs (not a bare
+        ``self._orphans...`` read): some lightweight test doubles mix in
+        this ``PickerScreenRuntimeMixin`` directly without running the real
+        ``PickerScreen.__init__`` that normally seeds them.
+
+        Each call starts its own independent background thread (via
+        ``_run_bg``), so the mount-time poll and a forced 'r' poll can
+        overlap; a generation counter (bumped per call, compared in
+        ``_done``) guards against an older request finishing after a
+        newer one and clobbering its fresher snapshot with stale data."""
+        now = time.monotonic()
+        checked_at = getattr(self, "_orphans_checked_at", None)
+        if not force and checked_at is not None and now - checked_at < self._ORPHAN_POLL_SECS:
+            return
+        self._orphans_checked_at = now
+        fetch = getattr(self.src, "orphans", None)
+        if not callable(fetch):
+            return
+
+        generation = getattr(self, "_orphans_poll_generation", 0) + 1
+        self._orphans_poll_generation = generation
+
+        def _work():
+            try:
+                return fetch()
+            except Exception:
+                return None
+
+        def _done(rows):
+            if rows is not None and getattr(
+                    self, "_orphans_poll_generation", generation) == generation:
+                self._orphans = rows
+
+
+        self._run_bg("orphan-check", _work, _done, quiet=True)
     def _maybe_repoll(self):
         """Fire a bounded, in-place background refresh of machine state (#1421).
 
