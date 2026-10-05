@@ -15,6 +15,7 @@ from .client_completion_review import CompletionReviewMixin
 from .client_events import EventStreamClientMixin
 from .client_exclude import ClearExcludeClientMixin
 from .client_registrations import RegistrationClientMixin
+from .client_spawn_reservations import SpawnReservationClientMixin
 from .client_spawn_terminal import SpawnTerminalClientMixin
 from .client_suspend import SuspendClientMixin
 from .client_verification import VerificationClientMixin
@@ -45,7 +46,7 @@ class DispatchUpgradeRequired(DispatchError):
         super().__init__(426, detail)
 
 
-class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, EventStreamClientMixin):
+class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(
@@ -917,35 +918,6 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, Complet
                 },
             )
         )
-
-    def list_reservations(
-        self,
-        *,
-        task_id: str | None = None,
-        state: str | None = None,
-        repo: str | None = None,
-        label: str | None = None,
-        conclusion_state: str | None = None,
-        resume_requested: bool | None = None,
-        limit: int = 200,
-    ) -> list[dict]:
-        params: dict[str, Any] = {"limit": limit}
-        if task_id is not None:
-            params["task_id"] = task_id
-        if state is not None:
-            params["state"] = state
-        if repo is not None:
-            params["repo"] = repo
-        if label is not None:
-            params["label"] = label
-        if conclusion_state is not None:
-            params["conclusion_state"] = conclusion_state
-        if resume_requested is not None:
-            params["resume_requested"] = resume_requested
-        return self._unwrap(self._http.get("/spawn-reservations", params=params))
-
-    def get_reservation(self, key: str) -> dict:
-        return self._unwrap(self._http.get(f"/spawn-reservations/{key}"))
 
     # -- schedule registry + job-leases -------------------------------------
 

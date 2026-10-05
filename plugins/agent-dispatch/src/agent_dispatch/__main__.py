@@ -676,10 +676,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "doctor",
-        help="diagnose held/suspended tasks: distinguish a confirmed-orphaned "
-        "task (its worktree provably gone) from ordinary in-flight work or "
-        "merely ambiguous liveness, and (with --repair) unbind + re-queue "
-        "only the confirmed-orphaned ones",
+        help="diagnose held/suspended/queued-with-a-reservation tasks: "
+        "distinguish a confirmed-orphaned task (its worktree provably gone), "
+        "a queued task still carrying a failed prior spawn attempt "
+        "(#5209), from ordinary in-flight work or merely ambiguous "
+        "liveness, and (with --repair) unbind + re-queue only the "
+        "confirmed-orphaned ones",
     )
     p.add_argument(
         "--task",

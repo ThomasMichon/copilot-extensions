@@ -367,9 +367,33 @@ class QueueClaimQueriesMixin:
         label: str | None = None,
         conclusion_state: str | None = None,
         resume_requested: bool | None = None,
+        task_status: str | Sequence[str] | None = None,
+        latest_only: bool = False,
         limit: int = 200,
     ) -> list[SpawnReservation]:
-        """List spawn reservations, newest first, optionally filtered."""
+        """List spawn reservations, newest first, optionally filtered.
+
+        ``latest_only`` restricts the result to each task's single
+        highest-``attempt`` reservation row (one row per ``task_id``). A
+        task retried several times accumulates one reservation row per
+        attempt, most now superseded; without this, a state filter (e.g.
+        ``state="failed"``) orders and limits across EVERY historical row,
+        so many tasks' old, already-superseded failed attempts can crowd
+        out an older task's single current-and-still-failed reservation out
+        of a bounded ``limit`` -- exactly the latest-only semantics
+        :func:`agent_dispatch.doctor.find_stuck_queued_reservations` needs.
+
+        ``task_status`` filters to the OWNING task's current status (e.g.
+        ``"queued"``) -- distinct from ``latest_only``: even with
+        duplicate attempts collapsed, a currently-``FAILED`` reservation
+        whose task has already moved on (completed, abandoned, dead-
+        lettered, or otherwise concluded) still consumes the bounded
+        ``limit`` ahead of an actually-still-``queued`` task's own failed
+        reservation. Filtering by task status at the query layer (via the
+        same ``tasks`` join already used for ``repo``/``label``) keeps the
+        limit's whole budget spent on tasks the caller actually cares
+        about.
+        """
         repo = self._canonical_repo(repo)
         clauses: list[str] = []
         params: list[object] = []
@@ -380,7 +404,17 @@ class QueueClaimQueriesMixin:
             states = [state] if isinstance(state, str) else list(state)
             clauses.append(f"r.state IN ({','.join('?' * len(states))})")
             params.extend(states)
-        join_tasks = repo is not None or label is not None or resume_requested is not None
+        if latest_only:
+            clauses.append(
+                "r.attempt = (SELECT MAX(r2.attempt) FROM spawn_reservations r2 "
+                "WHERE r2.task_id = r.task_id)"
+            )
+        join_tasks = (
+            repo is not None
+            or label is not None
+            or resume_requested is not None
+            or task_status is not None
+        )
         if repo is not None:
             clauses.append("t.repo = ?")
             params.append(repo)
@@ -393,6 +427,10 @@ class QueueClaimQueriesMixin:
         if resume_requested is not None:
             clauses.append("t.resume_requested = ?")
             params.append(1 if resume_requested else 0)
+        if task_status is not None:
+            statuses = [task_status] if isinstance(task_status, str) else list(task_status)
+            clauses.append(f"t.status IN ({','.join('?' * len(statuses))})")
+            params.extend(statuses)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
         with self._connect() as conn:

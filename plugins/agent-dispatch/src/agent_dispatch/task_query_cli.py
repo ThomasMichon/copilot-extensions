@@ -141,7 +141,12 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     """Diagnose held/suspended tasks (Boundary I / #2577; #2884 session-
     liveness / #2884). ``--task`` narrows to one exact task;
     ``--check-live-sessions`` walks its full reservation history for a
-    shadowed-but-live earlier attempt. See :mod:`agent_dispatch.doctor`."""
+    shadowed-but-live earlier attempt. In the repo/label sweep (no
+    ``--task``), also separately queries any ``queued`` task stuck behind a
+    genuinely failed spawn reservation (:func:`doctor
+    .find_stuck_queued_reservations`, #5209) -- a bounded, independent query
+    that never competes with the main sweep's own ``--limit``. See
+    :mod:`agent_dispatch.doctor`."""
     from . import doctor
 
     with _core()._client(args) as c:
@@ -151,6 +156,13 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             except DispatchError as exc:
                 print(f"agent-dispatch: {exc}", file=sys.stderr)
                 return 1
+            payload = doctor.diagnose_many(
+                c,
+                tasks,
+                check_live_sessions=args.check_live_sessions,
+                stale_lease_seconds=args.stale_lease_seconds,
+                repair_orphaned=args.repair,
+            )
         else:
             repo = _core()._scope_repo(args)
             if not repo:
@@ -162,13 +174,19 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
                 label=args.label,
                 limit=args.limit,
             )
-        payload = doctor.diagnose_many(
-            c,
-            tasks,
-            check_live_sessions=args.check_live_sessions,
-            stale_lease_seconds=args.stale_lease_seconds,
-            repair_orphaned=args.repair,
-        )
+            payload = doctor.diagnose_many(
+                c,
+                tasks,
+                check_live_sessions=args.check_live_sessions,
+                stale_lease_seconds=args.stale_lease_seconds,
+                repair_orphaned=args.repair,
+            )
+            stuck_queued = doctor.find_stuck_queued_reservations(
+                c, repo=repo, label=args.label, limit=args.limit
+            )
+            if stuck_queued:
+                payload["examined"] += len(stuck_queued)
+                payload["diagnoses"].extend(d.as_dict() for d in stuck_queued)
     return _core()._emit(payload)
 
 def _board_activity(task: dict, *, now: float | None = None) -> str | None:
