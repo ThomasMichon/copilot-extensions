@@ -23,7 +23,7 @@ one, can trigger a finding.
 Usage::
 
     check-effort-vision-structure.py FILE [FILE ...]   # check exactly these paths (pre-commit, staged)
-    check-effort-vision-structure.py                   # diff HEAD vs --base (default origin/main)
+    check-effort-vision-structure.py                   # diff HEAD vs --base (default origin/dev)
     check-effort-vision-structure.py --base <ref>       # diff vs an explicit base
     check-effort-vision-structure.py --all              # check every effort/vision README in the repo
 
@@ -85,7 +85,20 @@ def _changed_readmes(base_ref: str, head_ref: str) -> list[Path]:
             "skipping (fetch it to enable the guard).",
         )
         return []
-    mbase = _merge_base(base, head) or base
+    mbase = _merge_base(base, head)
+    if mbase is None:
+        # `base` resolves but shares no common ancestor with `head` -- see
+        # check-version-bump.py's identical fix for the full rationale
+        # (a `main` history rewrite severs even the repo's original
+        # dev/main fork point). Degrade the same soft way an unresolvable
+        # base already does above, rather than silently diff raw `base_ref`
+        # and misreport every README that differs from `main`'s last
+        # promotion snapshot as "changed by this branch."
+        print(
+            f"check-effort-vision-structure: base '{base_ref}' shares no common "
+            "history with HEAD (e.g. after a main history rewrite); skipping.",
+        )
+        return []
     r = _git("diff", "--name-only", "--diff-filter=ACM", f"{mbase}..{head}")
     paths = []
     for line in r.stdout.splitlines():
@@ -165,7 +178,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("paths", nargs="*", help="explicit README.md paths to check (pre-commit)")
-    ap.add_argument("--base", default="origin/main", help="base ref to diff against (default: origin/main)")
+    ap.add_argument("--base", default="origin/dev",
+                     help="base ref to diff against (default: origin/dev -- "
+                          "this repo's real contribution trunk)")
     ap.add_argument("--head", default="HEAD", help="head ref (default: HEAD)")
     ap.add_argument("--all", action="store_true", help="check every effort/vision README in the repo")
     args = ap.parse_args(argv)

@@ -436,6 +436,26 @@ def test_from_diff_bumps_every_consumer_of_a_changed_lib_and_the_lib(diff_repo):
     }
 
 
+def test_from_diff_base_sharing_no_merge_base_fails_loudly(diff_repo):
+    """A `--from-diff` base that RESOLVES but shares no common ancestor
+    with HEAD at all (the confirmed fallout of a deliberate `main` history
+    rewrite -- see docs/pipelines.md's "If main's history is force-rewritten")
+    must fail loudly, never silently diff raw `base` directly -- unlike the
+    read-only guards elsewhere in this repo, this tool's own ``--apply``
+    could otherwise WRITE a spurious version bump for every plugin that
+    merely differs between `base`'s snapshot and HEAD, not ones this
+    branch actually touched."""
+    root, git = diff_repo
+    git("checkout", "-q", "--orphan", "rewritten-main")
+    (root / "unrelated.txt").write_text("rewritten history\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "unrelated root (simulates a rewritten main)")
+    git("checkout", "-q", "feature")
+
+    with pytest.raises(SystemExit, match="no merge base"):
+        acc.compute_from_diff("rewritten-main")
+
+
 def test_from_diff_bumps_a_standalone_consumers_own_vendored_lib_copy(diff_repo):
     """`lib_bumps_from_diff()` only ever globbed `plugins/*/libs/<lib>/`,
     so a recognized standalone consumer's own top-level `libs/<lib>/` real

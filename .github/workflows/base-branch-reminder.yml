@@ -68,15 +68,19 @@ jobs:
             const { PR_AUTHOR, REPO_OWNER, HEAD_REF } = process.env;
             const pull_number = context.payload.pull_request.number;
 
-            // Mirrors ci.yml's `main-gate` job -- the exact three shapes
+            // Mirrors ci.yml's `main-gate` job -- the exact five shapes
             // that legitimately land on `main` directly (the release
-            // pipeline's own PR, a workflow-only bootstrap PR, and
-            // module-size-baseline-widen.yml's automated PR). Recognized
-            // by SIGNATURE (branch name + diff content), the same way
-            // `main-gate` itself verifies them, not merely by "author is
-            // the repo owner" -- all three shapes do happen to require
-            // that today, but checking the signature directly means this
-            // stays correct even if this job is later widened to cover
+            // pipeline's own PR, a workflow-only bootstrap PR,
+            // module-size-baseline-widen.yml's automated PR, and
+            // rollback_release.py's own pause/resume state-commit PR and
+            // revert rollback PR).
+            // Recognized by SIGNATURE (branch name + diff content, or branch
+            // name + commit count for the revert shape, whose diff is
+            // deliberately not single-file), the
+            // same way `main-gate` itself verifies them, not merely by
+            // "author is the repo owner" -- all five shapes do happen to
+            // require that today, but checking the signature directly means
+            // this stays correct even if this job is later widened to cover
             // every PR against `main` (not just non-owner authors): a
             // future change to the outer author-based scoping can never
             // accidentally start reminding the release pipeline's own
@@ -105,6 +109,19 @@ jobs:
                 return true;
               }
               if (
+                HEAD_REF.startsWith("release-pipeline/state-") &&
+                changed.length === 1 &&
+                changed[0] === ".github/release-pipeline-state.json"
+              ) {
+                return true;
+              }
+              if (
+                HEAD_REF.startsWith("release-pipeline/rollback-") &&
+                context.payload.pull_request.commits === 1
+              ) {
+                return true;
+              }
+              if (
                 changed.length > 0 &&
                 changed.every((name) => name.startsWith(".github/workflows/"))
               ) {
@@ -116,7 +133,8 @@ jobs:
             if (await isLegitimateAutomatedMainPr()) {
               core.info(
                 "Legitimate automated main-targeting PR (release pipeline / workflow-only " +
-                  "bootstrap / module-size-baseline-widen); skipping reminder.",
+                  "bootstrap / module-size-baseline-widen / rollback_release state-commit " +
+                  "or revert); skipping reminder.",
               );
               return;
             }
@@ -124,11 +142,11 @@ jobs:
             // Intended scope (unchanged from this workflow's original
             // design): this reminder only ever targets a NON-owner author's
             // ordinary PR against `main`. The signature check above is
-            // independent insurance for the three automated shapes
+            // independent insurance for the five automated shapes
             // specifically -- it is not a replacement for this outer scope
             // guard, and must stay a separate check: dropping this one
             // would also start reminding the repo owner's own ordinary (not
-            // one of the three automated-shape) PRs against `main`, which is
+            // one of the five automated-shape) PRs against `main`, which is
             // out of scope for this job (main-gate already gives the owner
             // direct, same-repo CI feedback in that case).
             if (PR_AUTHOR === REPO_OWNER) {
