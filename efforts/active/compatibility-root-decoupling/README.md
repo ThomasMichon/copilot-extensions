@@ -33,6 +33,20 @@ through it anymore.
 |-------------|---------------------|-------------|
 | lambda-core | Drives the migration slices, opens/lands each per-name PR | local worktree, independent per-slice PRs |
 
+## Coordination
+
+- **Topology:** independent per-slice PRs (no shared feature branch) --
+  each migration slice (one or a small batch of names) is its own PR
+  against `dev`, opened from its own worktree, reviewed and merged
+  independently before the next slice starts.
+- **Host (owns PRs):** lambda-core (sole participant; single-agent effort,
+  no delegation currently in play).
+- **Handoff:** none required while single-participant. If a future slice
+  is delegated to another participant, record the assignment here before
+  dispatching and follow the standard `agent-worktrees:git-collaboration`
+  skill's independent-worktree pattern (each delegate opens its own PR;
+  the effort README tracks which slice each PR covers).
+
 ## Context
 
 - Surfaced while fixing two broken daily CI workflows (PR #5270) and a
@@ -84,7 +98,7 @@ Any change that makes these files slightly smaller is a win."
       than eyeballed.
 - [x] `--progress` mode reports live aggregate counts, ranked by traffic.
       Baseline corrected multiple times this slice as real gaps surfaced
-      (see Journal): **42 accessors, 291 call sites, 157 distinct
+      (see Journal): **42 accessors, 290 call sites, 157 distinct
       monkeypatched names, 1049 patch-site occurrences** as of the final,
       review-hardened state of the tool (bare `core.attr(` calls,
       indented/local root imports, and `unittest.mock.patch("<pkg>.
@@ -280,6 +294,38 @@ _Pending._
   landed, re-confirming the "re-run after every sync" lesson above now
   also applies to "re-run after every review round, not just the
   first."
-- Next slice: `_resolve_worktree_id` (11 call sites / 40 monkeypatch
+- **Third review round found a real word-boundary regex bug**: the
+  call-site pattern had no identifier boundary before the alias, so a
+  single-char alias like `m` matched as the literal TAIL of an unrelated
+  longer identifier -- concretely, `this_platform.lower()` was reported
+  as an `m.lower()` root call purely because "platform" ends in "m".
+  Fixing this naively (adding a plain `\b` before the alias group) broke
+  the *other*, legitimate accessor-call shape: `_core()._json_output(`
+  stopped matching, because `\b` can't find a boundary between the `_`
+  and `core` inside `_core` -- that's a single continuous word-character
+  token in regex terms, and the accessor-call shape was only ever being
+  matched because the unanchored alias search happened to find "core"
+  as a substring of "_core". Root cause: **the lazy-accessor-function
+  shape is architecturally different from the plain-alias-variable
+  shape and must never share one pattern** -- callers invoke the
+  wrapper FUNCTION by its own defined name (`_core`, captured from
+  `def _core():`), never the internal variable name that function's
+  own import binds; the plain-alias shape is a genuinely separate,
+  word-bounded identifier match. Fixed by building two independent,
+  explicitly-named sub-patterns and OR-ing them, rather than reusing
+  one alias set for both shapes. Re-verified against the real repo:
+  `_resolve_worktree_id` call sites correctly stayed at 27 (not the
+  16 the broken `\b`-only fix would have silently undercounted to),
+  and the `this_platform.lower()` false positive is gone. Also added
+  `tools/test_compat_root_migration.py` (13 tests, a gap review
+  correctly flagged this tool never had) covering every regex edge
+  case found across all three rounds, plus the two "reject vacuous
+  success" guards; added the required `## Coordination` section to
+  this effort's own Participants block (a template-compliance gap);
+  fixed an outdated `__main__.py` comment that still described
+  `_json_output`/`_json_error` as root re-exports after they were
+  removed. Corrected `--progress` baseline: 290 call sites (was 291 --
+  the one `lower` false positive is now gone).
+- Next slice: `_resolve_worktree_id` (27 call sites / 48 monkeypatch
   sites) -- re-run `--progress` first, since this slice's corrected
   baseline may have shifted the ranking.

@@ -1067,8 +1067,12 @@ def _emit_plan(plan: dict) -> None:
 # JSON output helpers -- shared by all --json modes
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Moved to output.py (module-size split); re-exported here since nothing about
-# these needs to be defined in the entry-point module itself.
+# _JSON_SCHEMA_VERSION moved to output.py (module-size split); re-exported
+# here as a schema-version compatibility constant only. _json_output/
+# _json_error are NOT re-exported here -- every caller imports output
+# directly and calls output._json_output/_json_error (see
+# docs/patterns/compatibility-root-decoupling.md); do not reintroduce a
+# root alias for them.
 _JSON_SCHEMA_VERSION = output._JSON_SCHEMA_VERSION
 
 def _sync_status_tag(info: git_ops.WorktreeStateInfo) -> str:

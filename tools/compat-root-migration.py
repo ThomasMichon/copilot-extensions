@@ -38,7 +38,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
-CORE_ACCESSOR_DEF_RE = re.compile(r"^def _?core\(\)\s*:", re.MULTILINE)
+CORE_ACCESSOR_DEF_RE = re.compile(r"^def (_?core)\(\)\s*:", re.MULTILINE)
 ROOT_IMPORT_RE = re.compile(
     r"^\s*(?:from\s+[\w.]+\s+import\s+__main__\s+as\s+(\w+)"
     r"|import\s+[\w.]+\.__main__\s+as\s+(\w+))",
@@ -83,11 +83,29 @@ def find_core_call_sites(plugin: str, name: str) -> list[str]:
     hits = []
     for path in _iter_py_files(_src_dir(plugin)):
         text = path.read_text(encoding="utf-8", errors="replace")
+        patterns = []
+        # The lazy-accessor-function shape: callers always invoke the
+        # wrapper FUNCTION by its own defined name (conventionally
+        # `_core()`), never the internal variable name that function's own
+        # `from . import __main__ as X` binds (that name is only used
+        # inside the wrapper's own body, never by callers) -- so this is
+        # checked independent of _root_aliases_in_file, keyed only on the
+        # wrapper's own definition.
+        accessor_match = CORE_ACCESSOR_DEF_RE.search(text)
+        if accessor_match:
+            patterns.append(rf"\b{re.escape(accessor_match.group(1))}\(\)\.")
+        # The plain-alias-as-variable shape (e.g. `core = _core()` then
+        # `core.attr(...)`, or a direct top-level
+        # `from . import __main__ as X` used without a wrapper function):
+        # needs a word boundary so a short alias like `m` never matches as
+        # the tail of an unrelated longer identifier (e.g. `this_platform`).
         aliases = _root_aliases_in_file(text)
-        if not aliases:
+        if aliases:
+            alias_group = "|".join(re.escape(a) for a in aliases)
+            patterns.append(rf"\b(?:{alias_group})(?:\(\))?\.")
+        if not patterns:
             continue
-        alias_group = "|".join(re.escape(a) for a in aliases)
-        pattern = re.compile(rf"(?:{alias_group})(?:\(\))?\.{re.escape(name)}\(")
+        pattern = re.compile(rf"(?:{'|'.join(patterns)}){re.escape(name)}\(")
         for m in pattern.finditer(text):
             line = text.count("\n", 0, m.start()) + 1
             hits.append(f"{path.relative_to(REPO)}:{line}")
@@ -125,6 +143,16 @@ def cmd_name(plugin: str, name: str) -> int:
     calls = find_core_call_sites(plugin, name)
     patches = find_monkeypatch_sites(plugin, name)
 
+    if not defs and not calls and not patches:
+        print(
+            f"error: {name!r} has no definition site, root-alias call site, "
+            f"or root-patch site anywhere in {plugin} -- check for a typo. "
+            "Refusing to report a vacuous '[done]' for a name this tool "
+            "never saw at all.",
+            file=sys.stderr,
+        )
+        return 1
+
     print(f"=== {name} ({plugin}) ===")
     print(f"\nDefinition site(s) ({len(defs)}):")
     for h in defs:
@@ -132,7 +160,7 @@ def cmd_name(plugin: str, name: str) -> int:
     print(f"\nRoot-alias call sites ({len(calls)}):")
     for h in calls:
         print(f"  {h}")
-    print(f"\nmonkeypatch.setattr(<root alias>, \"{name}\", ...) sites ({len(patches)}):")
+    print(f"\nRoot-patch site(s) ({len(patches)}):")
     for h in patches:
         print(f"  {h}")
 
@@ -153,13 +181,19 @@ def cmd_progress(plugin: str) -> int:
     call_names: Counter[str] = Counter()
     for path in src_files:
         text = path.read_text(encoding="utf-8", errors="replace")
-        if CORE_ACCESSOR_DEF_RE.search(text):
+        accessor_match = CORE_ACCESSOR_DEF_RE.search(text)
+        if accessor_match:
             accessor_count += 1
+        patterns = []
+        if accessor_match:
+            patterns.append(rf"\b{re.escape(accessor_match.group(1))}\(\)\.")
         aliases = _root_aliases_in_file(text)
-        if not aliases:
+        if aliases:
+            alias_group = "|".join(re.escape(a) for a in aliases)
+            patterns.append(rf"\b(?:{alias_group})(?:\(\))?\.")
+        if not patterns:
             continue
-        alias_group = "|".join(re.escape(a) for a in aliases)
-        call_re = re.compile(rf"(?:{alias_group})(?:\(\))?\.(\w+)\(")
+        call_re = re.compile(rf"(?:{'|'.join(patterns)})(\w+)\(")
         for name in call_re.findall(text):
             call_names[name] += 1
 
