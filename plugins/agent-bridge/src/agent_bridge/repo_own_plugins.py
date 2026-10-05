@@ -147,14 +147,16 @@ def _resolve_ref_dir(source: str, repo_roots: list[Path]) -> Path | None:
     (first-wins across ``repo_roots``, shadowing-safe) without depending on
     that package -- both consume the same shared ``plugin_resolve``
     primitives. The **first** ``repo_roots`` entry whose settings declare
-    ``marketplace`` as a local source *claims* it: if that marketplace lacks
-    ``name`` or has an unreadable manifest, resolution stops there rather
-    than falling through to a different (shadowed) anchor's declaration of
-    the same marketplace name, or to the installed-plugin payload -- both of
-    which could silently load a different or stale payload than the one the
-    winning anchor actually declares. Only an **undeclared** marketplace (no
-    ``repo_roots`` entry claims it at all) falls back to the installed
-    payload. Fail-safe -> ``None``.
+    ``marketplace`` at all *claims* it, regardless of source kind: a local
+    declaration there resolves directly (success or failure stops here,
+    never falling through to a different anchor's declaration of the same
+    marketplace name); a non-local (remote) declaration there falls back to
+    the installed-plugin payload instead, since there is no local source to
+    read. Either way, a later anchor's own declaration of the same
+    marketplace name is never consulted -- it would silently load a
+    different or stale payload than the one the winning anchor actually
+    declares. Only a marketplace **undeclared** by every ``repo_roots``
+    entry falls back to the installed payload. Fail-safe -> ``None``.
     """
     name, marketplace = split_source(source)
     if not name or not marketplace:
@@ -167,7 +169,11 @@ def _resolve_ref_dir(source: str, repo_roots: list[Path]) -> Path | None:
         if marketplace not in settings.marketplaces:
             continue
         if marketplace_source_kind(marketplace, settings) is not MarketplaceSourceKind.LOCAL:
-            continue
+            # This anchor claims the marketplace name with a non-local
+            # (remote) source -- there's nothing local to read here, but a
+            # later anchor's own declaration of the same name must still
+            # not be consulted. Fall back to the installed payload only.
+            return _installed_dir(name, marketplace)
         # This anchor claims the marketplace name -- resolve exactly here,
         # success or failure, and never consult another anchor or the
         # installed inventory for this source.

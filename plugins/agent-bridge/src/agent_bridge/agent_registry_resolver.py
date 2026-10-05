@@ -403,15 +403,18 @@ class AgentResolver:
         """Rebind a machine/local venue target to run ``<repo>``'s binstub.
 
         ``target`` was resolved via ``_resolve_static(venue)`` against
-        *venue*'s own default project, so a local-loopback target's
-        ``copilot_args`` already carries that default project's own-plugin
-        and related-plugin ``--plugin-dir`` args baked in. Strip exactly
+        *venue*'s own default project. Only a **local-loopback** target's
+        ``copilot_args`` carries that default project's own-plugin and
+        related-plugin ``--plugin-dir`` args baked in (the ``type="ssh"``
+        branches never add them -- that's Phase 2 work) -- strip exactly
         that (known, reconstructible) suffix before appending the final
-        bound ``repo``'s own args -- otherwise the requested repo's plugins
-        never load and the venue's default-project plugins leak into a
-        dispatch that has nothing to do with them.
+        bound ``repo``'s own args, and leave a genuine remote-SSH target's
+        ``copilot_args`` (its explicitly configured values) completely
+        untouched: recomputing "stale" args for a project that was never
+        actually appended risks matching a real, user-configured suffix by
+        coincidence and silently deleting it.
         """
-        if target.type in ("local", "ssh"):
+        if target.type == "local":
             import dataclasses
 
             canonical = self.canonical_agent_name(venue)
@@ -424,15 +427,18 @@ class AgentResolver:
                 )
                 if stale and copilot_args[-len(stale):] == stale:
                     copilot_args = copilot_args[: -len(stale)]
-            if target.type == "local":
-                copilot_args = (
-                    copilot_args
-                    + self._own_plugin_args(repo)
-                    + self._related_plugin_args(repo)
-                )
+            copilot_args = (
+                copilot_args
+                + self._own_plugin_args(repo)
+                + self._related_plugin_args(repo)
+            )
             return dataclasses.replace(
                 target, project=repo, copilot_args=copilot_args,
             )
+        if target.type == "ssh":
+            import dataclasses
+
+            return dataclasses.replace(target, project=repo)
         raise ValueError(
             f"Cross-repo dispatch '{repo}@{venue}' is not supported for this "
             "venue (it hosts its own repo/checkout)."

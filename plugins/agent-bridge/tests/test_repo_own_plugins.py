@@ -437,3 +437,47 @@ def test_related_plugin_first_claiming_anchor_wins_even_if_broken(tmp_path, monk
     )
 
     assert args == []
+
+
+def test_related_plugin_remote_first_anchor_blocks_local_second_anchor(tmp_path, monkeypatch):
+    # The FIRST repo_root to declare `control-local` wins even when its own
+    # declaration is non-local (remote/github) -- a SECOND root's local
+    # declaration of the same marketplace name must never be consulted, and
+    # resolution falls back to the installed payload instead (the only
+    # option for a remote-sourced marketplace this function doesn't fetch).
+    first_root = tmp_path / "first"
+    _make_repo(
+        first_root,
+        enabled={},
+        marketplaces={
+            "control-local": {"source": {"source": "github", "repo": "o/r"}}
+        },
+    )
+    second_root = tmp_path / "second"
+    _make_local_marketplace(second_root / ".ai", "control-local", "enhancer")
+    _make_repo(
+        second_root,
+        enabled={},
+        marketplaces={
+            "control-local": {
+                "source": {"source": "directory", "path": str(second_root / ".ai")}
+            }
+        },
+    )
+    installed = tmp_path / "installed"
+    _write(installed / "control-local" / "enhancer" / "plugin.json", {"name": "enhancer"})
+    repo_own_plugins._INSTALLED = installed
+
+    monkeypatch.setattr(
+        related_plugins,
+        "related_plugins_for_repo",
+        lambda repo, anchors=None: [PluginRef("enhancer@control-local", enable=True)],
+    )
+
+    args = repo_own_plugins.related_plugin_dir_args(
+        "target-repo", repo_roots=[first_root, second_root],
+    )
+
+    # Falls back to the installed payload (first anchor is remote-sourced,
+    # second anchor's local declaration of the same name is never reached).
+    assert args == ["--plugin-dir", str(installed / "control-local" / "enhancer")]

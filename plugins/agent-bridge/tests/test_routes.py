@@ -3296,6 +3296,35 @@ def test_resolve_local_binstub_skips_non_executable_explicit_path(
     assert resolved == "/resolved/path"
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="PATHEXT-based extension recognition is a Windows-only concern.",
+)
+def test_resolve_local_binstub_extensionless_file_does_not_mask_cmd_shim(
+    tmp_path, monkeypatch,
+) -> None:
+    """Regression (#5306 review): an extensionless file at the exact
+    ``~/.local/bin/<project>`` path (a stray text file, a POSIX-style
+    script accidentally left over, etc.) is never itself launchable on
+    Windows -- only a suffix ``shutil.which``/``CreateProcess`` recognizes
+    via ``PATHEXT`` is. It must fall through to the adjacent ``.cmd`` shim,
+    not be treated as if it were the real binstub."""
+    import os
+    from pathlib import Path
+
+    from agent_bridge.routes.worktrees import _resolve_local_binstub
+
+    bin_dir = tmp_path / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "private-downstream-repo").write_text("not launchable\n")
+    shim = bin_dir / "private-downstream-repo.cmd"
+    shim.write_text("@echo off\n")
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    resolved = _resolve_local_binstub("private-downstream-repo")
+    assert os.path.normcase(resolved) == os.path.normcase(str(shim))
+
+
 def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
     """agent-bridge-worktree-native-agents (Phase 3): a worktree's bound
     charter borrows its own launch shape (copilot_path/mcp_servers/env, and

@@ -2139,6 +2139,41 @@ class TestVenueBoundResolve:
         assert "/related/SPO.Core" in target.copilot_args
 
     @pytest.mark.asyncio
+    async def test_repo_at_remote_machine_leaves_ssh_copilot_args_untouched(self):
+        # Regression (#5306 review): a genuine-remote (non-loopback) venue
+        # never had plugin args appended by _resolve_static in the first
+        # place -- _bind_repo must not recompute a "stale suffix" for it and
+        # risk stripping real, explicitly configured SSH args that happen to
+        # coincide with what plugin resolution would have produced.
+        from unittest.mock import patch
+
+        agents = {
+            "cloud1": AgentConfig(
+                name="cloud1", host="host-cloud1", ssh_environment="windows",
+                project="dotfiles", copilot_args=["--plugin-dir", "/own/dotfiles"],
+                derived=True,
+            ),
+        }
+        local = self.machines["host-dev6"]  # dispatcher is dev6, not cloud1
+
+        def _own(project, cwd=None):
+            return ["--plugin-dir", f"/own/{project}"]
+
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local, "windows"),
+        ):
+            resolver = AgentResolver(agents, self.machines)
+            with patch.object(resolver, "_own_plugin_args", side_effect=_own):
+                target = await resolver.resolve_async("SPO.Core@cloud1")
+
+        assert target.type == "ssh"
+        assert target.project == "SPO.Core"
+        # The explicitly configured arg (coincidentally equal to what
+        # _own_plugin_args("dotfiles") would produce) must survive untouched.
+        assert target.copilot_args == ["--plugin-dir", "/own/dotfiles"]
+
+    @pytest.mark.asyncio
     async def test_bare_venue_rebind_through_sender_repo_uses_final_project(self):
         # The other rebinding path (#5306 review): a bare machine resolved
         # via a namespace/bare candidate, then rebound through _bind_repo.

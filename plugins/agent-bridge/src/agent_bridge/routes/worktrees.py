@@ -519,10 +519,13 @@ def _resolve_local_binstub(project: str) -> str:
     directory component (like the explicit ``~/.local/bin/<project>`` path
     below) is checked for an *exact* match only, with no suffix search at
     all -- so it silently misses the installed ``.cmd``/``.ps1`` shim sitting
-    right next to it. Try the exact name first (POSIX: only if it is also
-    executable, matching what ``shutil.which`` itself checks -- a non-
-    executable file at that exact path must still fall through to PATH),
-    then each ``PATHEXT`` suffix directly against that same directory on
+    right next to it. Try the exact name first -- accepted only when it is
+    genuinely launchable (POSIX: executable via ``os.access(X_OK)``;
+    Windows: its own suffix is a recognized ``PATHEXT`` extension, the same
+    thing that makes ``shutil.which`` accept a bare name without a suffix
+    search -- a plain extensionless file is *never* launchable on Windows,
+    so it must fall through exactly like a non-executable POSIX file does)
+    -- then each ``PATHEXT`` suffix directly against that same directory on
     Windows, before falling back to a bare ``shutil.which(project)`` PATH
     search.
     """
@@ -530,19 +533,16 @@ def _resolve_local_binstub(project: str) -> str:
     from pathlib import Path
 
     explicit = Path.home() / ".local" / "bin" / project
-    is_executable = (
-        explicit.is_file()
-        and (os.name == "nt" or os.access(explicit, os.X_OK))
-    )
-    if is_executable:
-        return str(explicit)
     if os.name == "nt":
-        for ext in os.environ.get("PATHEXT", "").split(os.pathsep):
-            if not ext:
-                continue
+        pathext = [e for e in os.environ.get("PATHEXT", "").split(os.pathsep) if e]
+        if explicit.suffix.upper() in {e.upper() for e in pathext} and explicit.is_file():
+            return str(explicit)
+        for ext in pathext:
             candidate = explicit.with_name(explicit.name + ext)
             if candidate.is_file():
                 return str(candidate)
+    elif explicit.is_file() and os.access(explicit, os.X_OK):
+        return str(explicit)
     return shutil.which(project) or project
 
 
