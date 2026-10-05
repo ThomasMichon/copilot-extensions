@@ -1,0 +1,9 @@
+{
+  "comment": "Fix handoff-cutover-trigger never actually arming live_cutover, so the manual 'Cut over' path (Mux Companion / direct CLI) silently no-oped every time in manual-only mode.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
