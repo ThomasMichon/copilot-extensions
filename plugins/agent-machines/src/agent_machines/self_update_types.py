@@ -8,13 +8,21 @@ between those two.
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from agent_procutil import no_window_kwargs
+from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+
+log = logging.getLogger("agent-machines.self-update")
+
+# Conventional shell "command timed out" exit code (matches `timeout(1)` on
+# POSIX); used so a timed-out step is distinguishable from a genuine
+# subprocess failure in status/log output without inventing a new sentinel.
+TIMEOUT_RETURNCODE = 124
 
 
 @dataclass
@@ -105,17 +113,69 @@ def default_command_runner(
         binary = shutil.which(argv[0])
         if binary:
             resolved = [binary, *argv[1:]]
-    proc = subprocess.run(  # noqa: S603 - argv list, no shell
+    process, job_handle = spawn_sync_in_kill_on_close_job(
         resolved,
         cwd=str(cwd) if cwd is not None else None,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
-        timeout=timeout,
-        check=False,
         **no_window_kwargs(),
     )
-    return CommandResult(
-        argv=list(argv), returncode=proc.returncode, stdout=proc.stdout, stderr=proc.stderr
-    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+        return CommandResult(
+            argv=list(argv), returncode=process.returncode, stdout=stdout, stderr=stderr
+        )
+    except subprocess.TimeoutExpired:
+        # A plain `process.kill()` only terminates the immediate child. A
+        # `.cmd`/`.bat` binstub (agent-worktrees, agent-ssh, ...) commonly
+        # re-execs through several layers (cmd.exe -> pwsh.exe -> python.exe
+        # -> git.exe/further shims); any grandchild left alive after the
+        # immediate child dies can keep inherited stdout/stderr pipes open
+        # indefinitely, which then blocks `communicate()` forever even though
+        # the top-level process is already gone. Closing the kill-on-close Job
+        # (when one was assigned) terminates every process still in it, not
+        # just the immediate child, before we drain whatever partial output
+        # remains buffered.
+        tree_killed = job_handle is not None
+        if job_handle is not None:
+            job_handle.close()
+        else:
+            try:
+                process.kill()
+            except (ProcessLookupError, OSError):
+                log.debug("process already gone after timeout", exc_info=True)
+        try:
+            stdout, stderr = process.communicate(timeout=30)
+        except subprocess.TimeoutExpired as drain_exc:
+            # A surviving descendant can still hold the pipes open even after
+            # the tree-kill (or plain kill()) above; preserve whatever output
+            # the exception itself already collected rather than discarding it.
+            log.warning(
+                "command still undrained after termination; returning partial "
+                "output: %r",
+                resolved,
+            )
+            stdout = drain_exc.output or ""
+            stderr = drain_exc.stderr or ""
+            if isinstance(stdout, bytes):
+                stdout = stdout.decode("utf-8", errors="replace")
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+        termination = "tree-killed via Job Object" if tree_killed else "killed (no Job assigned)"
+        detail = (
+            f"command timed out after {timeout}s and was terminated "
+            f"({termination}): {resolved!r}"
+        )
+        return CommandResult(
+            argv=list(argv),
+            returncode=TIMEOUT_RETURNCODE,
+            stdout=stdout,
+            stderr="\n".join(part for part in (stderr, detail) if part),
+        )
+    finally:
+        if job_handle is not None:
+            job_handle.close()
+

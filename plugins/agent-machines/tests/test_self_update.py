@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -819,6 +820,49 @@ def test_run_tier_watchdog_fails_when_mesh_refresh_errors(monkeypatch, tmp_path)
     assert result.steps[-1].status == "error"
 
 
+def test_run_tier_converts_unexpected_exception_into_error_result_and_releases_lock(
+    monkeypatch, tmp_path
+):
+    """Safety net: every *anticipated* failure path already returns its own
+    error `RunResult`. This covers everything else -- a bug in a step, an
+    unexpected `OSError`, ... -- which previously propagated straight out of
+    `run_tier`, crashing the whole `self-update run` CLI invocation with a
+    raw traceback instead of a clean, structured error result. `last_attempt`
+    was already durably recorded before this (written before any step runs);
+    what's new is that the caller gets a normal `RunResult` back instead of
+    an unhandled exception, and the lock is still released."""
+    monkeypatch.setattr(self_update.sys, "platform", "win32")
+    monkeypatch.setattr(self_update_tasks.sys, "platform", "win32")
+    created_mutexes: list[_FakeMutex] = []
+
+    def _make_mutex(_name):
+        mutex = _FakeMutex("acquired")
+        created_mutexes.append(mutex)
+        return mutex
+
+    monkeypatch.setattr(self_update_lock, "_WindowsMutex", _make_mutex)
+    monkeypatch.setattr(self_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(self_update, "ensure_watchdog", boom)
+
+    result = self_update.run_tier("watchdog", opted_in=True, home=tmp_path)
+
+    assert result.status == "error"
+    assert "boom" in result.detail
+    assert result.attempted_at is not None
+    # The mutex `run_tier` actually acquired must have been released/closed,
+    # and its JSON lock record removed -- not merely "some later acquisition
+    # succeeds", which a leftover record owned by the same PID would also
+    # allow even if the original mutex were never released.
+    assert len(created_mutexes) == 1
+    assert created_mutexes[0].released is True
+    assert created_mutexes[0].closed is True
+    assert not self_update_lock.lock_path("watchdog", tmp_path).exists()
+
+
 def test_fast_forward_repo_skips_dirty_and_diverged(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -1349,18 +1393,18 @@ def test_default_command_runner_resolves_pathext_shim(monkeypatch):
             else None
         )
 
-    def fake_run(argv, **kwargs):
+    class _Proc:
+        returncode = 0
+
+        def communicate(self, timeout=None):
+            return "", ""
+
+    def fake_spawn(argv, **kwargs):
         captured["argv"] = argv
-
-        class _Proc:
-            returncode = 0
-            stdout = ""
-            stderr = ""
-
-        return _Proc()
+        return _Proc(), None
 
     monkeypatch.setattr(self_update_types.shutil, "which", fake_which)
-    monkeypatch.setattr(self_update_types.subprocess, "run", fake_run)
+    monkeypatch.setattr(self_update_types, "spawn_sync_in_kill_on_close_job", fake_spawn)
     result = self_update.default_command_runner(["agent-worktrees", "-p", "dotfiles", "list"])
     assert captured["argv"][0] == "C:\\Users\\operator\\.local\\bin\\agent-worktrees.cmd"
     # The reported CommandResult.argv still shows the original logical argv
@@ -1374,20 +1418,138 @@ def test_default_command_runner_leaves_unresolvable_argv0_unchanged(monkeypatch)
 
     captured: dict[str, list[str]] = {}
 
-    def fake_run(argv, **kwargs):
+    class _Proc:
+        returncode = 1
+
+        def communicate(self, timeout=None):
+            return "", "not found"
+
+    def fake_spawn(argv, **kwargs):
         captured["argv"] = argv
-
-        class _Proc:
-            returncode = 1
-            stdout = ""
-            stderr = "not found"
-
-        return _Proc()
+        return _Proc(), None
 
     monkeypatch.setattr(self_update_types.shutil, "which", fake_which)
-    monkeypatch.setattr(self_update_types.subprocess, "run", fake_run)
+    monkeypatch.setattr(self_update_types, "spawn_sync_in_kill_on_close_job", fake_spawn)
     self_update.default_command_runner(["totally-unknown-binary"])
     assert captured["argv"] == ["totally-unknown-binary"]
+
+
+def test_default_command_runner_tree_kills_job_on_timeout(monkeypatch):
+    """A hung child (and any grandchildren it spawned) must be torn down as a
+    whole Job, not just the immediate process -- a plain `kill()` on the
+    immediate child alone can leave a surviving grandchild holding the stdout
+    pipe open, which hangs `communicate()` forever even past the timeout
+    (observed in practice as a sweep tick left alive-but-stuck for over a day
+    on a real machine)."""
+    closed = {"job": False}
+
+    class _FakeJob:
+        def close(self):
+            closed["job"] = True
+
+    class _Proc:
+        returncode = None
+        killed = False
+
+        def communicate(self, timeout=None):
+            if not closed["job"]:
+                raise subprocess.TimeoutExpired(cmd="slow", timeout=timeout)
+            return "partial", ""
+
+        def kill(self):
+            self.killed = True
+
+    proc = _Proc()
+
+    def fake_spawn(argv, **kwargs):
+        return proc, _FakeJob()
+
+    monkeypatch.setattr(self_update_types.shutil, "which", lambda name: None)
+    monkeypatch.setattr(self_update_types, "spawn_sync_in_kill_on_close_job", fake_spawn)
+    result = self_update.default_command_runner(["slow-command"], timeout=5)
+
+    assert closed["job"] is True
+    assert not proc.killed  # the Job close subsumes a plain kill() when one was assigned
+    assert result.returncode == self_update_types.TIMEOUT_RETURNCODE
+    assert "timed out after 5s" in result.stderr
+    assert result.stdout == "partial"
+
+
+def test_default_command_runner_falls_back_to_kill_without_job(monkeypatch):
+    """Off-Windows (or if Job assignment itself failed), there is no Job to
+    close -- fall back to a plain `kill()` so the immediate child is still
+    reaped rather than left running forever."""
+
+    class _Proc:
+        returncode = None
+        killed = False
+
+        def communicate(self, timeout=None):
+            if not self.killed:
+                raise subprocess.TimeoutExpired(cmd="slow", timeout=timeout)
+            return "", ""
+
+        def kill(self):
+            self.killed = True
+
+    proc = _Proc()
+
+    def fake_spawn(argv, **kwargs):
+        return proc, None
+
+    monkeypatch.setattr(self_update_types.shutil, "which", lambda name: None)
+    monkeypatch.setattr(self_update_types, "spawn_sync_in_kill_on_close_job", fake_spawn)
+    result = self_update.default_command_runner(["slow-command"], timeout=5)
+
+    assert proc.killed is True
+    assert result.returncode == self_update_types.TIMEOUT_RETURNCODE
+
+
+def test_default_command_runner_preserves_partial_output_when_drain_also_times_out(
+    monkeypatch,
+):
+    """A surviving descendant can keep holding the pipes open even after the
+    tree-kill (or plain `kill()`) above, so the bounded second `communicate()`
+    can itself raise `TimeoutExpired` -- this is the one case that actually
+    guarantees a hung command can never re-hang the caller. `TimeoutExpired`
+    still carries whatever output was collected before it fired; that must be
+    returned, not silently discarded as empty strings."""
+    closed = {"job": False}
+
+    class _FakeJob:
+        def close(self):
+            closed["job"] = True
+
+    class _Proc:
+        returncode = None
+
+        def communicate(self, timeout=None):
+            if not closed["job"]:
+                raise subprocess.TimeoutExpired(cmd="slow", timeout=timeout)
+            # The bounded drain call itself times out too (a grandchild still
+            # holds the pipe), but TimeoutExpired carries whatever the OS
+            # already delivered before it fired.
+            raise subprocess.TimeoutExpired(
+                cmd="slow", timeout=timeout, output="collected-stdout", stderr="collected-stderr"
+            )
+
+        def kill(self):
+            pass
+
+    def fake_spawn(argv, **kwargs):
+        return _Proc(), _FakeJob()
+
+    monkeypatch.setattr(self_update_types.shutil, "which", lambda name: None)
+    monkeypatch.setattr(self_update_types, "spawn_sync_in_kill_on_close_job", fake_spawn)
+    result = self_update.default_command_runner(["slow-command"], timeout=5)
+
+    assert closed["job"] is True
+    assert result.returncode == self_update_types.TIMEOUT_RETURNCODE
+    assert "collected-stdout" in result.stdout
+    assert "collected-stderr" in result.stderr
+    assert "timed out after 5s" in result.stderr
+
+
 
 
 
