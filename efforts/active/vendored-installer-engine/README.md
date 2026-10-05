@@ -929,3 +929,45 @@ appropriately larger/riskier for one sitting):
     suite plus a `pwsh` parse check of `plugins/agent-logger/scripts/install.ps1`.
   - No broader multi-machine production deployment beyond the scoped local
     timer proof above.
+
+### 2026-10-05 — installer-test hygiene sweep for the next adopter lane
+
+- Added `installer-test-hygiene.md` to record a bounded sweep across the 10
+  installer-engine adoption targets, starting from the concrete `agent-logger`
+  churn in PR #5228 and genericized publicly as issue #5245.
+- Fixed the concrete hygiene gaps found:
+  - `plugins/agent-logger/tests/conftest.py` +
+    `plugins/agent-logger/tests/test_scaffold.py`: real temp-repo `git`
+    fixtures now scrub ambient git-routing env vars and use a 20-second
+    timeout, so they cannot silently follow a caller's `GIT_DIR` /
+    `GIT_WORK_TREE` into some other checkout or hang forever.
+  - `plugins/agent-logger/tests/test_install_binstub.py`: the real
+    stamp/provision/first-use snapshot tests now build a temp-rooted env that
+    mirrors `tools/plugin_test_containment.py`'s HOME/XDG/temp containment
+    instead of overriding only a subset of roots; the PowerShell task-warning
+    harness there is also now time-bounded.
+  - `plugins/agent-logger/tests/test_install_signed_python_probe.py`,
+    `test_install_sre_retry.py`, `test_install_venv_corruption_retry.py`, and
+    `test_install_sync_repo_config.py`: added explicit 20-second timeouts to
+    the previously unbounded local shell/PowerShell harness subprocesses.
+  - `plugins/agent-bridge/tests/test_install_sre_retry.py` and
+    `test_install_venv_corruption_retry.py`: applied the same timeout fix to
+    the analogous PowerShell retry harnesses.
+  - `plugins/agent-codespaces/tests/test_self_provisioning_binstub.py`: real
+    bash binstub runs now execute under temp-rooted HOME/XDG/temp dirs and have
+    an explicit 20-second timeout.
+- Spot-check result for the other next-wave plugins (`agent-vault`,
+  `agent-ssh`, `agent-index`, `agent-dispatch`, `agent-containers`,
+  `agent-mcp`, `agent-machines`): their installer-adjacent harnesses already
+  carried the containment this sweep was looking for (explicit subprocess
+  bounds and/or temp-rooted homes), so no code changes were needed in this
+  round.
+- Validation completed here:
+  - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-logger --admission-wait 540`
+    -> PASS (`496 passed, 17 skipped`; wrapper runner summary `247 passed, 7 skipped`)
+  - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-bridge --admission-wait 540`
+    -> PASS on retry after one transient failure in
+    `tests/test_codespace_spawner.py::test_relay_ping_probe_command_round_trips_against_real_listener`
+    (`warning-only first run failure; subsequent full-suite pass`)
+  - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-codespaces --admission-wait 540`
+    -> PASS (`688 passed, 1 skipped`; wrapper runner summary additional sub-suites `497 passed, 11 skipped`, `355 passed, 1 skipped`, `65 passed`)
