@@ -711,13 +711,22 @@ function Invoke-DowngradeGuard {
 # -- Runtime install (venv + package + binstub + manifest + verify + pivot) --
 
 function Resolve-VendoredLib {
-    param([Parameter(Mandatory)][string]$LibName)
+    param(
+        [Parameter(Mandatory)][string]$LibName,
+        # Where candidate 1 looks for libs/<name> -- the durable build
+        # snapshot during a real install (see New-PluginBuildSnapshot),
+        # defaulting to the live $PluginDir for any other caller.
+        [string]$LibRoot = $PluginDir
+    )
     # 1. Vendored inside agent-dispatch (marketplace install layout)
-    $candidate = Join-Path $PluginDir "libs\$LibName"
+    $candidate = Join-Path $LibRoot "libs\$LibName"
     if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
         return (Resolve-Path $candidate).Path
     }
-    # 2. Relative path (git checkout layout)
+    # 2. Relative path (git checkout layout) -- always against the REAL
+    # $PluginDir (not $LibRoot): a snapshot is a flat copy with no `../../libs`
+    # sibling, so this candidate only ever makes sense against the true,
+    # on-disk checkout location.
     $candidate = Join-Path $PluginDir "..\..\libs\$LibName"
     if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
         return (Resolve-Path $candidate).Path
@@ -757,7 +766,10 @@ raise SystemExit(1)
 }
 
 # zero-downtime graceful-cutover primitives (module ``zdd``).
-function Resolve-Zdd { return (Resolve-VendoredLib -LibName 'zdd') }
+function Resolve-Zdd {
+    param([string]$LibRoot = $PluginDir)
+    return (Resolve-VendoredLib -LibName 'zdd' -LibRoot $LibRoot)
+}
 
 # Check if the zdd cutover lib is already importable in the venv.
 function Test-ZddInstalled {
@@ -820,6 +832,70 @@ function Remove-PluginBuildArtifacts {
             (Join-Path $ExtraDir 'build'), `
             (Join-Path $ExtraDir '*.egg-info'), `
             (Join-Path (Join-Path $ExtraDir 'src') '*.egg-info')
+    }
+}
+
+function New-PluginBuildSnapshot {
+    <# Copy $PluginDir into a durable, version-pinned snapshot under
+       $InstallDir/snapshots/<ver>/ and return that path -- so every build
+       subprocess this installer spawns (uv's PEP 517 build backend included)
+       sets ITS OWN cwd inside a folder `copilot plugin update` never touches.
+       An update only ever deletes/replaces the live, swappable marketplace
+       payload (~/.copilot/installed-plugins/.../agent-dispatch); a snapshot
+       under $InstallDir is immutable once written and is removed only once
+       nothing references it. Confirmed live -- a stuck `uv pip install` build (its PEP 517 backend
+       cwd'd into libs/agent-procutil, directly inside the live payload) and
+       the init.ps1 installer process that spawned it both sat there for
+       hours, and `copilot plugin update agent-dispatch@copilot-extensions`
+       failed outright with os error 32 (ERROR_SHARING_VIOLATION) the entire
+       time.
+
+       A no-op (returns $PluginDir unchanged) when $PluginDir is ALREADY
+       under $InstallDir -- e.g. this install.ps1 is itself running from a
+       previously-made snapshot, as the self-provisioning binstub's
+       first-use `provision` dispatch does -- avoiding a redundant
+       copy-of-a-copy on the already-safe path.
+
+       Best-effort: on ANY failure (disk full, permissions, no resolved
+       source version) this logs a warning and returns $PluginDir unchanged,
+       degrading to the pre-existing (lock-vulnerable, but previously the
+       ONLY) behavior rather than aborting the whole install. #>
+    param(
+        [Parameter(Mandatory)][string]$PluginDir,
+        [Parameter(Mandatory)][string]$InstallDir,
+        [string]$Version
+    )
+    $installRoot = Resolve-Path -LiteralPath $InstallDir -ErrorAction SilentlyContinue
+    if ($installRoot) {
+        $prefix = $installRoot.Path.TrimEnd('\') + '\'
+        if (($PluginDir.TrimEnd('\') + '\') -like "$prefix*") {
+            return $PluginDir
+        }
+    }
+    if (-not $Version) {
+        Write-Skip 'No source version resolved -- building from the live payload (snapshot skipped)'
+        return $PluginDir
+    }
+    try {
+        if (-not (Test-Path $InstallDir)) { New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null }
+        $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $Version
+        $snapTmp = "$snapDir.tmp-$PID"
+        if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+        New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+        # Copy everything needed to `uv pip install .` (src, libs, scripts,
+        # pyproject, plugin.json, hooks, README); skip VCS/build/test junk --
+        # same exclusion list Invoke-Stamp uses for its own snapshot.
+        $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+        Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+        }
+        if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
+        Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+        Write-Ok "Building from durable snapshot: $snapDir (never locks the marketplace payload)"
+        return $snapDir
+    } catch {
+        Write-Warn "Could not create build snapshot ($($_.Exception.Message)) -- building from the live payload"
+        return $PluginDir
     }
 }
 
@@ -966,6 +1042,12 @@ function Install-Runtime {
         exit 1
     }
 
+    # Build from a durable, version-pinned snapshot -- never from the live,
+    # swappable marketplace payload ($PluginDir) -- so a uv/setuptools build
+    # subprocess's own cwd can never block `copilot plugin update`. See
+    # New-PluginBuildSnapshot's docstring for the confirmed incident.
+    $BuildSrcDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion
+
     $hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
 
     # Find a Python interpreter (skip Windows Store aliases that aren't real)
@@ -1063,7 +1145,7 @@ function Install-Runtime {
     # Declared as `agent-zdd` in pyproject but NOT on PyPI, so `uv pip install .`
     # cannot resolve it -- install it from the vendored lib FIRST so the package
     # install below finds the requirement already satisfied.
-    $ZddDir = Resolve-Zdd
+    $ZddDir = Resolve-Zdd -LibRoot $BuildSrcDir
     if ($ZddDir) {
         # Scrub BEFORE this standalone pre-install too, not just the main
         # install below -- this build reads from the exact same libs/zdd/
@@ -1072,13 +1154,13 @@ function Install-Runtime {
         # vulnerable to stale build/lib residue shadowing a fresh source
         # change if it runs first without this -- pass $ZddDir explicitly
         # so an external resolved path is reached too, not just libs/*.
-        Remove-PluginBuildArtifacts -PluginDir $PluginDir -ExtraDir $ZddDir
+        Remove-PluginBuildArtifacts -PluginDir $BuildSrcDir -ExtraDir $ZddDir
         if (Get-Command uv -ErrorAction SilentlyContinue) {
             $zddOut = & uv pip install --python $VenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet 2>&1
         } else {
             $zddOut = & $VenvPython -m pip install "$ZddDir" 2>&1
         }
-        Remove-PluginBuildArtifacts -PluginDir $PluginDir -ExtraDir $ZddDir
+        Remove-PluginBuildArtifacts -PluginDir $BuildSrcDir -ExtraDir $ZddDir
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP
             Write-Fail "zdd install failed (exit $LASTEXITCODE)"
@@ -1110,18 +1192,18 @@ function Install-Runtime {
         @{ Dir = 'agent-procutil'; Pkg = 'agent-procutil'; Display = 'agent-procutil' },
         @{ Dir = 'plugin-activation'; Pkg = 'agent-plugin-activation'; Display = 'plugin-activation' }
     )) {
-        $libDir = Resolve-VendoredLib -LibName $lib.Dir
+        $libDir = Resolve-VendoredLib -LibName $lib.Dir -LibRoot $BuildSrcDir
         if (-not $libDir) {
             Write-Fail "Cannot locate $($lib.Display) library. Reinstall the agent-dispatch plugin from the marketplace (copilot plugin install agent-dispatch@copilot-extensions), then rerun this installer."
             exit 1
         }
-        Remove-PluginBuildArtifacts -PluginDir $PluginDir -ExtraDir $libDir
+        Remove-PluginBuildArtifacts -PluginDir $BuildSrcDir -ExtraDir $libDir
         if (Get-Command uv -ErrorAction SilentlyContinue) {
             $libOut = & uv pip install --python $VenvPython "$libDir" --reinstall-package $lib.Pkg --refresh-package $lib.Pkg --quiet 2>&1
         } else {
             $libOut = & $VenvPython -m pip install "$libDir" 2>&1
         }
-        Remove-PluginBuildArtifacts -PluginDir $PluginDir -ExtraDir $libDir
+        Remove-PluginBuildArtifacts -PluginDir $BuildSrcDir -ExtraDir $libDir
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP
             Write-Fail "$($lib.Display) install failed (exit $LASTEXITCODE)"
@@ -1160,26 +1242,26 @@ function Install-Runtime {
     )
     $installPkg = {
         param([string]$Spec)
-        # Installing FROM the pristine payload directory ($PluginDir, under
-        # the plugin install root) leaves setuptools' own build/lib +
-        # *.egg-info staging behind IN that tree -- pip's build isolation
-        # covers the *environment* the build runs in, not where the legacy
-        # build_meta backend writes intermediate files. Left in place, a
-        # stale build/lib/ (or a src-layout package's src/*.egg-info, one
-        # level deeper than a root-level glob reaches) can silently shadow
-        # fresh src/ on a later install if setuptools' incremental-build
-        # mtime check decides nothing "changed". Scrub on every attempt
-        # (success or not) so the payload directory stays the pristine
-        # clone it's supposed to be -- mirrors the POSIX installer's
+        # Installing FROM $BuildSrcDir (the durable per-version snapshot, NOT
+        # the live payload -- see New-PluginBuildSnapshot) leaves setuptools'
+        # own build/lib + *.egg-info staging behind IN that tree -- pip's
+        # build isolation covers the *environment* the build runs in, not
+        # where the legacy build_meta backend writes intermediate files. Left
+        # in place, a stale build/lib/ (or a src-layout package's
+        # src/*.egg-info, one level deeper than a root-level glob reaches)
+        # can silently shadow fresh src/ on a later install if setuptools'
+        # incremental-build mtime check decides nothing "changed". Scrub on
+        # every attempt (success or not) so the snapshot directory stays the
+        # pristine copy it's supposed to be -- mirrors the POSIX installer's
         # cleanup in install.sh. Also reaches every vendored
         # `[tool.uv.sources]` workspace path dep under libs/<name>/, which
         # is its own independent build root and equally vulnerable -- see
         # Remove-PluginBuildArtifacts's own docstring for the confirmed
         # live incident.
-        $scrubArtifacts = { Remove-PluginBuildArtifacts -PluginDir $PluginDir }
+        $scrubArtifacts = { Remove-PluginBuildArtifacts -PluginDir $BuildSrcDir }
         # Scrub BEFORE installing too, not just after: residue already
-        # sitting in $PluginDir the moment this call starts (an earlier
-        # failed attempt, a marketplace resync, a concurrent process) is
+        # sitting in $BuildSrcDir the moment this call starts (an earlier
+        # failed attempt, a re-stamped snapshot, a concurrent process) is
         # what shadows THIS build -- an after-only scrub only protects the
         # NEXT install, not this one. Confirmed live (2026-09-23,
         # copilot-extensions#3444): a truncated recipes_cli.py shipped this
@@ -1215,12 +1297,12 @@ function Install-Runtime {
         }
     }
 
-    $mcpResult = & $installPkg "$($PluginDir)[mcp]"
+    $mcpResult = & $installPkg "$($BuildSrcDir)[mcp]"
     if ($mcpResult.Code -eq 0) {
         Write-Ok 'Package installed: agent-dispatch [mcp]'
     } else {
         Write-Warn 'Could not install the [mcp] extra (its native deps may not build on this platform) -- falling back to a base install without the MCP server surface'
-        $baseResult = & $installPkg "$PluginDir"
+        $baseResult = & $installPkg "$BuildSrcDir"
         if ($baseResult.Code -ne 0) {
             Write-Fail 'Failed to install agent-dispatch package into venv'
             Write-Host $baseResult.Output
@@ -2919,25 +3001,15 @@ function Invoke-Stamp {
     # build (and the coordinator/supervisor service install) to the binstub's
     # first use. No venv, no uv; fits a sessionStart grace window and NEVER holds
     # the marketplace payload open (it copies from the already self-staged
-    # $PluginDir, freeing the singleton immediately).
+    # $PluginDir, freeing the singleton immediately). Shares its copy logic with
+    # New-PluginBuildSnapshot (Install-Runtime's own build-isolation snapshot).
     Write-Host ''; Write-Host '=== agent-dispatch stamp (defer runtime to first use) ===' -ForegroundColor Cyan; Write-Host ''
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
-    $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
-    $snapTmp = "$snapDir.tmp-$PID"
-    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-    # Copy everything needed to `uv pip install .` from the slot (src, libs,
-    # scripts, pyproject, plugin.json, hooks, README); skip VCS/build/test junk.
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
-    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
-    }
-    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
-    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+    $snapDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Write-Ok "Snapshot: $snapDir"
