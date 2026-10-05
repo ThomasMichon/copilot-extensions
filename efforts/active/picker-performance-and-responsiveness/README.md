@@ -531,3 +531,20 @@ narrow opt-in" vs. this session's "two call sites, same shape, same fix")
 shows the right fix shape varies per call site and must be verified, not
 assumed, each time.
 
+### 2026-10-05 (later) — Modal backdrops reverted to translucent (out-of-phase, operator-directed)
+
+Not a numbered Plan phase -- the operator asked, in this effort's context,
+to restore "main screen contents behind dialogs" now that Phase 0's
+render-thread block and Phase 4's marketplace-reparse cost are fixed.
+That visual (translucent `ModalScreen` backdrops) had been traded away for
+a *different*, already-shipped, already-measured reason in the separate
+`picker-new-session-prompt-and-composer` effort (`#5074`: ~15-20% per-
+keystroke render cost from Textual's full-recomposite-on-translucent-
+screen behavior) -- a Textual compositing cost this effort's own Phase 0/4
+fixes do not touch at all (different root causes entirely: a blocking
+subprocess call, and a redundant file-parse paid once at boot). Reverted
+all 18 current modal CSS declarations back to `background: $background
+55%;` (see that effort's own 2026-10-05 Journal entry for the full
+file list, reasoning, and the explicit trade-off this re-introduces).
+Recorded here only as a pointer -- this effort does not own that finding
+or its reversal, and does not re-litigate it.
