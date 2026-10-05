@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import zipfile
@@ -3510,7 +3511,7 @@ def test_restrict_file_to_owner_invokes_icacls_on_windows(
     assert grant_cmd[1] == str(target)
     assert "/inheritance:r" in grant_cmd
     assert f"*{_FAKE_TOKEN_SID}:(OI)(CI)F" in grant_cmd
-    assert "SYSTEM:(OI)(CI)F" in grant_cmd
+    assert f"*{gft._SYSTEM_ACCOUNT_SID}:(OI)(CI)F" in grant_cmd
     assert remove_cmd[:3] == [_ICACLS_PATH, str(target), "/remove:g"]
     # Regression (round 25): a directory (e.g. the staging venv dir)
     # inherits `OWNER RIGHTS` by default on this repo's own machines --
@@ -3772,13 +3773,72 @@ def test_trusted_system32_tool_resolves_absolute_path():
 def test_trusted_system32_tool_fails_closed_when_missing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    # A `SystemRoot` that does not actually contain the requested tool
-    # must fail closed rather than fall back to a bare, PATH-resolved
-    # name. Exercises the REAL resolver; this fails identically on any
-    # platform (a nonexistent path is a nonexistent path).
-    monkeypatch.setenv("SystemRoot", str(tmp_path))
+    # A resolved system directory that does not actually contain the
+    # requested tool must fail closed rather than fall back to a bare,
+    # PATH-resolved name.
+    monkeypatch.setattr(gft, "_system_directory", lambda: tmp_path)
     with pytest.raises(bpa.ArtifactBuildError):
         _REAL_TRUSTED_SYSTEM32_TOOL("whoami")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="requires a real Windows System32")
+def test_trusted_system32_tool_ignores_forged_system_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    # Regression (round 27): `SystemRoot` is itself caller-controlled
+    # process environment -- an attacker-forged value pointing at a
+    # directory with substituted executables must NOT be consulted at
+    # all; the real resolver uses the `GetSystemDirectoryW` OS API
+    # instead, which this same process's own environment cannot redirect.
+    attacker_dir = tmp_path / "attacker-system32"
+    (attacker_dir).mkdir()
+    (attacker_dir / "icacls.exe").write_bytes(b"not a real tool")
+    monkeypatch.setenv("SystemRoot", str(attacker_dir.parent))
+    icacls = _REAL_TRUSTED_SYSTEM32_TOOL("icacls")
+    assert "attacker" not in icacls.lower()
+    assert Path(icacls).is_file()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="requires real Windows OS APIs")
+def test_well_known_sid_display_name_resolves_system_account():
+    # Exercises the real `LookupAccountSidW`/`ConvertStringSidToSidW`
+    # resolution for the well-known SYSTEM SID.
+    name = gft._well_known_sid_display_name(gft._SYSTEM_ACCOUNT_SID)
+    assert name.lower().endswith("system")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="requires real Windows OS APIs")
+def test_process_is_alive_true_for_current_process():
+    assert gft._process_is_alive(os.getpid()) is True
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="requires real Windows OS APIs")
+def test_process_is_alive_false_for_implausible_pid():
+    # PID 0 is reserved (the System Idle Process); an ordinary caller can
+    # never legitimately hold a lock under that PID.
+    assert gft._process_is_alive(999_999_999) is False
+
+
+def test_provenance_key_reclaims_stale_lock_from_dead_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression (round 27): a lockfile left behind by a CRASHED lock
+    # holder (one that created the lock but never removed it) must be
+    # reclaimed as soon as that holder is observed to be dead, not only
+    # after waiting out the full timeout -- and not fail forever on every
+    # subsequent call after that.
+    monkeypatch.setattr(gft, "_provenance_key_dir", lambda: tmp_path / "key-dir")
+    key_dir = tmp_path / "key-dir"
+    key_dir.mkdir(parents=True)
+    stale_lock = key_dir / "provenance-key.lock"
+    # A PID essentially guaranteed not to correspond to a real, currently
+    # running process.
+    stale_lock.write_text("999999999", encoding="utf-8")
+    key1 = gft._provenance_key()
+    key2 = gft._provenance_key()
+    assert key1 == key2
+    assert len(key1) == 32
+    assert not stale_lock.exists()
 
 
 def test_resolve_toolchain_lock_hardens_staging_dir_before_index_config_exists(

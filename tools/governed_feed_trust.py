@@ -32,6 +32,8 @@ import time
 import urllib.parse
 from pathlib import Path
 
+import ctypes
+
 try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
     # 3.10 support floor -- mirrors uv_editable_ref's own identical fallback.
     import tomllib
@@ -51,6 +53,29 @@ class ArtifactBuildError(Exception):
     re-imports/re-exports it exactly like every other name moved here."""
 
 
+def _system_directory() -> Path:
+    """Resolves the real Windows system directory (normally
+    `C:\\Windows\\System32`) via the `GetSystemDirectoryW` OS API --
+    never `%SystemRoot%` or any other environment variable, which is
+    itself ordinary, caller-controlled process environment: an attacker
+    can set it to point at an arbitrary directory containing substituted
+    executables, and an existence check alone would then accept them.
+    `GetSystemDirectoryW` asks the OS directly for its own installation
+    path instead, which a same-process environment-variable write cannot
+    redirect.
+
+    Raises `ArtifactBuildError` if the OS API call itself fails."""
+    buf = ctypes.create_unicode_buffer(260)
+    length = ctypes.windll.kernel32.GetSystemDirectoryW(buf, len(buf))
+    if not length:
+        raise ArtifactBuildError(
+            "could not resolve the Windows system directory via the "
+            "GetSystemDirectoryW OS API -- refusing to fall back to an "
+            "environment variable"
+        )
+    return Path(buf.value)
+
+
 def _trusted_system32_tool(name: str) -> str:
     """Absolute, OS-rooted path to a well-known Windows system tool
     (``whoami``/``icacls``) -- NEVER a bare name resolved through the
@@ -61,18 +86,16 @@ def _trusted_system32_tool(name: str) -> str:
     attacker-chosen account/SID (which the ACL code would then grant and
     accept as "expected"), or silently no-op an ACL operation entirely.
 
-    `%SystemRoot%\\System32` (falling back to the fixed, well-known
-    `C:\\Windows\\System32` only if `SystemRoot` is somehow unset -- never
-    to a bare name) is the OS's own fixed installation location for both
-    tools on every real Windows system -- unlike `PATH`, it is not an
-    ordered, caller-extendable search list a planted executable could
-    sit earlier in.
+    Resolved via `_system_directory` (the OS's own `GetSystemDirectoryW`
+    API) rather than an environment variable -- unlike `PATH`, this is
+    not an ordered, caller-extendable search list a planted executable
+    could sit earlier in, NOR a value this same process's own
+    environment could simply redirect.
 
     Raises `ArtifactBuildError` if the resolved path does not actually
     exist -- refusing to silently fall back to an unqualified, PATH/CWD-
     resolved name even then."""
-    system_root = os.environ.get("SystemRoot") or r"C:\Windows"
-    tool_path = Path(system_root) / "System32" / f"{name}.exe"
+    tool_path = _system_directory() / f"{name}.exe"
     if not tool_path.is_file():
         raise ArtifactBuildError(
             f"{tool_path}: trusted system tool not found at its expected "
@@ -132,6 +155,64 @@ def _current_token_identity() -> tuple[str, str]:
     return account_name, sid
 
 
+#: The well-known SID for the `NT AUTHORITY\SYSTEM` account -- a FIXED,
+#: locale-independent identifier `icacls` itself accepts directly
+#: (`*S-1-5-18`) in both a grant and its own query output's resolution,
+#: unlike the literal display name "SYSTEM"/"NT AUTHORITY\SYSTEM", which
+#: is localized on a non-English Windows installation.
+_SYSTEM_ACCOUNT_SID = "S-1-5-18"
+
+
+def _well_known_sid_display_name(sid_string: str) -> str:
+    """Resolves ``sid_string`` (e.g. ``"S-1-5-18"``) to the CURRENT OS's
+    own localized display name for it (e.g. ``"NT AUTHORITY\\SYSTEM"`` on
+    an English installation, but a different string entirely elsewhere)
+    via the `ConvertStringSidToSidW`/`LookupAccountSidW` Win32 APIs --
+    never a hardcoded English literal, which a non-English Windows host
+    would never actually produce in its own `icacls` query output,
+    wrongly rejecting a correctly hardened ACL there.
+
+    Raises `ArtifactBuildError` if either OS API call fails."""
+    advapi32 = ctypes.windll.advapi32
+    kernel32 = ctypes.windll.kernel32
+    psid = ctypes.c_void_p()
+    if not advapi32.ConvertStringSidToSidW(sid_string, ctypes.byref(psid)):
+        raise ArtifactBuildError(
+            f"could not convert {sid_string!r} to a SID via "
+            "ConvertStringSidToSidW"
+        )
+    try:
+        name_len = ctypes.c_ulong(0)
+        domain_len = ctypes.c_ulong(0)
+        sid_use = ctypes.c_ulong(0)
+        # First call with null buffers deliberately fails -- it exists
+        # only to report the buffer sizes this SID's name/domain need.
+        advapi32.LookupAccountSidW(
+            None, psid, None, ctypes.byref(name_len),
+            None, ctypes.byref(domain_len), ctypes.byref(sid_use),
+        )
+        if not name_len.value:
+            raise ArtifactBuildError(
+                f"could not size a name buffer for {sid_string!r} via "
+                "LookupAccountSidW"
+            )
+        name_buf = ctypes.create_unicode_buffer(name_len.value)
+        domain_buf = ctypes.create_unicode_buffer(domain_len.value or 1)
+        if not advapi32.LookupAccountSidW(
+            None, psid, name_buf, ctypes.byref(name_len),
+            domain_buf, ctypes.byref(domain_len), ctypes.byref(sid_use),
+        ):
+            raise ArtifactBuildError(
+                f"could not resolve {sid_string!r} to a display name via "
+                "LookupAccountSidW"
+            )
+        if domain_buf.value:
+            return f"{domain_buf.value}\\{name_buf.value}"
+        return name_buf.value
+    finally:
+        kernel32.LocalFree(psid)
+
+
 def _restrict_file_to_owner(path: Path) -> None:
     """Best-effort hardens ``path``'s ACCESS CONTROL to the owning user
     only, beyond the POSIX mode bits already applied at creation. `0o600`
@@ -149,11 +230,13 @@ def _restrict_file_to_owner(path: Path) -> None:
 
     On Windows: strips inherited permissions and grants Full Control to
     only the current user (resolved via `_current_token_identity`, never
-    the `USERDOMAIN`/`USERNAME` environment variables) plus `SYSTEM`
-    (required for normal OS housekeeping, e.g. antivirus scanning) via
-    `icacls` -- a standard Windows tool, no new dependency. On POSIX: a
-    no-op: the `0o600` mode bits already applied at creation are
-    authoritative there.
+    the `USERDOMAIN`/`USERNAME` environment variables) plus the
+    well-known SYSTEM SID (`_SYSTEM_ACCOUNT_SID` -- required for normal OS
+    housekeeping, e.g. antivirus scanning; granted by SID rather than the
+    literal name "SYSTEM", which is itself localized on a non-English
+    Windows installation) via `icacls` -- a standard Windows tool, no new
+    dependency. On POSIX: a no-op: the `0o600` mode bits already applied
+    at creation are authoritative there.
 
     Raises `ArtifactBuildError` on any failure (the current token's
     identity cannot be resolved, or `icacls` itself fails) -- a
@@ -169,16 +252,16 @@ def _restrict_file_to_owner(path: Path) -> None:
             icacls, str(path),
             "/inheritance:r",
             # `(OI)(CI)` (object-inherit, container-inherit) are applied
-            # explicitly -- round 25 found that combining `/inheritance:r`
-            # and `/grant:r` in a SINGLE `icacls` invocation (as here,
-            # rather than as two separate calls) does not reliably add an
-            # inheritable ACE for the explicitly granted principal on a
-            # DIRECTORY target: a file later created inside it (e.g. `uv
-            # venv` populating a hardened staging directory) could then
-            # be denied access despite the directory's own grant. Both
+            # explicitly: combining `/inheritance:r` and `/grant:r` in a
+            # SINGLE `icacls` invocation (as here, rather than as two
+            # separate calls) does not reliably add an inheritable ACE
+            # for the explicitly granted principal on a DIRECTORY
+            # target: a file later created inside it (e.g. `uv venv`
+            # populating a hardened staging directory) could then be
+            # denied access despite the directory's own grant. Both
             # flags are harmless no-ops on a FILE target (nothing to
             # inherit to).
-            "/grant:r", f"*{sid}:(OI)(CI)F", "SYSTEM:(OI)(CI)F",
+            "/grant:r", f"*{sid}:(OI)(CI)F", f"*{_SYSTEM_ACCOUNT_SID}:(OI)(CI)F",
         ],
         capture_output=True, text=True,
     )
@@ -219,15 +302,23 @@ def _verify_restricted_acl(path: Path, icacls: str, account_name: str) -> None:
     trusted as protected. Parses the exact PRINCIPAL name from each ACE
     line (everything before `:(`) and compares it EXACTLY (normalized
     lowercase) against the resolved token's own account name and the
-    literal "NT AUTHORITY\\SYSTEM" -- `icacls` resolves the granted
-    `*<sid>` back to this same display name when it can, so comparing
-    names here (rather than re-parsing SIDs out of the query output)
-    still works. A prior SUBSTRING check here wrongly accepted e.g.
-    `DOMAIN\\svc-backup` when the owner was `DOMAIN\\svc`, or any
-    principal merely containing the word "system", since the preceding
-    `/remove:g` step intentionally leaves any OTHER, non-broad explicit
-    ACE in place (one could legitimately exist from a prior, more
-    targeted grant) rather than wiping the ACL down to nothing first.
+    CURRENT OS's own display name for the well-known SYSTEM SID
+    (`_well_known_sid_display_name(_SYSTEM_ACCOUNT_SID)`), never a
+    hardcoded English literal -- `icacls` itself reports a LOCALIZED
+    display name on a non-English Windows installation, which a fixed
+    `"nt authority\\system"` comparison would never match, wrongly
+    rejecting a correctly hardened ACL there. Compares names here (not
+    SIDs) because `icacls` resolves the SIDs it was granted back to their
+    own display names in its query output, so a name-level comparison
+    against the SAME OS's own name-resolution answer is exact without
+    needing to re-parse SIDs out of that output.
+
+    The `/remove:g` step in `_restrict_file_to_owner` intentionally
+    leaves any OTHER, non-broad explicit ACE in place (one could
+    legitimately exist from an existing, more specific grant) rather than
+    wiping the ACL down to nothing first -- so this comparison must still
+    reject any principal that is merely similarly named or named-but-
+    unexpected, never accept it via a substring match.
 
     Requires BOTH expected principals to actually be OBSERVED, not merely
     "nothing unexpected is" -- empty or unrecognized `icacls` output
@@ -258,7 +349,8 @@ def _verify_restricted_acl(path: Path, icacls: str, account_name: str) -> None:
         principal = line.split(":(", 1)[0].strip()
         if principal:
             principals.append(principal)
-    expected = {account_name.lower(), "nt authority\\system"}
+    system_name = _well_known_sid_display_name(_SYSTEM_ACCOUNT_SID)
+    expected = {account_name.lower(), system_name.lower()}
     observed = {p.lower() for p in principals}
     unexpected = [p for p in principals if p.lower() not in expected]
     missing = expected - observed
@@ -275,14 +367,14 @@ def _verify_restricted_acl(path: Path, icacls: str, account_name: str) -> None:
 #: Well-known, locale-independent Windows SIDs for broad built-in
 #: principals that `icacls /grant:r` does not implicitly strip when
 #: granting a DIFFERENT principal -- see `_restrict_file_to_owner`.
-#: `OWNER RIGHTS` (round 25) is a NEWLY-observed member of this set --
-#: directories (hardened starting round 25, previously only files were)
-#: inherit it by default on this repo's own machines; it is a dynamic
-#: placeholder that always resolves to whoever currently owns the object
-#: rather than a fixed other principal, but is still stripped here for
-#: the same reason as the others: this function's own contract is an
-#: EXPLICIT, minimal allowlist of exactly two static grantees, not
-#: "nothing unexpectedly broad".
+#: `OWNER RIGHTS` is included because a DIRECTORY target (e.g. a hardened
+#: staging venv directory) inherits it by default on this repo's own
+#: machines; it is a dynamic placeholder that always resolves to
+#: whoever currently owns the object rather than a fixed other
+#: principal, but is still stripped here for the same reason as the
+#: others: this function's own contract is an EXPLICIT, minimal
+#: allowlist of exactly two static grantees, not "nothing unexpectedly
+#: broad".
 _BROAD_WINDOWS_PRINCIPAL_SIDS = (
     "*S-1-1-0",       # Everyone
     "*S-1-5-11",      # NT AUTHORITY\Authenticated Users
@@ -376,6 +468,35 @@ def _provenance_key_dir() -> Path:
 _PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS = 10.0
 
 
+def _process_is_alive(pid: int) -> bool:
+    """Best-effort liveness check for a PID recorded by another process
+    in `_provenance_key`'s own lockfile -- used only to decide whether a
+    stale lock left behind by a now-dead process is safe to reclaim, not
+    for anything security-sensitive (a reused PID could in principle
+    produce a false positive here; the worst outcome is simply waiting
+    out the normal timeout as if the check had never run, never anything
+    worse than today's unconditional wait)."""
+    if sys.platform == "win32":
+        # `os.kill(pid, 0)` has no POSIX-style "signal 0" liveness-probe
+        # meaning on Windows -- query the OS's own process table instead.
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+        )
+        if not handle:
+            return False
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Exists, just owned by someone else -- still alive.
+        return True
+    return True
+
+
 def _provenance_key() -> bytes:
     """A stable, per-machine random key used to compute
     `_opaque_index_identity` as a KEYED digest (HMAC) rather than a bare
@@ -393,19 +514,16 @@ def _provenance_key() -> bytes:
     invocations, which `resolve_toolchain_lock`'s reuse/provenance-match
     contract depends on. A sibling LOCKFILE (``<path>.lock``, created via
     `O_CREAT | O_EXCL`) serializes first-run creation across concurrent
-    callers -- a reread-after-publish alone (this function's own earlier
-    revision) still let two racing callers EACH publish a genuinely
-    different key, with whichever `os.replace` landed last silently
-    becoming the real one while the other had already returned (and
-    might already be persisting provenance keyed on) a value no longer
-    on disk. Holding the lock, a caller re-checks for an existing key
-    (another caller may have published while this one waited) before
-    generating its own -- so AT MOST ONE caller per machine ever
-    actually creates the key; every other caller, racing or not, reads
-    back that exact same one. Bounded by a generous timeout so a
-    crashed lock-holder cannot wedge every future caller forever (still
-    better than failing outright against this effort's own fail-closed
-    contract preferring loud failure over broken builds)."""
+    callers, so AT MOST ONE caller per machine ever actually creates the
+    key; every other caller, racing or not, reads back that exact same
+    one. Bounded by a generous timeout so a crashed lock-holder cannot
+    wedge every future caller forever -- but a bounded wait alone would
+    still fail forever on every call AFTER that timeout, since the stale
+    lock file itself never goes away on its own: the lock file records
+    its creator's PID, and a waiter whose own wait would otherwise time
+    out instead checks whether that PID is still a live process
+    (`_process_is_alive`) and, if not, removes the stale lock and retries
+    immediately rather than failing closed on a lock nobody still holds."""
     path = _provenance_key_dir() / "provenance-key"
     try:
         existing = path.read_bytes()
@@ -423,6 +541,21 @@ def _provenance_key() -> bytes:
                 str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600
             )
         except FileExistsError:
+            # Before waiting out (or failing on) the timeout, check
+            # whether the lock's own recorded creator is even still
+            # running -- a lock left behind by a crashed process is safe
+            # to reclaim immediately, rather than every future caller
+            # waiting out the same timeout forever afterward.
+            try:
+                holder_pid = int(lock_path.read_text(encoding="utf-8").strip())
+            except (OSError, ValueError):
+                holder_pid = None
+            if holder_pid is not None and not _process_is_alive(holder_pid):
+                try:
+                    lock_path.unlink()
+                except OSError:
+                    pass
+                continue
             if time.monotonic() > deadline:
                 raise ArtifactBuildError(
                     f"{lock_path}: timed out waiting for another process "
@@ -431,6 +564,7 @@ def _provenance_key() -> bytes:
                 )
             time.sleep(0.05)
     try:
+        os.write(lock_fd, str(os.getpid()).encode("ascii"))
         os.close(lock_fd)
         # Re-check NOW, under the lock: another caller may have already
         # published while this one was waiting to acquire it.
@@ -452,14 +586,13 @@ def _provenance_key() -> bytes:
         # key is just as credential-bearing as the index-config temp
         # file it protects) hardens the temp file's ACL BEFORE any key
         # bytes are written to it (same ordering as the index-config
-        # file: create EMPTY, harden, then write) -- hardening only
-        # AFTER the write, as a prior revision of this function did,
-        # leaves a real window where the file already holds the actual
-        # secret key but still carries only the broader, non-owner-only
-        # permissions the surrounding code elsewhere treats as
-        # insufficient for a credential-bearing file on Windows. Holding
-        # the lock means this is now the ONLY writer -- no reread-the-
-        # final-value step is needed afterward.
+        # file: create EMPTY, harden, then write) -- writing first and
+        # hardening only afterward would leave a real window where the
+        # file already holds the actual secret key but still carries
+        # only the broader, non-owner-only permissions the surrounding
+        # code elsewhere treats as insufficient for a credential-bearing
+        # file on Windows. Holding the lock means this is now the ONLY
+        # writer -- no reread-the-final-value step is needed afterward.
         tmp_path = path.with_name(
             f".{path.name}.tmp-{os.getpid()}-{secrets.token_hex(4)}"
         )
@@ -642,14 +775,14 @@ def _system_uv_toml_candidate(env: dict) -> Path | None:
     `uv/uv.toml`, using the first one found; only when NONE of those
     exist does it fall back to `/etc/uv/uv.toml`.
 
-    Returning every theoretical candidate instead (as a prior version of
-    this function did, relying on the caller's own generic per-candidate
-    loop to skip anything that merely fails to parse an index out of it)
-    would let that loop silently continue past the chosen system file to
-    a DIFFERENT, lower-priority one merely because the chosen file has no
-    index configured -- `uv` itself never does this: the chosen system
-    file lacking a setting means the system tier contributes nothing at
-    that tier, full stop, not "keep trying more system files."""
+    Returning every theoretical candidate instead, relying on the
+    caller's own generic per-candidate loop to skip anything that merely
+    fails to parse an index out of it, would let that loop silently
+    continue past the chosen system file to a DIFFERENT, lower-priority
+    one merely because the chosen file has no index configured -- `uv`
+    itself never does this: the chosen system file lacking a setting
+    means the system tier contributes nothing at that tier, full stop,
+    not "keep trying more system files."""
     xdg_config_dirs = env.get("XDG_CONFIG_DIRS") or "/etc/xdg"
     for config_dir in xdg_config_dirs.split(":"):
         if not config_dir:
@@ -779,10 +912,10 @@ def _governed_feed_configured(*, env: dict | None = None) -> bool:
     (a) not a public PyPI-family host, AND (b) affirmatively trusted by
     this machine's own explicit policy (`_TRUSTED_INDEX_HOSTS_ENV_VAR`).
 
-    This is an ALLOWLIST, deliberately -- a prior revision inferred
-    governance from "not one of a few known public hostnames", which would
-    silently accept an arbitrary untrusted index (e.g. a public mirror
-    under a different hostname) as "governed" just because it isn't named
+    This is an ALLOWLIST, deliberately -- NOT inferring governance from
+    "not one of a few known public hostnames", which would silently
+    accept an arbitrary untrusted index (e.g. a public mirror under a
+    different hostname) as "governed" just because it isn't named
     `pypi.org`. Nothing is trusted unless this machine's own environment
     affirmatively lists it: with no trust policy configured at all, this
     always fails closed, even if SOME non-public-looking index happens to
