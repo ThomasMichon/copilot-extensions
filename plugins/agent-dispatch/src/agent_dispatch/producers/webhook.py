@@ -26,15 +26,26 @@ three generic, forge-neutral event shapes onto tasks:
   missed/undelivered webhook, using the exact same ``<task_label>:<repo
   full name>#<issue number>`` dedup-key shape this route defaults to, so
   either path colliding on the same issue returns the same task rather than
-  creating a duplicate.
+  creating a duplicate **while that task is still non-terminal**. The
+  coordinator's dedup index releases a key once its task reaches a terminal
+  status (see :class:`DispatchClient`'s own ``create`` contract), so this is
+  a *collision* guard against a still-in-flight duplicate, not a durable
+  historical record -- a redelivery (or a poller run) arriving only after
+  the first task already completed mints a fresh task rather than being
+  recognized as a repeat. In practice this is bounded by the same
+  originating issue: once the first task resolves it, a well-behaved
+  poller/redelivery no longer finds an open issue to act on. Accepted,
+  matching the identical tradeoff a deployer's own periodic poller already
+  makes for the exact same dedup-key shape.
 
 Every task carries a deterministic ``dedup_key`` so a redelivered webhook (or
-a retry) doesn't double-enqueue. The app talks to the coordinator through an
-ordinary :class:`DispatchClient` -- it is a *producer*, not part of the
-coordinator core (which stays free of any PR/alert/issue logic). This keeps
-the public substrate generic; deployment-specific routing (which forge,
-which alertmanager, which lane, which label backlog) lives in the deployer's
-config, not here.
+a retry) doesn't double-enqueue **while the original task is still in
+flight** (see the caveat above for the terminal-task case). The app talks to
+the coordinator through an ordinary :class:`DispatchClient` -- it is a
+*producer*, not part of the coordinator core (which stays free of any
+PR/alert/issue logic). This keeps the public substrate generic;
+deployment-specific routing (which forge, which alertmanager, which lane,
+which label backlog) lives in the deployer's config, not here.
 
 Config (JSON), all keys optional::
 
@@ -153,11 +164,15 @@ def extract_issue(payload: dict[str, Any]) -> dict[str, Any] | None:
     remote = repo.get("clone_url") or repo.get("html_url") or repo.get("ssh_url")
     raw_labels = issue.get("labels")
     if not isinstance(raw_labels, list):
-        raw_labels = []
+        # Same reasoning as the malformed-repository case above: a rule
+        # without match_labels would otherwise happily process an event
+        # whose labels we could not actually read, silently bypassing the
+        # documented label-filter behavior.
+        return None
     labels = [
         label.get("name")
         for label in raw_labels
-        if isinstance(label, dict) and label.get("name")
+        if isinstance(label, dict) and isinstance(label.get("name"), str) and label.get("name")
     ]
     return {
         "number": number,

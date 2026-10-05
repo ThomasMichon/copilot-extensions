@@ -274,8 +274,25 @@ def test_issue_malformed_labels_is_not_a_500():
     }
     r = tc.post("/webhook/issue", json=body)
     assert r.status_code == 200
-    assert r.json()["created"] == []
+    assert r.json()["skipped"] == "not an issue event"
     assert sink == []
+
+
+def test_issue_non_string_label_name_is_not_a_500():
+    """A truthy non-string label name (e.g. a nested object) must not reach
+    set(issue['labels']) and raise -- it's filtered out instead."""
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {
+        **_CI_FAILURE_ISSUE,
+        "issue": {
+            **_CI_FAILURE_ISSUE["issue"],
+            "labels": [{"name": ["not", "a", "string"]}, {"name": "ci-failure-signature"}],
+        },
+    }
+    r = tc.post("/webhook/issue", json=body)
+    assert r.status_code == 200
+    assert len(r.json()["created"]) == 1
+    assert len(sink) == 1
 
 
 def test_issue_unnamed_rules_in_same_lane_each_get_a_task():
