@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from agent_dispatch.github_provider_adapter import PRObservation
 from agent_dispatch.pr_observation_store import PRObservationStore
 from agent_dispatch.pr_polling_policy import RepoTier
-from agent_dispatch.pr_review_poll_loop import run_poll_cycle
+from agent_dispatch.pr_review_poll_loop import build_provider_observer, run_poll_cycle
 from agent_dispatch.provider_state_machine import ApprovalStatus, Mergeability, Revision
 
 
@@ -104,3 +105,41 @@ def test_a_pr_with_no_prior_last_observed_at_is_treated_as_due(tmp_path: Path, m
 
     assert calls == [("example/a", 1)]
     assert len(refreshed) == 1
+
+
+def test_build_provider_observer_routes_provider_tagged_store_keys(monkeypatch):
+    calls = []
+
+    class _GitHub:
+        def __init__(self, expected_login, runner=None):
+            self.expected_login = expected_login
+
+        def observe(self, repo, number):
+            calls.append(("github", repo, number, self.expected_login))
+            return _observation("github-diff")
+
+    class _AzureDevOps:
+        def __init__(self, expected_login, runner=None):
+            self.expected_login = expected_login
+
+        def observe(self, repo, number):
+            calls.append(("azure-devops", repo, number, self.expected_login))
+            return _observation("ado-diff")
+
+    monkeypatch.setattr("agent_dispatch.pr_review_poll_loop.GitHubPRAdapter", _GitHub)
+    monkeypatch.setattr("agent_dispatch.pr_review_poll_loop.AzureDevOpsPRAdapter", _AzureDevOps)
+
+    observe = build_provider_observer(
+        {"github": "gh-bot", "azure-devops": "ado-bot"},
+        runner=lambda *_args, **_kwargs: SimpleNamespace(),
+    )
+
+    github = observe("example/project", 7)
+    azure = observe("azure-devops:example-org/example-project/example-repo", 9)
+
+    assert github.revision.diff_hash == "github-diff"
+    assert azure.revision.diff_hash == "ado-diff"
+    assert calls == [
+        ("github", "example/project", 7, "gh-bot"),
+        ("azure-devops", "example-org/example-project/example-repo", 9, "ado-bot"),
+    ]

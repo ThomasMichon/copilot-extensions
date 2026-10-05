@@ -13,10 +13,14 @@ def cmd_mux_daemon(rest: list[str]) -> int:
     if not args:
         print(
             "usage: worktree-manager mux-daemon "
-            "<run|ensure|register|remove|show> [...]"
+            "<run|ensure|register|remove|show|status> [...]"
         )
         return 2
     action = args.pop(0)
+    if action == "status":
+        from .daemons_cli import cmd_daemons
+
+        return cmd_daemons(["status", *args])
     if action == "run":
         root = None
         passive = False

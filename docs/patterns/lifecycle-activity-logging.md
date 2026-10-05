@@ -132,13 +132,21 @@ when you introduce one.
 
 ### 7. Retention/cleanup is owned by the tier, not the caller
 
-A caller never prunes. **Tier A** self-prunes inside `log_event`: a rewrite that
-keeps only lines within the retention window, attempted only once the file grows
-past a size threshold (so the common append stays cheap), best-effort, unparseable
-lines preserved. **Tier B** is pruned at launcher start (keep newest N by mtime)
-and is additionally reboot-volatile by living under the OS temp dir. Changing a
-retention policy is a change to the owning tier's module/launcher, never a
-per-call concern.
+A caller never prunes. **Tier A** self-prunes via a debounced background worker,
+not inline inside `log_event` (an inline rewrite of a multi-megabyte log can take
+several seconds, and `log_event` is called from everywhere, including mid-
+interaction from a live picker session -- running it synchronously there would
+freeze the caller between keypresses): once the file grows past a size
+threshold, `log_event` claims an atomic, time-bucketed debounce marker (at most
+one dispatch per window, cross-process-safe) and hands the actual rewrite --
+keeping only lines within the retention window, best-effort, unparseable lines
+preserved -- to a detached `activity-prune-worker` subprocess, so the caller
+never waits on it. The launcher boot-trace writers (PowerShell, bash) mirror the
+same claim-and-dispatch protocol for the lines they append before Tier A's own
+Python path runs. **Tier B** is pruned at launcher start (keep newest N by
+mtime) and is additionally reboot-volatile by living under the OS temp dir.
+Changing a retention policy is a change to the owning tier's module/launcher,
+never a per-call concern.
 
 ## Rationale
 

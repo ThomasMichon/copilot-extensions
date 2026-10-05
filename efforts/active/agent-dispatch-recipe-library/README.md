@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`)
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-09-30
-- **Status:** Active (Phase 9 done; only the separately tracked Phase 2 reviewer adapters and Phase 3 single-emitter-primitive follow-on remain)
+- **Status:** Active (Phase 9 done; only the separately tracked Phase 2 Gitea reviewer follow-on and Phase 3 single-emitter-primitive follow-on remain)
 - **Vision:** `visions/plugins/agent-dispatch/README.md` (§*The recipe*)
   advances *loop-recipes* from "four fixed archetypes, hand-declared per
   consumer" to "named, extendable templates a consumer instantiates with a
@@ -13,7 +13,8 @@
   realized `extends:` model, the four named recipe instantiations, the
   realized GitHub + Azure DevOps backlog-provider surface (with Gitea still a
   deferred stub), and the still-partial reviewer-side provider neutrality
-  (GitHub realized; Azure DevOps + Gitea reviewer adapters still open).
+  (GitHub + Azure DevOps read-side observation realized; Gitea still open,
+  and webhook / direct-action parity intentionally narrower).
 - **Umbrella issue:** #4691 (claimed and expanded by this effort — was an
   unplanned placeholder for the `extends:` model alone; this effort's scope
   also covers the provider-adapter gap and four new named recipes, all
@@ -241,14 +242,25 @@ not new engines either. The `extends:` model (Phase 3) and provider adapters
       to a future agent/session with Gitea access and expertise, since no
       integration approach was chosen and no live instance is available
       here to validate against.
-- [ ] Add the equivalent forge adapters for the **reviewer** recipe's
-      provider-neutral review capability (author/reviewer relationships,
-      verdict posting, merge/close state) for Azure DevOps and Gitea.
-      **Genuinely new, not yet started** — confirmed the reviewer-side PR
-      feed/verdict posting is GitHub-only today
-      (`producers/github_pr_review_webhook.py`, no ADO/Gitea equivalent);
-      the ADO backlog adapter above does not cover this surface.
-- [ ] Tests: adapter contract tests mirroring the existing GitHub adapter's
+- [x] Add the equivalent forge adapter for the **reviewer** recipe's
+      provider-neutral **read-side observation** capability for Azure
+      DevOps. Landed here: `azure_devops_provider_adapter.py` mirrors the
+      existing GitHub adapter's pure-classifier + thin-CLI-wrapper shape,
+      reviewer payload refs now accept
+      `azure-devops-pr:organization/project/repository#<id>`, and
+      reviewer-loop stale-exit checks can resolve ADO-backed PR
+      observations from the persisted provider cache. **Scope narrowed by
+      code search and documented below**: engine-side verdict posting and
+      merge/close actions are not implemented for GitHub either; those
+      remain worker-direct tool actions, so Azure DevOps parity here is the
+      read-side adapter/routing surface, not a new engine-side vote-casting
+      API.
+- [ ] Add the equivalent forge adapter for the **reviewer** recipe's
+      provider-neutral review capability for Gitea. **Still explicitly
+      deferred**: a structural `GiteaPRAdapter` stub exists (mirroring the
+      backlog-side stub precedent and keeping the provider slot named), but
+      no real Gitea API integration is implemented in this effort/session.
+- [x] Tests: adapter contract tests mirroring the existing GitHub adapter's
       own test shape, for both backlog and reviewer surfaces.
 
 ### Phase 3 — Registrar `extends:` unification
@@ -1414,9 +1426,71 @@ suite green (3743 passed, 23 skipped, the one known flake above).
   stays green, and the full plugin test/doc gate run for the PR is the
   remaining merge-time confirmation.
 - With Phase 9 checked off, every planned phase in this effort is now closed
-  except the two explicitly deferred, separately tracked follow-ons:
-  Phase 2's Azure DevOps/Gitea reviewer adapters and Phase 3's single-emitter-
+  except the explicitly deferred, separately tracked follow-ons: Phase 2's
+  remaining **Gitea** reviewer adapter work and Phase 3's single-emitter-
   primitive taxonomy refactor. The effort's own Plan is therefore complete
   modulo those named follow-ons. Whether to mark the effort archived under this
   repo's planning convention remains an explicit decision for the orchestrating
   session/operator, not something to do unilaterally here.
+
+### 2026-10-04 (same day) — Phase 2 remainder: Azure DevOps reviewer observation adapter landed; Gitea stays deferred
+- Implemented the Azure DevOps half of Phase 2's remaining reviewer-provider
+  gap as a **read-only observation surface**, intentionally mirroring the
+  existing GitHub adapter's shape rather than inventing a different contract:
+  new `azure_devops_provider_adapter.py` adds a pure
+  `observe_pr_state(...) -> PRObservation` classifier plus a thin
+  `AzureDevOpsPRAdapter` that fetches the raw PR / reviewer / thread / source
+  commit state through authenticated `az rest` calls, reusing the exact Azure
+  DevOps identity-verification pattern already proven in the backlog adapter
+  (`repository_issue_loops.AzureDevOpsProvider`: `connectionData` against
+  resource `499b84ac-1321-427f-aa17-267ca6975798`, then project/repository
+  verification).
+- Reviewer-loop payload refs are now provider-aware rather than
+  GitHub-hardcoded: added `review_target_refs.py`, widened reviewer payload
+  parsing from only `github-pr:owner/repo#<n>` to also accept
+  `azure-devops-pr:organization/project/repository#<n>`, and taught the
+  stale-exit provider-cache path (`reviewer_loops._provider_snapshot`) to
+  resolve those ADO refs through a provider-disambiguated observation-store
+  key. This keeps `pr_review_poll_loop`'s two-argument observer contract
+  unchanged, exactly as the Phase 10 poll-loop design intended.
+- **Important scope-finding, confirmed by code search before changing
+  anything:** there is still **no engine-side verdict-posting API for GitHub
+  either** in `agent_dispatch` (no `gh pr review`, no `az repos pr`, no
+  provider-specific vote-casting call anywhere in engine code). The standing
+  reviewer loop's own charter already relies on the worker agent's direct
+  tool access for posting feedback/approvals and for merge/close actions. So
+  Phase 2's "verdict posting / merge-close state" wording does **not**
+  translate to adding a new engine-owned vote API here; "done" for the ADO
+  half is the read-side provider adapter plus provider-aware routing/stale
+  lifecycle support.
+- Webhook decision: **do not add an Azure DevOps service-hook receiver in
+  this slice.** `provider_state_machine.PROVIDER_CAPABILITIES["azure_devops"]`
+  already records the empirically observed fidelity split (push for commits /
+  review submission / check status, but **poll-only** for thread resolution).
+  The existing GitHub webhook module is explicitly a trigger-only receiver;
+  adding a second provider-specific trigger service is materially more scope
+  than the read-side adapter gap this effort still had open, while the
+  declared polling fallback already covers the one ADO event class known not
+  to push-notify reliably. The ADO adapter therefore lands the **read-side
+  observation primitives** now (adapter, provider-aware payload refs, and
+  poll-observer routing helper); a future ADO webhook or live poll-service
+  producer can build on those separately.
+- Gitea remains explicitly deferred. Mirroring the backlog-side precedent,
+  landed a reviewer-surface `GiteaPRAdapter` **stub only** in its own module;
+  every method raises `NotImplementedError` pointing back at this effort's
+  Phase 2 tracker section. No real Gitea API integration was attempted here.
+- Tests:
+  - Added `test_azure_devops_provider_adapter.py`, deliberately mirroring
+    `test_github_provider_adapter.py`'s split: pure classifier coverage for
+    approval/mergeability/holds/revision plus thin-wrapper `az` runner tests,
+    along with payload-ref routing / Gitea-stub assertions.
+  - Added a reviewer-loop integration regression in `test_verification.py`
+    proving an `azure-devops-pr:...` payload ref resolves through the persisted
+    provider observation cache for stale-exit evaluation.
+  - Focused validation:
+    `python tools/run-plugin-tests.py agent-dispatch -k "azure_devops_provider_adapter or reviewer_loop_can_derive_last_commit_at_from_azure_devops_provider_observation_store" --timeout 600 --plugin-timeout 2400`
+    → **48 passed**.
+- Checklist result after this slice: Azure DevOps reviewer observation is now
+  realized and checked off above; the Phase 2 item remains visibly open only
+  for the **Gitea** reviewer adapter follow-on. The effort stays **Active**;
+  do not archive it yet.

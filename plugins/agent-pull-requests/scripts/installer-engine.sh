@@ -369,6 +369,9 @@ if [ "\$_rc" -eq 0 ] && [ -n "\$AGENT_RT_PY" ]; then
     exec "\$AGENT_RT_PY" -m "$module_name" "\$@"
 fi
 printf '[%s] provisioning completed without a resolvable runtime.\n' "\$_name" >&2
+if [ "\${_rc:-1}" -eq 0 ]; then
+    exit 1
+fi
 exit "\${_rc:-1}"
 EOF
     chmod +x "$stub"

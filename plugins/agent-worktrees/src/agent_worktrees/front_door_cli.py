@@ -221,11 +221,10 @@ def _git_toplevel(path: Path | None) -> Path | None:
             return git_ops.resolve_to_anchor(Path(r.stdout.strip()).resolve())
     except Exception:
         pass
-    # ``--show-toplevel`` always fails ("must be run in a work tree") for a
-    # *bare* anchor (agent-worktrees' own pattern once worktrees are attached
-    # to it) -- mirror git_ops.py's credential-helper pin, which uses
-    # ``--git-dir`` instead for the same reason, so a bare anchor still
-    # resolves as its own project rather than "not inside an adopted repo".
+    # ``--show-toplevel`` always fails for a *bare* anchor (agent-worktrees'
+    # own pattern once worktrees are attached) -- mirror git_ops.py's
+    # credential-helper pin and use ``--git-dir`` so it still resolves as its
+    # own project rather than "not inside an adopted repo".
     try:
         r = _rev_parse("--is-bare-repository", "--git-dir")
         lines = r.stdout.strip().splitlines()
@@ -291,6 +290,7 @@ _NO_PROJECT_COMMANDS = {
     "machine-context",
     "reconcile-binstubs",
     "register-project-entry",
+    "activity-prune-worker",
 }
 
 

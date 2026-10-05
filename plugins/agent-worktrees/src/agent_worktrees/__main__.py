@@ -5566,45 +5566,7 @@ def build_parser() -> argparse.ArgumentParser:
     session_tracking_cli.add_parsers(sub)
     worktree_status_audit.add_parsers(sub)
 
-    # activity -- view the high-level worktree lifecycle log
-    sp = sub.add_parser(
-        "activity",
-        help="View the worktree/session lifecycle activity log",
-    )
-    sp.add_argument(
-        "--since",
-        default=None,
-        help="Only show events newer than this (e.g. 2d, 12h, "
-        "30m, or an ISO date). Default: all retained.",
-    )
-    sp.add_argument("--worktree-id", default=None, help="Filter to a single worktree id")
-    sp.add_argument(
-        "--launch-id",
-        dest="launch_id",
-        default=None,
-        help="Filter to a single launch flow (correlation id)",
-    )
-    sp.add_argument("--event", default=None, help="Filter to a single event type")
-    sp.add_argument("--lines", type=int, default=None, help="Show only the most recent N events")
-    sp.add_argument(
-        "--json", action="store_true", help="Emit one JSON object per line instead of a table"
-    )
-
-    # activity-log -- append a single event (launcher/hook hook-invoked)
-    sp = sub.add_parser(
-        "activity-log",
-        help="Append one lifecycle event to the activity log (internal)",
-    )
-    sp.add_argument("event", help="Event name")
-    sp.add_argument("--worktree-id", default=None, help="Worktree ID (default: resolved from cwd)")
-    sp.add_argument("--session-id", default=None)
-    sp.add_argument(
-        "--launch-id", dest="launch_id", default=None, help="Launch-flow correlation id"
-    )
-    sp.add_argument("--source", default="launcher")
-    sp.add_argument(
-        "--field", action="append", default=[], help="Extra context as key=value (repeatable)"
-    )
+    activity.add_parsers(sub)
 
     # register-launch -- record this launch's own root pid (internal)
     launch_registry.add_parsers(sub)
@@ -5823,7 +5785,8 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
     "services", "repos", "accounts", "forks", "copilot-identity", "related", "state-root",
     "coordination-readiness", "config-root", "knowledge", "git",
     "pr-watch", "pr-merge", "pr-research", "pr",
-    "activity", "activity-log", "register-launch", "stage-update", "reconcile-marketplaces",
+    "activity", "activity-log", "activity-prune-worker", "register-launch", "stage-update",
+    "reconcile-marketplaces",
     "execution-leg", "copilot", "resolve", "handoff-trace", "identifiers",
 })
 
@@ -6500,6 +6463,7 @@ def _load_full_command_surface() -> None:
         "anchor-check": cmd_anchor_check,
         "activity": activity.cmd_activity,
         "activity-log": activity.cmd_activity_log,
+        "activity-prune-worker": activity.cmd_activity_prune_worker,
         "register-launch": launch_registry.cmd_register_launch,
     }
     _FULL_SURFACE_LOADED = True

@@ -777,6 +777,58 @@ def test_forks_dispatch_runs_from_neutral_cwd_without_resolving_project(
     assert "No forks confirmed yet." in capsys.readouterr().out
 
 
+@pytest.mark.guard
+def test_activity_prune_worker_is_no_project_command():
+    """'activity-prune-worker' is dispatched detached by
+    activity._dispatch_background_prune / the launcher boot-trace writers in
+    response to ANY command at all -- including one run from a cwd with no
+    adopted project. Unlike 'activity-log' (normally invoked from inside an
+    already-resolvable project context), every single invocation risks
+    firing this worker from a neutral cwd, so it must be able to dispatch
+    from one without main() routing it to cmd_help_unrouted first."""
+    assert "activity-prune-worker" in m._NO_PROJECT_COMMANDS
+    assert m._is_no_project_invocation(
+        ["activity-prune-worker", "/tmp/activity.jsonl", "7"]
+    )
+
+
+def test_activity_prune_worker_dispatch_runs_from_neutral_cwd(
+    monkeypatch, tmp_path, capsys,
+):
+    """Functional (not just membership) proof: main() must actually reach
+    activity.cmd_activity_prune_worker from a cwd with no adopted project,
+    never touching project resolution on the way there."""
+    log = tmp_path / "activity.jsonl"
+    old_ts = "2020-01-01T00:00:00+00:00"
+    new_ts = "2099-01-01T00:00:00+00:00"
+    log.write_text(
+        f'{{"ts": "{old_ts}", "event": "x"}}\n'
+        f'{{"ts": "{new_ts}", "event": "x"}}\n'
+    )
+    m.cfg.set_active_project(None)
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        m,
+        "_git_toplevel",
+        lambda _path: pytest.fail(
+            "activity-prune-worker dispatch tried to resolve project context"
+        ),
+    )
+    monkeypatch.setattr(
+        m,
+        "_resolve_active_project",
+        lambda _project: pytest.fail(
+            "activity-prune-worker dispatch tried to resolve an active project"
+        ),
+    )
+
+    assert m.main(["activity-prune-worker", str(log), "7"]) == 0
+
+    kept = log.read_text(encoding="utf-8").strip().splitlines()
+    assert len(kept) == 1 and '"ts": "2099' in kept[0]
+
+
 def test_removed_terminal_profile_commands_not_registered():
     parser = m.build_parser()
 

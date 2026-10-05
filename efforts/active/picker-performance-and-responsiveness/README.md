@@ -239,17 +239,36 @@ of restating it.)_
 _(Turns the already-documented `agent-worktrees-authoritative-daemon`
 finding into a fix; extends #918 rather than reopening it.)_
 
-- [ ] Give `record_cache.cached_load()` a non-deep-copying (or shallow-copy)
-      fast path for read-mostly, fleet-wide scan callers (the O(N×M) status
-      sweep in `worktree_status_daemon.py`) that never mutate the record
-      they read — reserve the existing deep-copy guarantee for callers that
-      actually stage a write. Audit every current caller first; this must
-      not reintroduce the shared-mutable-state hazard
-      `cached_load`'s own docstring explains the deep copy exists to avoid.
+- [x] Gave `record_cache.cached_load()` an explicit opt-in
+      (`copy_result=False`) non-deep-copying fast path, threaded through
+      `tracking.load_record(copy_result=...)` and
+      `tracking.list_records(copy_records=...)`, defaulting to the existing
+      (safe) deep-copy behavior everywhere. Audited the one caller worth
+      switching — `find_worktree_id_by_cwd` (the actual documented hot path:
+      `sessions.verify_worktree_active` → `reclaim.resolve_bound_copilots` →
+      here, called once per live session per sweep) only reads
+      `rec.worktree_path`/`rec.worktree_id` and never mutates or retains a
+      record — and switched only that one call site. Deliberately did NOT
+      change the default for any of `list_records`'s ~45 other direct call
+      sites (plus `load_record`'s own ~160 call sites): auditing all of them
+      for mutate-safety in one pass was not something this session could do
+      with confidence, so the fix stays a narrow, explicit opt-in rather
+      than a global policy change.
+- [x] Regression tests added: `test_record_cache.py`'s
+      `test_copy_result_false_returns_the_cache_s_own_object` (identity
+      check: `copy_result=False` hits/misses both return the cache's own
+      object; the default path is unaffected) and `test_tracking.py`'s
+      `test_list_records_copy_records_false_skips_the_deep_copy` +
+      `test_find_worktree_id_by_cwd_unaffected_by_the_copy_skip` (functional
+      correctness unchanged). All pass, plus the full existing
+      `test_record_cache.py`/`test_tracking.py` suites (242 tests).
 - [ ] Re-measure sustained daemon CPU on a fleet with a record count
       comparable to the diagnosis machine's (100+ tracked records) before/
       after, the same live-timed methodology `pivot-streaming-transport`'s
-      own Validation Plan already uses for its Phase 5.
+      own Validation Plan already uses for its Phase 5. Not done this
+      session — the code fix is live-reasoned (the removed `copy.deepcopy`
+      was directly observed in a live `py-spy` sample on the diagnosis
+      machine) but not yet re-measured end-to-end after the fix.
 
 ### Phase 4 — Boot-time budget (<~2s)
 
@@ -291,9 +310,11 @@ was invisible until an operator noticed it. Prevents a repeat.)_
       path, plus the same fallback-safety tests `pivot-streaming-transport`'s
       Phase 1/2 already wrote for agent-dispatch/agent-bridge (stream flag
       absent/stale degrades to one-shot, never a hard failure).
-- [ ] **Phase 3:** sustained daemon CPU % before/after on a comparable
-      record count, plus a test proving the fast-path cache entry is never
-      handed to a caller that mutates it without requesting the deep copy.
+- [x] **Phase 3 (partial):** a test proving the fast-path cache entry is
+      never handed to a caller requesting the default (copy) behavior —
+      `test_copy_result_false_returns_the_cache_s_own_object` — done.
+      Sustained daemon CPU % before/after on a comparable record count —
+      not yet measured; still open.
 - [ ] **Phase 4:** cold-boot wall-clock time before/after, on the same
       machine/conditions, with the profile that justified the fix attached.
 - [ ] **Phase 5:** the harness itself passing, plus one deliberately
@@ -337,3 +358,39 @@ Opened this effort (rather than filing Phase 0 under
 give the operator's numeric bar — <~100ms keypress, <~2s boot, <~1s menu-open
 — a standing home with its own measurement and enforcement phases (1, 4, 5),
 rather than letting the fix read as "one bug closed, done."
+
+Phase 0 PR (#5258) merged to `dev`, promoted to `main` by this repo's
+automated `validate-and-promote.yml` pipeline (no manual promotion step
+needed — confirmed the fix's content is present in `origin/main`), and
+deployed locally via `worktree-manager update` (installed version now
+`0.5.3-dev1`, confirmed to contain the fix).
+
+### 2026-10-04 — Phase 3 landed (partial — code fix only, CPU re-measurement still open)
+
+Gave `record_cache.cached_load()` an explicit `copy_result=False` opt-out of
+the per-hit `copy.deepcopy`, threaded through `tracking.load_record` and
+`tracking.list_records`, and switched exactly one call site —
+`find_worktree_id_by_cwd`, the actual documented hot path
+(`sessions.verify_worktree_active` → `reclaim.resolve_bound_copilots` →
+here) — after auditing it read-only-safe (only reads `worktree_path`/
+`worktree_id`, never mutates). Deliberately kept the default (copy) behavior
+for every other caller (`list_records` has ~45 direct call sites,
+`load_record` ~160) rather than attempting a global audit in one session —
+see Phase 3 above for the full reasoning.
+
+Added regression tests proving (1) `copy_result=False` really does return
+the cache's identical object, not a fresh copy, while the default path is
+unaffected, and (2) `find_worktree_id_by_cwd`'s actual resolution behavior is
+unchanged. Full `test_record_cache.py` + `test_tracking.py` suites (242
+tests) pass. Did not run the full `agent-worktrees` plugin suite locally in
+this session (it did not complete within a reasonable wait — likely just a
+large, subprocess-heavy suite, not evidence of a hang, but not confirmed
+either way); relying on this repo's own CI gate on the PR to cover it.
+
+**Left open, explicitly:** re-measuring sustained daemon CPU before/after on
+a comparable record count. The fix removes a cost directly observed live
+(the exact `copy.deepcopy` frame `py-spy` sampled `MainThread` inside during
+the original diagnosis), but that is reasoned evidence, not a fresh
+measurement — a future session should still do the live-timed before/after
+`pivot-streaming-transport`'s own Phase 5 methodology calls for, rather than
+treating this phase as fully closed from the code change alone.

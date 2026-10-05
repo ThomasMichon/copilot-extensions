@@ -1,4 +1,4 @@
-"""Persistent per-(repo, PR) observation store for the GitHub provider adapter.
+"""Persistent per-(repo, PR) observation store for reviewer-side provider adapters.
 
 Phase 10 item 3's remaining slice: :mod:`agent_dispatch.pr_revision_evaluator`
 needs a *previous* :class:`~agent_dispatch.github_provider_adapter.
@@ -196,7 +196,8 @@ def record_observation(
     persist the result, and return it.
 
     This is the glue slice tying the observer
-    (:mod:`agent_dispatch.github_provider_adapter`), the evaluator
+    (:mod:`agent_dispatch.github_provider_adapter`,
+    :mod:`agent_dispatch.azure_devops_provider_adapter`), the evaluator
     (:mod:`agent_dispatch.pr_revision_evaluator`), and this store together --
     the caller still owns *when* to call it (a polling loop or webhook
     handler, per :mod:`agent_dispatch.pr_polling_policy`'s cadence).

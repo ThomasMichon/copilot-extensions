@@ -88,40 +88,82 @@ function Write-BootTraceRecord(
 # Mirrors agent_worktrees.activity._maybe_prune/_prune's own retention window
 # (RETENTION_DAYS=7, _PRUNE_SIZE_BYTES=512*1024) so a launch that emits
 # boot_trace lines but never triggers a later Python-side log_event() call
-# does not grow activity.jsonl unbounded. Best-effort and lossy under a
-# concurrent writer during the rewrite, same posture as the Python pruner's
-# own documented tradeoff. Never lets a pruning failure affect the caller.
+# does not grow activity.jsonl unbounded.
+#
+# The rewrite itself is NEVER run inline here. This function can run on
+# every single launch (including a key/action dispatched from a live
+# picker session), and rewriting a multi-megabyte log line-by-line takes
+# several seconds -- long enough to freeze that picker between keypresses.
+# Instead, once the file is large, this claims the current debounce
+# window's marker (see Invoke-ClaimPruneMarker) and hands the actual
+# rewrite to a detached, windowless `agent_worktrees activity-prune-worker`
+# child -- mirroring the Python-side activity._dispatch_background_prune --
+# so the caller never waits on it. Best-effort throughout: a pruning
+# failure (or a runtime not yet resolved to dispatch the worker with)
+# never affects the caller.
 function Invoke-BootTraceMaybePrune([string]$LogPath) {
     try {
         $info = Get-Item -LiteralPath $LogPath -ErrorAction Stop
         if ($info.Length -lt 524288) { return }
-        $cutoff = [DateTimeOffset]::UtcNow.AddDays(-7).ToString('yyyy-MM-ddTHH:mm:sszzz')
-        $tmp = "$LogPath.prune.$PID"
-        $kept = [System.Collections.Generic.List[string]]::new()
-        foreach ($line in [IO.File]::ReadLines($LogPath)) {
-            # Tolerate both the compact form this launcher writes
-            # ("ts":"...") and the space-after-colon form Python's
-            # json.dumps (default separators) writes for every other
-            # activity.jsonl event ("ts": "...") -- matching only the
-            # compact form previously treated every real Python-emitted
-            # record as unparseable, retaining them forever (Copilot
-            # review, PR #3310).
-            $match = [regex]::Match($line, '"ts"\s*:\s*"')
-            if (-not $match.Success) { [void]$kept.Add($line); continue }
-            $rest = $line.Substring($match.Index + $match.Length)
-            $endIdx = $rest.IndexOf('"')
-            if ($endIdx -lt 0) { [void]$kept.Add($line); continue }
-            $ts = $rest.Substring(0, $endIdx)
-            if ([string]::CompareOrdinal($ts, $cutoff) -ge 0) { [void]$kept.Add($line) }
-        }
-        [IO.File]::WriteAllLines($tmp, $kept, [Text.UTF8Encoding]::new($false))
-        Move-Item -LiteralPath $tmp -Destination $LogPath -Force
-    } catch {
-        if ($tmp -and (Test-Path -LiteralPath $tmp)) {
-            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-        }
-    }
+    } catch { return }
+    if (-not $script:python) { return }  # no runtime yet to dispatch the worker with
+    if (-not (Invoke-ClaimPruneMarker -LogPath $LogPath)) { return }
+    try {
+        Start-Process -FilePath 'conhost.exe' -ArgumentList (@(
+            '--headless', "`"$script:python`"", '-I', '-m', 'agent_worktrees',
+            'activity-prune-worker', "`"$LogPath`"", '7'
+        )) -WindowStyle Hidden -ErrorAction Stop | Out-Null
+    } catch {}
 }
+
+# Atomically claims *this debounce window's* dispatch slot for $LogPath, so
+# a burst of concurrent launches -- all seeing the log large at the same
+# time -- dispatches at most one background prune for this window, not one
+# per launch. Mirrors the Python-side activity._claim_prune_marker: each
+# window gets its own marker file (named by its epoch-hour bucket number),
+# claimed with an exclusive create (`CreateNew`, which throws if the file
+# already exists). Unlike a single shared marker refreshed in place, there
+# is no separate "renew a stale marker" step and therefore no window where
+# multiple processes can all believe they renewed the same claim.
+function Invoke-ClaimPruneMarker([string]$LogPath) {
+    $bucket = [long][Math]::Floor(
+        ((Get-Date).ToUniversalTime() - [datetime]'1970-01-01').TotalSeconds / 3600
+    )
+    $marker = "$LogPath.prune-marker.$bucket"
+    try {
+        $fs = [IO.File]::Open($marker, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
+        $fs.Dispose()
+    } catch {
+        return $false
+    }
+    # Cleans up markers at least 2 whole windows behind $bucket -- never the
+    # immediately-preceding one ($bucket - 1). Mirrors the Python-side
+    # activity._PRUNE_MARKER_CLEANUP_GRACE_WINDOWS: a caller that read the
+    # clock right at the previous window's tail and was then descheduled
+    # before its (otherwise instantaneous) exclusive create can still be
+    # holding that bucket's claim-in-flight -- deleting it here would let
+    # that delayed caller's create succeed a second time once it resumes,
+    # dispatching a duplicate worker. Requiring a full extra window's worth
+    # of delay between reading the clock and one file-create call makes
+    # that race a scheduling pathology, not a realistic occurrence -- same
+    # best-effort posture as the rest of this module.
+    try {
+        $dir = Split-Path -Parent $LogPath
+        $leaf = Split-Path -Leaf $LogPath
+        $cutoff = $bucket - 1
+        Get-ChildItem -LiteralPath $dir -Filter "$leaf.prune-marker.*" -ErrorAction SilentlyContinue |
+            Where-Object {
+                $siblingBucket = $null
+                [long]::TryParse(
+                    $_.Name.Substring("$leaf.prune-marker.".Length), [ref]$siblingBucket
+                ) -and $siblingBucket -lt $cutoff
+            } |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+    } catch {}
+    return $true
+}
+
+
 
 function Write-BootTrace([string]$Phase, [string]$DispatchPath = '') {
     $timestampMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
