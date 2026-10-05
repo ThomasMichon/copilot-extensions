@@ -1294,3 +1294,16 @@ suite green (3743 passed, 23 skipped, the one known flake above).
      same-occurrence suppression) with `limit=1`, plus a regression test that
      the plan uses those per-effort lookups rather than a whole-corpus scan.
 - Focused Phase 8 tests after the fixes: **123 passed**.
+
+### 2026-10-04 (same day) — Review feedback, round 2
+- Automated review caught one more real portability bug in the new
+  effort-driver loop: the first version serialized `readme_relative` with the
+  host platform's native path separator, then fed that platform-shaped string
+  into the persistent `exclusive_key` / `dedup_key`. That would let the same
+  active effort receive different suppression keys on Windows vs. Linux,
+  defeating cross-machine dedup for a lane that can legally move between
+  eligible producer hosts. Fixed by canonicalizing repo-relative effort paths to
+  POSIX form (`relative_path.as_posix()`) before they ever reach task payloads
+  or persistent keys, and updated the focused effort-driver tests to assert the
+  canonical forward-slash form explicitly.
+- Focused Phase 8 tests after the fix: **123 passed**.

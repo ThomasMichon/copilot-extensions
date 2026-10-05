@@ -154,12 +154,12 @@ def test_global_effort_driver_discovers_active_effort_and_authors_goal_driven_ta
     assert task["evaluator_ref"] == "effort-driver"
     assert task["title"] == "Drive effort agent-dispatch recipe library to archive state"
     assert task["goal"] == "Drive tracked effort agent-dispatch recipe library to archive state"
-    assert "Active effort README: efforts\\active\\recipe-library\\README.md" in task["prompt"]
+    assert "Active effort README: efforts/active/recipe-library/README.md" in task["prompt"]
     assert "Current recorded status: In Progress" in task["prompt"]
     assert "Coordination refs already noted: #4691, #5200" in task["prompt"]
     assert "execution half only" in task["prompt"]
     assert payload["effort_slug"] == "recipe-library"
-    assert payload["effort_readme"] == "efforts\\active\\recipe-library\\README.md"
+    assert payload["effort_readme"] == "efforts/active/recipe-library/README.md"
     assert payload["coordination_refs"] == ["#4691", "#5200"]
 
 
@@ -201,7 +201,7 @@ def test_submitted_effort_task_suppresses_duplicate_creation_on_later_cadence(tm
                 "status": "submitted",
                 "exclusive_key": (
                     "effort-driver-loop:effort-driver:"
-                    "efforts\\active\\recipe-library\\README.md"
+                    "efforts/active/recipe-library/README.md"
                 ),
                 "origin_ref": "older",
             }
@@ -235,7 +235,7 @@ def test_plan_looks_up_only_per_effort_keys_not_the_entire_task_corpus(tmp_path)
             "source": "effort-driver",
             "exclusive_key": (
                 "effort-driver-loop:effort-driver:"
-                "efforts\\active\\recipe-library\\README.md"
+                "efforts/active/recipe-library/README.md"
             ),
             "status": "proposed,queued,claimed,started,suspended,submitted",
             "limit": 1,

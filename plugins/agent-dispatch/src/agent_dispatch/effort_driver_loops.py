@@ -386,7 +386,9 @@ def _discover_active_efforts(config: Mapping[str, Any]) -> tuple[list[ActiveEffo
             ActiveEffort(
                 slug=slug,
                 title=_title_from_readme(text, slug),
-                readme_relative=str(readme.relative_to(Path(config["state_root"]))),
+                readme_relative=readme.relative_to(
+                    Path(config["state_root"])
+                ).as_posix(),
                 state_root=str(config["state_root"]),
                 status=_status_from_readme(text),
                 coordination_refs=_coordination_refs_from_readme(text),
