@@ -1534,8 +1534,9 @@ class _HeadProvider:
         self.calls += 1
         if self.boom:
             raise RuntimeError("provider unreachable")
+        head = self.head.get(number) if isinstance(self.head, dict) else self.head
         return PullResult(number=number, state="merged" if self.merged else "open",
-                          merged=self.merged, head_sha=self.head)
+                          merged=self.merged, head_sha=head)
 
 
 def _patch_head_provider(monkeypatch, fake):
@@ -1606,3 +1607,33 @@ def test_a_confirmed_merge_takes_the_providers_head_over_a_recorded_one(monkeypa
     _patch_head_provider(monkeypatch, _HeadProvider("b" * 40))
     assert finalize_open_pr_gate._pr_entry_merge_status(pr, repo) is True
     assert (pr.head_sha, pr.state) == ("b" * 40, "merged")
+
+def test_a_stale_head_on_another_merged_pr_is_refreshed_too(refspec_worktree, monkeypatch):
+    """The boundary check covers every tracked PR's cleanup branch against its own
+    head: an older merged PR pushed outside the tool must be refreshed as well."""
+    env = refspec_worktree
+    record, repo, stale, real = _stale_head_case(env)
+    record.pr.head_sha = real  # the active PR's head is right
+    _git("branch", "pr/older-merged", real, cwd=env.clone)
+    other = SimpleNamespace(branch="pr/older-merged", state="merged", head_sha=stale, number=8,
+                            repo="o/r", provider="gitea", url="", opened_at="",
+                            head_observed_at="2026-01-01T00:00:00Z", head_observed_api_base="x")
+    record.prs = [record.pr, other]
+    fake = _HeadProvider({7: real, 8: real})
+    _patch_head_provider(monkeypatch, fake)
+    ok, err = finalize._pr_finalize_precondition(record, repo, str(env.clone), str(env.clone))
+    assert (ok, err) == (True, None)
+    assert other.head_sha == real
+    # Observation evidence was for the old head: it doesn't carry over to the new one.
+    assert (other.head_observed_at, other.head_observed_api_base) == ("", "")
+
+
+def test_an_unchanged_refresh_keeps_the_head_observation(monkeypatch):
+    pr = SimpleNamespace(state="merged", head_sha="a" * 40, number=7, repo="o/r",
+                         provider="gitea", url="", head_observed_at="2026-01-01T00:00:00Z",
+                         head_observed_api_base="x")
+    repo = SimpleNamespace(pr=SimpleNamespace(provider="gitea", api_base=""))
+    _patch_head_provider(monkeypatch, _HeadProvider("a" * 40))
+    assert finalize_open_pr_gate.refresh_merged_head(pr, repo) is False
+    assert (pr.head_sha, pr.state, pr.head_observed_at, pr.head_observed_api_base) == (
+        "a" * 40, "merged", "2026-01-01T00:00:00Z", "x")

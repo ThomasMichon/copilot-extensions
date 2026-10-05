@@ -331,6 +331,10 @@ def _pr_entry_merge_status(pr, repo) -> bool | None:
             except Exception:
                 observed_head = ""
         if observed_head:
+            if observed_head != (getattr(pr, "head_sha", "") or "").strip():
+                # Observation evidence describes the head it was taken for: not this one.
+                pr.head_observed_at = ""
+                pr.head_observed_api_base = ""
             pr.head_sha = observed_head
         pr.state = "merged"
         return True
@@ -347,30 +351,38 @@ def refresh_merged_head(pr, repo) -> bool:
     asks the provider again, and finalize refuses forever with "carries
     further commits". Called only on that refusing path, so a normal finalize
     makes no extra request. Returns True iff the provider confirmed the merge
-    and reported a different head (now on ``pr``); otherwise ``pr`` is left
-    exactly as it was."""
-    before = (getattr(pr, "head_sha", "") or "", getattr(pr, "state", "") or "")
+    and reported a different head (now on ``pr``, with the old head's observation
+    evidence cleared); otherwise ``pr`` is left exactly as it was."""
+    fields = ("head_sha", "state", "head_observed_at", "head_observed_api_base")
+    before = {f: getattr(pr, f, "") or "" for f in fields}
     pr.head_sha, pr.state = "", ""
     try:
         status = _pr_entry_merge_status(pr, repo)
     except Exception:
         status = None
     fresh = (getattr(pr, "head_sha", "") or "").strip()
-    if status is not True or not fresh:
-        pr.head_sha, pr.state = before
+    if status is not True or not fresh or fresh == before["head_sha"].strip():
+        for f, value in before.items():
+            setattr(pr, f, value)
         return False
-    return fresh != before[0].strip()
+    return True
 
 
 def merged_content_exceeds(
     record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *, cwd: str, repo,
 ) -> bool:
-    """:func:`content_exceeds_merged_head_any` for a merged PR, re-reading a
-    stale recorded merged head from the provider once (see
-    :func:`refresh_merged_head`) before concluding the worktree carries more."""
+    """:func:`content_exceeds_merged_head_any` for a merged PR, re-reading stale
+    recorded merged heads from the provider once (see :func:`refresh_merged_head`)
+    before concluding the worktree carries more: the active PR's, and every other
+    tracked PR recorded as merged -- the boundary check covers each one's cleanup
+    branch against its own head, and :func:`repair_other_tracked_pr_heads` fills
+    in only a missing head, never a stale one."""
     if not content_exceeds_merged_head_any(record, content_ref, upstream, cwd=cwd):
         return False
-    if refresh_merged_head(record.pr, repo):
+    entries = [record.pr] + [p for p in (getattr(record, "prs", None) or [])
+                             if p is not record.pr and getattr(p, "state", "") == "merged"]
+    refreshed = [refresh_merged_head(entry, repo) for entry in entries if entry is not None]
+    if any(refreshed):
         return content_exceeds_merged_head_any(record, content_ref, upstream, cwd=cwd)
     return True
 
