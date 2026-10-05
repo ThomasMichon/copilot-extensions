@@ -8,12 +8,14 @@ import sys
 from typing import Any, Protocol
 
 from . import (
+    LIVE_SESSION_ALIAS_PROTOCOL,
     VenueCopilotError,
     await_claim,
     bridge_probe_script,
     build_copilot_remote_command,
     deregister_live_session,
     last_json,
+    may_switch_session_id,
     observe_commands,
     registration_credentials_script,
     release_cli_mode,
@@ -21,7 +23,10 @@ from . import (
     resolve_daemon_port,
     resolve_local_auth_token,
     seed_delivery,
+    seed_outcome,
+    pending_seed_report,
     trust_folder_command,
+    unstable_handle_warning,
     with_new_session,
 )
 
@@ -62,6 +67,16 @@ _RUNNER_CONFIG_KEYS = frozenset({
     "missing_agent_worktrees_error", "old_agent_worktrees_error", "reservation_wait",
     "launch_detail",
 })
+
+# Mirrors agent-worktrees' mux seed hard cap. The remote launch timeout must
+# stay above it because readiness can slide while Copilot is visibly busy.
+_SEED_READY_HARD_CAP = 900.0
+# embody may first wait this long for the worktree's lifecycle lock
+# (agent-worktrees handoff_cli), and the launch itself needs some time too.
+_LIFECYCLE_LOCK_WAIT = 300.0
+_LAUNCH_OVERHEAD = 120.0
+#: The transport floor for a launch that may wait for its seed.
+_SEEDED_LAUNCH_TIMEOUT = _LIFECYCLE_LOCK_WAIT + _SEED_READY_HARD_CAP + _LAUNCH_OVERHEAD
 
 
 def public_plan(plan: dict[str, Any]) -> dict[str, Any]:
@@ -172,6 +187,9 @@ def launch_detached(
                 plan,
                 error="the host agent-bridge daemon has no readable auth token",
             )
+        handle_warning = unstable_handle_warning(daemon_port, copilot_args)
+        if handle_warning:
+            progress("handle", handle_warning)
 
         rc, _out, err = adapter.run(
             registration_credentials_script(token, daemon_port),
@@ -203,10 +221,19 @@ def launch_detached(
                 ),
             )
 
+        launch_timeout = register_timeout + 300.0
+        # refs become (part of) the seed; a worktree launch may also consume the
+        # worktree's own pending seed with neither passed here, and wait as long.
+        if seed or refs or not bool(plan.get("anchor", True)):
+            launch_timeout = max(launch_timeout, _SEEDED_LAUNCH_TIMEOUT)
+        # The reservation must outlive the refs upload, the launch (with its seed
+        # readiness wait) and registration, or a concurrent rejoin could replace it.
+        ttl = max(float(plan.get("reservation_ttl", 900.0)),
+                  (600.0 if refs else 0.0) + launch_timeout + register_timeout + 120.0)
         reservation = reserve_with_retry(
             plan["scope_id"],
             plan["venue"],
-            ttl_seconds=float(plan.get("reservation_ttl", 900.0)),
+            ttl_seconds=ttl,
             retry_window=float(plan.get("reserve_retry_window", 90.0)),
             on_wait=lambda: progress(
                 "waiting",
@@ -227,16 +254,17 @@ def launch_detached(
                 return 1, _payload(False, plan, error="could not copy the reference files to the venue")
             seed = f"{seed.rstrip()}\n\n{notes}" if seed else notes
         progress("launch", _venue_text(plan, "launch_detail", "`agent-worktrees embody` on the venue"))
+        seed_ready_timeout = max(register_timeout, 180.0)
         rc, stdout, stderr = adapter.launch(
             _launch_command(
                 plan,
                 seed=seed,
-                seed_ready_timeout=max(register_timeout, 180.0),
+                seed_ready_timeout=seed_ready_timeout,
                 driver=driver,
                 copilot_args=copilot_args,
                 ensure_mux=ensure_mux,
             ),
-            timeout=register_timeout + 300.0,
+            timeout=launch_timeout,
         )
         embodied = last_json(stdout)
         if "agent-worktrees: command not found" in stderr + stdout:
@@ -275,17 +303,15 @@ def launch_detached(
         if actual_mux and actual_mux != plan["mux_session"]:
             plan["mux_session"] = actual_mux
             plan["venue"]["mux_session_name"] = actual_mux
-        if created and seed and not embodied.get("seed_submitted"):
-            reason = embodied.get("seed_reason")
-            suffix = f" ({reason})" if reason else ""
-            return 1, _payload(
-                False,
-                plan,
-                error=(
-                    "Copilot never reached a ready prompt, so the seed was not "
-                    f"submitted{suffix}"
-                ),
-            )
+        seed_delivery_status, seed_needs_bridge = seed_outcome(embodied, created=created, seed=seed)
+        if seed_delivery_status == "failed":
+            progress("seed-draft", f"typed seed was not submitted ({embodied.get('seed_reason')}); "
+                     "not resending: the draft may remain in Copilot's input")
+        # Whatever its flags, a rejoin may rename -- and so may a launch embody
+        # itself resumed (an existing worktree's head: ``resume_session``).
+        resuming = not created or bool(embodied.get("resume_session"))
+        if resuming and not handle_warning:
+            handle_warning = unstable_handle_warning(daemon_port, copilot_args, rejoin=True)
         progress("register", "waiting for the session to register with the host bridge")
         session_id = await_claim(plan["scope_id"], reservation["reservation_id"], register_timeout)
         if not session_id:
@@ -295,26 +321,53 @@ def launch_detached(
                 error="the session is running but never registered with the host bridge",
             )
         ok = True
-        refs_extra: dict[str, Any] = {}
-        if notes:
-            # A new session got the note in its seed; a running one is told now.
+        # A resume can re-register under a new id after the claim; only a daemon
+        # with live-session aliases carries a bridge message (seed or note) across it.
+        # A rejoin's own flags say nothing about how the running session was
+        # launched (it may still be resuming), so it always needs that floor.
+        alias_floor = ({"min_daemon_protocol": LIVE_SESSION_ALIAS_PROTOCOL}
+                       if resuming or may_switch_session_id(copilot_args) else {})
+        if seed_needs_bridge:
             from .refs import deliver_note
 
+            reason = embodied.get("seed_reason")
+            detail = f"seed was never typed ({reason}); delivering over bridge" if reason else (
+                "seed was never typed; delivering over bridge"
+            )
+            progress("seed-bridge", detail)
+            seed_delivery_status = "bridge" if deliver_note(session_id, seed, operation=reservation["reservation_id"], **alias_floor) else "failed"
+        refs_extra: dict[str, Any] = {}
+        if notes:
+            # A typed new session got the note in its seed; a running one (or a
+            # new session whose typed seed missed readiness) is told by message.
+            from .refs import deliver_note
+
+            refs_delivered = "failed"
+            if created and seed_delivery_status == "typed":
+                refs_delivered = "seed"
+            elif seed_needs_bridge and seed_delivery_status == "bridge":
+                refs_delivered = "message"
+            elif not created:
+                refs_delivered = "message" if deliver_note(session_id, notes, operation=reservation["reservation_id"], **alias_floor) else "failed"
             refs_extra = {
                 "ref_files": notes.splitlines()[1:],
-                "refs_delivered": "seed" if created else (
-                    "message" if deliver_note(session_id, notes) else "failed"
-                ),
+                "refs_delivered": refs_delivered,
             }
+        seed_extra = ({"seed_delivery": seed_delivery_status} if created and seed
+                      else pending_seed_report(embodied, seed=seed))
         return 0, _payload(
             True,
             plan,
             session_id=session_id,
             created=created,
             resumed=not created,
-            seeded=bool(created and seed),
+            seeded=bool(created and seed and seed_delivery_status in {"typed", "bridge"})
+            or seed_extra.get("seed_delivery") == "typed",
             keeper=keeper,
+            **seed_extra,
             **refs_extra,
+            **({"session_handle": "provisional", "handle_warning": handle_warning}
+               if handle_warning else {}),
             commands={
                 **observe_commands(session_id),
                 "attach": adapter.attach_command(plan),

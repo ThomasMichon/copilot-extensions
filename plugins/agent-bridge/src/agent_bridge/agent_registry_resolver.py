@@ -400,8 +400,56 @@ class AgentResolver:
         return self._bind_repo(target, repo, venue)
 
     def _bind_repo(self, target: SpawnTarget, repo: str, venue: str) -> SpawnTarget:
-        """Rebind a machine/local venue target to run ``<repo>``'s binstub."""
-        if target.type in ("local", "ssh"):
+        """Rebind a machine/local venue target to run ``<repo>``'s binstub.
+
+        ``target`` was resolved via ``_resolve_static(venue)`` against
+        *venue*'s own default project, so a local-loopback target's
+        ``copilot_args`` already has that default project's own-plugin and
+        related-plugin ``--plugin-dir`` args appended (the ``type="ssh"``
+        branches never add them -- that's Phase 2 work). Rather than trying
+        to strip that suffix back out of ``target.copilot_args`` (which
+        requires re-resolving the exact same plugin args a second time and
+        trusting they come back byte-identical -- a changed setting or a
+        transient resolution failure between the two calls would silently
+        leave the default project's plugins attached alongside the
+        requested repo's), rebuild ``copilot_args`` from
+        ``old_config.copilot_args`` -- the stable, already-known **base**
+        before any plugin resolution was ever appended -- plus a single
+        fresh resolution for the final bound ``repo``. A genuine remote-SSH
+        target's ``copilot_args`` (its explicitly configured values) is
+        left completely untouched -- it never had plugin args appended in
+        the first place. ``target.cwd`` is the venue's own checkout, not
+        the bound repo's -- it is only a valid anchor fallback for the
+        final resolution when ``repo`` IS that same default project (no
+        actual project change, just re-confirming the same one); for any
+        other ``repo`` it must not be passed at all, or a different,
+        unrelated project would silently resolve the venue's own
+        checkout's plugins as if they belonged to it.
+        """
+        if target.type == "local":
+            import dataclasses
+
+            canonical = self.canonical_agent_name(venue)
+            old_config = self._agents.get(canonical) if canonical else None
+            base_args = (
+                list(old_config.copilot_args)
+                if old_config is not None
+                else list(target.copilot_args)
+            )
+            cwd_fallback = (
+                target.cwd
+                if old_config is not None and repo == old_config.project
+                else None
+            )
+            copilot_args = (
+                base_args
+                + self._own_plugin_args(repo, cwd_fallback)
+                + self._related_plugin_args(repo)
+            )
+            return dataclasses.replace(
+                target, project=repo, copilot_args=copilot_args,
+            )
+        if target.type == "ssh":
             import dataclasses
 
             return dataclasses.replace(target, project=repo)
@@ -561,7 +609,7 @@ class AgentResolver:
 
         return candidates
 
-    def _own_plugin_args(self, config) -> list[str]:
+    def _own_plugin_args(self, project: str | None, cwd: str | None = None) -> list[str]:
         """``--plugin-dir`` args for the launching repo's own enabled plugins."""
         try:
             from pathlib import Path as _Path
@@ -570,14 +618,30 @@ class AgentResolver:
             from .repo_own_plugins import repo_plugin_dir_args
 
             anchor = None
-            project = getattr(config, "project", None)
             if project:
                 anchor = _registry_anchor(project)
-            if anchor is None and getattr(config, "cwd", None):
-                anchor = _Path(config.cwd)
+            if anchor is None and cwd:
+                anchor = _Path(cwd)
             return repo_plugin_dir_args(anchor)
         except Exception as exc:  # pragma: no cover - defensive
             log.debug("own-plugin arg staging failed: %s", exc)
+            return []
+
+    def _related_plugin_args(self, project: str | None) -> list[str]:
+        """``--plugin-dir`` args for control-repo-declared related plugins.
+
+        The local-loopback counterpart of ``extra_plugins`` staging for a
+        namespace-resolved (``codespace:``/``container:``) target: resolves
+        ``related_plugins_for_repo`` against the launching repo's own project
+        name, since a local-loopback target shares this machine's filesystem
+        and needs no remote staging.
+        """
+        try:
+            from .repo_own_plugins import related_plugin_dir_args
+
+            return related_plugin_dir_args(project)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.debug("related-plugin arg resolution failed: %s", exc)
             return []
 
     def _resolve_static(self, agent_name: str) -> SpawnTarget:
@@ -607,7 +671,11 @@ class AgentResolver:
                 type="local",
                 cwd=config.cwd,
                 copilot_path=config.copilot_path,
-                copilot_args=config.copilot_args + self._own_plugin_args(config),
+                copilot_args=(
+                    config.copilot_args
+                    + self._own_plugin_args(config.project, config.cwd)
+                    + self._related_plugin_args(config.project)
+                ),
                 env=config.env,
                 project=config.project,
                 mcp_servers=config.mcp_servers,
@@ -647,7 +715,11 @@ class AgentResolver:
                 type="local",
                 cwd=config.cwd,
                 copilot_path=config.copilot_path,
-                copilot_args=config.copilot_args + self._own_plugin_args(config),
+                copilot_args=(
+                    config.copilot_args
+                    + self._own_plugin_args(config.project, config.cwd)
+                    + self._related_plugin_args(config.project)
+                ),
                 env=config.env,
                 project=config.project,
                 mcp_servers=config.mcp_servers,

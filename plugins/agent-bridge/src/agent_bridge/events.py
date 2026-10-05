@@ -66,6 +66,8 @@ class EventLog:
         self._lock = Lock()
         self._next_id = 1
         self._waiters: list[tuple[asyncio.AbstractEventLoop, asyncio.Event]] = []
+        #: Set when this log was merged into another: (target log, old id -> new id).
+        self.merged_into: tuple[EventLog, dict[int, int]] | None = None
         self._db = db
         self._session_id = session_id
         self._telemetry = telemetry.SessionTraceReducer(
@@ -115,13 +117,16 @@ class EventLog:
             log._next_id = max_id + 1
         return log
 
-    def append(self, event_type: str, data: dict[str, Any]) -> SseEvent:
-        """Append an event and return it with its assigned ID.
+    def append(
+        self, event_type: str, data: dict[str, Any], *, timestamp: float | None = None,
+    ) -> SseEvent:
+        """Append an event and return it with its assigned ID. `timestamp`
+        keeps a replayed event's original occurrence time (default: now).
 
         Adds the event to the in-memory list and wakes SSE consumers before
         queueing the durable write, so live delivery is not blocked by SQLite.
         """
-        ts = time.time()
+        ts = time.time() if timestamp is None else timestamp
 
         with self._lock:
             event_id = self._next_id
@@ -259,11 +264,16 @@ class EventLog:
                         self._telemetry.log_epoch,
                         timestamp=ts,
                     )
-        for loop, waiter in self._waiters:
-            if not loop.is_closed():
-                loop.call_soon_threadsafe(waiter.set)
+        self.wake_waiters()
         telemetry.emit(rebuild_marker)
         return count
+
+    def wake_waiters(self) -> None:
+        """Wake every pending reader so it re-reads (e.g. after a rebuild, or
+        after this log was merged into another one)."""
+        for loop, waiter in list(self._waiters):
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(waiter.set)
 
     @property
     def latest_id(self) -> int:
@@ -408,6 +418,15 @@ class EventLog:
             if events:
                 return events
             self._waiters.append(registration)
+        # A merge sets ``merged_into`` before waking this log's waiters: one that
+        # completed after the reader chose this log, but before it registered,
+        # woke nobody. Seen here, the reader returns now and follows the merge
+        # (a later merge wakes the registration above).
+        if self.merged_into is not None:
+            with self._lock:
+                if registration in self._waiters:
+                    self._waiters.remove(registration)
+            return self.get_events(after)
         try:
             await asyncio.wait_for(waiter.wait(), timeout=timeout)
             return self.get_events(after)

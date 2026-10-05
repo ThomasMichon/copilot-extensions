@@ -53,7 +53,11 @@ def add_copilot_parser(sub) -> None:
     p.add_argument(
         "--seed-ready-timeout", dest="seed_ready_timeout", type=float, default=180.0,
         metavar="SECONDS",
-        help="How long to wait for Copilot's input prompt before typing --seed (default 180)",
+        help=(
+            "Idle window while waiting for Copilot's input prompt before typing "
+            "--seed (default 180); visibly busy/changing panes keep waiting up "
+            "to a hard cap"
+        ),
     )
     p.add_argument(
         "--driver", default=None,

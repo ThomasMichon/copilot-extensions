@@ -12,6 +12,11 @@ from .db_core import (
     live_session_is_fresh,
     local_pid_alive,
 )
+from .db_live_session_aliases import (
+    CANONICAL_SESSION_SQL as _CANON,
+    PROCESS_START_TOLERANCE_SECONDS,
+    register_live_session_atomic,
+)
 
 LIVE_MESSAGE_DELIVERIES = {"queue", "steer", "interrupt"}
 
@@ -40,6 +45,7 @@ class _LiveSessionsMixin:
         now: float,
         driven_by: str | None = None,
         venue: str | None = None,
+        process_started_at: float | None = None,
     ) -> str:
         """Insert or refresh a live interactive-session registration (upsert).
 
@@ -66,57 +72,21 @@ class _LiveSessionsMixin:
 
         Returns the resulting registration status: ``'live'`` on a successful
         insert/refresh, or a rejection reason -- ``'reserved'`` (an owned ACP
-        reservation holds the worktree) or ``'taken-over'`` (this id was taken
-        over). The route maps a rejection to HTTP 409.
+        reservation holds the worktree), ``'taken-over'`` (this id was taken
+        over) or ``'incarnation_mismatch'`` (the pid or process start it reports
+        contradicts the row it would update, or -- through a renamed id's alias
+        -- its machine does: a stale heartbeat can't overwrite the successor).
+        The route maps a rejection to HTTP 409.
+
+        The upsert, the CLI-mode reservation claim and a same-process rollover
+        (alias insertion + predecessor deletion) commit in one transaction, so
+        a concurrent deregistration can't strand a half-rolled-over successor.
         """
-        cur = self.execute_write(
-            "INSERT INTO live_sessions (session_id, machine, cwd, worktree_id, "
-            "repo, branch, pid, role, driven_by, venue, status, registered_at, "
-            "updated_at) "
-            "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', ?, ? "
-            "WHERE NOT EXISTS ("
-            "  SELECT 1 FROM worktree_ownership wo "
-            "  JOIN sessions s ON s.id = wo.session_id "
-            "  WHERE wo.worktree_id = ? AND ? IS NOT NULL "
-            "    AND s.status IN ('running', 'idle')"
-            ") "
-            "ON CONFLICT(session_id) DO UPDATE SET "
-            "machine=excluded.machine, cwd=excluded.cwd, "
-            "worktree_id=excluded.worktree_id, repo=excluded.repo, "
-            "branch=excluded.branch, pid=excluded.pid, role=excluded.role, "
-            "driven_by=excluded.driven_by, "
-            "venue=COALESCE(excluded.venue, live_sessions.venue), "
-            "status='live', updated_at=excluded.updated_at "
-            "WHERE live_sessions.status != 'taken-over'",
-            (session_id, machine, cwd, worktree_id, repo, branch, pid, role,
-             driven_by, venue, now, now, worktree_id, worktree_id),
+        return register_live_session_atomic(
+            self, session_id, machine=machine, cwd=cwd, worktree_id=worktree_id,
+            repo=repo, branch=branch, pid=pid, role=role, now=now, driven_by=driven_by,
+            venue=venue, process_started_at=process_started_at,
         )
-        if cur.rowcount == 1:
-            # Best-effort, additive: a worktree with a pending, unclaimed
-            # CLI-mode reservation (agent-bridge-cli-mode-sessions Phase 2) is
-            # claimed by this registration and the row is marked accordingly.
-            # Never blocks or reverses the registration above -- claiming is
-            # honest bookkeeping, not an admission gate; an unclaimed or absent
-            # reservation is not an error. A venue descriptor recorded on the
-            # reservation by the reserving launcher is inherited here, so a
-            # remote session's venue comes from the trusted reservation.
-            if worktree_id is not None and self.claim_cli_mode_reservation(
-                worktree_id, session_id, now=now
-            ):
-                self.execute_write(
-                    "UPDATE live_sessions SET cli_mode=1, venue=COALESCE("
-                    "(SELECT venue FROM cli_mode_reservations "
-                    " WHERE worktree_id=? AND claimed_by_session_id=?), venue) "
-                    "WHERE session_id=?",
-                    (worktree_id, session_id, session_id),
-                )
-            return "live"
-        # Rejected -- derive why for the caller's error (the authoritative
-        # decision was the 0-row write above).
-        existing = self.get_live_session(session_id)
-        if existing is not None and (existing.get("status") or "live") == "taken-over":
-            return "taken-over"
-        return "reserved"
 
     def create_cli_mode_reservation(
         self, worktree_id: str, *, now: float, ttl_seconds: float = 300.0,
@@ -218,10 +188,10 @@ class _LiveSessionsMixin:
         no-op for a session_id that isn't registered. Also refreshes
         ``updated_at`` so activity keeps the registration fresh.
         """
-        self.execute_write(
+        self.execute_write(  # alias-aware like ack_live_messages (rollover between them)
             "UPDATE live_sessions SET turn_state=?, last_activity_at=?, "
-            "updated_at=? WHERE session_id=?",
-            (turn_state, last_activity_at, last_activity_at, session_id),
+            f"updated_at=? WHERE session_id={_CANON}",
+            (turn_state, last_activity_at, last_activity_at, session_id, session_id),
         )
 
     def update_live_progress(
@@ -236,19 +206,42 @@ class _LiveSessionsMixin:
         """
         cur = self.execute_write(
             "UPDATE live_sessions SET latest_progress=?, updated_at=? "
-            "WHERE session_id=?",
-            (latest_progress, now, session_id),
+            f"WHERE session_id={_CANON}",  # alias-aware: a beat to a retired id still lands
+            (latest_progress, now, session_id, session_id),
         )
         return cur.rowcount > 0
 
-    def deregister_live_session(self, session_id: str) -> None:
-        """Remove a live interactive-session registration and its message queue."""
-        self.execute_write(
-            "DELETE FROM live_sessions WHERE session_id=?", (session_id,)
-        )
-        self.execute_write(
-            "DELETE FROM live_messages WHERE session_id=?", (session_id,)
-        )
+    def deregister_live_session(
+        self, session_id: str, *, pid: int | None = None, process_started_at: float | None = None,
+    ) -> bool:
+        """Atomically remove a live registration, its queue and aliases; True only if this exact row went.
+
+        With the deregistering process's identity, only a row that process
+        registered goes: another process's (a replacement that registered the
+        id between this process's cleanup DELETEs) is left alone, checked in
+        the same statement. Omitted on either side, a field never conflicts."""
+        conn = self._get_conn()
+        with self._write_lock:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                if conn.execute(
+                    "DELETE FROM live_sessions WHERE session_id=? "
+                    "AND (? IS NULL OR pid IS NULL OR pid = ?) "
+                    "AND (? IS NULL OR process_started_at IS NULL "
+                    "     OR ABS(process_started_at - ?) < ?)",
+                    (session_id, pid, pid, process_started_at, process_started_at,
+                     PROCESS_START_TOLERANCE_SECONDS),
+                ).rowcount != 1:
+                    conn.rollback()
+                    return False
+                conn.execute("DELETE FROM live_messages WHERE session_id=?", (session_id,))
+                conn.execute("DELETE FROM live_session_aliases WHERE alias_session_id=? "
+                             "OR target_session_id=?", (session_id, session_id))
+                conn.commit()
+                return True
+            except Exception:
+                conn.rollback()
+                raise
 
     def expire_live_sessions_for_worktree(
         self, worktree_id: str, *, now: float, expected_session_id: str | None = None
@@ -276,11 +269,11 @@ class _LiveSessionsMixin:
         never-confirmed-dead claimant) is left untouched rather than
         collaterally demoted (#2906 race hardening).
         """
-        if expected_session_id is not None:
+        if expected_session_id is not None:  # alias-aware: the holder may have been renamed
             cur = self.execute_write(
                 "UPDATE live_sessions SET status='taken-over', updated_at=? "
-                "WHERE worktree_id=? AND status='live' AND session_id=?",
-                (now, worktree_id, expected_session_id),
+                f"WHERE worktree_id=? AND status='live' AND session_id={_CANON}",
+                (now, worktree_id, expected_session_id, expected_session_id),
             )
         else:
             cur = self.execute_write(
@@ -428,7 +421,9 @@ class _LiveSessionsMixin:
                 f"DELETE FROM live_messages WHERE session_id IN ({_in(dead_ids)})",
                 tuple(dead_ids),
             )
-            self.execute_write(
+            self.execute_write(  # its aliases go with it (live_sessions_drop_orphaned_aliases),
+                # in the same statement: a separate cleanup could delete an alias
+                # a registration re-created for a purged id in between.
                 f"DELETE FROM live_sessions WHERE session_id IN ({_in(dead_ids)})",
                 tuple(dead_ids),
             )
@@ -539,11 +534,45 @@ class _LiveSessionsMixin:
         )
         return dict(rows[0]) if rows else None
 
-    def get_live_session(self, session_id: str) -> dict[str, Any] | None:
+    def get_live_session_exact(self, session_id: str) -> dict[str, Any] | None:
         rows = self.execute_read(
             "SELECT * FROM live_sessions WHERE session_id=?", (session_id,)
         )
         return dict(rows[0]) if rows else None
+
+    def resolve_live_session_id(self, session_id: str) -> str:
+        """Resolve a retired live-session id to its current id, if aliased."""
+        current = session_id
+        seen: set[str] = set()
+        for _ in range(8):
+            if current in seen:
+                return current
+            seen.add(current)
+            rows = self.execute_read(
+                "SELECT target_session_id FROM live_session_aliases "
+                "WHERE alias_session_id=?",
+                (current,),
+            )
+            if not rows:
+                return current
+            target = rows[0]["target_session_id"]
+            if not isinstance(target, str) or not target or target == current:
+                return current
+            current = target
+        return current
+
+    def live_session_aliases_to(self, session_id: str) -> list[str]:
+        """Retired ids that now forward to ``session_id``."""
+        rows = self.execute_read(
+            "SELECT alias_session_id FROM live_session_aliases "
+            "WHERE target_session_id=?",
+            (session_id,),
+        )
+        return [r["alias_session_id"] for r in rows]
+
+    def get_live_session(self, session_id: str) -> dict[str, Any] | None:
+        sql = f"SELECT * FROM live_sessions WHERE session_id={_CANON}"  # alias + row: one read
+        return next((dict(r) for r in self.execute_read(sql, (session_id,) * 2)), None)
 
     def get_fresh_live_session(
         self,
@@ -758,10 +787,10 @@ class _LiveSessionsMixin:
             "INSERT OR IGNORE INTO live_messages "
             "(session_id, sender, body, reply_to, kind, delivery, "
             "idempotency_key, created_at) "
-            "SELECT ?, ?, ?, ?, ?, ?, ?, ? "
+            f"SELECT {_CANON}, ?, ?, ?, ?, ?, ?, ? "
             "WHERE EXISTS ("
             "  SELECT 1 FROM live_sessions ls "
-            "  WHERE ls.session_id = ? AND ls.status = 'live' "
+            f"  WHERE ls.session_id = {_CANON} AND ls.status = 'live' "
             "    AND ls.updated_at >= ? "
             "    AND ("
             "      ls.worktree_id IS NULL OR ls.session_id = ("
@@ -771,36 +800,44 @@ class _LiveSessionsMixin:
             "        ORDER BY registered_at DESC, updated_at DESC LIMIT 1"
             "      )"
             "    )"
-            "    AND (? IS NULL OR ? = ls.session_id)"
+            f"    AND (? IS NULL OR {_CANON} = ls.session_id)"
             ")",
             (
-                session_id, sender, body, reply_to, kind, delivery,
+                session_id, session_id, sender, body, reply_to, kind, delivery,
                 idempotency_key, now,
-                session_id, cutoff, cutoff,
-                expected_session_id, expected_session_id,
+                session_id, session_id, cutoff, cutoff,
+                expected_session_id, expected_session_id, expected_session_id,
             ),
         )
         if cur.rowcount == 1:
             return int(cur.lastrowid or 0), None
         if idempotency_key:
+            # The message and every canonical-id comparison in ONE statement
+            # (one snapshot): a rollover committing between separate reads
+            # would resolve the two handles differently and turn an identical
+            # retry into a false conflict.
+            msg_canon = (
+                "COALESCE((SELECT target_session_id FROM live_session_aliases "
+                "WHERE alias_session_id = live_messages.session_id), live_messages.session_id)"
+            )
             existing = self.execute_read(
-                "SELECT id, session_id, sender, body, reply_to, kind, delivery "
+                "SELECT id, sender, body, reply_to, kind, delivery, "
+                f"{msg_canon} = {_CANON} AS same_target, "
+                f"(? IS NULL OR {_CANON} = {_CANON}) AS same_expected "
                 "FROM live_messages WHERE idempotency_key = ?",
-                (idempotency_key,),
+                (session_id, session_id, expected_session_id, expected_session_id,
+                 expected_session_id, session_id, session_id, idempotency_key),
             )
             if existing:
                 original = existing[0]
                 same_request = (
-                    original["session_id"] == session_id
+                    bool(original["same_target"])
                     and original["sender"] == sender
                     and original["body"] == body
                     and original["reply_to"] == reply_to
                     and original["kind"] == kind
                     and original["delivery"] == delivery
-                    and (
-                        expected_session_id is None
-                        or expected_session_id == session_id
-                    )
+                    and bool(original["same_expected"])
                 )
                 if same_request:
                     return int(original["id"]), None
@@ -836,9 +873,9 @@ class _LiveSessionsMixin:
         """
         rows = self.execute_read(
             "SELECT * FROM live_messages "
-            "WHERE session_id=? AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
+            f"WHERE session_id={_CANON} AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
             "ORDER BY id ASC",
-            (session_id,),
+            (session_id, session_id),
         )
         return [dict(r) for r in rows]
 
@@ -858,6 +895,9 @@ class _LiveSessionsMixin:
             conn = self._get_conn()
             conn.execute("BEGIN IMMEDIATE")
             try:
+                session_id = conn.execute(
+                    f"SELECT {_CANON}", (session_id, session_id)
+                ).fetchone()[0]
                 conn.execute(
                     "UPDATE live_messages SET delivered_at=?, outcome='expired' "
                     "WHERE session_id=? AND kind LIKE 'control:%' "
@@ -891,9 +931,9 @@ class _LiveSessionsMixin:
         """
         cur = self.execute_write(
             "UPDATE live_messages SET delivered_at=?, outcome='withdrawn' "
-            "WHERE session_id=? AND id=? AND kind LIKE 'control:%' "
+            f"WHERE session_id={_CANON} AND id=? AND kind LIKE 'control:%' "
             "AND delivered_at IS NULL AND claimed_at IS NULL",
-            (now, session_id, control_id),
+            (now, session_id, session_id, control_id),
         )
         return cur.rowcount == 1
 
@@ -901,8 +941,8 @@ class _LiveSessionsMixin:
         """A control's ``claimed_at`` and ``outcome`` (``None`` if unknown)."""
         rows = self.execute_read(
             "SELECT claimed_at, outcome FROM live_messages "
-            "WHERE session_id=? AND id=? AND kind LIKE 'control:%'",
-            (session_id, control_id),
+            f"WHERE session_id={_CANON} AND id=? AND kind LIKE 'control:%'",
+            (session_id, session_id, control_id),
         )
         return dict(rows[0]) if rows else None
 
@@ -931,15 +971,15 @@ class _LiveSessionsMixin:
         if controls:
             cur = self.execute_write(
                 f"UPDATE live_messages SET delivered_at=?, outcome=? "
-                f"WHERE session_id=? AND delivered_at IS NULL AND kind LIKE 'control:%' "
+                f"WHERE session_id={_CANON} AND delivered_at IS NULL AND kind LIKE 'control:%' "
                 f"AND claimed_at IS NOT NULL AND id IN ({placeholders})",
-                (now, outcome or "applied", session_id, *ids),
+                (now, outcome or "applied", session_id, session_id, *ids),
             )
         else:
             cur = self.execute_write(
                 f"UPDATE live_messages SET delivered_at=? "
-                f"WHERE session_id=? AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
+                f"WHERE session_id={_CANON} AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
                 f"AND id IN ({placeholders})",
-                (now, session_id, *ids),
+                (now, session_id, session_id, *ids),
             )
         return cur.rowcount

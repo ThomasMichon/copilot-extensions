@@ -2107,6 +2107,225 @@ class TestVenueBoundResolve:
         assert target.project == "SPO.Core"
 
     @pytest.mark.asyncio
+    async def test_repo_at_machine_rebinds_plugin_args_not_default_projects(self):
+        # Regression: _resolve_static(venue) resolves plugin args for the
+        # venue's own DEFAULT project ("dotfiles") before _bind_repo swaps
+        # in the requested repo ("SPO.Core") -- the final copilot_args must
+        # carry SPO.Core's plugin args, never dotfiles' stale ones.
+        from unittest.mock import patch
+        local = self.machines["host-dev6"]
+
+        def _own(project, cwd=None):
+            return ["--plugin-dir", f"/own/{project}"]
+
+        def _related(project):
+            return ["--plugin-dir", f"/related/{project}"]
+
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local, "windows"),
+        ):
+            resolver = AgentResolver(self.agents, self.machines)
+            with (
+                patch.object(resolver, "_own_plugin_args", side_effect=_own),
+                patch.object(resolver, "_related_plugin_args", side_effect=_related),
+            ):
+                target = await resolver.resolve_async("SPO.Core@dev6")
+
+        assert target.project == "SPO.Core"
+        assert "/own/dotfiles" not in target.copilot_args
+        assert "/related/dotfiles" not in target.copilot_args
+        assert "/own/SPO.Core" in target.copilot_args
+        assert "/related/SPO.Core" in target.copilot_args
+
+    @pytest.mark.asyncio
+    async def test_repo_at_machine_rebind_never_re_resolves_old_project(self):
+        # Rebinding must build copilot_args from the configured base
+        # (old_config.copilot_args) plus a single fresh resolution for the
+        # final bound repo -- it must never re-resolve the venue's default
+        # project's own/related plugin args a second time to compute a
+        # suffix to strip, since that result isn't guaranteed to match the
+        # one baked in during the initial venue resolution (a changed
+        # setting or a transient failure would silently leave the default
+        # project's plugins attached alongside the requested repo's).
+        # _own_plugin_args/_related_plugin_args must therefore be called
+        # with the OLD ("dotfiles") project exactly once (during the
+        # initial venue resolution), never again during the rebind -- only
+        # with the final bound ("SPO.Core") one.
+        from unittest.mock import patch
+        local = self.machines["host-dev6"]
+        own_calls: list[str] = []
+        related_calls: list[str] = []
+
+        def _own(project, cwd=None):
+            own_calls.append(project)
+            # Deliberately returns something DIFFERENT each time it's
+            # called for "dotfiles" -- proves this project is never
+            # re-resolved a second time (the old bug's exact failure mode).
+            if project == "dotfiles":
+                return ["--plugin-dir", f"/own/dotfiles-call-{len(own_calls)}"]
+            return ["--plugin-dir", f"/own/{project}"]
+
+        def _related(project):
+            related_calls.append(project)
+            return ["--plugin-dir", f"/related/{project}"]
+
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local, "windows"),
+        ):
+            resolver = AgentResolver(self.agents, self.machines)
+            with (
+                patch.object(resolver, "_own_plugin_args", side_effect=_own),
+                patch.object(resolver, "_related_plugin_args", side_effect=_related),
+            ):
+                target = await resolver.resolve_async("SPO.Core@dev6")
+
+        assert own_calls.count("dotfiles") == 1
+        assert related_calls.count("dotfiles") == 1
+        assert "/own/dotfiles-call-1" not in target.copilot_args
+        assert "/own/SPO.Core" in target.copilot_args
+        assert "/related/SPO.Core" in target.copilot_args
+
+    @pytest.mark.asyncio
+    async def test_repo_at_machine_rebind_preserves_cwd_fallback(self):
+        # Regression: a venue whose own project has no
+        # registry anchor resolves its own-plugin args via the cwd fallback
+        # (_own_plugin_args(project, cwd)). Rebinding to the SAME project
+        # via `<repo>@<venue>` must still receive that fallback -- losing
+        # `cwd` on the rebind call would silently drop those plugins even
+        # though nothing about the actual target changed.
+        from unittest.mock import patch
+        local = self.machines["host-dev6"]
+        agents = {
+            "box": AgentConfig(
+                name="box", project="demo", cwd="/checkout/demo", derived=True,
+            ),
+        }
+
+        def _own(project, cwd=None):
+            if project == "demo" and cwd == "/checkout/demo":
+                return ["--plugin-dir", "/from-cwd/demo"]
+            return []
+
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local, "windows"),
+        ):
+            resolver = AgentResolver(agents, self.machines)
+            with patch.object(resolver, "_own_plugin_args", side_effect=_own):
+                target = await resolver.resolve_async("demo@box")
+
+        assert target.project == "demo"
+        assert "/from-cwd/demo" in target.copilot_args
+
+    @pytest.mark.asyncio
+    async def test_repo_at_machine_rebind_different_project_ignores_venue_cwd(self):
+        # Regression: the cwd fallback above is ONLY valid
+        # when `repo` is the venue's own default project (genuinely the
+        # same checkout) -- for any OTHER repo, `target.cwd` belongs to the
+        # venue's default project, not the requested one, and must not be
+        # passed at all, or the requested (different, unrelated) project
+        # would silently resolve the venue's own checkout's plugins.
+        from unittest.mock import patch
+        local = self.machines["host-dev6"]
+        agents = {
+            "box": AgentConfig(
+                name="box", project="demo", cwd="/checkout/demo", derived=True,
+            ),
+        }
+
+        def _own(project, cwd=None):
+            if project == "demo" and cwd == "/checkout/demo":
+                return ["--plugin-dir", "/from-cwd/demo"]
+            if project == "other-repo" and cwd is None:
+                return ["--plugin-dir", "/own/other-repo"]
+            # Anything else (e.g. other-repo incorrectly given demo's cwd)
+            # is the bug this test guards against.
+            return ["--plugin-dir", "/WRONG"]
+
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local, "windows"),
+        ):
+            resolver = AgentResolver(agents, self.machines)
+            with patch.object(resolver, "_own_plugin_args", side_effect=_own):
+                target = await resolver.resolve_async("other-repo@box")
+
+        assert target.project == "other-repo"
+        assert "/WRONG" not in target.copilot_args
+        assert "/from-cwd/demo" not in target.copilot_args
+        assert "/own/other-repo" in target.copilot_args
+
+    @pytest.mark.asyncio
+    async def test_repo_at_remote_machine_leaves_ssh_copilot_args_untouched(self):
+        # Regression: a genuine-remote (non-loopback) venue
+        # never had plugin args appended by _resolve_static in the first
+        # place -- _bind_repo must not recompute a "stale suffix" for it and
+        # risk stripping real, explicitly configured SSH args that happen to
+        # coincide with what plugin resolution would have produced.
+        from unittest.mock import patch
+
+        agents = {
+            "cloud1": AgentConfig(
+                name="cloud1", host="host-cloud1", ssh_environment="windows",
+                project="dotfiles", copilot_args=["--plugin-dir", "/own/dotfiles"],
+                derived=True,
+            ),
+        }
+        local = self.machines["host-dev6"]  # dispatcher is dev6, not cloud1
+
+        def _own(project, cwd=None):
+            return ["--plugin-dir", f"/own/{project}"]
+
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local, "windows"),
+        ):
+            resolver = AgentResolver(agents, self.machines)
+            with patch.object(resolver, "_own_plugin_args", side_effect=_own):
+                target = await resolver.resolve_async("SPO.Core@cloud1")
+
+        assert target.type == "ssh"
+        assert target.project == "SPO.Core"
+        # The explicitly configured arg (coincidentally equal to what
+        # _own_plugin_args("dotfiles") would produce) must survive untouched.
+        assert target.copilot_args == ["--plugin-dir", "/own/dotfiles"]
+
+    @pytest.mark.asyncio
+    async def test_bare_venue_rebind_through_sender_repo_uses_final_project(self):
+        # The other rebinding path: a bare machine resolved
+        # via a namespace/bare candidate, then rebound through _bind_repo.
+        # Exercise it the same way the venue-bound path is exercised above --
+        # a bare local agent with no `host`, rebound onto a different repo.
+        from unittest.mock import patch
+
+        agents = {
+            "box": AgentConfig(name="box", project="dotfiles", derived=True),
+        }
+
+        def _own(project, cwd=None):
+            return ["--plugin-dir", f"/own/{project}"]
+
+        def _related(project):
+            return ["--plugin-dir", f"/related/{project}"]
+
+        resolver = AgentResolver(agents, self.machines)
+        with (
+            patch.object(resolver, "_own_plugin_args", side_effect=_own),
+            patch.object(resolver, "_related_plugin_args", side_effect=_related),
+        ):
+            target = resolver._bind_repo(
+                resolver._resolve_static("box"), "SPO.Core", "box",
+            )
+
+        assert target.project == "SPO.Core"
+        assert "/own/dotfiles" not in target.copilot_args
+        assert "/related/dotfiles" not in target.copilot_args
+        assert "/own/SPO.Core" in target.copilot_args
+        assert "/related/SPO.Core" in target.copilot_args
+
+    @pytest.mark.asyncio
     async def test_explicit_repo_at_machine_agent_resolves_static(self):
         # A derived <repo>@<machine> entry that IS an exact registry key resolves
         # directly (loopback) -- it needs no bare venue agent to rebind onto.

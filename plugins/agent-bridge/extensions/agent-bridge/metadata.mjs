@@ -21,6 +21,21 @@
 // readiness. The four calls also run in parallel (`Promise.all`), bounded by
 // the single slowest one instead of their sum.
 import { exec, execFile } from "node:child_process";
+import { hostname } from "node:os";
+
+// Epoch seconds this process started (wall clock minus uptime), fixed once
+// per *process*: pinned on the process object, so an extension reload in the
+// same process (a new module instance) reports the bit-identical value rather
+// than a recomputation milliseconds off -- the bridge can then compare exactly.
+const STARTED_AT_KEY = Symbol.for("agent-bridge.processStartedAt");
+const PROCESS_STARTED_AT = (process[STARTED_AT_KEY] ??= Date.now() / 1000 - process.uptime());
+
+// This process's identity, known at load with no subprocess, so every
+// registration -- the very first one included -- lets the bridge refuse a row
+// that belongs to another incarnation instead of accepting an id-only write.
+export function processIdentity() {
+  return { pid: process.pid, process_started_at: PROCESS_STARTED_AT };
+}
 
 // --- Async CLI runner (non-blocking; never freezes the event loop) ---
 // Mirrors the platform split the old synchronous runCli used (Windows
@@ -62,7 +77,10 @@ export async function resolveMetadataAsync({ cwd = process.cwd(), env = process.
     getAsync("project"),
   ]);
   return {
-    machine,
+    // A failed lookup falls back to the hostname, agent-worktrees' own last
+    // resort (``detect_machine``): with no known machine, a resume could never
+    // be folded into its placeholder and messages to it would be stranded.
+    machine: machine || hostname().toLowerCase(),
     cwd,
     // A venue launcher may pin a venue-qualified identity (e.g.
     // `anchor-<repo>@<codespace>`) via AGENT_BRIDGE_SCOPE_ID so several
@@ -72,7 +90,10 @@ export async function resolveMetadataAsync({ cwd = process.cwd(), env = process.
     branch: branch || null,
     // process.pid is the extension host process -- a liveness hint, not the
     // copilot PID. The durable key is session_id; liveness is heartbeat-based.
-    pid: process.pid,
+    // With the start time, constant for this process (also across an
+    // in-process resume), the bridge tells it from an unrelated process that
+    // later reuses the pid.
+    ...processIdentity(),
     role: null,
     // D4: who is steering this session, if an agent embodied it (set by
     // `agent-worktrees embody --driver`). Surfaces the "driven by <agent>"

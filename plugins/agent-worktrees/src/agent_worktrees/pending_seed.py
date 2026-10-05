@@ -35,8 +35,45 @@ def claim_pending_seed(path: Path) -> str | None:
         return None
 
 
-def restore_pending_seed(path: Path, seed: str) -> None:
-    """Roll back an unconfirmed claim so a later attach can retry.
+#: ``mux_seed_pane`` outcomes that prove no keystroke reached the pane: it
+#: never typed (no confirmed-ready Copilot, or the pane was gone before it
+#: did). Anything else -- even ``send-failed``, which can follow a partial
+#: send -- may have left a draft, so retrying would append another copy.
+_NOTHING_TYPED = frozenset({"not-ready-timeout", "pane-target-unresolved", "pane-target-lost"})
+
+
+def nothing_typed(result: dict) -> bool:
+    """True when a seed delivery provably typed nothing (or was never
+    attempted), so its claimed pending seed may be restored for a retry."""
+    return not result or (not result.get("sent") and result.get("reason") in _NOTHING_TYPED)
+
+
+def settle_claim(path: Path, seed: str | None, result: dict) -> dict:
+    """After delivering a claimed pending ``seed``: restore it for a later
+    attach only when the delivery provably typed nothing, and say so
+    (``seed_deferred``, once the restore is confirmed; ``seed_lost`` when it
+    could not be kept) -- the session is idle until then. A typed but
+    unconfirmed seed may sit in the input as a draft -- another delivery would
+    append a second copy -- so it is reported for recovery instead
+    (``seed_unconfirmed``). Returns those report fields (``{}`` when there was
+    no claim or it was submitted)."""
+    if not seed or result.get("ok"):
+        return {}
+    report = {"seed_reason": result.get("reason") or "not-attempted"}
+    if not nothing_typed(result):
+        return {**report, "seed_unconfirmed": True}
+    try:
+        restored = restore_pending_seed(path, seed)
+    except Exception:
+        restored = False
+    # Kept for the next attach only once confirmed; else the claimed seed is gone.
+    return {**report, "seed_deferred": True} if restored else {**report, "seed_lost": True}
+
+
+def restore_pending_seed(path: Path, seed: str) -> bool:
+    """Roll back an unconfirmed claim so a later attach can retry; True once
+    a pending seed is confirmed kept (this one, or a newer one written since),
+    False when it could not be restored (the claimed seed is then lost).
 
     Unlike ``claim_pending_seed`` (where giving up on contention loses
     nothing -- the claim simply never happened), giving up here would
@@ -49,12 +86,13 @@ def restore_pending_seed(path: Path, seed: str) -> None:
                 try:
                     record = tracking.load_record(path)
                 except Exception:
-                    return
+                    return False
                 if not record.pending_seed:
                     record.pending_seed = seed
                     record.pending_seed_revision = getattr(record, "pending_seed_revision", 0) + 1
                     tracking.save_record(record, path)
-                return
+                return True
         except TimeoutError:
             if attempt < 2:
                 time.sleep(1.0)
+    return False

@@ -43,7 +43,13 @@ WORKSPACES_TTL = 20.0
 #: Per-command budgets (seconds). Listing a big repo takes ~10s; create runs setup.
 LIST_TIMEOUT = 90.0
 CREATE_TIMEOUT = 180.0
-EMBODY_TIMEOUT = 240.0
+#: Above embody's own worst case, so the launcher is never killed mid-launch
+#: with its session left unseeded: up to 300s waiting for the worktree's
+#: lifecycle lock (``handoff_cli``), then the 900s seed-ready hard cap (it keeps
+#: waiting while Copilot is busy), plus launch overhead.
+EMBODY_LIFECYCLE_LOCK_WAIT = 300.0
+EMBODY_SEED_HARD_CAP = 900.0
+EMBODY_TIMEOUT = EMBODY_LIFECYCLE_LOCK_WAIT + EMBODY_SEED_HARD_CAP + 120.0
 #: How long live PR titles/states and commit subjects are reused (seconds).
 PR_TTL = 120.0
 SUBJECT_TTL = 300.0

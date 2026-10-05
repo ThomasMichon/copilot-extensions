@@ -538,6 +538,7 @@ class RegisterLiveSessionRequest(BaseModel):
     role: str | None = None
     driven_by: str | None = None
     venue: LiveSessionVenue | None = None
+    process_started_at: float | None = None  # with pid: one process instance; routes refuse non-finite
 
 
 class LiveSessionInfo(BaseModel):
@@ -553,14 +554,13 @@ class LiveSessionInfo(BaseModel):
     role: str | None = None
     driven_by: str | None = None
     status: str = "live"
-    #: Coarse turn-state derived from the represented event tail (Phase 7
-    #: Channel A): "running" | "idle" | None (no turn signal yet).
+    #: Coarse turn-state from the represented event tail: "running" | "idle" | None.
     turn_state: str | None = None
     last_activity_at: float | None = None
     #: Friendly liveness label computed on read: active / stalled / idle / None.
     liveness: str | None = None
     #: Operator-driven session's latest progress beat (parsed object) or None
-    #: (Phase 7 Slice 7c). The live-session analogue of a task's latest_progress.
+    #: (Phase 7 Slice 7c), the live-session analogue of a task's latest_progress.
     latest_progress: dict[str, Any] | None = None
     #: True when this registration claimed a pending CLI-mode Session Host
     #: reservation for its worktree (agent-bridge-cli-mode-sessions Phase 2) --

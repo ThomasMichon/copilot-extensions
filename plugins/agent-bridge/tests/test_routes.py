@@ -3246,12 +3246,19 @@ def test_resolve_local_binstub_uses_pathext_aware_resolution(tmp_path, monkeypat
     assert os.path.normcase(resolved) == os.path.normcase(str(shim))
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows restricts the PATH fallback to a direct manual search "
+    "(see test_resolve_local_binstub_path_fallback_skips_ps1_for_cmd), not "
+    "a bare shutil.which call -- only POSIX still delegates to it.",
+)
 def test_resolve_local_binstub_falls_back_to_path_when_no_local_shim(
     tmp_path, monkeypatch,
 ) -> None:
     """No ``~/.local/bin/<project>`` shim -> fall back to whatever ``PATH``
-    resolves (still via the PATHEXT-aware :func:`shutil.which`), never the
-    bare, unresolved project name."""
+    resolves via :func:`shutil.which` (POSIX's own ``os.access(X_OK)`` check
+    already guarantees direct launchability), never the bare, unresolved
+    project name."""
     import shutil
     from pathlib import Path
 
@@ -3261,6 +3268,192 @@ def test_resolve_local_binstub_falls_back_to_path_when_no_local_shim(
     monkeypatch.setattr(shutil, "which", lambda name: f"/resolved/{name}" if name == "private-downstream-repo" else None)
     resolved = _resolve_local_binstub("private-downstream-repo")
     assert resolved == "/resolved/private-downstream-repo"
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows-only PATH-fallback search; POSIX uses shutil.which "
+    "directly (see test_resolve_local_binstub_falls_back_to_path_when_no_local_shim).",
+)
+def test_resolve_local_binstub_path_fallback_skips_ps1_for_cmd(
+    tmp_path, monkeypatch,
+) -> None:
+    """Regression: the **PATH** fallback (no local
+    ``~/.local/bin/<project>`` shim at all) must apply the identical
+    directly-launchable restriction as the explicit-path case -- a bare
+    ``shutil.which(project)`` could itself resolve to an interpreter-
+    dependent ``.ps1``/``.py``/... match ranked ahead of an equally-present
+    ``.cmd`` on ``PATH``, failing to launch with the same Windows error 193.
+    """
+    from pathlib import Path
+
+    from agent_bridge.routes.worktrees import _resolve_local_binstub
+
+    path_dir = tmp_path / "on-path"
+    path_dir.mkdir(parents=True)
+    (path_dir / "private-downstream-repo.ps1").write_text("# not directly launchable\n")
+    cmd_shim = path_dir / "private-downstream-repo.cmd"
+    cmd_shim.write_text("@echo off\n")
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "empty-home")
+    monkeypatch.setenv("PATH", str(path_dir))
+    monkeypatch.setenv("PATHEXT", ".PS1;.CMD;.EXE")
+    resolved = _resolve_local_binstub("private-downstream-repo")
+    import os as _os
+    assert _os.path.normcase(resolved) == _os.path.normcase(str(cmd_shim))
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="PATHEXT normalization is a Windows-only concern.",
+)
+def test_resolve_local_binstub_normalizes_pathext_whitespace_and_dot(
+    tmp_path, monkeypatch,
+) -> None:
+    """Regression: ``PATHEXT`` entries can carry stray
+    whitespace or (rarely) omit the leading dot -- both must still match a
+    direct-launch extension and build a correct candidate filename, rather
+    than silently never matching or constructing an unseparated name."""
+    from pathlib import Path
+
+    from agent_bridge.routes.worktrees import _resolve_local_binstub
+
+    bin_dir = tmp_path / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    shim = bin_dir / "private-downstream-repo.cmd"
+    shim.write_text("@echo off\n")
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("PATHEXT", " .PS1 ;CMD;.EXE")  # whitespace + dot-less
+    resolved = _resolve_local_binstub("private-downstream-repo")
+    import os as _os
+    assert _os.path.normcase(resolved) == _os.path.normcase(str(shim))
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="PATHEXT fallback is a Windows-only concern.",
+)
+@pytest.mark.parametrize("pathext_value", [None, ""])
+def test_resolve_local_binstub_falls_back_to_default_pathext_when_unset_or_empty(
+    pathext_value, tmp_path, monkeypatch,
+) -> None:
+    """Regression: an unset OR empty ``PATHEXT`` must not
+    silently zero every suffix candidate -- fall back to the same built-in
+    default list ``shutil.which`` itself uses, or an extensionless project
+    name misses an existing ``.cmd`` shim and falls through to the
+    unresolved name."""
+    from pathlib import Path
+
+    from agent_bridge.routes.worktrees import _resolve_local_binstub
+
+    bin_dir = tmp_path / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    shim = bin_dir / "private-downstream-repo.cmd"
+    shim.write_text("@echo off\n")
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    if pathext_value is None:
+        monkeypatch.delenv("PATHEXT", raising=False)
+    else:
+        monkeypatch.setenv("PATHEXT", pathext_value)
+    resolved = _resolve_local_binstub("private-downstream-repo")
+    import os as _os
+    assert _os.path.normcase(resolved) == _os.path.normcase(str(shim))
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX execute-permission semantics; Windows has no X_OK concept "
+    "for a plain file and always takes the PATHEXT branch instead.",
+)
+def test_resolve_local_binstub_skips_non_executable_explicit_path(
+    tmp_path, monkeypatch,
+) -> None:
+    """Regression: a non-executable file sitting at the exact
+    ``~/.local/bin/<project>`` path must not be selected -- ``shutil.which``
+    itself checks ``os.access(X_OK)``, so the explicit-path fast path must
+    too, or a real executable resolvable via ``PATH`` gets masked by a
+    stale/non-executable local file, raising ``PermissionError`` at spawn."""
+    import shutil
+    from pathlib import Path
+
+    from agent_bridge.routes.worktrees import _resolve_local_binstub
+
+    bin_dir = tmp_path / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    non_exec = bin_dir / "private-downstream-repo"
+    non_exec.write_text("not executable\n")
+    non_exec.chmod(0o644)
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(
+        shutil, "which",
+        lambda name: "/resolved/path" if name == "private-downstream-repo" else None,
+    )
+    resolved = _resolve_local_binstub("private-downstream-repo")
+    assert resolved == "/resolved/path"
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="PATHEXT-based extension recognition is a Windows-only concern.",
+)
+def test_resolve_local_binstub_extensionless_file_does_not_mask_cmd_shim(
+    tmp_path, monkeypatch,
+) -> None:
+    """Regression: an extensionless file at the exact
+    ``~/.local/bin/<project>`` path (a stray text file, a POSIX-style
+    script accidentally left over, etc.) is never itself launchable on
+    Windows -- only a suffix ``shutil.which``/``CreateProcess`` recognizes
+    via ``PATHEXT`` is. It must fall through to the adjacent ``.cmd`` shim,
+    not be treated as if it were the real binstub."""
+    import os
+    from pathlib import Path
+
+    from agent_bridge.routes.worktrees import _resolve_local_binstub
+
+    bin_dir = tmp_path / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "private-downstream-repo").write_text("not launchable\n")
+    shim = bin_dir / "private-downstream-repo.cmd"
+    shim.write_text("@echo off\n")
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    resolved = _resolve_local_binstub("private-downstream-repo")
+    assert os.path.normcase(resolved) == os.path.normcase(str(shim))
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="PATHEXT-based extension recognition is a Windows-only concern.",
+)
+def test_resolve_local_binstub_skips_ps1_for_directly_launchable_cmd(
+    tmp_path, monkeypatch,
+) -> None:
+    """Regression: ``PATHEXT`` commonly lists interpreter-
+    dependent extensions (``.PS1``, ``.PY``, ``.JS``, ...) alongside directly
+    launchable ones -- they're there for an interactive shell's own lookup,
+    not because ``create_subprocess_exec`` (no shell, no interpreter) can
+    spawn them. With a ``.ps1`` shim present (even one PATHEXT lists ahead
+    of ``.cmd``), the directly-launchable ``.cmd`` shim must still be
+    selected, never the ``.ps1`` -- picking it would fail with Windows error
+    193 (not a valid Win32 application)."""
+    import os
+    from pathlib import Path
+
+    from agent_bridge.routes.worktrees import _resolve_local_binstub
+
+    bin_dir = tmp_path / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "private-downstream-repo.ps1").write_text("# not directly launchable\n")
+    cmd_shim = bin_dir / "private-downstream-repo.cmd"
+    cmd_shim.write_text("@echo off\n")
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("PATHEXT", ".PS1;.CMD;.EXE")
+    resolved = _resolve_local_binstub("private-downstream-repo")
+    assert os.path.normcase(resolved) == os.path.normcase(str(cmd_shim))
 
 
 def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
