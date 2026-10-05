@@ -99,14 +99,17 @@ the trust model and both postures are owned by the
   `codespace:`/`container:`-namespaced one) is its own venue shape, outside
   the `codespace:`/`container:` namespace-resolver contract described above.
   The dividing line is the **SSH boundary**, not "same machine": a target is
-  **local loopback** only when both the resolved machine *and* its SSH
-  environment (platform) match the dispatcher exactly — a different
-  environment on the same physical machine (for example dispatching from
-  Windows to a WSL environment on that same box) is still reached over SSH
-  and carries the full remote-venue transport/relay requirements above, not
-  the loopback exemption. Every other static target is **genuine remote
-  SSH**, reached over the same SSH transport this vision already mandates,
-  whichever concrete launch shape the coordination layer composes for it.
+  **local loopback** only when the resolved machine, its SSH environment
+  (platform), *and* its effective login identity all match the dispatcher
+  exactly — a different environment on the same physical machine (for
+  example dispatching from Windows to a WSL environment on that same box),
+  or the same machine/environment under a different account, is still
+  reached over SSH and carries the full remote-venue transport/relay
+  requirements above, not the loopback exemption; loopback exists to skip a
+  redundant hop to the dispatcher's own account, never to skip an account
+  boundary. Every other static target is **genuine remote SSH**, reached
+  over the same SSH transport this vision already mandates, whichever
+  concrete launch shape the coordination layer composes for it.
 
   Both sub-shapes are owed the same venue-agnostic-launch guarantee as
   `codespace:`/`container:` targets: a dispatched agent carries the same
