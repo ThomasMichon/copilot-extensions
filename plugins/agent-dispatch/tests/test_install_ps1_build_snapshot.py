@@ -52,6 +52,11 @@ def _extract_function_block(name: str) -> str:
 
 def _run_harness(extra_script: str) -> subprocess.CompletedProcess[str]:
     script = (
+        # Matches install.ps1's own top-level `$ErrorActionPreference = 'Stop'`
+        # (line ~78) -- without it, a non-existent $PluginDir's Get-ChildItem
+        # error is merely non-terminating under pwsh's own 'Continue' default,
+        # which would not reproduce how the real script actually behaves.
+        "$ErrorActionPreference = 'Stop'\n"
         "function Write-Ok { param($m) Write-Host \"OK: $m\" }\n"
         "function Write-Warn { param($m) Write-Host \"WARN: $m\" }\n"
         "function Write-Skip { param($m) Write-Host \"SKIP: $m\" }\n"
@@ -154,3 +159,70 @@ Write-Output "RESULT:$result"
 
     assert snap_dir == plugin_dir
     assert not (install_dir / "snapshots").exists()
+
+
+def test_without_best_effort_a_copy_failure_rethrows(tmp_path: Path) -> None:
+    """Regression (review finding): Invoke-Stamp persists whatever this
+    function returns as the self-provisioning binstub's durable
+    `payload-dir` marker. Without -BestEffort (Invoke-Stamp's call site), a
+    real copy failure must THROW -- matching the script's own top-level
+    `$ErrorActionPreference = 'Stop'` -- rather than silently returning
+    $PluginDir and letting Invoke-Stamp publish a marker pointing at the
+    wrong (transient) directory while reporting success."""
+    plugin_dir = tmp_path / "payload" / "agent-dispatch"
+    install_dir = tmp_path / "install"
+    # A nonexistent $PluginDir makes Get-ChildItem -LiteralPath throw inside
+    # the try block -- a real, generic copy failure, not a validation path.
+    install_dir.mkdir(parents=True)
+
+    extra = f"""
+try {{
+    New-PluginBuildSnapshot -PluginDir "{plugin_dir}" -InstallDir "{install_dir}" -Version "0.1.0-dev1" | Out-Null
+    Write-Output "RESULT:no-throw"
+}} catch {{
+    Write-Output "RESULT:threw"
+}}
+"""
+    result = _run_harness(extra)
+    assert "RESULT:threw" in result.stdout, result.stdout + result.stderr
+
+
+def test_with_best_effort_a_copy_failure_degrades_to_the_live_payload(tmp_path: Path) -> None:
+    """The same failure, but from Install-Runtime's -BestEffort call site,
+    must degrade gracefully instead of aborting the whole install."""
+    plugin_dir = tmp_path / "payload" / "agent-dispatch"
+    install_dir = tmp_path / "install"
+    install_dir.mkdir(parents=True)
+
+    extra = f"""
+try {{
+    $result = New-PluginBuildSnapshot -PluginDir "{plugin_dir}" -InstallDir "{install_dir}" -Version "0.1.0-dev1" -BestEffort
+    Write-Output "RESULT:$result"
+}} catch {{
+    Write-Output "RESULT:threw"
+}}
+"""
+    result = _run_harness(extra)
+    assert f"RESULT:{plugin_dir}" in result.stdout, result.stdout + result.stderr
+
+
+def test_containment_check_is_a_literal_prefix_not_a_wildcard_match(tmp_path: Path) -> None:
+    """Regression (review finding): the no-op containment check must use a
+    literal prefix comparison, not `-like` globbing -- a path containing a
+    literal `[` (a valid, if unusual, directory-name character) must not be
+    mis-matched as a wildcard character class."""
+    install_dir = tmp_path / "inst[all]"
+    plugin_dir = install_dir / "snapshots" / "0.1.0-dev1"
+    _seed_plugin_dir(plugin_dir)
+
+    extra = f"""
+$result = New-PluginBuildSnapshot -PluginDir "{plugin_dir}" -InstallDir "{install_dir}" -Version "0.1.0-dev1"
+Write-Output "RESULT:$result"
+"""
+    result = _run_harness(extra)
+    snap_dir = Path(result.stdout.split("RESULT:", 1)[1].strip().splitlines()[0])
+
+    # Correctly recognized as already-under-$InstallDir -- a no-op, not a
+    # fresh (redundant) copy.
+    assert snap_dir == plugin_dir
+    assert sorted(p.name for p in (install_dir / "snapshots").iterdir()) == ["0.1.0-dev1"]

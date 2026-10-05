@@ -856,19 +856,39 @@ function New-PluginBuildSnapshot {
        first-use `provision` dispatch does -- avoiding a redundant
        copy-of-a-copy on the already-safe path.
 
-       Best-effort: on ANY failure (disk full, permissions, no resolved
-       source version) this logs a warning and returns $PluginDir unchanged,
-       degrading to the pre-existing (lock-vulnerable, but previously the
-       ONLY) behavior rather than aborting the whole install. #>
+       -BestEffort (Install-Runtime's own call site): on ANY copy failure
+       (disk full, permissions) logs a warning and returns $PluginDir
+       unchanged, degrading to the pre-existing (lock-vulnerable, but
+       previously the ONLY) behavior rather than aborting the whole
+       install. Without -BestEffort (Invoke-Stamp's call site, matching its
+       pre-existing behavior under the script's own
+       `$ErrorActionPreference = 'Stop'`): a copy failure THROWS rather
+       than silently publishing a `payload-dir`/`stamped-version` marker
+       that points at the wrong (transient, or merely unchanged) directory
+       -- Invoke-Stamp persists whatever this returns as the self-
+       provisioning binstub's durable source of truth, so a swallowed
+       failure there would silently break first-use provisioning instead
+       of failing the stamp outright. A missing source version always
+       degrades (no version to snapshot under), regardless of -BestEffort. #>
     param(
         [Parameter(Mandatory)][string]$PluginDir,
         [Parameter(Mandatory)][string]$InstallDir,
-        [string]$Version
+        [string]$Version,
+        [switch]$BestEffort
     )
     $installRoot = Resolve-Path -LiteralPath $InstallDir -ErrorAction SilentlyContinue
     if ($installRoot) {
-        $prefix = $installRoot.Path.TrimEnd('\') + '\'
-        if (($PluginDir.TrimEnd('\') + '\') -like "$prefix*") {
+        # Platform-portable, non-wildcard containment check: this script
+        # also runs under pwsh on Linux/macOS, where a hardcoded '\' never
+        # matches and a case-sensitive filesystem makes OrdinalIgnoreCase
+        # wrong -- compare with the real separator and the platform's own
+        # case sensitivity, as a literal prefix (no `-like` globbing, which
+        # would mis-match a path containing '[', ']', or '*').
+        $sep = [IO.Path]::DirectorySeparatorChar
+        $prefix = $installRoot.Path.TrimEnd('/\') + $sep
+        $pluginNorm = $PluginDir.TrimEnd('/\') + $sep
+        $cmp = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+        if ($pluginNorm.StartsWith($prefix, $cmp)) {
             return $PluginDir
         }
     }
@@ -894,6 +914,7 @@ function New-PluginBuildSnapshot {
         Write-Ok "Building from durable snapshot: $snapDir (never locks the marketplace payload)"
         return $snapDir
     } catch {
+        if (-not $BestEffort) { throw }
         Write-Warn "Could not create build snapshot ($($_.Exception.Message)) -- building from the live payload"
         return $PluginDir
     }
@@ -1046,7 +1067,9 @@ function Install-Runtime {
     # swappable marketplace payload ($PluginDir) -- so a uv/setuptools build
     # subprocess's own cwd can never block `copilot plugin update`. See
     # New-PluginBuildSnapshot's docstring for the confirmed incident.
-    $BuildSrcDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion
+    # -BestEffort: a failed snapshot here only means building from the live
+    # payload again (the prior, only-ever behavior) -- not fatal.
+    $BuildSrcDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion -BestEffort
 
     $hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
 
