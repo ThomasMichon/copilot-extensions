@@ -96,31 +96,39 @@ owns their lifecycle — the multiplexer itself almost certainly didn't fail;
 its **backing shell process did**, and every pane sharing that host lost its
 process at the same time. Check the host's crash/application event log for
 the actual shell binary (`pwsh.exe` on Windows, the Application log, Event ID
-1000) before assuming a mux or agent-worktrees defect: a `tmux`/`psmux` server
-only reports a session as gone once the process it was holding onto exits,
-so a cluster of simultaneous session deaths reads as a mux problem but is
-really a shell-runtime problem underneath it.
+1000) **and** for `psmux.exe`/`conhost.exe` themselves before assuming a mux
+or agent-worktrees defect: a `tmux`/`psmux` server only reports a session as
+gone once the process it was holding onto exits, so a cluster of simultaneous
+session deaths reads as a mux problem but is really a shell-runtime problem
+underneath it — though which layer (the shell, or the console host process
+hosting it) is the true root cause isn't always obvious from a single crash
+signature alone, since one can present as a symptom of the other.
 
-**A confirmed repeat offender:** PowerShell 7.6.6 (ARM64)'s `Console Host`
-(`Microsoft.PowerShell.ConsoleHost.dll`) has fast-failed repeatedly
-(`Environment.FailFast`, exception code `0x80131623`, same binary fault
-offset across occurrences) specifically when hosted inside a `psmux`-managed
-redirected console — i.e. exactly the pattern every muxed Windows worktree
-session runs under. Each crash kills the `pwsh.exe` process backing that pane;
-with several panes sharing the same crash-prone binary, a burst of unrelated-
-looking "session gone" reports can land within the same few minutes. The
-multiplexer, agent-worktrees, and the worktree lifecycle are all innocent here
-— this is a host PowerShell packaging defect, not a mux defect.
+**An observed compatibility signature:** PowerShell 7.6.6 (ARM64)'s
+`Console Host` (`Microsoft.PowerShell.ConsoleHost.dll`) has been seen
+fast-failing repeatedly (`Environment.FailFast`, exception code
+`0x80131623`, same binary fault offset across occurrences) when hosted
+inside a `psmux`-managed redirected console — i.e. exactly the pattern every
+muxed Windows worktree session runs under. Each crash kills the `pwsh.exe`
+process backing that pane; with several panes sharing the same crash-prone
+binary, a burst of unrelated-looking "session gone" reports can land within
+the same few minutes. Treat this as a reproducible compatibility signature to
+rule in or out, not a confirmed root cause: the same fault code has also been
+reported upstream as a downstream symptom of a `conhost.exe` failure, and an
+exit of the shared mux server can independently take down every otherwise-
+unrelated pane. Inspect `psmux.exe`/`conhost.exe` events alongside `pwsh.exe`
+before concluding which layer actually failed first.
 
-**Mitigation:** pin the host's PowerShell install to the 7.4 LTS line instead
-of latest-stable 7.6.x until the upstream regression is resolved (7.4.20 is
-supported through 2026-11-10 at time of writing). If you manage the host
-through `agent-machines`, express this as a declarative `package` resource
-(`manager: winget`, `id: Microsoft.PowerShell`, an explicit `version`, and
-`pin: true`, optionally a `process_guard` on `pwsh.exe` so a live session
-defers the downgrade rather than racing it) rather than a one-off manual
-`winget` command, so the pin survives machine re-provisioning. See
-`docs/resources.md` in the `agent-machines` plugin for the resource schema.
+**Mitigation, if this signature matches:** pin the host's PowerShell install
+to the 7.4 LTS line instead of latest-stable 7.6.x as a low-cost compatibility
+workaround (7.4.20 is supported through 2026-11-10 at time of writing). If you
+manage the host through `agent-machines`, express this as a declarative
+`package` resource (`manager: winget`, `id: Microsoft.PowerShell`, an explicit
+`version`, and `pin: true`, optionally a `process_guard` on `pwsh.exe` so a
+live session defers the downgrade rather than racing it) rather than a
+one-off manual `winget` command, so the pin survives machine
+re-provisioning. See `docs/resources.md` in the `agent-machines` plugin for
+the resource schema.
 
 ## See also
 
