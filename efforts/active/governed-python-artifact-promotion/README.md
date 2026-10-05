@@ -1310,6 +1310,32 @@ win grows with build complexity.
   checks clean, and smoke-tested genuine cross-PROCESS exclusion
   directly: a parent process holds the lock, a real child process
   blocks until the parent releases, then acquires immediately.
+- A thirtieth review round found two issues in the required
+  `windows-python-artifact-builder` job itself. (1) It used a bare
+  `pip install pytest` instead of `uv`, violating this repo's own
+  dependency-tooling rule; replaced with `astral-sh/setup-uv` +
+  `uv run --with pytest`, matching this file's other Windows jobs. (2)
+  More substantively, that job did not actually gate the round-29
+  `LockFileEx` fix at all: its only `windows_only` tests covered
+  System32/SID lookup, while the lock's own concurrency tests are
+  unmarked, same-process, cross-THREAD tests -- they only ever ran in
+  the Ubuntu job (exercising the `fcntl` branch, never `LockFileEx`) and
+  couldn't have exercised the cross-session gap even running on
+  Windows, since two threads in one process share a session by
+  definition. Added a new `windows_only` test spawning a genuine CHILD
+  PROCESS to hold/contend for the lock, proving real OS-level
+  `LockFileEx` exclusion end-to-end, and wired it into the required
+  lane.
+
+  1 more unit test (199 total, all passing; 3 still skipped on Ubuntu,
+  as before -- the new test runs for real on Windows).
+  `check-module-size.py` and `ruff check --select F,E9
+  --output-format=github .` both pass clean. The exact `-m windows_only`
+  pytest invocation (matching what `uv run --with pytest` ultimately
+  executes) passes all 4 Windows-only tests on a real Windows machine;
+  the `uv run` wrapper itself couldn't be locally verified due to an
+  unrelated broken `uv` shim on this dev machine, so real CI is the
+  authoritative check for that one step.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 
