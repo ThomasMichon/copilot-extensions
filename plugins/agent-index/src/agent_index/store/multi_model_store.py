@@ -33,6 +33,7 @@ from agent_index.store.item_repr import (
     item_content_hash,
     pool_vectors,
 )
+from agent_index.store.repo_filter import repo_matches
 from agent_index.store.store import SearchResult
 from agent_index.store.vector_table import VectorHit, VectorTable
 
@@ -1000,13 +1001,10 @@ def _apply_filters(
 ) -> list[SearchResult]:
     """Post-filter search results by metadata fields.
 
-    ``source`` matches a source exactly or as a subtype prefix
-    (``forge:issues`` matches ``forge:issues:owner/repo``).  ``repo`` is an
-    orthogonal sub-filter that matches the trailing ``owner/repo`` of any
-    Forge source regardless of subtype (``forge:*:owner/repo``).
-    ``labels`` / ``camera`` / ``voice`` are multi-valued metadata facets that
-    each use OR semantics — a result matches if its corresponding
-    ``metadata`` facet contains ANY of the requested values.
+    ``source`` matches exactly or as a subtype prefix (``git:odsp-web-harness``
+    matches its own ``:commits`` byproduct too). ``repo`` matches ANY source
+    (any type prefix/byproduct) for a given repo -- see ``repo_matches``.
+    ``labels``/``camera``/``voice`` are OR-matched multi-valued facets.
     """
     facets = {"labels": labels, "camera": camera, "voice": voice}
     if not any((source, language, file_path_glob, repo, *facets.values())):
@@ -1021,7 +1019,7 @@ def _apply_filters(
         import fnmatch
         filtered = [r for r in filtered if fnmatch.fnmatch(r.file_path, file_path_glob)]
     if repo:
-        filtered = [r for r in filtered if r.source.endswith(f":{repo}")]
+        filtered = [r for r in filtered if repo_matches(r.source, repo)]
     for key in _FACET_KEYS:
         wanted = facets[key]
         if wanted:
