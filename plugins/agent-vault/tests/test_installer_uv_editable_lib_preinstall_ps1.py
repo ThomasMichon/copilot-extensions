@@ -23,12 +23,12 @@ INSTALLER = PLUGIN / "scripts" / "install.ps1"
 pytestmark = pytest.mark.guard
 
 _LOOP_START = "    foreach ($lib in @('zdd', 'agent-procutil', 'single-instance-lease')) {"
-_LOOP_END = "\n    if (Get-Command uv -ErrorAction SilentlyContinue) {\n        $pkgOut ="
+_LOOP_END = "\n    }\n    if (Get-Command uv -ErrorAction SilentlyContinue) {\n        $pkgResultObj ="
 
 
 def _extract_loop() -> str:
     text = INSTALLER.read_text(encoding="utf-8")
-    return _LOOP_START + text.split(_LOOP_START, 1)[1].split(_LOOP_END, 1)[0]
+    return _LOOP_START + text.rsplit(_LOOP_START, 1)[1].split(_LOOP_END, 1)[0] + "\n    }"
 
 
 def _run(
@@ -39,6 +39,11 @@ def _run(
 function uv {{
     Add-Content -Path '{marker}' -Value ("UV_INSTALL_ARGS:" + ($args -join ' '))
     $global:LASTEXITCODE = 0
+}}
+function Invoke-UvPipInstallResilient {{
+    param([string[]]$Arguments, [string]$UvCommand = 'uv', [string]$PayloadDirToScrub)
+    & $UvCommand @Arguments
+    return [pscustomobject]@{{ Output = ''; ExitCode = $LASTEXITCODE }}
 }}
 """ if have_uv else ""
     script = f"""

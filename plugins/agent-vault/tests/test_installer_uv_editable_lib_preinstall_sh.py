@@ -40,6 +40,7 @@ def _run(
 set -uo pipefail
 _fail() {{ echo "FAIL:$1"; exit 1; }}
 uv() {{ echo "UV_INSTALL_ARGS:$*" >> '{marker}'; }}
+invoke_uv_pip_install_resilient() {{ local uv_cmd=\"$1\"; shift; \"$uv_cmd\" pip install \"$@\"; }}
 VENV_PYTHON=venv_python_stub
 venv_python_stub() {{ echo "PIP_INSTALL_ARGS:$*" >> '{marker}'; }}
 PLUGIN_DIR='{plugin_dir}'
