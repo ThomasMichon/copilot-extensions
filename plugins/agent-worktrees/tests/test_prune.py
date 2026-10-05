@@ -405,6 +405,23 @@ class TestCleanupDisposition:
         d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
         assert d.bucket == "held-claims"
 
+    def test_unknown_owning_machine_identity_stays_generic(self):
+        # A legacy record with an empty machine identity (tracking.py) can
+        # never be proven cross-machine either way -- comparing a qualified
+        # ref's machine against "" would make every qualified worktree
+        # claim compare unequal and misclassify as cross-machine. Fall back
+        # to the generic bucket rather than guessing.
+        rec = _rec(status="finalized")
+        rec.machine = ""
+        rec.resources = [
+            tracking.ResourceClaim(
+                kind="worktree",
+                ref=tracking.format_claim_ref("other-machine", "proj", "wt-child"),
+                state="active"),
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.bucket == "held-claims"
+
     def test_released_claim_does_not_block_cleanup(self):
         rec = _rec(status="finalized")
         rec.resources = [

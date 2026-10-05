@@ -266,7 +266,14 @@ def _count_cross_machine_worktree_claims(
     unjudgeable cross-machine ref, and ``worktree`` isn't in
     ``sweep._LEASEABLE_KINDS``). See the ``cross_machine_claims`` doc on
     :func:`assemble_closure_descriptor` for what this does and doesn't claim.
+
+    ``this_machine`` falsy/unknown (a legacy record with an empty
+    ``machine``, ``tracking.py``) means we cannot tell local from remote at
+    all -- never guess cross-machine from an unknown identity; this always
+    returns ``0`` in that case, keeping the conservative generic bucket.
     """
+    if not this_machine:
+        return 0
     count = 0
     for claim in held_claims:
         if claim.kind != "worktree":
