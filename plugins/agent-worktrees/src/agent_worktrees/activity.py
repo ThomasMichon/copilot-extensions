@@ -658,6 +658,55 @@ def render_events(events: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def add_parsers(sub) -> None:
+    """Register the activity / activity-log / activity-prune-worker verbs."""
+    sp = sub.add_parser(
+        "activity",
+        help="View the worktree/session lifecycle activity log",
+    )
+    sp.add_argument(
+        "--since",
+        default=None,
+        help="Only show events newer than this (e.g. 2d, 12h, "
+        "30m, or an ISO date). Default: all retained.",
+    )
+    sp.add_argument("--worktree-id", default=None, help="Filter to a single worktree id")
+    sp.add_argument(
+        "--launch-id",
+        dest="launch_id",
+        default=None,
+        help="Filter to a single launch flow (correlation id)",
+    )
+    sp.add_argument("--event", default=None, help="Filter to a single event type")
+    sp.add_argument("--lines", type=int, default=None, help="Show only the most recent N events")
+    sp.add_argument(
+        "--json", action="store_true", help="Emit one JSON object per line instead of a table"
+    )
+
+    sp = sub.add_parser(
+        "activity-log",
+        help="Append one lifecycle event to the activity log (internal)",
+    )
+    sp.add_argument("event", help="Event name")
+    sp.add_argument("--worktree-id", default=None, help="Worktree ID (default: resolved from cwd)")
+    sp.add_argument("--session-id", default=None)
+    sp.add_argument(
+        "--launch-id", dest="launch_id", default=None, help="Launch-flow correlation id"
+    )
+    sp.add_argument("--source", default="launcher")
+    sp.add_argument(
+        "--field", action="append", default=[], help="Extra context as key=value (repeatable)"
+    )
+
+    # internal; dispatched detached by _maybe_prune, never run interactively
+    sp = sub.add_parser(
+        "activity-prune-worker",
+        help="Prune a large activity log in the background (internal)",
+    )
+    sp.add_argument("path", help="Path to the activity.jsonl log to prune")
+    sp.add_argument("retention_days", help="Retention window in days")
+
+
 def cmd_activity(args) -> int:
     """``agent-worktrees activity`` -- view the lifecycle log."""
     since = None
