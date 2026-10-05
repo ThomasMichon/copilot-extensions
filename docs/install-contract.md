@@ -1596,6 +1596,32 @@ diagnostic tool) can check
 `[[ -f "$INSTALL_DIR/update-in-progress" ]] && (( $(cat ...) > $(date +%s) ))`
 without needing any plugin-specific caller-side cooperation.
 
+**Reference-counted, not single-owner.** A long-running `do_update`/
+`Invoke-Update` and a short `do_start`/`Invoke-Start` can legitimately
+overlap (neither serializes against the other beyond the install lock each
+already takes independently). A naive "last writer wins" marker breaks
+here: the short call's exit-time cleanup would delete the marker while the
+long call is still genuinely mid-transition. Both languages instead guard
+a small on-disk counter with a dedicated lock — **`flock` on a separate fd
+(never the main install-lock fd)** for `.sh`, a named
+**`System.Threading.Mutex`** for `.ps1` (the Windows cross-process
+primitive; `flock` has no Windows equivalent) — so the first caller to
+enter (count 0→1) writes the marker with a fresh expiry, later concurrent
+callers just increment, and only the caller that brings the count back to
+0 actually removes the marker. A same-process nested call (`do_update`
+calling `do_start` internally, where that pattern exists) is tracked via a
+process-local "already held" flag so it reuses the outer holder's slot
+rather than double-incrementing.
+
+**Scope: covers the installer's own lifecycle only.** This marker is
+written by the `do_update`/`do_start` (`Invoke-Update`/`Invoke-Start`)
+code paths in these install scripts. It does **not** cover
+`agent-dispatch`'s coordinator-driven self-deploy/successor-respawn paths
+(the coordinator process redeploying or replacing itself without going
+through the installer's CLI entry point) — a consumer watching this marker
+sees no transition during those, and must not assume it has full coverage
+of every way the daemon can restart.
+
 Cleared on **every** exit path uniformly — success, a cutover-then-fallback,
 a failed update's rollback, or an unhandled error — via a single cleanup
 hook per language rather than scattered manual clears at each return site:

@@ -282,15 +282,90 @@ function Write-Step    { param([string]$Msg) Write-Host "  ...    $Msg" -Foregro
 # any plugin-specific caller-side wrapping. $UpdateMarker itself is set once
 # $InstallDir is finalized below; these two functions only reference it at
 # call time, so defining them here is safe.
+#
+# Process-local: true once THIS invocation holds a refcount slot.
+$script:UpdateMarkerHeld = $false
+
+# Reference-counted, not single-owner: Invoke-Update holding the marker for
+# a long cutover and a separate, brief Invoke-Start both legitimately want
+# it live at once, and a single-owner/last-writer-wins scheme would let the
+# SHORT invocation's own exit delete the marker while the LONG one is still
+# mid-transition -- the marker must stay present until every concurrent
+# holder has released its own slot, not just the most recent one. A named
+# System.Threading.Mutex (the standard cross-process lock primitive on
+# Windows) makes increment/decrement atomic across processes.
+#
+# `New-Item -Force` the parent directory first: on a fresh or deleted
+# install root, $InstallDir itself may not exist yet at the point either
+# live-service lifecycle starts (its own provisioning step is what would
+# normally create it) -- the marker must not fail BEFORE that provisioning
+# ever gets a chance to run.
+function Get-UpdateMarkerMutex {
+    $name = 'Local\' + ($UpdateMarker -replace '[^a-zA-Z0-9]', '_') + '_refcount'
+    return New-Object System.Threading.Mutex($false, $name)
+}
 function Write-UpdateMarker {
     param([int]$TtlSeconds = $UpdateMarkerTtlDefault)
-    $expiry = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + $TtlSeconds
-    $tmp = "$UpdateMarker.$([Guid]::NewGuid().ToString('N'))"
-    Set-Content -Path $tmp -Value $expiry -NoNewline
-    Move-Item -Path $tmp -Destination $UpdateMarker -Force
+    if ($script:UpdateMarkerHeld) { return }
+    New-Item -ItemType Directory -Force -Path (Split-Path $UpdateMarker -Parent) | Out-Null
+    $countPath = "$UpdateMarker.refcount"
+    $mutex = Get-UpdateMarkerMutex
+    $acquired = $false
+    try {
+        $acquired = $mutex.WaitOne(10000)
+        $count = 0
+        if (Test-Path $countPath) {
+            $raw = Get-Content -Path $countPath -Raw -ErrorAction SilentlyContinue
+            if ($raw) { [int]::TryParse($raw.Trim(), [ref]$count) | Out-Null }
+        }
+        if ($count -eq 0) {
+            # First holder: stamp a fresh marker. A later joiner deliberately
+            # does NOT refresh the expiry -- the TTL is a safety-net backstop,
+            # not a per-holder renewal lease.
+            $expiry = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + $TtlSeconds
+            $tmp = "$UpdateMarker.$([Guid]::NewGuid().ToString('N'))"
+            Set-Content -Path $tmp -Value $expiry -NoNewline
+            Move-Item -Path $tmp -Destination $UpdateMarker -Force
+        }
+        $count++
+        $tmp2 = "$countPath.$([Guid]::NewGuid().ToString('N'))"
+        Set-Content -Path $tmp2 -Value $count -NoNewline
+        Move-Item -Path $tmp2 -Destination $countPath -Force
+        $script:UpdateMarkerHeld = $true
+    } finally {
+        if ($acquired) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
 }
+# Releases this invocation's own refcount slot; only the holder that takes
+# the count to zero actually removes the marker file, so it stays present
+# for the full duration of whichever concurrent transition runs longest.
 function Clear-UpdateMarker {
-    Remove-Item -Path $UpdateMarker -Force -ErrorAction SilentlyContinue
+    if (-not $script:UpdateMarkerHeld) { return }
+    $script:UpdateMarkerHeld = $false
+    $countPath = "$UpdateMarker.refcount"
+    $mutex = Get-UpdateMarkerMutex
+    $acquired = $false
+    try {
+        $acquired = $mutex.WaitOne(10000)
+        $count = 0
+        if (Test-Path $countPath) {
+            $raw = Get-Content -Path $countPath -Raw -ErrorAction SilentlyContinue
+            if ($raw) { [int]::TryParse($raw.Trim(), [ref]$count) | Out-Null }
+        }
+        if ($count -gt 0) { $count-- }
+        if ($count -le 0) {
+            Remove-Item -Path $UpdateMarker -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path $countPath -Force -ErrorAction SilentlyContinue
+        } else {
+            $tmp = "$countPath.$([Guid]::NewGuid().ToString('N'))"
+            Set-Content -Path $tmp -Value $count -NoNewline
+            Move-Item -Path $tmp -Destination $countPath -Force
+        }
+    } finally {
+        if ($acquired) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
 }
 
 # -- Paths --------------------------------------------------------------

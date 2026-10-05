@@ -61,20 +61,73 @@ _step() { printf '  ...    %s\n' "$1"; }
 # reference it at call time, so defining them here (alongside the other
 # early helpers) is safe.
 #
-# Atomic write (temp-file + `mv -f`) so a reader never sees a truncated/
-# partial file mid-write. Call once, then `trap _clear_update_marker EXIT`
-# immediately after -- a global EXIT trap (never a function-local RETURN
-# trap) is the only one guaranteed to still fire when `set -euo pipefail`
-# terminates the whole script on an unexpected command failure rather than
-# returning normally from the caller.
+# Process-local: true once THIS invocation holds a refcount slot.
+_UPDATE_MARKER_HELD=false
+#
+# Reference-counted, not single-owner: do_update holding the marker for a
+# long cutover and a separate, brief do_start both legitimately want it
+# live at once, and a single-owner/last-writer-wins scheme would let the
+# SHORT invocation's own exit delete the marker while the LONG one is
+# still mid-transition -- the marker must stay present until every
+# concurrent holder has released its own slot, not just the most recent
+# one. The refcount file + its own dedicated flock (fd 9, separate from
+# the main install lock so a brief do_start never needs to contend for --
+# or risk reentering -- that longer-held lock) make increment/decrement
+# atomic across processes.
+#
+# `mkdir -p` first: on a fresh or deleted install root, $INSTALL_DIR itself
+# may not exist yet at the point either live-service lifecycle starts (its
+# own provisioning step is what would normally create it) -- the marker
+# must not fail BEFORE that provisioning ever gets a chance to run.
 _write_update_marker() {
+    if [[ "$_UPDATE_MARKER_HELD" == true ]]; then
+        return 0
+    fi
     local ttl="${1:-${UPDATE_MARKER_TTL_DEFAULT}}"
-    local tmp
-    tmp="$(mktemp "${UPDATE_MARKER}.XXXXXX")"
-    echo "$(( $(date +%s) + ttl ))" > "${tmp}"
-    mv -f "${tmp}" "${UPDATE_MARKER}"
+    mkdir -p "$(dirname "${UPDATE_MARKER}")"
+    exec 9>"${UPDATE_MARKER_REFCOUNT_LOCK}"
+    flock -w 10 9 || true   # best-effort: proceed even if briefly uncontended-but-slow
+    local count tmp
+    count="$(cat "${UPDATE_MARKER_REFCOUNT}" 2>/dev/null || echo 0)"
+    [[ "$count" =~ ^[0-9]+$ ]] || count=0
+    if (( count == 0 )); then
+        # First holder: stamp a fresh marker. A later joiner deliberately
+        # does NOT refresh the expiry -- the TTL is a safety-net backstop,
+        # not a per-holder renewal lease.
+        tmp="$(mktemp "${UPDATE_MARKER}.XXXXXX")"
+        echo "$(( $(date +%s) + ttl ))" > "${tmp}"
+        mv -f "${tmp}" "${UPDATE_MARKER}"
+    fi
+    tmp="$(mktemp "${UPDATE_MARKER_REFCOUNT}.XXXXXX")"
+    echo "$(( count + 1 ))" > "${tmp}"
+    mv -f "${tmp}" "${UPDATE_MARKER_REFCOUNT}"
+    exec 9>&-
+    _UPDATE_MARKER_HELD=true
 }
-_clear_update_marker() { rm -f "${UPDATE_MARKER}"; }
+# Releases this invocation's own refcount slot; only the holder that takes
+# the count to zero actually removes the marker file, so it stays present
+# for the full duration of whichever concurrent transition runs longest.
+# Best-effort: a read/write race here is never fatal to the caller's own
+# exit (the TTL remains the backstop if the refcount file itself is ever
+# lost or corrupted).
+_clear_update_marker() {
+    [[ "$_UPDATE_MARKER_HELD" == true ]] || return 0
+    _UPDATE_MARKER_HELD=false
+    exec 9>"${UPDATE_MARKER_REFCOUNT_LOCK}" 2>/dev/null || return 0
+    flock -w 10 9 || true
+    local count tmp
+    count="$(cat "${UPDATE_MARKER_REFCOUNT}" 2>/dev/null || echo 0)"
+    [[ "$count" =~ ^[0-9]+$ ]] || count=0
+    (( count > 0 )) && (( count-- ))
+    if (( count <= 0 )); then
+        rm -f "${UPDATE_MARKER}" "${UPDATE_MARKER_REFCOUNT}"
+    else
+        tmp="$(mktemp "${UPDATE_MARKER_REFCOUNT}.XXXXXX")"
+        echo "${count}" > "${tmp}"
+        mv -f "${tmp}" "${UPDATE_MARKER_REFCOUNT}"
+    fi
+    exec 9>&-
+}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -259,6 +312,8 @@ fi
 VENV_DIR="$INSTALL_DIR/.venv"
 UPDATE_MARKER="${INSTALL_DIR}/update-in-progress"
 UPDATE_MARKER_TTL_DEFAULT=1200  # 20 min -- generous past any observed real cutover
+UPDATE_MARKER_REFCOUNT="${UPDATE_MARKER}.refcount"
+UPDATE_MARKER_REFCOUNT_LOCK="${UPDATE_MARKER}.refcount.lock"
 LOCAL_BIN="$HOME/.local/bin"
 VENV_PYTHON="$VENV_DIR/bin/python"
 STUB="$LOCAL_BIN/agent-dispatch"
