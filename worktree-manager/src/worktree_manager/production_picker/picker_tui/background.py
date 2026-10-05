@@ -15,7 +15,7 @@ import threading
 from typing import Callable
 from uuid import uuid4
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("agent-worktrees.picker")
 
 
 def run_background(

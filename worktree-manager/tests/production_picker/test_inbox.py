@@ -24,6 +24,9 @@ from worktree_manager.production_picker.picker_tui.inbox import (
 from worktree_manager.production_picker.picker_tui.engine_runtime import (
     PickerScreenRuntimeMixin,
 )
+from worktree_manager.production_picker.picker_tui.engine_loading import (
+    PickerScreenLoadingMixin,
+)
 
 
 class _RecordingOwner:
@@ -385,6 +388,44 @@ def test_drain_apply_runs_every_closure_even_when_one_raises():
     assert sorted(ran) == ["boom", "first", "last"]
 
 
+def test_drain_apply_propagates_the_exception_in_deterministic_posting_order():
+    """``_pending`` is insertion-ordered specifically so that, when more
+    than one closure in a batch raises, WHICH exception propagates is
+    deterministic (the first one posted), never varying run to run the
+    way it would under an unordered ``set``."""
+    inbox, _ = _inbox_with_foreign_home()
+
+    def _raise(msg):
+        def _inner():
+            raise ValueError(msg)
+        return _inner
+
+    inbox.post("first", _raise("first failure"))
+    inbox.post("second", _raise("second failure"))
+    with pytest.raises(ValueError, match="first failure"):
+        inbox.drain_apply()
+
+
+def test_drain_apply_does_not_catch_keyboard_interrupt_or_system_exit():
+    """A closure raising a process-control exception must propagate
+    immediately, like it would anywhere else -- never get captured,
+    deferred behind other closures, and re-raised later as if it were an
+    ordinary producer failure."""
+    inbox, _ = _inbox_with_foreign_home()
+    ran = []
+
+    def _interrupt():
+        raise KeyboardInterrupt()
+
+    inbox.post("ctrl-c", _interrupt)
+    inbox.post("after", lambda: ran.append("after"))
+    with pytest.raises(KeyboardInterrupt):
+        inbox.drain_apply()
+    # Unlike an ordinary Exception, this one is NOT required to let later
+    # closures in the batch run first -- it's a process-control signal.
+    assert ran == []
+
+
 def test_home_thread_post_never_consults_post_message_even_if_it_would_raise():
     """The home-thread shortcut applies inline unconditionally -- it must not
     depend on (or be defeated by) a broken ``post_message``, since the whole
@@ -452,6 +493,29 @@ def test_drain_inbox_swallows_a_raising_closure_instead_of_crashing_the_render_f
     assert any(
         "a posted closure raised" in r.message for r in caplog.records
     )
+
+
+def test_apply_from_worker_posts_distinct_slots_without_uuid_overhead():
+    """``_apply_from_worker`` names each posted slot from a cheap,
+    module-level counter rather than a fresh ``uuid4()`` per call -- confirm
+    repeated calls still get distinct slots (no coalescing two unrelated
+    outcomes together) and both callbacks survive a drain."""
+
+    class _Screen(PickerScreenLoadingMixin):
+        pass
+
+    screen = _Screen()
+    # Give the screen an Inbox whose home thread is NOT this test's own --
+    # otherwise each post below would apply immediately inline (the
+    # home-thread shortcut), leaving nothing pending to assert on.
+    inbox, _ = _inbox_with_foreign_home(screen)
+    screen.inbox = inbox
+    ran = []
+    screen._apply_from_worker(lambda: ran.append("first"))
+    screen._apply_from_worker(lambda: ran.append("second"))
+    assert len(screen.inbox.pending_slots()) == 2
+    assert screen.inbox.drain_apply() == 2
+    assert sorted(ran) == ["first", "second"]
 
 
 def test_inbox_updated_message_carries_no_payload_and_names_its_handler():

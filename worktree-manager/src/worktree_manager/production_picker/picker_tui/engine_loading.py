@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import contextlib
+import itertools
 import os
 import threading
 import time
 
 from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_loader, target_rows
+from .inbox import ensure_inbox
 from .selection import ListSelection
 from .. import project_config as cfg
+
+#: Supplies a unique suffix for ``_apply_from_worker``'s inbox slot name,
+#: cheaper than a fresh ``uuid4()`` per call (this can run on a hot path --
+#: a frequent loader update) and already thread-safe: CPython's
+#: ``itertools.count.__next__`` is a single, atomic C-level operation.
+_WORKER_APPLY_SEQ = itertools.count()
 
 # How long the Picker's shared config-cache scope (below) keeps a direct-file
 # snapshot before treating it as stale and recomputing it. Long enough to cover
@@ -281,11 +289,9 @@ class PickerScreenLoadingMixin:
         posting from the inbox's own home thread applies immediately rather
         than waiting on a wake that, with no event loop running yet, might
         never come."""
-        import uuid
-
-        from .inbox import ensure_inbox
-
-        ensure_inbox(self).post(f"worker-apply:{uuid.uuid4().hex}", callback)
+        ensure_inbox(self).post(
+            f"worker-apply:{next(_WORKER_APPLY_SEQ)}", callback
+        )
     def _prepare_live_source(self, snapshot):
         """Resolve source/config-derived values on the setup worker."""
         source_tabs = getattr(self.src, "source_tabs", None)

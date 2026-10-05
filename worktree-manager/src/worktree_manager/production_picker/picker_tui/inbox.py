@@ -57,8 +57,11 @@ class Inbox:
         """``owner`` is the Textual ``MessagePump`` (widget, screen, or app)
         this inbox wakes via ``post_message`` -- it needs no running App yet
         at construction time; the first ``post()`` is what actually requires
-        one (a ``post_message`` call against an unmounted/appless owner is a
-        harmless no-op, matching ``MessagePump``'s own contract).
+        one. ``MessagePump.post_message`` itself never raises against an
+        unmounted/appless owner, but it CAN return ``False`` (an
+        undeliverable wake) in that case -- ``Inbox.post()`` treats that
+        exactly like any other failed wake (logs a warning, returns
+        ``False``), it is not silently absorbed as a no-op.
 
         Records the constructing thread as the inbox's "home" thread --
         normally the owner's own render/event-loop thread, since a widget is
@@ -67,7 +70,13 @@ class Inbox:
         self._owner = owner
         self._lock = threading.Lock()
         self._slots: dict[str, Any] = {}
-        self._pending: set[str] = set()
+        # A ``dict`` used as an insertion-ordered set (Python's own dict
+        # preserves insertion order; values are unused placeholders) --
+        # ``drain_apply()`` documents re-raising the *first* exception in
+        # *posting order*, which requires a deterministic iteration order. A
+        # plain ``set`` would make that guarantee (and which exception wins
+        # when more than one closure raises) vary from run to run.
+        self._pending: dict[str, None] = {}
         self._wake_queued = False
         # Reentrant: a test double's (or any other same-thread, inline)
         # ``post_message`` may synchronously call back into
@@ -116,7 +125,7 @@ class Inbox:
         """
         with self._lock:
             self._slots[slot] = value
-            self._pending.add(slot)
+            self._pending[slot] = None
         if threading.get_ident() == self._home_thread_id:
             self.drain_apply()
             return True
@@ -197,21 +206,31 @@ class Inbox:
         it runs even if an earlier one raises -- a batch is independent
         producers' results, and one producer's failure must never cause a
         later, unrelated producer's own outcome to go silently unapplied.
-        The first exception raised (in posting order) is re-raised after
-        every closure has had a chance to run; any further exception is
-        logged, not swallowed, so it is at least diagnosable even though
-        only one exception can propagate.
+        The first exception raised (in posting order -- ``_pending``
+        preserves insertion order precisely so this is deterministic) is
+        re-raised after every closure has had a chance to run; any further
+        exception is logged, not swallowed, so it is at least diagnosable
+        even though only one exception can propagate.
+
+        Only ``Exception`` (not ``BaseException``) is caught here: a
+        closure raising ``KeyboardInterrupt``/``SystemExit`` is a
+        process-control signal, not an ordinary producer failure, and must
+        propagate immediately like it would anywhere else -- never get
+        captured, deferred past other closures, and re-raised later as if
+        it were a regular exception. This also matches
+        ``engine_runtime._drain_inbox()``'s own boundary catch, which only
+        ever catches ``Exception``.
 
         Returns the number of closures actually invoked.
         """
         applied = 0
-        first_exc: BaseException | None = None
+        first_exc: Exception | None = None
         for value in self.drain().values():
             if not callable(value):
                 continue
             try:
                 value()
-            except BaseException as exc:  # noqa: BLE001 -- see docstring
+            except Exception as exc:
                 if first_exc is None:
                     first_exc = exc
                 else:
@@ -245,7 +264,7 @@ class Inbox:
         """
         with self._lock:
             was_pending = slot in self._pending
-            self._pending.discard(slot)
+            self._pending.pop(slot, None)
             self._slots.pop(slot, None)
             return was_pending
 
