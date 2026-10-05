@@ -543,6 +543,36 @@ class TestFetchBaselineAsset:
         with pytest.raises(correlation.BaselineFetchError):
             correlation.fetch_baseline_asset("owner/repo", self._POINTER)
 
+    def test_raises_when_a_coverage_entrys_per_line_value_is_not_a_mapping(self, monkeypatch) -> None:
+        # Regression: a shallow-valid top-level coverage dict whose PER-FILE
+        # entry is itself a list (not a line-number -> test-list mapping)
+        # must also be rejected here -- not escape as a raw AttributeError
+        # from `ancestor_resolution.remap_or_invalidate_baseline`'s own
+        # `per_line.items()` call downstream.
+        payload = {**self._VALID_PAYLOAD, "coverage": {"f.py": []}}
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_when_a_coverage_lines_test_list_is_malformed(self, monkeypatch) -> None:
+        payload = {**self._VALID_PAYLOAD, "coverage": {"f.py": {"1": "not-a-list"}}}
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_when_a_tests_record_is_not_a_mapping(self, monkeypatch) -> None:
+        # Regression: a non-mapping test record must also be rejected here
+        # -- not escape as a raw AttributeError from
+        # `fallback.compute_fallback_set`'s own `.get("duration_s")` call
+        # downstream.
+        payload = {**self._VALID_PAYLOAD, "tests": {"test_x": "not-a-dict"}}
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
     def test_raises_when_downloaded_plugin_does_not_match_the_pointer(self, monkeypatch) -> None:
         # Regression: a syntactically valid baseline document whose OWN
         # plugin/measured_commit disagree with the pointer that named it

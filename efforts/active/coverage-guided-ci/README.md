@@ -280,8 +280,10 @@ order.
       is the one orchestrating entry point -- no resolvable baseline, a
       failed Release-asset fetch, exceeded coverage-debt, or any
       per-file/per-line selection trigger each independently route to the
-      curated fallback tier (or, for "no baseline at all", an explicit
-      zero-evidence fallback with no curated set to draw from).
+      curated fallback tier (or, for the three zero-evidence paths -- no
+      baseline at all, a resolved pointer's own plugin not matching the
+      one requested, or a failed asset fetch -- an explicit zero-evidence
+      fallback with no curated set to draw from).
 - [x] Make the selection auditable: which baseline generation was used, and
       why (fresh subset vs. fallback + trigger), discoverable per CI run.
       **Done**: `decide()`'s `SelectionDecision` records `mode`
@@ -391,7 +393,7 @@ baseline at all, a failed asset fetch, exceeded coverage-debt, or any
 per-file/per-line selection trigger (`no_baseline_entry`/
 `line_not_attributed`).
 
-23 new tests (`TestFetchBaselineAsset`, `TestDecide`) -- `decide()`'s own
+26 new tests (`TestFetchBaselineAsset`, `TestDecide`) -- `decide()`'s own
 tests monkeypatch its collaborators directly (each already has its own
 dedicated test class) rather than re-exercising them through real git/
 network I/O.
@@ -438,6 +440,21 @@ happens to run in, making coverage age environment-dependent).
 `SelectionDecision.debt`'s own docstring now documents both pre-assessment
 fallback paths (no baseline resolved, pointer mismatch, or fetch failed)
 that leave it `None`, not only the first.
+
+**Third round of review fixes (same PR):** `fetch_baseline_asset` now
+validates the baseline's *nested* shape too, not just its two top-level
+mappings -- a shallow-valid-but-corrupt payload (e.g. a per-file coverage
+entry that's a list instead of a line->test-list mapping, a per-line
+value that isn't a list of test-id strings, or a non-mapping test record)
+previously passed validation here and only failed later with an unrelated
+raw exception (`.items()` inside
+`ancestor_resolution.remap_or_invalidate_baseline`, or `.get()` inside
+`fallback.compute_fallback_set`), bypassing `decide()`'s documented
+fetch-failure fallback path entirely. Also fixed two remaining doc-
+accuracy gaps the review caught: `SelectionDecision.selected_tests`'s own
+docstring and this README's own Phase 3 checklist entry both omitted the
+pointer-plugin-mismatch path from the list of zero-evidence-fallback
+cases.
 
 **Also noted, not caused by this work:** the operator flagged that
 `main`'s history was force-rewritten (via `git filter-repo`) to purge

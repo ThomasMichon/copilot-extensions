@@ -167,7 +167,10 @@ def fetch_baseline_asset(repo: str, pointer: dict, *, timeout_s: float = 300.0) 
     `subprocess`/`Path` and raise a raw `TypeError`), a missing
     release/asset, a non-UTF-8 or malformed-JSON payload, or a
     syntactically-valid-but-wrong document (not a dict, a
-    non-mapping/absent `coverage`/`tests`, a `generated_at` that isn't a
+    non-mapping/absent `coverage`/`tests` or malformed nested entries
+    within either (a non-mapping per-file coverage entry, a non-list/
+    non-string-list per-line test-id list, or a non-mapping test record),
+    a `generated_at` that isn't a
     timezone-aware, parseable ISO8601 timestamp -- a naive one would be
     interpreted in whichever timezone the *consuming* host happens to run
     in, making coverage age environment-dependent -- or whose own
@@ -264,6 +267,34 @@ def fetch_baseline_asset(repo: str, pointer: dict, *, timeout_s: float = 300.0) 
             raise BaselineFetchError(
                 f"downloaded asset {asset}'s {field_name!r} is missing or not a mapping "
                 f"(got {type(value).__name__})"
+            )
+
+    # Validate the NESTED shape too, not just the two top-level mappings --
+    # a corrupt-but-shallow-valid payload (e.g. `coverage: {"f.py": []}`)
+    # would otherwise pass here and only fail later with an unrelated raw
+    # exception (`.items()` on a list inside
+    # `ancestor_resolution.remap_or_invalidate_baseline`, or `.get()` on a
+    # non-dict test record inside `fallback.compute_fallback_set`),
+    # bypassing `decide()`'s documented fetch-failure fallback path.
+    coverage = baseline["coverage"]
+    for file_path, per_line in coverage.items():
+        if not isinstance(file_path, str) or not isinstance(per_line, dict):
+            raise BaselineFetchError(
+                f"downloaded asset {asset}'s coverage entry for {file_path!r} is not a "
+                f"line-number -> test-list mapping (got {type(per_line).__name__})"
+            )
+        for line_key, test_ids in per_line.items():
+            if not isinstance(test_ids, list) or not all(isinstance(t, str) for t in test_ids):
+                raise BaselineFetchError(
+                    f"downloaded asset {asset}'s coverage[{file_path!r}][{line_key!r}] is not "
+                    "a list of test-id strings"
+                )
+    tests = baseline["tests"]
+    for test_id, record in tests.items():
+        if not isinstance(test_id, str) or not isinstance(record, dict):
+            raise BaselineFetchError(
+                f"downloaded asset {asset}'s tests entry for {test_id!r} is not a mapping "
+                f"(got {type(record).__name__})"
             )
 
     if baseline.get("plugin") != pointer_plugin:

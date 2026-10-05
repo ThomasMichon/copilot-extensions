@@ -74,8 +74,9 @@ class SelectionDecision:
     """The one auditable record of how a CI run chose its tests.
 
     `selected_tests` is `None` precisely when there is no curated evidence
-    at all to draw a subset from (no baseline ever resolved, or its asset
-    couldn't be fetched) -- the caller must run its own full/default test
+    at all to draw a subset from -- no baseline ever resolved, a resolved
+    pointer's own `plugin` didn't match the one requested, or its asset
+    couldn't be fetched -- the caller must run its own full/default test
     suite in that case, never interpret `None` as "run nothing". A real
     tuple (including a genuinely empty `()`) always means a curation step
     actually ran and produced that exact set, zero tests included (e.g. an
