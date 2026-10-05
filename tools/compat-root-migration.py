@@ -114,9 +114,21 @@ def find_core_call_sites(plugin: str, name: str) -> list[str]:
 
 def find_monkeypatch_sites(plugin: str, name: str) -> list[str]:
     hits = []
-    dotted_pattern = re.compile(
-        rf'patch\(\s*"[\w.]+\.__main__\.{re.escape(name)}"'
-    )
+    # Three independent dotted/object-attribute shapes all target the root
+    # module for a given name, and each is checked unconditionally -- none
+    # of them require (or are gated behind) an `as X` alias import in the
+    # file, since a dotted string is a literal path, not an alias
+    # reference:
+    #   1. unittest.mock.patch("<pkg>.__main__.<name>")
+    #   2. monkeypatch.setattr("<pkg>.__main__.<name>", replacement) --
+    #      pytest's monkeypatch also accepts a single dotted-string target
+    #      (resolved internally), not just an (object, "attr") pair.
+    dotted_patterns = [
+        re.compile(rf'patch\(\s*"[\w.]+\.__main__\.{re.escape(name)}"'),
+        re.compile(
+            rf'monkeypatch\.setattr\(\s*"[\w.]+\.__main__\.{re.escape(name)}"'
+        ),
+    ]
     for path in _iter_py_files(_tests_dir(plugin)):
         text = path.read_text(encoding="utf-8", errors="replace")
         aliases = _root_aliases_in_file(text)
@@ -128,13 +140,10 @@ def find_monkeypatch_sites(plugin: str, name: str) -> list[str]:
             for m in pattern.finditer(text):
                 line = text.count("\n", 0, m.start()) + 1
                 hits.append(f"{path.relative_to(REPO)}:{line}")
-        # unittest.mock.patch("<pkg>.__main__.<name>") targets the root
-        # module by a literal dotted string, independent of any
-        # `from . import __main__ as X` alias in the file -- must be
-        # checked unconditionally, not gated behind `if aliases`.
-        for m in dotted_pattern.finditer(text):
-            line = text.count("\n", 0, m.start()) + 1
-            hits.append(f"{path.relative_to(REPO)}:{line}")
+        for dotted_pattern in dotted_patterns:
+            for m in dotted_pattern.finditer(text):
+                line = text.count("\n", 0, m.start()) + 1
+                hits.append(f"{path.relative_to(REPO)}:{line}")
     return hits
 
 
@@ -198,7 +207,10 @@ def cmd_progress(plugin: str) -> int:
             call_names[name] += 1
 
     patch_names: Counter[str] = Counter()
-    dotted_pattern = re.compile(r'patch\(\s*"[\w.]+\.__main__\.(\w+)"')
+    dotted_patterns = [
+        re.compile(r'patch\(\s*"[\w.]+\.__main__\.(\w+)"'),
+        re.compile(r'monkeypatch\.setattr\(\s*"[\w.]+\.__main__\.(\w+)"'),
+    ]
     for path in test_files:
         text = path.read_text(encoding="utf-8", errors="replace")
         aliases = _root_aliases_in_file(text)
@@ -209,10 +221,11 @@ def cmd_progress(plugin: str) -> int:
             )
             for name in pattern.findall(text):
                 patch_names[name] += 1
-        # unittest.mock.patch("<pkg>.__main__.<name>") -- unconditional,
-        # independent of any alias import in the file (see find_monkeypatch_sites).
-        for name in dotted_pattern.findall(text):
-            patch_names[name] += 1
+        # Dotted-string targets -- unconditional, independent of any alias
+        # import in the file (see find_monkeypatch_sites).
+        for dotted_pattern in dotted_patterns:
+            for name in dotted_pattern.findall(text):
+                patch_names[name] += 1
 
     total_calls = sum(call_names.values())
     total_patch_sites = sum(patch_names.values())

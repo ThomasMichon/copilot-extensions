@@ -393,6 +393,15 @@ jobs:
         run: python tools/check-module-size.py
       - name: Module size guard tests
         run: python -m pytest -q tools/test_check_module_size.py
+      - name: compat-root-migration scanner guard tests
+        # Backs efforts/active/compatibility-root-decoupling/: this
+        # scanner's output controls when a compatibility-root re-export is
+        # considered safe to delete, and several of its regex edge cases
+        # (whole-identifier alias matching, indented/local imports, three
+        # independent dotted-string patch shapes) have already needed
+        # fixes once each -- gate future regressions the same way every
+        # other tools/ scanner is gated.
+        run: python -m pytest -q tools/test_compat_root_migration.py
       - name: Large files (generous image cap, tight default cap, PR diff only)
         # Same pinned-sha pattern as the changefile-presence/module-size steps
         # above, for the same reason: without an explicit --head, the default

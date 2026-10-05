@@ -1909,7 +1909,8 @@ def test_cli_owners_is_global_via_control_plane(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(related, "find_control_plane_anchor", lambda: str(cp))
     # No --repo, and _related_anchor would not resolve a project here: the
     # control-plane path must still answer. _related_anchor is self-owned
-    # by related_cli (patch there); _json_output is still __main__-native.
+    # by related_cli (patch there); _json_output lives in output.py now
+    # (patch there too -- see docs/patterns/compatibility-root-decoupling.md).
     monkeypatch.setattr(cli, "_related_anchor", lambda rest: None)
     captured: dict = {}
     monkeypatch.setattr(output, "_json_output", lambda payload: captured.update(payload))

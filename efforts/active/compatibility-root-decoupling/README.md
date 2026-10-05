@@ -97,38 +97,37 @@ Any change that makes these files slightly smaller is a win."
       verifiably complete (zero call sites, zero monkeypatch sites) rather
       than eyeballed.
 - [x] `--progress` mode reports live aggregate counts, ranked by traffic.
-      Baseline corrected multiple times this slice as real gaps surfaced
-      (see Journal): **42 accessors, 290 call sites, 157 distinct
-      monkeypatched names, 1049 patch-site occurrences** as of the final,
-      review-hardened state of the tool (bare `core.attr(` calls,
-      indented/local root imports, and `unittest.mock.patch("<pkg>.
-      __main__.<name>")` dotted-string targets are all now detected;
-      `--plugin` also now fails loud on an unresolvable plugin name
-      instead of silently reporting a vacuous success).
+      Detects every root-alias shape in both source and test files:
+      `_core()`-style lazy accessor calls, a plain assigned-variable
+      alias (`core = _core()` then `core.attr(...)`), and three
+      independent test-side patch shapes --
+      `monkeypatch.setattr(<alias>, "<name>", ...)` (single- or
+      multi-line), `unittest.mock.patch("<pkg>.__main__.<name>")`, and
+      `monkeypatch.setattr("<pkg>.__main__.<name>", ...)`. Whole-identifier
+      matching (not a substring/suffix match) throughout. `--plugin` and
+      `--name` both fail loud on an unresolvable plugin or a name with no
+      definition/call/patch site anywhere, rather than reporting a vacuous
+      success. Current baseline: **42 accessors, 290 call sites, 157
+      distinct monkeypatched names, 1050 patch-site occurrences.** Covered
+      by `tools/test_compat_root_migration.py`.
 
 ### Phase 2 — migrate the highest-traffic names
-- [x] `_json_output` + `_json_error` (migrated together: same files, always
-      paired). Final corrected shape (tool's multi-line-aware pass found
-      more than the original estimate): 32 source files touched (22 with a
-      `_core()`/`core.` shim or direct call, plus `__main__.py` itself, plus
-      9 more files reaching through a bare `core`-as-import-alias or a
-      second local shim variant the first measurement pass missed) and 14
-      test files (10 originally identified + 4 more found only by a
-      multi-line-aware `monkeypatch.setattr(\n    <alias>,\n    "<name>"`
-      scan — single-line regexes silently missed these). Every caller now
-      does `from . import output` + `output._json_output(...)`/
-      `output._json_error(...)`; every test monkeypatches `output` directly.
-      Validated: `tools/compat-root-migration.py --name` reports zero call
-      sites and zero monkeypatch sites for both names; full targeted test
-      sweep (1330+ tests across every touched file) green; `ruff
-      check --select F,E9` clean; `check-module-size.py` clean (one file
-      tipped 1 line over its cap from the added import -- fixed by merging
-      it into an existing `from . import` line instead of a new one, net
-      zero added lines).
-- [ ] `_resolve_worktree_id` (11 call sites / 40 monkeypatch sites) —
+- [x] `_json_output` + `_json_error` (migrated together: same files,
+      always paired). Every caller does `from . import output` +
+      `output._json_output(...)`/`output._json_error(...)`; every test
+      (both `monkeypatch.setattr` and `unittest.mock.patch` shapes)
+      targets `output` directly. 34 source files + 15 test files touched.
+      Every now-fully-unused `_core()` accessor retired per the rule
+      below; `__main__._CLUSTER_FREE_MODULES` updated to match (confirmed
+      via the checked-in AST drift-check scanner).
+      Validated: `tools/compat-root-migration.py --name` reports zero
+      call/monkeypatch sites for both names; full targeted test sweep
+      (1330+ tests across every touched file) green; `ruff
+      check --select F,E9` clean; `check-module-size.py` clean.
+- [ ] `_resolve_worktree_id` (27 call sites / 48 monkeypatch sites) —
       next slice.
-- [ ] `_find_repo_dir`, `_normalize_path`, `_infer_worktree_id_from_cwd`,
-      `_infer_worktree_id`, `_resolve_active_project`, `_build_env`
+- [ ] `_infer_worktree_id`, `_self_override`, `_normalize_path`,
+      `_find_repo_dir`, `_apply_tracking_override`, `_build_active_paths`
       (next-highest traffic; re-measure with `--progress` before picking
       exact order — several of these have outsized monkeypatch counts
       relative to call-site counts, which may make them higher-value than
@@ -326,6 +325,26 @@ _Pending._
   `_json_output`/`_json_error` as root re-exports after they were
   removed. Corrected `--progress` baseline: 290 call sites (was 291 --
   the one `lower` false positive is now gone).
+- **Fourth review round found one more genuine gap, the rest stale
+  restatements of already-fixed findings** (reviewer lag, reconfirmed
+  pattern this session -- verified each against current file content
+  before acting): a THIRD independent dotted-string patch shape,
+  `monkeypatch.setattr("<pkg>.__main__.<name>", replacement)` -- pytest's
+  own `monkeypatch.setattr` accepts a single dotted-string target
+  (resolved internally via its own import machinery), distinct from both
+  the plain `(alias, "name")` fixture call and `unittest.mock.patch`.
+  Live at `test_run_claims.py:232` for `_infer_worktree_id_from_cwd` (a
+  planned future slice), meaning the tool could have silently reported
+  that name "done" without ever seeing this patch site. Fixed in both
+  `--name` and `--progress`, with 2 more regression tests (15 total).
+  Also: wired `tools/test_compat_root_migration.py` into
+  `.github/workflows/ci.yml` (it existed but ran in no CI job -- a green
+  check had never actually executed it); fixed one real stale comment in
+  `test_related.py` that still said `_json_output` was `__main__`-native
+  after this slice moved it to `output.py`; rewrote this Plan's own
+  Phase 1/2 bullets to state only the current contract/scope (timeless),
+  moving the "corrected multiple times," "original estimate," and
+  round-by-round narrative into this Journal where it belongs.
 - Next slice: `_resolve_worktree_id` (27 call sites / 48 monkeypatch
   sites) -- re-run `--progress` first, since this slice's corrected
   baseline may have shifted the ranking.

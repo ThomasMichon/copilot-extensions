@@ -198,6 +198,24 @@ def test_find_monkeypatch_sites_dotted_patch_is_alias_independent(repo: Path):
     assert len(hits) == 1
 
 
+def test_find_monkeypatch_sites_detects_dotted_string_setattr(repo: Path):
+    """pytest's `monkeypatch.setattr` also accepts a single dotted-string
+    target (resolved internally), not just an (object, "attr") pair --
+    a third shape distinct from both unittest.mock.patch and the plain
+    (alias, "name") fixture call."""
+    _src, tests = _make_plugin(repo)
+    _write(
+        tests / "test_mod.py",
+        "def test_x(monkeypatch):\n"
+        "    monkeypatch.setattr(\n"
+        "        \"demo_plugin.__main__._json_output\",\n"
+        "        lambda *_: None,\n"
+        "    )\n",
+    )
+    hits = crm.find_monkeypatch_sites("demo-plugin", "_json_output")
+    assert len(hits) == 1
+
+
 # -- --progress aggregate scan honors the same whole-identifier fix -------
 
 def test_cmd_progress_excludes_alias_suffix_false_positive(repo: Path, capsys):
@@ -213,3 +231,20 @@ def test_cmd_progress_excludes_alias_suffix_false_positive(repo: Path, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "lower:" not in out
+
+
+def test_cmd_progress_counts_dotted_string_setattr(repo: Path, capsys):
+    _src, tests = _make_plugin(repo)
+    _write(
+        tests / "test_mod.py",
+        "def test_x(monkeypatch):\n"
+        "    monkeypatch.setattr(\n"
+        "        \"demo_plugin.__main__._json_output\",\n"
+        "        lambda *_: None,\n"
+        "    )\n",
+    )
+    rc = crm.cmd_progress("demo-plugin")
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "distinct names monkeypatched on the root module: 1" in out
+
