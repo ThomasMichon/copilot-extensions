@@ -392,10 +392,17 @@ def register_spawn_routes(
         label: str | None = None,
         conclusion_state: str | None = None,
         resume_requested: bool | None = None,
+        task_status: str | None = None,
+        latest_only: bool = False,
         limit: int = 200,
     ) -> list[dict]:
         states = (
             [s.strip() for s in state.split(",") if s.strip()] if state else None
+        )
+        task_statuses = (
+            [s.strip() for s in task_status.split(",") if s.strip()]
+            if task_status
+            else None
         )
         return [
             _reservation_dict(r)
@@ -406,6 +413,8 @@ def register_spawn_routes(
                 label=label,
                 conclusion_state=conclusion_state,
                 resume_requested=resume_requested,
+                task_status=task_statuses,
+                latest_only=latest_only,
                 limit=limit,
             )
         ]

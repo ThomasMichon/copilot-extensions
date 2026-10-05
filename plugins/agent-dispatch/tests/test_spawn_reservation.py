@@ -947,6 +947,59 @@ def _fail_attempts(q, task_id, count=3):
         q.fail_spawn(reservation.key, detail="transport unavailable")
 
 
+def test_list_reservations_latest_only_dedupes_per_task(q):
+    """A retried task accumulates one reservation row per attempt, most now
+    superseded. ``latest_only`` must return exactly the single
+    highest-attempt row per task, not every historical attempt -- the
+    semantics `agent_dispatch.doctor.find_stuck_queued_reservations` relies
+    on so a busy fleet's older-but-still-stuck tasks aren't crowded out of
+    a bounded ``limit`` by other tasks' already-superseded old attempts."""
+    t = q.create("work")
+    _fail_attempts(q, t.id, count=3)
+
+    all_failed = q.list_reservations(task_id=t.id, state=SpawnState.FAILED)
+    assert len(all_failed) == 3
+
+    latest = q.list_reservations(
+        task_id=t.id, state=SpawnState.FAILED, latest_only=True
+    )
+    assert len(latest) == 1
+    assert latest[0].attempt == 3
+
+
+def test_list_reservations_latest_only_across_multiple_tasks(q):
+    """Across several tasks, ``latest_only`` returns at most one row per
+    ``task_id`` -- each task's own highest-attempt row -- regardless of how
+    many older, superseded attempts any of them individually accumulated."""
+    busy = q.create("busy")
+    _fail_attempts(q, busy.id, count=5)
+    quiet = q.create("quiet")
+    _fail_attempts(q, quiet.id, count=1)
+
+    latest = q.list_reservations(state=SpawnState.FAILED, latest_only=True)
+    by_task = {r.task_id: r.attempt for r in latest}
+    assert by_task == {busy.id: 5, quiet.id: 1}
+
+
+def test_list_reservations_task_status_filters_out_non_queued_tasks(q):
+    """A task's current reservation can stay FAILED after the task itself
+    moved on (completed/abandoned out of band, dead-lettered, etc.) --
+    ``task_status`` excludes it so it never consumes the same bounded
+    ``limit`` a genuinely-still-queued task's own failed reservation needs."""
+    still_queued = q.create("still-queued")
+    _fail_attempts(q, still_queued.id, count=1)
+
+    moved_on = q.create("moved-on")
+    _fail_attempts(q, moved_on.id, count=1)
+    with q._connect() as conn:
+        conn.execute("UPDATE tasks SET status = 'completed' WHERE id = ?", (moved_on.id,))
+
+    filtered = q.list_reservations(
+        state=SpawnState.FAILED, task_status="queued", latest_only=True
+    )
+    assert {r.task_id for r in filtered} == {still_queued.id}
+
+
 def test_rearm_atomically_retires_failed_history(q):
     t = q.create("work")
     _fail_attempts(q, t.id)

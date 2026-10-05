@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from agent_dispatch import doctor
 from agent_dispatch.__main__ import _cmd_doctor, build_parser
+from agent_dispatch.client import DispatchError
 
 
 def _args(argv):
@@ -83,6 +86,52 @@ def test_diagnose_started_within_grace_is_healthy():
 def test_diagnose_suspended_with_no_reservation_is_unknown():
     task = _task(status="suspended", worktree_id=None, reservation_key=None)
     d = doctor.diagnose(task, resolve=lambda wt: {"status": "active"})
+    assert d.verdict == "unknown"
+
+
+def test_diagnose_queued_with_reservation_reports_stuck_verdict():
+    """A queued task whose latest spawn reservation genuinely FAILED --
+    confirmed live (#5209): several review tasks sat `queued, no owner` for
+    hours during a facility-wide agent-bridge outage, invisible to a doctor
+    sweep that never examined `queued` at all."""
+    task = _task(status="queued", worktree_id=None, reservation_key="dispatch-task:t-1:2")
+    task["spawn_reservation"] = {
+        "key": "dispatch-task:t-1:2",
+        "attempt": 2,
+        "state": "failed",
+        "detail": (
+            "'intelligence-dampener-dispatch-reviewer' is not a known agent "
+            "name or session ID"
+        ),
+    }
+    d = doctor.diagnose(task, resolve=lambda wt: {"status": "active"})
+    assert d.verdict == doctor.QUEUED_STUCK_RESERVATION_VERDICT
+    assert "not a known agent name" in d.detail
+
+
+def test_diagnose_queued_with_active_reservation_is_not_stuck():
+    """`reserving`/`spawned`/`cold`/`releasing` are all legitimate ACTIVE
+    states for a reservation whose task still shows as `queued` -- only a
+    genuinely FAILED reservation is stuck. Misreporting an in-flight spawn
+    as stuck would be a false positive on healthy work."""
+    for active_state in ("reserving", "spawned", "cold", "releasing"):
+        task = _task(status="queued", worktree_id=None, reservation_key="k1")
+        task["spawn_reservation"] = {"key": "k1", "attempt": 1, "state": active_state}
+        d = doctor.diagnose(task, resolve=lambda wt: {"status": "active"})
+        assert d.verdict != doctor.QUEUED_STUCK_RESERVATION_VERDICT, active_state
+
+
+def test_diagnose_queued_with_no_reservation_is_unknown_not_stuck():
+    """diagnose() itself is unaffected for an ordinary, never-yet-attempted
+    queued task -- it falls through to "unknown" like before. An ordinary
+    queued task is kept out of the repo/label sweep entirely by
+    `_cmd_doctor`'s own `EXAMINED_STATUSES` status filter (never fetched in
+    the first place); a queued task that already failed a spawn attempt
+    reaches this verdict only via the separate
+    `find_stuck_queued_reservations()` query."""
+    task = _task(status="queued", worktree_id=None, reservation_key=None)
+    d = doctor.diagnose(task, resolve=lambda wt: {"status": "active"})
+    assert d.verdict != doctor.QUEUED_STUCK_RESERVATION_VERDICT
     assert d.verdict == "unknown"
 
 
@@ -221,9 +270,10 @@ def test_repair_terminal_task_clears_only_the_stale_reservation():
 
 
 class _ListClient:
-    def __init__(self, tasks):
+    def __init__(self, tasks, reservations=None):
         self._tasks = tasks
         self.list_calls = []
+        self._reservations = reservations or []
 
     def __enter__(self):
         return self
@@ -234,6 +284,15 @@ class _ListClient:
     def list(self, **kw):
         self.list_calls.append(kw)
         return self._tasks
+
+    def list_reservations(self, **kw):
+        return self._reservations
+
+    def get(self, task_id):
+        for t in self._tasks:
+            if t.get("id") == task_id:
+                return t
+        raise AssertionError(f"no such task: {task_id}")
 
 
 def test_cli_doctor_reports_diagnoses_without_repair(capsys, monkeypatch):
@@ -470,7 +529,22 @@ def test_cli_doctor_check_live_sessions_fetches_reservations_per_task(
     fake = _ListClient(tasks)
     fake.list_reservations_calls = []
 
-    def _list_reservations(*, task_id, limit=1000):
+    def _list_reservations(
+        *,
+        task_id=None,
+        state=None,
+        repo=None,
+        label=None,
+        task_status=None,
+        latest_only=False,
+        limit=1000,
+    ):
+        if task_id is None:
+            # The separate stuck-queued-reservation query also calls
+            # list_reservations (with no task_id); irrelevant to this
+            # test's own assertion below, which tracks only per-task
+            # reservation-history calls.
+            return []
         fake.list_reservations_calls.append(task_id)
         return [
             _reservation(attempt=1, key="k1", session_handle="local-body:sess-old"),
@@ -598,20 +672,183 @@ def test_diagnose_many_still_repairs_an_examined_status_task(monkeypatch):
 
 def test_diagnose_many_never_repairs_a_non_examined_non_terminal_status(monkeypatch):
     """A status that is neither EXAMINED_STATUSES nor TERMINAL_STATES (e.g.
-    `queued`/`proposed`, which have no owner/reservation to repair in the
-    first place) stays excluded from auto-repair entirely."""
+    `proposed`, which has no owner/reservation to repair in the first
+    place) stays excluded from auto-repair entirely. `queued` is now
+    examined too, but a queued task with a reservation always diagnoses as
+    :data:`doctor.QUEUED_STUCK_RESERVATION_VERDICT` (never
+    `REPAIRABLE_VERDICT`) -- see
+    ``test_diagnose_many_never_repairs_a_queued_stuck_reservation`` below."""
     monkeypatch.setattr(doctor, "resolve_worktree", lambda wt, **k: {"status": "finalized"})
-    task = _task(task_id="t-1", status="queued")
+    task = _task(task_id="t-1", status="proposed")
 
     class _Client:
         def fail_spawn(self, *a, **k):
-            raise AssertionError("must not repair a queued task")
+            raise AssertionError("must not repair a proposed task")
 
         def yield_task(self, *a, **k):
-            raise AssertionError("must not repair a queued task")
+            raise AssertionError("must not repair a proposed task")
 
         def release(self, *a, **k):
-            raise AssertionError("must not repair a queued task")
+            raise AssertionError("must not repair a proposed task")
 
     payload = doctor.diagnose_many(_Client(), [task], repair_orphaned=True)
     assert payload["repaired"] == []
+
+
+def test_find_stuck_queued_reservations_queries_failed_state_separately():
+    """The query is independent: list_reservations(state=FAILED) rather than
+    expanding the bounded task sweep, so a large queued backlog never
+    consumes the sweep's own --limit."""
+
+    class _Client:
+        def __init__(self):
+            self.list_reservations_calls = []
+
+        def list_reservations(self, **kw):
+            self.list_reservations_calls.append(kw)
+            return [{"key": "k1", "task_id": "t-1", "state": "failed"}]
+
+        def get(self, task_id):
+            assert task_id == "t-1"
+            return _task(
+                task_id="t-1",
+                status="queued",
+                worktree_id=None,
+                reservation_key="k1",
+            ) | {
+                "spawn_reservation": {
+                    "key": "k1",
+                    "attempt": 2,
+                    "state": "failed",
+                    "detail": "boom",
+                }
+            }
+
+    client = _Client()
+    diagnoses = doctor.find_stuck_queued_reservations(client, repo="r", label="l", limit=50)
+    assert len(diagnoses) == 1
+    assert diagnoses[0].verdict == doctor.QUEUED_STUCK_RESERVATION_VERDICT
+    assert client.list_reservations_calls == [
+        {
+            "state": doctor.SpawnState.FAILED,
+            "repo": "r",
+            "label": "l",
+            "task_status": "queued",
+            "latest_only": True,
+            "limit": 50,
+        }
+    ]
+
+
+def test_find_stuck_queued_reservations_skips_task_no_longer_queued():
+    """A failed reservation whose task has since progressed past `queued`
+    (claimed a fresh attempt, etc.) is not stuck anymore -- must not report
+    it as if it still were."""
+
+    class _Client:
+        def list_reservations(self, **kw):
+            return [{"key": "k1", "task_id": "t-1", "state": "failed"}]
+
+        def get(self, task_id):
+            return _task(task_id="t-1", status="claimed")
+
+    assert doctor.find_stuck_queued_reservations(_Client()) == []
+
+
+def test_find_stuck_queued_reservations_skips_superseded_reservation():
+    """The task is still `queued`, but its *current* reservation is a newer
+    attempt than the one this FAILED row named -- a fresh attempt already
+    superseded it, so it is not stuck."""
+
+    class _Client:
+        def list_reservations(self, **kw):
+            return [{"key": "k1-old", "task_id": "t-1", "state": "failed"}]
+
+        def get(self, task_id):
+            task = _task(task_id="t-1", status="queued", worktree_id=None)
+            task["spawn_reservation"] = {"key": "k2-new", "attempt": 2, "state": "reserving"}
+            return task
+
+    assert doctor.find_stuck_queued_reservations(_Client()) == []
+
+
+def test_find_stuck_queued_reservations_skips_rearmed_race():
+    """Same reservation key as the FAILED row the initial list query named,
+    task still queued -- but an operator's `reservations rearm` raced in
+    between (`failed` -> `rearmed`) before this per-task fetch. No longer
+    stuck; must not be reported."""
+
+    class _Client:
+        def list_reservations(self, **kw):
+            return [{"key": "k1", "task_id": "t-1", "state": "failed"}]
+
+        def get(self, task_id):
+            task = _task(task_id="t-1", status="queued", worktree_id=None)
+            task["spawn_reservation"] = {"key": "k1", "attempt": 1, "state": "rearmed"}
+            return task
+
+    assert doctor.find_stuck_queued_reservations(_Client()) == []
+
+
+def test_find_stuck_queued_reservations_skips_vanished_task():
+    """A confirmed 404 (the task no longer exists) is the only failure this
+    skips -- see the companion propagation test below."""
+
+    class _Client:
+        def list_reservations(self, **kw):
+            return [{"key": "k1", "task_id": "t-1", "state": "failed"}]
+
+        def get(self, task_id):
+            raise DispatchError(404, "no such task")
+
+    assert doctor.find_stuck_queued_reservations(_Client()) == []
+
+
+def test_find_stuck_queued_reservations_propagates_non_404_errors():
+    """An auth failure, a coordinator 5xx, or a transport error must never
+    look like a vanished task -- doctor should fail loudly, not silently
+    report an incomplete/empty diagnosis during the exact outage it exists
+    to investigate."""
+
+    class _Client:
+        def list_reservations(self, **kw):
+            return [{"key": "k1", "task_id": "t-1", "state": "failed"}]
+
+        def get(self, task_id):
+            raise DispatchError(503, "coordinator unavailable")
+
+    with pytest.raises(DispatchError):
+        doctor.find_stuck_queued_reservations(_Client())
+
+
+def test_cmd_doctor_merges_stuck_queued_reservations_into_sweep(capsys, monkeypatch):
+    """CLI-level: the repo/label sweep's own diagnoses and the separately-
+    queried stuck-queued-reservation diagnoses land in one combined payload,
+    with `examined` reflecting both sources."""
+    tasks = [_task(task_id="t-1", status="started")]
+
+    class _Client(_ListClient):
+        def __init__(self):
+            super().__init__(tasks)
+
+        def list_reservations(self, **kw):
+            return [{"key": "k2", "task_id": "t-2", "state": "failed"}]
+
+        def get(self, task_id):
+            task = _task(task_id="t-2", status="queued", worktree_id=None)
+            task["spawn_reservation"] = {"key": "k2", "attempt": 1, "state": "failed"}
+            return task
+
+    fake = _Client()
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda args: fake)
+    monkeypatch.setattr("agent_dispatch.__main__._scope_repo", lambda args: "repo")
+    monkeypatch.setattr(doctor, "resolve_worktree", lambda wt, **k: {"status": "finalized"})
+
+    rc = _cmd_doctor(_args(["doctor"]))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["examined"] == 2
+    verdicts = {d["verdict"] for d in out["diagnoses"]}
+    assert "orphaned_worktree_gone" in verdicts
+    assert doctor.QUEUED_STUCK_RESERVATION_VERDICT in verdicts
+
