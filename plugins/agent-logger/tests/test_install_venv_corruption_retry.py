@@ -67,6 +67,7 @@ function Start-Sleep {{ param([int]$Seconds) Add-Content -LiteralPath '{delays_f
         check=True,
         capture_output=True,
         text=True,
+        timeout=20,
     )
 
 
@@ -120,6 +121,7 @@ _warn() {{ echo "WARN: $*"; }}
         capture_output=True,
         text=True,
         env=env,
+        timeout=20,
     )
 
 

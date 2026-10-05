@@ -310,6 +310,35 @@ step" contract applied at both levels: onboarding for a missing provider,
 provider-owned guidance for missing resources. The Picker never presents a
 promise it cannot source; it presents the path to earning it.
 
+### responsive-by-budget
+Keyboard-first navigation (`§keyboard-first-navigation`) is a promise, not just
+an input mapping — the Manager commits to concrete latency budgets so that
+promise holds under real fleet load, not only on an idle demo machine:
+
+- **A keypress is acknowledged in well under 100ms.** Navigation, selection,
+  and typing into an open input never wait on a network/subprocess round trip
+  — the render/input loop (one asyncio event loop, per
+  `§auditable-testable-rendering`) is never blocked by I/O. Any data a
+  keystroke's visible feedback does not strictly need yet is fetched off that
+  loop and painted in when it arrives, not before.
+- **The Manager boots to its first interactive frame in well under 2s.**
+  Startup cost scales with what's installed, not with fleet size or a cold
+  provider's own startup cost (`§graceful-capability-scaling`'s scaling
+  promise applies to boot latency too, not only to feature surface).
+- **An action menu opens in well under 1s.** Opening a row's action menu
+  reflects cached/derived state immediately; an authoritative recheck may
+  follow asynchronously but never gates the menu's appearance.
+
+These are budgets, not aspirations: a change that is merely "not slower than
+before" can still violate them. A synchronous CLI/subprocess round trip
+reachable from the render tick or a key/menu handler is a budget violation by
+construction, regardless of how infrequently it runs — see
+`§live-not-snapshot` and `§render-derive-not-own` for why the data *source*
+matters here too, not only the thread it runs on: a slow one-shot CLI call
+moved off-thread still risks painting stale data persistently if nothing
+replaces it with a live channel. Tracked by the
+`picker-performance-and-responsiveness` effort.
+
 ### renderable-and-assertable-headless
 The Picker can be instantiated **headlessly** — no live terminal, no human, no
 real fleet — fed a known context (its `--json`-shaped inputs), driven to a target
@@ -378,6 +407,11 @@ regression is something a test can catch before an operator does.
   worktree-row view of the remote workers a worktree supervises), the same
   kind of pivot-specific overhaul `plugins/agent-dispatch/tasks-pane-ux` did
   for Tasks.
+- Performance budgets tracked by:
+  `efforts/active/picker-performance-and-responsiveness` (the numeric budgets
+  in `§responsive-by-budget` above) and
+  `efforts/active/pivot-streaming-transport` (the live-channel work
+  `§live-not-snapshot` and `§responsive-by-budget` both depend on).
 - CodeSpaces-pivot data owner: [agent-codespaces](../plugins/agent-codespaces/README.md)
   — the Picker's **CodeSpaces** pivot renders that venue's pool membership,
   per-venue state (in-use / idle / clean / stale), allocation, and budget
@@ -485,3 +519,20 @@ regression is something a test can catch before an operator does.
   just detect loss while some part of it happens to still be running. That
   guarantee now lives on session-hosting, generalizing recovery from "the mux
   process died" to "the machine it ran on rebooted entirely."
+- **2026-10-04** — Added `§Behaviors/responsive-by-budget`: concrete numeric
+  latency budgets (keypress <~100ms, boot <~2s, action-menu-open <~1s) for
+  what `keyboard-first-navigation` and `live-not-snapshot` already promised
+  qualitatively. Prompted by a live operator incident (py-spy + process-census
+  diagnosis on a loaded machine) that traced a near-total UI freeze to a
+  single, previously-undetected regression: the render-tick's update-indicator
+  poll (`production_picker/picker_tui/engine_runtime.py`'s
+  `_poll_update_state`) called a ~2-2.5s synchronous CLI subprocess round trip
+  directly on Textual's render/input thread, roughly twice a second — so the
+  loop was blocked almost continuously despite Phase 3c of
+  `worktree-manager-control-plane` already having moved every *other* known
+  blocking call off that thread. Budgets, not just "move the one bug off-
+  thread," because a regression of this exact shape (a synchronous call
+  quietly reappearing on the hot path) is otherwise invisible until an
+  operator notices the freeze — tracked going forward by the
+  `picker-performance-and-responsiveness` effort, which closed that specific
+  regression as its first phase and owns measuring/holding the budgets here.

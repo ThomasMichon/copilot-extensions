@@ -21,6 +21,37 @@ _COMMANDS = (
     "ramp-up-session",
     "session-sync",
 )
+_HARNESS_TIMEOUT_SECONDS = 20
+
+
+def _isolated_install_env(home: Path) -> dict[str, str]:
+    """Mirror the runner's containment roots for direct installer subprocesses."""
+    env = os.environ.copy()
+    roots = {
+        "HOME": home,
+        "USERPROFILE": home,
+        "APPDATA": home / "AppData" / "Roaming",
+        "LOCALAPPDATA": home / "AppData" / "Local",
+        "PROGRAMDATA": home / "ProgramData",
+        "XDG_CONFIG_HOME": home / ".config",
+        "XDG_CACHE_HOME": home / ".cache",
+        "XDG_DATA_HOME": home / ".local" / "share",
+        "XDG_STATE_HOME": home / ".local" / "state",
+        "XDG_RUNTIME_DIR": home / "run",
+        "TEMP": home / "tmp",
+        "TMP": home / "tmp",
+        "TMPDIR": home / "tmp",
+        "COPILOT_HOME": home / ".copilot",
+        "AGENT_HOME": home,
+        "AGENT_LOGGER_HOME": home / ".agent-logger",
+    }
+    for path in roots.values():
+        path.mkdir(parents=True, exist_ok=True)
+    env.update({name: str(path) for name, path in roots.items()})
+    env["COPILOT_PLUGIN_INSTALL_STAGED"] = "1"
+    for name in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"):
+        env.pop(name, None)
+    return env
 
 
 def _stage_payload(tmp_path: Path) -> Path:
@@ -79,18 +110,11 @@ def _host_pip_index_url() -> str | None:
 def test_stamp_replaces_dangling_legacy_binstub(tmp_path: Path) -> None:
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
+    env = _isolated_install_env(home)
     local_bin = home / ".local" / "bin"
     local_bin.mkdir(parents=True)
     binstub = local_bin / "agent-logger"
     binstub.symlink_to(home / ".agent-logger" / ".venv" / "bin" / "agent-logger")
-
-    env = os.environ.copy()
-    env.update(
-        {
-            "HOME": str(home),
-            "COPILOT_PLUGIN_INSTALL_STAGED": "1",
-        }
-    )
     result = subprocess.run(
         ["bash", str(payload / "scripts" / "install.sh"), "stamp"],
         env=env,
@@ -144,16 +168,7 @@ def test_stamp_replaces_dangling_legacy_binstub(tmp_path: Path) -> None:
 def test_windows_stamp_publishes_complete_command_family(tmp_path: Path) -> None:
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
-    home.mkdir()
-    env = os.environ.copy()
-    env.update(
-        {
-            "HOME": str(home),
-            "USERPROFILE": str(home),
-            "LOCALAPPDATA": str(home / "AppData" / "Local"),
-            "COPILOT_PLUGIN_INSTALL_STAGED": "1",
-        }
-    )
+    env = _isolated_install_env(home)
     powershell = shutil.which("pwsh") or shutil.which("powershell")
     assert powershell is not None
     result = subprocess.run(
@@ -313,6 +328,7 @@ try {
         check=True,
         capture_output=True,
         text=True,
+        timeout=_HARNESS_TIMEOUT_SECONDS,
     )
     assert "WARN: could not update scheduled task 'Test Task' (Access is denied)" in result.stdout
     assert "DENIED-HANDLED-WITHOUT-THROW" in result.stdout
@@ -347,16 +363,7 @@ def test_provision_publishes_durable_compatibility_wrappers(
 ) -> None:
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
-    home.mkdir()
-    env = os.environ.copy()
-    env.update(
-        {
-            "HOME": str(home),
-            "USERPROFILE": str(home),
-            "LOCALAPPDATA": str(home / "AppData" / "Local"),
-            "COPILOT_PLUGIN_INSTALL_STAGED": "1",
-        }
-    )
+    env = _isolated_install_env(home)
     # This test-runner's own pytest process runs from inside a managed venv
     # (`.test-venvs/.../agent-logger`), which can leave `PYTHONHOME`/
     # `PYTHONPATH` set to THAT venv's own paths. `install.ps1 provision`
@@ -368,8 +375,6 @@ def test_provision_publishes_durable_compatibility_wrappers(
     # dependency's wheel). Strip both so this test builds its OWN
     # standalone runtime cleanly, matching how a real end-user's
     # (non-venv-nested) shell invokes this same script.
-    env.pop("PYTHONHOME", None)
-    env.pop("PYTHONPATH", None)
     # This test's own isolated HOME/USERPROFILE/LOCALAPPDATA (above) is
     # layered on top of the run-plugin-tests.py containment wrapper's OWN
     # sandboxing of HOME/APPDATA/PROGRAMDATA (see
@@ -429,23 +434,12 @@ def test_provision_publishes_durable_compatibility_wrappers(
 def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -> None:
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
-    home.mkdir()
     version = next(
         line.split('"')[1]
         for line in (_PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8").splitlines()
         if line.startswith("version = ")
     )
-    env = os.environ.copy()
-    env.update(
-        {
-            "HOME": str(home),
-            "USERPROFILE": str(home),
-            "LOCALAPPDATA": str(home / "AppData" / "Local"),
-            "COPILOT_PLUGIN_INSTALL_STAGED": "1",
-        }
-    )
-    env.pop("PYTHONHOME", None)
-    env.pop("PYTHONPATH", None)
+    env = _isolated_install_env(home)
     internal_index = _host_pip_index_url()
     if internal_index and not (env.get("UV_DEFAULT_INDEX") or env.get("UV_INDEX_URL")):
         env["UV_DEFAULT_INDEX"] = internal_index
@@ -517,7 +511,6 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
 def test_stamp_reuses_pre_adoption_same_version_snapshot(tmp_path: Path) -> None:
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
-    home.mkdir()
     version = next(
         line.split('"')[1]
         for line in (_PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8").splitlines()
@@ -534,15 +527,7 @@ def test_stamp_reuses_pre_adoption_same_version_snapshot(tmp_path: Path) -> None
     install_sh.write_text("#!/usr/bin/env bash\n# legacy self-contained install\n", encoding="utf-8")
     install_ps1.write_text("<# legacy self-contained install #>\n", encoding="utf-8")
 
-    env = os.environ.copy()
-    env.update(
-        {
-            "HOME": str(home),
-            "USERPROFILE": str(home),
-            "LOCALAPPDATA": str(home / "AppData" / "Local"),
-            "COPILOT_PLUGIN_INSTALL_STAGED": "1",
-        }
-    )
+    env = _isolated_install_env(home)
     if os.name == "nt":
         powershell = shutil.which("pwsh") or shutil.which("powershell")
         assert powershell is not None
@@ -591,7 +576,6 @@ def test_stamp_reuses_pre_adoption_same_version_snapshot(tmp_path: Path) -> None
 def test_scoped_stamp_avoids_global_compatibility_wrappers(tmp_path: Path) -> None:
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
-    home.mkdir()
     install_dir = (
         home
         / ".copilot-extensions"
@@ -600,15 +584,7 @@ def test_scoped_stamp_avoids_global_compatibility_wrappers(tmp_path: Path) -> No
         / "plugins"
         / "agent-logger"
     )
-    env = os.environ.copy()
-    env.update(
-        {
-            "HOME": str(home),
-            "USERPROFILE": str(home),
-            "LOCALAPPDATA": str(home / "AppData" / "Local"),
-            "COPILOT_PLUGIN_INSTALL_STAGED": "1",
-        }
-    )
+    env = _isolated_install_env(home)
     if os.name == "nt":
         powershell = shutil.which("pwsh") or shutil.which("powershell")
         assert powershell is not None

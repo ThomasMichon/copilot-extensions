@@ -65,6 +65,7 @@ Write-Host "RESULT:$result"
         check=True,
         capture_output=True,
         text=True,
+        timeout=20,
     )
 
 

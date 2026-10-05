@@ -7,6 +7,7 @@ from .engine_dialogs import QuitConfirmScreen
 from .engine_helpers import C_DIM
 from .engine_legend import LegendScreen
 from .listview import capture_row_refs, remap_row_refs, render_command_bar
+from .orphanage import OrphanageScreen
 from .styles import canonical_key
 
 class PickerScreenInputMixin:
@@ -64,6 +65,13 @@ class PickerScreenInputMixin:
             return
         if key == "s" and self._kind() == "worktrees":
             self._wt_remap(lambda: self.list_view.cycle_sort(derive.WT_SORT_KEYS))
+            return
+        # "o" opens the read-only local claims-orphanage screen
+        # (worktree-claims-transitive-finalization Phase 4 item 2) --
+        # Worktrees only, matching "/" / "s" above; a no-op (never opens an
+        # empty screen) when nothing is currently orphaned.
+        if key == "o" and self._kind() == "worktrees" and self._orphans:
+            self.app.push_screen(OrphanageScreen(self._orphans))
             return
 
         zone = self.sel[0]
@@ -143,6 +151,7 @@ class PickerScreenInputMixin:
             # Real reload: rebuild the data source (live mode re-fetches every
             # machine on its loader threads; fixture mode re-reads src.load()).
             self._start_setup_reload_worker()
+            self._poll_orphan_state(force=True)
             self.sel = self.default_sel()
             self.debug = "refreshed · reloaded worktrees"
         elif key in ("q", "escape"):
