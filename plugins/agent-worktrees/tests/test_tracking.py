@@ -3657,6 +3657,52 @@ class TestSetDisposition:
         assert stored.startswith("Session a900")     # keeps the leading text
         assert load_record(p).title_asserted is True
 
+    def test_set_paused_is_purely_informational(self, tmp_path: Path, monkeypatch):
+        """`paused` never reopens a finalized owner (unlike `follow_up=True`)
+        and never affects `status`/`completed_at` -- it's a parallel,
+        independent overlay."""
+        rec = self._rec(status="finalized", completed_at="2026-09-01T00:00:00")
+        p = tmp_path / "wt.yaml"
+        monkeypatch.setattr("agent_worktrees.tracking.save_record",
+                            lambda record, path=None: save_record(record, p))
+        set_disposition(rec, paused=True)
+        loaded = load_record(p)
+        assert loaded.paused is True
+        assert loaded.status == "finalized"  # unchanged -- no gate interaction
+        assert loaded.completed_at == "2026-09-01T00:00:00"
+
+    def test_paused_round_trips_and_omits_when_false(self, tmp_path: Path, monkeypatch):
+        rec = self._rec()
+        p = tmp_path / "wt.yaml"
+        monkeypatch.setattr("agent_worktrees.tracking.save_record",
+                            lambda record, path=None: save_record(record, p))
+        set_disposition(rec, summary="s")
+        assert load_record(p).paused is False
+        assert "paused" not in p.read_text()  # emitted only when True
+
+        set_disposition(load_record(p), paused=True)
+        assert "paused: true" in p.read_text()
+        assert load_record(p).paused is True
+
+        set_disposition(load_record(p), paused=False)
+        assert load_record(p).paused is False
+        assert "paused" not in p.read_text()
+
+    def test_paused_independent_of_follow_up(self, tmp_path: Path, monkeypatch):
+        rec = self._rec()
+        p = tmp_path / "wt.yaml"
+        monkeypatch.setattr("agent_worktrees.tracking.save_record",
+                            lambda record, path=None: save_record(record, p))
+        set_disposition(rec, follow_up=True, paused=True)
+        loaded = load_record(p)
+        assert loaded.follow_up is True
+        assert loaded.paused is True
+        # Clearing one leaves the other untouched.
+        set_disposition(loaded, follow_up=False)
+        again = load_record(p)
+        assert again.follow_up is False
+        assert again.paused is True
+
     def test_summary_strips_illegal_controls_before_write(
         self, tmp_path: Path, monkeypatch
     ):

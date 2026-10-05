@@ -2661,11 +2661,12 @@ def _cmd_status_write(
     title: str | None = None,
     activity: str | None = None,
     follow_up: bool | None = None,
+    paused: bool | None = None,
 ) -> int:
     """Write mode of `status`: annotate THIS worktree's agent-asserted
-    disposition (summary / title / activity / follow-up). Resolves the
-    worktree from CWD (or --worktree-id). Orthogonal to git/session state;
-    see the worktree-status-core effort and the agent-fabric vision
+    disposition (summary / title / activity / follow-up / paused). Resolves
+    the worktree from CWD (or --worktree-id). Orthogonal to git/session
+    state; see the worktree-status-core effort and the agent-fabric vision
     (disposition-is-asserted-pulse-is-derived).
     """
     config = cfg.load_config()
@@ -2734,6 +2735,7 @@ def _cmd_status_write(
                 "title": title,
                 "activity": activity,
                 "follow_up": follow_up,
+                "paused": paused,
                 "session_id": session_id,
                 "project": project,
             },
@@ -2756,6 +2758,8 @@ def _cmd_status_write(
         return 1
     flag = "follow-ups pending" if result["follow_up"] else "resolved"
     msg = f"[OK] Worktree {worktree_id[-4:]} disposition: {flag}"
+    if result.get("paused"):
+        msg += " (paused)"
     if title is not None and result["title"]:
         msg += f" -- title: {result['title']}"
     if activity is not None and result.get("activity"):

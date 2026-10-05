@@ -95,6 +95,24 @@ def test_activity_write_is_independent_of_summary_and_title(status_env):
     assert record.activity_at is not None
 
 
+def test_paused_does_not_reactivate_finalized_worktree(status_env):
+    """Unlike `follow_up=True`, `paused=True` is purely informational and
+    must never flip a finalized worktree back to active."""
+    args = argparse.Namespace(worktree_id=None)
+
+    assert main._cmd_status_write(
+        args,
+        summary="Leave this open on purpose",
+        paused=True,
+    ) == 0
+
+    record = tracking.load_record(status_env)
+    assert record.status == "finalized"
+    assert record.completed_at == "2026-08-28T01:00:00"
+    assert record.paused is True
+    assert record.summary == "Leave this open on purpose"
+
+
 def test_first_write_in_session_emits_stage_5_status_reported(status_env, monkeypatch):
     """Stage 5 (status_reported): the first status-report write in a session
     marks "Copilot did something here"."""

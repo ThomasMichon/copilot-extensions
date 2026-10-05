@@ -66,6 +66,18 @@ def add_parsers(sub) -> None:
         help="Clear the follow-up flag -- this worktree is resolved (write mode)",
     )
     p.add_argument(
+        "--paused",
+        action="store_true",
+        help="Flag this worktree as intentionally idle for now -- purely "
+        "informational, never affects finalize/cleanup eligibility "
+        "(write mode)",
+    )
+    p.add_argument(
+        "--unpaused",
+        action="store_true",
+        help="Clear the paused flag (write mode)",
+    )
+    p.add_argument(
         "--worktree-id",
         default=None,
         help="Target worktree id for write mode (default: inferred from CWD)",
@@ -97,9 +109,19 @@ def cmd_status(args: argparse.Namespace) -> int:
         output.err("Pass only one of --follow-up / --resolved.")
         return 1
     _follow = True if _fu else (False if _res else None)
-    if _summary is not None or _title is not None or _activity is not None or _follow is not None:
+    _pa = getattr(args, "paused", False)
+    _unpa = getattr(args, "unpaused", False)
+    if _pa and _unpa:
+        output.err("Pass only one of --paused / --unpaused.")
+        return 1
+    _paused = True if _pa else (False if _unpa else None)
+    if (
+        _summary is not None or _title is not None or _activity is not None
+        or _follow is not None or _paused is not None
+    ):
         return _core()._cmd_status_write(
-            args, summary=_summary, title=_title, activity=_activity, follow_up=_follow
+            args, summary=_summary, title=_title, activity=_activity,
+            follow_up=_follow, paused=_paused,
         )
 
     # worktree-status-core: history read mode (per-worktree), orthogonal to the

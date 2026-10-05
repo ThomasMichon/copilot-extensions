@@ -1,0 +1,9 @@
+{
+  "comment": "status: add a purely-informational --paused/--unpaused disposition flag, plus a 'pausing a worktree' runbook (compose git sync + claims sweep/settle instead of a new mutating subcommand)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

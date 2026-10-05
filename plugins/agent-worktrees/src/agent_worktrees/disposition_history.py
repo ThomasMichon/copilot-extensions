@@ -56,7 +56,7 @@ DIGEST_SESSION_SUFFIX_CHARS = 6
 DIGEST_OMITTED = "- ... older entries omitted ..."
 
 #: The disposition fields a history entry snapshots / can mark as changed.
-_FIELDS = ("summary", "title", "activity", "follow_up")
+_FIELDS = ("summary", "title", "activity", "follow_up", "paused")
 
 
 def history_path(worktree_id: str, *, tracking_path: Path | None = None) -> Path:
@@ -83,6 +83,7 @@ def append(
     follow_up: bool,
     changed: list[str],
     activity: str = "",
+    paused: bool = False,
     kind: str = "status",
     session_id: str | None = None,
     tracking_path: Path | None = None,
@@ -96,7 +97,9 @@ def append(
     ``summary``'s broader recap and ``title``'s rare headline -- see
     ``tracking.set_disposition``'s own docstring for the cadence contract);
     omitted from the line when empty, same as every other neutral-default
-    field below.
+    field below. ``paused`` is a purely informational "intentionally idle
+    for now" overlay (never fed to any gate, unlike ``follow_up``); omitted
+    from the line when ``False``.
 
     ``kind`` classifies the entry -- ``"status"`` (a disposition write; the
     default so every existing caller is unchanged), ``"bind"`` (a session
@@ -124,6 +127,8 @@ def append(
         }
         if activity:
             entry["activity"] = activity
+        if paused:
+            entry["paused"] = True
         if kind and kind != "status":
             entry["kind"] = kind
         if session_id:

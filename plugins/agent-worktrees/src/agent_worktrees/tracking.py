@@ -787,6 +787,14 @@ class WorktreeRecord:
     # the prune verdict. The live "pulse" (assistant.intent) is a SEPARATE
     # sidecar, never stored on this durable record.
     follow_up: bool = False
+    # Agent-asserted "intentionally idle for now" overlay -- purely
+    # informational, orthogonal to `status` (the git/push/finalize
+    # lifecycle) and `follow_up` (an actionable gap fed to the prune
+    # verdict). Never consulted by finalize/cleanup/any other gate; set
+    # via `agent-worktrees status --paused`/`--unpaused` so a human or
+    # Picker reader can see "this worktree has work left open on
+    # purpose, not abandoned" without it affecting pruning eligibility.
+    paused: bool = False
     summary: str = ""
     status_note_at: str | None = None
     # #3307 worktrees-pivot-ux-overhaul follow-up: the agent-asserted CURRENT
@@ -2150,6 +2158,7 @@ def _load_record_uncached(path: Path) -> WorktreeRecord:
         pending_seed=(str(data["pending_seed"]) if data.get("pending_seed") else None),
         pending_seed_revision=int(data.get("pending_seed_revision", 0) or 0),
         follow_up=bool(data.get("follow_up", False)),
+        paused=bool(data.get("paused", False)),
         follow_ups=follow_ups_list,
         summary=str(data.get("summary", "") or ""),
         active_effort=active_effort_from_mapping(data.get("active_effort")),
@@ -2664,6 +2673,8 @@ def _save_record_unlocked(
     # byte-identical (no churn for the common case).
     if record.follow_up:
         content += "follow_up: true\n"
+    if record.paused:
+        content += "paused: true\n"
     if record.summary:
         safe_summary = record.summary.replace("'", "''")
         content += f"summary: '{safe_summary}'\n"
@@ -3440,13 +3451,14 @@ def set_disposition(
     title: str | None = None,
     activity: str | None = None,
     follow_up: bool | None = None,
+    paused: bool | None = None,
     session_id: str | None = None,
     kind: str = "status",
     save: bool = True,
     tracking_path: Path | None = None,
 ) -> None:
     """Set the agent-asserted disposition overlay (summary / title / activity /
-    follow-up) and save.
+    follow-up / paused) and save.
 
     Orthogonal to git/session state -- this records what only the agent knows:
     whether the worktree is genuinely *resolved* or still has *actionable
@@ -3501,6 +3513,11 @@ def set_disposition(
         # in `add_follow_up`. Idempotent/no-op when already non-finalized.
         if follow_up and record.status == "finalized":
             reopen_finalized_owner(record, reason="follow_up flag set")
+    if paused is not None:
+        record.paused = paused
+        changed.append("paused")
+        # Deliberately NO gate interaction (no reopen, no prune-verdict
+        # effect) -- `paused` is purely informational, unlike `follow_up`.
     record.status_note_at = _now_iso()
     if changed:
         disposition_history.append(
@@ -3509,6 +3526,7 @@ def set_disposition(
             summary=record.summary,
             title=record.title,
             follow_up=record.follow_up,
+            paused=record.paused,
             changed=changed,
             activity=record.activity,
             kind=kind,

@@ -278,6 +278,52 @@ branch, and pushes. `finalize` verifies the content actually landed before
 removing the worktree/branch — and defers the prune while a session is still
 live. Never hand-run `git merge`/`push`/`worktree remove`.
 
+### Pausing a worktree instead of finalizing (a runbook, not a subcommand)
+
+`finalize` is all-or-nothing on its resource-obligation-settlement gate: any
+unsettled outbound claim either blocks it outright, or `--abandon
+--handoff-to <recipient>` re-homes the *entire* unsettled set elsewhere.
+Neither fits "sync and tidy everything that's actually done, but leave this
+one claim open on purpose" — e.g. a deliberate pending `context-handoff` task
+meant to resume in this exact worktree, or any other genuinely-still-open
+piece of work. There is no dedicated `pause` subcommand for this — compose
+the existing primitives instead:
+
+```bash
+agent-worktrees git sync                       # pull the branch forward onto the latest default branch
+agent-worktrees claims sweep --apply            # auto-settle whatever the never-wedge sweep can PROVE is resolved
+agent-worktrees claims                          # see what's still genuinely open
+# settle/release anything you've independently confirmed is safe:
+agent-worktrees claims settle <ref> [--released]
+# mark the worktree as intentionally idle, with a note on what's left:
+agent-worktrees status --paused --summary "<why it's paused / what's still open>"
+```
+
+1. **Sync first.** `git sync` rebases the branch forward (never force-pushes,
+   never prunes) so the worktree builds on the latest default branch before
+   you report anything.
+2. **Auto-settle only what's provably safe.** `claims sweep --apply` is the
+   repo's own never-wedge reclaim sweep — it flips a claim to
+   `at-rest`/`abandoned` only when its holder is provably gone *and* its
+   resource is provably safe (a merged PR, an off-box CodeSpace, …). It never
+   guesses. Settle anything else you've independently verified via
+   `claims settle <ref>` / `claims release <ref>`.
+3. **Report what remains — don't force it.** `claims` (no args) prints the
+   full outbound ledger. Whatever is left open after the sweep is exactly
+   what the operator needs to see; do not release, abandon, or force a
+   disposition on a claim you can't prove is already safe.
+4. **Mark the worktree `--paused`.** This is purely informational — it never
+   affects `finalize`'s obligation gate, `cleanup`'s prune eligibility, or any
+   other gate — but it lets a human (or Picker) immediately see "this
+   worktree has work left open on purpose, not abandoned". Pair it with
+   `--summary` naming what's still open and why. Clear it later with
+   `agent-worktrees status --unpaused` once the worktree is active again (or
+   genuinely done — run `finalize` instead).
+
+Settling a specific claim, then re-running `finalize`, is how a paused
+worktree eventually becomes finalizable — `pause` itself never settles
+anything `claims sweep` couldn't already prove safe.
+
 ### 3b. PR mode — the `pr-*` command family
 
 When the repo is PR-gated, sign-off becomes **create-pr → review → merge →
