@@ -14,8 +14,7 @@ same claim-journal primitive (``pr_ops._ensure_pr_claim``) the local path
 already relies on, so both paths converge on identical claim/attribution
 semantics rather than growing two divergent implementations.
 
-Per the effort's own resolved design decision (2026-10-04, operator-directed):
-the CALLING worktree always auto-journals a ``pr``-kind claim on itself --
+Always auto-journals a ``pr``-kind claim on the calling worktree itself --
 never the manual ``claims add pr`` workaround ``venue-and-claims.md``
 documents as today's only path. This is deliberately NOT also appended to the
 calling worktree's own ``prs`` list (unlike a PR the worktree's own checkout
@@ -26,7 +25,7 @@ not a full tracked-PR record.
 """
 from __future__ import annotations
 
-from . import claim_history, config as cfg, pr_config, pr_ops, tracking
+from . import claim_history, config as cfg, obligations, pr_config, pr_ops, tracking
 from .codename import is_valid_handle
 from .providers import attribution as attr
 from .providers import base as providers
@@ -101,17 +100,6 @@ def create_foreign_pr_from_branch(
             "repo": target_repo,
         }
     base_branch = base or repo_cfg.default_branch
-
-    missing_body = pr_ops.missing_required_body_sections(body, prcfg.required_body_sections)
-    if missing_body:
-        return {
-            "error": (
-                "PR body is missing required non-empty section(s): "
-                + ", ".join(missing_body)
-                + ". Pass --body or --body-file before opening the PR."
-            ),
-            "repo": target_repo,
-        }
 
     rec_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     pre_record = tracking.load_record(rec_path) if rec_path.exists() else None
@@ -201,6 +189,24 @@ def create_foreign_pr_from_branch(
                     pull = existing
                     reused = True
         if pull is None:
+            # Deferred until we actually need to open a PR (not just
+            # reuse one) -- matching the local path, which only validates
+            # the body when it's genuinely about to publish one. Checking
+            # this earlier would fail an idempotent retry against a
+            # required_body_sections repo even when no new PR would be
+            # created at all.
+            missing_body = pr_ops.missing_required_body_sections(
+                body, prcfg.required_body_sections,
+            )
+            if missing_body:
+                return {
+                    "error": (
+                        "PR body is missing required non-empty section(s): "
+                        + ", ".join(missing_body)
+                        + ". Pass --body or --body-file before opening the PR."
+                    ),
+                    "repo": target_repo,
+                }
             pull = provider.create_pull(scope, token=token)
     except (providers.ProviderError, OSError) as e:
         return {"error": str(e), "repo": target_repo}
@@ -211,7 +217,12 @@ def create_foreign_pr_from_branch(
         "url": pull.url,
         "number": pull.number,
         "state": normalized_state,
-        "draft": bool(draft),
+        # A reused PR's draft state is whatever the provider already
+        # reports it as, not the caller's OWN --draft request for a PR
+        # that was never actually created this call -- mirrors the local
+        # path's own retry contract (draft is only ever true for a PR
+        # THIS call just opened as one).
+        "draft": False if reused else bool(draft),
         "head": from_branch,
         "base": base_branch,
         "pr_opened": True,
@@ -242,12 +253,26 @@ def create_foreign_pr_from_branch(
                 repo=target_repo, number=pull.number, url=pull.url,
                 state=normalized_state,
             )
+            # `_ensure_pr_claim` returns ``None`` for TWO different cases --
+            # a genuine failure (the owner is frozen/finalizing), and an
+            # idempotent no-op (the claim is ALREADY active, so there is
+            # nothing new to journal). Conflating them would report
+            # `claimed: false` + a bogus "not claimed" warning on a retry
+            # whose ledger was already perfectly correct. `claimed_ref` is
+            # kept ONLY to decide whether a NEW history event is warranted;
+            # whether the PR is claimed at all is checked independently.
             claimed_ref = _ensure_pr_claim(record, target_pr)
             tracking.save_record(record)
             claim_worktree_id, claim_machine, claim_project = (
                 record.worktree_id, record.machine, record.repo,
             )
-        result["claimed"] = bool(claimed_ref)
+            is_claimed = any(
+                c.ref == pull.url and c.kind == "pr" and c.state == obligations.ACTIVE
+                for c in record.resources
+            )
+        result["claimed"] = is_claimed
+        if not is_claimed:
+            result["claim_warning"] = "PR not claimed (owner worktree is frozen)."
     except FileNotFoundError:
         result["claimed"] = False
         result["claim_warning"] = (

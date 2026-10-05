@@ -545,3 +545,85 @@ class TestCreateForeignPrFromBranch:
         scope, _token = fake_provider.calls[0]
         assert "head=my-unverified-branch-name" not in scope.body
         assert "worktree=" in scope.body
+
+    def test_required_body_sections_check_is_skipped_on_an_idempotent_reuse(
+        self, monkeypatch, _tracking_setup,
+    ):
+        """An idempotent retry (an existing open PR found) must not fail
+        the required_body_sections check just because the caller didn't
+        resupply the original body -- no NEW PR is being opened at all."""
+        _tracking_d, wid = _tracking_setup
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: _foreign_resolution(
+                required_body_sections=("## Intent",),
+            ),
+        )
+        existing_pull = _FakePull(url="https://example/pr/17", number=17, state="open")
+        fake_provider = _FakeProvider(existing=existing_pull)
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
+
+        result = pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="x", body="no intent section here",
+        )
+        assert "error" not in result
+        assert result["reused"] is True
+        assert result["number"] == 17
+
+    def test_reused_pr_reports_draft_false_regardless_of_the_callers_request(
+        self, monkeypatch, _tracking_setup,
+    ):
+        _tracking_d, wid = _tracking_setup
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: _foreign_resolution(),
+        )
+        existing_pull = _FakePull(url="https://example/pr/18", number=18, state="open")
+        fake_provider = _FakeProvider(existing=existing_pull)
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
+
+        result = pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="x", draft=True,
+        )
+        assert result["reused"] is True
+        assert result["draft"] is False
+
+    def test_an_idempotent_retry_reports_claimed_true_not_a_bogus_warning(
+        self, monkeypatch, _tracking_setup,
+    ):
+        """_ensure_pr_claim returns None both when a claim genuinely fails
+        AND when it's already active (nothing new to journal) -- a retry
+        whose ledger is already correct must report claimed: true, not a
+        false "not claimed" warning."""
+        tracking_d, wid = _tracking_setup
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: _foreign_resolution(),
+        )
+        fake_pull = _FakePull(url="https://example/pr/19", number=19)
+        monkeypatch.setattr(
+            providers, "get_provider", lambda name: _FakeProvider(result=fake_pull),
+        )
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
+
+        # First call: journals the claim for real.
+        pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="x",
+        )
+        # Second call against the SAME PR (simulating a retry/duplicate
+        # claim attempt) -- _ensure_pr_claim now returns None because the
+        # claim is already active, not because anything failed.
+        result = pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="x",
+        )
+        assert result["claimed"] is True
+        assert "claim_warning" not in result
+        record = tracking.load_record(tracking_d / f"{wid}.yaml")
+        refs = [c.ref for c in record.resources if c.kind == "pr"]
+        assert refs.count(fake_pull.url) == 1  # never duplicated
