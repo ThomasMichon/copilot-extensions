@@ -247,13 +247,17 @@ def digest(
             sess = _digest_session_suffix(e.get("session"))
             sess_tag = f" {sess}" if sess else ""
             flag = " !" if e.get("follow_up") else ""
+            # Same convention as `flag` above: the snapshot's CURRENT
+            # `paused` value, renders independent of which fields this
+            # particular entry's own write touched.
+            pause_mark = " \u23f8" if e.get("paused") else ""
             title = e.get("title")
             summary = _digest_label(e.get("summary"))
             label = summary or (title or "")
             if kind != "status" and not label:
                 label = f"({kind})"
             label = _digest_label(label)
-            line = f"- {at} [{kind}{sess_tag}]{flag} {label}".rstrip()
+            line = f"- {at} [{kind}{sess_tag}]{flag}{pause_mark} {label}".rstrip()
             rendered.append(line)
 
         selected: list[str] = []

@@ -141,18 +141,16 @@ SUBSCRIBER_TTL_SECONDS = 30.0
 
 _VERBS: dict[str, Callable[[dict], dict]] = {}
 
-#: Per-verb schema version (2026-10-05 PR review finding, "rolling-upgrade
-#: version-skew window can silently lose a new payload field"): reusing an
-#: existing verb NAME for an enriched ``args`` shape (e.g. adding a field a
-#: pre-upgrade daemon process's still-running old code would silently
-#: ignore) is invisible to the ``tracking_write_verbs`` capability check
-#: below, which only ever looks at the verb's NAME. A verb whose payload
-#: shape changed bumps its own version here; :func:`endpoint_from_rendezvous`
-#: additionally rejects an endpoint whose advertised version for that verb
-#: is too old, so the request falls back to :func:`run_direct` -- always
-#: correct, since that runs the CALLING process's own current code -- for
-#: the rest of that rolling-upgrade window, exactly like an unknown verb
-#: name already does.
+#: Per-verb schema version: reusing an existing verb NAME for an enriched
+#: ``args`` shape (e.g. adding a field a pre-upgrade daemon process's
+#: still-running old code would silently ignore) is invisible to the
+#: ``tracking_write_verbs`` capability check below, which only ever looks
+#: at the verb's NAME. A verb whose payload shape changed bumps its own
+#: version here; :func:`endpoint_from_rendezvous` additionally rejects an
+#: endpoint whose advertised version for that verb is too old, so the
+#: request falls back to :func:`run_direct` -- always correct, since that
+#: runs the CALLING process's own current code -- for the rest of that
+#: rolling-upgrade window, exactly like an unknown verb name already does.
 _VERB_VERSIONS: dict[str, int] = {}
 
 #: How many :func:`compute` calls (verb executions) are currently running in
@@ -420,10 +418,10 @@ def endpoint_from_rendezvous(
     enriched-payload rolling-upgrade case :data:`_VERB_VERSIONS` exists for:
     a verb a pre-upgrade daemon process already recognizes by name, but
     whose still-running old ``fn`` would silently ignore (or otherwise
-    mishandle) a field a newer payload shape adds (2026-10-05 PR review
-    finding). Unlike the name check, this can never be confirmed from the
-    daemon's response after the fact (the old ``fn`` succeeds normally, it
-    just drops data) -- it must be caught here, before dialing.
+    mishandle) a field a newer payload shape adds. Unlike the name check,
+    this can never be confirmed from the daemon's response after the fact
+    (the old ``fn`` succeeds normally, it just drops data) -- it must be
+    caught here, before dialing.
     """
     if not isinstance(data, dict):
         return None

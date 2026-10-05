@@ -123,11 +123,11 @@ def apply_status_disposition(args: dict) -> dict:
     }
 
 
-# version=2 (2026-10-05 PR review finding): the `paused` arg was added to
-# this SAME verb name's payload after it first shipped. A pre-upgrade
-# daemon process still running the version-1 `fn` would accept a request
-# carrying `paused` (the name check alone can't see the shape change) and
-# silently ignore it while reporting success -- see `tracking_write`'s own
-# `_VERB_VERSIONS` docstring for why this requires a version bump rather
-# than relying on the pre-existing by-name capability check.
+# version=2: `paused` is part of this verb's payload, added after this verb
+# first shipped at version 1. A pre-upgrade daemon process still running
+# the version-1 `fn` would accept a request carrying `paused` (the name
+# check alone can't see the shape change) and silently ignore it while
+# reporting success -- see `tracking_write`'s own `_VERB_VERSIONS`
+# docstring for why this requires a version bump rather than relying on
+# the pre-existing by-name capability check.
 tracking_write.register_verb("status_disposition_write", apply_status_disposition, version=2)

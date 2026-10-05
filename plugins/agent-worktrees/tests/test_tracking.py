@@ -3429,6 +3429,47 @@ class TestSystemWorktreeKind:
         assert final.summary == "unrelated update"
         assert final.pending_seed_revision == 1
 
+    def test_stale_full_record_writer_cannot_erase_a_concurrent_pause(
+        self, tmp_path: Path,
+    ):
+        """A process (e.g. `finalize.py`) that loaded the record BEFORE a
+        concurrent `status --paused` write, and holds that stale snapshot
+        across its own Git/network work before saving, must not silently
+        overwrite the already-persisted `paused=True` with its own stale
+        `paused=False` -- `_save_record_unlocked` merges `paused` the same
+        way it already does for `pending_seed`/`effort_revision`: the
+        ON-DISK `paused_revision` wins when it is newer."""
+        path = tmp_path / "wt-stale-pause.yaml"
+        rec = create_new_record(
+            "wt-stale-pause", "worktree/wt-stale-pause", "/tmp/wt-stale-pause",
+            "test-repo", "test", "wsl", tmp_path,
+        )
+        assert rec.paused_revision == 0
+        save_record(rec, path)
+
+        # Another process (e.g. finalize.py) loads the SAME on-disk state
+        # before the pause, then holds it across its own slow work.
+        stale = load_record(path)
+        assert stale.paused is False
+
+        # Meanwhile, `status --paused` happens under the record lock and
+        # is saved first.
+        set_disposition(rec, paused=True, save=False)
+        assert rec.paused_revision == 1
+        save_record(rec, path)
+        assert load_record(path).paused is True
+
+        # The stale writer's later save (unaware of the pause) must not
+        # revert it, even though it also legitimately changes an unrelated
+        # field.
+        stale.summary = "unrelated update"
+        save_record(stale, path)
+
+        final = load_record(path)
+        assert final.paused is True
+        assert final.summary == "unrelated update"
+        assert final.paused_revision == 1
+
     def test_create_new_record_bound_agent_whitespace_normalizes_to_none(
         self, tmp_path: Path,
     ):
@@ -3686,7 +3727,15 @@ class TestSetDisposition:
 
         set_disposition(load_record(p), paused=False)
         assert load_record(p).paused is False
-        assert "paused" not in p.read_text()
+        # The `paused` key itself is omitted once cleared, but
+        # `paused_revision` persists -- same convention as
+        # `pending_seed`/`pending_seed_revision`: the revision must survive
+        # the value returning to its default so a later stale save can
+        # still be detected and rejected (see the dedicated
+        # `_save_record_unlocked` stale-writer tests).
+        content = p.read_text()
+        assert "paused: true" not in content
+        assert "paused_revision: 2" in content
 
     def test_paused_independent_of_follow_up(self, tmp_path: Path, monkeypatch):
         rec = self._rec()

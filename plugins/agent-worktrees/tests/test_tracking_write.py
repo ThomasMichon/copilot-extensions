@@ -141,13 +141,13 @@ def test_endpoint_from_rendezvous_rejects_pre_capability_daemon_data():
 
 
 def test_endpoint_from_rendezvous_rejects_an_endpoint_below_min_version():
-    """(2026-10-05 PR review finding) Reusing an existing verb NAME for an
-    enriched payload shape is invisible to the by-name capability check
-    above -- a pre-upgrade daemon process still recognizes the verb and
-    would silently ignore (or mishandle) the new field. ``min_version``
-    closes that gap: an endpoint whose published version for this verb is
-    too low (or missing, meaning version 1) is never dialed, exactly like
-    an endpoint lacking the verb's name."""
+    """Reusing an existing verb NAME for an enriched payload shape is
+    invisible to the by-name capability check above -- a pre-upgrade daemon
+    process still recognizes the verb and would silently ignore (or
+    mishandle) the new field. ``min_version`` closes that gap: an endpoint
+    whose published version for this verb is too low (or missing, meaning
+    version 1) is never dialed, exactly like an endpoint lacking the verb's
+    name."""
     fields = {
         "tracking_write_endpoint": "127.0.0.1:65535",
         "tracking_write_token": "tok",

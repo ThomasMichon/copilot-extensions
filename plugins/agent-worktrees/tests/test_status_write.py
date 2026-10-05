@@ -131,6 +131,29 @@ def test_unpaused_prints_an_explicit_confirmation(status_env, capsys):
     assert record.paused is False
 
 
+def test_status_history_disambiguates_pausing_from_unpausing(status_env, capsys):
+    """`status --history`'s plain-text rendering must not show the same
+    `(paused)` label for both a --paused and a --unpaused entry -- the
+    `changed` field name alone can't distinguish set from clear."""
+    args = argparse.Namespace(worktree_id=None)
+
+    # summary=None on both so `changed` is exactly `["paused"]` on each
+    # write -- isolates the assertion to the `paused` column alone.
+    assert main._cmd_status_write(args, summary=None, paused=True) == 0
+    assert main._cmd_status_write(args, summary=None, paused=False) == 0
+    capsys.readouterr()  # discard both write confirmations above
+
+    assert main._cmd_status_history(
+        argparse.Namespace(worktree_id=None, limit=None, json=False),
+    ) == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    paused_glyph_lines = [line for line in lines if "(paused)" in line]
+    assert len(paused_glyph_lines) == 2
+    assert "\u23f8" in paused_glyph_lines[0]
+    assert "\u23f8" not in paused_glyph_lines[1]
+
+
 def test_first_write_in_session_emits_stage_5_status_reported(status_env, monkeypatch):
     """Stage 5 (status_reported): the first status-report write in a session
     marks "Copilot did something here"."""

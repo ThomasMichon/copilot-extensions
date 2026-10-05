@@ -795,6 +795,15 @@ class WorktreeRecord:
     # Picker reader can see "this worktree has work left open on
     # purpose, not abandoned" without it affecting pruning eligibility.
     paused: bool = False
+    # Monotonic counter, bumped on every `set_disposition` call that touches
+    # `paused` -- lets `_save_record_unlocked` merge it the same way as
+    # `effort_revision`/`pending_seed_revision`/every other per-field
+    # revision below: an ordinary full-record writer can hold a snapshot
+    # across Git/network I/O and save it well after a concurrent `status
+    # --paused`/`--unpaused` write released the record lock; without its
+    # own revision, that later save would silently overwrite the
+    # already-persisted newer `paused` value with its own stale one.
+    paused_revision: int = 0
     summary: str = ""
     status_note_at: str | None = None
     # #3307 worktrees-pivot-ux-overhaul follow-up: the agent-asserted CURRENT
@@ -2159,6 +2168,7 @@ def _load_record_uncached(path: Path) -> WorktreeRecord:
         pending_seed_revision=int(data.get("pending_seed_revision", 0) or 0),
         follow_up=bool(data.get("follow_up", False)),
         paused=bool(data.get("paused", False)),
+        paused_revision=int(data.get("paused_revision", 0) or 0),
         follow_ups=follow_ups_list,
         summary=str(data.get("summary", "") or ""),
         active_effort=active_effort_from_mapping(data.get("active_effort")),
@@ -2400,6 +2410,15 @@ def _save_record_unlocked(
             record.follow_up = current.follow_up
             record.summary = current.summary
             record.status_note_at = current.status_note_at
+        # `set_disposition` advances `paused_revision` under the record
+        # lock on every `status --paused`/`--unpaused` write. A stale
+        # full-record writer loaded before that write (e.g. `finalize.py`
+        # holding a snapshot across Git/network I/O, per this function's
+        # own "universal write chokepoint" note above) must never save its
+        # older `paused` value back over the already-persisted newer one.
+        if current.paused_revision > record.paused_revision:
+            record.paused = current.paused
+            record.paused_revision = current.paused_revision
         # A claim/restore (pending_seed.py) advances pending_seed_revision
         # under the record lock. A stale full-record writer loaded BEFORE
         # that transition must never resurrect an already-delivered
@@ -2675,6 +2694,8 @@ def _save_record_unlocked(
         content += "follow_up: true\n"
     if record.paused:
         content += "paused: true\n"
+    if record.paused_revision:
+        content += f"paused_revision: {record.paused_revision}\n"
     if record.summary:
         safe_summary = record.summary.replace("'", "''")
         content += f"summary: '{safe_summary}'\n"
@@ -3515,6 +3536,7 @@ def set_disposition(
             reopen_finalized_owner(record, reason="follow_up flag set")
     if paused is not None:
         record.paused = paused
+        record.paused_revision += 1
         changed.append("paused")
         # Deliberately NO gate interaction (no reopen, no prune-verdict
         # effect) -- `paused` is purely informational, unlike `follow_up`.
