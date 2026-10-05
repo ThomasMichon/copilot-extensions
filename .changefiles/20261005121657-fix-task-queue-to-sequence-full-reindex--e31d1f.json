@@ -1,5 +1,5 @@
 {
-  "comment": "Fix task queue to sequence full reindex ahead of incremental (cancelling now-redundant queued incrementals, and skipping an incremental already covered by a queued/processing full), so a full reindex never races or trails one it supersedes.",
+  "comment": "Fix task queue to sequence full reindex ahead of incremental (cancelling now-redundant queued incrementals, and skipping an incremental already covered by a queued full), so a full reindex never races or trails one it supersedes.",
   "changes": [
     {
       "plugin": "agent-index",
