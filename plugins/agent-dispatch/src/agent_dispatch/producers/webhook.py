@@ -21,9 +21,8 @@ three generic, forge-neutral event shapes onto tasks:
   to its own forge label) can share one listener and one config file. Each
   matching rule creates a task with ``source="issue-webhook"`` and
   ``origin_ref="issue/<n>"``. This is the reactive half of a
-  "webhook-primary, polling-fallback" pair: the periodic poller that
-  inspired this route (an aperture-labs ``tools/*-trigger.py`` script, one
-  per backlog) keeps running on its own longer interval as a backstop for a
+  "webhook-primary, polling-fallback" pair: a deployer-owned periodic poller
+  can keep running on its own longer interval as a backstop for a
   missed/undelivered webhook, using the exact same ``<task_label>:<repo
   full name>#<issue number>`` dedup-key shape this route defaults to, so
   either path colliding on the same issue returns the same task rather than
@@ -62,8 +61,8 @@ Config (JSON), all keys optional::
           "name": "ci-failure-fix-worker",         # identifies this rule in skip reasons
           "match_actions": ["opened", "labeled"],  # default: opened, labeled
           "match_labels": ["ci-failure-signature"],# ALL must be present on the issue
-          "repo_allowlist": ["ThomasMichon/copilot-extensions"],  # optional
-          "repo": "tmichon/aperture-labs",          # dispatch lane (else default_repo)
+          "repo_allowlist": ["acme/widget"],        # optional
+          "repo": "example.com/acme/widget",        # dispatch lane (else default_repo)
           "task_label": "ci-failure-fix-worker",    # dedup-key prefix + default template field
           "title_template": "drive: {title}",
           "prompt_template": "Resolve {repo_full_name}#{number} ({url}): {title}\\n\\n{body}",
@@ -377,10 +376,21 @@ def build_app(
                     "url": issue["url"], "action": issue["action"], "repo": lane,
                     "repo_full_name": issue["repo_full_name"], "task_label": task_label,
                 }
+                custom_prompt = rule.get("prompt_template")
+                if custom_prompt:
+                    # The issue's own title/body is attacker-influenceable
+                    # external content -- append the shared framing
+                    # regardless of what the rule author's own template
+                    # says, mirroring producers/evaluator.py's
+                    # _emit_from_rule, so this guardrail doesn't depend on
+                    # every rule remembering it.
+                    prompt = _fmt(custom_prompt, fields) + " " + UNTRUSTED_EXTERNAL_CONTENT_NOTE
+                else:
+                    prompt = _fmt(_DEFAULT_ISSUE_PROMPT, fields)
                 task = client.create(
                     _fmt(rule.get("title_template", _DEFAULT_ISSUE_TITLE), fields),
                     repo=lane,
-                    prompt=_fmt(rule.get("prompt_template", _DEFAULT_ISSUE_PROMPT), fields),
+                    prompt=prompt,
                     proposed=bool(rule.get("proposed", False)),
                     requires=rule.get("require", []),
                     labels=rule.get("labels", []),

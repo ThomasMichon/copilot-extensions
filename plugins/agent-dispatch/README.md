@@ -1113,7 +1113,7 @@ body type are no longer a repo-local copy.
 
 ### Reactive webhook producer (`agent-dispatch webhook`)
 
-A small HTTP app that maps two generic, forge-neutral event shapes onto tasks:
+A small HTTP app that maps three generic, forge-neutral event shapes onto tasks:
 
 - `POST /webhook/pr` -- a git-forge PR event; when **merged**, creates a
   follow-up task (`source=pr-webhook`, `origin_ref=pr/<n>`) in the lane derived
@@ -1121,10 +1121,22 @@ A small HTTP app that maps two generic, forge-neutral event shapes onto tasks:
 - `POST /webhook/telemetry` -- a monitoring alert; a **firing** alert creates a
   remediation task (`source=telemetry`). Accepts an Alertmanager-style
   `{"alerts": [...]}` batch or a single flat alert object.
+- `POST /webhook/issue` -- a git-forge issue event (GitHub's `issues` webhook
+  shape, which Gitea mirrors closely enough to reuse). Driven by a list of
+  independent **rules** (`config["issues"]`) rather than one fixed template, so
+  several label-watching backlogs can share one listener. Each rule matches on
+  issue `action` (default `opened`/`labeled`) and a set of required forge
+  labels, optionally restricts to a repo allowlist, and creates a task
+  (`source=issue-webhook`, `origin_ref=issue/<n>`) with a deterministic
+  `dedup_key` of `<task_label>:<repo full name>#<issue number>` -- this is the
+  reactive half of a "webhook-primary, polling-fallback" pair: a deployer-owned
+  periodic poller using the same dedup-key shape is a safe, idempotent backstop
+  for a missed or undelivered webhook.
 
 Every task carries a deterministic `dedup_key`, so a redelivered webhook doesn't
-double-enqueue. Behavior (templates, base-branch/severity allowlists, an optional
-inbound bearer token, the coordinator URL) is set in an optional JSON config:
+double-enqueue. Behavior (templates, base-branch/severity/label allowlists, an
+optional inbound bearer token, the coordinator URL) is set in an optional JSON
+config:
 
 ```bash
 agent-dispatch webhook --config webhook.json --host 127.0.0.1 --port 9331

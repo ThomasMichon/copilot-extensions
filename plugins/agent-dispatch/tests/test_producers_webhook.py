@@ -149,12 +149,12 @@ _CI_FAILURE_ISSUE = {
         "number": 5287,
         "title": "CI failure: guards (full-tree, non-PR-scoped)",
         "body": "## Summary\n\nmodule-size guard failed.",
-        "html_url": "https://github.com/ThomasMichon/copilot-extensions/issues/5287",
+        "html_url": "https://github.com/acme/widget/issues/5287",
         "labels": [{"name": "ci-failure-signature"}, {"name": "bug"}],
     },
     "repository": {
-        "full_name": "ThomasMichon/copilot-extensions",
-        "clone_url": "https://github.com/ThomasMichon/copilot-extensions.git",
+        "full_name": "acme/widget",
+        "clone_url": "https://github.com/acme/widget.git",
     },
 }
 
@@ -163,8 +163,8 @@ _ISSUE_RULES_CONFIG = {
         {
             "name": "ci-failure-fix-worker",
             "match_labels": ["ci-failure-signature"],
-            "repo_allowlist": ["ThomasMichon/copilot-extensions"],
-            "repo": "tmichon/aperture-labs",
+            "repo_allowlist": ["acme/widget"],
+            "repo": "example.com/acme/widget",
             "task_label": "ci-failure-fix-worker",
             "labels": ["ci-failure-fix-worker"],
         }
@@ -181,9 +181,9 @@ def test_issue_matching_rule_creates_task():
     task = body["created"][0]
     assert task["source"] == "issue-webhook"
     assert task["origin_ref"] == "issue/5287"
-    assert task["repo"] == "tmichon/aperture-labs"
+    assert task["repo"] == "example.com/acme/widget"
     assert task["labels"] == ["ci-failure-fix-worker"]
-    assert task["dedup_key"] == "ci-failure-fix-worker:ThomasMichon/copilot-extensions#5287"
+    assert task["dedup_key"] == "ci-failure-fix-worker:acme/widget#5287"
     assert len(sink) == 1
 
 
@@ -194,7 +194,7 @@ def test_issue_dedup_key_matches_poller_format():
     creating the task first is idempotent against the other."""
     tc, sink = _client(_ISSUE_RULES_CONFIG)
     tc.post("/webhook/issue", json=_CI_FAILURE_ISSUE)
-    assert sink[0]["dedup_key"] == "ci-failure-fix-worker:ThomasMichon/copilot-extensions#5287"
+    assert sink[0]["dedup_key"] == "ci-failure-fix-worker:acme/widget#5287"
 
 
 def test_issue_default_prompt_frames_event_fields_as_untrusted():
