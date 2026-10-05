@@ -182,6 +182,19 @@ def test_shared_lib_change_passes_when_all_consumers_bump(repo: Path):
 def test_installer_engine_change_charges_registered_adopters(repo: Path):
     """A canonical installer-engine change must charge every registered adopter
     even when the diff touches only `libs/installer-engine/*`."""
+    # The registered adopter (installer_engine_ref.ADOPTERS) must actually
+    # exist as a plugin in this diff's base, or check-version-bump.py's
+    # `(PLUGINS_DIR / plugin).is_dir()` filter correctly treats it as
+    # nonexistent and silently excludes it -- it does not get created by
+    # the shared `repo` fixture, which only knows about alpha/beta.
+    _plugin(repo, "agent-pull-requests", "1.0.0-dev1")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add agent-pull-requests, the registered installer-engine adopter")
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", base_sha)
+
     _write(repo, "libs/installer-engine/installer-engine.sh", "echo shared\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "installer engine change, no adopter bumps")

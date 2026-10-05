@@ -215,6 +215,15 @@ jobs:
         # every test with an import error) with nothing to catch it
         # (PR #4942 review).
         run: python -m pytest -q tools/test_check_changefile_presence.py
+      - name: Version-bump diff engine guard tests
+        # check-version-bump.py no longer gates an ordinary PR directly (see
+        # the step above), but check-changefile-presence.py and
+        # accumulate_bumps.py both import its plugin-diff detection as a
+        # shared engine, and its own standalone CLI remains a documented
+        # release/recovery check (docs/pipelines.md § Release & Versioning)
+        # -- so its own regression suite still needs to run somewhere, not
+        # just when a dependent guard's tests happen to exercise it.
+        run: python -m pytest -q tools/test_check_version_bump.py
       - name: Module size (hard cap + shrink-only baseline, PR diff only)
         # Scoped to files THIS PR's own commits touch (like the changefile-
         # presence step above) -- a PR is never blocked by growth in a file it

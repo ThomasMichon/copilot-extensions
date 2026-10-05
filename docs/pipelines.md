@@ -44,9 +44,16 @@ committing to `dev` / pushing a worktree branch directly.
 
 A GitHub repository ruleset ("dev branch policy: PR-required") carries a
 `pull_request` rule (+ `non_fast_forward`) that blocks direct pushes to
-`dev` server-side, for everyone (no bypass). A separate branch-protection
-rule on `main` restricts pushes to the promotion pipeline's own identity,
-with repo-admin escalation retained for genuine emergencies (see
+`dev` server-side, for everyone (no bypass). `main` has its own branch
+protection: no one pushes to it directly, including the promotion
+pipeline itself — a personal GitHub account's branch rulesets have no way
+to grant a bypass to the GitHub Actions app the way an organization's can.
+Instead, the pipeline pushes its generated commit to a
+`release/promote-<run id>` branch and lands it on `main` through a real
+pull request, merged under the pipeline's own identity
+(`APERTURE_RELEASE_TOKEN`) — the same PR-based path every other change to
+this repo uses, just automated end to end. Repo-admin escalation is
+retained for genuine emergencies (see
 [Never admin-merge a PR into `main`](#never-admin-merge-a-pr-into-main)
 below).
 
@@ -331,9 +338,16 @@ automated PR (see the `main-gate` job in `ci.yml`), and `main-gate`
 recognizes and passes **all three** of those on its own — unassisted, no
 override needed. That means `gh pr merge --admin` (or the
 equivalent `--admin` flag on any PR-merge tool) has **no legitimate use
-against `main`** once this gate is in place: if `main-gate` is failing a
-PR, that is the gate correctly telling you the PR doesn't belong on `main`
-— retarget it to `dev`, don't override the check. This is not a
+against an ordinary contribution or promotion PR** once this gate is in
+place: if `main-gate` is failing a PR, that is the gate correctly telling
+you the PR doesn't belong on `main`
+— retarget it to `dev`, don't override the check. (This prohibition
+covers routine work only — `main`'s ruleset also grants a narrower,
+separate `RepositoryRole: admin` bypass reserved for a genuine
+human-operator emergency, e.g. `tools/rollback_release.py`'s own
+documented escape hatch for landing a revert when the normal automated
+path can't. That bypass is never automated, and is not a license to
+override `main-gate` on a routine PR it's correctly failing.) This is not a
 hypothetical risk: a PR landed directly on `main` via admin-bypass once,
 stranding content that the next wholesale dev→main promotion would have
 silently reverted, because `main`'s tree is regenerated entirely from
