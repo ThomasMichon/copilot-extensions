@@ -1,8 +1,7 @@
 """The relocated ``launch-session.{ps1,sh}`` delegation leg of ``_run_launch``
 -- split out of ``__main__.py`` purely to keep that module under this repo's
-module-size cap (no functional reason to split otherwise). Phase 3b Sub-slice
-2a's own canonical muxed-launch implementation, plus Phase 9's (#5210)
-``new_window`` modifier.
+module-size cap (no functional reason to split otherwise). This package's own
+canonical muxed-launch implementation, plus the ``new_window`` modifier.
 """
 
 from __future__ import annotations
@@ -43,19 +42,16 @@ def _relocated_launch_script():
 
 def _run_relocated_mux_launch(req, plan, script) -> int:
     """Delegate an ordinary local launch to the relocated launch-session
-    script -- the ONE canonical muxed-launch implementation (DQ9). The script
+    script -- the ONE canonical muxed-launch implementation. The script
     performs its own resolve/launch/attach/post-exit; this passes the
     already-resolved ``plan.worktree_id`` (never re-issuing ``--new``/
     ``--base``), so a ``mode == "new"`` request cannot create a second
     worktree by re-triggering creation inside the script's own resolve call.
 
-    ``req.new_window`` (Phase 9, #5210) opens the SAME script invocation in a
-    brand-new, visible terminal window instead of running it in this
-    process, so the mux-daemon registration the script performs always runs
-    the identical way regardless of which window modifier was chosen --
-    unlike the retired `agent-worktrees copilot --headed` path, which created
-    the session through a separate, in-process code path that never ran this
-    script at all.
+    ``req.new_window`` opens the SAME script invocation in a brand-new,
+    visible terminal window instead of running it in this process, so the
+    mux-daemon registration the script performs always runs the identical
+    way regardless of which window modifier was chosen.
     """
     args = ["--project", req.project]
     if req.mode == "base":
@@ -68,10 +64,9 @@ def _run_relocated_mux_launch(req, plan, script) -> int:
         args += ["--worktree-id", worktree_id]
         if req.mode == "bare-resume":
             args.append("--bare-resume")
-    if getattr(req, "no_mux", False):
-        os.environ["WORKTREE_NO_MUX"] = "1"
 
     is_windows = _core()._is_windows()
+    no_mux = bool(getattr(req, "no_mux", False))
 
     if getattr(req, "new_window", False):
         from . import new_window_spawn
@@ -81,14 +76,28 @@ def _run_relocated_mux_launch(req, plan, script) -> int:
             if is_windows
             else ["bash", str(script), *args]
         )
+        # A new window is a genuinely separate process (never replacing or
+        # blocking this one), so a one-off env override is passed EXPLICITLY
+        # to the spawned child rather than mutated onto `os.environ` -- that
+        # global mutation would never be undone and would leak into every
+        # later or concurrent spawn in this (long-lived Picker) process.
+        env = None
+        if no_mux:
+            env = {**os.environ, "WORKTREE_NO_MUX": "1"}
         title = str(getattr(plan, "worktree_id", None) or req.worktree_id or req.project)
         try:
-            new_window_spawn.spawn_detached_new_window(argv, title=title)
+            new_window_spawn.spawn_detached_new_window(argv, title=title, env=env)
         except new_window_spawn.NewWindowSpawnError as error:
             print(f"error: could not open a new window: {error}")
             return 1
         return 0
 
+    # Every other path below either exec-replaces this process (POSIX) or
+    # blocks on it (Windows `Popen().wait()`) -- there is no "later spawn"
+    # to leak into, so the pre-existing `os.environ` mutation is harmless
+    # here (unlike the new_window branch above).
+    if no_mux:
+        os.environ["WORKTREE_NO_MUX"] = "1"
     if is_windows:
         argv = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(script), *args]
         proc = subprocess.Popen(argv)

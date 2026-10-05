@@ -1,19 +1,12 @@
 """Spawn a genuinely NEW, VISIBLE terminal window running an arbitrary argv --
-the mechanics behind the Picker's "Launch in new window" action (#5210,
-Phase 9 of the ``worktree-manager-control-plane`` effort).
+the mechanics behind the Picker's "Launch in new window" action.
 
-Relocated here from ``agent-worktrees``' ``headed_launch.py`` (added by #4593,
-then found three days later to re-own exactly the terminal-presentation
-mechanics Phase 3b had already moved out of agent-worktrees -- see the
-``session-hosting`` vision's Concepts/*Session-host provider*: "Presentation
-... TMux/PSMux pane wrapping, a plain terminal, a GUI window, or none" is
-owned by the Worktree Manager, not agent-worktrees). The original module
-only ever ran a fixed ``<mux_bin> attach-session -t <session>`` command
-after the caller had separately created/resumed the session in-process; this
-version wraps an arbitrary argv so the caller can run the SAME
-``launch-session.{ps1,sh}`` plan execution every other launch uses (the one
-that performs the mux-daemon registration), inside a new window, instead of
-a parallel code path that bypasses it.
+This is the Worktree Manager's own terminal-presentation mechanic (see the
+``session-hosting`` vision's Concepts/*Session-host provider*: a GUI/plain
+terminal window is a presentation concern owned here, not by agent-worktrees).
+It wraps an arbitrary argv so a caller can run the SAME launch-plan execution
+every other launch uses, inside a new window, instead of a separate code
+path that bypasses it.
 """
 
 from __future__ import annotations
@@ -39,13 +32,13 @@ class NewWindowSpawnError(RuntimeError):
     argv in the caller's own (headless/TUI) process."""
 
 
-def _windows_spawn(argv: list[str], *, title: str) -> dict:
+def _windows_spawn(argv: list[str], *, title: str, env: dict[str, str] | None) -> dict:
     wt_bin = shutil.which("wt.exe") or shutil.which("wt")
     if wt_bin:
         # -w -1: always a brand-new window (never reuse/attach to an
         # existing Windows Terminal window that may not even be ours).
         wt_argv = [wt_bin, "-w", "-1", "new-tab", "--title", title, "--", *argv]
-        proc = subprocess.Popen(wt_argv)
+        proc = subprocess.Popen(wt_argv, env=env)
         return {"spawner": "wt.exe", "pid": proc.pid}
     # No Windows Terminal on PATH: fall back to a plain new console host.
     # CREATE_NEW_CONSOLE always pops a REAL, visible window (conhost, or
@@ -53,7 +46,7 @@ def _windows_spawn(argv: list[str], *, title: str) -> dict:
     # Windows-11-only feature -- redirects it to); it is the platform's
     # only universal "give me a new window" primitive absent wt.exe.
     proc = subprocess.Popen(
-        argv, creationflags=_CREATE_NEW_CONSOLE,  # headless-guard: allow this is the deliberate new-window exception (module docstring); the whole point is a visible window
+        argv, creationflags=_CREATE_NEW_CONSOLE, env=env,  # headless-guard: allow this is the deliberate new-window exception (module docstring); the whole point is a visible window
     )
     return {"spawner": "conhost (CREATE_NEW_CONSOLE)", "pid": proc.pid}
 
@@ -73,15 +66,24 @@ _POSIX_TERMINALS = (
 )
 
 
-def _posix_spawn(argv: list[str], *, title: str) -> dict:
+def _applescript_quote(text: str) -> str:
+    """Escape ``text`` for safe interpolation inside an AppleScript
+    double-quoted string literal (backslash, then double-quote)."""
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _posix_spawn(argv: list[str], *, title: str, env: dict[str, str] | None) -> dict:
     if platform.system() == "Darwin":
         # osascript can't easily accept an argv list; quote for a shell
-        # command string instead.
+        # command string, THEN escape the result for the AppleScript string
+        # literal it is embedded in -- shell-quoting alone leaves `"` and
+        # `\` free to terminate that literal early or inject AppleScript
+        # source (e.g. an argv element naming an installation path).
         import shlex
 
         cmd = " ".join(shlex.quote(a) for a in argv)
-        script = f'tell application "Terminal" to do script "{cmd}"'
-        proc = subprocess.Popen(["osascript", "-e", script])
+        script = f'tell application "Terminal" to do script "{_applescript_quote(cmd)}"'
+        proc = subprocess.Popen(["osascript", "-e", script], env=env)
         return {"spawner": "osascript (Terminal.app)", "pid": proc.pid}
     for term in _POSIX_TERMINALS:
         term_bin = shutil.which(term)
@@ -95,7 +97,7 @@ def _posix_spawn(argv: list[str], *, title: str) -> dict:
         term_argv = [term_bin, "--title", title, sep, *argv] if sep == "--" else [
             term_bin, "-T", title, sep, *argv
         ]
-        proc = subprocess.Popen(term_argv)
+        proc = subprocess.Popen(term_argv, env=env)
         return {"spawner": term, "pid": proc.pid}
     raise NewWindowSpawnError(
         "no visible terminal spawner found (tried: "
@@ -104,8 +106,17 @@ def _posix_spawn(argv: list[str], *, title: str) -> dict:
     )
 
 
-def spawn_detached_new_window(argv: list[str], *, title: str) -> dict:
+def spawn_detached_new_window(
+    argv: list[str], *, title: str, env: dict[str, str] | None = None,
+) -> dict:
     """Open a brand-new, visible terminal window running ``argv``.
+
+    ``env``, when given, is the exact environment the spawned process
+    receives (default ``None``: inherit this process's current environment,
+    matching ``subprocess.Popen``'s own default) -- callers that need a
+    one-off override (e.g. a no-mux launch's ``WORKTREE_NO_MUX=1``) pass an
+    explicit copy instead of mutating ``os.environ`` globally, which would
+    leak into every other concurrent or later spawn in this process.
 
     Returns ``{"spawner": <str>, "pid": <int>}`` on success. Raises
     :class:`NewWindowSpawnError` -- never silently degrades to running
@@ -113,5 +124,5 @@ def spawn_detached_new_window(argv: list[str], *, title: str) -> dict:
     is available on this platform.
     """
     if platform.system() == "Windows":
-        return _windows_spawn(argv, title=title)
-    return _posix_spawn(argv, title=title)
+        return _windows_spawn(argv, title=title, env=env)
+    return _posix_spawn(argv, title=title, env=env)

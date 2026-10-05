@@ -1340,18 +1340,19 @@ class TestRunLaunchNewWindow:
             AssertionError("new_window must never exec-replace this process")))
         calls = []
 
-        def fake_spawn(argv, *, title):
-            calls.append((argv, title))
+        def fake_spawn(argv, *, title, env=None):
+            calls.append((argv, title, env))
             return {"spawner": "wt.exe", "pid": 4242}
 
         monkeypatch.setattr(new_window_spawn, "spawn_detached_new_window", fake_spawn)
 
         assert entrypoint._run_launch(self._request()) == 0
         assert len(calls) == 1
-        argv, title = calls[0]
+        argv, title, env = calls[0]
         assert argv[:4] == ["pwsh.exe", "-NoProfile", "-NoLogo", "-File"]
         assert argv[4] == str(script)
         assert title == "demo-1234"
+        assert env is None  # no --no-mux: inherit this process's environment unchanged
 
     def test_new_window_argv_matches_the_ordinary_launch_argv(self, monkeypatch, tmp_path):
         """The whole point of Phase 9: "new window" must run the IDENTICAL
@@ -1386,19 +1387,24 @@ class TestRunLaunchNewWindow:
         new_window_calls = []
         monkeypatch.setattr(
             new_window_spawn, "spawn_detached_new_window",
-            lambda argv, *, title: new_window_calls.append(argv) or {"spawner": "x", "pid": 1},
+            lambda argv, *, title, env=None: new_window_calls.append(argv) or {"spawner": "x", "pid": 1},
         )
         assert entrypoint._run_launch(self._request(new_window=True)) == 0
 
         assert ordinary_calls == new_window_calls
 
-    def test_new_window_registers_none_when_composed_with_no_mux(self, monkeypatch, tmp_path):
+    def test_new_window_passes_no_mux_as_an_explicit_child_env_not_a_global_mutation(
+        self, monkeypatch, tmp_path,
+    ):
         """A `--no-mux` launch bypasses mux entirely (PSMux/TMux is never
         invoked -- see `launch-session.ps1`), so composing it with
         `new_window` must still run the SAME script (which itself skips
-        registration for a no-mux launch), never a separate no-registration
-        special case needing its own regression guard here beyond argv
-        parity with the no-mux, non-new-window case."""
+        registration for a no-mux launch). The `WORKTREE_NO_MUX=1` override
+        must reach the spawned child via an explicit `env` argument, NEVER
+        by mutating `os.environ` -- that would never be undone and would
+        leak into every later or concurrent spawn in this long-lived Picker
+        process (unlike the ordinary Popen/execvp paths, which block or
+        replace this process and so have no "later spawn" to leak into)."""
         from worktree_manager import ahp_provider, new_window_spawn
 
         script = tmp_path / "launch-session.ps1"
@@ -1414,12 +1420,17 @@ class TestRunLaunchNewWindow:
         calls = []
         monkeypatch.setattr(
             new_window_spawn, "spawn_detached_new_window",
-            lambda argv, *, title: calls.append(argv) or {"spawner": "x", "pid": 1},
+            lambda argv, *, title, env=None: calls.append((argv, env)) or {"spawner": "x", "pid": 1},
         )
 
         assert entrypoint._run_launch(self._request(new_window=True, no_mux=True)) == 0
-        assert entrypoint.os.environ.get("WORKTREE_NO_MUX") == "1"
+        # The override reached the spawn call as an explicit env...
         assert len(calls) == 1
+        _argv, env = calls[0]
+        assert env is not None
+        assert env.get("WORKTREE_NO_MUX") == "1"
+        # ...and os.environ itself was never touched.
+        assert "WORKTREE_NO_MUX" not in entrypoint.os.environ
         monkeypatch.delenv("WORKTREE_NO_MUX", raising=False)
 
     def test_new_window_rejects_remote_plan(self, monkeypatch):

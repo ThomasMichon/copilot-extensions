@@ -414,10 +414,13 @@ class PickerScreenWorktreeActionsMixin:
             # Phase 9 (#5210): runs the row's ordinary resume decision with
             # LaunchRequest.new_window=True in-process, opening a brand-new
             # visible terminal window WITHOUT exiting the Picker (unlike
-            # every other verb here).
+            # every other verb here). Forwards the submenu's own no_mux/ahp
+            # toggles so "No Mux + Launch in new window" still bypasses mux,
+            # and an AHP-required worktree reaches new_window's explicit
+            # rejection instead of silently ignoring the toggle.
             from .headed_actions import open_worktree_cli_headed
 
-            open_worktree_cli_headed(self, rec)
+            open_worktree_cli_headed(self, rec, no_mux=no_mux, ahp=ahp)
         elif cur == "Bare resume":
             # Two-step restore: mux + Copilot in HOME, no --resume (#outage).
             self._decide(self._resume_decision(rec, bare_resume=True))
