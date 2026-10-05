@@ -113,6 +113,24 @@ def test_paused_does_not_reactivate_finalized_worktree(status_env):
     assert record.summary == "Leave this open on purpose"
 
 
+def test_unpaused_prints_an_explicit_confirmation(status_env, capsys):
+    """Copilot review finding: `--unpaused` only ever printed the unrelated
+    follow-up flag (`resolved`), never confirming the paused flag was
+    actually cleared -- indistinguishable from a write that never touched
+    `paused` at all."""
+    args = argparse.Namespace(worktree_id=None)
+
+    assert main._cmd_status_write(args, summary=None, paused=True) == 0
+    capsys.readouterr()  # discard the --paused confirmation above
+
+    assert main._cmd_status_write(args, summary=None, paused=False) == 0
+    out = capsys.readouterr().out
+    assert "(unpaused)" in out
+
+    record = tracking.load_record(status_env)
+    assert record.paused is False
+
+
 def test_first_write_in_session_emits_stage_5_status_reported(status_env, monkeypatch):
     """Stage 5 (status_reported): the first status-report write in a session
     marks "Copilot did something here"."""

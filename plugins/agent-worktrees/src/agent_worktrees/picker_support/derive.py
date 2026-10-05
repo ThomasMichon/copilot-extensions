@@ -387,10 +387,9 @@ def norm(
     # after the title. ``state`` stays pure (bucket()/prune key off it); the
     # not-auto-prune-SAFE behavior comes from the ``follow-up`` cleanup bucket.
     follow_up = bool(w.get("follow_up"))
-    # Purely informational "intentionally idle for now" overlay (status-core
-    # addition following the pause-verb review) -- never fed into bucket()/
-    # the prune verdict, unlike follow_up; just a scannable title glyph +
-    # a field callers can filter/display on.
+    # Purely informational "intentionally idle for now" overlay -- never fed
+    # into bucket()/the prune verdict, unlike follow_up; just a scannable
+    # title glyph + a field callers can filter/display on.
     paused = bool(w.get("paused"))
     # #93: a bare (un-muxed) bound Copilot -- invisible to the mux fleet view.
     bare_orphan = bool(w.get("session_bare_orphan"))

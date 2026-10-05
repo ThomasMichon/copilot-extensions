@@ -2762,6 +2762,11 @@ def _cmd_status_write(
     msg = f"[OK] Worktree {worktree_id[-4:]} disposition: {flag}"
     if result.get("paused"):
         msg += " (paused)"
+    elif paused is False:
+        # Confirm the clear explicitly -- `result.get("paused")` is falsy
+        # either way, so without this branch `--unpaused` prints the exact
+        # same message as a write that never touched `paused` at all.
+        msg += " (unpaused)"
     if title is not None and result["title"]:
         msg += f" -- title: {result['title']}"
     if activity is not None and result.get("activity"):
