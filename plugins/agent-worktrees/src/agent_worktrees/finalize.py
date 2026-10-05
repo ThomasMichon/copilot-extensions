@@ -561,8 +561,9 @@ def push_changes(
             # Both streams matter -- git's own protocol error lands on
             # stderr, but a hook's own check output (e.g. a module-size-cap
             # violation's `[FAIL] ...` detail) commonly lands on stdout.
-            if res.failure_detail:
-                output.err(res.failure_detail.lstrip("\n"))
+            detail = git_ops.push_failure_detail(res)
+            if detail:
+                output.err(detail.lstrip("\n"))
             # Only a non-fast-forward race is fixed by fetch+rebase+retry.
             # Everything else recurs identically -- fail fast with the real
             # reason above rather than burning three doomed attempts.
@@ -879,8 +880,15 @@ def _push_changes_pr(
             pushed = git_ops.push(remote, feature, cwd=worktree_path, force_with_lease=True)
         if not pushed:
             output.err(f"Failed to push {feature} to {remote}.")
-            if pushed.failure_detail:
-                output.err(pushed.failure_detail.lstrip("\n"))
+            if pushed.retryable:
+                output.err(
+                    git_ops.pr_branch_non_fast_forward_hint(
+                        retry_command="agent-worktrees push-changes"
+                    )
+                )
+            detail = git_ops.push_failure_detail(pushed)
+            if detail:
+                output.err(detail.lstrip("\n"))
             if pushed_pr is not None and pushed_pr.state in ("", "creating"):
                 tracking.save_record(record)
             return False
@@ -919,6 +927,10 @@ def _push_changes_pr(
 
         activity.log_event(
             "pr_changes_pushed", worktree_id=worktree_id, branch=feature,
+        )
+        output.ok(
+            f"Rebased '{wt_branch}' onto {upstream}, refreshed PR branch "
+            f"'{feature}', and force-with-lease pushed the rewritten head."
         )
         output.ok(
             f"Pushed {feature} to {remote} (--force-with-lease). "
@@ -1026,8 +1038,15 @@ def _push_changes_pr_refspec(
             )
         if not pushed:
             output.err(f"Failed to push {wt_branch} to {remote}/{feature}.")
-            if pushed.failure_detail:
-                output.err(pushed.failure_detail.lstrip("\n"))
+            if pushed.retryable:
+                output.err(
+                    git_ops.pr_branch_non_fast_forward_hint(
+                        retry_command="agent-worktrees push-changes"
+                    )
+                )
+            detail = git_ops.push_failure_detail(pushed)
+            if detail:
+                output.err(detail.lstrip("\n"))
             if pushed_pr is not None and pushed_pr.state in ("", "creating"):
                 tracking.save_record(record)
             return False
@@ -1066,6 +1085,10 @@ def _push_changes_pr_refspec(
 
         activity.log_event(
             "pr_changes_pushed", worktree_id=worktree_id, branch=feature,
+        )
+        output.ok(
+            f"Rebased '{wt_branch}' onto {upstream} and force-with-lease "
+            f"pushed it directly to PR head '{feature}'."
         )
         output.ok(
             f"Pushed {wt_branch} to {remote}/{feature} (--force-with-lease). "

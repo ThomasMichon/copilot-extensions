@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve incremental create-pr updates for live PRs and clarify PR-branch push diagnostics.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

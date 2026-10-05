@@ -936,6 +936,7 @@ def create_pr(
     #    commit with the new work into one patch that no longer matched
     #    upstream, forcing a spurious conflict that aborted create-pr.
     base_sha = ""
+    rebased_onto_upstream = False
     if git_ops.ref_exists(upstream, cwd=worktree_path):
         if not git_ops.rebase(upstream, cwd=worktree_path):
             _rollback(worktree_path, wt_branch, orig_sha)
@@ -947,6 +948,7 @@ def create_pr(
                 f"resolve in place. Rebase manually (git rebase {upstream}), fix "
                 f"the conflicts, then re-run create-pr."
             )}
+        rebased_onto_upstream = True
         base_sha = _rev(upstream, cwd=worktree_path)
         # Recompute what remains ahead of upstream: the rebase may have dropped
         # an already-merged commit, so the pre-rebase ``ahead`` is now stale.
@@ -958,9 +960,14 @@ def create_pr(
                 f"(they were merged upstream) -- nothing new to open a PR for."
             )}
 
-    # 2. Squash the surviving worktree commits into one. After the rebase the
-    #    survivors are exactly the new work (any already-merged commit is gone).
-    if len(ahead) > 1:
+    # 2. On a FRESH PR publish, squash the surviving worktree commits into one.
+    #    After the rebase the survivors are exactly the new work (any already-
+    #    merged commit is gone). On a REUSED live PR head, keep those rebased
+    #    commits intact: re-squashing would rewrite already-pushed history on
+    #    every review round (#5300).
+    surviving_commits = len(ahead)
+    squashed = False
+    if not reusing and surviving_commits > 1:
         squashed, squash_reason = git_ops.squash_branch(
             upstream, squash_msg, cwd=worktree_path
         )
@@ -968,6 +975,27 @@ def create_pr(
             _rollback(worktree_path, wt_branch, orig_sha)
             detail = f" {squash_reason}" if squash_reason else ""
             return {**base, "error": f"Failed to squash worktree commits.{detail}"}
+
+    if rebased_onto_upstream:
+        rewrite_lead = f"Rebased '{wt_branch}' onto {upstream}"
+    else:
+        rewrite_lead = f"Prepared '{wt_branch}' without an upstream rebase"
+    if reusing:
+        history_action = (
+            f"{rewrite_lead} and reused the live PR head without re-squashing; "
+            f"publishing {surviving_commits} surviving commit(s) with "
+            "--force-with-lease."
+        )
+    elif squashed:
+        history_action = (
+            f"{rewrite_lead}, squashed {surviving_commits} surviving commit(s) "
+            "into one, then published the PR head."
+        )
+    else:
+        history_action = (
+            f"{rewrite_lead}; one surviving commit remained, so create-pr "
+            "published it without additional squashing."
+        )
 
     head_sha = _rev("HEAD", cwd=worktree_path)
     # Squash-invariant reference for downstream recorders (#898): survives the
@@ -997,11 +1025,18 @@ def create_pr(
                 cwd=worktree_path, force_with_lease=reusing,
             )
         if not pushed:
+            detail = git_ops.push_failure_detail(pushed)
+            hint = (
+                "\n" + git_ops.pr_branch_non_fast_forward_hint(
+                    retry_command="agent-worktrees create-pr"
+                )
+            ) if pushed.retryable else ""
             return {**base, "error": (
                 f"Failed to push '{wt_branch}' to '{publish_remote}/{feature_branch}'. "
                 f"The squashed work is on '{wt_branch}'; tracking state left as "
                 f"'creating' for retry (re-run create-pr)."
-                + pushed.failure_detail
+                + hint
+                + detail
             )}
     else:
         # Snapshot publish: the local worktree lands on the squashed commit
@@ -1029,12 +1064,19 @@ def create_pr(
                 publish_remote, feature_branch, cwd=worktree_path, force_with_lease=reusing
             )
         if not pushed:
+            detail = git_ops.push_failure_detail(pushed)
+            hint = (
+                "\n" + git_ops.pr_branch_non_fast_forward_hint(
+                    retry_command="agent-worktrees create-pr"
+                )
+            ) if pushed.retryable else ""
             return {**base, "error": (
                 f"Failed to push '{feature_branch}' to '{publish_remote}'. The squashed "
                 f"work is on '{wt_branch}' (and the local '{feature_branch}' "
                 f"snapshot); tracking state left as 'creating' for retry "
                 f"(re-run create-pr)."
-                + pushed.failure_detail
+                + hint
+                + detail
             )}
 
     # 7. Record the open state on the target PR (preserving any url/number
@@ -1061,14 +1103,18 @@ def create_pr(
         "repo": (target_pr.repo if target_pr else default_pr_repo),
         "pr_count": len(record.prs) if record else 0,
         "draft": want_draft,
+        "history_action": history_action,
+        "squashed": squashed,
+        "surviving_commits": surviving_commits,
     }
     if fork_owner:
         result["pr_head"] = f"{fork_owner}:{feature_branch}"
     if reusing:
-        # This call iterated an existing *live* PR (re-squash + force-push onto
-        # the reused head) rather than opening a fresh one -- flag it so callers
-        # recognize the idempotent re-run and don't treat it as a new PR. Mirrors
-        # the fast-path re-run signal in ``_push_existing_feature``.
+        # This call iterated an existing *live* PR head rather than opening a
+        # fresh one -- after rebasing it forward, but WITHOUT re-squashing its
+        # already-pushed history -- so callers can distinguish the idempotent
+        # update path from a newly-opened PR. Mirrors the fast-path re-run
+        # signal in ``_push_existing_feature``.
         result["rerun"] = True
 
     # 8. Auto-open the PR via the configured provider plugin (Phase 2/3):
@@ -2522,7 +2568,11 @@ def _push_existing_feature(
         pushed = git_ops.push(remote, feature_branch, cwd=worktree_path, force_with_lease=True)
     if not pushed:
         error = f"Failed to (re)push '{feature_branch}' to '{remote}'."
-        error += "\nThe remote branch advanced; rebase and retry." if pushed.retryable else ""
+        if pushed.retryable:
+            error += "\nThe remote branch advanced; rebase and retry."
+            error += "\n" + git_ops.pr_branch_non_fast_forward_hint(
+                retry_command="agent-worktrees create-pr"
+            )
         return {**base, "error": f"{error}\n{pushed.stderr.strip()}" if pushed.stderr else error}
     # Match the PRRecord for this branch (a worktree may track several); update
     # it in place rather than clobbering an unrelated active PR. A *terminal*

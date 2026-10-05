@@ -80,6 +80,10 @@ class TestExistingFeaturePush:
         assert result["error"] == (
             "Failed to (re)push 'feature/change' to 'origin'.\n"
             "The remote branch advanced; rebase and retry.\n"
+            "This is most likely caused by this worktree's own earlier "
+            "create-pr/push-changes rebase or squash of the PR branch, not an "
+            "external rewrite. Fetch/inspect the remote PR branch if needed, "
+            "then re-run agent-worktrees create-pr.\n"
             "[rejected] non-fast-forward"
         )
 
@@ -446,6 +450,8 @@ class TestCreatePR:
         res = pr_ops.create_pr(wid, config, title="Add feature")
 
         assert res["success"] is True, res
+        assert res["squashed"] is True
+        assert "squashed 2 surviving commit(s) into one" in res["history_action"]
         assert res["state"] == "open"
         assert res["branch"] == "feature/add-feature-aaaa"
         assert res["provider"] == "gitea"
@@ -514,6 +520,35 @@ class TestCreatePR:
         assert _git("rev-parse", f"worktree/{wid}", cwd=wt_path) == first_head
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert len(rec.prs) == 1
+
+    def test_reused_open_pr_keeps_incremental_commits_unsquashed(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        first = pr_ops.create_pr(wid, config, title="Add feature")
+        assert first["success"], first
+
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "c.txt").write_text("feedback 1\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback 1", cwd=wt_path)
+        (wt_path / "d.txt").write_text("feedback 2\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback 2", cwd=wt_path)
+
+        rerun = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert rerun["success"] is True, rerun
+        assert rerun["rerun"] is True
+        assert rerun["squashed"] is False
+        assert "without re-squashing" in rerun["history_action"]
+        ahead = git_ops.get_commits_ahead(
+            "origin/feature/add-feature-aaaa", "origin/master", cwd=str(wt_path)
+        )
+        assert len(ahead) == 3
+        subjects = _git(
+            "log", "--format=%s", "-n", "3", "origin/feature/add-feature-aaaa",
+            cwd=wt_path,
+        ).splitlines()
+        assert subjects == ["address feedback 2", "address feedback 1", "Add feature"]
 
     def test_branch_collision_error_suggests_explicit_distinguishing_suffix(self, pr_repo):
         config, wid, wt_path, _ = pr_repo
@@ -3058,7 +3093,7 @@ class TestPRFinalizeAndPush:
         assert ok is False
         assert "unpushed" in err
 
-    def test_push_changes_updates_feature_branch(self, pr_repo):
+    def test_push_changes_updates_feature_branch(self, pr_repo, capsys):
         from agent_worktrees import finalize as fin
         config, wid, wt_path, _remote_dir = pr_repo
         pr_ops.create_pr(wid, config, title="Add feature")
@@ -3075,6 +3110,10 @@ class TestPRFinalizeAndPush:
 
         ok = fin.push_changes(wid, config)
         assert ok is True
+        captured = capsys.readouterr()
+        combined = captured.out + captured.err
+        assert f"Rebased 'worktree/{wid}' onto origin/master" in combined
+        assert "force-with-lease pushed the rewritten head" in combined
 
         after = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
         assert after != before  # remote feature branch advanced
@@ -5284,6 +5323,24 @@ class TestCreatePRCLIPolicyError:
 
 
 class TestCreatePRCLIArgs:
+    def test_success_output_names_squash_action(self, pr_repo, monkeypatch, capfd):
+        config, wid, _wt_path, _ = pr_repo
+
+        monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
+        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: candidate)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+
+        args = m.build_parser().parse_args([
+            "create-pr", wid, "--title", "Add feature",
+        ])
+
+        rc = m.cmd_create_pr(args)
+
+        captured = capfd.readouterr()
+        combined = captured.out + captured.err
+        assert rc == 0
+        assert "squashed 2 surviving commit(s) into one" in combined
+
     def test_topic_flag_is_parsed_and_forwarded(self, pr_repo, monkeypatch):
         config, wid, _wt_path, _ = pr_repo
         captured: dict[str, object] = {}
