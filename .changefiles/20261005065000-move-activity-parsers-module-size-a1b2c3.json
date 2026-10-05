@@ -1,0 +1,9 @@
+{
+  "comment": "Move the activity verb parsers into activity.py to restore the module-size caps for __main__.py and front_door_cli.py",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
