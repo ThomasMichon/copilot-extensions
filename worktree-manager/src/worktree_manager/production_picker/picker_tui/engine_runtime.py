@@ -834,13 +834,28 @@ class PickerScreenRuntimeMixin:
                 # this outcome to.
                 if inbox.discard(f"setup-reload:{epoch}"):
                     self._dispose_setup_payload(self._release_setup_payload(epoch))
-                    self._apply_setup_failure(
-                        epoch,
-                        RuntimeError(
-                            "could not wake the render flow to apply this "
-                            "setup/reload payload"
-                        ),
-                    )
+                    # Re-check epoch currency immediately before
+                    # publishing the failure, not just once at the top of
+                    # `_worker()`: a wake failure only surfaces after
+                    # `_collect_setup_payload()` and `inbox.post()` have
+                    # both already run, a real window in which a NEWER
+                    # reload can have started and bumped `_setup_epoch`
+                    # (and -- if its own wake also failed -- already
+                    # recorded ITS OWN, newer failure). Without this,
+                    # this now-superseded worker could publish an OLDER
+                    # epoch over that newer failure, and
+                    # `_wait_for_initial_setup()` -- which only accepts a
+                    # failure matching the CURRENT epoch -- would stop
+                    # seeing a match, recreating the very timeout this
+                    # fallback exists to prevent.
+                    if not cancel.is_set() and epoch == self._setup_epoch:
+                        self._apply_setup_failure(
+                            epoch,
+                            RuntimeError(
+                                "could not wake the render flow to apply "
+                                "this setup/reload payload"
+                            ),
+                        )
 
         threading.Thread(
             target=_worker, name=f"picker-setup-reload:{epoch}", daemon=True

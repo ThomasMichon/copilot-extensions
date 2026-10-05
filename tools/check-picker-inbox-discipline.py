@@ -285,7 +285,25 @@ class _CallFinder(ast.NodeVisitor):
         self.generic_visit(node)
 
     def _record_alias(self, target: ast.expr, value: ast.expr | None) -> None:
-        if not isinstance(target, ast.Name) or value is None:
+        if value is None:
+            return
+        if isinstance(target, (ast.Tuple, ast.List)):
+            # `marshal, other = self.app.call_from_thread, None` -- a
+            # tuple/list-unpacking assignment. Only analyzed when the
+            # right-hand side is ITSELF a literal tuple/list of the same
+            # length (so each target pairs unambiguously with its own
+            # value); a starred target, a mismatched length, or unpacking
+            # an opaque expression (e.g. `a, b = get_something()`) is left
+            # untouched rather than guessed at.
+            if (
+                isinstance(value, (ast.Tuple, ast.List))
+                and len(target.elts) == len(value.elts)
+                and not any(isinstance(e, ast.Starred) for e in target.elts)
+            ):
+                for sub_target, sub_value in zip(target.elts, value.elts):
+                    self._record_alias(sub_target, sub_value)
+            return
+        if not isinstance(target, ast.Name):
             return
         # `marshal = self.app.call_from_thread` (any attribute chain ending
         # in the flagged attribute) or `marshal = call_from_thread` (an
@@ -312,6 +330,13 @@ class _CallFinder(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        self._record_alias(node.target, node.value)
+        self.generic_visit(node)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+        # A walrus binding (`if marshal := self.app.call_from_thread:
+        # marshal(fn)`) is an alias assignment too, just embedded inside
+        # an expression rather than a standalone statement.
         self._record_alias(node.target, node.value)
         self.generic_visit(node)
 

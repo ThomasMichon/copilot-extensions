@@ -299,6 +299,47 @@ def test_reassigning_an_alias_to_a_safe_callable_clears_it(repo):
     assert guard.verify() == []
 
 
+def test_flags_an_alias_established_via_tuple_unpacking(repo):
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_focus.py",
+        "def f(self):\n"
+        "    marshal, other = self.app.call_from_thread, None\n"
+        "    marshal(fn)\n",
+    )
+    assert any("call_from_thread(" in p for p in guard.verify())
+
+
+def test_flags_an_alias_established_via_a_walrus_binding(repo):
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_model.py",
+        "def f(self):\n"
+        "    if marshal := self.app.call_from_thread:\n"
+        "        marshal(fn)\n",
+    )
+    assert any("call_from_thread(" in p for p in guard.verify())
+
+
+def test_opaque_tuple_unpacking_is_left_unanalyzed_not_falsely_flagged(repo):
+    """Unpacking an opaque (non-literal-tuple) right-hand side can't be
+    paired element-wise with any confidence -- it must not be guessed at
+    (which could just as easily produce a false positive as a false
+    negative); a plain, unrelated call through such a target is not
+    flagged."""
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_regions.py",
+        "def f(self):\n"
+        "    marshal, other = get_two_things()\n"
+        "    marshal(fn)\n",
+    )
+    assert guard.verify() == []
+
+
 def test_docstring_mention_not_flagged(repo):
     d = _picker_tui_dir(repo)
     _write(
