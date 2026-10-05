@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import argparse
 import os
-import shlex
 import sys
 import threading
 from collections.abc import Callable
+
+from remote_login_shell import wrap_login_shell
 
 from ._ssh_retry import exec_with_retry
 from .launch_memory import DEFAULT_DRIVER as _DEFAULT_DRIVER
@@ -283,7 +284,7 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
                 )
                 return
             script = registration_credentials_script(token, daemon_port)
-            result = await exec_with_retry(manager, name, f"bash -lc {shlex.quote(script)}")
+            result = await exec_with_retry(manager, name, wrap_login_shell(script))
             if getattr(result, "exit_code", 1) != 0:
                 print(
                     f"[PREP] Could not provision registration credentials on "

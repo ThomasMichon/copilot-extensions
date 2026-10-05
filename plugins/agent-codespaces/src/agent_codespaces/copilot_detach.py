@@ -34,6 +34,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from remote_login_shell import wrap_login_shell
 from venue_copilot import (
     MAX_SEED_CHARS,  # noqa: F401 -- re-exported: callers/tests read detach.MAX_SEED_CHARS
     _TRUST_FOLDER,  # noqa: F401 -- re-exported for the trust-folder snippet test
@@ -116,7 +117,7 @@ def _remote(
         try:
             # Transient exit/stderr failures retry inside the shared helper.
             result = await exec_with_retry(
-                manager, name, f"bash -lc {shlex.quote(command)}", timeout=timeout,
+                manager, name, wrap_login_shell(command), timeout=timeout,
                 input_bytes=input_bytes,
             )
             return result.exit_code, result.stdout or "", result.stderr or ""
@@ -813,7 +814,7 @@ def cmd_stop(args: argparse.Namespace, *, ssh_session: Callable[..., int]) -> in
     for attempt in range(_LAUNCH_ATTEMPTS):  # the verified kill is idempotent
         try:
             rc = ssh_session(
-                _ssh_namespace(args, f"bash -lc {shlex.quote(script)}", timeout=120.0),
+                _ssh_namespace(args, wrap_login_shell(script), timeout=120.0),
                 result_sink=sink,
                 # --keep-claim: the caller still owns the box (finalize / retire
                 # next), so a clean checkout must not settle the claim at-rest,

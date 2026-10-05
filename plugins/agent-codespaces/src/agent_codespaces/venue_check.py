@@ -38,6 +38,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
+from remote_login_shell import wrap_login_shell
+
 ExecCommand = Callable[[str, str], Awaitable[Any]]
 
 # A single batched remote probe -- one round trip, not one per fact. Emits
@@ -260,7 +262,7 @@ async def remediate_remote_venue(
         # an unnecessary remote round trip to an already-ready venue.
         result.attempted.append("provision/refresh agent-worktrees")
         probe = await exec_command(
-            host, 'bash -lc "agent-worktrees --version"',
+            host, wrap_login_shell("agent-worktrees --version"),
         )
         if getattr(probe, "exit_code", 1) == 0:
             result.succeeded.append("provision/refresh agent-worktrees")
@@ -276,7 +278,7 @@ async def remediate_remote_venue(
             result.attempted.append("install agent-bridge plugin")
             probe = await exec_command(
                 host,
-                "bash -lc 'copilot plugin install agent-bridge@copilot-extensions 2>&1'",
+                wrap_login_shell("copilot plugin install agent-bridge@copilot-extensions 2>&1"),
             )
             if getattr(probe, "exit_code", 1) == 0:
                 result.succeeded.append("install agent-bridge plugin")

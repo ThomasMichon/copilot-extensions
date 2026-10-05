@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-import shlex
+
+from remote_login_shell import is_posix_login_shell, wrap_login_shell
 
 from . import config as cfg, output
 
@@ -239,12 +240,6 @@ def _resolve_ssh_alias(entry: cfg.MachineEntry) -> str:
     return _resolve_ssh_target(entry)[0]
 
 
-#: Documented supported POSIX remote-shell values
-#: (``plugins/agent-bridge/docs/machine-config.md``) that support a
-#: ``-lc <command>`` login-shell invocation.
-_POSIX_LOGIN_SHELLS = ("bash", "sh", "zsh")
-
-
 def _wrap_remote_command(shell: str, command: str) -> str:
     """Wrap ``command`` so it runs correctly as a bare, non-interactive,
     non-login SSH command-exec (``ssh host "command"``) on the target shell.
@@ -268,13 +263,13 @@ def _wrap_remote_command(shell: str, command: str) -> str:
     session already gets. Windows (``pwsh``) targets are left untouched --
     this exact non-login-shell PATH gap is POSIX-specific; PowerShell's own
     profile-loading rules differ and are out of scope here. Only wraps for
-    an EXPLICIT, documented POSIX shell (:data:`_POSIX_LOGIN_SHELLS`) --
-    never guesses for an unrecognized/empty ``shell`` value, since wrapping
+    an EXPLICIT, documented POSIX shell (:func:`remote_login_shell.is_posix_login_shell`)
+    -- never guesses for an unrecognized/empty ``shell`` value, since wrapping
     a non-POSIX target in a POSIX login shell would break it outright (see
     :func:`_resolve_ssh_target`, which already defaults an unset ``shell``
     sensibly before calling this)."""
-    if shell in _POSIX_LOGIN_SHELLS:
-        return f"{shell} -lc {shlex.quote(command)}"
+    if is_posix_login_shell(shell):
+        return wrap_login_shell(command, shell=shell)
     return command
 
 
