@@ -142,6 +142,46 @@ def add_parsers(sub) -> None:
     p.add_argument("--json", action="store_true", help="JSON output mode")
     p.add_argument("--config", default=None)
 
+    p = sub.add_parser(
+        "pr-diff",
+        help="Read the active tracked PR's current unified diff.",
+    )
+    p.add_argument("worktree_id", nargs="?", default=None)
+    p.add_argument("--json", action="store_true", help="JSON output mode")
+    p.add_argument("--config", default=None)
+
+    p = sub.add_parser(
+        "pr-comment",
+        help="Post a general (non-verdict) comment on the active tracked PR.",
+    )
+    p.add_argument("worktree_id", nargs="?", default=None)
+    p.add_argument("body", help="Comment text")
+    p.add_argument("--json", action="store_true", help="JSON output mode")
+    p.add_argument("--config", default=None)
+
+    p = sub.add_parser(
+        "pr-review",
+        help="Publish a review verdict (approve/request-changes/comment) on "
+        "the active tracked PR.",
+    )
+    p.add_argument("worktree_id", nargs="?", default=None)
+    verdict = p.add_mutually_exclusive_group(required=True)
+    verdict.add_argument(
+        "--approve", action="store_const", dest="event", const="APPROVED",
+        help="Approve the PR",
+    )
+    verdict.add_argument(
+        "--request-changes", action="store_const", dest="event",
+        const="CHANGES_REQUESTED", help="Request changes on the PR",
+    )
+    verdict.add_argument(
+        "--comment", action="store_const", dest="event", const="COMMENTED",
+        help="Leave a non-blocking review comment with no verdict",
+    )
+    p.add_argument("--body", default="", help="Review summary text")
+    p.add_argument("--json", action="store_true", help="JSON output mode")
+    p.add_argument("--config", default=None)
+
 
 def cmd_set_pr(args: argparse.Namespace) -> int:
     core = _core()
@@ -563,3 +603,104 @@ def cmd_pr_complete(args: argparse.Namespace) -> int:
     else:
         output.err(result.get("error", "pr-complete failed."))
     return 0 if result.get("success") else 1
+
+
+def cmd_pr_diff(args: argparse.Namespace) -> int:
+    core = _core()
+    from . import pr_reviewer_ops
+
+    use_json = getattr(args, "json", False)
+    try:
+        config = cfg.load_config(Path(args.config) if args.config else None)
+    except Exception as e:
+        if use_json:
+            return core._json_error(str(e))
+        raise
+    worktree_id = core._infer_worktree_id(args.worktree_id, config)
+    if not worktree_id:
+        msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
+        return core._json_error(msg) if use_json else (output.err(msg) or 1)
+    worktree_id = core._resolve_worktree_id(worktree_id)
+
+    result = pr_reviewer_ops.pr_diff(worktree_id, config=config)
+    if use_json:
+        core._json_output(result)
+        return 0 if "error" not in result else 1
+    if result.get("error"):
+        output.err(result["error"])
+        return 1
+    if not result.get("has_pr"):
+        print(result.get("detail") or f"{worktree_id}: no PR tracked (nothing to diff).")
+        return 0
+    if not result.get("supported"):
+        output.warn("This provider does not support reading a unified diff.")
+        return 1
+    print(result.get("diff", ""))
+    return 0
+
+
+def cmd_pr_comment(args: argparse.Namespace) -> int:
+    core = _core()
+    from . import pr_reviewer_ops
+
+    use_json = getattr(args, "json", False)
+    try:
+        config = cfg.load_config(Path(args.config) if args.config else None)
+    except Exception as e:
+        if use_json:
+            return core._json_error(str(e))
+        raise
+    worktree_id = core._infer_worktree_id(args.worktree_id, config)
+    if not worktree_id:
+        msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
+        return core._json_error(msg) if use_json else (output.err(msg) or 1)
+    worktree_id = core._resolve_worktree_id(worktree_id)
+
+    result = pr_reviewer_ops.pr_comment(worktree_id, args.body, config=config)
+    if use_json:
+        core._json_output(result)
+        return 0 if "error" not in result else 1
+    if result.get("error"):
+        output.err(result["error"])
+        return 1
+    if not result.get("has_pr"):
+        print(result.get("detail") or f"{worktree_id}: no PR tracked (nothing to comment on).")
+        return 0
+    output.ok(f"Posted a comment on #{result.get('number')} ({result.get('repo')}).")
+    return 0
+
+
+def cmd_pr_review(args: argparse.Namespace) -> int:
+    core = _core()
+    from . import pr_reviewer_ops
+
+    use_json = getattr(args, "json", False)
+    try:
+        config = cfg.load_config(Path(args.config) if args.config else None)
+    except Exception as e:
+        if use_json:
+            return core._json_error(str(e))
+        raise
+    worktree_id = core._infer_worktree_id(args.worktree_id, config)
+    if not worktree_id:
+        msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
+        return core._json_error(msg) if use_json else (output.err(msg) or 1)
+    worktree_id = core._resolve_worktree_id(worktree_id)
+
+    result = pr_reviewer_ops.pr_review(
+        worktree_id, event=args.event, body=getattr(args, "body", ""), config=config
+    )
+    if use_json:
+        core._json_output(result)
+        return 0 if "error" not in result else 1
+    if result.get("error"):
+        output.err(result["error"])
+        return 1
+    if not result.get("has_pr"):
+        print(result.get("detail") or f"{worktree_id}: no PR tracked (nothing to review).")
+        return 0
+    output.ok(
+        f"Submitted a {result.get('event')} review on #{result.get('number')} "
+        f"({result.get('repo')})."
+    )
+    return 0

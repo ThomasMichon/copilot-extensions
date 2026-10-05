@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 from .base import ProviderError, PRScope, PullResult
 
 if TYPE_CHECKING:
-    from ..pr_contract import PRSnapshot, ReviewNudgeResult, ThreadsResult
+    from ..pr_contract import PRDiff, PRSnapshot, ReviewNudgeResult, ThreadsResult
 
 
 def _now() -> str:
@@ -60,6 +60,11 @@ class _FakePR:
     auto_complete: bool = False
     auto_merge_armed: bool = False
     review_nudge_count: int = 0
+    diff: str = ""
+    comments: list = field(default_factory=list)
+    """Test-observable list of ``(author, body)`` pairs posted via
+    :meth:`MockPRProvider.post_comment` (distinct from ``threads``, which are
+    fabricated review-comment threads, not plain issue comments)."""
     """Test-observable counter: how many times :meth:`MockPRProvider.request_review`
     was called for this PR (does not fabricate a new review -- tests that want
     one call :meth:`add_review` separately, mirroring how a real reviewer's
@@ -363,7 +368,53 @@ class MockPRProvider:
                    f"(nudge #{pr.review_nudge_count}).",
         )
 
+    def get_diff(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> "PRDiff":
+        from ..pr_contract import PRDiff
+
+        pr = self._get(repo, number)
+        return PRDiff(diff=pr.diff, supported=True)
+
+    def post_comment(
+        self, repo: str, number: int, body: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        pr = self._get(repo, number)
+        pr.comments.append((pr.author, body))
+        return ""
+
+    _REVIEW_EVENT_STATES = ("APPROVED", "CHANGES_REQUESTED", "COMMENTED")
+
+    def submit_review(
+        self, repo: str, number: int, *, event: str, body: str = "",
+        api_base: str = "", token: str | None = None,
+    ) -> str:
+        from ..pr_contract import Review
+
+        canonical = event.upper()
+        if canonical not in self._REVIEW_EVENT_STATES:
+            return (
+                f"mock: unknown review event {event!r} (expected one of "
+                f"{self._REVIEW_EVENT_STATES})."
+            )
+        pr = self._get(repo, number)
+        if body:
+            pr.comments.append(("mock-reviewer", body))
+        review_id = len(pr.reviews) + 1
+        pr.reviews.append(
+            Review(
+                id=review_id, state=canonical, user="mock-reviewer",
+                submitted_at=_now(), commit_id=pr.head_sha,
+            )
+        )
+        return ""
+
     # -- test-only fabrication helpers (not part of the PRProvider protocol) --
+
+    def set_diff(self, repo: str, number: int, diff_text: str) -> None:
+        """Fabricate a PR's unified diff (conformance-test setup only)."""
+        self._get(repo, number).diff = diff_text
 
     def add_review(
         self, repo: str, number: int, *, id: int, state: str, user: str,
