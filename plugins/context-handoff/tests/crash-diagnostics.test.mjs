@@ -62,7 +62,12 @@ async function withCrashLog(fn) {
   try {
     await fn(logPath);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    // The stress cases rotate/write sidecar files rapidly right up until
+    // cleanup; on Windows the OS can still be releasing a just-closed file
+    // handle when rmSync runs, which throws ENOTEMPTY even though nothing
+    // is genuinely locked. maxRetries/retryDelay (built into rmSync) retry
+    // past that transient window instead of failing the test on a race.
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 

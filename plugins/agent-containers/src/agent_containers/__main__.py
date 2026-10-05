@@ -42,8 +42,10 @@ from .config import (
     load_config,
 )
 from .resolver import (
+    _append_copilot_args,
     build_restricted_spawn_command,
     host_gh_token,
+    resolve_extra_copilot_args,
     resolve_live_exec_target,
 )
 from .ssh_transport import (
@@ -139,14 +141,12 @@ def main(argv: list[str] | None = None) -> int:
 
     exec_p = sub.add_parser("exec", help="Run the ACP launch command in a container")
     exec_p.add_argument("name", help="Container name")
-    exec_p.add_argument(
-        "--stdio", action="store_true",
-        help="Attach stdio (ACP transport) instead of a one-shot probe",
-    )
+    exec_p.add_argument("--stdio", action="store_true", help="Attach stdio transport.")
     exec_p.add_argument(
         "--force", action="store_true",
         help="Terminate a live SSH holder and take over this trusted container",
     )
+    exec_p.add_argument("copilot_args", nargs="*", help="Extra copilot args (after --).")
 
     from .copilot_venue import add_copilot_subparser as _add_copilot_subparser
     _add_copilot_subparser(sub)
@@ -957,18 +957,17 @@ def _relay_healthy(port: int, timeout: float = 0.5) -> bool:
 def _cmd_exec(args: argparse.Namespace) -> int:
     """Transport wrapper: launch a Copilot ACP agent in a container.
 
-    This is what agent-bridge spawns for a ``container:`` agent. It resolves the
-    container's per-fleet settings, fetches the host ``gh`` token at spawn time
-    (so it is never persisted in a SpawnTarget), and selects the transport from
-    the fleet's trust posture.
-
-    Trusted fleets use OpenSSH, with ``docker exec`` only as the SSH
-    ``ProxyCommand`` bootstrap. Restricted fleets retain the direct
-    deny-by-construction ``docker exec`` path and receive no SSH key projection.
-    With ``--stdio`` the wrapper explicitly pumps bytes between its own stdio
-    and the child because inherited pipes are unreliable under
-    ``CREATE_NO_WINDOW`` on Windows.
+    This is what agent-bridge spawns for a ``container:`` agent. It resolves
+    the container's per-fleet settings, fetches the host ``gh`` token at
+    spawn time (never persisted in a SpawnTarget), and selects the transport
+    from the fleet's trust posture: trusted fleets use OpenSSH (``docker
+    exec`` only as the ``ProxyCommand`` bootstrap); restricted fleets retain
+    the direct deny-by-construction ``docker exec`` path with no SSH key
+    projection. With ``--stdio`` the wrapper pumps bytes between its own
+    stdio and the child (inherited pipes are unreliable under
+    ``CREATE_NO_WINDOW`` on Windows).
     """
+    extra = resolve_extra_copilot_args(getattr(args, "copilot_args", None))
     target = resolve_live_exec_target(args.name, config=load_config())
 
     if target.actual_profile == RESTRICTED_PROFILE:
@@ -985,7 +984,7 @@ def _cmd_exec(args: argparse.Namespace) -> int:
                     target.fleet,
                     target.actual_profile,
                     target.user,
-                    target.acp_command,
+                    _append_copilot_args(target.acp_command, extra),
                     container_id=target.container_id,
                 )
         except ProviderAdmissionError as busy:
@@ -1008,7 +1007,7 @@ def _cmd_exec(args: argparse.Namespace) -> int:
             target.fleet,
             target.actual_profile,
             target.user,
-            target.acp_command,
+            _append_copilot_args(target.acp_command, extra),
         )
     finally:
         target_lock.release()

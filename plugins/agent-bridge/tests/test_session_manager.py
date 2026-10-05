@@ -29,6 +29,7 @@ from agent_bridge.session_manager import (
     RemoteHostRecoveryPendingError,
     Session,
     SessionManager,
+    _container_remote_child_argv,
     _default_cwd,
     _venue_workspace_cwd,
 )
@@ -5546,3 +5547,38 @@ class TestContainerClaimKey:
         t = SpawnTarget(type="local", cwd="/tmp", caller_worktree="/wt/a")
         assert sm._container_claim_key(t) is None
 
+
+
+class TestContainerRemoteChildArgv:
+    """Tests for _container_remote_child_argv's copilot_args forwarding
+    (the trusted/SSH container route's own charter-overlay support --
+    separate from the restricted/docker-exec route's own, in
+    agent_containers.resolver._append_copilot_args)."""
+
+    def test_no_copilot_args_is_unchanged(self):
+        argv = _container_remote_child_argv(
+            {"acp_command": "copilot --acp --stdio"}, {}, [],
+        )
+        assert argv == ["bash", "-lc", "copilot --acp --stdio"]
+
+    def test_copilot_args_are_quoted_and_appended(self):
+        argv = _container_remote_child_argv(
+            {"acp_command": "copilot --acp --stdio"},
+            {},
+            [],
+            copilot_args=["--agent", "some charter"],
+        )
+        assert argv == [
+            "bash", "-lc",
+            "copilot --acp --stdio --agent 'some charter'",
+        ]
+
+    def test_copilot_args_apply_after_remote_env_sourcing(self):
+        argv = _container_remote_child_argv(
+            {"acp_command": "copilot --acp --stdio"},
+            {"remote_env": "/tmp/env.sh"},
+            [],
+            copilot_args=["--agent", "some-charter"],
+        )
+        assert argv[-1].endswith("copilot --acp --stdio --agent some-charter")
+        assert argv[-1].startswith(". /tmp/env.sh; rm -f /tmp/env.sh;")

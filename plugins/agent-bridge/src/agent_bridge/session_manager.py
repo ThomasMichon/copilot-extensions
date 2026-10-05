@@ -225,6 +225,7 @@ def _container_remote_child_argv(
     plugin_dirs: list[str],
     *,
     acp_command_override: str | None = None,
+    copilot_args: list[str] | None = None,
 ) -> list[str]:
     """Build the far-side child command from provider env + bridge policy."""
     acp_command = _append_plugin_dirs(
@@ -232,6 +233,13 @@ def _container_remote_child_argv(
         or str(prepared.get("acp_command") or container_target["acp_command"]),
         plugin_dirs,
     )
+    if copilot_args:
+        # Container charter overlay (trusted/SSH route): mirrors
+        # agent_containers.resolver._append_copilot_args, which does the
+        # same for the restricted/docker-exec route -- both append onto the
+        # in-container acp_command string, just reached via different spawn
+        # paths, so neither can import a shared helper from the other.
+        acp_command += " " + " ".join(shlex.quote(a) for a in copilot_args)
     remote_env = prepared.get("remote_env")
     if remote_env:
         env_path = shlex.quote(str(remote_env))

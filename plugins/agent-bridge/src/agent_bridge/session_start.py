@@ -450,6 +450,7 @@ class _SessionStartMixin:
                                 if parity_fault
                                 else None
                             ),
+                            copilot_args=target.copilot_args,
                         ),
                         remote_cwd=remote_cwd,
                         model=model,
