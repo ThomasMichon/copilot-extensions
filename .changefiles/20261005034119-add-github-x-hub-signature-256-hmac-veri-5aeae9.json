@@ -1,0 +1,9 @@
+{
+  "comment": "Add GitHub X-Hub-Signature-256 HMAC verification (github_secret config) to the reactive webhook producer, alongside the existing inbound_token bearer check, for genuine GitHub-sourced webhook deliveries.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
