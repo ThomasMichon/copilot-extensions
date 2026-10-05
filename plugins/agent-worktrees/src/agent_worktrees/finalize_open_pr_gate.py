@@ -309,30 +309,82 @@ def _pr_entry_merge_status(pr, repo) -> bool | None:
         )
         if not merged:
             return False
-        if not head_sha:
-            head_sha = (getattr(result, "head_sha", "") or "").strip()
-            if not head_sha:
-                # Best-effort fallback for providers whose get_pull() doesn't
-                # eagerly report head_sha -- not every provider supports this
-                # (e.g. Azure DevOps deliberately keeps observe_head()
-                # unsupported, since it has no server-clock timestamp to
-                # satisfy that method's contract; its merged head comes from
-                # get_pull() above instead), so swallow any failure here.
-                try:
-                    observed = provider.observe_head(
-                        slug, int(number),
-                        api_base=getattr(prcfg, "api_base", "") or "",
-                        token=token,
-                    )
-                    head_sha = (getattr(observed, "head_sha", "") or "").strip()
-                except Exception:
-                    head_sha = ""
-            if head_sha:
-                pr.head_sha = head_sha
+        # The provider's merged head is authoritative over a recorded one: a push
+        # made outside this tool (a fork, a raw `git push`) leaves the recorded
+        # head at an earlier commit, which would then falsely read as "carries
+        # further commits".
+        observed_head = (getattr(result, "head_sha", "") or "").strip()
+        if not observed_head:
+            # Best-effort fallback for providers whose get_pull() doesn't
+            # eagerly report head_sha -- not every provider supports this
+            # (e.g. Azure DevOps deliberately keeps observe_head()
+            # unsupported, since it has no server-clock timestamp to
+            # satisfy that method's contract; its merged head comes from
+            # get_pull() above instead), so swallow any failure here.
+            try:
+                observed = provider.observe_head(
+                    slug, int(number),
+                    api_base=getattr(prcfg, "api_base", "") or "",
+                    token=token,
+                )
+                observed_head = (getattr(observed, "head_sha", "") or "").strip()
+            except Exception:
+                observed_head = ""
+        if observed_head:
+            if observed_head != (getattr(pr, "head_sha", "") or "").strip():
+                # Observation evidence describes the head it was taken for: not this one.
+                pr.head_observed_at = ""
+                pr.head_observed_api_base = ""
+            pr.head_sha = observed_head
         pr.state = "merged"
         return True
     except Exception:
         return None
+
+
+def refresh_merged_head(pr, repo) -> bool:
+    """Re-read a merged PR's head from the provider before trusting a block.
+
+    A record can carry ``state: merged`` with a stale ``head_sha`` (written
+    before the provider's head was taken as authoritative, or recorded at an
+    earlier push): the fast path in :func:`_pr_entry_merge_status` then never
+    asks the provider again, and finalize refuses forever with "carries
+    further commits". Called only on that refusing path, so a normal finalize
+    makes no extra request. Returns True iff the provider confirmed the merge
+    and reported a different head (now on ``pr``, with the old head's observation
+    evidence cleared); otherwise ``pr`` is left exactly as it was."""
+    fields = ("head_sha", "state", "head_observed_at", "head_observed_api_base")
+    before = {f: getattr(pr, f, "") or "" for f in fields}
+    pr.head_sha, pr.state = "", ""
+    try:
+        status = _pr_entry_merge_status(pr, repo)
+    except Exception:
+        status = None
+    fresh = (getattr(pr, "head_sha", "") or "").strip()
+    if status is not True or not fresh or fresh == before["head_sha"].strip():
+        for f, value in before.items():
+            setattr(pr, f, value)
+        return False
+    return True
+
+
+def merged_content_exceeds(
+    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *, cwd: str, repo,
+) -> bool:
+    """:func:`content_exceeds_merged_head_any` for a merged PR, re-reading stale
+    recorded merged heads from the provider once (see :func:`refresh_merged_head`)
+    before concluding the worktree carries more: the active PR's, and every other
+    tracked PR recorded as merged -- the boundary check covers each one's cleanup
+    branch against its own head, and :func:`repair_other_tracked_pr_heads` fills
+    in only a missing head, never a stale one."""
+    if not content_exceeds_merged_head_any(record, content_ref, upstream, cwd=cwd):
+        return False
+    entries = [record.pr] + [p for p in (getattr(record, "prs", None) or [])
+                             if p is not record.pr and getattr(p, "state", "") == "merged"]
+    refreshed = [refresh_merged_head(entry, repo) for entry in entries if entry is not None]
+    if any(refreshed):
+        return content_exceeds_merged_head_any(record, content_ref, upstream, cwd=cwd)
+    return True
 
 
 def repair_other_tracked_pr_heads(record: tracking.WorktreeRecord, repo) -> None:

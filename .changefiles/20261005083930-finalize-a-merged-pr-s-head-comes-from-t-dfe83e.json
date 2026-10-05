@@ -1,0 +1,9 @@
+{
+  "comment": "finalize: a merged PR's head comes from the provider, and a stale recorded head is re-read before refusing with 'carries further commits'.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
