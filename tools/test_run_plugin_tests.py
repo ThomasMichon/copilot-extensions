@@ -178,6 +178,42 @@ def test_heavy_run_holds_admission_for_all_targets(monkeypatch) -> None:
     assert events == ["acquire", "run:alpha", "run:beta", "release"]
 
 
+def test_unexpected_runner_error_does_not_wedge_remaining_plugins(monkeypatch) -> None:
+    """Regression (coverage-guided-ci full-matrix local validation pass,
+    2026-10-05): a single plugin's own contained-run failure must never
+    propagate past the per-plugin loop and abort the rest of ``--all``/
+    ``--changed`` -- only ``ContainmentError``/``CalledProcessError`` were
+    ever caught here, so any OTHER exception type (e.g. a transient
+    OS-level resource issue after many sequential heavy runs) would
+    silently truncate validation of every plugin after the one that
+    raised it."""
+    events: list[str] = []
+
+    class Lease:
+        def release(self) -> None:
+            events.append("release")
+
+    def _run_plugin(name: str, *_args, **_kwargs) -> int:
+        if name == "beta":
+            raise MemoryError("simulated unexpected failure, not ContainmentError")
+        events.append(f"run:{name}")
+        return 0
+
+    monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    monkeypatch.setattr(runner.shutil, "which", lambda _name: "uv")
+    monkeypatch.setattr(
+        runner,
+        "_acquire_admission",
+        lambda _wait: events.append("acquire") or Lease(),
+    )
+    monkeypatch.setattr(runner, "run_plugin", _run_plugin)
+
+    # Exit code 1 (a real failure was recorded), but every target was
+    # still attempted -- "gamma" (after the raising "beta") must have run.
+    assert runner.main(["alpha", "beta", "gamma"]) == 1
+    assert events == ["acquire", "run:alpha", "run:gamma", "release"]
+
+
 def test_guards_also_take_heavy_admission(monkeypatch) -> None:
     # `--guards` still reaches `_ensure_venv()` and so can rebuild/delete
     # the SHARED on-disk venv a concurrent bare admitted run may be

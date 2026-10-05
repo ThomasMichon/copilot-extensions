@@ -1,0 +1,9 @@
+{
+  "comment": "Harden run-plugin-tests.py: catch any unexpected per-plugin exception in the --all/--changed matrix loop (not just ContainmentError/CalledProcessError) so one plugin's own run never wedges validation of every remaining plugin",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "dev"
+    }
+  ]
+}
