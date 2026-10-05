@@ -291,6 +291,7 @@ _NO_PROJECT_COMMANDS = {
     "machine-context",
     "reconcile-binstubs",
     "register-project-entry",
+    "activity-prune-worker",
 }
 
 

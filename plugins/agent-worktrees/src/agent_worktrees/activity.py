@@ -128,7 +128,10 @@ import json
 import logging
 import os
 import socket
+import subprocess
 import sys
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -143,6 +146,13 @@ RETENTION_DAYS = 7
 # common append path cheap. Events are small and infrequent, so this
 # triggers rarely (hundreds of sessions).
 _PRUNE_SIZE_BYTES = 512 * 1024
+
+# Minimum time between prune *dispatches*, independent of how many
+# log_event() calls land on this path in between. Under heavy automated
+# usage (many sub-agents/launches per minute) the file can stay above
+# _PRUNE_SIZE_BYTES almost continuously, so without this debounce every
+# single log_event() call would spawn its own background prune worker.
+_PRUNE_DEBOUNCE_SECONDS = 3600
 
 _HOSTNAME = socket.gethostname()
 
@@ -350,13 +360,134 @@ def log_event(
 
 
 def _maybe_prune(path: Path) -> None:
-    """Prune lines older than the retention window if the file is large."""
+    """Dispatch a background prune if the file has grown large.
+
+    The rewrite is never run inline on this path. ``log_event()`` is called
+    from everywhere -- including a picker action mid-interaction (selecting
+    an item, opening a sub-menu) -- so a synchronous multi-second rewrite of
+    a large log here would freeze the caller *between keypresses*. Instead
+    this claims the current debounce window's marker (see
+    :func:`_claim_prune_marker`) and hands the actual rewrite to a detached
+    ``activity-prune-worker`` subprocess (see
+    :func:`_dispatch_background_prune`), so the foreground caller never
+    waits on it.
+    """
     try:
         if path.stat().st_size < _PRUNE_SIZE_BYTES:
             return
     except OSError:
         return
-    _prune(path, RETENTION_DAYS)
+    if not _claim_prune_marker(path):
+        return
+    _dispatch_background_prune(path)
+
+
+def _prune_marker_path(path: Path, *, now: float | None = None) -> Path:
+    """The debounce marker for *path*'s current ``_PRUNE_DEBOUNCE_SECONDS``
+    window, named by its bucket number so each window gets its own file."""
+    return path.with_name(f"{path.name}.prune-marker.{_prune_marker_bucket(now=now)}")
+
+
+def _prune_marker_bucket(*, now: float | None = None) -> int:
+    return int((time.time() if now is None else now) // _PRUNE_DEBOUNCE_SECONDS)
+
+
+def _claim_prune_marker(path: Path) -> bool:
+    """Atomically claim *this debounce window's* dispatch slot for *path*.
+
+    Returns ``True`` only for the one caller that wins the claim, so a burst
+    of concurrent ``log_event()`` calls -- across many processes, all seeing
+    the log large at the same time -- dispatches at most one background
+    prune for this window, not one per caller.
+
+    Each window gets its own marker file (``_prune_marker_path``), claimed
+    with an exclusive create (``O_CREAT | O_EXCL``). Unlike a single shared
+    marker refreshed in place, there is no separate "renew a stale marker"
+    step -- and therefore no window where multiple processes can all
+    believe they renewed the same claim.
+    """
+    bucket = _prune_marker_bucket()
+    marker = path.with_name(f"{path.name}.prune-marker.{bucket}")
+    try:
+        fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+    except OSError:
+        return False
+    _cleanup_old_prune_markers(path, current_bucket=bucket)
+    return True
+
+
+# How many whole debounce windows a marker must be behind the current one
+# before cleanup may delete it. 1 (not 0) is deliberate: a caller that read
+# the clock right at the tail of bucket N-1 and was then descheduled before
+# its (otherwise instantaneous) O_CREAT|O_EXCL claim can still be holding
+# that bucket's claim-in-flight when a different caller's cleanup pass, now
+# in bucket N, runs -- deleting bucket N-1 at that point would let the
+# descheduled caller's claim succeed a second time once it resumes,
+# dispatching a duplicate worker. Only ever cleaning bucket <= N-2 means
+# that race now requires a caller to be descheduled for over a FULL
+# extra debounce window (~_PRUNE_DEBOUNCE_SECONDS) between reading the
+# clock and completing one `os.open()` call -- not eliminated in theory,
+# but not a realistic scheduling delay either, and proportionate to a
+# diagnostic log's own debounce (same best-effort posture as the rest of
+# this module).
+_PRUNE_MARKER_CLEANUP_GRACE_WINDOWS = 1
+
+
+def _cleanup_old_prune_markers(path: Path, *, current_bucket: int) -> None:
+    prefix = f"{path.name}.prune-marker."
+    cutoff = current_bucket - _PRUNE_MARKER_CLEANUP_GRACE_WINDOWS
+    try:
+        for sibling in path.parent.glob(f"{prefix}*"):
+            suffix = sibling.name[len(prefix):]
+            try:
+                sibling_bucket = int(suffix)
+            except ValueError:
+                continue  # not one of ours (or malformed) -- leave it alone
+            if sibling_bucket < cutoff:
+                try:
+                    sibling.unlink()
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+
+def _dispatch_background_prune(path: Path) -> None:
+    """Fire-and-forget a detached worker that prunes *path*. Never blocks,
+    never raises into the caller.
+
+    The ``Popen`` handle is retained and reaped on a daemon thread (not
+    discarded) even though the child is otherwise fully detached
+    (``start_new_session``/``DETACHED_PROCESS``): on POSIX, detaching a
+    session does not reap the child -- a caller that never waits on it
+    leaves an exited worker as a zombie until this process starts another
+    subprocess or exits. A long-lived caller (the picker, a resident
+    daemon) could accumulate one zombie per dispatch over its lifetime.
+    ``Thread(target=proc.wait)`` performs that blocking wait off the
+    caller's own thread, so dispatch itself still returns immediately.
+    """
+    try:
+        from agent_procutil import (
+            detached_kwargs,
+            windowless_python,
+            windowless_python_env,
+        )
+
+        python = windowless_python(sys.executable)
+        env = {**os.environ, **windowless_python_env(sys.executable)}
+        proc = subprocess.Popen(
+            [
+                python, "-I", "-m", "agent_worktrees", "activity-prune-worker",
+                str(path), str(RETENTION_DAYS),
+            ],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, env=env,
+            **detached_kwargs(breakaway=True),
+        )
+        threading.Thread(target=proc.wait, daemon=True).start()
+    except Exception:
+        log.debug("activity: failed to dispatch background prune for %s", path, exc_info=True)
 
 
 def _prune(path: Path, retention_days: int) -> int:
@@ -365,6 +496,16 @@ def _prune(path: Path, retention_days: int) -> int:
     Returns the number of lines kept. Best-effort: a concurrent append
     during the rewrite could be lost, which is acceptable for a
     diagnostic log. Unparseable lines are kept.
+
+    Adjacent debounce windows are deliberately allowed to each dispatch
+    their own worker (see ``_claim_prune_marker``'s grace window), so two
+    ``_prune()`` calls against the same *path* can genuinely run
+    concurrently. The rewrite's temp file is therefore named per-process
+    (``.tmp.<pid>``), never a fixed shared name -- two processes writing and
+    replacing through the same temp path could otherwise interleave and
+    corrupt the result, or race each other's ``replace()``. Both workers
+    still converge on a valid (if redundant) prune of the same file; they
+    simply never share a write target while doing it.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
     kept: list[str] = []
@@ -380,7 +521,7 @@ def _prune(path: Path, retention_days: int) -> int:
     except OSError:
         return 0
 
-    tmp = path.with_name(path.name + ".tmp")
+    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
     try:
         tmp.write_text(
             ("\n".join(kept) + "\n") if kept else "", encoding="utf-8"
@@ -538,6 +679,23 @@ def cmd_activity(args) -> int:
             print(json.dumps(rec, ensure_ascii=True))
         return 0
     print(render_events(events))
+    return 0
+
+
+def cmd_activity_prune_worker(args) -> int:
+    """``agent-worktrees activity-prune-worker`` -- internal, hidden.
+
+    Performs the actual synchronous rewrite dropped out of ``log_event()``'s
+    own call path (see ``_maybe_prune``/``_dispatch_background_prune``).
+    Only ever invoked as a detached, windowless background child -- never
+    run this directly from an interactive flow.
+    """
+    path = Path(getattr(args, "path"))
+    try:
+        retention_days = int(getattr(args, "retention_days"))
+    except (TypeError, ValueError):
+        retention_days = RETENTION_DAYS
+    _prune(path, retention_days)
     return 0
 
 
