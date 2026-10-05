@@ -91,6 +91,18 @@ def test_apply_installs_marker_slot_and_binstub(tmp_path, monkeypatch):
     assert payload["provider_root"] == str(root.resolve())
 
 
+def test_windows_binstubs_force_utf8_mode():
+    """``worktree-manager.cmd``/``.ps1`` must set ``PYTHONUTF8=1`` so the
+    launched interpreter's stdout/stderr are UTF-8 regardless of the active
+    console codepage (#5218) -- a Windows console defaults to the system ANSI
+    codepage (e.g. ``cp1252``), which crashes on a status glyph like
+    ``\u2713``/``\u2192`` unless UTF-8 mode is forced before the interpreter
+    starts.
+    """
+    assert 'set "PYTHONUTF8=1"' in si._cmd_binstub()
+    assert "$env:PYTHONUTF8 = '1'" in si._ps1_binstub()
+
+
 def test_apply_reaps_stranded_cutover_passive_before_copying_payload(tmp_path, monkeypatch):
     """A slot left occupied by an abandoned cutover passive (spawned by
     ``mux_daemon_cutover.spawn_passive`` with its ``cwd`` pinned inside the
