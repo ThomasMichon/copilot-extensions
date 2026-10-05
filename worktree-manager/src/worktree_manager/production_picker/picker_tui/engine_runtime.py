@@ -92,9 +92,14 @@ class PickerScreenRuntimeMixin:
         its own to surface on, so this is tracked as independent screen
         state rather than folded into ``self.data`` -- read by
         ``status_text()`` (the count chip) and the 'o' Orphanage screen.
-        Cached; ``force=True`` (the 'r' full-reload key) bypasses the cache."""
+        Cached; ``force=True`` (the 'r' full-reload key) bypasses the cache.
+        Uses ``getattr`` defaults for its own cache attrs (not a bare
+        ``self._orphans...`` read): some lightweight test doubles mix in
+        this ``PickerScreenRuntimeMixin`` directly without running the real
+        ``PickerScreen.__init__`` that normally seeds them."""
         now = time.monotonic()
-        if not force and now - self._orphans_checked_at < self._ORPHAN_POLL_SECS:
+        checked_at = getattr(self, "_orphans_checked_at", None)
+        if not force and checked_at is not None and now - checked_at < self._ORPHAN_POLL_SECS:
             return
         self._orphans_checked_at = now
         fetch = getattr(self.src, "orphans", None)

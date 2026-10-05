@@ -248,7 +248,12 @@ class PickerScreen(
         # ever mounting (no ``on_mount`` -> ``_setup_skeleton`` run) still
         # finds a well-formed value in ``status_text()``/the 'o' key.
         self._orphans: list[dict] = []
-        self._orphans_checked_at = 0.0
+        # ``None`` (never polled), not ``0.0``: a bare monotonic-time
+        # comparison against a real elapsed reading would wrongly treat the
+        # very first poll as "already fresh" on a just-booted host/container
+        # whose monotonic clock hasn't yet reached ``_ORPHAN_POLL_SECS`` --
+        # caught in CI, not locally, on a long-uptime dev machine.
+        self._orphans_checked_at: float | None = None
         # Per-refresh render caches (#169): in the NF compose tree every segment
         # widget (title / pivots / chrome / machine / buttons / footer) renders
         # from this one screen's derived frame in the SAME paint pass. Without a

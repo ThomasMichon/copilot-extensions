@@ -5359,6 +5359,32 @@ def test_poll_orphan_state_respects_the_cache_ttl_unless_forced(monkeypatch):
     assert len(calls) == 2
 
 
+def test_poll_orphan_state_always_fetches_on_a_fresh_low_uptime_clock(monkeypatch):
+    """Regression: a just-booted host/container's ``time.monotonic()`` can
+    read well under ``_ORPHAN_POLL_SECS`` (120s). The cache must key off
+    "never polled yet" (``None``), not a bare ``0.0`` timestamp -- comparing
+    a real small monotonic reading against literal ``0.0`` wrongly looked
+    "already fresh" and skipped the very first fetch (seen in CI, never
+    locally, where the dev host's own uptime happens to exceed 120s)."""
+    from worktree_manager.production_picker.picker_tui import engine_runtime
+
+    s = PickerScreen(_fixture_source(), live=False)
+    s.setup_sync_for_tests()
+    calls = []
+    s.src.orphans = lambda: (calls.append(1), [])[1]
+
+    def _sync_run_bg(_label, work, done=None, **_kwargs):
+        result = work()
+        if done is not None:
+            done(result)
+
+    monkeypatch.setattr(s, "_run_bg", _sync_run_bg)
+    monkeypatch.setattr(engine_runtime.time, "monotonic", lambda: 5.0)
+
+    s._poll_orphan_state()
+    assert len(calls) == 1
+
+
 def test_o_key_opens_orphanage_screen_listing_the_cached_entries():
     from worktree_manager.production_picker.picker_tui.orphanage import OrphanageScreen
 
