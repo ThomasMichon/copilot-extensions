@@ -422,9 +422,11 @@ below — read it before starting any Phase 3 work).
       repo-local active-effort loop, and document the ADO/Gitea adapter state.
 - [x] Update `visions/plugins/agent-dispatch/README.md`,
       `.../repository-issue-loop/README.md`, and `.../reviewer/README.md` to
-      mark `provider-neutral-backlog-capability` /
-      `provider-neutral-review-capability` realized, and add the `extends:`
-      model + four named recipes as realized features.
+      add the `extends:` model + four named recipes as realized features, and
+      document the provider-neutrality state precisely: backlog support
+      realized on the shared GitHub + Azure DevOps surface (with Gitea still a
+      deferred adopter), reviewer support still intentionally partial
+      (GitHub realized; Azure DevOps/Gitea reviewer adapters deferred).
 - [x] Publish a migration note for a consumer moving a hand-written
       `kind: repository-issue-loop`/`reviewer-loop` declaration (with inline
       custom scripts) onto the new `extends:`-based thin form.
@@ -438,9 +440,12 @@ below — read it before starting any Phase 3 work).
       operational finding's own lanes, or an equivalent fixture) is migrated
       to an `extends:`-based thin declaration with zero custom script, and
       confirmed behavior-equivalent to the original.
-- [ ] `agent-dispatch recipes list` shows all eight shipped global recipes
-      (the four base archetypes plus backlog-triager, issue-reproducer,
-      effort-builder, and effort-driver) with their params documented.
+- [ ] `plugins/agent-dispatch/README.md` lists all eight shipped global
+      recipes (the four base archetypes plus backlog-triager,
+      issue-reproducer, effort-builder, and effort-driver) with their params
+      documented and cross-checked against
+      `plugins/agent-dispatch/src/agent_dispatch/registrar_recipes.py`'s
+      `GLOBAL_RECIPES` dict.
 - [ ] A live fixture repo/issue/PR set exercises each of the four newly
       named recipes end-to-end per their own Phase's test item.
 
