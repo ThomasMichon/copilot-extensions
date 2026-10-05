@@ -26,12 +26,8 @@ def _core_helper(name: str, local):
     return local
 
 
-def _json_error(*args, **kwargs):
-    return _core()._json_error(*args, **kwargs)
 
 
-def _json_output(*args, **kwargs):
-    return _core()._json_output(*args, **kwargs)
 
 
 def _note_disposition_snapshot(wt_id: str, *, summary: str, kind: str, session_id):
@@ -601,7 +597,7 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
         os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     )
     if not session_id:
-        return _json_error(
+        return output._json_error(
             "could not determine the session id to bind: pass --session-id "
             "(COPILOT_AGENT_SESSION_ID was not set)",
             exit_code=2,
@@ -620,14 +616,14 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
     wdir = getattr(args, "worktree_dir", None) or os.getcwd()
     if wt_id:
         if not cfg.active_project() and not _activate_project_for_worktree_id(wt_id):
-            return _json_error(
+            return output._json_error(
                 f"could not find the adopted project that owns worktree '{wt_id}'",
                 exit_code=3,
             )
         try:
             wt_id = _resolve_worktree_id(wt_id)
         except Exception as e:
-            return _json_error(f"could not resolve worktree '{wt_id}': {e}")
+            return output._json_error(f"could not resolve worktree '{wt_id}': {e}")
     else:
         _activate_project_for_path(wdir)
         try:
@@ -635,7 +631,7 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
         except Exception:
             wt_id = None
     if not wt_id:
-        return _json_error(
+        return output._json_error(
             f"'{wdir}' is not inside a tracked worktree; pass --worktree-dir "
             "pointing at the worktree checkout (or --worktree-id)",
             exit_code=3,
@@ -670,7 +666,7 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
             wt_id,
         )
     except Exception as e:
-        return _json_error(f"failed to bind session: {e}")
+        return output._json_error(f"failed to bind session: {e}")
 
     activity.log_event(
         "session_bound",
@@ -705,7 +701,7 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
     except Exception:
         head = None
     sys.stderr.write(_session_register_write.head_hold_note(session_id, head))
-    _json_output(
+    output._json_output(
         {
             "worktree_id": wt_id,
             "session": session_id,
@@ -750,7 +746,7 @@ def cmd_note_handoff(args: argparse.Namespace) -> int:
         except Exception:
             wt_id = None
     if not wt_id:
-        _json_output({"noted": False, "reason": "not a tracked worktree"})
+        output._json_output({"noted": False, "reason": "not a tracked worktree"})
         return 0
 
     task = (getattr(args, "task", None) or "").strip()
@@ -785,7 +781,7 @@ def cmd_note_handoff(args: argparse.Namespace) -> int:
             handoff_ordinal = None
 
     _note_disposition_snapshot(wt_id, summary=summary, kind="handoff", session_id=session_id)
-    _json_output(
+    output._json_output(
         {
             "noted": True,
             "worktree_id": wt_id,

@@ -7,20 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from . import config as cfg, pr_ops, reclaim, sessions, tracking
-
-
-def _core():
-    from . import __main__ as core
-
-    return core
-
-
-def _json_output(*args, **kwargs):
-    return _core()._json_output(*args, **kwargs)
-
-
-def _json_error(*args, **kwargs):
-    return _core()._json_error(*args, **kwargs)
+from . import output
 
 
 def add_parsers(sub) -> None:
@@ -205,9 +192,9 @@ def cmd_picker_reconcile_local(args: argparse.Namespace) -> int:
     try:
         payload = build_payload(worktree_ids=getattr(args, "worktree_id", None))
     except Exception as exc:
-        return _json_error(str(exc))
+        return output._json_error(str(exc))
     if getattr(args, "json", False):
-        _json_output(payload)
+        output._json_output(payload)
     else:
         print(payload["summary"]["record_count"])
     return 0

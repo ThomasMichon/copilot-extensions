@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from agent_worktrees import config as cfg
-from agent_worktrees import pr_ops, providers, tracking
+from agent_worktrees import output, pr_ops, providers, tracking
 from agent_worktrees import pr_state_cli
 
 
@@ -56,9 +56,9 @@ def _patch_status_shell(monkeypatch, config, captured):
         lambda: SimpleNamespace(
             _infer_worktree_id=lambda value, config: value,
             _resolve_worktree_id=lambda value: value,
-            _json_output=lambda value: captured.update(value),
         ),
     )
+    monkeypatch.setattr(output, "_json_output", lambda value: captured.update(value))
     monkeypatch.setattr(
         tracking,
         "load_record",

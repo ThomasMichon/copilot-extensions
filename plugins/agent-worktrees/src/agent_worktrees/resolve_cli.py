@@ -52,12 +52,8 @@ def _heal_stale_anchor_if_self_missing(*args, **kwargs):
     return _core()._heal_stale_anchor_if_self_missing(*args, **kwargs)
 
 
-def _json_error(*args, **kwargs):
-    return _core()._json_error(*args, **kwargs)
 
 
-def _json_output(*args, **kwargs):
-    return _core()._json_output(*args, **kwargs)
 
 
 def _launch_profile_selection(*args, **kwargs):
@@ -185,7 +181,7 @@ class ResolveCommandState:
             resolved_id, error_message = _resolve_codename_anywhere(codename_arg)
             if resolved_id is None:
                 if self.use_json:
-                    raise _ResolveEarlyExit(_json_error(error_message))
+                    raise _ResolveEarlyExit(output._json_error(error_message))
                 output.err(error_message)
                 raise _ResolveEarlyExit(1)
             self.args.worktree_id = resolved_id
@@ -197,7 +193,7 @@ class ResolveCommandState:
             selectors = sum(bool(value) for value in (self.worktree_id, self.use_new, self.use_base))
             if selectors != 1:
                 raise _ResolveEarlyExit(
-                    _json_error("--json requires exactly one of --worktree-id, --new, or --base")
+                    output._json_error("--json requires exactly one of --worktree-id, --new, or --base")
                 )
             if (
                 getattr(self.args, "restore", False)
@@ -205,7 +201,7 @@ class ResolveCommandState:
                 and platform.system() != "Windows"
             ):
                 raise _ResolveEarlyExit(
-                    _json_error(
+                    output._json_error(
                         "--restore with --json is unsupported on Linux/WSL because a "
                         "successful reptyr adoption must attach the existing mux; run "
                         "`remux` interactively instead"
@@ -356,7 +352,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         # discard the value.
         message = "--seed is only valid with --new."
         if state.use_json:
-            return _json_error(message)
+            return output._json_error(message)
         output.err(message)
         return 2
 
@@ -374,7 +370,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             "use --seed on this machine only, or omit --machine."
         )
         if state.use_json:
-            return _json_error(message)
+            return output._json_error(message)
         output.err(message)
         return 2
 
@@ -477,7 +473,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     try:
         config = state.load_config()
     except Exception as exc:
-        return _json_error(str(exc))
+        return output._json_error(str(exc))
 
     if state.requested_machine:
         remote_args: list[str] = []
@@ -501,7 +497,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         )
         if rc is not None:
             return rc
-        return _json_error(
+        return output._json_error(
             "unknown or unreachable remote machine: "
             f"{state.requested_machine} "
             f"{getattr(state.args, 'environment', None) or ''}".strip()
@@ -510,14 +506,14 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     try:
         _validate_profile_assignment_config(config)
     except profile_assignment.ProfileAssignmentError as exc:
-        return _json_error(str(exc), exit_code=3)
+        return output._json_error(str(exc), exit_code=3)
 
     if state.use_base:
         repo = config.default_repo
         work_dir = repo.anchor
         launch_preflight = _preflight_launch(config, state.args, work_dir)
         if launch_preflight.error:
-            return _json_error(launch_preflight.error, exit_code=3)
+            return output._json_error(launch_preflight.error, exit_code=3)
         launch_cmd = _build_launch_cmd(
             config,
             state.args,
@@ -525,7 +521,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             preflight=launch_preflight,
         )
         env = _build_env(None, _repo_session_env(config, work_dir), work_dir=work_dir)
-        _json_output(
+        output._json_output(
             {
                 "action": "exec",
                 "work_dir": work_dir,
@@ -554,8 +550,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         except getattr(_core(), "CoordinationReadinessFailure") as exc:
             return _core()._emit_coordination_rejection(exc.readiness, json_out=True)
         except RuntimeError as exc:
-            return _json_error(str(exc))
-        _json_output(result)
+            return output._json_error(str(exc))
+        output._json_output(result)
         return 0
 
     assert state.worktree_id is not None
@@ -565,14 +561,14 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         try:
             config = state.load_config()
         except Exception as exc:
-            return _json_error(str(exc))
+            return output._json_error(str(exc))
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
-        return _json_error(f"Worktree not found: {worktree_id}")
+        return output._json_error(f"Worktree not found: {worktree_id}")
     record = tracking.load_record(yaml_path)
     launch_preflight = _preflight_launch(config, state.args, record.worktree_path)
     if launch_preflight.error:
-        return _json_error(launch_preflight.error, exit_code=3)
+        return output._json_error(launch_preflight.error, exit_code=3)
     if getattr(state.args, "restore", False):
         session_id = sessions.find_latest_session_id_fast(record.worktree_path, record.sessions)
         restored = _perform_remux(
@@ -583,7 +579,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             apply_windows=True,
         )
         if not restored.get("ok"):
-            return _json_error(restored.get("reason", "could not restore the session"))
+            return output._json_error(restored.get("reason", "could not restore the session"))
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
         tracking.mark_resumed(record, save=False)
@@ -612,7 +608,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
             resume_session=last_session,
         )
     except profile_assignment.ProfileAssignmentError as exc:
-        return _json_error(str(exc), exit_code=3)
+        return output._json_error(str(exc), exit_code=3)
     _reflect_assignment(record, selection)
     launch_cmd = _build_launch_cmd(
         config,
@@ -649,7 +645,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     project = config.repo_name
     if project:
         launch["project"] = project
-    _json_output({"worktree": _worktree_to_dict(record), "launch": launch})
+    output._json_output({"worktree": _worktree_to_dict(record), "launch": launch})
     return 0
 
 

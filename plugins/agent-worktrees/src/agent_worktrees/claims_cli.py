@@ -39,12 +39,8 @@ def _infer_worktree_id(*args, **kwargs):
     return _core()._infer_worktree_id(*args, **kwargs)
 
 
-def _json_error(*args, **kwargs):
-    return _core()._json_error(*args, **kwargs)
 
 
-def _json_output(*args, **kwargs):
-    return _core()._json_output(*args, **kwargs)
 
 
 def add_parsers(sub) -> None:
@@ -238,7 +234,7 @@ def cmd_claims(args: argparse.Namespace) -> int:
     if target and target[0] == "add":
         if len(target) < 3:
             if args.json:
-                return _json_error("claims add: usage 'add <kind> <ref>'", 2)
+                return output._json_error("claims add: usage 'add <kind> <ref>'", 2)
             output.err(
                 "claims add: usage 'add <kind> <ref>' "
                 "(kind: worktree|codespace|container|ssh|workdir|pr)"
@@ -248,23 +244,23 @@ def cmd_claims(args: argparse.Namespace) -> int:
     if target and target[0] == "release":
         if len(target) < 2:
             if args.json:
-                return _json_error("claims release: missing <ref>", 2)
+                return output._json_error("claims release: missing <ref>", 2)
             output.err("claims release: missing <ref>. Usage: claims release <ref> [--remove]")
             return 2
         return _claims_release(args, target[1])
     if target and target[0] == "annotate":
         if len(target) < 2:
             if args.json:
-                return _json_error("claims annotate: missing <ref>", 2)
+                return output._json_error("claims annotate: missing <ref>", 2)
             output.err("claims annotate: missing <ref>. Usage: claims annotate <ref> --note NOTE")
             return 2
         return claims_annotate.claims_annotate(
-            args, target[1], _infer_worktree_id, _json_error, _json_output, output,
+            args, target[1], _infer_worktree_id, output._json_error, output._json_output, output,
         )
     if target and target[0] == "settle":
         if len(target) < 2:
             if args.json:
-                return _json_error("claims settle: missing <ref>", 2)
+                return output._json_error("claims settle: missing <ref>", 2)
             output.err("claims settle: missing <ref>. Usage: claims settle <ref> [--released]")
             return 2
         return _claims_settle(args, target[1])
@@ -279,7 +275,7 @@ def cmd_claims(args: argparse.Namespace) -> int:
                 "--status <disposition>'"
             )
             if args.json:
-                return _json_error(msg, 2)
+                return output._json_error(msg, 2)
             output.err(msg)
             return 2
         return _claims_mirror_status(args, target[1], target[2])
@@ -315,7 +311,7 @@ def _emit_coordination_rejection(
     json_out: bool,
 ) -> int:
     if json_out:
-        _json_output(
+        output._json_output(
             {
                 "error": readiness.error,
                 "code": readiness.code,
@@ -390,8 +386,8 @@ def _claims_handoff(args: argparse.Namespace, target: list[str]) -> int:
         require_coordination_readiness=_require_coordination_readiness,
         infer_worktree_id=_infer_worktree_id,
         format_claim_ref=tracking.format_claim_ref,
-        json_error=_json_error,
-        json_output=_json_output,
+        json_error=output._json_error,
+        json_output=output._json_output,
     )
 
 
@@ -439,7 +435,7 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
             f"claims add: unknown kind {kind!r} (expected one of {', '.join(sorted(valid_kinds))})"
         )
         if args.json:
-            return _json_error(msg, 2)
+            return output._json_error(msg, 2)
         output.err(msg)
         return 2
     config = cfg.load_config()
@@ -448,7 +444,7 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
         rec_path, wt_id, err = _resolve_owner_ref_record_path(owner_ref, config)
         if err:
             if args.json:
-                return _json_error(err, 2)
+                return output._json_error(err, 2)
             output.err(err)
             return 2
         readiness = _coordination_readiness_for_owner_ref(owner_ref, config)
@@ -456,7 +452,7 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
             return _emit_coordination_rejection(readiness, json_out=args.json)
         if rec_path is None:
             if args.json:
-                _json_output(
+                output._json_output(
                     {
                         "worktree_id": wt_id,
                         "kind": kind,
@@ -478,7 +474,7 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
         rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
     if not rec_path.exists():
         if args.json:
-            return _json_error(f"worktree not found: {wt_id}")
+            return output._json_error(f"worktree not found: {wt_id}")
         output.err(f"worktree not found: {wt_id}")
         return 1
     from . import tracking_write
@@ -498,18 +494,18 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
     except tracking_write.AmbiguousWriteOutcome as exc:
         msg = f"claims add: write to {wt_id} is in an unknown state: {exc}"
         if args.json:
-            return _json_error(msg)
+            return output._json_error(msg)
         output.err(msg)
         return 1
     if result.get("error") in ("frozen", "rejected"):
         if args.json:
-            return _json_error(result["message"])
+            return output._json_error(result["message"])
         output.err(result["message"])
         return 1
     reopened = result["reopened"]
     released_by_finalize = result["released_by_finalize"]
     if args.json:
-        _json_output(
+        output._json_output(
             {
                 "worktree_id": wt_id,
                 "kind": kind,
@@ -542,7 +538,7 @@ def _claims_mirror_status(args: argparse.Namespace, kind: str, ref: str) -> int:
     if not status:
         msg = "claims mirror-status: --status is required"
         if args.json:
-            return _json_error(msg, 2)
+            return output._json_error(msg, 2)
         output.err(msg)
         return 2
     if kind != "task":
@@ -551,7 +547,7 @@ def _claims_mirror_status(args: argparse.Namespace, kind: str, ref: str) -> int:
             "(only 'task' is externally mirrored today)"
         )
         if args.json:
-            return _json_error(msg, 2)
+            return output._json_error(msg, 2)
         output.err(msg)
         return 2
     from . import task_claim_registry
@@ -559,7 +555,7 @@ def _claims_mirror_status(args: argparse.Namespace, kind: str, ref: str) -> int:
     holder = getattr(args, "claim_holder", None) or "agent-dispatch"
     ok = task_claim_registry.set_task_claim_status(ref, status, holder=holder)
     if args.json:
-        _json_output({"kind": kind, "ref": ref, "status": status, "mirrored": ok})
+        output._json_output({"kind": kind, "ref": ref, "status": status, "mirrored": ok})
         return 0 if ok else 1
     if ok:
         print(f"mirrored {kind}:{ref} disposition -> {status}")
@@ -575,7 +571,7 @@ def _claims_release(args: argparse.Namespace, ref: str) -> int:
     rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
     if not rec_path.exists():
         if args.json:
-            return _json_error(f"worktree not found: {wt_id}")
+            return output._json_error(f"worktree not found: {wt_id}")
         output.err(f"worktree not found: {wt_id}")
         return 1
     from . import tracking_write
@@ -594,22 +590,22 @@ def _claims_release(args: argparse.Namespace, ref: str) -> int:
     except tracking_write.AmbiguousWriteOutcome as exc:
         msg = f"claims release: write to {wt_id} is in an unknown state: {exc}"
         if args.json:
-            return _json_error(msg)
+            return output._json_error(msg)
         output.err(msg)
         return 1
     if result.get("error") == "not_found":
         if args.json:
-            return _json_error(f"no outbound claim with ref: {ref}")
+            return output._json_error(f"no outbound claim with ref: {ref}")
         output.err(f"no outbound claim with ref: {ref} on {wt_id}")
         return 1
     if result.get("error") == "reserved":
         if args.json:
-            return _json_error(result["message"])
+            return output._json_error(result["message"])
         output.err(result["message"])
         return 1
     action = result["action"]
     if args.json:
-        _json_output({"worktree_id": wt_id, "ref": ref, "action": action})
+        output._json_output({"worktree_id": wt_id, "ref": ref, "action": action})
         return 0
     print(f"{action} outbound claim {ref} on {wt_id}")
     return 0
@@ -623,12 +619,12 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
         rec_path, wt_id, err = _resolve_owner_ref_record_path(owner_ref, config)
         if err:
             if args.json:
-                return _json_error(err, 2)
+                return output._json_error(err, 2)
             output.err(err)
             return 2
         if rec_path is None:
             if args.json:
-                _json_output(
+                output._json_output(
                     {
                         "worktree_id": wt_id,
                         "ref": ref,
@@ -647,7 +643,7 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
         rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
     if not rec_path.exists():
         if args.json:
-            return _json_error(f"worktree not found: {wt_id}")
+            return output._json_error(f"worktree not found: {wt_id}")
         output.err(f"worktree not found: {wt_id}")
         return 1
     disposition = obligations.RELEASED if getattr(args, "released", False) else obligations.AT_REST
@@ -667,21 +663,21 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
     except tracking_write.AmbiguousWriteOutcome as exc:
         msg = f"claims settle: write to {wt_id} is in an unknown state: {exc}"
         if args.json:
-            return _json_error(msg)
+            return output._json_error(msg)
         output.err(msg)
         return 1
     if result.get("error") == "reserved":
         if args.json:
-            return _json_error(result["message"])
+            return output._json_error(result["message"])
         output.err(result["message"])
         return 1
     if result.get("error") == "not_found":
         if args.json:
-            return _json_error(f"no outbound claim with ref: {ref}")
+            return output._json_error(f"no outbound claim with ref: {ref}")
         output.err(f"no outbound claim with ref: {ref} on {wt_id}")
         return 1
     if args.json:
-        _json_output({"worktree_id": wt_id, "ref": ref, "disposition": disposition})
+        output._json_output({"worktree_id": wt_id, "ref": ref, "disposition": disposition})
         return 0
     print(f"settled outbound claim {ref} on {wt_id} -> {disposition}")
     return 0
@@ -771,7 +767,7 @@ def _claims_sweep(args: argparse.Namespace) -> int:
                 ref=r["ref"],
             )
     if args.json:
-        _json_output({"applied": apply, "reclaimed": reclaimed, "count": len(reclaimed)})
+        output._json_output({"applied": apply, "reclaimed": reclaimed, "count": len(reclaimed)})
         return 0
     if not reclaimed:
         print("claims sweep: no abandonable obligations found.")
@@ -833,7 +829,7 @@ def _claims_reconcile_at_rest(args: argparse.Namespace) -> int:
                 ref=r["ref"],
             )
     if args.json:
-        _json_output({"applied": apply, "released": released, "count": len(released)})
+        output._json_output({"applied": apply, "released": released, "count": len(released)})
         return 0
     if not released:
         print("claims reconcile-at-rest: no lingering at-rest claims found.")
@@ -866,7 +862,7 @@ def _claims_cleanup(args: argparse.Namespace) -> int:
                 handoff_to=r.get("handoff_to"),
             )
     if args.json:
-        _json_output(
+        output._json_output(
             {
                 "applied": apply,
                 "results": rows,
@@ -904,7 +900,7 @@ def _claims_orphans(args: argparse.Namespace) -> int:
     """List the durable orphanage -- obligations re-homed by an ``--abandon`` finalize."""
     orphans = tracking.load_orphaned_obligations()
     if args.json:
-        _json_output({"orphaned": orphans, "count": len(orphans)})
+        output._json_output({"orphaned": orphans, "count": len(orphans)})
         return 0
     if not orphans:
         print(
@@ -937,7 +933,7 @@ def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
     rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
     if not rec_path.exists():
         if args.json:
-            return _json_error(f"worktree not found: {wt_id}")
+            return output._json_error(f"worktree not found: {wt_id}")
         output.err(f"worktree not found: {wt_id}")
         return 1
     rec = tracking.load_record(rec_path)
@@ -970,7 +966,7 @@ def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
     }
 
     if args.json:
-        _json_output(ledger)
+        output._json_output(ledger)
         return 0
 
     print(f"Claim ledger for {wt_id}  ({rec.repo} @ {rec.machine})")
@@ -1010,8 +1006,8 @@ def _claims_transitive(args: argparse.Namespace, worktree_id: str | None) -> int
     return claims_transitive_cli.cmd_claims_transitive(
         args, worktree_id,
         infer_worktree_id=_infer_worktree_id,
-        json_error=_json_error,
-        json_output=_json_output,
+        json_error=output._json_error,
+        json_output=output._json_output,
     )
 
 
@@ -1019,5 +1015,5 @@ def _claims_history(args: argparse.Namespace, ref: str | None) -> int:
     """``claims history <ref>`` -- delegates to ``claims_history_cli``
     (kept a separate module for the module-size cap)."""
     return claims_history_cli.cmd_claims_history(
-        args, ref, json_error=_json_error, json_output=_json_output,
+        args, ref, json_error=output._json_error, json_output=output._json_output,
     )

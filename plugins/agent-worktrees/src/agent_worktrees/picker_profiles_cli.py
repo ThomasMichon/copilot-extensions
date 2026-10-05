@@ -23,8 +23,6 @@ def _exec_worktree_manager(*args, **kwargs):
     return _core()._exec_worktree_manager(*args, **kwargs)
 
 
-def _json_output(*args, **kwargs):
-    return _core()._json_output(*args, **kwargs)
 
 
 def _usable_worktree_manager(*args, **kwargs):
@@ -145,7 +143,7 @@ def cmd_picker(args: argparse.Namespace) -> int:
 
     effective = mgr is not None
     if as_json:
-        _json_output(
+        output._json_output(
             {
                 "effective": effective,
                 "manager_available": effective,

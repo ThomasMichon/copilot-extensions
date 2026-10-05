@@ -173,7 +173,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         json_out = "--json" in rest
         entries = repos.list_repos(class_filter=class_filter)
         if json_out:
-            _core()._json_output(
+            output._json_output(
                 {
                     "repos": [
                         {
@@ -223,7 +223,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         path = repos.resolve_path(name)
         if path:
             if json_out:
-                _core()._json_output({"name": name, "path": path})
+                output._json_output({"name": name, "path": path})
             else:
                 print(path)
             return 0
@@ -233,7 +233,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         else:
             msg = f"Repo '{name}' not found in registry"
         if json_out:
-            return _core()._json_error(msg)
+            return output._json_error(msg)
         output.err(msg)
         return 1
 
@@ -420,7 +420,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         json_out = "--json" in rest
         statuses = repos.status_all(tag=tag, class_filter=class_filter)
         if json_out:
-            _core()._json_output(
+            output._json_output(
                 {
                     "repos": [
                         {
@@ -513,7 +513,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         json_out = "--json" in rest
         findings = doctor.reconcile(fix=do_fix)
         if json_out:
-            _core()._json_output(
+            output._json_output(
                 {
                     "fixed": do_fix,
                     "findings": [
@@ -548,7 +548,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             return 1
         login = repos.account_for_github_slug(target)
         if json_out:
-            _core()._json_output({"target": target, "account": login})
+            output._json_output({"target": target, "account": login})
             return 0 if login else 1
         if login:
             print(login)
@@ -563,7 +563,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             return 1
         login = repos.copilot_account_for(target)
         if json_out:
-            _core()._json_output({"target": target, "copilot_account": login})
+            output._json_output({"target": target, "copilot_account": login})
             return 0 if login else 1
         if login:
             print(login)
@@ -602,7 +602,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                 break
         results = repos.backfill_credential_pins(target)
         if json_out:
-            _core()._json_output(
+            output._json_output(
                 {
                     "results": [
                         {
@@ -675,7 +675,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             registry = repos.read_registry()
             json_out = "--json" in acrest
             if json_out:
-                _core()._json_output({"account_map": dict(registry.account_map)})
+                output._json_output({"account_map": dict(registry.account_map)})
                 return 0
             if not registry.account_map:
                 print("No account_map entries.")
@@ -732,7 +732,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         if do_list:
             grants = allow_edits.list_active()
             if json_out:
-                _core()._json_output(
+                output._json_output(
                     {
                         "grants": [
                             {
@@ -767,7 +767,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
         if do_revoke:
             removed = allow_edits.revoke(repo)
             if json_out:
-                _core()._json_output({"repo": repo, "revoked": removed})
+                output._json_output({"repo": repo, "revoked": removed})
             elif removed:
                 output.ok(f"Revoked edit grant for '{repo}'.")
             else:
@@ -779,7 +779,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                 f"repos allow-edits requires --reason (>= {allow_edits.MIN_REASON_LEN} chars) "
                 "explaining why delegation cannot be used."
             )
-            return _core()._json_error(msg) if json_out else (output.err(msg) or 1)
+            return output._json_error(msg) if json_out else (output.err(msg) or 1)
 
         entry = repos.find_repo(repo)
         g = allow_edits.grant(repo, reason.strip(), minutes)
@@ -789,7 +789,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             else (f" (note: '{repo}' is not in the repos registry — nothing may be guarding it)")
         )
         if json_out:
-            _core()._json_output(
+            output._json_output(
                 {
                     "repo": repo,
                     "expires_at_ms": g.expires_at_ms,
@@ -864,7 +864,7 @@ def cmd_accounts_dispatch(argv: list[str]) -> int:
     if sub == "list":
         entries = accounts.list_accounts()
         if "--json" in rest:
-            _core()._json_output(
+            output._json_output(
                 {
                     "accounts": [
                         {
@@ -900,7 +900,7 @@ def cmd_accounts_dispatch(argv: list[str]) -> int:
             output.err(f"No account '{rest[0]}' in accounts.yaml")
             return 1
         if "--json" in rest:
-            _core()._json_output(
+            output._json_output(
                 {
                     "login": e.login,
                     "host": e.host,

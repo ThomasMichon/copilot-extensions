@@ -23,8 +23,6 @@ def _core_helper(name: str, local):
 
 
 def _infer_worktree_id_from_cwd(*args, **kwargs): return _core()._infer_worktree_id_from_cwd(*args, **kwargs)
-def _json_error(*args, **kwargs): return _core()._json_error(*args, **kwargs)
-def _json_output(*args, **kwargs): return _core()._json_output(*args, **kwargs)
 def _resolve_worktree_id(*args, **kwargs): return _core()._resolve_worktree_id(*args, **kwargs)
 
 
@@ -94,14 +92,14 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
                 wt_id,
                 bare_only=getattr(args, "bare_only", False),
             )
-            _json_output(payload)
+            output._json_output(payload)
             return 0 if payload.get("ok") else 1
         wt_path = _wt_path(wt_id)
     elif not session_id and not want_all:
         # No explicit target -- infer the worktree from the current directory.
         wt_id = _infer_worktree_id_from_cwd()
         if not wt_id:
-            return _json_error(
+            return output._json_error(
                 "no --session-id/--worktree-id/--all and cwd is not a worktree",
                 exit_code=2,
             )
@@ -189,7 +187,7 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
     }
 
     if as_json:
-        _json_output(payload)
+        output._json_output(payload)
         return 0 if ok else 1
 
     if not targets:
@@ -342,7 +340,7 @@ def cmd_remux(args: argparse.Namespace) -> int:
     elif not session_id:
         wt_id = _infer_worktree_id_from_cwd()
         if not wt_id:
-            return _json_error(
+            return output._json_error(
                 "no --session-id/--worktree-id and cwd is not a worktree", exit_code=2
             )
         wt_path = _wt_path(wt_id)
@@ -356,7 +354,7 @@ def cmd_remux(args: argparse.Namespace) -> int:
     )
 
     if as_json:
-        _json_output(result)
+        output._json_output(result)
         return 0 if result.get("ok") else 1
 
     if not result.get("ok"):
@@ -519,7 +517,7 @@ def cmd_restart(args: argparse.Namespace) -> int:
         settle_timeout=getattr(args, "settle_timeout", 6.0),
     )
     if getattr(args, "json", False):
-        _json_output(payload)
+        output._json_output(payload)
         return 0 if payload["ok"] else 1
     wt = payload["worktree_id"]
     if not payload["had_session"]:

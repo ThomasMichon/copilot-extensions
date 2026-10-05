@@ -17,12 +17,8 @@ def _infer_worktree_id(*args, **kwargs):
     return _core()._infer_worktree_id(*args, **kwargs)
 
 
-def _json_error(*args, **kwargs):
-    return _core()._json_error(*args, **kwargs)
 
 
-def _json_output(*args, **kwargs):
-    return _core()._json_output(*args, **kwargs)
 
 
 def _resolve_worktree_id(*args, **kwargs):
@@ -70,13 +66,13 @@ def _git_resolve_target(rest: list[str], use_json: bool):
         config = cfg.load_config(Path(config_arg) if config_arg else None)
     except Exception as exc:
         if use_json:
-            return None, _json_error(str(exc))
+            return None, output._json_error(str(exc))
         raise
     worktree_id = _infer_worktree_id(worktree_id_arg, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass --worktree-id or run from inside a worktree."
         if use_json:
-            return None, _json_error(msg)
+            return None, output._json_error(msg)
         output.err(msg)
         return None, 1
     return config, _resolve_worktree_id(worktree_id)
@@ -119,7 +115,7 @@ def cmd_git_sync(rest: list[str]) -> int:
             return wid
         ok = git_collab.sync_forward(wid, config, dry_run=dry_run)
         if use_json:
-            _json_output({"worktree_id": wid, "synced": ok})
+            output._json_output({"worktree_id": wid, "synced": ok})
         return 0 if ok else 1
     finally:
         if ctx is not None:
@@ -162,7 +158,7 @@ def cmd_git_feature_branch(rest: list[str]) -> int:
             dry_run=dry_run,
         )
         if use_json:
-            _json_output({"worktree_id": wid, "feature": name, "ok": ok})
+            output._json_output({"worktree_id": wid, "feature": name, "ok": ok})
         return 0 if ok else 1
     finally:
         if ctx is not None:
@@ -194,7 +190,7 @@ def cmd_git_merge_to_feature(rest: list[str]) -> int:
             return wid
         ok = git_collab.merge_to_feature(wid, config, name, push=push, dry_run=dry_run)
         if use_json:
-            _json_output({"worktree_id": wid, "feature": name, "merged": ok})
+            output._json_output({"worktree_id": wid, "feature": name, "merged": ok})
         return 0 if ok else 1
     finally:
         if ctx is not None:

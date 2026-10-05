@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_worktrees import __main__ as cli
+from agent_worktrees import output
 from agent_worktrees import finalize, tracking
 
 WORKTREE_ID = "host-win-20260909-abcd"
@@ -41,9 +42,9 @@ def _configure(monkeypatch, tmp_path, outputs) -> None:
     )
     monkeypatch.setattr(cli.cfg, "tracking_dir", lambda: tmp_path)
     monkeypatch.setattr(cli, "_resolve_worktree_id", lambda value: value)
-    monkeypatch.setattr(cli, "_json_output", outputs.append)
+    monkeypatch.setattr(output, "_json_output", outputs.append)
     monkeypatch.setattr(
-        cli,
+        output,
         "_json_error",
         lambda message, exit_code=1: outputs.append(
             {"version": 1, "error": message}

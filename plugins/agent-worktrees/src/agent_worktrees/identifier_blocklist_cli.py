@@ -11,12 +11,6 @@ from . import output, repos as repos_mod
 _VALID_FORMATS = ("ci", "json")
 
 
-def _core():
-    from . import __main__ as core
-
-    return core
-
-
 def add_parsers(sub) -> None:
     sub.add_parser(
         "identifiers",
@@ -116,7 +110,7 @@ def cmd_identifiers_dispatch(argv: list[str]) -> int:
         )
 
         if fmt == "json":
-            _core()._json_output(
+            output._json_output(
                 {
                     "target": target,
                     "target_visibility": (target_entry.visibility if target_entry else ""),

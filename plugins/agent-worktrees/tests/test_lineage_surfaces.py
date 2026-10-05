@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 from agent_worktrees import __main__ as cli
+from agent_worktrees import output
 from agent_worktrees import lineage_surfaces
 from agent_worktrees import session_tracking_cli
 from agent_worktrees import session_projection
@@ -544,7 +545,7 @@ def test_lineage_cli_commands_emit_versioned_payloads(
     record = _record()
     record_path = tmp_path / "child.yaml"
     captured: list[dict] = []
-    monkeypatch.setattr(cli, "_json_output", captured.append)
+    monkeypatch.setattr(output, "_json_output", captured.append)
     monkeypatch.setattr(
         session_tracking_cli,
         "_find_tracking_file",

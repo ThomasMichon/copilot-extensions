@@ -253,7 +253,7 @@ def _related_doctor(anchor: str, rest: list[str], json_out: bool) -> int:
                 )
 
     if json_out:
-        _core()._json_output(
+        output._json_output(
             {
                 "current_machine": current_machine,
                 "machines_yaml_available": machines_known_available,
@@ -372,7 +372,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             else []
         )
         if json_out:
-            _core()._json_output(
+            output._json_output(
                 {"owned": owners, "count": len(owners), "source": "control-plane" if cp else "cwd"}
             )
         elif not owners:
@@ -411,7 +411,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         entries = related.list_related_grafted(anchors, role=role)
         primary = related.get_primary_grafted(anchors)
         if json_out:
-            _core()._json_output(
+            output._json_output(
                 {
                     "primary": primary,
                     "related": [
@@ -463,7 +463,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             return 1
         reg = repos.find_repo(name)
         if json_out:
-            _core()._json_output(
+            output._json_output(
                 {
                     "name": e.name,
                     "role": e.role,
@@ -680,7 +680,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         _gh_slug = repos.github_slug(reg.remote) if (reg and reg.remote) else None
         if json_out:
             _acct_json = repos.resolve_account(reg)
-            _core()._json_output(
+            output._json_output(
                 {
                     "name": resn.name,
                     "locus_kind": resn.locus_kind,
@@ -796,7 +796,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                 return 1
             if existing.ownership and not overwrite:
                 if json_out:
-                    _core()._json_output(
+                    output._json_output(
                         {
                             "name": target,
                             "ownership": existing.ownership,
@@ -813,7 +813,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                 return 0
             if not derived:
                 if json_out:
-                    _core()._json_output(
+                    output._json_output(
                         {
                             "name": target,
                             "ownership": "",
@@ -832,7 +832,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                 anchor, related.RelatedEntry(name=target, ownership=derived, owner=owner)
             )
             if json_out:
-                _core()._json_output(
+                output._json_output(
                     {"name": target, "ownership": derived, "owner": owner, "changed": True}
                 )
             else:
@@ -842,7 +842,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             return 0
         changed = related.classify_all(anchor, overwrite=overwrite)
         if json_out:
-            _core()._json_output({"changed": changed, "count": len(changed)})
+            output._json_output({"changed": changed, "count": len(changed)})
         elif not changed:
             output.info(
                 "No ownership changes (all entries classified, or "
