@@ -233,6 +233,71 @@ def test_shell_git_commit_still_denies_alongside_pull_exemption(
     assert d and d["permissionDecision"] == "deny"
 
 
+# -- git branch exemption -- the main-history-rewrite incident class ----------
+# A live incident: recovering a local ``main`` after a deliberate upstream
+# history rewrite (docs/pipelines.md's "If main's history is force-rewritten")
+# used ``git branch -f main origin/main`` directly against the anchor
+# checkout, which the guard did not catch at the time -- ``branch`` was
+# simply absent from the write-subcommand list, so the whole invocation was
+# invisible to it.
+
+def test_shell_git_branch_force_move_into_anchor_denies(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell(f'git -C "{gp}" branch -f main origin/main', tmp_path),
+                     env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_branch_force_move_from_anchor_cwd_denies(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell("git branch -f main origin/main", gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_branch_delete_from_anchor_cwd_denies(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell("git branch -D stale-branch", gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_branch_move_rename_from_anchor_cwd_denies(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell("git branch -m old-name new-name", gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_branch_bare_listing_from_anchor_cwd_allows(tmp_path, anchor):
+    """A plain ``git branch`` (no args) only lists and must stay allowed."""
+    gp = anchor[0]["path"]
+    assert guard.decide(_shell("git branch", gp), env={}, home=tmp_path,
+                        anchors=anchor) is None
+
+
+def test_shell_git_branch_verbose_list_from_anchor_cwd_allows(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    assert guard.decide(_shell("git branch -vv", gp), env={}, home=tmp_path,
+                        anchors=anchor) is None
+
+
+def test_shell_git_branch_show_current_from_anchor_cwd_allows(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    assert guard.decide(_shell("git branch --show-current", gp), env={},
+                        home=tmp_path, anchors=anchor) is None
+
+
+def test_shell_git_commit_with_branch_force_in_message_denies(tmp_path, anchor):
+    """The ``branch`` exemption must key off the actual git SUBCOMMAND, not a
+    bare substring search -- a ``commit`` whose message happens to contain
+    ``branch -f`` is still a genuine commit and must still deny."""
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell("git commit -m 'branch -f cleanup'", gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
 # -- cwd-scoped git mutation (no path named) -- the incident-class case --------
 
 def test_shell_git_commit_from_anchor_cwd_denies(tmp_path, anchor):

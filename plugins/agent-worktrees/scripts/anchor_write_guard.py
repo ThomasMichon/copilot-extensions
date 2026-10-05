@@ -108,7 +108,7 @@ _WRITE_VERBS = re.compile(
         r"\btouch\b", r"\bmkdir\b", r"\bdd\b", r"\btruncate\b", r"\bpatch\b",
         r"git\s+(?:-C\s+\S+\s+)?(?:apply|commit|checkout|switch|reset|"
         r"restore|clean|rm|mv|stash|merge|rebase|pull|cherry-pick|revert|"
-        r"add|init)",
+        r"add|init|branch)",
     ]),
     re.IGNORECASE,
 )
@@ -146,7 +146,7 @@ _WRITE_CMD_START = re.compile(
 _GIT_START = re.compile(r"^\s*[\"']?git\b", re.IGNORECASE)
 _GIT_WRITE_SUB = re.compile(
     r"\b(?:add|commit|apply|checkout|switch|reset|restore|clean|rm|mv|stash|"
-    r"merge|rebase|pull|cherry-pick|revert|init)\b",
+    r"merge|rebase|pull|cherry-pick|revert|init|branch)\b",
     re.IGNORECASE,
 )
 # ``pull`` is the one write-sub verb with a narrow, precise exemption: this
@@ -178,6 +178,36 @@ _GIT_FF_ONLY_FLAG = re.compile(
 )
 # A ``-C`` (git change-directory) flag anywhere in a git segment.
 _GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
+
+# ``branch`` is the other write-sub verb with a narrow, precise exemption,
+# added after a live incident: ``git branch -f <name> <ref>`` (e.g. force-
+# moving a stale local ``main`` to match a rewritten ``origin/main``, see
+# docs/pipelines.md's "If main's history is force-rewritten") force-moves a
+# local ref in the anchor -- a genuine mutation this guard exists to catch
+# -- but slipped through entirely before this exemption existed (``branch``
+# was simply absent from ``_GIT_WRITE_SUB``, so the whole subcommand was
+# invisible to the guard; this incident is exactly why ``branch`` was added
+# to that list).
+#
+# A bare listing/inspection invocation (``git branch``, ``git branch -v``/
+# ``-vv``/``-a``/``-r``/``--list``/``--all``/``--remotes``/``--contains``/
+# ``--merged``/``--no-merged``/``--show-current``) never moves, deletes, or
+# copies an existing ref and must stay allowed -- mirrors the ``pull
+# --ff-only`` exemption above: look for the one mutating flag that makes
+# this specific invocation unsafe, same whole-segment-search style, rather
+# than enumerate every safe flag. ``-f``/``--force`` (move, overwriting an
+# existing name), ``-d``/``-D``/``--delete``, ``-m``/``-M``/``--move``, and
+# ``-c``/``-C``/``--copy`` are the mutating forms; their absence means this
+# invocation cannot move/delete/rename/copy any ref. A plain
+# ``git branch <new-name>`` (create, no flag at all) is a known, accepted
+# gap of this heuristic -- lower-risk than force-moving/deleting/copying an
+# EXISTING ref (the incident class this exemption targets), and consistent
+# with this guard's stated bias toward under- rather than over-triggering.
+_GIT_BRANCH_MUTATING_FLAG = re.compile(
+    r"""(?:^|\s)["']?(?:-f|--force|-d|-D|--delete|-m|-M|--move|-c|-C|--copy)
+        ["']?(?=\s|$)""",
+    re.IGNORECASE | re.VERBOSE,
+)
 
 # Leading benign prefixes to strip so a write verb after them is still seen at
 # "command position": env-assignments (``VAR=val``) and wrapper commands
@@ -518,6 +548,12 @@ def _shell_hit(cmd: str, cwd: str, anchors: list[dict]) -> dict | None:
         subcmd = _GIT_SUBCOMMAND.match(eff)
         is_pull = bool(subcmd and subcmd.group(1).lower() == "pull")
         if git_write and is_pull and _GIT_FF_ONLY_FLAG.search(seg):
+            git_write = False
+        # A ``branch`` invocation is exempt from ``git_write`` ONLY when its
+        # actual SUBCOMMAND is ``branch`` and the segment carries NONE of
+        # the mutating flags -- see ``_GIT_BRANCH_MUTATING_FLAG``'s comment.
+        is_branch = bool(subcmd and subcmd.group(1).lower() == "branch")
+        if git_write and is_branch and not _GIT_BRANCH_MUTATING_FLAG.search(seg):
             git_write = False
         has_dash_c = is_git and bool(_GIT_DASH_C_FLAG.search(seg))
         for a in anchors:

@@ -41,17 +41,49 @@ def _load_check_version_bump():
     return module
 
 
+def _resolve_mbase(cvb, base_ref: str, head_ref: str) -> tuple[str, str] | None:
+    """The ``(merge_base, head_sha)`` pair for ``base_ref``/``head_ref``, or
+    ``None`` when either ref is unresolvable OR they share no common
+    ancestor at all.
+
+    The latter is a real, confirmed condition for this repo: ``main`` is a
+    wholesale-regenerated promotion artifact (see
+    ``tools/promote_release.py``'s own docstring), so its commit graph has
+    always been disjoint from ``dev``'s except for the repo's original fork
+    point -- and a deliberate `main` history rewrite (docs/pipelines.md's
+    "If main's history is force-rewritten") changes every commit's SHA on
+    `main`'s own line, severing even that shared ancestor. Callers must
+    treat ``None`` as "nothing determinable here," never silently fall back
+    to diffing raw ``base_ref`` directly -- that previously produced a
+    large, misleading "changed" set spanning everything that differs
+    between `main`'s last promotion snapshot and the current branch, not
+    this branch's own actual changes (confirmed live immediately after the
+    2026-10-04 rewrite)."""
+    head = cvb._rev_parse(head_ref)
+    if head is None:
+        return None
+    base = cvb._rev_parse(base_ref)
+    if base is None:
+        return None
+    mbase = cvb._merge_base(base, head)
+    if mbase is None:
+        print(
+            f"check-changefile-presence: base '{base_ref}' shares no common "
+            "history with HEAD (e.g. after a main history rewrite); skipping.",
+            file=sys.stderr,
+        )
+        return None
+    return mbase, head
+
+
 def touched_plugins(base_ref: str, head_ref: str = "HEAD") -> set[str]:
     """Every plugin the ``base_ref..head_ref`` diff touches, per
     check-version-bump.py's existing, tested plugin-diff rule."""
     cvb = _load_check_version_bump()
-    head = cvb._rev_parse(head_ref)
-    if head is None:
+    resolved = _resolve_mbase(cvb, base_ref, head_ref)
+    if resolved is None:
         return set()
-    base = cvb._rev_parse(base_ref)
-    if base is None:
-        return set()
-    mbase = cvb._merge_base(base, head) or base
+    mbase, head = resolved
     changed = cvb._changed_files(mbase, head)
     if not changed:
         return set()
@@ -85,13 +117,10 @@ def added_changefile_names(base_ref: str, head_ref: str = "HEAD") -> set[str]:
     diff never added a changefile ``read_changefiles()`` can see at all
     (PR #4954 review)."""
     cvb = _load_check_version_bump()
-    head = cvb._rev_parse(head_ref)
-    if head is None:
+    resolved = _resolve_mbase(cvb, base_ref, head_ref)
+    if resolved is None:
         return set()
-    base = cvb._rev_parse(base_ref)
-    if base is None:
-        return set()
-    mbase = cvb._merge_base(base, head) or base
+    mbase, head = resolved
     r = cvb._git("diff", "--name-only", "--diff-filter=A", f"{mbase}..{head}",
                  "--", ".changefiles")
     names = set()

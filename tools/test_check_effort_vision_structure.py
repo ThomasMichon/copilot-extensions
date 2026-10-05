@@ -7,6 +7,7 @@ tests are independent of the working tree's actual diff.
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 from pathlib import Path
 
 TOOLS_DIR = Path(__file__).resolve().parent
@@ -198,3 +199,45 @@ def test_main_explicit_paths_reports_success(tmp_path, monkeypatch, capsys):
     good = _write(tmp_path, "efforts/active/sample-effort/README.md", VALID_EFFORT)
     rc = mod.main([str(good)])
     assert rc == 0
+
+
+def _git(repo, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+
+
+def test_changed_readmes_base_sharing_no_merge_base_degrades_to_soft_skip(
+    tmp_path, monkeypatch, capsys,
+):
+    """A `base` that RESOLVES but shares no common ancestor with HEAD at
+    all (the confirmed fallout of a deliberate `main` history rewrite --
+    see docs/pipelines.md's "If main's history is force-rewritten") must
+    degrade to a soft no-op (no README misreported as changed), never
+    silently diff raw `base` directly against HEAD's current tree (which
+    previously could misattribute an untouched effort/vision README as
+    "changed by this branch" merely because it differs from `main`'s last
+    promotion snapshot)."""
+    monkeypatch.setattr(mod, "ROOT", tmp_path)
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@example.com")
+    _git(tmp_path, "config", "user.name", "Test")
+    _git(tmp_path, "checkout", "-q", "-b", "dev")
+    _write(tmp_path, "efforts/active/sample-effort/README.md", VALID_EFFORT)
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "base")
+
+    _git(tmp_path, "checkout", "-q", "--orphan", "rewritten-main")
+    _write(tmp_path, "unrelated.txt", "rewritten history\n")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "unrelated root (simulates a rewritten main)")
+    rewritten_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(tmp_path, "update-ref", "refs/remotes/origin/main", rewritten_sha)
+    _git(tmp_path, "checkout", "-q", "dev")
+    _write(tmp_path, "efforts/active/sample-effort/README.md", INVALID_EFFORT)
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "edit effort README (same branch, unrelated to origin/main)")
+
+    paths = mod._changed_readmes("origin/main", "HEAD")
+    assert paths == []
+    assert "shares no common history" in capsys.readouterr().out

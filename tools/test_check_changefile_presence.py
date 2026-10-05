@@ -89,6 +89,34 @@ def test_touched_plugin_without_changefile_fails(repo: Path):
     assert "no pending changefile" in result.stderr
 
 
+def test_base_sharing_no_merge_base_degrades_to_soft_skip(repo: Path):
+    """A `base` that RESOLVES but shares no common ancestor with HEAD at
+    all (the confirmed fallout of a deliberate `main` history rewrite --
+    see docs/pipelines.md's "If main's history is force-rewritten") must
+    degrade to a soft no-op (no plugin misreported as touched), never
+    silently diff raw `base` directly and misreport every plugin that
+    merely differs between `base`'s snapshot and HEAD as missing a
+    changefile."""
+    _write(repo, "plugins/alpha/src/alpha/feature.py", "def f():\n    return 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "alpha feature, no changefile")
+
+    _git(repo, "checkout", "-q", "--orphan", "rewritten-main")
+    _write(repo, "unrelated.txt", "rewritten history\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "unrelated root (simulates a rewritten main)")
+    rewritten_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", rewritten_sha)
+    _git(repo, "checkout", "-q", "dev")
+
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "alpha" not in result.stdout + result.stderr
+    assert "shares no common history" in result.stdout + result.stderr
+
+
 def test_touched_plugin_with_changefile_passes(repo: Path):
     _write(repo, "plugins/alpha/src/alpha/feature.py", "def f():\n    return 1\n")
     _write(repo, ".changefiles/fix.json",

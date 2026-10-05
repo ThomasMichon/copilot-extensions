@@ -85,7 +85,20 @@ def _changed_readmes(base_ref: str, head_ref: str) -> list[Path]:
             "skipping (fetch it to enable the guard).",
         )
         return []
-    mbase = _merge_base(base, head) or base
+    mbase = _merge_base(base, head)
+    if mbase is None:
+        # `base` resolves but shares no common ancestor with `head` -- see
+        # check-version-bump.py's identical fix for the full rationale
+        # (a `main` history rewrite severs even the repo's original
+        # dev/main fork point). Degrade the same soft way an unresolvable
+        # base already does above, rather than silently diff raw `base_ref`
+        # and misreport every README that differs from `main`'s last
+        # promotion snapshot as "changed by this branch."
+        print(
+            f"check-effort-vision-structure: base '{base_ref}' shares no common "
+            "history with HEAD (e.g. after a main history rewrite); skipping.",
+        )
+        return []
     r = _git("diff", "--name-only", "--diff-filter=ACM", f"{mbase}..{head}")
     paths = []
     for line in r.stdout.splitlines():

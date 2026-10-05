@@ -416,8 +416,35 @@ def _git(*args: str) -> str:
 
 def _changed_since(base: str) -> list[str]:
     """Committed + uncommitted + untracked paths changed since the merge base."""
-    merge_base = _git("merge-base", base, "HEAD").strip() or base
-    paths = set(_git("diff", "--name-only", merge_base).split())
+    merge_base_out = _git("merge-base", base, "HEAD").strip()
+    if not merge_base_out:
+        base_resolves = bool(
+            _git("rev-parse", "--verify", "--quiet", base).strip()
+        )
+        if base_resolves:
+            # `base` RESOLVES (to some commit) but shares no common ancestor
+            # with HEAD at all -- a real, confirmed condition for this repo
+            # (`main` is a wholesale-regenerated promotion artifact, and a
+            # deliberate history rewrite severs even the repo's one shared
+            # fork-point commit; see check-version-bump.py's identical fix
+            # for the full rationale). The previous ``or base`` fallback
+            # here silently diffed raw ``base`` directly, which -- unlike
+            # the read-only guards elsewhere in this repo -- this tool can
+            # then ``--apply``, writing spurious version bumps for every
+            # plugin that merely differs between `base`'s current snapshot
+            # and HEAD, not ones this branch actually touched. Fail loudly
+            # instead (mirrors `run_tests_in_devcontainer.py`'s own
+            # established "no merge base" hard-failure convention) rather
+            # than risk a silent wrong mutation.
+            raise SystemExit(
+                f"accumulate_bumps: '{base}' resolves but shares no common "
+                f"history with HEAD (no merge base -- e.g. after a main "
+                f"history rewrite). Refusing to guess; pass a --from-diff "
+                f"base that shares real ancestry with this branch (e.g. "
+                f"origin/dev)."
+            )
+        merge_base_out = base
+    paths = set(_git("diff", "--name-only", merge_base_out).split())
     paths |= set(_git("ls-files", "--others", "--exclude-standard").split())
     return sorted(paths)
 

@@ -326,8 +326,11 @@ def _new_blobs_in_range(base_ref: str, head_ref: str) -> list[tuple[str, int]] |
     see ``_commit_touched_blobs``).
 
     Returns None ONLY for the one legitimate soft skip this function has:
-    ``base_ref``/``head_ref`` can't be resolved before enumeration even
-    starts (e.g. ``base_ref`` genuinely not fetched yet), matching
+    ``base_ref``/``head_ref`` can't be resolved, OR they share no common
+    ancestor at all (e.g. after a deliberate `main` history rewrite --
+    see ``check-version-bump.py``'s identical fix for the full rationale),
+    before enumeration even starts (e.g. ``base_ref`` genuinely not fetched
+    yet), matching
     ``check-effort-vision-structure.py``'s own convention. Once enumeration
     begins, a real git plumbing failure (``rev-list``/``diff-tree``) raises
     :class:`GitEnumerationError` instead -- never silently returns "nothing
@@ -345,7 +348,13 @@ def _new_blobs_in_range(base_ref: str, head_ref: str) -> list[tuple[str, int]] |
             "skipping (fetch it to enable the guard).",
         )
         return None
-    mbase = _merge_base(base, head) or base
+    mbase = _merge_base(base, head)
+    if mbase is None:
+        print(
+            f"check-large-files: base '{base_ref}' shares no common history "
+            "with head (e.g. after a main history rewrite); skipping.",
+        )
+        return None
     out: list[tuple[str, int]] = []
     for commit in _commits_in_range(mbase, head):
         out.extend(_commit_touched_blobs(commit))

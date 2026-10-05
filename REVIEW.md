@@ -33,17 +33,20 @@ specifically when reviewing a pull request, not a replacement for them.
   `main`, head branch matching `release/promote-<run id>`, authored via the
   `APERTURE_RELEASE_TOKEN` fine-grained PAT (a personal token minted under
   the maintainer's own account -- this repo has no separate bot identity --
-  so the PR's author is `ThomasMichon`, not a bot login). The other two
+  so the PR's author is `ThomasMichon`, not a bot login). The other three
   legitimate shapes are a workflow-file-ONLY bootstrap PR by the repo owner
   (workflow_run-triggered workflows resolve their own YAML from `main`, so a
   fix to `.github/workflows/*.yml` occasionally must land there directly),
-  and `module-size-baseline-widen.yml`'s own automated PR (a fixed branch
+  `module-size-baseline-widen.yml`'s own automated PR (a fixed branch
   name, authored under the same PAT, whose diff is never anything but the
-  one generated baseline JSON file) --
+  one generated baseline JSON file), and `rollback_release.py`'s own
+  pause/resume state-commit PR (branch name `release-pipeline/state-*`,
+  same PAT, whose diff is never anything but the one pipeline-state JSON
+  file) --
   `main-gate` (ci.yml) enforces this by diff content, not by admin bypass;
   see ThomasMichon/copilot-extensions#3622-erratum for the incident that
   prompted the hardening. Contributors always target `dev` — a PR whose
-  base is `main` and that matches none of these three shapes is not a
+  base is `main` and that matches none of these four shapes is not a
   legitimate use of
   this repo's PR flow (the repo's own CI has a hard guard checking exactly
   this, but that only fails the build; this comment is the visible signal
@@ -54,8 +57,9 @@ specifically when reviewing a pull request, not a replacement for them.
   > This PR targets `main` directly. `main` only ever moves via this
   > repo's own CI promotion pipeline (dev-branch-release-pipeline effort,
   > `.github/workflows/validate-and-promote.yml`) from a `release/promote-*`
-  > branch, a workflow-file-ONLY bootstrap PR, or
-  > `module-size-baseline-widen.yml`'s own automated PR. Please retarget
+  > branch, a workflow-file-ONLY bootstrap PR,
+  > `module-size-baseline-widen.yml`'s own automated PR, or
+  > `rollback_release.py`'s own state-commit PR. Please retarget
   > this PR's base branch to `dev` — see `docs/pipelines.md` § Release & Versioning.
 - **Scope to the diff.** Review the code the PR actually changes. The repo
   carries pre-existing style debt — do **not** demand repo-wide cleanup or

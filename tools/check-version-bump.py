@@ -309,7 +309,27 @@ def check(base_ref: str, head_ref: str) -> tuple[int, list[str]]:
             "(fetch it to enable the guard).",
         )
         return 0, []
-    mbase = _merge_base(base, head) or base
+    mbase = _merge_base(base, head)
+    if mbase is None:
+        # `base` resolves but shares no common ancestor with `head` -- the
+        # confirmed, concrete fallout of a deliberate `main` history rewrite
+        # (see docs/pipelines.md's "If main's history is force-rewritten"):
+        # EVERY commit's SHA changes on `main`'s own line, so a `dev`-based
+        # branch's one-time shared ancestor with `main` (the repo's original
+        # fork point) no longer exists under that SHA either. Before this
+        # fix, `mbase = _merge_base(base, head) or base` silently fell back
+        # to a literal two-dot diff against raw `origin/main`'s CURRENT
+        # snapshot -- producing a large, misleading "changed" set spanning
+        # every plugin that happens to differ between `main`'s last
+        # promotion and this branch, not this branch's own actual changes.
+        # Degrade the same way an unresolvable base already does just below
+        # (this tool's own established "never wedge the push over an
+        # infra/topology hiccup" stance) rather than silently mislead.
+        print(
+            f"check-version-bump: base '{base_ref}' shares no common history with "
+            f"HEAD (e.g. after a main history rewrite); skipping.",
+        )
+        return 0, []
 
     changed = _changed_files(mbase, head)
     if not changed:

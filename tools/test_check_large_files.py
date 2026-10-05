@@ -152,6 +152,36 @@ def test_diff_scoped_mode_catches_a_newly_added_oversized_file(repo: Path):
     assert "new-big.json" in result.stdout
 
 
+def test_diff_scoped_mode_base_sharing_no_merge_base_degrades_to_soft_skip(repo: Path):
+    """A `--base` that RESOLVES but shares no common ancestor with HEAD at
+    all (the confirmed fallout of a deliberate `main` history rewrite --
+    see docs/pipelines.md's "If main's history is force-rewritten") must
+    degrade to the same soft "skipping" no-op an unresolvable base already
+    gets, never silently enumerate every commit reachable from raw `--base`
+    itself and risk flagging a file this branch never actually touched."""
+    _write_bytes(repo, "src/small.txt", 10)
+    _commit_all(repo)
+    original_branch = subprocess.run(
+        ["git", "branch", "--show-current"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    _git(repo, "checkout", "-q", "--orphan", "rewritten-main")
+    _write_bytes(repo, "unrelated.txt", 10)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "unrelated root (simulates a rewritten main)")
+    _write_bytes(repo, "huge-in-rewritten-main.json", 2 * 1024 * 1024)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "oversized file only reachable from the rewritten line")
+    _git(repo, "branch", "-f", "base_marker", "HEAD")
+    _git(repo, "checkout", "-q", original_branch)
+
+    result = _run(repo, "--base", "base_marker")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "huge-in-rewritten-main.json" not in result.stdout
+    assert "shares no common history" in result.stdout + result.stderr
+
+
 def test_explicit_staged_paths_mode(repo: Path):
     _write_bytes(repo, "src/big.json", 2 * 1024 * 1024)
     _commit_all(repo)

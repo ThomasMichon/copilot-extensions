@@ -405,18 +405,33 @@ def _changed_files(base: str) -> list[str] | None:
     """Files this branch changed vs *base* (``git diff --name-only base...HEAD``).
 
     Returns the changed paths, or ``None`` when *base* can't be resolved (e.g. a
-    fresh clone with no ``origin/main``) so the caller can fall back to a
-    full-tree scan.
+    fresh clone with no ``origin/main``) OR has no common ancestor with ``HEAD``
+    (three-dot ``git diff`` fails outright with "no merge base" rather than
+    producing an empty/partial diff) so the caller can fall back to a
+    full-tree scan either way. The no-common-ancestor case is a real,
+    confirmed condition for this repo specifically: a deliberate `main`
+    history rewrite (see docs/pipelines.md's "If main's history is
+    force-rewritten") changes every commit's SHA on `main`'s own line, so
+    ANY worktree whose branch forked from `dev` (which is every ordinary
+    contributor worktree -- `main` is a generated/promoted artifact, never
+    a fork point) permanently loses its merge-base with the default
+    ``origin/main`` base the moment such a rewrite happens. Before this
+    fix, that produced an unhandled ``CalledProcessError`` crash instead of
+    the gracefully-documented full-tree fallback -- confirmed live
+    immediately after the 2026-10-04 rewrite.
     """
     if not _ref_exists(base):
         return None
-    out = subprocess.run(
-        ["git", "diff", "--name-only", f"{base}...HEAD"],
-        cwd=REPO,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--name-only", f"{base}...HEAD"],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        return None
     return [line for line in out.stdout.splitlines() if line]
 
 
@@ -428,7 +443,9 @@ def _files_to_scan(scan_all: bool, base: str, *, emit_status: bool = True) -> li
     if changed is None:
         if emit_status:
             print(
-                f"base ref '{base}' not found -- scanning the whole tracked tree.",
+                f"base ref '{base}' not found or shares no history with HEAD "
+                f"(e.g. after a main history rewrite) -- scanning the whole "
+                f"tracked tree.",
             )
         return _tracked_files()
     if emit_status:

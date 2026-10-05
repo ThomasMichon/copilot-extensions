@@ -190,3 +190,82 @@ def test_full_rollback_cycle_blocks_then_force_allows_repromotion(repo: Path):
     report = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False, force=True)
     assert report["promoted"] is True
     assert report["dev_head"] == promotion["dev_head"]
+
+
+# --- _land_via_pr: version-tolerant `gh pr create` output parsing -----------
+# A real incident (2026-10-04 main-history-rewrite effort): `gh pr create
+# --json number` fails outright on gh 2.101.0 with `unknown flag: --json`
+# -- unlike `pr view`/`pr list`, `gh pr create` has never supported a
+# `--json` flag at all. Both `pause`/`resume --push` hit this every time and
+# had to be landed by hand. These tests pin `_land_via_pr`'s fixed behavior:
+# parse the PR number from `gh pr create`'s own plain stdout (the URL it
+# always prints) instead of requiring `--json`.
+
+class _FakeCompleted:
+    def __init__(self, returncode: int, stdout: str = "", stderr: str = ""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def test_land_via_pr_parses_number_from_plain_create_url(monkeypatch, repo: Path):
+    """``gh pr create`` prints only its PR's URL on success (no ``--json``
+    involved); the merged commit sha is whatever ``_rev_parse`` reports for
+    ``origin/<base_ref>`` after the merge -- fetch/rev-parse are mocked here
+    so the test needs no real GitHub remote."""
+    merge_calls: list[list[str]] = []
+
+    def fake_run(cmd, cwd=None, capture_output=None, text=None):
+        if cmd[:3] == ["gh", "pr", "create"]:
+            assert "--json" not in cmd
+            return _FakeCompleted(0, stdout="https://github.com/o/r/pull/4242\n")
+        if cmd[:3] == ["gh", "pr", "merge"]:
+            merge_calls.append(cmd)
+            assert cmd[3] == "4242"
+            return _FakeCompleted(0, stdout="merged\n")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    import subprocess as _real_subprocess
+    monkeypatch.setattr(_real_subprocess, "run", fake_run)
+    monkeypatch.setattr(rb, "_git", lambda *a, **k: "")
+    monkeypatch.setattr(rb, "_rev_parse", lambda ref, cwd: "deadbeef" * 5)
+
+    sha = rb._land_via_pr(
+        repo=repo, branch="release-pipeline/state-test", base_ref="main",
+        title="t", body="b",
+    )
+    assert sha == "deadbeef" * 5
+    assert len(merge_calls) == 1
+
+
+def test_land_via_pr_raises_clearly_when_create_output_unparseable(
+    monkeypatch, repo: Path,
+):
+    def fake_run(cmd, cwd=None, capture_output=None, text=None):
+        if cmd[:3] == ["gh", "pr", "create"]:
+            return _FakeCompleted(0, stdout="unexpected output, no url here\n")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    import subprocess as _real_subprocess
+    monkeypatch.setattr(_real_subprocess, "run", fake_run)
+
+    with pytest.raises(pr.PromotionError, match="recognizable PR URL"):
+        rb._land_via_pr(
+            repo=repo, branch="whatever", base_ref="main", title="t", body="b",
+        )
+
+
+def test_land_via_pr_surfaces_create_failure(monkeypatch, repo: Path):
+    def fake_run(cmd, cwd=None, capture_output=None, text=None):
+        if cmd[:3] == ["gh", "pr", "create"]:
+            return _FakeCompleted(1, stdout="", stderr="unknown flag: --json")
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    import subprocess as _real_subprocess
+    monkeypatch.setattr(_real_subprocess, "run", fake_run)
+
+    with pytest.raises(pr.PromotionError, match="gh pr create failed"):
+        rb._land_via_pr(
+            repo=repo, branch="whatever", base_ref="main", title="t", body="b",
+        )
+

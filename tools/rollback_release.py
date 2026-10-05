@@ -28,6 +28,16 @@ can), so a raw push to `main` is always rejected. Requires an authenticated
 `gh` CLI (this is meant to be run by a human operator with their own
 credentials, not from within ``validate-and-promote.yml``'s CI identity).
 Pass `--no-pr` only against an unprotected/trusted repo (tests use this).
+``_land_via_pr`` parses the created PR's number from ``gh pr create``'s own
+plain stdout (never ``--json``, which that subcommand has never supported
+-- confirmed on gh 2.101.0) and this tool's own state-commit branch shape
+(``release-pipeline/state-*``, single-file diff) is one of
+``.github/workflows/ci.yml``'s ``main-gate`` job's recognized automated-PR
+shapes, so a ``pause``/``resume --push`` PR lands through the normal
+sanctioned flow without an operator admin-bypass merge (both were real gaps
+hit during the 2026-10-04 main-history-rewrite effort; see
+``efforts/done/main-history-rewrite/README.md``'s Gotchas section for the
+incident writeup).
 
 Guards:
 
@@ -83,18 +93,34 @@ def _land_via_pr(
     genuine human-operator emergency retains a separate, narrower escape
     hatch: ``main``'s ruleset also grants a ``RepositoryRole: admin``
     bypass, usable via ``gh pr merge --admin`` -- never automated here,
-    reserved for a human deciding a true emergency merits it.)"""
-    import json as _json
+    reserved for a human deciding a true emergency merits it.)
+
+    Deliberately does NOT pass ``gh pr create --json ...``: unlike
+    ``pr view``/``pr list``, ``gh pr create`` has never supported a
+    ``--json`` flag at all (confirmed live against gh 2.101.0: ``unknown
+    flag: --json``, not merely an unsupported field list) -- this was a
+    real incident during the 2026-10-04 main-history-rewrite effort, where
+    both ``pause``/``resume --push`` had to be landed by hand each time.
+    Parse the PR number from ``gh pr create``'s own plain stdout instead,
+    which always prints the created PR's URL (and only that, as of gh's
+    documented behavior) regardless of installed version."""
+    import re as _re
     import subprocess as _subprocess
 
     create = _subprocess.run(
         ["gh", "pr", "create", "--base", base_ref, "--head", branch,
-         "--title", title, "--body", body, "--json", "number"],
+         "--title", title, "--body", body],
         cwd=str(repo), capture_output=True, text=True,
     )
     if create.returncode != 0:
         raise PromotionError(f"gh pr create failed: {create.stderr.strip()}")
-    number = _json.loads(create.stdout)["number"]
+    match = _re.search(r"/pull/(\d+)\s*$", create.stdout.strip())
+    if not match:
+        raise PromotionError(
+            f"gh pr create succeeded but its output did not contain a "
+            f"recognizable PR URL to parse the number from: {create.stdout!r}"
+        )
+    number = match.group(1)
 
     merge = _subprocess.run(
         ["gh", "pr", "merge", str(number), "--squash", "--auto"],

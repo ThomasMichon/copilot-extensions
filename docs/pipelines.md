@@ -384,9 +384,10 @@ never checks out or executes the PR's own code and never runs tests — its
 only effect is that one comment, so it adds no capability a
 non-collaborator didn't already have.
 
-It recognizes `main-gate`'s own three legitimate automated-PR shapes (the
-release pipeline's own PR, a workflow-only bootstrap PR, and
-`module-size-baseline-widen.yml`'s automated PR) by the same branch-name
+It recognizes `main-gate`'s own four legitimate automated-PR shapes (the
+release pipeline's own PR, a workflow-only bootstrap PR,
+`module-size-baseline-widen.yml`'s automated PR, and `rollback_release.py`'s
+own pause/resume state-commit PR) by the same branch-name
 and diff-content signature `main-gate` itself checks, not merely by
 "author is the repo owner" — so if this reminder is ever widened to cover
 every PR against `main` rather than only non-owner authors, it still can't
@@ -422,6 +423,37 @@ this repo needs to know or care either: `copilot plugin install`/`update`
 (both the direct-repo and marketplace paths) and `worktree-manager`'s own
 self-updater fetch **by branch name**, never a pinned commit SHA — so they
 transparently pick up whatever is currently on `main`, rewritten or not.
+
+### Ancestry/compare checks across the rewrite boundary fail by design — that's not corruption
+
+Any SHA-based ancestry check spanning the rewrite — `git merge-base
+--is-ancestor <pre-rewrite-sha> origin/main`, a GitHub `compare/<old>...
+<new>` API call, or a PR-merge-ancestry lookup for a PR merged before the
+rewrite — **genuinely has no common ancestor** across that boundary and
+correctly fails (locally: a non-zero exit with no useful message; via the
+API: `404 No common ancestor between <sha> and <sha>`). This is expected
+for every pre-rewrite commit, not a sign the rewrite dropped history or
+that your checkout is broken — `git filter-repo` rewrites every commit's
+tree-ids, so no pre-rewrite SHA appears anywhere in the rewritten line.
+
+To check whether a specific pre-rewrite change (e.g. a PR merged shortly
+before a rewrite) actually survived, don't try to re-derive ancestry across
+the boundary — check the rewritten `main`'s **content** directly instead,
+by file:
+
+```bash
+gh api "repos/<owner>/<repo>/contents/<path>?ref=main" --jq '.content' \
+  | base64 -d | grep '<expected string from that change>'
+```
+
+(or just read the file at that ref with any `gh`/API content call). The
+rewrite is content-identical at every commit — only the SHAs and tree-ids
+changed — so this always gives a real answer where ancestry cannot. The
+one documented rewrite to date is the 2026-10-04 purge recorded in the
+repo README banner and
+[`efforts/done/main-history-rewrite`](../efforts/done/main-history-rewrite/README.md);
+if you hit this exact "no common ancestor" symptom, check there first for
+the exact old→new SHA pair before assuming something new is wrong.
 
 ## Release & Versioning
 
