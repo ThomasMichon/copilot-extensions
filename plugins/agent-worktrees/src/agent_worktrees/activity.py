@@ -384,8 +384,11 @@ def _maybe_prune(path: Path) -> None:
 def _prune_marker_path(path: Path, *, now: float | None = None) -> Path:
     """The debounce marker for *path*'s current ``_PRUNE_DEBOUNCE_SECONDS``
     window, named by its bucket number so each window gets its own file."""
-    bucket = int((time.time() if now is None else now) // _PRUNE_DEBOUNCE_SECONDS)
-    return path.with_name(f"{path.name}.prune-marker.{bucket}")
+    return path.with_name(f"{path.name}.prune-marker.{_prune_marker_bucket(now=now)}")
+
+
+def _prune_marker_bucket(*, now: float | None = None) -> int:
+    return int((time.time() if now is None else now) // _PRUNE_DEBOUNCE_SECONDS)
 
 
 def _claim_prune_marker(path: Path) -> bool:
@@ -400,24 +403,35 @@ def _claim_prune_marker(path: Path) -> bool:
     with an exclusive create (``O_CREAT | O_EXCL``). Unlike a single shared
     marker refreshed in place, there is no separate "renew a stale marker"
     step -- and therefore no window where multiple processes can all
-    believe they renewed the same claim. Markers from older windows are
-    opportunistically cleaned up on a successful claim (best-effort: a
-    cleanup race never affects correctness, only tidiness).
+    believe they renewed the same claim. Markers from STRICTLY OLDER
+    windows are opportunistically cleaned up on a successful claim
+    (best-effort: a cleanup race never affects correctness, only tidiness)
+    -- never a marker whose own bucket is >= ours, since a concurrent
+    caller in an adjacent (e.g. the very next) window may have already
+    claimed it; deleting that marker would let a second caller re-claim the
+    same window and dispatch a duplicate worker.
     """
-    marker = _prune_marker_path(path)
+    bucket = _prune_marker_bucket()
+    marker = path.with_name(f"{path.name}.prune-marker.{bucket}")
     try:
         fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.close(fd)
     except OSError:
         return False
-    _cleanup_old_prune_markers(path, keep=marker)
+    _cleanup_old_prune_markers(path, current_bucket=bucket)
     return True
 
 
-def _cleanup_old_prune_markers(path: Path, *, keep: Path) -> None:
+def _cleanup_old_prune_markers(path: Path, *, current_bucket: int) -> None:
+    prefix = f"{path.name}.prune-marker."
     try:
-        for sibling in path.parent.glob(f"{path.name}.prune-marker.*"):
-            if sibling != keep:
+        for sibling in path.parent.glob(f"{prefix}*"):
+            suffix = sibling.name[len(prefix):]
+            try:
+                sibling_bucket = int(suffix)
+            except ValueError:
+                continue  # not one of ours (or malformed) -- leave it alone
+            if sibling_bucket < current_bucket:
                 try:
                     sibling.unlink()
                 except OSError:

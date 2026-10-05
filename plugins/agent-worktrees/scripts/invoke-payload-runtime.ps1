@@ -125,8 +125,12 @@ function Invoke-BootTraceMaybePrune([string]$LogPath) {
 # already exists). Unlike a single shared marker refreshed in place, there
 # is no separate "renew a stale marker" step and therefore no window where
 # multiple processes can all believe they renewed the same claim. Markers
-# from older windows are opportunistically cleaned up on a successful claim
-# (best-effort: a cleanup race never affects correctness, only tidiness).
+# from STRICTLY OLDER windows are opportunistically cleaned up on a
+# successful claim (best-effort: a cleanup race never affects correctness,
+# only tidiness) -- never a marker whose own bucket is >= ours, since a
+# concurrent caller in an adjacent (e.g. the very next) window may have
+# already claimed it; deleting that marker would let a second caller
+# re-claim the same window and dispatch a duplicate worker.
 function Invoke-ClaimPruneMarker([string]$LogPath) {
     $bucket = [long][Math]::Floor(
         ((Get-Date).ToUniversalTime() - [datetime]'1970-01-01').TotalSeconds / 3600
@@ -142,7 +146,12 @@ function Invoke-ClaimPruneMarker([string]$LogPath) {
         $dir = Split-Path -Parent $LogPath
         $leaf = Split-Path -Leaf $LogPath
         Get-ChildItem -LiteralPath $dir -Filter "$leaf.prune-marker.*" -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -ne $marker } |
+            Where-Object {
+                $siblingBucket = $null
+                [long]::TryParse(
+                    $_.Name.Substring("$leaf.prune-marker.".Length), [ref]$siblingBucket
+                ) -and $siblingBucket -lt $bucket
+            } |
             Remove-Item -Force -ErrorAction SilentlyContinue
     } catch {}
     return $true

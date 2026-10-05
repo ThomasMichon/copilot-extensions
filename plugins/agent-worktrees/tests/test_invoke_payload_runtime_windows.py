@@ -7,6 +7,8 @@ test_status_monitor_windows.py rather than duplicating them.
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
 import time
@@ -33,12 +35,56 @@ def _prune_functions_source() -> str:
     return source[start:end]
 
 
+def _csc() -> str | None:
+    """The legacy .NET Framework C# compiler, used only to build a genuine,
+    dependency-free executable stub -- conhost's CreateProcess-based
+    `--headless` launch cannot execute a `.cmd`/`.bat` script directly
+    (those need a `cmd.exe` host), so the stand-in for the real interpreter
+    must itself be a real PE executable."""
+    candidate = shutil.which("csc.exe") or shutil.which("csc")
+    if candidate:
+        return candidate
+    fixed = Path(r"C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe")
+    return str(fixed) if fixed.is_file() else None
+
+
+def _build_stub_exe(tmp_path: Path, csc: str) -> Path:
+    """A trivial real executable: appends one line to the file named by the
+    ``STUB_PRUNE_MARKER`` environment variable, ignoring argv entirely (the
+    production dispatch's argv shape -- ``-I -m agent_worktrees
+    activity-prune-worker <path> 7`` -- is irrelevant to what this test is
+    proving)."""
+    source = tmp_path / "stub.cs"
+    source.write_text(
+        "using System;\n"
+        "using System.IO;\n"
+        "class Stub {\n"
+        "    static void Main() {\n"
+        "        var marker = Environment.GetEnvironmentVariable(\"STUB_PRUNE_MARKER\");\n"
+        "        if (!string.IsNullOrEmpty(marker)) { File.AppendAllText(marker, \"ran\\n\"); }\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    exe = tmp_path / "stub.exe"
+    result = subprocess.run(
+        [csc, "/nologo", f"/out:{exe}", str(source)],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, f"stub compile failed: {result.stdout}\n{result.stderr}"
+    return exe
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows console integration")
 def test_background_prune_dispatch_launches_no_visible_window(tmp_path: Path):
     """The conhost --headless dispatch in Invoke-BootTraceMaybePrune must
     never surface a visible console window or steal foreground focus,
     across at least two dispatch cycles, launched from a real windowless
     PowerShell parent."""
+    csc = _csc()
+    if not csc:
+        pytest.skip("no C# compiler available to build the stub executable")
+
     pwsh = (
         subprocess.run(
             ["where", "pwsh"], capture_output=True, text=True,
@@ -52,15 +98,12 @@ def test_background_prune_dispatch_launches_no_visible_window(tmp_path: Path):
     # LAUNCH is windowless, not re-testing the real worker's prune logic
     # (already covered by the Python test suite).
     stub_marker = tmp_path / "worker-ran"
-    stub_python = tmp_path / "stub-python.cmd"
-    stub_python.write_text(
-        f'@echo off\r\necho ran >> "{stub_marker}"\r\n', encoding="utf-8",
-    )
+    stub_exe = _build_stub_exe(tmp_path, csc)
 
     harness = tmp_path / "harness.ps1"
     harness.write_text(
         _prune_functions_source() + "\n"
-        f"$script:python = '{stub_python}'\n"
+        f"$script:python = '{stub_exe}'\n"
         "for ($i = 0; $i -lt 2; $i++) {\n"
         f"    $log = Join-Path '{tmp_path}' \"activity-$i.jsonl\"\n"
         "    [IO.File]::WriteAllText($log, ('x' * 600000))\n"
@@ -74,9 +117,12 @@ def test_background_prune_dispatch_launches_no_visible_window(tmp_path: Path):
     baseline_windows = _window_snapshot(baseline_processes)
     baseline_foreground = _foreground_state(baseline_processes)
 
+    env = dict(os.environ)
+    env["STUB_PRUNE_MARKER"] = str(stub_marker)
     process = subprocess.Popen(
         [pwsh, "-NoProfile", "-NoLogo", "-File", str(harness)],
         creationflags=subprocess.CREATE_NO_WINDOW,
+        env=env,
     )
 
     visible_terminal_windows: set[tuple[int, int, str, str, str]] = set()
