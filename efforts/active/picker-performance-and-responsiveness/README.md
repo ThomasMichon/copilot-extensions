@@ -275,14 +275,25 @@ finding into a fix; extends #918 rather than reopening it.)_
 _(No existing effort measures or owns this; starts from a cold investigation,
 not a known fix.)_
 
-- [ ] Profile a cold `worktree-manager`/Picker launch (`py-spy record` from
+- [x] Profile a cold `worktree-manager`/Picker launch (`py-spy record` from
       process start to first interactive frame) on a representative machine
       and identify the dominant cost(s) — process/interpreter startup,
       module import graph, initial roster/config scan, or first-paint data
       fetch are all plausible and this phase should not assume which before
-      measuring.
+      measuring. Done, via `worktree-manager picker screenshot --demo` (the
+      headless capture seam, driving the real production Picker's full
+      bootstrap against deterministic mock data) under both `py-spy record`
+      and `python -m cProfile`. See Journal for the full before/after numbers
+      and what each profile actually showed.
 - [ ] Narrow whichever cost(s) the profile actually shows dominate, to bring
-      cold boot under ~2s.
+      cold boot under ~2s. **Partially done:** the single dominant cost the
+      first profile found (redundant marketplace-manifest re-parsing, see
+      Journal) is fixed and measured. Cold boot is still far over budget
+      (~7.7-9.1s, down from ~10.5-12.4s) — the *next* dominant cost the
+      post-fix profile surfaced (per-project `git` subprocess calls during
+      project discovery, ~17-18 calls still remaining) is identified but
+      NOT yet fixed; a future session should profile-then-fix that one the
+      same way before this item is checked off.
 
 ### Phase 5 — Hold the budgets: a timing regression harness
 
@@ -315,8 +326,12 @@ was invisible until an operator noticed it. Prevents a repeat.)_
       `test_copy_result_false_returns_the_cache_s_own_object` — done.
       Before/after sweep-time measurement at a comparable record count —
       done, see Journal (~66-71% reduction at 120 records).
-- [ ] **Phase 4:** cold-boot wall-clock time before/after, on the same
-      machine/conditions, with the profile that justified the fix attached.
+- [ ] **Phase 4 (partial):** cold-boot wall-clock time before/after, on the
+      same machine/conditions, with the profile that justified the fix
+      attached — done for the one fix landed this session (~10.5-12.4s ->
+      ~7.7-9.1s, see Journal), still open for the next dominant cost
+      (per-project `git` subprocess calls) and for reaching the <~2s budget
+      itself.
 - [ ] **Phase 5:** the harness itself passing, plus one deliberately
       reintroduced synchronous call (the Phase 0 bug, reverted) proving the
       harness actually catches it before trusting it as a guard.
@@ -431,3 +446,88 @@ directly confirms the reasoned fix: removing the per-hit `copy.deepcopy`
 roughly triples `find_worktree_id_by_cwd`'s throughput at 120 tracked
 records. Phase 3 is now fully closed, including its previously-open
 measurement item.
+
+### 2026-10-05 — Phase 4 opened: cold-boot profiled, one dominant cost fixed
+
+Profiled a cold `worktree-manager`/Picker launch for the first time this
+effort — nothing existing measured or owned this budget. Used
+`worktree-manager picker screenshot --demo --format text` (the production
+Picker's own headless capture seam, against deterministic mock data) as a
+representative cold-boot proxy: it exercises the real module import graph,
+the real plugin-activation/plugin-resolve bootstrap, and the real Picker
+mount/first-paint path, then exits — without needing an interactive
+terminal. `Measure-Command` on this machine: **~10.5-12.4s**, roughly
+5-6x the <~2s budget.
+
+Profiled with both `py-spy record` and `python -m cProfile` (cProfile gave
+cleaner call attribution; py-spy confirmed the same hot path live).
+cProfile's cumulative-time ranking showed two concrete dominant costs, not
+assumed up front:
+
+1. **`plugin_activation.resolver._local_root`** (called once per *enabled
+   plugin source*, both globally and per registered project) independently
+   re-read and re-parsed the **same** marketplace manifest JSON file once per
+   plugin that names it — with ~24-28 enabled plugins sharing 1-2
+   marketplaces, this measured as 29 `load_marketplace` calls / 56
+   `_load_json` calls / 177 `pathlib.read_text` calls in one bootstrap,
+   ~9.1s cumulative in `_git`-adjacent subprocess/read paths combined.
+2. A ~5.6s cost in repeated marketplace JSON loading specifically
+   (`plugin_resolve.marketplace.load_marketplace`/`_load_json`), the same
+   redundant-reparse shape as (1) and in fact the same root cause: `_local_root`
+   has zero cross-call caching, so N plugins in the same marketplace pay N
+   full re-reads of a file that cannot have changed mid-process.
+
+This is structurally identical to Phase 3's `record_cache` fix (an
+uncached, read-heavy call repeated once per item in a loop, re-parsing a
+file nothing in-process could have changed) — not a new finding pattern,
+just a new call site. Fixed by threading two optional, per-call caches
+(`_manifest_cache`, `_marketplace_cache`, both plain dicts keyed on the
+canonical marketplace root) through `_local_root`/`_marketplace_manifest`,
+created once in `resolve_active_plugins()` and shared across every
+plugin/scope that function resolves in one pass — scoped to the lifetime of
+a single `resolve_active_plugins()` call only (this is a short-lived CLI
+process; no staleness risk, same reasoning as `resolve.py`'s own pre-existing
+analogous `loaded: dict[str, object] = {}` cache one function over, which
+this mirrors). Both cache parameters default to `None` (meaning "no cache,
+re-read every time"), so every other/test caller of these private helpers is
+byte-for-byte unaffected.
+
+`plugin-activation` is a **vendored** lib (`libs/plugin-activation` canonical
++ byte-identical copies in `plugins/agent-worktrees/libs/` and
+`plugins/customizing-copilot/libs/`) — propagated the fix to all three
+copies and bumped the shared version (`0.1.0-dev6` -> `0.1.0-dev7`) per
+`tools/check-vendored-libs-sync.py`'s own requirement. `tools/
+sync-vendored-libs.py --restore-canonical` was NOT used broad-strokes: a
+first invocation also "fixed" unrelated pre-existing drift in four other,
+untouched vendored libs (deleting their `tests/conftest.py`, modifying their
+`README.md`) as a side effect of resyncing from whichever copy happened to
+be newest — reverted those via `git checkout --`, and instead copied only
+`resolver.py`'s content directly across the three `plugin-activation`
+copies, so this change touches exactly what it means to.
+
+**Result (Measure-Command, 3 runs each):** before ≈ 10.5-12.4s, after ≈
+7.7-9.1s — the full suite of ~24-28 enabled plugins' marketplace-manifest
+reads collapsed from N-per-marketplace down to 1-per-marketplace per
+bootstrap. Re-profiled after the fix (cProfile): total profiled time dropped
+from 11.169s to 5.823s (~48% less profiler-measured work), and
+`_local_root`/`load_marketplace`/`_load_json` no longer appear anywhere near
+the top of the cumulative-time ranking — confirming the fix actually
+removed the cost the first profile attributed to it, not just coincidental
+noise.
+
+**Left open, explicitly:** cold boot is still ~4-4.5x over the <~2s budget.
+The post-fix profile's new top cost is ~17-18 remaining `git` subprocess
+calls (`plugin_activation.resolver._git`, `bare_anchor.git_root`) during
+project/root discovery (`harness_state.build_projects`,
+`engine_client.get_value`) — a different call site than the one fixed here,
+not yet profiled deeply enough to say whether it has the same
+"same-file/same-answer-every-call" shape this fix exploited, or needs a
+different approach (e.g. batching the git calls, or caching per-project
+git-root resolution across a single bootstrap the same way marketplace
+loads now are). A future session should profile *that* specifically before
+assuming it's fixable the same way — this session's own evidence (Phase 0's
+"obviously the same idiom as its sibling" vs. Phase 3's "a real, audited,
+narrow opt-in" vs. this session's "two call sites, same shape, same fix")
+shows the right fix shape varies per call site and must be verified, not
+assumed, each time.
+
