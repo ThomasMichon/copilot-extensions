@@ -243,6 +243,59 @@ def test_posting_a_closure_from_the_home_thread_does_not_disturb_an_unrelated_pe
     assert inbox.drain() == {"other-data": "untouched"}
 
 
+def test_home_thread_post_never_invokes_a_stale_closure_a_racing_post_already_replaced():
+    """A regression for a lost-update race: the home-thread path releases
+    ``_lock`` (after writing the posted value) before claiming and
+    invoking it -- a background thread's own ``post()`` to the SAME slot
+    can legitimately race in during that window with a NEWER value
+    (ordinary coalescing). The home-thread path must detect this and
+    never invoke the now-stale closure it captured, nor silently discard
+    the replacement value out from under whoever posted it."""
+    owner = _RecordingOwner()
+    inbox = Inbox(owner)  # home thread == this test's own thread
+    real_lock = inbox._lock
+    triggered = {"done": False}
+    replaced = threading.Event()
+
+    class _RacyLock:
+        """Wraps the real lock, but -- only the first time it is released
+        -- lets a background thread race in and replace the slot's value
+        before the home-thread path's own later claim-check proceeds."""
+
+        def __enter__(self):
+            real_lock.acquire()
+            return self
+
+        def __exit__(self, *exc_info):
+            real_lock.release()
+            if not triggered["done"]:
+                # Flip the flag BEFORE spawning -- the background post
+                # below reuses this same lock for its own (non-home-
+                # thread) write, and must not re-trigger this branch.
+                triggered["done"] = True
+                t = threading.Thread(
+                    target=_post_from_other_thread,
+                    args=(inbox, "slot", "newer"),
+                )
+                t.start()
+                t.join(timeout=5)
+                replaced.set()
+            return False
+
+    inbox._lock = _RacyLock()
+    calls = []
+    ok = inbox.post("slot", lambda: calls.append("stale"))
+    assert ok is True
+    assert replaced.is_set()
+    # The stale closure this call posted was never invoked -- the slot
+    # already held a different (newer) value by the time this call tried
+    # to claim it.
+    assert calls == []
+    # The racing background post's own value survives, exactly as a
+    # normal coalesced post would -- it was never silently discarded.
+    assert inbox.drain() == {"slot": "newer"}
+
+
 def test_posting_from_a_background_thread_queues_exactly_one_wake():
     owner = _RecordingOwner()
     inbox = Inbox(owner)

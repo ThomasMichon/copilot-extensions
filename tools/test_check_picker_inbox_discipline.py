@@ -189,6 +189,29 @@ def test_a_call_in_one_branch_is_flagged_even_when_an_earlier_sibling_branch_cle
     assert any("call_from_thread(" in p for p in guard.verify())
 
 
+def test_a_call_reachable_only_via_try_body_succeeding_then_else_is_flagged(repo):
+    """``try``/``else`` are NOT mutually exclusive alternatives -- ``else``
+    only runs as a CONTINUATION after the ``try`` body completes fully
+    with no exception, so a call reachable only through
+    body-succeeds-then-``else`` must still be flagged, using the alias
+    state the body itself actually produced (not the pre-``try`` state,
+    and not merged away by treating ``else`` as a third alternative
+    branch alongside the body and its handlers)."""
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_worker_dialogs.py",
+        "def f(self):\n"
+        "    try:\n"
+        "        marshal = self.app.call_from_thread\n"
+        "    except Exception:\n"
+        "        marshal = some_safe_callable\n"
+        "    else:\n"
+        "        marshal(fn)\n",
+    )
+    assert any("call_from_thread(" in p for p in guard.verify())
+
+
 def test_alias_in_one_function_does_not_flag_an_unrelated_name_in_another(repo):
     """An alias assigned inside one function must not leak into a sibling
     function -- a parameter or local that merely happens to share the

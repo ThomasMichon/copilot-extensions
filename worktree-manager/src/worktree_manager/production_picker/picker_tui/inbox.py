@@ -146,13 +146,23 @@ class Inbox:
             # discard any OTHER producer's still-pending data slot (never
             # auto-invoked, but drained and dropped all the same) or claim
             # a different, unrelated closure this call has no business
-            # taking credit/blame for. `discard()` reports whether the
-            # slot was still genuinely pending (always true here, since
-            # nothing else runs between the write above and this, but
-            # mirrors the same defensive pattern used elsewhere in this
-            # module) before invoking it.
-            if not self.discard(slot):
-                return True
+            # taking credit/blame for.
+            #
+            # The write above released `_lock` before this point -- a
+            # background thread's own `post()` to this SAME slot can
+            # legitimately race in right here with a newer value
+            # (coalescing, last-write-wins). Atomically re-check under
+            # `_lock` that the slot still holds exactly the value THIS
+            # call posted before claiming and invoking it: if a newer
+            # value already replaced it, that newer value belongs to
+            # whoever posted it next (this call must not invoke the now-
+            # stale closure it captured, nor silently discard the
+            # replacement out from under them).
+            with self._lock:
+                if self._slots.get(slot) is not value:
+                    return True
+                self._slots.pop(slot, None)
+                self._pending.pop(slot, None)
             # `drain_apply()` deliberately re-raises an ordinary closure
             # exception (see its own docstring) -- but `post()` itself
             # promises callers it never raises. Mirror

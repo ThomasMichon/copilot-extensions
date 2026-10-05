@@ -185,10 +185,34 @@ class _CallFinder(ast.NodeVisitor):
         self._merge_branches(node.body, node.orelse)
 
     def visit_Try(self, node: ast.Try) -> None:
+        # `try`'s `body` and each `except` handler ARE mutually exclusive
+        # alternatives (a handler is only reached if the body raised
+        # partway through) -- merge those via the same union-of-branches
+        # approach as `if`/`else`. But `else` is NOT a third alternative:
+        # it runs only as a CONTINUATION after the body completes fully,
+        # successfully, with no exception at all -- so it must be
+        # analyzed against the body's own resulting alias state, never
+        # merged in as if it were an independent fork from the pre-try
+        # state (that would miss a call reachable only via
+        # body-succeeds-then-else, e.g. `try: marshal = x.call_from_thread
+        # ... else: marshal(fn)`).
+        start = set(self._aliases)
         branches = [node.body, *[h.body for h in node.handlers]]
-        if node.orelse:
-            branches.append(node.orelse)
         self._merge_branches(*branches)
+        if node.orelse:
+            # Capture the body+handlers merge computed just above before
+            # overwriting the current scope to recompute the
+            # body-succeeds-then-else continuation separately -- `_aliases`
+            # IS `self._scopes[-1]`, so without this snapshot the union
+            # below would just be unioning the else-continuation with
+            # itself, silently dropping whatever the merge above found.
+            merged_without_else = set(self._aliases)
+            self._scopes[-1] = set(start)
+            for stmt in node.body:
+                self.visit(stmt)
+            for stmt in node.orelse:
+                self.visit(stmt)
+            self._scopes[-1] = merged_without_else | self._aliases
         # `finally` always runs regardless of which branch above executed,
         # after whichever one did -- visit it sequentially against the
         # merged outcome, not as another alternative branch.
