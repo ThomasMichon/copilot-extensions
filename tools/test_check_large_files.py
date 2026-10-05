@@ -15,6 +15,7 @@ Run:  python -m pytest tools/test_check_large_files.py
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -485,6 +486,48 @@ def test_commit_touched_blobs_raises_on_a_failed_blob_size_read(repo: Path):
     with mock.patch.object(module, "REPO", repo), mock.patch("subprocess.run", side_effect=_failing_cat_file):
         with pytest.raises(module.GitEnumerationError):
             module._commit_touched_blobs(commit)
+
+
+def test_staged_mode_handles_a_dot_slash_prefixed_path(repo: Path):
+    # A caller-supplied "./src/big.json" must still be checked even though
+    # `git ls-files` itself normalizes and reports it as "src/big.json" --
+    # looking the entry back up under the ORIGINAL (unnormalized) spelling
+    # would silently find nothing staged under that exact string.
+    _write_bytes(repo, "src/big.json", 2 * 1024 * 1024)
+    _git(repo, "add", "src/big.json")
+
+    result = _run(repo, "./src/big.json")
+
+    assert result.returncode == 1
+    assert "big.json" in result.stdout
+
+
+def test_an_inherited_git_dir_does_not_redirect_the_check_elsewhere(repo: Path, tmp_path: Path):
+    # An ambient GIT_DIR/GIT_WORK_TREE (e.g. inherited from a parent
+    # process already operating on a DIFFERENT repository) must never
+    # override this script's own explicit `git -C REPO` -- otherwise
+    # --all could silently inspect the wrong repository and report a
+    # clean pass despite this one having a real violation.
+    _write_bytes(repo, "src/big.json", 2 * 1024 * 1024)
+    _commit_all(repo)
+
+    other = tmp_path.parent / f"{tmp_path.name}-other"
+    other.mkdir()
+    _git(other, "init", "-q")
+    _git(other, "config", "user.email", "test@example.com")
+    _git(other, "config", "user.name", "Test")
+    (other / "small.txt").write_text("hi")
+    _git(other, "add", "-A")
+    _git(other, "commit", "-q", "-m", "unrelated repo")
+
+    env = {**os.environ, "GIT_DIR": str(other / ".git"), "GIT_WORK_TREE": str(other)}
+    result = subprocess.run(
+        [sys.executable, str(repo / "tools" / SCRIPT.name), "--all"],
+        cwd=repo, capture_output=True, text=True, env=env,
+    )
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "big.json" in result.stdout
 
 
 

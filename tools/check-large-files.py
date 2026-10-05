@@ -79,6 +79,7 @@ violates a cap or is an always-blocked extension.
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -116,10 +117,44 @@ class GitEnumerationError(RuntimeError):
     """
 
 
+#: Environment variables that redirect git's own notion of "which repo/
+#: index/objects am I operating on" -- an inherited value from a DIFFERENT
+#: checkout's environment (e.g. a parent process that already set GIT_DIR
+#: for its own repo) would silently override this script's own explicit
+#: ``git -C REPO``, making ``--all`` inspect a different repository
+#: entirely and still report a clean pass. Modeled on
+#: ``plugins/agent-worktrees/src/agent_worktrees/git_ops.py``'s own
+#: ``_REPOSITORY_CONTEXT_ENV``. Deliberately EXCLUDES ``GIT_INDEX_FILE``:
+#: git's own ``pre-commit`` hook protocol sets it to the real index being
+#: committed (relevant for e.g. a partial/``git commit -p`` commit), and
+#: stripping it would make this check silently look at the WRONG index.
+_REPOSITORY_CONTEXT_ENV = frozenset({
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CEILING_DIRECTORIES", "GIT_COMMON_DIR",
+    "GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_DIR",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_GRAFT_FILE", "GIT_IMPLICIT_WORK_TREE",
+    "GIT_INTERNAL_SUPER_PREFIX", "GIT_NAMESPACE", "GIT_NO_REPLACE_OBJECTS",
+    "GIT_OBJECT_DIRECTORY", "GIT_PREFIX", "GIT_QUARANTINE_PATH", "GIT_REPLACE_REF_BASE",
+    "GIT_SHALLOW_FILE", "GIT_WORK_TREE",
+})
+
+
+def _git_env() -> dict[str, str]:
+    env = os.environ.copy()
+    for name in list(env):
+        upper = name.upper()
+        if (
+            upper in _REPOSITORY_CONTEXT_ENV
+            or upper.startswith("GIT_CONFIG_KEY_")
+            or upper.startswith("GIT_CONFIG_VALUE_")
+        ):
+            env.pop(name, None)
+    return env
+
+
 def _git_bytes(*args: str) -> subprocess.CompletedProcess[bytes]:
     return subprocess.run(
         ["git", "-C", str(REPO), *args],
-        capture_output=True, check=False,
+        capture_output=True, check=False, env=_git_env(),
     )
 
 
@@ -385,7 +420,7 @@ def _staged_blobs(paths: list[str]) -> list[tuple[str, int]]:
         return []
     ls_files = subprocess.run(
         ["git", "--literal-pathspecs", "-C", str(REPO), "ls-files", "--stage", "-z", "--", *paths],
-        capture_output=True, check=False,
+        capture_output=True, check=False, env=_git_env(),
     )
     if ls_files.returncode != 0:
         raise GitEnumerationError(
@@ -405,10 +440,12 @@ def _staged_blobs(paths: list[str]) -> list[tuple[str, int]]:
             continue  # e.g. a submodule gitlink, or an unmerged conflict stage -- deliberate skip
         shas[path] = sha
     out: list[tuple[str, int]] = []
-    for path in paths:
-        sha = shas.get(path)
-        if sha is None:
-            continue  # not in the index (e.g. a staged deletion) -- nothing to check
+    # Iterate the entries ls-files itself already resolved and normalized
+    # (not the caller's original path strings): a caller-supplied path like
+    # "./src/big.json" round-trips through ls-files as "src/big.json", so
+    # matching back against the ORIGINAL spelling would silently find
+    # nothing and skip a real, staged, oversized file.
+    for path, sha in shas.items():
         r2 = _git_bytes("cat-file", "-s", sha)
         if r2.returncode != 0:
             raise GitEnumerationError(
