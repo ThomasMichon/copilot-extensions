@@ -323,6 +323,60 @@ def test_shell_git_branch_show_current_from_anchor_cwd_allows(tmp_path, anchor):
                         home=tmp_path, anchors=anchor) is None
 
 
+def test_shell_git_branch_merged_with_embedded_value_from_anchor_cwd_allows(
+    tmp_path, anchor,
+):
+    """A value-bearing read-only flag using the embedded ``=value`` form
+    (no separate positional argument) stays allowed."""
+    gp = anchor[0]["path"]
+    assert guard.decide(_shell("git branch --merged=HEAD", gp), env={},
+                        home=tmp_path, anchors=anchor) is None
+
+
+# -- allowlist, not a blacklist: every mutating MODE must be caught, not
+# just the ones an earlier blacklist happened to enumerate (review finding:
+# --track/--set-upstream-to/--unset-upstream/--edit-description all mutate
+# a ref or its config but carried none of the blacklisted flags) ------------
+
+def test_shell_git_branch_track_from_anchor_cwd_denies(tmp_path, anchor):
+    """``--track`` creates a new ref plus upstream config -- a real
+    mutation with none of the previously-blacklisted flags."""
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell("git branch --track child main", gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_branch_set_upstream_to_from_anchor_cwd_denies(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell("git branch --set-upstream-to=origin/main", gp),
+                     env={}, home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_branch_unset_upstream_from_anchor_cwd_denies(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell("git branch --unset-upstream", gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_branch_edit_description_from_anchor_cwd_denies(tmp_path, anchor):
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell("git branch --edit-description", gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_branch_bare_positional_name_from_anchor_cwd_denies(tmp_path, anchor):
+    """A bare positional argument with no recognized flag at all (plain
+    branch creation) is unrecognized and must deny, not be assumed safe."""
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell("git branch new-name", gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
 def test_shell_git_commit_with_branch_force_in_message_denies(tmp_path, anchor):
     """The ``branch`` exemption must key off the actual git SUBCOMMAND, not a
     bare substring search -- a ``commit`` whose message happens to contain

@@ -195,33 +195,57 @@ _GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
 # invisible to the guard; this incident is exactly why ``branch`` was added
 # to that list).
 #
-# A bare listing/inspection invocation (``git branch``, ``git branch -v``/
-# ``-vv``/``-a``/``-r``/``--list``/``--all``/``--remotes``/``--contains``/
-# ``--merged``/``--no-merged``/``--show-current``) never moves, deletes, or
-# copies an existing ref and must stay allowed -- mirrors the ``pull
-# --ff-only`` exemption above: look for the one mutating flag that makes
-# this specific invocation unsafe, same whole-segment-search style, rather
-# than enumerate every safe flag. ``-f``/``--force`` (move, overwriting an
-# existing name), ``-d``/``-D``/``--delete``, ``-m``/``-M``/``--move``, and
-# ``-c``/``-C``/``--copy`` are the mutating forms; their absence means this
-# invocation cannot move/delete/rename/copy any ref. Git accepts these
-# short forms COMBINED into a single token (``-df`` deletes with force,
-# exactly like ``-d -f``) -- matching only a standalone ``-f``/``-d``/etc.
-# would miss that cluster entirely (and the safe list's own short flags,
-# ``v``/``a``/``r``, never collide with a mutating letter, so a combined
-# safe cluster like ``-vv``/``-av`` is never mistaken for one). The second
-# alternative below therefore matches ANY single-dash token containing one
-# of the mutating letters anywhere in it, not just a token equal to one of
-# them. A plain ``git branch <new-name>`` (create, no flag at all) is a
-# known, accepted gap of this heuristic -- lower-risk than force-moving/
-# deleting/copying an EXISTING ref (the incident class this exemption
-# targets), and consistent with this guard's stated bias toward under-
-# rather than over-triggering.
-_GIT_BRANCH_MUTATING_FLAG = re.compile(
-    r'(?:^|\s)["\']?(?:--force|--delete|--move|--copy)["\']?(?=\s|$)'
-    r'|(?:^|\s)-[A-Za-z]*[dDfmMcC][A-Za-z]*(?=\s|$)',
-    re.IGNORECASE,
+# ALLOWLIST, not a blacklist: an earlier revision tried to enumerate known
+# MUTATING flags (``-f``/``-d``/``--force``/etc.) and exempt everything
+# else, but git's ``branch`` subcommand has more mutating forms than any
+# such list reliably enumerates (``--track`` creates a ref + upstream
+# config; ``--set-upstream-to``/``--unset-upstream`` rewrite config;
+# ``--edit-description`` opens an editor that rewrites a ref-note; a bare
+# positional name creates a ref) -- a blacklist is only ever as safe as its
+# most recently discovered gap. This instead enumerates every known
+# READ-ONLY flag (below) and the exemption applies ONLY when every token
+# after ``branch`` is one of them; an unrecognized flag or any bare
+# positional argument (a branch name, a filter pattern, anything) means
+# "unknown, possibly mutating" and the invocation stays denied -- the safe
+# direction for a write guard, even at the cost of occasionally denying a
+# few benign-but-unrecognized read invocations (e.g. a separate-argument
+# form of ``--contains <ref>`` instead of ``--contains=<ref>``).
+_GIT_BRANCH_SAFE_LONG_FLAG = re.compile(
+    r"""^(?:
+        --list|--all|--remotes|--verbose|--show-current|--column|
+        --no-column|--ignore-case|--omit-empty|--no-abbrev|--no-color|
+        --color(?:=\S+)?|--sort=\S+|--format=\S+|--abbrev=\S+|
+        --points-at=\S+|--contains=\S+|--no-contains=\S+|
+        --merged(?:=\S+)?|--no-merged(?:=\S+)?
+    )$""",
+    re.IGNORECASE | re.VERBOSE,
 )
+# A short-option cluster containing ONLY safe letters (v=verbose,
+# a=all, r=remotes, i=ignore-case) -- e.g. ``-v``, ``-a``, ``-vv``,
+# ``-avr``. Any OTHER letter anywhere in the cluster (including a
+# mutating one like ``f``/``d``/``m``/``c``, combined or not) fails this
+# and falls through to "unrecognized -> deny".
+_GIT_BRANCH_SAFE_SHORT_CLUSTER = re.compile(r"^-[vari]+$", re.IGNORECASE)
+_GIT_BRANCH_ARG_TOKEN = re.compile(r'"[^"]*"|\'[^\']*\'|\S+')
+
+
+def _git_branch_invocation_is_readonly(args_text: str) -> bool:
+    """Whether every token in ``args_text`` (everything after the ``branch``
+    subcommand word in a git invocation) is a known read-only flag -- see
+    the allowlist rationale above. Quoted tokens are unwrapped before
+    classification so ``"--list"`` and ``--list`` are treated alike."""
+    for raw in _GIT_BRANCH_ARG_TOKEN.findall(args_text):
+        token = raw
+        if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
+            token = token[1:-1]
+        if not token:
+            continue
+        if _GIT_BRANCH_SAFE_LONG_FLAG.match(token):
+            continue
+        if _GIT_BRANCH_SAFE_SHORT_CLUSTER.match(token):
+            continue
+        return False
+    return True
 
 # Leading benign prefixes to strip so a write verb after them is still seen at
 # "command position": env-assignments (``VAR=val``) and wrapper commands
@@ -564,10 +588,11 @@ def _shell_hit(cmd: str, cwd: str, anchors: list[dict]) -> dict | None:
         if git_write and is_pull and _GIT_FF_ONLY_FLAG.search(seg):
             git_write = False
         # A ``branch`` invocation is exempt from ``git_write`` ONLY when its
-        # actual SUBCOMMAND is ``branch`` and the segment carries NONE of
-        # the mutating flags -- see ``_GIT_BRANCH_MUTATING_FLAG``'s comment.
+        # actual SUBCOMMAND is ``branch`` and every argument after it is a
+        # known read-only flag -- see ``_git_branch_invocation_is_readonly``'s
+        # allowlist rationale.
         is_branch = bool(subcmd and subcmd.group(1).lower() == "branch")
-        if git_write and is_branch and not _GIT_BRANCH_MUTATING_FLAG.search(seg):
+        if git_write and is_branch and _git_branch_invocation_is_readonly(eff[subcmd.end():]):
             git_write = False
         has_dash_c = is_git and bool(_GIT_DASH_C_FLAG.search(seg))
         for a in anchors:
