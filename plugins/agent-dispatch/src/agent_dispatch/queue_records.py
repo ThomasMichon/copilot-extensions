@@ -28,6 +28,11 @@ class TaskError(RuntimeError):
     """Raised on an illegal state transition or a lease/ownership violation."""
 
 
+class ExclusiveKeyBusyError(TaskError):
+    """Reacquiring ``exclusive_key`` collided with an active sibling -- retry
+    later, not a hard failure (same discipline as ``SpawnState.DEFERRED``)."""
+
+
 class Status:
     """The nine task states (string constants, stored verbatim)."""
 
@@ -230,6 +235,7 @@ class SpawnReservation:
     driver: str | None = None
     release_requested: bool = False
     release_disposition: str | None = None
+    exclusive_released: bool = False
     detail: str | None = None
     conclusion_state: str | None = None
     conclusion_detail: str | None = None
@@ -255,6 +261,7 @@ class SpawnReservation:
             driver=row["driver"],
             release_requested=bool(row["release_requested"]),
             release_disposition=row["release_disposition"],
+            exclusive_released=bool(row["exclusive_released"]),
             detail=row["detail"],
             conclusion_state=row["conclusion_state"],
             conclusion_detail=row["conclusion_detail"],

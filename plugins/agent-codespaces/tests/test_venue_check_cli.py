@@ -75,6 +75,10 @@ def _patch(monkeypatch, manager: _FakeManager) -> None:
         "agent_codespaces.auth_preflight.github_credential_preflight",
         _github_ok,
     )
+    # No real host bridge: a test that needs its version sets one.
+    monkeypatch.setattr(
+        "agent_codespaces.venue_check.host_bridge_version", lambda port=None: None,
+    )
 
 
 class TestCmdCheck:
@@ -185,6 +189,36 @@ class TestCmdDoctorVenue:
         assert payload["ready"] is True
         assert "remediation" in payload
         assert "install tmux" in payload["remediation"]["succeeded"]
+
+    def test_a_plugin_still_behind_the_host_after_fix_is_not_ready(
+        self, monkeypatch, capsys,
+    ) -> None:
+        """The update ran (or the marketplace is behind the host): the re-probe
+        still reads the old version, so doctor reports the gap and exits nonzero."""
+        stale = _READY_PROBE_OUTPUT + "AGENT_BRIDGE_PLUGIN_VERSION=0.4.4-dev1\n"
+        manager = _FakeManager([stale, stale])
+        _patch(monkeypatch, manager)
+        monkeypatch.setattr(
+            "agent_codespaces.venue_check.host_bridge_version", lambda port=None: "0.9.9.dev1",
+        )
+
+        rc = main(["doctor", "cs-one", "--fix", "--json"])
+
+        assert rc == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["ready"] is False
+        assert "update agent-bridge plugin" in payload["remediation"]["succeeded"]
+        assert any("older than the host bridge (0.9.9.dev1)" in g for g in payload["gaps"])
+
+    def test_check_reports_a_plugin_behind_the_host(self, monkeypatch, capsys) -> None:
+        manager = _FakeManager([_READY_PROBE_OUTPUT + "AGENT_BRIDGE_PLUGIN_VERSION=0.4.4-dev1\n"])
+        _patch(monkeypatch, manager)
+        monkeypatch.setattr(
+            "agent_codespaces.venue_check.host_bridge_version", lambda port=None: "0.9.9.dev1",
+        )
+
+        assert main(["check", "cs-one"]) == 1
+        assert "older than the host bridge" in capsys.readouterr().out
 
 
 def pytest_probe_script() -> str:

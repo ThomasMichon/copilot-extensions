@@ -91,6 +91,7 @@ from .queue_producer_fences import (  # noqa: F401 -- re-exported for existing c
     ProducerScopeValidationError,
 )
 from .queue_records import (  # noqa: F401 -- re-exported for existing call sites/tests
+    ExclusiveKeyBusyError,
     ResourceReservation,
     ScheduleLease,
     ScheduleRecord,
@@ -546,6 +547,7 @@ class TaskQueue(
                 "  driver TEXT,"
                 "  release_requested INTEGER NOT NULL DEFAULT 0,"
                 "  release_disposition TEXT,"
+                "  exclusive_released INTEGER NOT NULL DEFAULT 0,"
                 "  detail TEXT,"
                 "  conclusion_state TEXT,"
                 "  conclusion_detail TEXT,"
@@ -691,6 +693,15 @@ class TaskQueue(
                 except sqlite3.OperationalError as exc:
                     if "duplicate column name" not in str(exc).lower():
                         raise
+            if "exclusive_released" not in reservation_columns:
+                try:
+                    conn.execute(
+                        "ALTER TABLE spawn_reservations "
+                        "ADD COLUMN exclusive_released INTEGER NOT NULL DEFAULT 0"
+                    )
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
             conn.execute(
                 "UPDATE spawn_reservations SET state = ?, "
                 "release_disposition = COALESCE(release_disposition, ?), "
@@ -724,7 +735,8 @@ class TaskQueue(
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_spawn_res_exclusive_active "
                     "ON spawn_reservations(exclusive_key) "
                     "WHERE exclusive_key IS NOT NULL "
-                    "AND state IN ('reserving','spawned','cold','releasing')"
+                    "AND state IN ('reserving','spawned','cold','releasing') "
+                    "AND exclusive_released = 0"
                 )
             except BaseException:
                 conn.execute("ROLLBACK")

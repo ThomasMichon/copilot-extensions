@@ -315,7 +315,11 @@ the ordinary release/retire step.
 
 Requires the venue's `agent-worktrees` and `agent-bridge` plugins to support
 `embody --bridge-scope-id/--copilot-arg`; an older venue fails closed with an
-"update agent-worktrees on the CodeSpace" error.
+"update agent-worktrees on the CodeSpace" error. The launch's own preflight
+installs `agent-bridge` on the venue when it is missing and updates it when it
+is older than the host bridge's version (an old venue CLI can start a local
+daemon over the forwarded host route); `doctor <name> --fix` does the same and
+reports a plugin that is still behind as a gap.
 
 ## SSH (Diagnostic Only)
 
