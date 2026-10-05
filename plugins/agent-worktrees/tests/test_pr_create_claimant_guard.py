@@ -47,7 +47,7 @@ class TestCreatePrClaimantGuard:
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
         )
         monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda config=None: wid)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
 
         captured = {}
 
@@ -79,7 +79,7 @@ class TestCreatePrClaimantGuard:
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: None
         )
         monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: candidate)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
 
         monkeypatch.setattr(
             m.pr_ops, "create_pr",
@@ -103,7 +103,7 @@ class TestCreatePrForeignRepoRefusal:
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
         monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
         )
@@ -130,7 +130,7 @@ class TestCreatePrForeignRepoRefusal:
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
         monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
         )
@@ -167,7 +167,7 @@ class TestCreatePrFromBranch:
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
         monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
         )
@@ -216,7 +216,7 @@ class TestCreatePrFromBranch:
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
         monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
         )
@@ -249,7 +249,7 @@ class TestCreatePrFromBranch:
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
         monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
         )
@@ -280,7 +280,7 @@ class TestCreatePrFromBranch:
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
         monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
         )
@@ -306,7 +306,7 @@ class TestCreatePrFromBranch:
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
         monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
         )
@@ -331,7 +331,7 @@ class TestCreatePrFromBranch:
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
         monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
         )
@@ -360,7 +360,7 @@ class TestCreatePrFromBranch:
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
         monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
         )

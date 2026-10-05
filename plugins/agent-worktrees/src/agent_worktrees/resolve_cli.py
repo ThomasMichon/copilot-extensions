@@ -8,7 +8,7 @@ import platform
 import sys
 import threading
 
-from . import activity, output, profile_assignment, sessions, tracking
+from . import activity, output, profile_assignment, sessions, tracking, worktree_identity
 from . import codename_tracking, config as cfg
 from .launch_trace import append_launch_event
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
@@ -106,10 +106,6 @@ def _resolve_profile(*args, **kwargs):
 
 def _resolve_resume(*args, **kwargs):
     return _core()._resolve_resume(*args, **kwargs)
-
-
-def _resolve_worktree_id(*args, **kwargs):
-    return _core()._resolve_worktree_id(*args, **kwargs)
 
 
 def _restore_before_resume(*args, **kwargs):
@@ -555,7 +551,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         return 0
 
     assert state.worktree_id is not None
-    worktree_id = _resolve_worktree_id(state.worktree_id)
+    worktree_id = worktree_identity._resolve_worktree_id(state.worktree_id)
     if _relocate_active_project_for_worktree(worktree_id):
         state.config = None
         try:
@@ -651,7 +647,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
 
 def _resolve_noninteractive_worktree(state: ResolveCommandState) -> int:
     assert state.worktree_id is not None
-    worktree_id = _resolve_worktree_id(state.worktree_id)
+    worktree_id = worktree_identity._resolve_worktree_id(state.worktree_id)
     if _relocate_active_project_for_worktree(worktree_id):
         state.config = None
     config = state.load_config()

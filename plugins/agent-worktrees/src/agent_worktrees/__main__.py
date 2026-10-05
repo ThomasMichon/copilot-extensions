@@ -1580,7 +1580,7 @@ def _binding_from_payload(value: object) -> tracking.ExecutionLegBinding | None:
 def cmd_execution_leg(args) -> int:
     """Inspect or mutate a provider-neutral execution-leg binding."""
     config = cfg.load_config()
-    worktree_id = _resolve_worktree_id(args.worktree_id)
+    worktree_id = worktree_identity._resolve_worktree_id(args.worktree_id)
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         return output._json_error(f"Worktree not found: {worktree_id}")
@@ -2489,11 +2489,11 @@ def _infer_worktree_id(
 # resolution, external-worktree adoption) moved to worktree_identity.py --
 # no dependency on this entry-point module, so sibling CLI modules (pr_cli.py
 # etc.) can import it directly instead of reverse-importing __main__.
+from . import worktree_identity  # noqa: E402 -- re-export position matches original definition site
 from .worktree_identity import (  # noqa: E402 -- re-export position matches original definition site
     _adopt_linked_worktree,  # noqa: F401 -- session_binding_cli accesses via __main__
     _infer_worktree_id_from_cwd,
     _infer_worktree_id_from_worktree_root,  # noqa: F401 -- re-exported for unit tests
-    _resolve_worktree_id,
     _worktree_id_from_git,
     _worktree_path_for_id,  # noqa: F401 -- re-exported for context_cli
     resolve_worktree_id_by_codename,  # noqa: F401 -- re-exported for session_metadata_cli
@@ -2678,7 +2678,7 @@ def _cmd_status_write(
             "Could not determine worktree ID. Run from inside a worktree or pass --worktree-id."
         )
         return 1
-    worktree_id = _resolve_worktree_id(worktree_id)
+    worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         output.err(f"Tracking file not found at {yaml_path}. Cannot annotate an unknown worktree.")
@@ -2786,7 +2786,7 @@ def _cmd_status_history(args: argparse.Namespace) -> int:
             "Could not determine worktree ID. Run from inside a worktree or pass --worktree-id."
         )
         return 1
-    worktree_id = _resolve_worktree_id(worktree_id)
+    worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
     limit = getattr(args, "limit", None)
     entries = disposition_history.read(worktree_id, limit=limit)
     if getattr(args, "json", False):
@@ -4671,7 +4671,7 @@ def reap_one(
     repo = config.default_repo
     tracking_path = cfg.tracking_dir()
 
-    wt_id = _resolve_worktree_id(wt_id)
+    wt_id = worktree_identity._resolve_worktree_id(wt_id)
     yaml_path = tracking_path / f"{wt_id}.yaml"
 
     def _result(payload: dict) -> dict:

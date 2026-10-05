@@ -10,7 +10,7 @@ from pathlib import Path
 from . import config as cfg
 from . import output
 from . import installer as inst
-from . import profile_assignment, sessions, terminal_conclusion, tracking
+from . import profile_assignment, sessions, terminal_conclusion, tracking, worktree_identity
 from . import reap_cli, status_monitor_runtime
 
 
@@ -966,7 +966,7 @@ def cmd_recent_messages(args: argparse.Namespace) -> int:
     caller can distinguish a cleanly finished last turn from a cut-off
     assistant turn or an unanswered assistant offer.
     """
-    wt_id = _core()._resolve_worktree_id(args.worktree_id)
+    wt_id = worktree_identity._resolve_worktree_id(args.worktree_id)
     records = tracking.list_records(cfg.tracking_dir())
     rec = next((r for r in records if r.worktree_id == wt_id), None)
     if rec is None:

@@ -7,14 +7,14 @@ import sys
 from pathlib import Path
 
 from . import config as cfg
-from . import git_ops, output, providers, tracking
+from . import git_ops, output, providers, tracking, worktree_identity
 
 
 def _core():
     """Lazily resolve ``agent_worktrees.__main__`` -- **never** at module load.
 
     Cross-module CLI helpers (``_json_output``, ``_resolve_repo_remote``,
-    ``_resolve_worktree_id``, ...) are defined in sibling modules but
+    ...) are defined in sibling modules but
     re-exported onto ``__main__`` so the test suite's ``monkeypatch.setattr(m,
     "_name", ...)`` convention keeps working uniformly regardless of where a
     name's real implementation lives. Routing every cross-module call through
@@ -222,7 +222,7 @@ def _tracked_pr_pushed_head(
     if worktree_id:
         try:
             record = tracking.load_record(
-                tracking_dir / f"{_core()._resolve_worktree_id(worktree_id)}.yaml"
+                tracking_dir / f"{worktree_identity._resolve_worktree_id(worktree_id)}.yaml"
             )
         except Exception:
             record = None
@@ -301,7 +301,7 @@ def _tracked_pr_head_evidence(
         return "", ""
     try:
         record = tracking.load_record(
-            cfg.tracking_dir() / f"{_core()._resolve_worktree_id(worktree_id)}.yaml"
+            cfg.tracking_dir() / f"{worktree_identity._resolve_worktree_id(worktree_id)}.yaml"
         )
     except Exception:
         return "", ""

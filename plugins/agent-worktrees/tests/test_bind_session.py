@@ -18,7 +18,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import output
-from agent_worktrees import activity, tracking
+from agent_worktrees import activity, tracking, worktree_identity
 from agent_worktrees import status_updater_cli
 from agent_worktrees.tracking import WorktreeRecord, load_record, save_record
 
@@ -286,7 +286,7 @@ class TestBindSession:
         monkeypatch.setattr(
             m, "_activate_project_for_worktree_id", lambda _wt: "test-project"
         )
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda wid: wid)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda wid: wid)
 
         rc = m.cmd_bind_session(
             _args(worktree_id="wt-c", worktree_dir="/tmp/unrelated", session_id="sess-c")
@@ -330,7 +330,7 @@ class TestBindSession:
             "_activate_project_for_worktree_id",
             lambda wt: activated.append(wt) or "test-project",
         )
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda wt: wt)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda wt: wt)
 
         assert m.cmd_bind_session(
             _args(worktree_id="wt-direct", session_id="sess-direct")
@@ -462,7 +462,7 @@ class TestHistoryDigestCmd:
         monkeypatch.setattr(status_updater_cli, "_activate_project_for_path",
                             lambda c: activated.update(cwd=c))
         monkeypatch.setattr(m, "_infer_worktree_id", lambda wid, cfg=None: "wt-h")
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda wid: wid)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda wid: wid)
 
         rc = m.cmd_history_digest(
             argparse.Namespace(worktree_id=None, limit=8)

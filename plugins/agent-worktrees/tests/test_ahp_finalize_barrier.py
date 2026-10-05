@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from agent_worktrees import __main__ as cli
-from agent_worktrees import finalize, git_ops, tracking
+from agent_worktrees import finalize, git_ops, tracking, worktree_identity
 
 
 def test_active_ahp_execution_leg_blocks_finalize(monkeypatch):
@@ -140,7 +140,7 @@ def _configure_reap(monkeypatch, tmp_path, record):
         lambda: SimpleNamespace(default_repo=repo),
     )
     monkeypatch.setattr(cli.cfg, "tracking_dir", lambda: tmp_path)
-    monkeypatch.setattr(cli, "_resolve_worktree_id", lambda value: value)
+    monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: value)
     monkeypatch.setattr(cli.git_ops, "has_remote", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(
         cli.sessions,

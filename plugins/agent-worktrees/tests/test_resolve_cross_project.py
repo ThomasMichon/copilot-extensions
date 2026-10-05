@@ -110,7 +110,7 @@ def test_noninteractive_resume_reloads_config_after_relocation(tmp_path, monkeyp
     from an earlier (ambient-project) probe once relocation switches the
     active project -- every downstream call (profile validation, preflight,
     profile resolution, resume) must see the *new* project's config."""
-    from agent_worktrees import resolve_cli
+    from agent_worktrees import resolve_cli, worktree_identity
 
     other_dir = tmp_path / "other" / "worktrees"
     _write_record(other_dir, "wt-1")
@@ -136,7 +136,7 @@ def test_noninteractive_resume_reloads_config_after_relocation(tmp_path, monkeyp
 
     seen_configs = []
 
-    monkeypatch.setattr(resolve_cli, "_resolve_worktree_id", lambda wt_id: wt_id)
+    monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda wt_id: wt_id)
     monkeypatch.setattr(
         resolve_cli, "_relocate_active_project_for_worktree", lambda wt_id: True
     )

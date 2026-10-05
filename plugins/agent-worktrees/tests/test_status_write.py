@@ -7,7 +7,7 @@ import argparse
 import pytest
 
 from agent_worktrees import __main__ as main
-from agent_worktrees import tracking
+from agent_worktrees import tracking, worktree_identity
 
 
 @pytest.fixture
@@ -36,7 +36,7 @@ def status_env(tmp_path, tmp_tracking_dir, monkeypatch):
         "_infer_worktree_id",
         lambda _worktree_id, _config=None: record.worktree_id,
     )
-    monkeypatch.setattr(main, "_resolve_worktree_id", lambda worktree_id: worktree_id)
+    monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda worktree_id: worktree_id)
     return path
 
 
