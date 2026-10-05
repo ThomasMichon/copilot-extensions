@@ -2,6 +2,7 @@
 """PickerScreen mixin extracted from ``engine.py``."""
 from __future__ import annotations
 
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -9,6 +10,28 @@ from dataclasses import dataclass
 from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_loader, target_rows
 from .selection import ListSelection
 from .. import update_stage
+
+#: Minimum time between real ``update_stage.indicator_state()`` polls
+#: (picker-performance-and-responsiveness Phase A). That call is a full
+#: ``agent-worktrees stage-update --indicator-state --json`` subprocess
+#: round trip -- cold Python-interpreter + CLI-module-import cost, not the
+#: "two small files" its docstring once assumed -- so calling it synchronously
+#: on every tick (previously every 5th frame, ~2x/sec) blocked the entire
+#: Textual render/input loop for the call's full duration, observed at
+#: 2-2.5s on a loaded machine: far longer than the polling interval itself,
+#: so the UI thread was blocked almost continuously. ``AGENT_WORKTREES_
+#: PICKER_UPDATE_STATE_POLL_SECS`` overrides it, ``<= 0`` disables polling
+#: (the last-known state just stops refreshing).
+def _update_state_poll_secs() -> float:
+    try:
+        return float(
+            os.environ.get("AGENT_WORKTREES_PICKER_UPDATE_STATE_POLL_SECS", "30")
+        )
+    except (TypeError, ValueError):
+        return 30.0
+
+
+UPDATE_STATE_POLL_SECS = _update_state_poll_secs()
 
 
 @dataclass(frozen=True)
@@ -26,11 +49,26 @@ class _SetupPayload:
 
 class PickerScreenRuntimeMixin:
     def _poll_update_state(self):
-        """Refresh the cached update-indicator state from the stage status.
+        """Refresh ``self.update_state`` from the engine's stage-update
+        indicator -- throttled and OFF the render thread
+        (picker-performance-and-responsiveness Phase A).
 
-        Cheap (two small files) and never fatal -- a read hiccup leaves the
-        last state in place. Kept off the SSH/tmux hot path by the frame
-        throttle in ``_tick``. A no-op once ``_update_state_pinned`` is set
+        ``update_stage.indicator_state()`` is a full ``agent-worktrees
+        stage-update --indicator-state --json`` subprocess round trip (cold
+        interpreter + CLI-module-import cost), not the "two small files" an
+        earlier version of this docstring assumed -- measured at 2-2.5s on a
+        loaded machine. This method used to call it synchronously from
+        ``_tick`` every 5th frame (~2x/sec): since a single call already
+        costs far longer than the interval between calls, the Textual
+        render/input loop was blocked almost continuously, dropping/delaying
+        keystrokes. Now it's wall-clock-throttled to
+        :data:`UPDATE_STATE_POLL_SECS` and, when due, the actual subprocess
+        call runs via :meth:`_run_bg` on a background thread -- mirroring
+        :meth:`_poll_manager_update_state`'s existing pattern -- so this
+        call always returns immediately and never blocks a keypress.
+
+        Never fatal -- a read hiccup leaves the last state in place. A no-op
+        once ``_update_state_pinned`` is set
         (:func:`capture.capture_async`'s ``update_state`` override, applied
         after this poll's ``call_after_refresh`` scheduling): this callback's
         exact fire time relative to that override is not guaranteed by pause
@@ -38,13 +76,30 @@ class PickerScreenRuntimeMixin:
         fixed number of ``pilot.pause()`` calls), so an unconditional
         assignment here could silently clobber an explicit test/audit
         override moments after it was set -- a real, observed capture-race,
-        not just a hypothetical one."""
+        not just a hypothetical one. Re-checked again in ``_done`` below, in
+        case the pin lands while the background call is in flight."""
         if getattr(self, "_update_state_pinned", False):
             return
-        try:
-            self.update_state = update_stage.indicator_state()
-        except Exception:
-            pass
+        now = time.monotonic()
+        if now - self._last_update_state_poll < UPDATE_STATE_POLL_SECS:
+            return
+        if self._update_state_poll_pending:
+            return
+        self._last_update_state_poll = now
+        self._update_state_poll_pending = True
+
+        def _work():
+            try:
+                return update_stage.indicator_state()
+            except Exception:
+                return None
+
+        def _done(state):
+            self._update_state_poll_pending = False
+            if state is not None and not getattr(self, "_update_state_pinned", False):
+                self.update_state = state
+
+        self._run_bg("update-stage-poll", _work, _done, quiet=True)
     def _poll_manager_update_state(self):
         """Refresh ``self.manager_update_state`` from the cached
         manager-update-check status (cheap, read-only, no network) and, if
