@@ -6,6 +6,9 @@ from typing import Any
 
 from fastapi import HTTPException
 
+DEFAULT_PAGE_LIMIT = 200
+MAX_PAGE_LIMIT = 1000
+
 
 def rows_to_events(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Convert durable event rows to the wire event-dict shape."""
