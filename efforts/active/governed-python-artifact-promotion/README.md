@@ -1338,6 +1338,33 @@ win grows with build complexity.
   the `uv run` wrapper itself couldn't be locally verified due to an
   unrelated broken `uv` shim on this dev machine, so real CI is the
   authoritative check for that one step.
+- A thirty-first review round found two issues. (1) A stale journal
+  count (still said "3" Windows-only tests above, after round 30 added
+  the `LockFileEx` contention test as a 4th) -- corrected. (2) More
+  substantively, a genuine bug that an earlier round's fix had left
+  half-done: `resolve_toolchain_lock` resolved `python_identity` via
+  `_resolve_interpreter_identity`/`uv python find` for its PROVENANCE
+  MARKER, but then created the venv with the caller's raw `python`
+  selector text in a SEPARATE `uv` invocation -- if PATH was reordered
+  or a selector symlink was repointed between the two calls, `uv venv`
+  could create the environment under a DIFFERENT interpreter than the
+  one just probed, while the marker still recorded the earlier-resolved
+  identity, letting a later caller reuse a mismatched venv under false
+  provenance. Fixed by always passing the already-resolved, absolute
+  `python_identity` to `uv venv --python`, never the raw selector text
+  (kept at the same `--no-config <dir> --python <value>` positional
+  shape so the ~25 existing tests asserting the staging directory stays
+  at a fixed argv position needed no restructuring, only the VALUE
+  changed).
+
+  199 tests total (unchanged -- no test added/removed this round, only
+  a real bug fixed and existing assertions re-validated against the new
+  value), all passing. `check-module-size.py` and `ruff check --select
+  F,E9 --output-format=github .` both pass clean. Smoke-tested for real
+  against the live governed feed: confirmed the actual `uv venv`
+  subprocess invocation receives the fully-resolved absolute
+  interpreter path via `--python`, not a bare selector, and that the
+  resulting toolchain lock resolves correctly end-to-end.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 
