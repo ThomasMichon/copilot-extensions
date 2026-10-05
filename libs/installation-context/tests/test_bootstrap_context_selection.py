@@ -12,7 +12,6 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[3]
 CONTEXT_TOOL = REPO / "libs" / "installation-context" / "installation_context.py"
-PLUGINS = ("agent-machines", "agent-index")
 # Agent Index's compatibility hooks are now unconditional no-ops; exercise
 # context refusal at the remaining operative bootstrap boundary instead.
 BEHAVIOR_PLUGINS = ("agent-machines",)
@@ -271,13 +270,16 @@ def _run_powershell(
     )
 
 
-@pytest.mark.parametrize("plugin", PLUGINS)
+@pytest.mark.parametrize("plugin", BEHAVIOR_PLUGINS)
 @pytest.mark.parametrize("runner", (_run_shell, _run_powershell))
 def test_selected_current_manifest_is_a_read_only_noop(
     tmp_path: Path,
     plugin: str,
     runner,
 ) -> None:
+    # Agent Index is excluded (see BEHAVIOR_PLUGINS): its compatibility hook
+    # is an unconditional no-op that always emits "{}", so the "else" branch
+    # this test used to run for it (asserting empty stdout) could never pass.
     home, context, version = _stamp_context(tmp_path, plugin)
     plugin_root = context.parent
     (plugin_root / "deploy-manifest.json").write_text(
@@ -288,14 +290,10 @@ def test_selected_current_manifest_is_a_read_only_noop(
     result = runner(plugin, _environment(home, context))
 
     assert result.returncode == 0
-    if plugin == "agent-machines":
-        assert "requested installation context is not active" in (
-            result.stdout + result.stderr
-        )
-        assert "without legacy fallback" in result.stdout + result.stderr
-    else:
-        assert result.stdout == ""
-        assert result.stderr == ""
+    assert "requested installation context is not active" in (
+        result.stdout + result.stderr
+    )
+    assert "without legacy fallback" in result.stdout + result.stderr
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is unavailable")
@@ -321,7 +319,7 @@ def test_agent_machines_active_current_cell_is_a_read_only_noop(
     )
 
     assert result.returncode == 0
-    assert result.stdout == ""
+    assert result.stdout == "{}"
     assert result.stderr == ""
     assert not (home / ".agent-machines").exists()
 
@@ -520,7 +518,12 @@ def test_agent_index_compatibility_bootstrap_never_reads_or_mutates_context(tmp_
     before = evidence()
     result = runner("agent-index", _environment(home, context))
     assert result.returncode == 0
-    assert result.stdout == result.stderr == ""
+    # Agent Index's compatibility hook is an unconditional no-op that always
+    # emits "{}" on stdout (the hooks.json session-start contract requires
+    # valid JSON back on every invocation) -- never reads or writes anything
+    # else, which is what this test actually guards.
+    assert result.stdout == "{}"
+    assert result.stderr == ""
     assert evidence() == before
     assert not (home / ".agent-index").exists()
 
@@ -628,7 +631,10 @@ def test_context_for_other_plugin_preserves_legacy_reconcile(
     if runner_plugin == "agent-machines":
         assert "without legacy fallback" in result.stdout + result.stderr
     else:
-        assert result.stdout == ""
+        # Agent Index's compatibility hook is an unconditional no-op --
+        # always emits "{}" on stdout (hooks.json session-start contract),
+        # never anything on stderr.
+        assert result.stdout == "{}"
         assert result.stderr == ""
 
 

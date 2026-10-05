@@ -11,9 +11,15 @@
 # Primary usage -- from the FIRST lines of any bootstrap-check.ps1:
 #   $guard = Join-Path $ScriptDir 'bootstrap-killswitch-guard.ps1'
 #   if (Test-Path $guard) {
-#     & $guard check *>&2
+#     & $guard check
 #     if ($LASTEXITCODE -eq 0) { [Console]::Out.Write('{}'); exit 0 }
 #   }
+# (PowerShell has no stream-merge-into-stderr operator analogous to bash's
+# `>&2` -- only `N>&1` merging into the success stream is supported, so
+# there's nothing valid to redirect here. Not a problem in practice: `check`
+# never writes to stdout -- its only output is via [Console]::Error.WriteLine,
+# which writes straight to the real stderr handle regardless of any
+# PowerShell-level redirection.)
 # Exit 0 -> killswitch ACTIVE; caller must skip its own reconcile.
 # Exit 1 -> killswitch INACTIVE, or state file missing/unreadable/malformed.
 #           Fails OPEN to "inactive" deliberately (see .sh header).

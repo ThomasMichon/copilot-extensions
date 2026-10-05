@@ -585,7 +585,18 @@ def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
         text = path.read_text(encoding="utf-8")
         if path.parents[1].name == "agent-index":
             code = [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
-            assert code == ["exit 0"]
+            if "bootstrap-check" in path.name:
+                # bootstrap-check is a hooks.json session-start hook, so its
+                # no-op still owes the caller a valid JSON reply ("{}") --
+                # unlike ensure-service, which isn't a session-start hook.
+                emit = (
+                    "[Console]::Out.Write('{}')"
+                    if path.suffix == ".ps1"
+                    else "printf '{}'"
+                )
+                assert code == [emit, "exit 0"]
+            else:
+                assert code == ["exit 0"]
             continue
         assert "legacy-entrypoint-probe" in text
         if "bootstrap-check" in path.name:
@@ -604,21 +615,37 @@ def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
                     "Start-Process"
                 )
 
-    for path in (
-        REPO / "plugins" / "agent-machines" / "scripts" / "init.ps1",
-        REPO / "plugins" / "agent-index" / "scripts" / "install.ps1",
+    for path, atomic in (
+        (REPO / "plugins" / "agent-machines" / "scripts" / "init.ps1", True),
+        (REPO / "plugins" / "agent-index" / "scripts" / "install.ps1", False),
     ):
         text = path.read_text(encoding="utf-8")
         assert "payload-origin" in text
         assert "COPILOT_PLUGIN_STAGED_FROM" in text
         assert "Threading.Mutex" in text
-        assert text.index("WaitOne([TimeSpan]::FromSeconds(20))") < text.index(
-            "Remove-Item $payloadDirMarker, $payloadOriginMarker"
-        )
-        assert "Remove-Item $payloadDirMarker, $payloadOriginMarker" in text
-        assert text.rindex("WriteAllText($payloadOriginMarker") < text.rindex(
-            "WriteAllText($payloadDirMarker"
-        )
+        if atomic:
+            # agent-machines (round 7/9 review findings, see its own inline
+            # comments): deliberately never pre-clears the markers --
+            # Publish-FileAtomically replaces each one in place only once
+            # its fresh snapshot is ready, so a reader never observes a
+            # missing marker during the stamp window. Pre-clearing (as
+            # agent-index below still does) was found to be the exact
+            # regression this atomic rewrite exists to prevent.
+            assert "Remove-Item $payloadDirMarker, $payloadOriginMarker" not in text
+            assert text.rindex("Publish-FileAtomically -Path $payloadOriginMarker") < text.rindex(
+                "Publish-FileAtomically -Path $payloadDirMarker"
+            )
+        else:
+            # agent-index has not been backported to the atomic-publish
+            # pattern above (tracked separately) -- it still pre-clears both
+            # markers ahead of a non-atomic WriteAllText.
+            assert text.index("WaitOne([TimeSpan]::FromSeconds(20))") < text.index(
+                "Remove-Item $payloadDirMarker, $payloadOriginMarker"
+            )
+            assert "Remove-Item $payloadDirMarker, $payloadOriginMarker" in text
+            assert text.rindex("WriteAllText($payloadOriginMarker") < text.rindex(
+                "WriteAllText($payloadDirMarker"
+            )
 
     machines_sh = (
         REPO / "plugins" / "agent-machines" / "scripts" / "init.sh"
@@ -646,8 +673,8 @@ def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
     ) < machines_sh.index('_lock="$_root/.provision.lock"')
 
     for plugin, timeouts in {
-        "agent-machines": [30, 30],
-        "agent-index": [30, 30, 10],
+        "agent-machines": [15, 45],
+        "agent-index": [45, 20],
     }.items():
         hooks = json.loads(
             (REPO / "plugins" / plugin / "hooks.json").read_text(encoding="utf-8")
@@ -658,7 +685,11 @@ def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
         if plugin == "agent-index":
             assert "bootstrap-check" not in json.dumps(hooks)
             assert "ensure-service" not in json.dumps(hooks)
-            assert "register-dispatch-companion" in json.dumps(hooks)
+            # agent-index's sessionStart wiring has since consolidated onto
+            # these two scripts (register-dispatch-companion is gone).
+            assert "write-session-guidance" in json.dumps(hooks)
+            assert "install.ps1" in json.dumps(hooks)
+            assert "install.sh" in json.dumps(hooks)
 
 
 def _uid_absent_from_passwd() -> str:
