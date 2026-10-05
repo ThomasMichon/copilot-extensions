@@ -83,9 +83,14 @@ Any change that makes these files slightly smaller is a win."
       verifiably complete (zero call sites, zero monkeypatch sites) rather
       than eyeballed.
 - [x] `--progress` mode reports live aggregate counts, ranked by traffic.
-      Corrected baseline (multi-alias-aware, supersedes the manual-grep
-      numbers in Context above): **47 accessors, 308 call sites, 123
-      distinct monkeypatched names, 727 patch-site occurrences.**
+      Baseline corrected multiple times this slice as real gaps surfaced
+      (see Journal): **42 accessors, 291 call sites, 157 distinct
+      monkeypatched names, 1049 patch-site occurrences** as of the final,
+      review-hardened state of the tool (bare `core.attr(` calls,
+      indented/local root imports, and `unittest.mock.patch("<pkg>.
+      __main__.<name>")` dotted-string targets are all now detected;
+      `--plugin` also now fails loud on an unresolvable plugin name
+      instead of silently reporting a vacuous success).
 
 ### Phase 2 — migrate the highest-traffic names
 - [x] `_json_output` + `_json_error` (migrated together: same files, always
@@ -251,6 +256,30 @@ _Pending._
   caution comment on that exact set, warning that a regex-only scan
   previously shipped a live `create-pr` regression; didn't skip the
   extra verification just because the AST scan agreed.
+- **Automated PR review (2 rounds) found a genuinely severe miss the
+  tool's own grep-based scan is structurally blind to**: `test_remove_
+  system.py` carries 30 `unittest.mock.patch("agent_worktrees.__main__.
+  _json_output"/"_json_error")` targets -- `patch()` resolves the dotted
+  string eagerly at entry, so removing the root re-export broke all 29
+  exercised tests in that file (not caught locally because the tool only
+  recognized `monkeypatch.setattr(<alias>, "<name>", ...)` fixture calls,
+  never a dotted-string `unittest.mock.patch` target). Fixed the file
+  (repointed to `agent_worktrees.output`, 33/33 passing) and the tool
+  itself (both `--name` and `--progress` now also scan for
+  `patch("<pkg>.__main__.<name>")`, unconditional on any alias import
+  since it's a literal string, not an alias reference). Review also
+  caught: a misspelled/unsupported `--plugin` silently reporting a
+  vacuous success (fixed -- now a hard error); three more dead `_core()`
+  accessors left behind after their last call site moved
+  (`copilot_identity_cli`, `forks_cli`, `identifier_blocklist_cli` --
+  removed, per the effort's own zero-call-site retirement rule); and
+  `session_tracking_cli.py` routing 4 calls through `core.output._json_*`
+  (still transitively through `_core()`, not actually decoupled) instead
+  of its own already-imported `output` module directly (fixed). All
+  caught by a *second* reviewer round after the first round's fixes
+  landed, re-confirming the "re-run after every sync" lesson above now
+  also applies to "re-run after every review round, not just the
+  first."
 - Next slice: `_resolve_worktree_id` (11 call sites / 40 monkeypatch
   sites) -- re-run `--progress` first, since this slice's corrected
   baseline may have shifted the ranking.

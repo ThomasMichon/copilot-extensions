@@ -567,10 +567,10 @@ def cmd_worktree_status_bundle(args: argparse.Namespace) -> int:
     core = _core()
     yaml_path = _find_tracking_file(args.worktree_id)
     if yaml_path is None:
-        return core.output._json_error(f"No worktree found: {args.worktree_id}")
+        return output._json_error(f"No worktree found: {args.worktree_id}")
     project = _project_for_tracking_file(yaml_path)
     if project is None:
-        return core.output._json_error(
+        return output._json_error(
             f"Could not resolve the owning project for: {args.worktree_id}"
         )
     record = tracking.load_record(yaml_path)
@@ -584,7 +584,7 @@ def cmd_worktree_status_bundle(args: argparse.Namespace) -> int:
         # about to pass `record.worktree_id` as both, making the check a
         # tautology. Validate against the actual requested filename here,
         # before any substitution happens.
-        return core.output._json_error(
+        return output._json_error(
             f"tracked record at {yaml_path.name!r} declares a different "
             f"identity {record.worktree_id!r} -- refusing to serve it"
         )
@@ -621,7 +621,7 @@ def cmd_worktree_status_bundle(args: argparse.Namespace) -> int:
         payload=payload,
         fallback=_fallback,
     )
-    core.output._json_output(bundle)
+    output._json_output(bundle)
     return 0
 
 

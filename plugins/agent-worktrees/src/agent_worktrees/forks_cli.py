@@ -13,12 +13,6 @@ from . import config as cfg
 from . import output
 
 
-def _core():
-    from . import __main__ as core
-
-    return core
-
-
 def _forks_usage() -> None:
     try:
         project = cfg.project_name()

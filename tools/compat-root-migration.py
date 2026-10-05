@@ -96,16 +96,25 @@ def find_core_call_sites(plugin: str, name: str) -> list[str]:
 
 def find_monkeypatch_sites(plugin: str, name: str) -> list[str]:
     hits = []
+    dotted_pattern = re.compile(
+        rf'patch\(\s*"[\w.]+\.__main__\.{re.escape(name)}"'
+    )
     for path in _iter_py_files(_tests_dir(plugin)):
         text = path.read_text(encoding="utf-8", errors="replace")
         aliases = _root_aliases_in_file(text)
-        if not aliases:
-            continue
-        alias_group = "|".join(re.escape(a) for a in aliases)
-        pattern = re.compile(
-            rf'monkeypatch\.setattr\(\s*(?:{alias_group})\s*,\s*\n?\s*"{re.escape(name)}"'
-        )
-        for m in pattern.finditer(text):
+        if aliases:
+            alias_group = "|".join(re.escape(a) for a in aliases)
+            pattern = re.compile(
+                rf'monkeypatch\.setattr\(\s*(?:{alias_group})\s*,\s*\n?\s*"{re.escape(name)}"'
+            )
+            for m in pattern.finditer(text):
+                line = text.count("\n", 0, m.start()) + 1
+                hits.append(f"{path.relative_to(REPO)}:{line}")
+        # unittest.mock.patch("<pkg>.__main__.<name>") targets the root
+        # module by a literal dotted string, independent of any
+        # `from . import __main__ as X` alias in the file -- must be
+        # checked unconditionally, not gated behind `if aliases`.
+        for m in dotted_pattern.finditer(text):
             line = text.count("\n", 0, m.start()) + 1
             hits.append(f"{path.relative_to(REPO)}:{line}")
     return hits
@@ -155,16 +164,20 @@ def cmd_progress(plugin: str) -> int:
             call_names[name] += 1
 
     patch_names: Counter[str] = Counter()
+    dotted_pattern = re.compile(r'patch\(\s*"[\w.]+\.__main__\.(\w+)"')
     for path in test_files:
         text = path.read_text(encoding="utf-8", errors="replace")
         aliases = _root_aliases_in_file(text)
-        if not aliases:
-            continue
-        alias_group = "|".join(re.escape(a) for a in aliases)
-        pattern = re.compile(
-            rf'monkeypatch\.setattr\(\s*(?:{alias_group})\s*,\s*\n?\s*"(\w+)"'
-        )
-        for name in pattern.findall(text):
+        if aliases:
+            alias_group = "|".join(re.escape(a) for a in aliases)
+            pattern = re.compile(
+                rf'monkeypatch\.setattr\(\s*(?:{alias_group})\s*,\s*\n?\s*"(\w+)"'
+            )
+            for name in pattern.findall(text):
+                patch_names[name] += 1
+        # unittest.mock.patch("<pkg>.__main__.<name>") -- unconditional,
+        # independent of any alias import in the file (see find_monkeypatch_sites).
+        for name in dotted_pattern.findall(text):
             patch_names[name] += 1
 
     total_calls = sum(call_names.values())
@@ -193,6 +206,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.name and not args.progress:
         parser.error("pass --name <name> or --progress")
+
+    src_dir = _src_dir(args.plugin)
+    if not src_dir.is_dir():
+        parser.error(
+            f"--plugin {args.plugin!r} has no source directory at "
+            f"{src_dir.relative_to(REPO)} -- check the plugin name "
+            "(e.g. a typo, or a plugin with no src/ layout). Refusing to "
+            "silently report an empty-but-'successful' scan."
+        )
 
     if args.name:
         return cmd_name(args.plugin, args.name)

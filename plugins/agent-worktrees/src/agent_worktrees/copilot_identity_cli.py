@@ -11,12 +11,6 @@ from . import output
 from . import copilot_identity
 
 
-def _core():
-    from . import __main__ as core
-
-    return core
-
-
 def add_parsers(sub) -> None:
     sub.add_parser(
         "copilot-identity",

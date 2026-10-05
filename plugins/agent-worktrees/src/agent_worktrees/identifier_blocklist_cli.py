@@ -11,12 +11,6 @@ from . import output, repos as repos_mod
 _VALID_FORMATS = ("ci", "json")
 
 
-def _core():
-    from . import __main__ as core
-
-    return core
-
-
 def add_parsers(sub) -> None:
     sub.add_parser(
         "identifiers",
