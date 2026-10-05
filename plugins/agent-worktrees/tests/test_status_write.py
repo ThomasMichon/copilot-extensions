@@ -132,15 +132,12 @@ def test_unpaused_prints_an_explicit_confirmation(status_env, capsys):
 
 
 def test_every_status_write_requires_verb_v2_even_without_paused(status_env, monkeypatch):
-    """Scoping the v2 requirement to only writes that touch `paused` was
-    tried and reverted: during rolling skew, a --paused write correctly
-    falls back to the new in-process writer while an old (v1) daemon
-    remains resident, but a LATER plain summary/title/follow-up write at
-    v1 would then dial that same old daemon -- whose old full-record
-    writer silently drops `paused`/`paused_revision`, erasing the
-    already-persisted pause. Every status write must require v2, so none
-    of them ever reach an incompatible old daemon while it's still
-    resident."""
+    """Every status write must avoid a resident v1 full-record writer, not
+    only ones touching `paused`: a v1 daemon's old full-record writer
+    silently drops `paused`/`paused_revision` (fields it predates), so a
+    plain summary/title/follow-up write reaching that daemon during
+    rolling skew would erase an already-persisted pause set moments
+    earlier by a (correctly v2-gated) `--paused` write."""
     from agent_worktrees import tracking_write
 
     args = argparse.Namespace(worktree_id=None)

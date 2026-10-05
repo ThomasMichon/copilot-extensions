@@ -2402,6 +2402,8 @@ def _save_record_unlocked(
         if current.paused_revision > record.paused_revision:
             record.paused = current.paused
             record.paused_revision = current.paused_revision
+            if (current.status_note_at or "") > (record.status_note_at or ""):
+                record.status_note_at = current.status_note_at
         # A claim/restore (pending_seed.py) must never resurrect an
         # already-delivered (cleared) seed via a stale snapshot's save.
         if current.pending_seed_revision > record.pending_seed_revision:

@@ -3470,6 +3470,38 @@ class TestSystemWorktreeKind:
         assert final.summary == "unrelated update"
         assert final.paused_revision == 1
 
+    def test_stale_pause_merge_preserves_the_newer_status_note_at(
+        self, tmp_path: Path,
+    ):
+        """Adopting the on-disk `paused` must not also adopt the stale
+        writer's own (older) `status_note_at` -- that would erase the
+        pause write's freshness/glance-ordering timestamp even though the
+        record correctly ends up `paused=True`."""
+        path = tmp_path / "wt-stale-pause-ts.yaml"
+        rec = create_new_record(
+            "wt-stale-pause-ts", "worktree/wt-stale-pause-ts",
+            "/tmp/wt-stale-pause-ts", "test-repo", "test", "wsl", tmp_path,
+        )
+        save_record(rec, path)
+
+        # A stale writer loads before the pause -- its own status_note_at
+        # is whatever the record had at that point (None, here).
+        stale = load_record(path)
+        assert stale.status_note_at is None
+
+        set_disposition(rec, paused=True, save=False)
+        pause_stamp = rec.status_note_at
+        assert pause_stamp is not None
+        save_record(rec, path)
+
+        # The stale writer's later save must not erase that fresher stamp.
+        stale.summary = "unrelated update"
+        save_record(stale, path)
+
+        final = load_record(path)
+        assert final.paused is True
+        assert final.status_note_at == pause_stamp
+
     def test_create_new_record_bound_agent_whitespace_normalizes_to_none(
         self, tmp_path: Path,
     ):
