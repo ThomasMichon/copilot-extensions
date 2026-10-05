@@ -1,0 +1,9 @@
+{
+  "comment": "Fix invoke-payload-runtime crash on first self-provisioning (missing namespaceGeneration on the status action result).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
