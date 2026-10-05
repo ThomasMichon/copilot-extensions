@@ -232,6 +232,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          # `github.repository_owner` -- immutable, platform-controlled,
+          # never a repository secret/variable (a Maintainer-writable repo
+          # variable would let the very tier this check restricts
+          # re-point it at their own login). Matches the same pattern
+          # `ci.yml`/`workflow-lockdown-guard.yml` already use for an
+          # owner-authorization check. KNOWN LIMITATION, same as those:
+          # in an ORGANIZATION-owned fork this is the org login, which no
+          # individual account can ever equal -- scoped to user-owned
+          # repos only.
+          OWNER_LOGIN: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
           ISSUE_JSON=$(gh issue view "$NUM" --repo "$REPO" --json author,body,labels)
@@ -256,8 +266,8 @@ jobs:
           # logs (below) apply identically regardless of author, and still
           # reject a hand-authored issue that doesn't name a real,
           # currently-reproducible failure.
-          if [ "$AUTHOR" != "app/github-actions" ] && [ "$AUTHOR" != "ThomasMichon" ]; then
-            echo "::warning::Issue #$NUM was authored by '$AUTHOR', neither the watchdog's own app/github-actions token identity nor the repo owner -- refusing to run the agent (a hand-authored issue re-using this label is not an authenticated diagnostic)."
+          if [ "$AUTHOR" != "app/github-actions" ] && [ "$AUTHOR" != "$OWNER_LOGIN" ]; then
+            echo "::warning::Issue #$NUM was authored by '$AUTHOR', neither the watchdog's own app/github-actions token identity nor the repo owner ('$OWNER_LOGIN') -- refusing to run the agent (a hand-authored issue re-using this label is not an authenticated diagnostic)."
             echo "authorized=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
