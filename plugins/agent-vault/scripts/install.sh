@@ -454,20 +454,6 @@ _deploy_binstub() {
         "AGENT_VAULT_NO_SELFPROVISION" \
         "$SCRIPT_DIR/resolve-runtime.ps1" \
         "$SCRIPT_DIR/resolve-runtime.sh"
-    local tmp="${STUB}.tmp.$$"
-    : > "$tmp"
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        printf '%s\n' "$line" >> "$tmp"
-        if [[ "$line" == "printf '[%s] provisioning completed without a resolvable runtime.\n' \"\$_name\" >&2" ]]; then
-            printf '%s\n' 'if [ "${_rc:-1}" -eq 0 ]; then' >> "$tmp"
-            printf '%s\n' '    exit 1' >> "$tmp"
-            printf '%s\n' 'fi' >> "$tmp"
-            IFS= read -r _discard || true
-            printf '%s\n' 'exit "${_rc:-1}"' >> "$tmp"
-        fi
-    done < "$STUB"
-    mv -f "$tmp" "$STUB"
-    chmod +x "$STUB"
 }
 
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):
