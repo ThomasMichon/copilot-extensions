@@ -219,6 +219,27 @@ def test_a_call_in_one_branch_is_flagged_even_when_an_earlier_sibling_branch_cle
     assert any("call_from_thread(" in p for p in guard.verify())
 
 
+def test_a_call_in_one_match_case_is_flagged_even_when_an_earlier_case_clears_the_alias(repo):
+    """``match`` cases are mutually exclusive alternatives, just like
+    ``if``/``elif``/``else`` branches -- visiting them sequentially
+    against one shared, mutable alias set would let an earlier case's
+    reassignment hide a real call in a later, independently-reachable
+    case."""
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_sessions_actions.py",
+        "def f(self, kind):\n"
+        "    marshal = self.app.call_from_thread\n"
+        "    match kind:\n"
+        "        case 'safe':\n"
+        "            marshal = some_safe_callable\n"
+        "        case _:\n"
+        "            marshal(fn)\n",
+    )
+    assert any("call_from_thread(" in p for p in guard.verify())
+
+
 def test_a_call_reachable_only_via_try_body_succeeding_then_else_is_flagged(repo):
     """``try``/``else`` are NOT mutually exclusive alternatives -- ``else``
     only runs as a CONTINUATION after the ``try`` body completes fully

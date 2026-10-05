@@ -120,6 +120,9 @@ def _iter_direct_statements(stmts: list[ast.stmt]):
             yield from _iter_direct_statements(stmt.orelse)
         elif isinstance(stmt, (ast.With, ast.AsyncWith)):
             yield from _iter_direct_statements(stmt.body)
+        elif isinstance(stmt, getattr(ast, "Match", ())):
+            for case in stmt.cases:
+                yield from _iter_direct_statements(case.body)
 
 
 def _direct_assign_targets_and_values(stmt: ast.stmt):
@@ -407,6 +410,26 @@ class _CallFinder(ast.NodeVisitor):
 
     def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
         self._visit_conditionally(node)
+
+    def visit_Match(self, node: ast.AST) -> None:
+        # Each `case` is a mutually exclusive alternative (like `if`/
+        # `elif`/`else`) -- visited independently from the SAME
+        # pre-match alias state, then merged by union, exactly as
+        # `_merge_branches` already does for `if`/`else`. A guard
+        # expression (`case ... if cond:`) runs as part of deciding
+        # whether that specific case is taken, so it's visited within
+        # that case's own branch, not the subject's.
+        self.visit(node.subject)
+        start = set(self._aliases)
+        merged = set(start)
+        for case in node.cases:
+            self._scopes[-1] = set(start)
+            if case.guard is not None:
+                self.visit(case.guard)
+            for stmt in case.body:
+                self.visit(stmt)
+            merged |= self._aliases
+        self._scopes[-1] = merged
 
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func
