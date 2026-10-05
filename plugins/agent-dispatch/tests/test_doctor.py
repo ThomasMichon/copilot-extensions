@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from agent_dispatch import doctor
 from agent_dispatch.__main__ import _cmd_doctor, build_parser
+from agent_dispatch.client import DispatchError
 
 
 def _args(argv):
@@ -107,10 +110,10 @@ def test_diagnose_queued_with_reservation_reports_stuck_verdict():
 
 
 def test_diagnose_queued_with_active_reservation_is_not_stuck():
-    """Review finding (#5227): `reserving`/`spawned`/`cold`/`releasing` are
-    all legitimate ACTIVE states for a reservation whose task still shows as
-    `queued` -- only a genuinely FAILED reservation is stuck. Misreporting an
-    in-flight spawn as stuck would be a false positive on healthy work."""
+    """`reserving`/`spawned`/`cold`/`releasing` are all legitimate ACTIVE
+    states for a reservation whose task still shows as `queued` -- only a
+    genuinely FAILED reservation is stuck. Misreporting an in-flight spawn
+    as stuck would be a false positive on healthy work."""
     for active_state in ("reserving", "spawned", "cold", "releasing"):
         task = _task(status="queued", worktree_id=None, reservation_key="k1")
         task["spawn_reservation"] = {"key": "k1", "attempt": 1, "state": active_state}
@@ -523,9 +526,10 @@ def test_cli_doctor_check_live_sessions_fetches_reservations_per_task(
 
     def _list_reservations(*, task_id=None, state=None, repo=None, label=None, limit=1000):
         if task_id is None:
-            # The new, separate stuck-queued-reservation query (#5227) --
-            # irrelevant to this test's own assertion below, which tracks
-            # only per-task reservation-history calls.
+            # The separate stuck-queued-reservation query also calls
+            # list_reservations (with no task_id); irrelevant to this
+            # test's own assertion below, which tracks only per-task
+            # reservation-history calls.
             return []
         fake.list_reservations_calls.append(task_id)
         return [
@@ -678,9 +682,9 @@ def test_diagnose_many_never_repairs_a_non_examined_non_terminal_status(monkeypa
 
 
 def test_find_stuck_queued_reservations_queries_failed_state_separately():
-    """The new, independent query: list_reservations(state=FAILED) rather
-    than expanding the bounded task sweep (review finding, #5227 -- a large
-    queued backlog must never consume the sweep's own --limit)."""
+    """The query is independent: list_reservations(state=FAILED) rather than
+    expanding the bounded task sweep, so a large queued backlog never
+    consumes the sweep's own --limit."""
 
     class _Client:
         def __init__(self):
@@ -748,14 +752,34 @@ def test_find_stuck_queued_reservations_skips_superseded_reservation():
 
 
 def test_find_stuck_queued_reservations_skips_vanished_task():
+    """A confirmed 404 (the task no longer exists) is the only failure this
+    skips -- see the companion propagation test below."""
+
     class _Client:
         def list_reservations(self, **kw):
             return [{"key": "k1", "task_id": "t-1", "state": "failed"}]
 
         def get(self, task_id):
-            raise RuntimeError("no such task")
+            raise DispatchError(404, "no such task")
 
     assert doctor.find_stuck_queued_reservations(_Client()) == []
+
+
+def test_find_stuck_queued_reservations_propagates_non_404_errors():
+    """An auth failure, a coordinator 5xx, or a transport error must never
+    look like a vanished task -- doctor should fail loudly, not silently
+    report an incomplete/empty diagnosis during the exact outage it exists
+    to investigate."""
+
+    class _Client:
+        def list_reservations(self, **kw):
+            return [{"key": "k1", "task_id": "t-1", "state": "failed"}]
+
+        def get(self, task_id):
+            raise DispatchError(503, "coordinator unavailable")
+
+    with pytest.raises(DispatchError):
+        doctor.find_stuck_queued_reservations(_Client())
 
 
 def test_cmd_doctor_merges_stuck_queued_reservations_into_sweep(capsys, monkeypatch):

@@ -50,6 +50,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from .client import DispatchError
 from .procutil import agent_worktrees_launch_prefix, no_window_kwargs
 from .queue_records import SpawnState, Status
 from .spawn_factories import _parse_fleet_body_handle, _parse_local_body_handle
@@ -103,8 +104,7 @@ DEFAULT_STALE_LEASE_GRACE_SECONDS = 3600.0
 #: Task statuses doctor examines via the bounded repo/label sweep. ``queued``/
 #: ``proposed`` are deliberately excluded here -- a repo's queued backlog can
 #: be arbitrarily large and would consume this query's own ``limit`` before
-#: claimed/started/suspended rows are ever seen (review finding,
-#: ThomasMichon/copilot-extensions#5227). A queued task stuck behind a
+#: claimed/started/suspended rows are ever seen. A queued task stuck behind a
 #: failed spawn reservation is instead found via a **separate**, reservation-
 #: state-filtered query -- see :func:`find_stuck_queued_reservations`, which
 #: never competes with this sweep's own limit.
@@ -117,8 +117,8 @@ REPAIRABLE_VERDICT = "orphaned_worktree_gone"
 #: terminal :data:`SpawnState.FAILED` state -- i.e. a prior attempt
 #: genuinely failed (not merely in flight: ``reserving``/``spawned``/
 #: ``cold``/``releasing`` are all legitimate active states for a task still
-#: showing as ``queued`` and must never be reported here -- review finding)
-#: -- and the task landed back in ``queued`` with nothing surfacing *why*
+#: showing as ``queued`` and must never be reported here) -- and the task
+#: landed back in ``queued`` with nothing surfacing *why*
 #: (#5209). Purely advisory: a queued task may legitimately pick up and
 #: retry on the scheduler's own next pass, so this is never auto-repaired --
 #: see :func:`repair`'s verdict check.
@@ -359,11 +359,15 @@ def diagnose(
 
     if status == "queued" and reservation.get("state") == SpawnState.FAILED:
         attempt = reservation.get("attempt")
-        failure_detail = (
-            reservation.get("conclusion_detail")
-            or reservation.get("detail")
-            or "no further detail recorded"
-        )
+        # `detail` carries the spawn failure itself; `conclusion_detail` is
+        # cleanup/conclusion metadata recorded alongside it. Report the root
+        # failure first and append conclusion metadata only when present, so
+        # cleanup bookkeeping never hides the actual error.
+        root_detail = reservation.get("detail") or "no further detail recorded"
+        failure_detail = root_detail
+        conclusion_detail = reservation.get("conclusion_detail")
+        if conclusion_detail and conclusion_detail != root_detail:
+            failure_detail = f"{root_detail} (conclusion: {conclusion_detail})"
         return result(
             QUEUED_STUCK_RESERVATION_VERDICT,
             f"queued task's latest spawn reservation (attempt {attempt}) is "
@@ -561,7 +565,7 @@ def find_stuck_queued_reservations(
     repo/label sweep structurally cannot see, since ``EXAMINED_STATUSES``
     deliberately excludes ``queued`` (a large backlog would otherwise
     consume the sweep's own ``limit`` before any claimed/started/suspended
-    row is examined -- review finding, #5227).
+    row is examined).
 
     This queries ``GET /spawn-reservations?state=failed`` directly --
     a **separate**, reservation-state-filtered, independently-limited query
@@ -569,11 +573,11 @@ def find_stuck_queued_reservations(
     reservation it fetches the owning task (``GET /tasks/{id}``, the one
     endpoint that actually attaches ``spawn_reservation`` -- the bulk
     ``GET /tasks`` list endpoint does not, which is why this cannot simply
-    filter an already-fetched task list; review finding, #5227) and reports
-    it only when that task is still ``queued`` **and** this is still its
-    *current* (latest) reservation -- a reservation that failed but whose
-    task has since progressed (a fresh attempt reserved, claimed, etc.) is
-    not stuck and must not be reported as if it still were.
+    filter an already-fetched task list) and reports it only when that task
+    is still ``queued`` **and** this is still its *current* (latest)
+    reservation -- a reservation that failed but whose task has since
+    progressed (a fresh attempt reserved, claimed, etc.) is not stuck and
+    must not be reported as if it still were.
     """
     diagnoses = []
     reservations = client.list_reservations(
@@ -585,12 +589,13 @@ def find_stuck_queued_reservations(
             continue
         try:
             task = client.get(task_id)
-        except Exception:
+        except DispatchError as exc:
+            if exc.status_code != 404:
+                raise
             log.debug(
-                "find_stuck_queued_reservations: task %s vanished or could "
-                "not be fetched; skipping",
+                "find_stuck_queued_reservations: task %s no longer exists; "
+                "skipping",
                 task_id,
-                exc_info=True,
             )
             continue
         if task.get("status") != "queued":
