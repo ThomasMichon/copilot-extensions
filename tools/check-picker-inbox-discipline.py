@@ -62,16 +62,24 @@ PICKER_TUI_DIR = (
 
 _ALLOW = "inbox-guard: allow"
 _FLAGGED_ATTR = "call_from_thread"
-# The primitive itself is the one module allowed to call it -- that call IS
-# the sanctioned wake mechanism Inbox wraps for everyone else.
-_EXEMPT_FILENAMES = frozenset({"inbox.py"})
 
 
 def _iter_py():
     if not PICKER_TUI_DIR.is_dir():
         return
+    # The primitive itself is the one module allowed to call
+    # `call_from_thread` -- that call IS the sanctioned wake mechanism
+    # `Inbox` wraps for everyone else. Compared by full, resolved path
+    # (never a bare basename, and computed fresh from the current
+    # `PICKER_TUI_DIR` rather than cached at import time -- tests
+    # monkeypatch `PICKER_TUI_DIR` to a throwaway directory): the scan is
+    # recursive, so a basename-only check would also silently exempt any
+    # future unrelated nested module that merely happens to be named the
+    # same (`picker_tui/**/inbox.py`), even though only this one root
+    # primitive is sanctioned.
+    exempt = (PICKER_TUI_DIR / "inbox.py").resolve()
     for f in sorted(PICKER_TUI_DIR.rglob("*.py")):
-        if f.name in _EXEMPT_FILENAMES:
+        if f.resolve() == exempt:
             continue
         yield f
 
@@ -185,31 +193,35 @@ class _CallFinder(ast.NodeVisitor):
         self._merge_branches(node.body, node.orelse)
 
     def visit_Try(self, node: ast.Try) -> None:
-        # `try`'s `body` and each `except` handler ARE mutually exclusive
-        # alternatives (a handler is only reached if the body raised
-        # partway through) -- merge those via the same union-of-branches
-        # approach as `if`/`else`. But `else` is NOT a third alternative:
-        # it runs only as a CONTINUATION after the body completes fully,
-        # successfully, with no exception at all -- so it must be
-        # analyzed against the body's own resulting alias state, never
-        # merged in as if it were an independent fork from the pre-try
-        # state (that would miss a call reachable only via
-        # body-succeeds-then-else, e.g. `try: marshal = x.call_from_thread
-        # ... else: marshal(fn)`).
+        # The try body may raise partway through -- a handler can
+        # therefore observe any PREFIX of the body's own assignments (an
+        # exception after the 3rd statement still leaves the first two's
+        # aliasing effects live when the handler runs). Conservatively
+        # let every handler start from the union of the pre-try state and
+        # the FULLY-completed body's state, rather than just the pre-try
+        # state alone -- erring toward seeing MORE of the body's aliases,
+        # never fewer.
         start = set(self._aliases)
-        branches = [node.body, *[h.body for h in node.handlers]]
-        self._merge_branches(*branches)
-        if node.orelse:
-            # Capture the body+handlers merge computed just above before
-            # overwriting the current scope to recompute the
-            # body-succeeds-then-else continuation separately -- `_aliases`
-            # IS `self._scopes[-1]`, so without this snapshot the union
-            # below would just be unioning the else-continuation with
-            # itself, silently dropping whatever the merge above found.
-            merged_without_else = set(self._aliases)
-            self._scopes[-1] = set(start)
-            for stmt in node.body:
+        self._scopes[-1] = set(start)
+        for stmt in node.body:
+            self.visit(stmt)
+        body_state = set(self._aliases)
+        handler_start = start | body_state
+        merged = set(body_state)
+        for h in node.handlers:
+            self._scopes[-1] = set(handler_start)
+            for stmt in h.body:
                 self.visit(stmt)
+            merged |= self._aliases
+        self._scopes[-1] = merged
+        if node.orelse:
+            # `else` is NOT a further alternative alongside the handlers
+            # -- it runs only as a CONTINUATION after the body completes
+            # fully, successfully, with no exception at all, so it must
+            # be analyzed against the body's own resulting alias state
+            # (not the handler-merged state, and not the pre-try state).
+            merged_without_else = set(self._scopes[-1])
+            self._scopes[-1] = set(body_state)
             for stmt in node.orelse:
                 self.visit(stmt)
             self._scopes[-1] = merged_without_else | self._aliases
@@ -219,22 +231,41 @@ class _CallFinder(ast.NodeVisitor):
         for stmt in node.finalbody:
             self.visit(stmt)
 
+    def _visit_loop(self, iter_or_test: ast.expr, body: list[ast.stmt],
+                     orelse: list[ast.stmt]) -> None:
+        """Shared ``for``/``while`` handling: the body may run zero or
+        more times, and ``else`` runs after it completes without
+        ``break`` -- NOT as an alternative fork to the body (a loop
+        ``else`` is not mutually exclusive with its body; it commonly
+        runs immediately after it). ``else`` is analyzed from the union
+        of "the body never ran" and "the body's own resulting state"
+        (one pass through the body is enough to capture its aliasing
+        effect -- re-running the same statements again doesn't change
+        that fixed point), and the overall exit state (for code after the
+        loop) is the union of all three possible outcomes.
+        """
+        self.visit(iter_or_test)
+        start = set(self._aliases)
+        self._scopes[-1] = set(start)
+        for stmt in body:
+            self.visit(stmt)
+        body_state = set(self._aliases)
+        else_state: set[str] = set()
+        if orelse:
+            self._scopes[-1] = start | body_state
+            for stmt in orelse:
+                self.visit(stmt)
+            else_state = set(self._aliases)
+        self._scopes[-1] = start | body_state | else_state
+
     def visit_For(self, node: ast.For) -> None:
-        self.visit(node.iter)
-        # The loop body may run zero or more times, and `orelse` (a
-        # for/else clause) runs only if the loop completes without
-        # `break` -- treat both as alternative outcomes of the same fork,
-        # same as an if/else, rather than visiting them as if `orelse`
-        # always follows a fully-executed `body`.
-        self._merge_branches(node.body, node.orelse)
+        self._visit_loop(node.iter, node.body, node.orelse)
 
     def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
-        self.visit(node.iter)
-        self._merge_branches(node.body, node.orelse)
+        self._visit_loop(node.iter, node.body, node.orelse)
 
     def visit_While(self, node: ast.While) -> None:
-        self.visit(node.test)
-        self._merge_branches(node.body, node.orelse)
+        self._visit_loop(node.test, node.body, node.orelse)
 
     def visit_With(self, node: ast.With) -> None:
         self._visit_conditionally(node)

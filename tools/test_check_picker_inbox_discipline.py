@@ -68,6 +68,18 @@ def test_inbox_module_itself_is_exempt(repo):
     assert guard.verify() == []
 
 
+def test_a_nested_module_merely_named_inbox_py_is_not_exempt(repo):
+    """Only the one root ``picker_tui/inbox.py`` primitive is sanctioned
+    -- a different, nested module that merely happens to share that
+    basename (e.g. under a subpackage) must still be scanned and flagged
+    like any other file."""
+    d = _picker_tui_dir(repo)
+    nested = d / "some_subpackage"
+    nested.mkdir()
+    _write(nested, "inbox.py", "self._owner.call_from_thread(fn)\n")
+    assert any("call_from_thread(" in p for p in guard.verify())
+
+
 def test_flags_bare_name_call(repo):
     d = _picker_tui_dir(repo)
     _write(
@@ -206,6 +218,44 @@ def test_a_call_reachable_only_via_try_body_succeeding_then_else_is_flagged(repo
         "        marshal = self.app.call_from_thread\n"
         "    except Exception:\n"
         "        marshal = some_safe_callable\n"
+        "    else:\n"
+        "        marshal(fn)\n",
+    )
+    assert any("call_from_thread(" in p for p in guard.verify())
+
+
+def test_a_call_in_an_except_handler_is_flagged_for_an_alias_from_earlier_in_the_try_body(repo):
+    """An exception can occur partway through the ``try`` body -- a
+    handler must be analyzed as if it could observe any prefix of the
+    body's own assignments (the alias could have been established right
+    before the statement that actually raised), not just the pre-``try``
+    state."""
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_sessions_actions.py",
+        "def f(self):\n"
+        "    try:\n"
+        "        marshal = self.app.call_from_thread\n"
+        "        risky()\n"
+        "    except Exception:\n"
+        "        marshal(fn)\n",
+    )
+    assert any("call_from_thread(" in p for p in guard.verify())
+
+
+def test_a_call_in_a_loop_else_is_flagged_for_an_alias_from_the_loop_body(repo):
+    """A loop's ``else`` clause is NOT mutually exclusive with its body --
+    it runs after the body (zero or more iterations) completes without a
+    ``break``, so an alias the body itself establishes must still be
+    visible when analyzing ``else``."""
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_worktree_actions.py",
+        "def f(self, items):\n"
+        "    for item in items:\n"
+        "        marshal = self.app.call_from_thread\n"
         "    else:\n"
         "        marshal(fn)\n",
     )
