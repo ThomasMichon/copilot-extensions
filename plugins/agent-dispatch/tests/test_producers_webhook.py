@@ -268,6 +268,19 @@ def test_issue_non_issue_body_skipped():
     assert r.json()["skipped"] == "not an issue event"
 
 
+@pytest.mark.parametrize("malformed_number", ["", False, True, 0, -1, {"n": 1}])
+def test_issue_malformed_number_is_not_a_500(malformed_number):
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {
+        **_CI_FAILURE_ISSUE,
+        "issue": {**_CI_FAILURE_ISSUE["issue"], "number": malformed_number},
+    }
+    r = tc.post("/webhook/issue", json=body)
+    assert r.status_code == 200
+    assert r.json()["skipped"] == "not an issue event"
+    assert sink == []
+
+
 def test_issue_malformed_repository_is_not_a_500():
     tc, sink = _client(_ISSUE_RULES_CONFIG)
     body = {**_CI_FAILURE_ISSUE, "repository": "not-an-object"}

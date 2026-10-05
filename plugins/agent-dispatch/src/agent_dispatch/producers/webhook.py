@@ -151,7 +151,11 @@ def extract_issue(payload: dict[str, Any]) -> dict[str, Any] | None:
     if not isinstance(issue, dict):
         return None
     number = issue.get("number")
-    if number is None:
+    # bool is an int subclass in Python -- exclude it explicitly, along
+    # with any non-positive or non-integer value, so a malformed delivery
+    # (e.g. {"number": ""}/False/an object) can't reach origin_ref/the
+    # dedup key as an ambiguous identity.
+    if isinstance(number, bool) or not isinstance(number, int) or number <= 0:
         return None
     repo = payload.get("repository")
     if not isinstance(repo, dict):
