@@ -636,9 +636,28 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
         _restrict_file_to_owner(staging_venv_dir)
         index_config_path: Path | None = None
         try:
-            venv_cmd = ["uv", "venv", "--no-config", str(staging_venv_dir)]
-            if python:
-                venv_cmd += ["--python", python]
+            # Always pass the ALREADY-RESOLVED `python_identity` here,
+            # never the caller's raw `python` selector text (and never
+            # omit it, regardless of whether `python` was given):
+            # `_resolve_interpreter_identity` and this venv creation are
+            # two SEPARATE `uv` invocations, and if PATH is reordered or
+            # a selector symlink is repointed between them, a selector
+            # like `python3` or `3.12` -- or even `uv`'s own unselected
+            # default resolution -- could resolve to a DIFFERENT
+            # interpreter here than the one just probed, silently
+            # creating a venv the recorded `python_identity` marker does
+            # not actually describe and defeating the provenance check
+            # the reuse decision above relies on. The resolved path is
+            # unambiguous: `uv venv --python <absolute path>` uses
+            # exactly that interpreter, with nothing left to re-resolve.
+            venv_cmd = [
+                "uv",
+                "venv",
+                "--no-config",
+                str(staging_venv_dir),
+                "--python",
+                python_identity,
+            ]
             result = subprocess.run(
                 venv_cmd, capture_output=True, text=True, env=sanitized_env
             )

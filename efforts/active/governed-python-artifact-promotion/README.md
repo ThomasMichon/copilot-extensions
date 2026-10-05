@@ -1265,11 +1265,13 @@ win grows with build complexity.
   scheme were removed entirely as no longer needed. Also added a
   dedicated, path-gated `windows-python-artifact-builder` CI job
   (`.github/workflows/ci.yml`) running just the 3 genuinely Windows-OS-
-  API-only tests (selected via a new `windows_only` pytest marker) that
-  the Ubuntu `guards + lint` job's own tests skip themselves out of --
-  those production paths had never actually executed in required CI at
-  all before this. Reworded the remaining review-round labels (round 19
-  through round 27) throughout `tools/test_build_python_artifacts.py`'s
+  API-only tests at the time (selected via a new `windows_only` pytest
+  marker; a 4th, the round-30 `LockFileEx` contention test, was added
+  later -- see below) that the Ubuntu `guards + lint` job's own tests
+  skip themselves out of -- those production paths had never actually
+  executed in required CI at all before this. Reworded the remaining
+  review-round labels (round 19 through round 27) throughout
+  `tools/test_build_python_artifacts.py`'s
   own comments to timeless technical descriptions, keeping this Journal
   as the sole place that retains the historical round-by-round mapping.
 
