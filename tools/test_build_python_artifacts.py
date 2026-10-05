@@ -1941,8 +1941,8 @@ def test_provenance_key_stale_lock_file_left_by_crashed_process_does_not_block(
 ):
     # Regression: a lock FILE left behind on disk by a crashed process
     # must not block a new caller -- `_provenance_key_lock` is OS-backed
-    # (a named Windows mutex / POSIX flock), which the OS itself releases
-    # the instant the owning process terminates for ANY reason, so a
+    # (a Windows byte-range file lock / POSIX flock), which the OS itself
+    # releases the instant the owning process terminates for ANY reason, so a
     # leftover file with no process actually still holding its OS-level
     # lock is harmless; nothing needs to inspect or remove it.
     key_dir = tmp_path / "key-dir"

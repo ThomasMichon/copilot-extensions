@@ -40,6 +40,11 @@ try:
 except ImportError:  # pragma: no cover - exercised only on Windows
     fcntl = None
 
+try:
+    import msvcrt
+except ImportError:  # pragma: no cover - exercised only on POSIX
+    msvcrt = None
+
 try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
     # 3.10 support floor -- mirrors uv_editable_ref's own identical fallback.
     import tomllib
@@ -477,10 +482,11 @@ _PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS = 10.0
 @contextmanager
 def _provenance_key_lock():
     """An OS-BACKED, genuinely exclusive lock serializing first-run
-    `_provenance_key` creation across concurrent callers -- a named
-    Windows mutex (`CreateMutexW`) or a POSIX `flock` advisory lock,
-    never a plain `O_CREAT | O_EXCL` lockfile plus a manual liveness/
-    staleness check.
+    `_provenance_key` creation across concurrent callers -- a Windows
+    byte-range file lock (`LockFileEx`, covers every Terminal Services
+    session for this account, not just the caller's own) or a POSIX
+    `flock` advisory lock, never a plain `O_CREAT | O_EXCL` lockfile plus
+    a manual liveness/staleness check.
 
     A manual scheme (read a recorded holder PID, check whether it's
     still alive, unlink-and-retry if not) is NOT atomic: two waiters can
@@ -500,48 +506,78 @@ def _provenance_key_lock():
     lock_path = _provenance_key_dir() / "provenance-key.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     if hasattr(ctypes, "windll"):
-        # A session-local named mutex, keyed off this machine's fixed
-        # provenance-key directory so every caller on this machine names
-        # the SAME mutex -- `CreateMutexW` both creates and opens an
-        # existing mutex of the same name, and the OS releases it
-        # automatically if the owning process terminates without an
-        # explicit `ReleaseMutex` (e.g. a crash). Branches on
-        # `hasattr(ctypes, "windll")` (whether this call would actually
-        # work) rather than `sys.platform == "win32"` -- a test can
-        # legitimately fake `sys.platform` to exercise unrelated Windows-
-        # shaped logic (e.g. `_restrict_file_to_owner`'s own icacls
-        # command construction) on a genuinely non-Windows interpreter,
-        # where `ctypes.windll` does not exist as an attribute at all;
-        # this function's own choice of lock primitive must depend on
-        # what is ACTUALLY callable, never on a value the surrounding
-        # test suite is free to spoof for other reasons.
-        mutex_name = (
-            "Local\\copilot-extensions-provenance-key-"
-            + hashlib.sha256(str(lock_path).encode("utf-8")).hexdigest()[:32]
-        )
-        handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
-        if not handle:
-            raise ArtifactBuildError(
-                "could not create the provenance-key OS mutex -- refusing "
-                "to proceed without a verified, agreed-upon key"
-            )
-        wait_result = ctypes.windll.kernel32.WaitForSingleObject(
-            handle, int(_PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS * 1000)
-        )
-        WAIT_OBJECT_0 = 0
-        WAIT_ABANDONED = 0x80
-        if wait_result not in (WAIT_OBJECT_0, WAIT_ABANDONED):
-            ctypes.windll.kernel32.CloseHandle(handle)
-            raise ArtifactBuildError(
-                f"{lock_path}: timed out waiting for another process to "
-                "finish publishing the provenance key -- refusing to "
-                "proceed without a verified, agreed-upon key"
-            )
+        # A byte-range file lock (`LockFileEx`) on the lock file itself,
+        # rather than a named kernel mutex: a named mutex in the `Local\`
+        # namespace is scoped to ONE Terminal Services session, so two
+        # processes for the SAME account running in DIFFERENT sessions
+        # (an interactive session and a scheduled-task/service session,
+        # for example) would each create and wait on a DIFFERENT mutex
+        # object and could enter this critical section concurrently --
+        # reintroducing exactly the race this lock exists to prevent. A
+        # `Global\` mutex would cover every session, but creating one
+        # safely also needs an explicit security descriptor (to stop an
+        # unrelated process from squatting or denying access to the
+        # name first) that a byte-range lock on the already per-user,
+        # already access-controlled lock FILE doesn't need: the file is
+        # visible host-wide regardless of session, inherits this
+        # function's own filesystem permissions, and the OS releases the
+        # lock automatically the instant the holding file handle closes
+        # for ANY reason, including a crash -- the same guarantee the
+        # `CreateMutexW` design offered, without its session-scoping gap.
+        # Branches on `hasattr(ctypes, "windll")` (whether this call
+        # would actually work) rather than `sys.platform == "win32"` -- a
+        # test can legitimately fake `sys.platform` to exercise unrelated
+        # Windows-shaped logic (e.g. `_restrict_file_to_owner`'s own
+        # icacls command construction) on a genuinely non-Windows
+        # interpreter, where `ctypes.windll` does not exist as an
+        # attribute at all; this function's own choice of lock primitive
+        # must depend on what is ACTUALLY callable, never on a value the
+        # surrounding test suite is free to spoof for other reasons.
+        class _Overlapped(ctypes.Structure):
+            _fields_ = [
+                ("Internal", ctypes.c_void_p),
+                ("InternalHigh", ctypes.c_void_p),
+                ("Offset", ctypes.c_uint32),
+                ("OffsetHigh", ctypes.c_uint32),
+                ("hEvent", ctypes.c_void_p),
+            ]
+
+        LOCKFILE_FAIL_IMMEDIATELY = 0x00000001
+        LOCKFILE_EXCLUSIVE_LOCK = 0x00000002
+        ALL_BYTES = 0xFFFFFFFF
+
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+        handle = msvcrt.get_osfhandle(fd)
+        overlapped = _Overlapped()
+        deadline = time.monotonic() + _PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS
         try:
-            yield
+            while True:
+                acquired = ctypes.windll.kernel32.LockFileEx(
+                    handle,
+                    LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+                    0,
+                    ALL_BYTES,
+                    ALL_BYTES,
+                    ctypes.byref(overlapped),
+                )
+                if acquired:
+                    break
+                if time.monotonic() > deadline:
+                    raise ArtifactBuildError(
+                        f"{lock_path}: timed out waiting for another "
+                        "process to finish publishing the provenance "
+                        "key -- refusing to proceed without a verified, "
+                        "agreed-upon key"
+                    )
+                time.sleep(0.05)
+            try:
+                yield
+            finally:
+                ctypes.windll.kernel32.UnlockFileEx(
+                    handle, 0, ALL_BYTES, ALL_BYTES, ctypes.byref(overlapped)
+                )
         finally:
-            ctypes.windll.kernel32.ReleaseMutex(handle)
-            ctypes.windll.kernel32.CloseHandle(handle)
+            os.close(fd)
     elif fcntl is not None:
         fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
         deadline = time.monotonic() + _PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS
