@@ -903,9 +903,27 @@ def _embed_and_store_batch(
                 )
                 raise
             except Exception:
-                logger.warning(
-                    "Failed to embed batch with model '%s'", model_id,
+                # ANY other embed/upsert failure must ALSO fail loud, for the
+                # exact same #775 reason the EngineUnavailableError branch
+                # above already covers: upsert_content() ran earlier in this
+                # loop iteration and already persisted this batch's chunks, so
+                # silently continuing here leaves them stored WITHOUT their
+                # vector -- permanently invisible to semantic search, with the
+                # task still reporting a clean "complete". This previously
+                # only logged a warning and moved on, which is exactly how a
+                # real host accumulated chunks across MULTIPLE sources with
+                # silently-missing vectors once the embedding engine started
+                # returning HTTP 500s (httpx.HTTPStatusError, NOT
+                # EngineUnavailableError, which only covers connection-level
+                # unreachability -- a since-fixed transformers version-pin
+                # typo, copilot-extensions#114) while every affected reindex
+                # task still reported success.
+                logger.error(
+                    "Failed to embed batch with model '%s'; failing the "
+                    "source so %d chunks are retried, not silently stored "
+                    "without vectors", model_id, len(model_chunks),
                     exc_info=True,
                 )
+                raise
 
     return total
