@@ -32,7 +32,7 @@ class OrphanageScreen(ModalScreen[None]):
     exactly that reason."""
 
     CSS = """
-    OrphanageScreen { align: center middle; background: $background; }
+    OrphanageScreen { align: center middle; background: $background 55%; }
     OrphanageScreen > #orphanage-frame {
         width: 92; height: auto; max-height: 90%;
         border: round #ffaf00; background: $surface; padding: 1 2;

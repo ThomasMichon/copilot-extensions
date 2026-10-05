@@ -2225,3 +2225,38 @@ effort.
 Both Validation Plan items are now fully checked. Phase A and Phase B are
 both code-complete, merged, and validated live end-to-end. **This effort
 is Done** -- no further Plan or Validation Plan work remains.
+
+### 2026-10-05 — Opaque modal backdrops reverted to translucent (operator decision, from `picker-performance-and-responsiveness`)
+
+The operator, working the separate `picker-performance-and-responsiveness`
+effort (Phase 0's render-thread-blocking fix + Phase 4's marketplace-
+reparse fix), asked to restore "showing main screen contents behind
+dialogs" now that those two root causes are fixed. Reverted all 18
+current `ModalScreen` CSS declarations (the original 17 this effort's
+2026-10-03 entry converted, plus `OrphanageScreen` -- added later via
+`#5247`, after the opaque conversion, and had simply copied the by-then-
+established opaque convention) from `background: $background;` back to
+`background: $background 55%;` across `create_action_screen.py`,
+`engine_dialogs.py` (8 screens), `engine_legend.py`, `engine_live_screens.py`
+(3 screens), `orphanage.py`, `steering.py` (3 screens), and
+`steering_form.py`. Full `test_picker_tui.py` suite re-run: 293 passed,
+unchanged (this is a CSS-only change with no behavioral surface the
+existing tests didn't already cover, same as the original opaque
+conversion's own reasoning).
+
+**This is a conscious trade-off, not a claim the original finding was
+wrong.** The ~15-20% per-keystroke render-cost measured above (full
+compositor recomposite for a translucent screen, vs. cheap incremental
+chops for an opaque one) is still real and still applies -- neither Phase 0
+(a render-thread-blocking *subprocess call*, unrelated to compositing) nor
+Phase 4 (plugin/marketplace-resolution cost, paid once at boot, not per
+keystroke) touches this specific Textual compositing behavior at all.
+What changed is the *decision*, not the *physics*: with the baseline
+`~66ms/keystroke` this effort's own harness measured for the translucent
+case still comfortably under the `responsive-by-budget` vision's `<~100ms`
+keypress bar, the operator chose the visual nicety over the marginal
+(and, post-Phase-0/4, less consequential) render-cost reduction. A future
+session reintroducing the opaque style for a *different* measured reason
+should not treat this reversal as settling the question permanently either
+way -- re-measure for the actual conditions at hand rather than assuming
+either direction from history alone.

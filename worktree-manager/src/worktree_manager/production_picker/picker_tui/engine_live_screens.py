@@ -46,7 +46,7 @@ class ProgressScreen(ModalScreen[None]):
     """
 
     CSS = """
-    ProgressScreen { align: center middle; background: $background; }
+    ProgressScreen { align: center middle; background: $background 55%; }
     ProgressScreen > #progress { width: auto; height: auto; max-height: 90%; }
     """
 
@@ -232,7 +232,7 @@ class MsgViewScreen(ModalScreen[None]):
     """
 
     CSS = """
-    MsgViewScreen { align: center middle; background: $background; }
+    MsgViewScreen { align: center middle; background: $background 55%; }
     MsgViewScreen > #msgview { width: auto; height: auto; max-height: 90%; }
     """
 
@@ -377,7 +377,7 @@ class SessionsViewScreen(ModalScreen[None]):
     """
 
     CSS = """
-    SessionsViewScreen { align: center middle; background: $background; }
+    SessionsViewScreen { align: center middle; background: $background 55%; }
     SessionsViewScreen > #sessionsview { width: auto; height: auto; max-height: 90%; }
     """
 
