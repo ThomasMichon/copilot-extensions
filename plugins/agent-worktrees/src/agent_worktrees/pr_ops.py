@@ -932,12 +932,15 @@ def create_pr(
         # rewrite those published commits before the later force-with-lease
         # push, defeating the ordinary incremental-update contract (#5300).
         # Keep the PR's existing base for patch-id continuity when we already
-        # know it; otherwise the downstream patch-id simply degrades to the
-        # current full HEAD diff.
+        # know it; otherwise derive a non-rewriting merge-base fallback.
         base_sha = (
             (target_pr.base_sha if target_pr is not None else "")
             or (active.base_sha if active is not None else "")
         )
+        if not base_sha and git_ops.ref_exists(upstream, cwd=worktree_path):
+            base_sha = git_ops.git(
+                "merge-base", upstream, "HEAD", cwd=worktree_path, check=False
+            ).stdout.strip()
     elif git_ops.ref_exists(upstream, cwd=worktree_path):
         # Fresh PR publish: rebase the worktree commits onto the upstream
         # default branch FIRST, with the individual commits intact, so git can
@@ -1127,10 +1130,10 @@ def create_pr(
         result["pr_head"] = f"{fork_owner}:{feature_branch}"
     if reusing:
         # This call iterated an existing *live* PR head rather than opening a
-        # fresh one -- after rebasing it forward, but WITHOUT re-squashing its
-        # already-pushed history -- so callers can distinguish the idempotent
-        # update path from a newly-opened PR. Mirrors the fast-path re-run
-        # signal in ``_push_existing_feature``.
+        # fresh one -- preserving its already-pushed history rather than
+        # re-squashing or rebasing that published tip -- so callers can
+        # distinguish the idempotent update path from a newly-opened PR.
+        # Mirrors the fast-path re-run signal in ``_push_existing_feature``.
         result["rerun"] = True
 
     # 8. Auto-open the PR via the configured provider plugin (Phase 2/3):

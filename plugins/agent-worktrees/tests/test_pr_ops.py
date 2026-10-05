@@ -563,6 +563,28 @@ class TestCreatePR:
         ).splitlines()
         assert subjects == ["address feedback 2", "address feedback 1", "Add feature"]
 
+    def test_reused_open_pr_with_empty_base_sha_still_records_patch_id(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        first = pr_ops.create_pr(wid, config, title="Add feature")
+        assert first["success"], first
+
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.pr.base_sha = ""
+        tracking.save_record(rec)
+
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        rerun = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert rerun["success"] is True, rerun
+        assert rerun["rerun"] is True
+        assert rerun["patch_id"]
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.pr.patch_id
+
     def test_branch_collision_error_suggests_explicit_distinguishing_suffix(self, pr_repo):
         config, wid, wt_path, _ = pr_repo
         _git("branch", "feature/add-feature-aaaa", cwd=wt_path)
