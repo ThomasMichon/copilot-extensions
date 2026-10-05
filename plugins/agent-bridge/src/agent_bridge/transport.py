@@ -1195,18 +1195,33 @@ async def spawn(
     return await spawn_local(target, tracker=tracker, session_id=session_id)
 
 
+_AGENT_CONTAINERS_PROVIDER = "agent-containers"
+
+
+def _is_agent_containers_target(target: SpawnTarget) -> bool:
+    """Whether ``target`` is an ``agent-containers``-backed command target.
+
+    Trusted fleets carry ``target.container`` metadata directly; restricted
+    fleets reach ``spawn_raw`` the same way but deliberately omit it,
+    identifying themselves only via ``venue.provider`` instead -- so both
+    must be checked (``agent_containers.resolver.ContainerResolver
+    .resolve_spec``, the ``if not restricted:`` branch around ``spec
+    ["container"]``).
+    """
+    if target.container is not None:
+        return True
+    venue = target.venue if isinstance(target.venue, dict) else {}
+    return venue.get("provider") == _AGENT_CONTAINERS_PROVIDER
+
+
 async def spawn_raw(
     target: SpawnTarget,
     *,
     tracker: ConnectTracker | None = None,
     session_id: str = "",
 ) -> AgentProcess:
-    """Spawn an ACP agent via a raw command.
-
-    Used for provider agents that handle their own transport (e.g.
-    agent-codespaces wraps SSH connection and copilot launch internally).
-    The command is expected to speak ACP protocol on stdin/stdout.
-    """
+    """Spawn an ACP agent via a raw command (provider agents that handle
+    their own transport, e.g. agent-codespaces wraps SSH + copilot launch)."""
     if not target.spawn_command:
         raise ValueError("Command target requires spawn_command")
 
@@ -1239,6 +1254,15 @@ async def spawn_raw(
     env.update(target.env)
 
     spawn_command = _reresolve_stale_interpreter(list(target.spawn_command))
+    if _is_agent_containers_target(target) and target.copilot_args:
+        # Forwarded via env, not trailing argv: on Windows the wrapper is
+        # often a `.cmd` shim that `_wrap_batch_for_windows` below routes
+        # through `cmd.exe`, which reparses metacharacters in argv but
+        # passes the environment block through untouched -- so this is the
+        # only reparsing-safe channel regardless of which binstub a given
+        # install resolves to. `agent-containers exec`'s own CLI reads this
+        # var (see AGENT_CONTAINERS_EXEC_COPILOT_ARGS in its resolver.py).
+        env["AGENT_CONTAINERS_EXEC_COPILOT_ARGS"] = json.dumps(target.copilot_args)
     args = _wrap_batch_for_windows(spawn_command, env)
     log.info("Spawning command agent: %s", " ".join(args))
 

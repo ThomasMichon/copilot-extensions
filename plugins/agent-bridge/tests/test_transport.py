@@ -1195,6 +1195,96 @@ class TestSpawnRaw:
         with pytest.raises(ValueError, match="spawn_command"):
             await spawn_raw(target)
 
+    @pytest.mark.asyncio
+    async def test_spawn_raw_sets_copilot_args_env_for_container_target(self):
+        """A container-backed target's copilot_args (e.g. a charter overlay,
+        ``--agent <charter>``) must reach the launched ``agent-containers
+        exec`` invocation via the ``AGENT_CONTAINERS_EXEC_COPILOT_ARGS`` env
+        var, never trailing argv -- unlike the local/SSH spawn paths, which
+        append copilot_args directly onto the launched ``copilot`` command,
+        a container target's spawn_command is itself a wrapper binstub that
+        can be a Windows ``.cmd`` shim routed through ``cmd.exe``, which
+        reparses argv metacharacters but passes the environment through
+        untouched."""
+        target = SpawnTarget(
+            type="command",
+            spawn_command=["agent-containers", "exec", "--stdio", "myfleet-1"],
+            copilot_args=["--agent", "some-charter"],
+            container={"name": "myfleet-1"},
+        )
+        with patch("agent_bridge.transport.asyncio") as mock_asyncio, \
+             patch("agent_bridge.transport._wrap_batch_for_windows") as mock_wrap, \
+             patch("agent_bridge.transport._creation_flags", return_value=0):
+            mock_proc = MagicMock()
+            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_proc)
+            mock_asyncio.subprocess = asyncio.subprocess
+            mock_wrap.side_effect = lambda cmd, env: cmd
+
+            await spawn_raw(target)
+
+            call_args = mock_asyncio.create_subprocess_exec.call_args
+            assert call_args[0] == ("agent-containers", "exec", "--stdio", "myfleet-1")
+            assert json.loads(
+                call_args[1]["env"]["AGENT_CONTAINERS_EXEC_COPILOT_ARGS"]
+            ) == ["--agent", "some-charter"]
+
+    @pytest.mark.asyncio
+    async def test_spawn_raw_sets_copilot_args_env_for_restricted_container_target(
+        self,
+    ):
+        """A restricted-fleet container target carries no ``target.container``
+        metadata at all (``ContainerResolver.resolve_spec`` deliberately omits
+        it for restricted fleets) -- it is identified only via
+        ``venue.provider`` instead, so that must also trigger the env-var
+        forwarding, not just ``target.container is not None``."""
+        target = SpawnTarget(
+            type="command",
+            spawn_command=["agent-containers", "exec", "--stdio", "myfleet-1"],
+            copilot_args=["--agent", "some-charter"],
+            venue={"provider": "agent-containers", "kind": "container"},
+        )
+        with patch("agent_bridge.transport.asyncio") as mock_asyncio, \
+             patch("agent_bridge.transport._wrap_batch_for_windows") as mock_wrap, \
+             patch("agent_bridge.transport._creation_flags", return_value=0):
+            mock_proc = MagicMock()
+            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_proc)
+            mock_asyncio.subprocess = asyncio.subprocess
+            mock_wrap.side_effect = lambda cmd, env: cmd
+
+            await spawn_raw(target)
+
+            call_args = mock_asyncio.create_subprocess_exec.call_args
+            assert json.loads(
+                call_args[1]["env"]["AGENT_CONTAINERS_EXEC_COPILOT_ARGS"]
+            ) == ["--agent", "some-charter"]
+
+    @pytest.mark.asyncio
+    async def test_spawn_raw_does_not_set_copilot_args_env_for_non_container_command(
+        self,
+    ):
+        """A codespace (or other non-agent-containers) command target's own
+        spawn wrapper is not assumed to understand this env var -- it is only
+        set for a target carrying agent-containers transport metadata, never
+        generically for every command target."""
+        target = SpawnTarget(
+            type="command",
+            spawn_command=["agent-codespaces", "ssh", "--stdio", "my-cs"],
+            copilot_args=["--agent", "some-charter"],
+        )
+        with patch("agent_bridge.transport.asyncio") as mock_asyncio, \
+             patch("agent_bridge.transport._wrap_batch_for_windows") as mock_wrap, \
+             patch("agent_bridge.transport._creation_flags", return_value=0):
+            mock_proc = MagicMock()
+            mock_asyncio.create_subprocess_exec = AsyncMock(return_value=mock_proc)
+            mock_asyncio.subprocess = asyncio.subprocess
+            mock_wrap.side_effect = lambda cmd, env: cmd
+
+            await spawn_raw(target)
+
+            call_args = mock_asyncio.create_subprocess_exec.call_args
+            assert call_args[0] == ("agent-codespaces", "ssh", "--stdio", "my-cs")
+            assert "AGENT_CONTAINERS_EXEC_COPILOT_ARGS" not in call_args[1]["env"]
+
 
 class TestSpawnDispatchCommand:
     """Tests for spawn() dispatching to spawn_raw for command targets."""
