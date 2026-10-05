@@ -13,6 +13,35 @@ from collections.abc import Iterator
 _JSON_SCHEMA_VERSION = 1
 
 
+def write_real_stdout(payload: str) -> None:
+    """Write *payload* once to the real stdout, never replaying on failure.
+
+    :func:`capture_json_output` swaps ``sys.__stdout__`` for an in-memory
+    :class:`io.StringIO`; write straight to that (no OS handle involved, so
+    nothing can be partially delivered). Otherwise write directly to the
+    real OS fd 1 -- bypassing ``sys.__stdout__``'s buffered TextIOWrapper
+    (and its separate ``flush()`` step) entirely, so a transient console/
+    handle fault (observed on Windows as ``OSError`` 22) can never leave an
+    indeterminate amount already delivered that a retry would then
+    duplicate. A write failure here is unrecoverable; report it clearly
+    instead of an unhandled traceback.
+    """
+    stream = sys.__stdout__
+    if isinstance(stream, io.StringIO):
+        stream.write(payload)
+        return
+    try:
+        os.write(1, payload.encode("utf-8", errors="replace"))
+    except OSError as exc:
+        print(
+            f"agent-worktrees: could not write to stdout ({exc}). This "
+            "terminal's stdout handle appears to be broken; close it and "
+            "retry in a fresh terminal.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
+
+
 def _json_output(data: dict) -> None:
     """Write a versioned JSON envelope to the real stdout.
 
@@ -20,8 +49,7 @@ def _json_output(data: dict) -> None:
     :func:`stdout_to_stderr` blocks.
     """
     envelope = {"version": _JSON_SCHEMA_VERSION, **data}
-    sys.__stdout__.write(json.dumps(envelope, indent=2) + "\n")
-    sys.__stdout__.flush()
+    write_real_stdout(json.dumps(envelope, indent=2) + "\n")
 
 
 def _json_error(message: str, exit_code: int = 1) -> int:

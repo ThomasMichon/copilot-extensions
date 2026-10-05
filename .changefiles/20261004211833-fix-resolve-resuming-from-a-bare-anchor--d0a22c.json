@@ -1,0 +1,9 @@
+{
+  "comment": "Fix resolve resuming from a bare anchor checkout ('Could not resolve the current repo') and an unhandled OSError crash in resolve's final stdout plan write when the terminal's stdout handle is broken",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
