@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 
 from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_loader, target_rows
+from .inbox import ensure_inbox
 from .selection import ListSelection
 from .. import update_stage
 
@@ -289,7 +290,21 @@ class PickerScreenRuntimeMixin:
                     rt.repoll(scope)
             except Exception:
                 continue
+    def on_inbox_updated(self, message) -> None:
+        """Wake from ``self.inbox.post(...)``. Draining here (not just on
+        the next ``_tick``) gives a background producer's outcome prompt
+        effect even if the screen's own tick were ever slowed/paused; the
+        tick below drains too, so applying twice for the same batch is a
+        guaranteed-safe no-op (``Inbox.drain`` empties what it returns)."""
+        message.stop()
+        self._drain_inbox()
+    def _drain_inbox(self) -> int:
+        """Apply every closure posted to ``self.inbox`` since the last
+        drain. The sole place that turns a background producer's posted
+        outcome into actual widget/state mutation -- see inbox.py."""
+        return self.inbox.drain_apply()
     def _tick(self):
+        self._drain_inbox()
         self.frame += 1
         if self._frame_health is not None:
             self._frame_health.tick(
@@ -676,6 +691,10 @@ class PickerScreenRuntimeMixin:
         self._prime_setup_reload()
         epoch = self._next_setup_epoch()
         cancel = self._bg_cancel
+        # A minimal test double that never ran PickerScreen.__init__ still
+        # gets a working Inbox here, lazily -- resolved on this (the calling)
+        # thread, before the worker below ever touches it.
+        inbox = ensure_inbox(self)
         app_lookup_error: Exception | None = None
         try:
             app = self.app
@@ -740,16 +759,26 @@ class PickerScreenRuntimeMixin:
                     ),
                 )
                 return
-            try:
-                app.call_from_thread(_apply)
-            except Exception as exc:
-                # Same silent-drop gap as above, for the OTHER failure mode:
-                # `call_from_thread` itself raising -- most commonly the
-                # App's event loop not running, or already stopped/
-                # shutting down (#5220). Record the real exception instead
-                # of a generic downstream timeout.
+            if not inbox.post(f"setup-reload:{epoch}", _apply):
+                # The outcome is still sitting in the inbox (never lost),
+                # but nothing is guaranteed to ever drain it if waking the
+                # render flow itself failed (#5220's other traced failure
+                # mode: the App's event loop not running, or already
+                # stopped/shutting down). A poller elsewhere (capture.py's
+                # `_wait_for_initial_setup`) must see the real cause
+                # instead of spinning until its own unrelated timeout, so
+                # this records a diagnosed failure directly -- the same
+                # narrow, already-established off-thread-mutation exception
+                # as the "app is None" branch above, for the same reason:
+                # there is nothing else to hand this outcome to.
                 self._dispose_setup_payload(self._release_setup_payload(epoch))
-                self._apply_setup_failure(epoch, exc)
+                self._apply_setup_failure(
+                    epoch,
+                    RuntimeError(
+                        "could not wake the render flow to apply this "
+                        "setup/reload payload"
+                    ),
+                )
 
         threading.Thread(
             target=_worker, name=f"picker-setup-reload:{epoch}", daemon=True

@@ -1,0 +1,9 @@
+{
+  "comment": "Picker: add an addressed Inbox primitive as the sole sanctioned cross-thread UI-update marshalling path, migrate _run_bg/_apply_from_worker/the setup-reload worker onto it, and add a static guard against raw call_from_thread usage",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -273,12 +273,19 @@ class PickerScreenLoadingMixin:
 
         self._apply_from_worker(apply)
     def _apply_from_worker(self, callback):
-        """Apply on Textual's thread; inline only for direct main-thread tests."""
-        try:
-            self.app.call_from_thread(callback)
-        except Exception:
-            if threading.current_thread() is threading.main_thread():
-                callback()
+        """Apply *callback* on the render thread via its ``Inbox`` -- the
+        sole sanctioned marshalling path (see inbox.py). Safe to call from
+        ANY thread, including the render thread itself (a direct-main-thread
+        test): ``Inbox.post`` -> ``MessagePump.post_message`` never raises on
+        the caller's own identity, unlike ``app.call_from_thread`` -- and
+        posting from the inbox's own home thread applies immediately rather
+        than waiting on a wake that, with no event loop running yet, might
+        never come."""
+        import uuid
+
+        from .inbox import ensure_inbox
+
+        ensure_inbox(self).post(f"worker-apply:{uuid.uuid4().hex}", callback)
     def _prepare_live_source(self, snapshot):
         """Resolve source/config-derived values on the setup worker."""
         source_tabs = getattr(self.src, "source_tabs", None)

@@ -218,6 +218,16 @@ class _SetupRaceScreen(
     def _pivot_machine_id(self):
         return "host"
 
+    def post_message(self, message):
+        """Mirrors ``_ImmediateApp.call_from_thread``'s old intent: apply
+        deterministically/immediately regardless of which thread posted,
+        so this race-condition fixture stays synchronous and assertion-
+        friendly without a real Textual App/event loop running."""
+        from worktree_manager.production_picker.picker_tui.inbox import ensure_inbox
+
+        ensure_inbox(self).drain_apply()
+        return True
+
 
 def _install_setup_race(screen, *, first_tag: str, second_tag: str) -> dict[str, object]:
     first_release = threading.Event()
@@ -250,13 +260,14 @@ def _install_setup_race(screen, *, first_tag: str, second_tag: str) -> dict[str,
     }
 
 
-def test_setup_reload_records_a_diagnosed_failure_when_marshal_back_to_ui_fails():
-    """#5220: when ``call_from_thread`` itself raises (most commonly the
-    App's event loop not running, or already stopped/shutting down), the
-    collected payload must not be silently dropped -- a diagnosed failure
-    (the real exception) must land in ``_setup_failed_epoch`` so a poller
-    (capture.py's ``_wait_for_initial_setup``) sees the actual cause instead
-    of spinning until its own unrelated timeout.
+def test_setup_reload_records_a_diagnosed_failure_when_waking_the_render_flow_fails():
+    """#5220: when waking the render flow to apply the collected payload
+    fails (most commonly the App's event loop not running, or already
+    stopped/shutting down -- here simulated by a screen with no working
+    ``post_message`` at all), the collected payload must not be silently
+    dropped -- a diagnosed failure must land in ``_setup_failed_epoch`` so a
+    poller (capture.py's ``_wait_for_initial_setup``) sees the actual cause
+    instead of spinning until its own unrelated timeout.
     """
     disposed = threading.Event()
     failed = threading.Event()
@@ -313,7 +324,7 @@ def test_setup_reload_records_a_diagnosed_failure_when_marshal_back_to_ui_fails(
     assert len(screen.failures) == 1
     failed_epoch, err = screen.failures[0]
     assert failed_epoch == epoch
-    assert "app already exited" in str(err)
+    assert "could not wake the render flow" in str(err)
 
 
 def test_setup_reload_records_a_diagnosed_failure_when_app_is_unresolvable():
@@ -407,6 +418,15 @@ def test_setup_reload_unmount_disposes_payload_if_marshalled_callback_never_runs
             self._pivot_runtimes = {}
             self.applied = []
 
+        def post_message(self, message):
+            """Mirrors the old fake ``_App.call_from_thread``'s intent: the
+            outcome is scheduled (signalling ``marshalled``) but -- unlike
+            ``_SetupRaceScreen``'s fixture -- deliberately never actually
+            drained/applied, so ``on_unmount``'s own payload disposal (not
+            the ``_apply`` closure itself) is what this test exercises."""
+            marshalled.set()
+            return True
+
         def _prime_setup_reload(self):
             return None
 
@@ -462,6 +482,23 @@ def test_setup_reload_disposes_payload_when_apply_raises():
             self._setup_failed_epoch = 0
             self._pending_setup_payloads = {}
             self._setup_payloads_lock = threading.Lock()
+
+        def post_message(self, message):
+            """Mirrors the old fake ``_App.call_from_thread``: drains and
+            applies immediately, swallowing the ``RuntimeError`` ``_apply``
+            itself re-raises after disposing the payload -- this is NOT a
+            wake failure (so it must never trip the new "could not wake"
+            fallback in ``_start_setup_reload_worker``), it's the
+            already-handled "apply itself raised" path."""
+            from worktree_manager.production_picker.picker_tui.inbox import (
+                ensure_inbox,
+            )
+
+            try:
+                ensure_inbox(self).drain_apply()
+            except RuntimeError:
+                raised.set()
+            return True
 
         def _prime_setup_reload(self):
             return None

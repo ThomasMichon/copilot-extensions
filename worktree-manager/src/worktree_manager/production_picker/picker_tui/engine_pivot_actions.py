@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
-import threading
 
 from .engine_dialogs import CfgMenuScreen, ScopeDlgScreen, TaskMenuScreen
 from .create_action_screen import CreateActionScreen
+from .background import run_background
+from .inbox import ensure_inbox
 from .steering import PivotCardScreen, PivotFormScreen, SubmitErrorScreen, _normalize_form_fields, _steer_draft_path
 
 log = logging.getLogger("agent-worktrees.picker")
@@ -144,12 +145,11 @@ class PickerScreenPivotActionsMixin:
         Every pivot/worktree/config action shells out (agent-dispatch, git,
         ssh, ...); running that inline in the key/modal-dismiss handler
         blocked the event loop for up to the action timeout (30s), freezing
-        the TUI and reading as a crash. Here ``work()`` runs on a daemon
-        thread, and ``done(result)`` (UI updates) is marshalled back onto
-        the event loop via Textual's ``call_from_thread`` -- so the render
-        flow is never blocked and no widget is mutated off-thread. A
-        worker exception surfaces on the status line instead of killing
-        the thread. Returns immediately.
+        the TUI and reading as a crash. A thin, signature-preserving wrapper
+        around ``background.run_background`` -- the one sanctioned
+        implementation of "thread + marshal the outcome back via the inbox"
+        (see inbox.py/background.py); no caller of ``_run_bg`` needs to
+        change. Returns immediately.
 
         While it runs, the footer shows the shared animated spinner +
         ``label`` (via ``_busy_label``). Pass ``quiet=True`` when a
@@ -159,91 +159,31 @@ class PickerScreenPivotActionsMixin:
 
         The worker is tracked on ``self._bg_threads`` and honors
         ``self._bg_cancel``, set by ``on_unmount`` when the picker is torn
-        down. A worker still running then drops its outcome quietly once
-        ``work()`` returns, instead of racing ``call_from_thread`` against
-        an app that may already be gone."""
-        if not quiet:
-            self._busy_label = label
+        down."""
+        def _set_busy_label(value):
+            self._busy_label = value
 
-        # Resolve the App while this screen is still attached. The worker may
-        # outlive picker exit, when MessagePump.app can no longer walk to it.
-        app = self.app
-        cancel = self._bg_cancel
+        def _set_debug(value):
+            self.debug = value
 
-        def _worker():
-            try:
-                result, err = work(), None
-            except Exception as exc:  # a worker thread must never die silently
-                result, err = None, exc
+        # A minimal test double that never ran PickerScreen.__init__ (and so
+        # never got an Inbox) still gets a working one here, lazily --
+        # _run_bg's own contract (never requiring a widget's real __init__)
+        # must not regress just because the marshalling mechanism changed.
+        inbox = ensure_inbox(self)
 
-            if cancel.is_set():
-                # The picker tore down (a launch decision, cancel, or quit)
-                # while this worker's blocking work() was still in flight --
-                # ``on_unmount`` already set ``_bg_cancel`` for exactly this
-                # case. There is no UI left to marshal onto and this is an
-                # expected, intentional exit rather than an unforeseen
-                # failure, so drop the outcome quietly (debug only, no
-                # traceback) instead of racing ``app.call_from_thread`` and
-                # logging it as a warning.
-                log.debug(
-                    "pivot action %r: picker exited while this worker was "
-                    "still running; dropping its outcome (err=%r)",
-                    label, err,
-                )
-                return
-
-            def _apply():
-                if not quiet:
-                    self._busy_label = None
-                if err is not None:
-                    if quiet:
-                        if done is not None:
-                            try:
-                                done(None)
-                            except Exception:
-                                pass
-                    else:
-                        detail = str(err).strip()
-                        detail = detail.splitlines()[0] if detail else type(err).__name__
-                        self.debug = f"{label} failed · {detail[:80]}"
-                elif done is not None:
-                    try:
-                        done(result)
-                    except Exception as exc:
-                        self.debug = f"{label} · applied with error: {str(exc)[:60]}"
-
-            try:
-                app.call_from_thread(_apply)
-            except Exception:
-                # marshalling back onto the event loop itself failed for a
-                # reason OTHER than the expected/cancelled exit handled above
-                # (e.g. the screen itself is gone but the app is still up) --
-                # that outcome is otherwise lost with **no** operator-visible
-                # signal at all: a steer submission (or any other action) can
-                # genuinely succeed or fail off-thread while the operator sees
-                # nothing change and reasonably assumes it worked. Log it so
-                # this class of silent drop is at least diagnosable after the
-                # fact, even though the status line itself is unreachable at
-                # this point.
-                log.warning(
-                    "pivot action %r: could not marshal its outcome back to "
-                    "the UI (app.call_from_thread failed); the action itself "
-                    "may have already run to completion with err=%r",
-                    label, err, exc_info=True,
-                )
-
-        def _tracked_worker():
-            thread = threading.current_thread()
-            try:
-                _worker()
-            finally:
-                self._bg_threads.discard(thread)
-
-        thread = threading.Thread(
-            target=_tracked_worker, name=f"pivot-action:{label}", daemon=True
+        run_background(
+            inbox=inbox,
+            bg_threads=self._bg_threads,
+            cancel=self._bg_cancel,
+            label=label,
+            work=work,
+            done=done,
+            quiet=quiet,
+            set_busy_label=_set_busy_label,
+            set_debug=_set_debug,
+            thread_name_prefix="pivot-action",
         )
-        self._bg_threads.add(thread)
-        thread.start()
     def _run_task_action(self, reg, action, rec):
         """Execute one task action, then invalidate the cached list so the row
         reflects the new state on the next fetch. An INTERNAL (navigation) action

@@ -279,8 +279,9 @@ Never block, and never leave a control that looks like it did nothing.
   **config** sections (`_run_config_section`) -- hands the blocking call to
   **`PickerScreen._run_bg(label, work, done, *, quiet=False)`**. `work()` runs on a
   daemon worker thread; the UI update `done(result)` is marshalled back onto the
-  event loop via Textual **`call_from_thread`** (so no widget is mutated
-  off-thread). The handler returns instantly; while it runs the **footer shows the
+  event loop via the screen's **`Inbox`** (`inbox.py`), never a raw
+  `app.call_from_thread` (see "The Inbox: the one sanctioned marshalling path"
+  below). The handler returns instantly; while it runs the **footer shows the
   shared animated spinner** (`SPINNER` braille, driven by `frame`) + the action
   label via `_busy_label` -- never a static line, so no action looks inert. Pass
   `quiet=True` when a *different* surface already shows the load state (see below).
@@ -308,13 +309,85 @@ Never block, and never leave a control that looks like it did nothing.
 
 **Enforcement / when you add a feature.** Any new key handler, action, or
 menu-open that reaches a subprocess or blocking IO must go through `_run_bg` (or a
-dedicated daemon worker), never call it inline -- and any load-gated *component*
-should open-first + spinner + refine rather than wait. Two regression tests gate a
-runtime/probe that blocks on an `Event`:
+dedicated daemon worker via `background.run_background`), never call it inline --
+and any load-gated *component* should open-first + spinner + refine rather than
+wait. Two regression tests gate a runtime/probe that blocks on an `Event`:
 `test_steer_submit_is_offloaded_off_the_render_flow` (Confirm returns without running
 the submit inline) and `test_actions_menu_liveness_verify_is_offloaded` (the Actions
 menu is open + `loading` immediately, then refines in place when the gate releases).
 If you add a blocking edge, add the equivalent offload + assertion.
+
+### The Inbox: the one sanctioned marshalling path
+
+Before `inbox.py` existed, two independent, hand-rolled marshalling
+mechanisms coexisted in the Picker: the data-plane's `LiveLoader.records()`
+snapshot pull (above), and a push-based `_run_bg`/`app.call_from_thread`
+pattern that several call sites (`_run_bg`, `_apply_from_worker`, the
+setup-reload worker, ...) each reimplemented slightly differently --
+subtly different thread-safety, error-handling, and cancellation bookkeeping
+in each. Textual gives no forced single-threaded runtime guarantee and no
+guaranteed non-blocking IO of its own; nothing prevented a new push-based
+call site from hand-rolling its own variant, each a fresh place to get it
+wrong (see the `#5220` setup-reload diagnosability bug for a concrete
+instance).
+
+**`Inbox` (`picker_tui/inbox.py`) is now the only sanctioned way for a
+background thread to hand a UI update back to the render flow.** Any
+producer that spawns a thread or otherwise runs off the event-loop thread
+must address its result into a named slot -- `inbox.post(slot, value)` --
+never call `app.call_from_thread` (or hand-roll an equivalent wake) itself.
+The owning `PickerScreen` drains its `Inbox` once per render opportunity
+(`_tick`, and immediately on the `InboxUpdated` message the first post in a
+batch queues) and applies everything pending in **one batched pass** --
+multiple posts to the same slot between two drains coalesce to the single
+latest value, so a fast-moving producer never queues one apply per post.
+
+- **Why `post_message`, not `call_from_thread`.** Textual's own
+  `App.call_from_thread` *raises* `RuntimeError` when called from the app's
+  own event-loop thread (or before the app is running) -- a real footgun for
+  a primitive meant to be callable from anywhere, including synchronously
+  from a producer that sometimes short-circuits inline, or a unit test with
+  no running event loop at all. `MessagePump.post_message` is
+  unconditionally thread-safe and never raises on the caller's thread
+  identity, which is why `Inbox` uses it as its wake mechanism instead.
+- **The home-thread shortcut.** `Inbox` remembers the thread that
+  constructed it (normally the render/event-loop thread). A post from that
+  same thread drains and applies **immediately** rather than merely queuing
+  a wake -- nothing else is going to pump an event loop that may not even be
+  running, and there is no cross-thread race to guard against since this IS
+  that thread. This is what lets an inline/synchronous producer (and a
+  synchronous unit test) observe its own post take effect without a real
+  Textual app running.
+- **The `bool` wake-success contract.** `inbox.post()` returns `True` unless
+  a *needed* wake failed to deliver. The value itself is never lost either
+  way -- it stays in the inbox for whatever next drains it -- but a caller
+  with its own diagnosability contract for "this update must become
+  visible" (the setup-reload worker's `#5220` fix) can use a `False` return
+  to fall back to a direct, off-thread diagnostic write, mirroring the one
+  narrowly-scoped, already-documented exception for a producer with no app
+  to post into at all.
+- **`background.run_background(...)`** wraps the common "spawn a worker
+  thread, post its outcome into the Inbox" shape (busy label, quiet mode,
+  cancellation via `_bg_cancel`, thread tracking via `_bg_threads`) so
+  `_run_bg` and similar call sites don't hand-roll it themselves.
+
+**Static enforcement.** `tools/check-picker-inbox-discipline.py` (AST-based,
+modeled on `tools/check-headless-launch.py`) scans every `picker_tui/*.py`
+file (except `inbox.py` itself, which IS the primitive) for a raw
+`call_from_thread(` call and fails the build if one is found, with an inline
+`# inbox-guard: allow <why>` escape hatch for a genuinely-intentional
+exception. It runs in CI and in the local pre-push hook alongside
+`check-headless-launch.py`.
+
+**Known remaining gap.** `engine_pivot_actions.py`'s
+`_run_task_action_progress()` still mutates a shared `prog` dict's keys
+(`pct`, `msg`, `done`, `error`) directly from its worker thread and relies on
+polling + GIL safety rather than routing through the `Inbox` -- a real, if
+lower-priority, violation of this invariant that predates `Inbox` and has
+not yet been migrated. Threading it through `Inbox` safely (without
+regressing the live progress-bar UI) is a tracked follow-up, not something
+the static guard currently catches (it flags raw `call_from_thread`, not
+unmarshalled shared-state mutation).
 
 ## Session Lifecycle
 
