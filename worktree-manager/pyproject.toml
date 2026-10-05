@@ -58,6 +58,11 @@ dependencies = [
     # payload carries the real local vendored tree. Used by the resident
     # mux-daemon update path.
     "agent-zdd",
+    # Shared POSIX login-shell command wrapping for remote SSH exec (module
+    # ``remote_login_shell``, copilot-extensions#5207). Used transitively via
+    # the vendored ``agent_worktrees.resolve_machine_cli`` module this product
+    # ships its own copy of.
+    "agent-remote-login-shell",
 ]
 
 [tool.uv.sources]
@@ -93,6 +98,14 @@ agent-work-coalescing-singleton = { path = "../libs/work-coalescing-singleton", 
 # sync -- only a real `main`-branch release (tools/materialize_main.py)
 # ever gets a real local copy.
 agent-zdd = { path = "../libs/zdd", editable = true }
+# Shared POSIX login-shell command wrapping for remote SSH exec (module
+# ``remote_login_shell``, copilot-extensions#5207). This is a `uv`-editable
+# canonical reference (vendor-pointer-generalization effort, Phase 1): `path`
+# escapes this project's own root and resolves live to
+# `libs/remote-login-shell`, so this `dev`-branch checkout has nothing to
+# keep manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
+agent-remote-login-shell = { path = "../libs/remote-login-shell", editable = true }
 
 [project.scripts]
 worktree-manager = "worktree_manager.__main__:console_entry"
