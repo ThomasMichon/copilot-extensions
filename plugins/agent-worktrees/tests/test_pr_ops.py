@@ -586,6 +586,36 @@ class TestCreatePR:
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec.pr.patch_id
 
+    def test_reused_open_pr_refuses_to_overwrite_divergent_remote_head(self, pr_repo):
+        config, wid, wt_path, remote_dir = pr_repo
+        first = pr_ops.create_pr(wid, config, title="Add feature")
+        assert first["success"], first
+
+        other = remote_dir.parent / "other-clone"
+        _git("clone", str(remote_dir), str(other), cwd=remote_dir.parent)
+        _git("config", "user.email", "other@example.com", cwd=other)
+        _git("config", "user.name", "Other", cwd=other)
+        _git(
+            "checkout", "-B", "feature/add-feature-aaaa",
+            "origin/feature/add-feature-aaaa", cwd=other,
+        )
+        (other / "remote.txt").write_text("other actor\n")
+        _git("add", "-A", cwd=other)
+        _git("commit", "-m", "remote update", cwd=other)
+        _git("push", "origin", "feature/add-feature-aaaa", cwd=other)
+        remote_head = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=other)
+
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "local.txt").write_text("local feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "local update", cwd=wt_path)
+
+        rerun = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert rerun["success"] is False
+        assert "another actor updating the remote branch" in rerun["error"]
+        assert _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path) == remote_head
+
     def test_branch_collision_error_suggests_explicit_distinguishing_suffix(self, pr_repo):
         config, wid, wt_path, _ = pr_repo
         _git("branch", "feature/add-feature-aaaa", cwd=wt_path)

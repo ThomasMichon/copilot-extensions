@@ -46,8 +46,8 @@ def create_pr_history_action(
     if reusing:
         return (
             f"{rewrite_lead} and reused the live PR head without re-squashing; "
-            f"publishing the current {surviving_commits}-commit PR head with "
-            "--force-with-lease."
+            f"publishing the current {surviving_commits}-commit PR head "
+            "incrementally."
         )
     if squashed:
         return (

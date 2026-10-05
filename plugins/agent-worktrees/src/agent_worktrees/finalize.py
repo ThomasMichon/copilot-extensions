@@ -820,12 +820,12 @@ def _push_changes_pr(
         if on_wt:
             print(
                 f"[dry-run] Would snapshot {feature} to {wt_branch}'s current "
-                f"tip, then push {feature} to {remote} (--force-with-lease)."
+                f"tip, then push {feature} to {remote}."
             )
         else:
             print(
                 f"[dry-run] Would push the current tracked PR branch "
-                f"{feature} to {remote} (--force-with-lease)."
+                f"{feature} to {remote}."
             )
         return True
 
@@ -848,7 +848,7 @@ def _push_changes_pr(
             )
 
         with hooks.allow_pr_push():
-            pushed = git_ops.push(remote, feature, cwd=worktree_path, force_with_lease=True)
+            pushed = git_ops.push(remote, feature, cwd=worktree_path)
         if not pushed:
             output.err(f"Failed to push {feature} to {remote}.")
             if pushed.retryable:
@@ -900,11 +900,11 @@ def _push_changes_pr(
             "pr_changes_pushed", worktree_id=worktree_id, branch=feature,
         )
         output.ok(
-            f"Preserved the published PR tip on '{feature}' and "
-            f"force-with-lease pushed incremental updates from '{wt_branch}'."
+            f"Preserved the published PR tip on '{feature}' and pushed "
+            f"incremental updates from '{wt_branch}'."
         )
         output.ok(
-            f"Pushed {feature} to {remote} (--force-with-lease). "
+            f"Pushed {feature} to {remote}. "
             f"The open PR is updated."
         )
         return True
@@ -974,7 +974,7 @@ def _push_changes_pr_refspec(
     if dry_run:
         print(
             f"[dry-run] Would push "
-            f"{wt_branch}:refs/heads/{feature} to {remote} (--force-with-lease)."
+            f"{wt_branch}:refs/heads/{feature} to {remote}."
         )
         return True
 
@@ -994,7 +994,7 @@ def _push_changes_pr_refspec(
         with hooks.allow_pr_push():
             pushed = git_ops.push(
                 remote, f"{wt_branch}:refs/heads/{feature}",
-                cwd=worktree_path, force_with_lease=True,
+                cwd=worktree_path,
             )
         if not pushed:
             output.err(f"Failed to push {wt_branch} to {remote}/{feature}.")
@@ -1047,11 +1047,11 @@ def _push_changes_pr_refspec(
             "pr_changes_pushed", worktree_id=worktree_id, branch=feature,
         )
         output.ok(
-            f"Preserved the published PR tip and force-with-lease pushed "
-            f"incremental updates directly to PR head '{feature}'."
+            f"Preserved the published PR tip and pushed incremental updates "
+            f"directly to PR head '{feature}'."
         )
         output.ok(
-            f"Pushed {wt_branch} to {remote}/{feature} (--force-with-lease). "
+            f"Pushed {wt_branch} to {remote}/{feature}. "
             f"The open PR is updated."
         )
         return True

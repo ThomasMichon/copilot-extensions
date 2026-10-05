@@ -484,8 +484,9 @@ def create_pr(
     branch (``worktree/{id}``) at the squashed commit -- it is never reset off
     it -- so a retry after a push-that-failed-to-open lands there with the
     squashed work still in place and is recognized as a re-run of the live
-    tracked PR: the head is simply (re)pushed (force-with-lease) with the
-    tracking state advanced to ``open``.  Two legacy/migration cases are handled
+    tracked PR: the existing published tip is preserved and any newer commits
+    are simply (re)pushed incrementally, with the tracking state advanced to
+    ``open``. Two legacy/migration cases are handled
     the same way: HEAD still on the feature branch (a push that failed before the
     old code returned HEAD), and ``worktree/{id}`` sitting at the upstream tip
     with the feature branch still local (a worktree created under the old
@@ -968,7 +969,7 @@ def create_pr(
         with hooks.allow_pr_push():
             pushed = git_ops.push(
                 publish_remote, f"{wt_branch}:refs/heads/{feature_branch}",
-                cwd=worktree_path, force_with_lease=reusing,
+                cwd=worktree_path,
             )
         if not pushed:
             return {**base, "error": push_diagnostics.create_pr_push_error(
@@ -1002,9 +1003,7 @@ def create_pr(
         # stays on worktree/<id>.
         git_ops.git("branch", "-f", feature_branch, "HEAD", cwd=worktree_path, check=False)
         with hooks.allow_pr_push():
-            pushed = git_ops.push(
-                publish_remote, feature_branch, cwd=worktree_path, force_with_lease=reusing
-            )
+            pushed = git_ops.push(publish_remote, feature_branch, cwd=worktree_path)
         if not pushed:
             return {**base, "error": push_diagnostics.create_pr_push_error(
                 wt_branch=wt_branch,
@@ -2502,7 +2501,7 @@ def _push_existing_feature(
     # on-feature-branch path these are identical.
     head_sha = _rev(feature_branch, cwd=worktree_path)
     with hooks.allow_pr_push():
-        pushed = git_ops.push(remote, feature_branch, cwd=worktree_path, force_with_lease=True)
+        pushed = git_ops.push(remote, feature_branch, cwd=worktree_path)
     if not pushed:
         error = f"Failed to (re)push '{feature_branch}' to '{remote}'."
         if pushed.retryable:
