@@ -901,13 +901,10 @@ def _arm_pending_handoff_from_session_state(record) -> bool:
     the same token is returned as-is, with ``live_cutover`` promoted
     False -> True if not already armed, never downgraded) -- so this ALWAYS
     calls it for every unconsumed marker found, rather than skipping tokens
-    already present in ``record.handoffs``. Skipping would permanently
-    strand an entry a prior non-live-cutover path (an ordinary
-    ``trigger_handoff`` call, or a past instance of this exact bug -- caught
-    live via mux-companion-manual-cutover-diagnostics' own Validation Plan)
-    already created at ``live_cutover=False``. Scoped to a session actually
-    tracked on THIS record. Returns whether an entry was (already, or
-    newly) armed."""
+    already present in ``record.handoffs``, which would leave an entry
+    opened without the flag permanently unarmed. Scoped to a session
+    actually tracked on THIS record. Returns whether an entry was (already,
+    or newly) armed."""
     open_handoff = tracking.open_handoff
     armed = False
     for entry in getattr(record, "sessions", None) or []:

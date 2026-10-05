@@ -3239,12 +3239,11 @@ class TestCmdHandoffCutoverTrigger:
         assert len(seen_records) == 1
         tokens = {h.token for h in seen_records[0].handoffs}
         assert "handoff-predecessor-2" in tokens
-        # Regression (found live via mux-companion-manual-cutover-diagnostics
-        # Validation Plan): arming without `live_cutover=True` created a
-        # ledger entry that `_monitor_pending_handoff_request`'s own
-        # `not handoff.live_cutover` filter would silently skip forever --
-        # making the whole on-demand trigger a permanent no-op for exactly
-        # the manual-only-mode scenario it exists to serve.
+        # `live_cutover` must be set: `_monitor_pending_handoff_request`'s
+        # own `not handoff.live_cutover` filter would otherwise silently
+        # skip this entry forever, making the whole on-demand trigger a
+        # permanent no-op for exactly the manual-only-mode scenario it
+        # exists to serve.
         armed = next(h for h in seen_records[0].handoffs if h.token == "handoff-predecessor-2")
         assert armed.live_cutover is True
         # The ledger entry is durable -- reloading the record from disk
@@ -3263,18 +3262,10 @@ class TestCmdHandoffCutoverTrigger:
         _tracking.register_session("wt-trigger-5", "predecessor-3")
         loaded = _tracking.load_record(path)
         # Opened WITHOUT live_cutover -- exactly what an ordinary (non-force)
-        # `trigger_handoff` call, or a past instance of this very bug, leaves
-        # behind: a real ledger entry that is nonetheless invisible to
-        # `_monitor_pending_handoff_request`'s `not handoff.live_cutover`
-        # filter. Regression (found live via
-        # mux-companion-manual-cutover-diagnostics Validation Plan): the
-        # arming loop used to treat "token already present in
-        # record.handoffs" as "already armed" and skip straight past WITHOUT
-        # checking whether that existing entry's own live_cutover flag was
-        # actually set -- permanently stranding it, since `open_handoff`
-        # itself was never called again to perform the False -> True
-        # upgrade. A human pressing "Cut over" (or calling this verb) a
-        # SECOND time must still be able to recover.
+        # `trigger_handoff` call leaves behind: a real ledger entry that is
+        # nonetheless invisible to `_monitor_pending_handoff_request`'s own
+        # filter. A human pressing "Cut over" (or calling this verb) must
+        # still be able to arm and recover it.
         _tracking.open_handoff(loaded, "predecessor-3", "handoff-predecessor-3")
         _tracking.save_record(loaded, path)
         marker_path = tmp_path / "handoff-request.json"
