@@ -68,6 +68,25 @@ def test_validate_accepts_each_kind():
          "interval_seconds": 3600},
     )
     validate_registration(
+        RegistrationKind.EMITTER,
+        {
+            "id": "effort-driver",
+            "effort_driver_loop": {
+                "name": "effort-driver",
+                "kind": "effort-driver-loop",
+                "repo": TEST_REPO,
+                "source": "effort-driver",
+                "cadence_seconds": 3600,
+                "effort_slugs": ["recipe-library"],
+                "state_root": "C:\\repo",
+                "task_label": "effort-work",
+                "pool": {"body": {"type": "headless", "agent": "effort-worker"}},
+            },
+            "interval_seconds": 60,
+            "cwd": "C:\\repo",
+        },
+    )
+    validate_registration(
         RegistrationKind.EVALUATOR,
         {"evaluator_spec": {}, "all_repos": True, "evaluator_ref": "review-loop"},
     )
@@ -99,6 +118,28 @@ def test_validate_accepts_each_kind():
                     }
                 ],
             },
+        },
+    )
+
+
+def test_validate_registration_accepts_effort_driver_emitter_builtin():
+    validate_registration(
+        RegistrationKind.EMITTER,
+        {
+            "id": "effort-driver",
+            "effort_driver_loop": {
+                "name": "effort-driver",
+                "kind": "effort-driver-loop",
+                "repo": TEST_REPO,
+                "source": "effort-driver",
+                "cadence_seconds": 3600,
+                "effort_slugs": ["recipe-library"],
+                "state_root": "C:\\repo",
+                "task_label": "effort-work",
+                "pool": {"body": {"type": "headless", "agent": "effort-worker"}},
+            },
+            "interval_seconds": 60,
+            "cwd": "C:\\repo",
         },
     )
 

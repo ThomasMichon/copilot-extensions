@@ -859,7 +859,7 @@ Any registrar declaration file (not just `repository-issue-loop`/
 spelling out every field directly:
 
 ```yaml
-extends: "global:<name>"                 # plugin-shipped recipe (see below for the four shipped today)
+extends: "global:<name>"                 # plugin-shipped recipe (see below for the shipped set)
 # or
 extends: "./recipes/my-loop.yaml"        # repo-local, relative to the repo root
 # or
@@ -921,7 +921,7 @@ every other declaration file uses; a `global:<name>` ref looks up a
 plugin-shipped recipe built into
 `agent_dispatch.registrar_recipes.GLOBAL_RECIPES`.
 
-**Shipped global recipes.** Six named recipes ship today, each
+**Shipped global recipes.** Eight named recipes ship today, each
 covering the fields real adopters already repeat verbatim (shared
 exclude-label conventions, the headless pool body type, the archetype's
 standing-conduct charter) while leaving everything genuinely repo-specific
@@ -935,6 +935,7 @@ evaluator verdict-application policy) for the declaration itself to supply:
 | `backlog-triager` | `kind: repository-issue-loop` | The same common loop defaults as `repository-issue-loop`, plus `worker_identity: backlog-triager`, `require_verification: true`, and `evaluator_ref: backlog-triager`. The built-in identity handles the shared backlog-triage shape (classify the issue, confirm it is a legitimate bug, assign priority, apply the repository's own triage markers, and ensure it is attached to tracked effort work before triage is considered complete). The *exact* triage label/body-marker schema and what counts as "assigned to an effort" stay repository-specific and are enforced by a consumer-supplied trusted evaluator registration under that `evaluator_ref`; this package deliberately does not hardcode one repo's label taxonomy into every adopter. |
 | `issue-reproducer` | `kind: repository-issue-loop` | The same common loop defaults as `repository-issue-loop`, plus `worker_identity: issue-reproducer`, `require_verification: true`, and `evaluator_ref: issue-reproducer`. The built-in identity handles the shared reproduction-only shape (attempt reproduction with relevant repo/stack strategies, attach durable evidence, and leave either a reproducible marker or a not-reproducible outcome plus strike marker). The *exact* evidence/comment schema, reproducible/not-reproducible tags, and strike-marker convention stay repository-specific and are enforced by a consumer-supplied trusted evaluator registration under that `evaluator_ref`; this package deliberately does not hardcode one repo's issue-process vocabulary into every adopter. |
 | `effort-builder` | `kind: repository-issue-loop` | The same common loop defaults as `repository-issue-loop`, plus `worker_identity: effort-builder`, `require_verification: true`, and `evaluator_ref: effort-builder`. The built-in identity handles the shared planning-only shape: take a bounded set of already-triaged related issues (for example a filtered query result or an explicit `issue_numbers` set), group them into one coherent tracked effort, create or join that effort, assign every selected issue to it, and stop once the effort's own tracking artifact has reached the repository's review gate. The *exact* effort-assignment marker and review-gate evidence stay repository-specific and are enforced by a consumer-supplied trusted evaluator registration under that `evaluator_ref`; this package deliberately does not hardcode one repo's effort schema into every adopter. |
+| `effort-driver` | `kind: effort-driver-loop` | `worker_identity: effort-driver`, `require_verification: true`, and `evaluator_ref: effort-driver`. Unlike the forge-backed `repository-issue-loop` family, discovery is repo-local: the emitter scans active effort READMEs under the consumer's own state root (`efforts/active/<slug>/README.md` shape) but requires an explicit `effort_slugs` selector so it drives only already-assigned efforts, never every draft in the tree by default. The built-in identity handles the shared execution-only shape: drive an already-assigned effort relentlessly through its remaining PRs and tightly-coupled bug fixes until it reaches archive state. The *exact* archive-state evidence, PR-proof shape, and constituent-issue-resolution contract stay repository-specific and are enforced by a consumer-supplied trusted evaluator registration under that `evaluator_ref`; this package deliberately does not hardcode one repo's effort archive schema into every adopter. |
 | `reviewer` | `kind: reviewer-loop` | `pool.body.type: headless` plus a default `pool.body.charter`: a generalized (no `{repo}`/`{pr}` placeholders -- those vary per discovered PR and live in that PR's own task, not this static charter) standing-reviewer charter covering the `land=self`/`land=author` landing models, suspend/resume, never superseding another author's PR, and stagnation handling. |
 | `conflict-resolution` | `kind: reviewer-loop` | Same pool defaults as `reviewer`, with a charter specialized to taking a stuck, conflict-producer-opened PR the last mile: rebase, resolve, force-push back over the same PR head, never open a second PR. |
 
@@ -957,6 +958,12 @@ owns the generic grouping-and-effort-creation workflow, while a repo-scoped
 trusted evaluator named `effort-builder` validates the repo's concrete
 effort-assignment convention and what "that effort reached the review gate"
 means there (for example an open or merged effort-creation PR).
+`global:effort-driver` mirrors that split for the execution half: the shipped
+recipe/identity owns repo-local active-effort discovery plus the generic
+drive-through-archive worker contract, while a repo-scoped trusted evaluator
+named `effort-driver` validates the repo's concrete archive-state evidence
+shape (for example which archive path, which merged-PR proof, and how the
+effort demonstrates its constituent issues are resolved or transferred).
 
 There is no path-traversal hardening on a file-path ref today; a
 declaration author is already a trusted party for the repo's own registrar

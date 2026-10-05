@@ -14,7 +14,7 @@ that pattern to this repository.
 | [ai-attribution Audience-Based Disclosure Policy](active/ai-attribution-audience-policy/README.md) | Active (Phase 1 done) | #2965 |
 | [Devcontainer Test Isolation](active/devcontainer-test-isolation/README.md) | Done; pending archive | #5040 |
 | [Pivot Streaming Transport & Render Performance](active/pivot-streaming-transport/README.md) | Active | #4762 |
-| [agent-dispatch Recipe Library](active/agent-dispatch-recipe-library/README.md) | Draft | #4691 |
+| [agent-dispatch Recipe Library](active/agent-dispatch-recipe-library/README.md) | Active | #4691 |
 | [agent-dispatch Recipe Composability](active/agent-dispatch-recipe-composability/README.md) | Active | #4959 |
 | [Configurable token-command sourcing](active/token-command-sourcing/README.md) | Draft | _pending_ |
 | [CI Identifier Leak Guard](active/ci-identifier-leak-guard/README.md) | Active | #3923 |

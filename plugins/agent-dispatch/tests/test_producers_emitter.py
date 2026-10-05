@@ -236,6 +236,38 @@ def test_run_tick_dispatches_builtin_repository_issue_loop(monkeypatch):
     assert result["duration_seconds"] == 2.0
 
 
+def test_run_tick_dispatches_builtin_effort_driver_loop(monkeypatch):
+    client = FakeClient()
+    config = {"kind": "effort-driver-loop"}
+    spec = _spec(command=None, effort_driver_loop=config, cwd="/state/root")
+    observed = {}
+
+    monkeypatch.setattr(emitter, "validate_spec", lambda _spec: None)
+
+    def fake_run_tick(actual_client, actual_config, **kwargs):
+        observed.update(
+            client=actual_client,
+            config=actual_config,
+            kwargs=kwargs,
+        )
+        return {"created": [{"id": "task-2"}]}
+
+    monkeypatch.setattr(
+        "agent_dispatch.effort_driver_loops.run_tick", fake_run_tick
+    )
+    times = iter([10.0, 11.0])
+
+    result = emitter.run_tick(
+        client, spec, holder="host-a", clock=lambda: next(times)
+    )
+
+    assert observed["client"] is client
+    assert observed["config"] is config
+    assert observed["kwargs"]["cwd"] == "/state/root"
+    assert result["created"] == [{"id": "task-2"}]
+    assert result["duration_seconds"] == 1.0
+
+
 def test_validate_spec_threads_cwd_into_repository_issue_loop_validation(monkeypatch):
     """Regression guard: a repository-issue-loop emitter's own ``cwd`` (the
     declaring repo's root, stamped at expansion time) must reach
@@ -259,6 +291,26 @@ def test_validate_spec_threads_cwd_into_repository_issue_loop_validation(monkeyp
     )
     emitter.validate_spec(spec)
     assert observed["cwd"] == "/repo/root"
+
+
+def test_validate_spec_threads_cwd_into_effort_driver_loop_validation(monkeypatch):
+    observed = {}
+
+    def fake_validate_config(_config, *, cwd=None):
+        observed["cwd"] = cwd
+        return {}
+
+    monkeypatch.setattr(
+        "agent_dispatch.effort_driver_loops.validate_config",
+        fake_validate_config,
+    )
+    spec = _spec(
+        command=None,
+        effort_driver_loop={"kind": "effort-driver-loop"},
+        cwd="/state/root",
+    )
+    emitter.validate_spec(spec)
+    assert observed["cwd"] == "/state/root"
 
 
 def test_validate_spec_rejects_malformed_cwd_before_repository_issue_loop_validation():

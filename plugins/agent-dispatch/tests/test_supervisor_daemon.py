@@ -26,6 +26,7 @@ import pytest
 from agent_dispatch.companion import CompanionIndeterminate
 from agent_dispatch.registrar import load_declaration
 from agent_dispatch.registrar_reconcile import declaration_to_registration
+from agent_dispatch.effort_driver_loops import expand_effort_driver_loop
 from agent_dispatch.repository_issue_loops import expand_repository_issue_loop
 from agent_dispatch.supervisor_daemon import (
     SupervisorDaemon,
@@ -419,6 +420,47 @@ def test_repository_issue_loop_expansion_builds_periodic_emitter_command():
         "host-a",
     ]
     assert captured["emitter"]["repository_issue_loop"]["name"] == "backlog"
+
+
+def test_effort_driver_loop_expansion_builds_periodic_emitter_command(tmp_path):
+    source, _workers = expand_effort_driver_loop(
+        {
+            "name": "effort-driver",
+            "kind": "effort-driver-loop",
+            "repo": "example/project",
+            "source": "effort-driver",
+            "cadence_seconds": 3600,
+            "effort_slugs": ["recipe-library"],
+            "state_root": str(tmp_path),
+            "task_label": "effort-work",
+            "pool": {"body": {"type": "headless", "agent": "effort-worker"}},
+        },
+        repo_root=tmp_path,
+    )
+    registration = declaration_to_registration(
+        source, machine="host-a", env="default"
+    )
+    captured = {}
+
+    def materialize(name, payload):
+        captured[name] = payload
+        return f"/run/{name}.json"
+
+    command = build_command(
+        registration, python="PY", materialize=materialize
+    )
+
+    assert command == [
+        "PY",
+        "-m",
+        "agent_dispatch",
+        "emitter",
+        "serve",
+        "/run/emitter.json",
+        "--holder",
+        "host-a",
+    ]
+    assert captured["emitter"]["effort_driver_loop"]["name"] == "effort-driver"
 
 
 def test_build_command_needs_materializer_for_inline_spec():
