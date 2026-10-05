@@ -745,8 +745,8 @@ function Test-SnapshotRequiresMaterializedEngine {
     if (Test-Path -LiteralPath $installPs1) {
         $ps1Text = Get-Content -LiteralPath $installPs1 -Raw
         if (
-            $ps1Text.Contains(". (Join-Path $PSScriptRoot 'installer-engine.ps1')") -or
-            $ps1Text.Contains(". (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')")
+            $ps1Text.Contains('. (Join-Path $PSScriptRoot ''installer-engine.ps1'')') -or
+            $ps1Text.Contains('. (Join-Path $PSScriptRoot ''..\..\..\libs\installer-engine\installer-engine.ps1'')')
         ) {
             return $true
         }
