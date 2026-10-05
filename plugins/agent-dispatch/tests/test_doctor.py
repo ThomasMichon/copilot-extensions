@@ -87,15 +87,15 @@ def test_diagnose_suspended_with_no_reservation_is_unknown():
 
 
 def test_diagnose_queued_with_reservation_reports_stuck_verdict():
-    """A queued task that already tried (and failed) to spawn once still
-    carries its prior reservation -- confirmed live (#5209): several review
-    tasks sat `queued, no owner` for hours during a facility-wide agent-bridge
-    outage, invisible to a doctor sweep that never examined `queued` at all."""
+    """A queued task whose latest spawn reservation genuinely FAILED --
+    confirmed live (#5209): several review tasks sat `queued, no owner` for
+    hours during a facility-wide agent-bridge outage, invisible to a doctor
+    sweep that never examined `queued` at all."""
     task = _task(status="queued", worktree_id=None, reservation_key="dispatch-task:t-1:2")
     task["spawn_reservation"] = {
         "key": "dispatch-task:t-1:2",
         "attempt": 2,
-        "state": "released",
+        "state": "failed",
         "detail": (
             "'intelligence-dampener-dispatch-reviewer' is not a known agent "
             "name or session ID"
@@ -104,6 +104,18 @@ def test_diagnose_queued_with_reservation_reports_stuck_verdict():
     d = doctor.diagnose(task, resolve=lambda wt: {"status": "active"})
     assert d.verdict == doctor.QUEUED_STUCK_RESERVATION_VERDICT
     assert "not a known agent name" in d.detail
+
+
+def test_diagnose_queued_with_active_reservation_is_not_stuck():
+    """Review finding (#5227): `reserving`/`spawned`/`cold`/`releasing` are
+    all legitimate ACTIVE states for a reservation whose task still shows as
+    `queued` -- only a genuinely FAILED reservation is stuck. Misreporting an
+    in-flight spawn as stuck would be a false positive on healthy work."""
+    for active_state in ("reserving", "spawned", "cold", "releasing"):
+        task = _task(status="queued", worktree_id=None, reservation_key="k1")
+        task["spawn_reservation"] = {"key": "k1", "attempt": 1, "state": active_state}
+        d = doctor.diagnose(task, resolve=lambda wt: {"status": "active"})
+        assert d.verdict != doctor.QUEUED_STUCK_RESERVATION_VERDICT, active_state
 
 
 def test_diagnose_queued_with_no_reservation_is_unknown_not_stuck():
@@ -250,9 +262,10 @@ def test_repair_terminal_task_clears_only_the_stale_reservation():
 
 
 class _ListClient:
-    def __init__(self, tasks):
+    def __init__(self, tasks, reservations=None):
         self._tasks = tasks
         self.list_calls = []
+        self._reservations = reservations or []
 
     def __enter__(self):
         return self
@@ -263,6 +276,15 @@ class _ListClient:
     def list(self, **kw):
         self.list_calls.append(kw)
         return self._tasks
+
+    def list_reservations(self, **kw):
+        return self._reservations
+
+    def get(self, task_id):
+        for t in self._tasks:
+            if t.get("id") == task_id:
+                return t
+        raise AssertionError(f"no such task: {task_id}")
 
 
 def test_cli_doctor_reports_diagnoses_without_repair(capsys, monkeypatch):
@@ -278,7 +300,7 @@ def test_cli_doctor_reports_diagnoses_without_repair(capsys, monkeypatch):
     assert out["examined"] == 1
     assert out["diagnoses"][0]["verdict"] == "orphaned_worktree_gone"
     assert "repaired" not in out
-    assert fake.list_calls[0]["status"] == "claimed,started,suspended,queued"
+    assert fake.list_calls[0]["status"] == "claimed,started,suspended"
 
 
 def test_cli_doctor_honors_patched_resolver_without_real_agent_worktrees(
@@ -499,7 +521,12 @@ def test_cli_doctor_check_live_sessions_fetches_reservations_per_task(
     fake = _ListClient(tasks)
     fake.list_reservations_calls = []
 
-    def _list_reservations(*, task_id, limit=1000):
+    def _list_reservations(*, task_id=None, state=None, repo=None, label=None, limit=1000):
+        if task_id is None:
+            # The new, separate stuck-queued-reservation query (#5227) --
+            # irrelevant to this test's own assertion below, which tracks
+            # only per-task reservation-history calls.
+            return []
         fake.list_reservations_calls.append(task_id)
         return [
             _reservation(attempt=1, key="k1", session_handle="local-body:sess-old"),
@@ -650,47 +677,115 @@ def test_diagnose_many_never_repairs_a_non_examined_non_terminal_status(monkeypa
     assert payload["repaired"] == []
 
 
-def test_diagnose_many_skips_queued_tasks_with_no_reservation():
-    """The common case: an ordinary, never-yet-attempted queued task carries
-    no reservation at all and is silently skipped, so a normal backlog never
-    floods a doctor sweep's output (#5209)."""
-    fresh = _task(task_id="t-1", status="queued", worktree_id=None, reservation_key=None)
-    fresh["spawn_reservation"] = None
-
-    payload = doctor.diagnose_many(_FakeClient(), [fresh])
-    assert payload["examined"] == 0
-    assert payload["diagnoses"] == []
-
-
-def test_diagnose_many_surfaces_queued_task_with_reservation():
-    stuck = _task(task_id="t-1", status="queued", worktree_id=None, reservation_key="k1")
-    stuck["spawn_reservation"] = {
-        "key": "k1",
-        "attempt": 3,
-        "state": "released",
-        "detail": "RELEASING with no session_handle for 712s",
-    }
-
-    payload = doctor.diagnose_many(_FakeClient(), [stuck])
-    assert payload["examined"] == 1
-    assert payload["diagnoses"][0]["verdict"] == doctor.QUEUED_STUCK_RESERVATION_VERDICT
-
-
-def test_diagnose_many_never_repairs_a_queued_stuck_reservation(monkeypatch):
-    """Even with --repair, a queued-with-reservation diagnosis is purely
-    advisory -- it is never REPAIRABLE_VERDICT, so repair() is never invoked
-    for it regardless of queued now being in EXAMINED_STATUSES."""
-    monkeypatch.setattr(doctor, "resolve_worktree", lambda wt, **k: {"status": "finalized"})
-    stuck = _task(task_id="t-1", status="queued", worktree_id=None, reservation_key="k1")
-    stuck["spawn_reservation"] = {"key": "k1", "attempt": 1, "state": "released", "detail": "x"}
+def test_find_stuck_queued_reservations_queries_failed_state_separately():
+    """The new, independent query: list_reservations(state=FAILED) rather
+    than expanding the bounded task sweep (review finding, #5227 -- a large
+    queued backlog must never consume the sweep's own --limit)."""
 
     class _Client:
-        def fail_spawn(self, *a, **k):
-            raise AssertionError("must not repair a queued_with_reservation_detail verdict")
+        def __init__(self):
+            self.list_reservations_calls = []
 
-        def yield_task(self, *a, **k):
-            raise AssertionError("must not repair a queued_with_reservation_detail verdict")
+        def list_reservations(self, **kw):
+            self.list_reservations_calls.append(kw)
+            return [{"key": "k1", "task_id": "t-1", "state": "failed"}]
 
-    payload = doctor.diagnose_many(_Client(), [stuck], repair_orphaned=True)
-    assert payload["diagnoses"][0]["verdict"] == doctor.QUEUED_STUCK_RESERVATION_VERDICT
-    assert payload["repaired"] == []
+        def get(self, task_id):
+            assert task_id == "t-1"
+            return _task(
+                task_id="t-1",
+                status="queued",
+                worktree_id=None,
+                reservation_key="k1",
+            ) | {
+                "spawn_reservation": {
+                    "key": "k1",
+                    "attempt": 2,
+                    "state": "failed",
+                    "detail": "boom",
+                }
+            }
+
+    client = _Client()
+    diagnoses = doctor.find_stuck_queued_reservations(client, repo="r", label="l", limit=50)
+    assert len(diagnoses) == 1
+    assert diagnoses[0].verdict == doctor.QUEUED_STUCK_RESERVATION_VERDICT
+    assert client.list_reservations_calls == [
+        {"state": doctor.SpawnState.FAILED, "repo": "r", "label": "l", "limit": 50}
+    ]
+
+
+def test_find_stuck_queued_reservations_skips_task_no_longer_queued():
+    """A failed reservation whose task has since progressed past `queued`
+    (claimed a fresh attempt, etc.) is not stuck anymore -- must not report
+    it as if it still were."""
+
+    class _Client:
+        def list_reservations(self, **kw):
+            return [{"key": "k1", "task_id": "t-1", "state": "failed"}]
+
+        def get(self, task_id):
+            return _task(task_id="t-1", status="claimed")
+
+    assert doctor.find_stuck_queued_reservations(_Client()) == []
+
+
+def test_find_stuck_queued_reservations_skips_superseded_reservation():
+    """The task is still `queued`, but its *current* reservation is a newer
+    attempt than the one this FAILED row named -- a fresh attempt already
+    superseded it, so it is not stuck."""
+
+    class _Client:
+        def list_reservations(self, **kw):
+            return [{"key": "k1-old", "task_id": "t-1", "state": "failed"}]
+
+        def get(self, task_id):
+            task = _task(task_id="t-1", status="queued", worktree_id=None)
+            task["spawn_reservation"] = {"key": "k2-new", "attempt": 2, "state": "reserving"}
+            return task
+
+    assert doctor.find_stuck_queued_reservations(_Client()) == []
+
+
+def test_find_stuck_queued_reservations_skips_vanished_task():
+    class _Client:
+        def list_reservations(self, **kw):
+            return [{"key": "k1", "task_id": "t-1", "state": "failed"}]
+
+        def get(self, task_id):
+            raise RuntimeError("no such task")
+
+    assert doctor.find_stuck_queued_reservations(_Client()) == []
+
+
+def test_cmd_doctor_merges_stuck_queued_reservations_into_sweep(capsys, monkeypatch):
+    """CLI-level: the repo/label sweep's own diagnoses and the separately-
+    queried stuck-queued-reservation diagnoses land in one combined payload,
+    with `examined` reflecting both sources."""
+    tasks = [_task(task_id="t-1", status="started")]
+
+    class _Client(_ListClient):
+        def __init__(self):
+            super().__init__(tasks)
+
+        def list_reservations(self, **kw):
+            return [{"key": "k2", "task_id": "t-2", "state": "failed"}]
+
+        def get(self, task_id):
+            task = _task(task_id="t-2", status="queued", worktree_id=None)
+            task["spawn_reservation"] = {"key": "k2", "attempt": 1, "state": "failed"}
+            return task
+
+    fake = _Client()
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda args: fake)
+    monkeypatch.setattr("agent_dispatch.__main__._scope_repo", lambda args: "repo")
+    monkeypatch.setattr(doctor, "resolve_worktree", lambda wt, **k: {"status": "finalized"})
+
+    rc = _cmd_doctor(_args(["doctor"]))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["examined"] == 2
+    verdicts = {d["verdict"] for d in out["diagnoses"]}
+    assert "orphaned_worktree_gone" in verdicts
+    assert doctor.QUEUED_STUCK_RESERVATION_VERDICT in verdicts
+
