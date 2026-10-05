@@ -1,0 +1,9 @@
+{
+  "comment": "exec's CLI now accepts trailing copilot args (after --) and appends them onto the launched acp_command, closing the other half of the container charter-forwarding gap.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}
