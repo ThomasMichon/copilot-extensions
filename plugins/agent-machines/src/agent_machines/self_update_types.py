@@ -165,7 +165,10 @@ def default_command_runner(
             if isinstance(stderr, bytes):
                 stderr = stderr.decode("utf-8", errors="replace")
         termination = "tree-killed via Job Object" if tree_killed else "killed (no Job assigned)"
-        detail = f"command timed out after {timeout}s and was terminated ({termination}): {resolved!r}"
+        detail = (
+            f"command timed out after {timeout}s and was terminated "
+            f"({termination}): {resolved!r}"
+        )
         return CommandResult(
             argv=list(argv),
             returncode=TIMEOUT_RETURNCODE,

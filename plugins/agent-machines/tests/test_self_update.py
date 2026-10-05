@@ -1505,6 +1505,51 @@ def test_default_command_runner_falls_back_to_kill_without_job(monkeypatch):
     assert result.returncode == self_update_types.TIMEOUT_RETURNCODE
 
 
+def test_default_command_runner_preserves_partial_output_when_drain_also_times_out(
+    monkeypatch,
+):
+    """A surviving descendant can keep holding the pipes open even after the
+    tree-kill (or plain `kill()`) above, so the bounded second `communicate()`
+    can itself raise `TimeoutExpired` -- this is the one case that actually
+    guarantees a hung command can never re-hang the caller. `TimeoutExpired`
+    still carries whatever output was collected before it fired; that must be
+    returned, not silently discarded as empty strings."""
+    closed = {"job": False}
+
+    class _FakeJob:
+        def close(self):
+            closed["job"] = True
+
+    class _Proc:
+        returncode = None
+
+        def communicate(self, timeout=None):
+            if not closed["job"]:
+                raise subprocess.TimeoutExpired(cmd="slow", timeout=timeout)
+            # The bounded drain call itself times out too (a grandchild still
+            # holds the pipe), but TimeoutExpired carries whatever the OS
+            # already delivered before it fired.
+            raise subprocess.TimeoutExpired(
+                cmd="slow", timeout=timeout, output="collected-stdout", stderr="collected-stderr"
+            )
+
+        def kill(self):
+            pass
+
+    def fake_spawn(argv, **kwargs):
+        return _Proc(), _FakeJob()
+
+    monkeypatch.setattr(self_update_types.shutil, "which", lambda name: None)
+    monkeypatch.setattr(self_update_types, "spawn_sync_in_kill_on_close_job", fake_spawn)
+    result = self_update.default_command_runner(["slow-command"], timeout=5)
+
+    assert closed["job"] is True
+    assert result.returncode == self_update_types.TIMEOUT_RETURNCODE
+    assert "collected-stdout" in result.stdout
+    assert "collected-stderr" in result.stderr
+    assert "timed out after 5s" in result.stderr
+
+
 
 
 

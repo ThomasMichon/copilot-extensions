@@ -266,7 +266,9 @@ def test_assign_suspended_to_kill_on_close_job_assigns_pid_to_job(monkeypatch):
         ("OpenProcess", pu._PROCESS_SET_QUOTA | pu._PROCESS_TERMINATE, False, 12345),
         ("AssignProcessToJobObject", 101, 202),
     ]
-    assert fake.limit_flags == pu._JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    assert fake.limit_flags == (
+        pu._JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | pu._JOB_OBJECT_LIMIT_BREAKAWAY_OK
+    )
     assert fake.calls[4:] == [("CloseHandle", 202)]
 
     job.close()
@@ -565,3 +567,76 @@ time.sleep(10)
                 job.close()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Job Object integration")
+def test_windows_job_permits_explicit_breakaway_grandchild():
+    """The containment job must allow an ordinary descendant to die with it
+    while letting a descendant that explicitly requests
+    ``CREATE_BREAKAWAY_FROM_JOB`` escape and outlive it -- a real command run
+    through this containment (`agent-worktrees update`) can itself spawn a
+    daemon cutover successor with exactly that flag
+    (``windowless_daemon_kwargs(breakaway=True)``), and Windows rejects that
+    spawn outright unless the containing job's limit flags permit it."""
+    src = Path(__file__).resolve().parents[1] / "src"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(src) + os.pathsep + env.get("PYTHONPATH", "")
+    child_code = r"""
+import subprocess
+import sys
+import time
+
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
+# Only spawned once this process is itself already a job member (the test
+# harness assigns the job before resuming it), so both grandchildren inherit
+# membership at spawn time unless they opt out.
+ordinary = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+breakaway = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(60)"],
+    creationflags=CREATE_BREAKAWAY_FROM_JOB,
+)
+print(ordinary.pid, breakaway.pid, flush=True)
+time.sleep(60)
+"""
+    process, job = pu.spawn_sync_in_kill_on_close_job(
+        [sys.executable, "-c", child_code],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    assert job is not None, "failed to spawn the test harness itself inside a job"
+    try:
+        pids = process.stdout.readline().strip().split()
+        assert len(pids) == 2, f"expected 'ordinary breakaway' pids, got: {pids!r}"
+        ordinary_pid, breakaway_pid = (int(p) for p in pids)
+
+        ordinary_handle = pu.ctypes.windll.kernel32.OpenProcess(
+            0x00100000 | 0x1000 | 0x0001, False, ordinary_pid
+        )
+        breakaway_handle = pu.ctypes.windll.kernel32.OpenProcess(
+            0x00100000 | 0x1000 | 0x0001, False, breakaway_pid
+        )
+        assert ordinary_handle and breakaway_handle
+        try:
+            job.close()
+            job = None
+            assert (
+                pu.ctypes.windll.kernel32.WaitForSingleObject(ordinary_handle, 5000) == 0
+            ), "ordinary descendant must die with the job"
+            assert (
+                pu.ctypes.windll.kernel32.WaitForSingleObject(breakaway_handle, 0) == 0x102
+            ), "breakaway descendant must survive the job closing"
+        finally:
+            _wait_or_terminate_process_handle(ordinary_handle, timeout_ms=0)
+            _wait_or_terminate_process_handle(breakaway_handle, timeout_ms=0)
+            pu.ctypes.windll.kernel32.CloseHandle(ordinary_handle)
+            pu.ctypes.windll.kernel32.CloseHandle(breakaway_handle)
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=5)
+        if job is not None:
+            job.close()
+

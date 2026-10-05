@@ -62,6 +62,15 @@ _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 _CREATE_SUSPENDED = 0x00000004
 _CONTAINED_TEST_ENV = "COPILOT_EXTENSIONS_TEST_CONTAINED"
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+# Permit (but do not require) a contained descendant to opt out of the
+# kill-on-close job via its own CREATE_BREAKAWAY_FROM_JOB creation flag.
+# Without this, Windows rejects that child spawn outright -- a real hazard
+# for a command like `agent-worktrees update`, whose own daemon cutover
+# (``status_monitor_cutover.py``, via ``windowless_daemon_kwargs(breakaway=
+# True)``) deliberately spawns its successor with CREATE_BREAKAWAY_FROM_JOB
+# so the new daemon outlives the updater. Ordinary descendants that never
+# request breakaway stay contained and still die with the job as before.
+_JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x0800
 _JobObjectExtendedLimitInformation = 9
 _PROCESS_SET_QUOTA = 0x0100
 _PROCESS_TERMINATE = 0x0001
@@ -240,7 +249,9 @@ def _assign_suspended_to_kill_on_close_job(pid: int) -> JobHandle | None:
             return None
 
         limit_info = _build_job_extended_limit_info()()
-        limit_info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        limit_info.BasicLimitInformation.LimitFlags = (
+            _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | _JOB_OBJECT_LIMIT_BREAKAWAY_OK
+        )
         if not kernel32.SetInformationJobObject(
             job,
             _JobObjectExtendedLimitInformation,
