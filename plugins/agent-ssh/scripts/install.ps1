@@ -683,6 +683,33 @@ function Test-PublishedSnapshotIsNewer {
     return Test-AgentSshVersionGreater $publishedVersion $SourceVersion
 }
 
+function Test-SnapshotReusable {
+    param(
+        [string]$SnapshotDir,
+        [string]$SourceKind,
+        [string]$SourcePath,
+        [string]$SourceVersion
+    )
+    if ($SourceKind -eq 'local') { return $false }
+    if (-not $SnapshotDir -or -not (Test-Path $SnapshotDir)) { return $false }
+    foreach ($rel in @(
+        'scripts\installer-engine.sh',
+        'scripts\installer-engine.ps1',
+        'libs\agent-procutil\pyproject.toml',
+        'libs\ssh-manager\pyproject.toml',
+        'libs\venue-copilot\pyproject.toml',
+        'libs\zdd\pyproject.toml',
+        'libs\remote-login-shell\pyproject.toml'
+    )) {
+        if (-not (Test-Path (Join-Path $SnapshotDir $rel))) { return $false }
+    }
+    if (-not (Test-Path (Get-SnapshotVersionMarkerPath -SnapshotDir $SnapshotDir))) { return $false }
+    if (((Get-Content -LiteralPath (Get-SnapshotVersionMarkerPath -SnapshotDir $SnapshotDir) -Raw).Trim()) -ne $SourceVersion) { return $false }
+    if (-not (Test-Path (Get-SnapshotSourceMarkerPath -SnapshotDir $SnapshotDir))) { return $false }
+    if (((Get-Content -LiteralPath (Get-SnapshotSourceMarkerPath -SnapshotDir $SnapshotDir) -Raw).Trim()) -ne $SourcePath) { return $false }
+    return $true
+}
+
 function Get-CurrentSnapshotPath {
     $payloadPath = Join-Path $InstallDir 'payload-dir'
     if (-not (Test-Path $payloadPath)) { return '' }
@@ -730,22 +757,7 @@ function Invoke-Stamp {
             Write-Binstubs
             return
         }
-        if (
-            $sourceKind -ne 'local' -and
-            $currentSnapshot -and
-            (Test-Path $currentSnapshot) -and
-            (Test-Path (Join-Path $currentSnapshot 'scripts\installer-engine.sh')) -and
-            (Test-Path (Join-Path $currentSnapshot 'scripts\installer-engine.ps1')) -and
-            (Test-Path (Join-Path $currentSnapshot 'libs\agent-procutil\pyproject.toml')) -and
-            (Test-Path (Join-Path $currentSnapshot 'libs\ssh-manager\pyproject.toml')) -and
-            (Test-Path (Join-Path $currentSnapshot 'libs\venue-copilot\pyproject.toml')) -and
-            (Test-Path (Join-Path $currentSnapshot 'libs\zdd\pyproject.toml')) -and
-            (Test-Path (Join-Path $currentSnapshot 'libs\remote-login-shell\pyproject.toml')) -and
-            (Test-Path (Get-SnapshotVersionMarkerPath -SnapshotDir $currentSnapshot)) -and
-            (((Get-Content -LiteralPath (Get-SnapshotVersionMarkerPath -SnapshotDir $currentSnapshot) -Raw).Trim()) -eq $SrcVersion) -and
-            (Test-Path (Get-SnapshotSourceMarkerPath -SnapshotDir $currentSnapshot)) -and
-            (((Get-Content -LiteralPath (Get-SnapshotSourceMarkerPath -SnapshotDir $currentSnapshot) -Raw).Trim()) -eq $sourcePath)
-        ) {
+        if (Test-SnapshotReusable -SnapshotDir $currentSnapshot -SourceKind $sourceKind -SourcePath $sourcePath -SourceVersion $SrcVersion) {
             $payloadTmp = Join-Path $InstallDir ("payload-dir.$PID.tmp")
             [System.IO.File]::WriteAllText($payloadTmp, $currentSnapshot, $utf8NoBom)
             Move-Item -LiteralPath $payloadTmp -Destination (Join-Path $InstallDir 'payload-dir') -Force

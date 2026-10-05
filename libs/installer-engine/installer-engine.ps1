@@ -306,7 +306,12 @@ function Write-DeployManifest {
 
     $manifestPath = Join-Path $InstallPath 'deploy-manifest.json'
     $provenancePath = if ($SourcePathOverride) { $SourcePathOverride } else { $PluginPath }
-    $kind = & $GetSourceKind $provenancePath
+    if ($SourcePathOverride) {
+        $normalized = ($provenancePath -replace '\\', '/')
+        $kind = if ($normalized -match '/\.copilot/installed-plugins/') { 'marketplace' } else { 'local' }
+    } else {
+        $kind = & $GetSourceKind $provenancePath
+    }
     $ver = if ($VersionOverride) { $VersionOverride } else { '0.0.0' }
     if (-not $VersionOverride) {
         $pyproj = Join-Path $PluginPath 'pyproject.toml'
