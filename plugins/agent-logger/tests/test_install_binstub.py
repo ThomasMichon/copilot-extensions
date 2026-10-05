@@ -107,6 +107,10 @@ def _host_pip_index_url() -> str | None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer behavior")
+# Regression (coverage-guided-ci's full-matrix local validation pass,
+# 2026-10-04): same class of gap -- two sequential timeout=30 subprocess
+# calls mean a worst case near 60s, past the 30s blanket default.
+@pytest.mark.timeout(90)
 def test_stamp_replaces_dangling_legacy_binstub(tmp_path: Path) -> None:
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
@@ -165,6 +169,11 @@ def test_stamp_replaces_dangling_legacy_binstub(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows installer behavior")
+# Regression (coverage-guided-ci's full-matrix local validation pass,
+# 2026-10-04): same class of gap -- two sequential subprocess calls
+# (timeout=60, timeout=30) mean a worst case near 90s, past the 30s
+# blanket default.
+@pytest.mark.timeout(120)
 def test_windows_stamp_publishes_complete_command_family(tmp_path: Path) -> None:
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
@@ -358,6 +367,19 @@ def test_posix_snapshot_uses_self_staged_payload_not_original() -> None:
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required")
+# Regression (coverage-guided-ci's full-matrix local validation pass,
+# 2026-10-04): this test's own `subprocess.run(..., timeout=420)` call
+# already anticipates needing up to 420s "to absorb a genuinely fresh
+# package resolution/build under shared-machine contention" -- but with no
+# `@pytest.mark.timeout` override, `run-plugin-tests.py`'s own blanket
+# 30s-per-test pytest-timeout default fires first and kills it on any real
+# (non-instant, contended) run, well before that 420s internal ceiling is
+# ever reached. Same class of false-positive `test_first_install_bootstrap
+# .py::test_posix_lean_provision_installs_resolver_and_launchers_reenter_
+# runtime` already hit and fixed the same way: give real headroom above
+# the test's own internal subprocess ceiling, not a global timeout bump
+# that would mask an actual hang in a lighter test elsewhere.
+@pytest.mark.timeout(450)
 def test_provision_publishes_durable_compatibility_wrappers(
     tmp_path: Path,
 ) -> None:
@@ -431,6 +453,12 @@ def test_provision_publishes_durable_compatibility_wrappers(
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required")
+# Regression (coverage-guided-ci's full-matrix local validation pass,
+# 2026-10-04): same class as `test_provision_publishes_durable_compatibility_
+# wrappers` above -- two sequential subprocess.run calls (timeout=60,
+# timeout=420) mean a worst case near 480s, well past the 30s blanket
+# pytest-timeout default. Real headroom above the combined internal ceiling.
+@pytest.mark.timeout(520)
 def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -> None:
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
@@ -508,6 +536,10 @@ def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -
     assert f"agent-logger {version}" in provision.stdout
 
 
+# Regression (coverage-guided-ci's full-matrix local validation pass,
+# 2026-10-04): same class of gap -- two sequential timeout=60 subprocess
+# calls mean a worst case near 120s, past the 30s blanket default.
+@pytest.mark.timeout(150)
 def test_stamp_reuses_pre_adoption_same_version_snapshot(tmp_path: Path) -> None:
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
@@ -573,6 +605,10 @@ def test_stamp_reuses_pre_adoption_same_version_snapshot(tmp_path: Path) -> None
     assert sentinel.read_text(encoding="utf-8") == "keep"
 
 
+# Regression (coverage-guided-ci's full-matrix local validation pass,
+# 2026-10-04): same class of gap -- a single timeout=60 subprocess call,
+# past the 30s blanket default.
+@pytest.mark.timeout(90)
 def test_scoped_stamp_avoids_global_compatibility_wrappers(tmp_path: Path) -> None:
     payload = _stage_payload(tmp_path)
     home = tmp_path / "home"

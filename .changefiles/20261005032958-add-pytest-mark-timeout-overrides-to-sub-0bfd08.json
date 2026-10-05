@@ -1,0 +1,13 @@
+{
+  "comment": "Add pytest.mark.timeout overrides to subprocess-heavy tests whose own internal subprocess timeouts already exceed run-plugin-tests.py's blanket 30s per-test default, so pytest-timeout's own default doesn't kill them before their real work finishes",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "dev"
+    }
+  ]
+}
