@@ -1,0 +1,9 @@
+{
+  "comment": "Update diagnosing-validate-and-promote-failures worked example: headed_launch relocated to worktree_manager.new_window_spawn (Phase 9, #5210)",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}

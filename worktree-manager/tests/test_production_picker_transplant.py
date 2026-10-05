@@ -1281,6 +1281,171 @@ def test_run_launch_relocated_script_posix_execs_bash(monkeypatch, tmp_path):
     assert "--bare-resume" in calls[0][1]
 
 
+class TestRunLaunchNewWindow:
+    """Phase 9 (#5210): ``new_window=True`` opens the SAME relocated
+    launch-session script in a new, visible window instead of blocking/
+    exec-replacing the caller's own process -- so the script's mux-daemon
+    registration always runs, and the caller (the live Picker TUI) is never
+    torn down or blocked. Reuses the identical argv every other local launch
+    builds (proving registration parity); refuses, rather than silently
+    falling back to a blocking/exec path, whenever the request can't be
+    satisfied through the relocated script (remote, AHP, or script absent)."""
+
+    def _plan(self, *, action="exec", worktree_id="demo-1234"):
+        return type(
+            "Plan", (), {"action": action, "exit_code": 0, "worktree_id": worktree_id},
+        )()
+
+    def _request(self, **overrides):
+        base = {
+            "project": "demo", "worktree_id": "demo-1234", "mode": "resume",
+            "machine": None, "no_mux": False, "ahp": False, "new_window": True,
+        }
+        base.update(overrides)
+        return type("Request", (), base)()
+
+    @pytest.fixture(autouse=True)
+    def _no_persisted_execution_leg(self, monkeypatch):
+        """Every request below is local + mode="resume"/"bare-resume" with a
+        concrete worktree_id, so `_run_launch` always probes the persisted
+        execution leg first; keep that probe a no-op (older-engine shape)
+        unless a test overrides it, matching the sibling non-new-window
+        tests above (e.g. `test_run_launch_relocated_script_sets_no_mux_env`)."""
+        from worktree_manager import engine_client
+
+        monkeypatch.setattr(
+            engine_client, "execution_leg_get",
+            lambda *_a, **_k: (_ for _ in ()).throw(
+                engine_client.EngineFeatureUnavailable("older engine")),
+        )
+
+    def test_spawns_detached_new_window_instead_of_blocking(self, monkeypatch, tmp_path):
+        from worktree_manager import ahp_provider, new_window_spawn
+
+        script = tmp_path / "launch-session.ps1"
+        script.write_text("# stub\n", encoding="utf-8")
+        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (self._plan(), 0))
+        monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
+        monkeypatch.setattr(
+            ahp_provider, "ensure_session",
+            lambda *_a: (_ for _ in ()).throw(AssertionError("AHP is opt-in")),
+        )
+        monkeypatch.setattr(entrypoint, "_is_windows", lambda: True)
+
+        def boom_popen(*_a, **_k):
+            raise AssertionError("new_window must never block this process with Popen().wait()")
+
+        monkeypatch.setattr(entrypoint.subprocess, "Popen", boom_popen)
+        monkeypatch.setattr(entrypoint.os, "execvp", lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("new_window must never exec-replace this process")))
+        calls = []
+
+        def fake_spawn(argv, *, title):
+            calls.append((argv, title))
+            return {"spawner": "wt.exe", "pid": 4242}
+
+        monkeypatch.setattr(new_window_spawn, "spawn_detached_new_window", fake_spawn)
+
+        assert entrypoint._run_launch(self._request()) == 0
+        assert len(calls) == 1
+        argv, title = calls[0]
+        assert argv[:4] == ["pwsh.exe", "-NoProfile", "-NoLogo", "-File"]
+        assert argv[4] == str(script)
+        assert title == "demo-1234"
+
+    def test_new_window_argv_matches_the_ordinary_launch_argv(self, monkeypatch, tmp_path):
+        """The whole point of Phase 9: "new window" must run the IDENTICAL
+        script invocation an ordinary (non-new-window) local launch would,
+        so the script's `Invoke-ManagedMuxRegister`/mux-daemon registration
+        call always fires the same way regardless of which window modifier
+        was chosen."""
+        from worktree_manager import ahp_provider, new_window_spawn
+
+        script = tmp_path / "launch-session.ps1"
+        script.write_text("# stub\n", encoding="utf-8")
+        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (self._plan(), 0))
+        monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
+        monkeypatch.setattr(
+            ahp_provider, "ensure_session",
+            lambda *_a: (_ for _ in ()).throw(AssertionError("AHP is opt-in")),
+        )
+        monkeypatch.setattr(entrypoint, "_is_windows", lambda: True)
+
+        ordinary_calls = []
+
+        class _FakeProc:
+            def wait(self, timeout=None):
+                return 0
+
+        monkeypatch.setattr(
+            entrypoint.subprocess, "Popen",
+            lambda argv, **_k: ordinary_calls.append(argv) or _FakeProc(),
+        )
+        assert entrypoint._run_launch(self._request(new_window=False)) == 0
+
+        new_window_calls = []
+        monkeypatch.setattr(
+            new_window_spawn, "spawn_detached_new_window",
+            lambda argv, *, title: new_window_calls.append(argv) or {"spawner": "x", "pid": 1},
+        )
+        assert entrypoint._run_launch(self._request(new_window=True)) == 0
+
+        assert ordinary_calls == new_window_calls
+
+    def test_new_window_registers_none_when_composed_with_no_mux(self, monkeypatch, tmp_path):
+        """A `--no-mux` launch bypasses mux entirely (PSMux/TMux is never
+        invoked -- see `launch-session.ps1`), so composing it with
+        `new_window` must still run the SAME script (which itself skips
+        registration for a no-mux launch), never a separate no-registration
+        special case needing its own regression guard here beyond argv
+        parity with the no-mux, non-new-window case."""
+        from worktree_manager import ahp_provider, new_window_spawn
+
+        script = tmp_path / "launch-session.ps1"
+        script.write_text("# stub\n", encoding="utf-8")
+        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (self._plan(), 0))
+        monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
+        monkeypatch.setattr(
+            ahp_provider, "ensure_session",
+            lambda *_a: (_ for _ in ()).throw(AssertionError("AHP is opt-in")),
+        )
+        monkeypatch.setattr(entrypoint, "_is_windows", lambda: True)
+        monkeypatch.delenv("WORKTREE_NO_MUX", raising=False)
+        calls = []
+        monkeypatch.setattr(
+            new_window_spawn, "spawn_detached_new_window",
+            lambda argv, *, title: calls.append(argv) or {"spawner": "x", "pid": 1},
+        )
+
+        assert entrypoint._run_launch(self._request(new_window=True, no_mux=True)) == 0
+        assert entrypoint.os.environ.get("WORKTREE_NO_MUX") == "1"
+        assert len(calls) == 1
+        monkeypatch.delenv("WORKTREE_NO_MUX", raising=False)
+
+    def test_new_window_rejects_remote_plan(self, monkeypatch):
+        plan = self._plan(action="remote")
+        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+        rc = entrypoint._run_launch(self._request(machine="dev6", environment="prod"))
+        assert rc == 1
+
+    def test_new_window_rejects_ahp(self, monkeypatch):
+        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (self._plan(), 0))
+        rc = entrypoint._run_launch(self._request(ahp=True))
+        assert rc == 1
+
+    def test_new_window_rejects_missing_relocated_script(self, monkeypatch):
+        from worktree_manager import ahp_provider
+
+        monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (self._plan(), 0))
+        monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: None)
+        monkeypatch.setattr(
+            ahp_provider, "ensure_session",
+            lambda *_a: (_ for _ in ()).throw(AssertionError("AHP is opt-in")),
+        )
+        rc = entrypoint._run_launch(self._request())
+        assert rc == 1
+
+
 def test_run_launch_default_never_calls_ahp(monkeypatch):
     from worktree_manager import ahp_provider, launcher
 

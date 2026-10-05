@@ -133,13 +133,16 @@ commands below use `<agent-worktrees catalog argv[0]>` as that placeholder.
 ## Worked example
 
 `test_windows_falls_back_to_new_console_without_wt` faked `platform.system()`
-to `"Windows"` to exercise `headed_launch._windows_spawn`'s
-no-Windows-Terminal fallback, then asserted against
+to `"Windows"` to exercise the module's `_windows_spawn`'s no-Windows-Terminal
+fallback (at the time, `headed_launch._windows_spawn` in agent-worktrees;
+relocated to `worktree_manager.new_window_spawn._windows_spawn` by Phase 9 of
+the `worktree-manager-control-plane` effort, #5210 -- the lesson below is
+unchanged by the move), then asserted against
 `subprocess.CREATE_NEW_CONSOLE` directly. That attribute is real only on an
 actual Windows Python build; on the Linux `ubuntu-latest` runner it raised
 `AttributeError: module 'subprocess' has no attribute 'CREATE_NEW_CONSOLE'`
 before the faked `Popen` was ever reached. The production code was already
-correctly platform-guarded (`spawn_headed_attach` only calls
+correctly platform-guarded (`spawn_detached_new_window` only calls
 `_windows_spawn` when `platform.system() == "Windows"`); the fix was
 module-level `_CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE",
 <fallback flag>)`, used by both the production code and the test, so faking
