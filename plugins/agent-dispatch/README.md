@@ -828,9 +828,10 @@ adapter slot, but declarations with `forge.provider: gitea` are still
 validation-rejected until a real adapter lands (tracked separately as
 `ThomasMichon/copilot-extensions#4825`).
 
-The configured `forge.producer_login` is verified against the authenticated
-`gh` identity and repository immediately before every mutation; comments from
-other authors are untrusted issue data.
+The configured producer identity is verified against the selected provider
+immediately before every mutation (for example `gh` against the GitHub repo, or
+the authenticated Azure DevOps surface against its project/work-item backend);
+comments from other authors are untrusted issue data.
 
 **Rehearsing a new or edited declaration before trusting it to run
 unattended:** `rehearsal_mode: true` (default `false`) makes every

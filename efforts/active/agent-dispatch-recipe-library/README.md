@@ -415,9 +415,11 @@ below — read it before starting any Phase 3 work).
 
 ### Phase 9 — Docs
 - [x] `plugins/agent-dispatch/README.md`: document the `extends:` model, the
-      six recipes (existing four plus the two truly new engines this effort
-      adds none of — clarify that c/d/e/f are named instantiations, not new
-      archetypes), and the ADO/Gitea adapters.
+      eight shipped global recipes (four base archetypes plus the four named
+      additions from this effort), clearly calling out that
+      `backlog-triager`/`issue-reproducer`/`effort-builder` are named
+      instantiations of existing engines while `effort-driver` is the distinct
+      repo-local active-effort loop, and document the ADO/Gitea adapter state.
 - [x] Update `visions/plugins/agent-dispatch/README.md`,
       `.../repository-issue-loop/README.md`, and `.../reviewer/README.md` to
       mark `provider-neutral-backlog-capability` /
@@ -436,9 +438,9 @@ below — read it before starting any Phase 3 work).
       operational finding's own lanes, or an equivalent fixture) is migrated
       to an `extends:`-based thin declaration with zero custom script, and
       confirmed behavior-equivalent to the original.
-- [ ] `agent-dispatch recipes list` shows all six recipes (four existing +
-      backlog-triager + issue-reproducer, with effort-builder/effort-driver
-      also present) with their params documented.
+- [ ] `agent-dispatch recipes list` shows all eight shipped global recipes
+      (the four base archetypes plus backlog-triager, issue-reproducer,
+      effort-builder, and effort-driver) with their params documented.
 - [ ] A live fixture repo/issue/PR set exercises each of the four newly
       named recipes end-to-end per their own Phase's test item.
 

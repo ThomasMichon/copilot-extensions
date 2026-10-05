@@ -85,9 +85,8 @@ The reusable pull-request capability covers the common cooperative review
 operations across supported forges. Provider differences stay behind adapters;
 reviewer policy does not reimplement subprocess invocation, identity
 classification, revision parsing, verdict rendering, wait loops, or merge
-guards. GitHub is the fully realized adapter on that surface today; Azure
-DevOps and Gitea remain future adopters of the same contract rather than
-fork-specific reviewer engines.
+guards. GitHub, Azure DevOps, Gitea, and other forge adopters belong on that
+same contract rather than on fork-specific reviewer engines.
 
 ### revision-driven-resume
 
