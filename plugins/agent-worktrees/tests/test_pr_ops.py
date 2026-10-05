@@ -525,6 +525,14 @@ class TestCreatePR:
         config, wid, wt_path, _ = pr_repo
         first = pr_ops.create_pr(wid, config, title="Add feature")
         assert first["success"], first
+        original_pr_head = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
+
+        anchor = Path(config.repos["ext"].anchor)
+        _git("checkout", "master", cwd=anchor)
+        (anchor / "upstream.txt").write_text("unrelated upstream advance\n")
+        _git("add", "-A", cwd=anchor)
+        _git("commit", "-m", "advance upstream", cwd=anchor)
+        _git("push", "origin", "master", cwd=anchor)
 
         _git("checkout", f"worktree/{wid}", cwd=wt_path)
         (wt_path / "c.txt").write_text("feedback 1\n")
@@ -540,10 +548,15 @@ class TestCreatePR:
         assert rerun["rerun"] is True
         assert rerun["squashed"] is False
         assert "without re-squashing" in rerun["history_action"]
+        assert "without rebasing it onto newer upstream" in rerun["history_action"]
         ahead = git_ops.get_commits_ahead(
             "origin/feature/add-feature-aaaa", "origin/master", cwd=str(wt_path)
         )
         assert len(ahead) == 3
+        assert _git(
+            "merge-base", original_pr_head, "origin/feature/add-feature-aaaa",
+            cwd=wt_path,
+        ) == original_pr_head
         subjects = _git(
             "log", "--format=%s", "-n", "3", "origin/feature/add-feature-aaaa",
             cwd=wt_path,

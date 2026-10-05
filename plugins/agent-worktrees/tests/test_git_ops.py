@@ -798,6 +798,14 @@ class TestCrossAccountAuth:
         assert bool(res) is False
         assert res.retryable is True
 
+    def test_push_stale_info_failure_is_retryable(self):
+        res = go.PushResult(
+            ok=False,
+            stderr=" ! [rejected]        pr/head -> pr/head (stale info)\n"
+                   "error: failed to push some refs",
+        )
+        assert res.retryable is True
+
     def test_push_success_returns_truthy_no_stderr(self, monkeypatch):
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         monkeypatch.setattr(go, "git", lambda *a, **k: types.SimpleNamespace(

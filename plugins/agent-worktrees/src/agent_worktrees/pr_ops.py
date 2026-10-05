@@ -837,16 +837,15 @@ def create_pr(
     ahead = git_ops.get_commits_ahead(wt_branch, upstream, cwd=worktree_path)
 
     # --- Re-run fast path: a live PR whose head is already published and whose
-    #     base has nothing new to squash. This is hit by (a) a legacy/migration
+    #     base has nothing new to publish. This is hit by (a) a legacy/migration
     #     worktree created under the old scheme that DID reset worktree/<id> to
     #     upstream (so it now sits at the tip, `not ahead`), and (b) any repo
     #     where the merged content has already synced back. In both cases the
-    #     squashed work already lives on the (still-local) feature branch, so
+    #     published work already lives on the (still-local) feature branch, so
     #     re-push that branch instead of tripping the "already exists" guard or
-    #     the "nothing ahead" error below. Under the current scheme a *successful*
-    #     create-pr leaves worktree/<id> ONE ahead (the squashed commit is kept
-    #     in place, never reset), so a normal iterate/retry has `ahead` non-empty
-    #     and falls through to re-squash + force-push onto the reused branch. ---
+    #     the "nothing ahead" error below. Under the current scheme a successful
+    #     create-pr leaves worktree/<id> ahead, so a normal iterate/retry has
+    #     `ahead` non-empty and falls through to the live-PR update path. ---
     if reusing and not ahead and git_ops.local_branch_exists(
         feature_branch, cwd=worktree_path
     ):
@@ -925,19 +924,24 @@ def create_pr(
     # guard is needed either.
     squash_msg = eff_title
 
-    # 1. Rebase the worktree commits onto the upstream default branch FIRST,
-    #    with the individual commits intact -- BEFORE squashing. This lets
-    #    ``git rebase`` drop any commit already present on upstream by patch-id.
-    #    The case that matters (#546): a REUSED worktree whose prior PR was
-    #    already **squash-merged**. Because every agent-worktrees PR is a single
-    #    squashed commit, that prior commit's patch-id matches the squash-merge
-    #    on upstream, so the rebase drops it cleanly and only the new work
-    #    survives. Squashing *first* (the old order) fused the already-merged
-    #    commit with the new work into one patch that no longer matched
-    #    upstream, forcing a spurious conflict that aborted create-pr.
     base_sha = ""
     rebased_onto_upstream = False
-    if git_ops.ref_exists(upstream, cwd=worktree_path):
+    if reusing:
+        # A live PR update must preserve the already-published PR tip exactly
+        # as-is: rebasing the whole worktree onto a newer upstream tip would
+        # rewrite those published commits before the later force-with-lease
+        # push, defeating the ordinary incremental-update contract (#5300).
+        # Keep the PR's existing base for patch-id continuity when we already
+        # know it; otherwise the downstream patch-id simply degrades to the
+        # current full HEAD diff.
+        base_sha = (
+            (target_pr.base_sha if target_pr is not None else "")
+            or (active.base_sha if active is not None else "")
+        )
+    elif git_ops.ref_exists(upstream, cwd=worktree_path):
+        # Fresh PR publish: rebase the worktree commits onto the upstream
+        # default branch FIRST, with the individual commits intact, so git can
+        # drop any commit already present on upstream by patch-id (#546).
         if not git_ops.rebase(upstream, cwd=worktree_path):
             _rollback(worktree_path, wt_branch, orig_sha)
             return {**base, "error": (
@@ -979,11 +983,11 @@ def create_pr(
     if rebased_onto_upstream:
         rewrite_lead = f"Rebased '{wt_branch}' onto {upstream}"
     else:
-        rewrite_lead = f"Prepared '{wt_branch}' without an upstream rebase"
+        rewrite_lead = f"Preserved '{wt_branch}' without rebasing it onto newer upstream"
     if reusing:
         history_action = (
             f"{rewrite_lead} and reused the live PR head without re-squashing; "
-            f"publishing {surviving_commits} surviving commit(s) with "
+            f"publishing the current {surviving_commits}-commit PR head with "
             "--force-with-lease."
         )
     elif squashed:
@@ -1031,10 +1035,15 @@ def create_pr(
                     retry_command="agent-worktrees create-pr"
                 )
             ) if pushed.retryable else ""
+            work_desc = (
+                f"The current PR-head commits remain on '{wt_branch}'; "
+                if reusing else
+                f"The squashed work is on '{wt_branch}'; "
+            )
             return {**base, "error": (
                 f"Failed to push '{wt_branch}' to '{publish_remote}/{feature_branch}'. "
-                f"The squashed work is on '{wt_branch}'; tracking state left as "
-                f"'creating' for retry (re-run create-pr)."
+                + work_desc
+                + "tracking state left as 'creating' for retry (re-run create-pr)."
                 + hint
                 + detail
             )}
@@ -1070,11 +1079,18 @@ def create_pr(
                     retry_command="agent-worktrees create-pr"
                 )
             ) if pushed.retryable else ""
+            work_desc = (
+                f"The current PR-head commits remain on '{wt_branch}' (and the "
+                f"local '{feature_branch}' snapshot); "
+                if reusing else
+                f"The squashed work is on '{wt_branch}' (and the local "
+                f"'{feature_branch}' snapshot); "
+            )
             return {**base, "error": (
-                f"Failed to push '{feature_branch}' to '{publish_remote}'. The squashed "
-                f"work is on '{wt_branch}' (and the local '{feature_branch}' "
-                f"snapshot); tracking state left as 'creating' for retry "
-                f"(re-run create-pr)."
+                f"Failed to push '{feature_branch}' to '{publish_remote}'. "
+                + work_desc +
+                "tracking state left as 'creating' for retry "
+                "(re-run create-pr)."
                 + hint
                 + detail
             )}

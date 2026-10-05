@@ -393,12 +393,15 @@ through to merge. Never skip the PR entirely when `pr-required` is `true`.
 ### Head scheme + branch topology (PR mode)
 
 **Invariant (both schemes): a worktree is always checked out on its own
-`worktree/{id}` branch, and it always lands on the squashed commit.**
-`create-pr` squashes the worktree's commits in place on `worktree/{id}`, rebases
-onto upstream, and leaves HEAD there at that squashed commit — it is **never
-reset off it** (#1804). `worktree/{id}` sits one commit ahead of the default branch while
-the PR is open; a later `git sync` (or the finalize reconcile) realigns it clean
-on merge.
+`worktree/{id}` branch.** The **initial** `create-pr` squashes the worktree's
+commits in place on `worktree/{id}`, rebases onto upstream, and leaves HEAD
+there at that squashed commit — it is **never reset off it** (#1804). A **later
+`create-pr` update on the same still-open PR** reuses that published PR head
+without re-squashing or rebasing the already-pushed tip onto newer upstream;
+it publishes any newer commits incrementally on top. `worktree/{id}` therefore
+lands on the squashed commit on first publish, then accumulates later feedback
+commits on top while the PR stays open; a later `git sync` (or the finalize
+reconcile) realigns it clean on merge.
 
 `pr.head_scheme` selects **only how the PR head is published** — its name +
 push mechanism — never the local worktree state:
@@ -558,14 +561,16 @@ replaces the authored PR description.
 
 > **Never run `create-pr`/`push-changes` for the same worktree from two
 > actors at once -- not even a delegated sub-agent "helping" with the exact
-> PR you're already driving.** `create-pr` squashes commits and rebases IN
-> PLACE on `worktree/{id}`'s own checkout; a second actor (a spawned sub-agent
-> given the same worktree path, or a second session bound to it) committing,
-> stashing, or pushing concurrently corrupts the other's in-flight edits
-> invisibly -- a mid-flight multi-step edit can land half-applied with no
-> error, and commits already safely pushed to an open PR can vanish from
-> `git log` the moment the other actor's own `create-pr` run rebases past
-> them, with nothing to suggest why. Confirmed live: a background sub-agent
+> PR you're already driving.** The initial `create-pr` squashes and rebases
+> IN PLACE on `worktree/{id}`'s own checkout, and later `create-pr`/`push-
+> changes` calls still rewrite that same local branch in place as they publish
+> updates. A second actor (a spawned sub-agent given the same worktree path, or
+> a second session bound to it) committing, stashing, or pushing concurrently
+> corrupts the other's in-flight edits invisibly -- a mid-flight multi-step
+> edit can land half-applied with no error, and commits already safely pushed
+> to an open PR can vanish from `git log` the moment the other actor's own
+> publish path rewrites past them, with nothing to suggest why. Confirmed live:
+> a background sub-agent
 > mistakenly delegated the SAME repo/worktree (rather than its own,
 > independently created one) ran for 3+ hours alongside the delegating
 > session, pushing its own commits and `git stash`-ing the other session's

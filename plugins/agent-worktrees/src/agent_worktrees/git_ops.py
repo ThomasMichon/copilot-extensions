@@ -853,6 +853,7 @@ class PushResult:
         return (
             "non-fast-forward" in s
             or "fetch first" in s
+            or "stale info" in s
             or "tip of your current branch is behind" in s
             or "the remote contains work that you do" in s
         )
