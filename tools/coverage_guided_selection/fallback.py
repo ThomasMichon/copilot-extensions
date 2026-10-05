@@ -9,15 +9,20 @@ the baseline evolves, not because it is provably optimal.
 
 Pure stdlib, operates only on the portable JSON baseline.
 
-**Phase 0 scope note:** the vision requires the fallback tier to be
-"always-safe" -- drawn from the portfolio's own already-vetted tiers, not
-just whichever tests happen to score well on coverage-per-cost. This
-prototype accepts an optional `eligible_tests` restriction for exactly that
-reason; when omitted, it defaults to the full baseline (every collected
-test is a candidate) as a documented Phase 0 simplification, **not** a
-safety claim -- wiring real portfolio-tier eligibility (`test-portfolio`'s
-own tiering) into `eligible_tests` is required before this curation is used
-as an actual CI fallback tier (tracked in this effort's own Phase 3).
+**Fallback eligibility is real, portfolio-tier-restricted, not every
+collected test.** `compute_fallback_set` itself stays a general,
+reusable primitive: its own `eligible_tests` parameter accepts any
+caller-supplied restriction, or `None` for "every collected test is a
+candidate" -- a deliberately unsafe default no actual CI fallback should
+ever rely on directly. `decide.py`'s own `decide()` is what wires the
+*real* safety restriction: unless a caller explicitly overrides it,
+`decide()` always derives `eligible_tests` from
+`default_tier_eligible_tests` below, which restricts candidates to the
+test-portfolio's own default, always-on tiers (T0-T2 and untiered) --
+never T3 (clean-room) or T4 (end-to-end), which `pytest_portfolio_guard.py`
+itself skips unless a run explicitly opts in with `--allow-explicit-tiers`.
+A fallback tier that silently drew from those gated tiers would grant
+every PR's smoke fallback an opt-in no one actually asked for.
 
 **`covered_fraction` is always measured against the full baseline**,
 independent of `eligible_tests`: restricting candidates can leave lines
@@ -39,6 +44,12 @@ import math
 from dataclasses import dataclass
 
 _MIN_DURATION_S = 1e-6  # avoid division by zero for a measured 0.00s test
+
+#: Portfolio tiers `pytest_portfolio_guard.py` itself skips by default
+#: (requires `--allow-explicit-tiers` to opt in) -- never part of the
+#: portfolio's own always-on default run, so never eligible for an
+#: always-on CI fallback tier either. See `default_tier_eligible_tests`.
+_INELIGIBLE_TIERS = frozenset({"T3", "T4"})
 
 
 @dataclass(frozen=True)
@@ -156,4 +167,29 @@ def compute_fallback_set(
         total_runtime_s=total_cost,
         covered_fraction=covered_fraction,
         universe_size=len(universe),
+    )
+
+
+def default_tier_eligible_tests(baseline: dict) -> frozenset[str]:
+    """The real, test-portfolio-tier-restricted candidate universe for an
+    always-on CI fallback: every test recorded in `baseline["tests"]`
+    whose own `portfolio_tier` (baseline schema v3+, see `baseline.py`) is
+    NOT one of `_INELIGIBLE_TIERS` (T3/T4) -- the tiers
+    `pytest_portfolio_guard.py` itself skips unless a run explicitly opts
+    in with `--allow-explicit-tiers`. A test with no `portfolio_tier` key
+    at all (either genuinely untiered, or recorded in a baseline collected
+    before schema v3 added the field) is treated as eligible, matching
+    `pytest_portfolio_guard.py`'s own behavior for a test with no declared
+    tier -- it runs unrestricted in every default invocation, so it must
+    not be penalized here as though it were excluded.
+
+    This is the actual safety wiring the vision requires of the fallback
+    tier ("drawn from the portfolio's own already-vetted tiers"); `decide()`
+    uses this as its own default `eligible_tests` whenever a caller doesn't
+    explicitly override it.
+    """
+    return frozenset(
+        nodeid
+        for nodeid, info in baseline.get("tests", {}).items()
+        if info.get("portfolio_tier") not in _INELIGIBLE_TIERS
     )
