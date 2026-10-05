@@ -28,6 +28,13 @@ can), so a raw push to `main` is always rejected. Requires an authenticated
 `gh` CLI (this is meant to be run by a human operator with their own
 credentials, not from within ``validate-and-promote.yml``'s CI identity).
 Pass `--no-pr` only against an unprotected/trusted repo (tests use this).
+``_land_via_pr`` parses the created PR's number from ``gh pr create``'s own
+plain stdout (never ``--json``, which that subcommand has never supported)
+and this tool's own state-commit/revert branch shapes
+(``release-pipeline/state-*``, ``release-pipeline/rollback-*``) are among
+``.github/workflows/ci.yml``'s ``main-gate`` job's recognized automated-PR
+shapes, so a ``pause``/``resume --push``/``revert --push`` PR lands
+through the normal sanctioned flow without an operator admin-bypass merge.
 
 Guards:
 
@@ -83,18 +90,32 @@ def _land_via_pr(
     genuine human-operator emergency retains a separate, narrower escape
     hatch: ``main``'s ruleset also grants a ``RepositoryRole: admin``
     bypass, usable via ``gh pr merge --admin`` -- never automated here,
-    reserved for a human deciding a true emergency merits it.)"""
-    import json as _json
+    reserved for a human deciding a true emergency merits it.)
+
+    Deliberately does NOT pass ``gh pr create --json ...``: unlike
+    ``pr view``/``pr list``, ``gh pr create`` has never supported a
+    ``--json`` flag at all (``unknown flag: --json``, not merely an
+    unsupported field list). Parse the PR number from ``gh pr create``'s
+    own plain stdout instead, which always prints the created PR's URL
+    (and only that, as of gh's documented behavior) regardless of
+    installed version."""
+    import re as _re
     import subprocess as _subprocess
 
     create = _subprocess.run(
         ["gh", "pr", "create", "--base", base_ref, "--head", branch,
-         "--title", title, "--body", body, "--json", "number"],
+         "--title", title, "--body", body],
         cwd=str(repo), capture_output=True, text=True,
     )
     if create.returncode != 0:
         raise PromotionError(f"gh pr create failed: {create.stderr.strip()}")
-    number = _json.loads(create.stdout)["number"]
+    match = _re.search(r"/pull/(\d+)\s*$", create.stdout.strip())
+    if not match:
+        raise PromotionError(
+            f"gh pr create succeeded but its output did not contain a "
+            f"recognizable PR URL to parse the number from: {create.stdout!r}"
+        )
+    number = match.group(1)
 
     merge = _subprocess.run(
         ["gh", "pr", "merge", str(number), "--squash", "--auto"],
@@ -103,8 +124,65 @@ def _land_via_pr(
     if merge.returncode != 0:
         raise PromotionError(f"gh pr merge failed: {merge.stderr.strip()}")
 
-    _git(["fetch", "origin", base_ref], cwd=repo)
-    return _rev_parse(f"origin/{base_ref}", cwd=repo)
+    return _wait_for_pr_merge(repo=repo, number=number)
+
+
+def _wait_for_pr_merge(
+    *, repo: Path, number: str,
+    timeout_seconds: float = 300.0, interval_seconds: float = 10.0,
+) -> str:
+    """Poll ``gh pr view <number>`` until it reports ``MERGED``, fetch that
+    merge commit into the local ``repo`` checkout, and return its sha.
+
+    ``gh pr merge --squash --auto`` returns as soon as auto-merge is ARMED,
+    not once the PR is actually merged -- this repo's required checks (the
+    real pending one is `main-gate`'s own sibling job set, a few minutes'
+    wall-clock) still have to pass first. Resolving the merge commit via
+    an immediate ``git fetch origin <base> && git rev-parse origin/<base>``
+    right after that call can therefore race the merge and return the OLD
+    pre-merge tip, not the new one. Poll instead of assuming completion.
+    The final ``git fetch`` (by commit sha, not branch name) is still
+    required even after confirming the merge via the API: callers
+    (``revert``'s own ``git tag -a ... <merged-sha>``) need that commit's
+    OBJECT present in the local repo, which the API call alone never
+    provides."""
+    import json as _json
+    import subprocess as _subprocess
+    import time as _time
+
+    deadline = _time.monotonic() + timeout_seconds
+    while True:
+        view = _subprocess.run(
+            ["gh", "pr", "view", number, "--json", "state,mergeCommit"],
+            cwd=str(repo), capture_output=True, text=True,
+        )
+        if view.returncode != 0:
+            raise PromotionError(f"gh pr view failed while waiting for merge: {view.stderr.strip()}")
+        data = _json.loads(view.stdout)
+        state = data.get("state")
+        if state == "MERGED":
+            merge_commit = data.get("mergeCommit") or {}
+            sha = merge_commit.get("oid")
+            if not sha:
+                raise PromotionError(
+                    f"PR #{number} reports state MERGED but its mergeCommit.oid "
+                    f"is missing from `gh pr view`'s output: {data!r}"
+                )
+            _git(["fetch", "origin", sha], cwd=repo)
+            return sha
+        if state in ("CLOSED",):
+            raise PromotionError(
+                f"PR #{number} was closed without merging while waiting for "
+                f"auto-merge to complete -- refusing to guess a commit sha."
+            )
+        if _time.monotonic() >= deadline:
+            raise PromotionError(
+                f"PR #{number} did not merge within {timeout_seconds:.0f}s "
+                f"(last observed state: {state!r}) -- its required checks may "
+                f"still be running, or auto-merge may have stalled; check it "
+                f"manually before retrying."
+            )
+        _time.sleep(interval_seconds)
 
 
 def _write_state_commit(

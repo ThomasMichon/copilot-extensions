@@ -405,18 +405,31 @@ def _changed_files(base: str) -> list[str] | None:
     """Files this branch changed vs *base* (``git diff --name-only base...HEAD``).
 
     Returns the changed paths, or ``None`` when *base* can't be resolved (e.g. a
-    fresh clone with no ``origin/main``) so the caller can fall back to a
-    full-tree scan.
+    fresh clone with no ``origin/main``) OR has no common ancestor with ``HEAD``
+    (three-dot ``git diff`` fails outright with "no merge base" rather than
+    producing an empty/partial diff) so the caller can fall back to a
+    full-tree scan either way. The no-common-ancestor case is a real,
+    standing condition for this repo specifically: `main` is a
+    generated/promoted artifact (see `tools/promote_release.py`'s own
+    docstring), never a fork point, so a branch whose only shared ancestor
+    with `main` was the repo's original root loses even that the moment
+    `main`'s history is ever rewritten (every commit's SHA on `main`'s own
+    line changes along with it -- see docs/pipelines.md's "If main's
+    history is force-rewritten"). Treat this exactly like an unresolvable
+    base -- a full-tree scan, not a crash.
     """
     if not _ref_exists(base):
         return None
-    out = subprocess.run(
-        ["git", "diff", "--name-only", f"{base}...HEAD"],
-        cwd=REPO,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--name-only", f"{base}...HEAD"],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        return None
     return [line for line in out.stdout.splitlines() if line]
 
 
@@ -428,7 +441,9 @@ def _files_to_scan(scan_all: bool, base: str, *, emit_status: bool = True) -> li
     if changed is None:
         if emit_status:
             print(
-                f"base ref '{base}' not found -- scanning the whole tracked tree.",
+                f"base ref '{base}' not found or shares no history with HEAD "
+                f"(e.g. after a main history rewrite) -- scanning the whole "
+                f"tracked tree.",
             )
         return _tracked_files()
     if emit_status:

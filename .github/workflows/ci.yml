@@ -73,7 +73,7 @@ env:
 jobs:
   main-gate:
     name: main source gate
-    # The gate for any PR targeting `main`. Exactly three shapes are legitimate:
+    # The gate for any PR targeting `main`. Exactly five shapes are legitimate:
     # (1) the promotion pipeline's own PR (a release/promote-<run id> branch,
     #     opened via the APERTURE_RELEASE_TOKEN PAT -- a personal fine-grained
     #     token minted under the maintainer's own account, this repo having no
@@ -89,9 +89,32 @@ jobs:
     #     name `automation/module-size-baseline-widen`, also opened via the
     #     APERTURE_RELEASE_TOKEN PAT so it's PR_AUTHOR == the repo owner too,
     #     and whose diff is never anything but the one generated baseline
-    #     JSON file).
+    #     JSON file); or
+    # (4) tools/rollback_release.py's own pause/resume state-commit PR
+    #     (branch name `release-pipeline/state-<epoch ms>`, same PAT, whose
+    #     diff is never anything but the one pipeline-state JSON file). This
+    #     shape was added after a real gap found during the 2026-10-04
+    #     main-history-rewrite effort: `_land_via_pr`'s documented path
+    #     (open a PR, let it land normally) could never actually complete
+    #     against this gate for a state-commit PR, forcing an admin-merge
+    #     bypass every single time `pause`/`resume --push` ran -- see
+    #     `tools/rollback_release.py`'s own module docstring and
+    #     `docs/pipelines.md`'s pause/resume section for the full story; or
+    # (5) tools/rollback_release.py's own `revert` rollback PR (branch name
+    #     `release-pipeline/rollback-<epoch ms>`, same PAT) -- a wholesale
+    #     revert of main's tree to its pre-promotion state, generated as a
+    #     single `commit-tree` call (`_write_state_commit`/`revert`'s own
+    #     "never a force-push/history-rewrite" commit message), so unlike
+    #     shape (4) its diff is NOT single-file by nature; recognized
+    #     instead by branch-name pattern plus the PR carrying exactly ONE
+    #     commit (`github.event.pull_request.commits == 1`) -- a real,
+    #     hand-assembled multi-commit PR can never match a mechanically
+    #     generated single `commit-tree` push. Added alongside shape (4)
+    #     after the same main-history-rewrite effort found `revert --push`
+    #     hits the identical gap.
     #
-    # Shapes (2) and (3) are enforced by DIFF CONTENT here, not by admin/human bypass --
+    # Shapes (2), (3), (4), and (5) are enforced by DIFF CONTENT or commit-shape here,
+    # not by admin/human bypass --
     # this is deliberate, prompted by a real incident (an unrelated
     # vision-doc PR landed directly on `main` via `gh pr merge --admin`,
     # stranding content that the next promotion would have silently reverted,
@@ -108,7 +131,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Only the promotion pipeline's own PR, or a workflow-only bootstrap PR, may land on main
+      - name: Only the promotion pipeline's own PR, a workflow-only bootstrap PR, or a recognized automated/state PR, may land on main
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
@@ -132,13 +155,16 @@ jobs:
           REPO_OWNER: ${{ github.repository_owner }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Used only by shape (5) below -- the PR's own total commit count,
+          # straight from the webhook payload (no extra API call needed).
+          PR_COMMITS: ${{ github.event.pull_request.commits }}
         run: |
           if [[ "$HEAD_REF" == release/promote-* && "$PR_AUTHOR" == "$REPO_OWNER" ]]; then
             echo "Legitimate promotion-pipeline PR -- OK."
             exit 0
           fi
           if [ "$PR_AUTHOR" != "$REPO_OWNER" ]; then
-            echo "::error::This PR targets 'main' and is not the promotion pipeline's own PR. main only ever moves via a release/promote-* PR, a workflow-file-only bootstrap PR, or module-size-baseline-widen.yml's own automated PR (all by the repo owner). Please retarget this PR's base branch to 'dev' -- see docs/pipelines.md > Release & Versioning."
+            echo "::error::This PR targets 'main' and is not the promotion pipeline's own PR. main only ever moves via a release/promote-* PR, a workflow-file-only bootstrap PR, module-size-baseline-widen.yml's own automated PR, or rollback_release.py's own state-commit/revert PR (all by the repo owner). Please retarget this PR's base branch to 'dev' -- see docs/pipelines.md > Release & Versioning."
             exit 1
           fi
           # Merge-base-relative (three-dot semantics), not a literal
@@ -173,15 +199,88 @@ jobs:
             echo "$changed"
             exit 0
           fi
+          # Fourth legitimate shape: tools/rollback_release.py's own
+          # pause/resume state-commit PR (see that tool's `_write_state_commit`
+          # / `_land_via_pr`) -- branch name is always `release-pipeline/
+          # state-<epoch ms>` (never reused, never hand-typed), and its diff
+          # is never anything but the one pipeline-state JSON file
+          # (`.github/release-pipeline-state.json`, `PIPELINE_STATE_PATH` in
+          # that tool). Checked by branch-name PATTERN (not exact match --
+          # the timestamp varies every run) AND single-file diff content
+          # together, same shape as the module-size-baseline-widen check
+          # above, for the same reason: neither alone should be enough to
+          # widen this narrow exception.
+          if [[ "$HEAD_REF" == release-pipeline/state-* \
+                && "$changed" == ".github/release-pipeline-state.json" ]]; then
+            echo "Automated rollback_release.py state-commit PR -- OK. Files:"
+            echo "$changed"
+            exit 0
+          fi
+          # Fifth legitimate shape: tools/rollback_release.py's own
+          # `revert` rollback PR (see that tool's `revert`/`_land_via_pr`)
+          # -- branch name is always `release-pipeline/rollback-<epoch ms>`
+          # (never reused, never hand-typed), generated as a SINGLE
+          # mechanical `commit-tree` call that wholesale-restores main's
+          # pre-promotion tree. Unlike shape (4), this diff is deliberately
+          # NOT single-file (a real tree-wide revert can touch many files),
+          # so it cannot be checked by diff content the same way. Branch
+          # name and commit count alone are NOT enough here, though -- any
+          # owner-authored, single-commit PR could otherwise reuse this
+          # prefix to land an arbitrary tree-wide change, since a single
+          # hand-authored commit is routine. Verify the actual shape
+          # instead: the head's SOLE parent must be this PR's base sha
+          # (proving it is a direct, un-rebased child of main's tip at
+          # open time, matching `commit-tree -p <main tip>`), and every
+          # file it changes relative to the REAL promotion commit's OWN
+          # parent must be the one pipeline-state file -- i.e. the
+          # revert's tree, aside from that one file, is byte-identical to
+          # the commit immediately before the promotion it reverts,
+          # exactly what `revert()` constructs. The "real promotion
+          # commit" is NOT simply `BASE_SHA^`: the documented operator
+          # flow is pause THEN revert, so a pause/resume bookkeeping
+          # commit is often main's actual tip by the time `revert` runs,
+          # making `BASE_SHA` itself that pause commit and `BASE_SHA^` the
+          # promotion commit being reverted, not its parent. Walk
+          # `BASE_SHA`'s history for the most recent `promote-*`-tagged
+          # commit instead, mirroring `_find_last_promotion_commit`
+          # exactly, and compare against THAT commit's parent.
+          if [[ "$HEAD_REF" == release-pipeline/rollback-* && "$PR_COMMITS" == "1" ]]; then
+            parent_count="$(git rev-list --parents -n 1 "$HEAD_SHA" | wc -w)"
+            sole_parent="$(git rev-parse "$HEAD_SHA^" 2>/dev/null || true)"
+            if [[ "$parent_count" != "2" || "$sole_parent" != "$BASE_SHA" ]]; then
+              echo "::error::This PR's head is not a single, direct child of its base (expected exactly one parent equal to \$BASE_SHA) -- refusing to treat it as an automated rollback_release.py revert."
+              exit 1
+            fi
+            promotion_commit=""
+            for sha in $(git log --format=%H "$BASE_SHA"); do
+              if git tag --points-at "$sha" | grep -q '^promote-'; then
+                promotion_commit="$sha"
+                break
+              fi
+            done
+            if [ -z "$promotion_commit" ]; then
+              echo "::error::Could not find a tagged promotion commit reachable from this PR's base -- refusing to treat it as an automated rollback_release.py revert."
+              exit 1
+            fi
+            rollback_diff="$(git diff --name-only "$promotion_commit^" "$HEAD_SHA" | grep -v '^\.github/release-pipeline-state\.json$' || true)"
+            if [ -n "$rollback_diff" ]; then
+              echo "::error::This PR's tree (beyond the pipeline-state file) does not match main's pre-promotion state -- refusing to treat it as an automated rollback_release.py revert. Unexpected diff:"
+              echo "::error::$rollback_diff"
+              exit 1
+            fi
+            echo "Automated rollback_release.py revert PR -- OK."
+            exit 0
+          fi
           non_workflow="$(echo "$changed" | grep -v '^\.github/workflows/' || true)"
           if [ -n "$non_workflow" ]; then
             echo "::error::This PR touches file(s) outside .github/workflows/, so it cannot use the workflow-only bootstrap exception:"
             echo "::error::$non_workflow"
-            echo "::error::main only ever moves via a release/promote-* PR, a workflow-file-ONLY bootstrap PR, or module-size-baseline-widen.yml's own automated PR. Please retarget this PR's base branch to 'dev' -- see docs/pipelines.md > Release & Versioning."
+            echo "::error::main only ever moves via a release/promote-* PR, a workflow-file-ONLY bootstrap PR, module-size-baseline-widen.yml's own automated PR, or rollback_release.py's own state-commit/revert PR. Please retarget this PR's base branch to 'dev' -- see docs/pipelines.md > Release & Versioning."
             exit 1
           fi
           echo "Workflow-file-only bootstrap PR by the repo owner -- OK. Files:"
           echo "$changed"
+
 
   checks:
     name: guards + lint

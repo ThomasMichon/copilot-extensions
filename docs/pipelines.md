@@ -384,10 +384,12 @@ never checks out or executes the PR's own code and never runs tests — its
 only effect is that one comment, so it adds no capability a
 non-collaborator didn't already have.
 
-It recognizes `main-gate`'s own three legitimate automated-PR shapes (the
-release pipeline's own PR, a workflow-only bootstrap PR, and
-`module-size-baseline-widen.yml`'s automated PR) by the same branch-name
-and diff-content signature `main-gate` itself checks, not merely by
+It recognizes `main-gate`'s own five legitimate automated-PR shapes (the
+release pipeline's own PR, a workflow-only bootstrap PR,
+`module-size-baseline-widen.yml`'s automated PR, and `rollback_release.py`'s
+own pause/resume state-commit PR and revert rollback PR) by the same
+branch-name and diff-content (or branch-name and commit-count, for the
+revert shape) signature `main-gate` itself checks, not merely by
 "author is the repo owner" — so if this reminder is ever widened to cover
 every PR against `main` rather than only non-owner authors, it still can't
 mistake the release pipeline's own automated PRs for ones that need a
@@ -422,6 +424,48 @@ this repo needs to know or care either: `copilot plugin install`/`update`
 (both the direct-repo and marketplace paths) and `worktree-manager`'s own
 self-updater fetch **by branch name**, never a pinned commit SHA — so they
 transparently pick up whatever is currently on `main`, rewritten or not.
+
+### Ancestry/compare checks across the rewrite boundary fail by design — that's not corruption
+
+Any SHA-based ancestry check spanning the rewrite — `git merge-base
+--is-ancestor <pre-rewrite-sha> origin/main`, a GitHub `compare/<old>...
+<new>` API call, or a PR-merge-ancestry lookup for a PR merged before the
+rewrite — **genuinely has no common ancestor** across that boundary and
+correctly fails (locally: a non-zero exit with no useful message; via the
+API: `404 No common ancestor between <sha> and <sha>`). This is expected
+for every pre-rewrite commit, not a sign the rewrite dropped history or
+that your checkout is broken — `git filter-repo` rewrites every commit's
+**ID** (each commit's SHA depends on its parent's SHA, so once the root
+commit's ID changes, every descendant's ID changes too, all the way to the
+tip), so no pre-rewrite commit SHA appears anywhere in the rewritten line.
+(A commit's **tree** ID is a different thing and does *not* automatically
+change along with it — a tree ID depends only on its own entries, so a
+commit whose tree was untouched by the rewrite keeps the same tree ID even
+though its own commit ID changed.)
+
+To check whether a specific pre-rewrite change (e.g. a PR merged shortly
+before a rewrite) actually survived, don't try to re-derive ancestry across
+the boundary — check the rewritten `main`'s **content** directly instead,
+by file:
+
+```bash
+gh api "repos/<owner>/<repo>/contents/<path>?ref=main" --jq '.content' \
+  | base64 -d | grep '<expected string from that change>'
+```
+
+(or just read the file at that ref with any `gh`/API content call). A
+history rewrite like this is only ever verified content-identical at the
+rewritten **tip** (its tree, as a whole, matches the pre-rewrite tip's tree
+byte-for-byte) — it is NOT content-identical commit-by-commit throughout
+history: the whole point is deliberately stripping specific oversized
+blobs from every historical commit that carried one, so a commit that only
+ever touched a since-stripped blob no longer resolves that blob's content.
+Every file that survives to the rewritten tip, though, is exactly what it
+was. The one documented rewrite to date is the 2026-10-04 purge recorded in
+the repo README banner and
+[`efforts/done/main-history-rewrite`](../efforts/done/main-history-rewrite/README.md);
+if you hit this exact "no common ancestor" symptom, check there first for
+the exact old→new SHA pair before assuming something new is wrong.
 
 ## Release & Versioning
 
@@ -504,11 +548,24 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 
 > **Mechanical shortcut — release/recovery tooling only, not for an ordinary
 > contributor PR:** `python tools/accumulate_bumps.py --from-diff
-> origin/main --apply` bumps exactly what `check-version-bump.py` requires
+> origin/dev --apply` bumps exactly what `check-version-bump.py` requires
 > for a branch — every touched plugin (all three files plus literal
 > `__version__` fallbacks), every plugin that vendors a changed lib, and
 > the lib itself in all its copies — each only when it is not already
-> ahead of `origin/main`. This writes version manifests **directly**, the
+> ahead of `origin/dev`. Use `origin/dev` here, not `origin/main`: `main`
+> is a disjoint, wholesale-regenerated promotion artifact (see
+> `tools/promote_release.py`'s own docstring) with no real shared ancestry
+> to an ordinary branch except the repo's original fork point — and a
+> deliberate `main` history rewrite (this doc's own "If main's history is
+> force-rewritten" section) severs even that, making `origin/main` a
+> permanently unrelated base this tool now explicitly refuses rather than
+> silently computing a wrong/misleading bump set. The one case that
+> legitimately wants `origin/main` as the base is a true recovery check
+> run directly against a specific already-promoted `main` commit (e.g.
+> auditing exactly what a past promotion bumped) — pass that commit's SHA
+> explicitly rather than the branch name `origin/main`, since the branch
+> itself is just whatever the most recent promotion happens to be. This
+> writes version manifests **directly**, the
 > same way the promotion pipeline itself does, and does **not** consume or
 > even look at pending changefiles — using it on an ordinary `dev` PR
 > bypasses the changefile workflow above entirely. It exists for the

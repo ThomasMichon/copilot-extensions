@@ -97,7 +97,13 @@ CMD_ARG_KEYS = ("command", "cmd", "script", "commandLine", "commandline", "input
 # suspected write. Mirrors cross_repo_guard. ``pull`` stays in this cheap
 # early-out list -- an unsafe (non-``--ff-only``) pull must still reach the
 # precise per-segment analysis below, which is where the real ``--ff-only``
-# exemption lives (see ``_GIT_FF_ONLY_FLAG``).
+# exemption lives (see ``_GIT_FF_ONLY_FLAG``). The optional ``-C <path>``
+# uses the same quoted-or-unquoted grammar as ``_GIT_SUBCOMMAND`` below
+# (``"[^"]*"|'[^']*'|\S+``, not a bare ``\S+``) -- an anchor path containing
+# a space (``-C "my anchor path" commit ...``) otherwise makes ``\S+``
+# match only the first word, so the whole early-out fails to match and the
+# entire per-segment analysis below is skipped outright, silently allowing
+# the write.
 _WRITE_VERBS = re.compile(
     "|".join([
         "Set-Content", "Add-Content", "Out-File", "New-Item", "Remove-Item",
@@ -106,9 +112,9 @@ _WRITE_VERBS = re.compile(
         ">>?",
         r"\btee\b", r"\bsed\b\s+-i", r"\bcp\b", r"\bmv\b", r"\brm\b",
         r"\btouch\b", r"\bmkdir\b", r"\bdd\b", r"\btruncate\b", r"\bpatch\b",
-        r"git\s+(?:-C\s+\S+\s+)?(?:apply|commit|checkout|switch|reset|"
-        r"restore|clean|rm|mv|stash|merge|rebase|pull|cherry-pick|revert|"
-        r"add|init)",
+        r"""git\s+(?:-C\s+(?:"[^"]*"|'[^']*'|\S+)\s+)?(?:apply|commit|checkout|switch|reset|"""
+        r"""restore|clean|rm|mv|stash|merge|rebase|pull|cherry-pick|revert|"""
+        r"""add|init|branch)""",
     ]),
     re.IGNORECASE,
 )
@@ -146,7 +152,7 @@ _WRITE_CMD_START = re.compile(
 _GIT_START = re.compile(r"^\s*[\"']?git\b", re.IGNORECASE)
 _GIT_WRITE_SUB = re.compile(
     r"\b(?:add|commit|apply|checkout|switch|reset|restore|clean|rm|mv|stash|"
-    r"merge|rebase|pull|cherry-pick|revert|init)\b",
+    r"merge|rebase|pull|cherry-pick|revert|init|branch)\b",
     re.IGNORECASE,
 )
 # ``pull`` is the one write-sub verb with a narrow, precise exemption: this
@@ -178,6 +184,63 @@ _GIT_FF_ONLY_FLAG = re.compile(
 )
 # A ``-C`` (git change-directory) flag anywhere in a git segment.
 _GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
+
+# ``branch`` is the other write-sub verb with a narrow, precise exemption:
+# listing/inspecting branches is a common, safe operation that should
+# remain allowed even against the anchor, while any mutation of a ref or
+# its config must stay denied.
+#
+# ALLOWLIST, not a blacklist: enumerating known MUTATING flags
+# (``-f``/``-d``/``--force``/etc.) and exempting everything else is
+# insufficient -- git's ``branch`` subcommand has more mutating forms than
+# any such list reliably enumerates (``--track`` creates a ref + upstream
+# config; ``--set-upstream-to``/``--unset-upstream`` rewrite config;
+# ``--edit-description`` opens an editor that rewrites a ref-note; a bare
+# positional name creates a ref) -- a blacklist is only ever as safe as its
+# most recently discovered gap. This instead enumerates every known
+# READ-ONLY flag (below) and the exemption applies ONLY when every token
+# after ``branch`` is one of them; an unrecognized flag or any bare
+# positional argument (a branch name, a filter pattern, anything) means
+# "unknown, possibly mutating" and the invocation stays denied -- the safe
+# direction for a write guard, even at the cost of occasionally denying a
+# few benign-but-unrecognized read invocations (e.g. a separate-argument
+# form of ``--contains <ref>`` instead of ``--contains=<ref>``).
+_GIT_BRANCH_SAFE_LONG_FLAG = re.compile(
+    r"""^(?:
+        --list|--all|--remotes|--verbose|--show-current|
+        --column(?:=\S+)?|--no-column|--ignore-case|--omit-empty|
+        --no-abbrev|--no-color|--color(?:=\S+)?|--sort=\S+|--format=\S+|
+        --abbrev=\S+|--points-at=\S+|--contains=\S+|--no-contains=\S+|
+        --merged(?:=\S+)?|--no-merged(?:=\S+)?
+    )$""",
+    re.IGNORECASE | re.VERBOSE,
+)
+# A short-option cluster containing ONLY safe letters (v=verbose,
+# a=all, r=remotes, i=ignore-case, l=list) -- e.g. ``-v``, ``-a``, ``-vv``,
+# ``-avr``, ``-l``. Any OTHER letter anywhere in the cluster (including a
+# mutating one like ``f``/``d``/``m``/``c``, combined or not) fails this
+# and falls through to "unrecognized -> deny".
+_GIT_BRANCH_SAFE_SHORT_CLUSTER = re.compile(r"^-[varil]+$", re.IGNORECASE)
+_GIT_BRANCH_ARG_TOKEN = re.compile(r'"[^"]*"|\'[^\']*\'|\S+')
+
+
+def _git_branch_invocation_is_readonly(args_text: str) -> bool:
+    """Whether every token in ``args_text`` (everything after the ``branch``
+    subcommand word in a git invocation) is a known read-only flag -- see
+    the allowlist rationale above. Quoted tokens are unwrapped before
+    classification so ``"--list"`` and ``--list`` are treated alike."""
+    for raw in _GIT_BRANCH_ARG_TOKEN.findall(args_text):
+        token = raw
+        if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
+            token = token[1:-1]
+        if not token:
+            continue
+        if _GIT_BRANCH_SAFE_LONG_FLAG.match(token):
+            continue
+        if _GIT_BRANCH_SAFE_SHORT_CLUSTER.match(token):
+            continue
+        return False
+    return True
 
 # Leading benign prefixes to strip so a write verb after them is still seen at
 # "command position": env-assignments (``VAR=val``) and wrapper commands
@@ -518,6 +581,13 @@ def _shell_hit(cmd: str, cwd: str, anchors: list[dict]) -> dict | None:
         subcmd = _GIT_SUBCOMMAND.match(eff)
         is_pull = bool(subcmd and subcmd.group(1).lower() == "pull")
         if git_write and is_pull and _GIT_FF_ONLY_FLAG.search(seg):
+            git_write = False
+        # A ``branch`` invocation is exempt from ``git_write`` ONLY when its
+        # actual SUBCOMMAND is ``branch`` and every argument after it is a
+        # known read-only flag -- see ``_git_branch_invocation_is_readonly``'s
+        # allowlist rationale.
+        is_branch = bool(subcmd and subcmd.group(1).lower() == "branch")
+        if git_write and is_branch and _git_branch_invocation_is_readonly(eff[subcmd.end():]):
             git_write = False
         has_dash_c = is_git and bool(_GIT_DASH_C_FLAG.search(seg))
         for a in anchors:
