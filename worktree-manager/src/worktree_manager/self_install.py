@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 import uuid
 from dataclasses import dataclass
@@ -180,31 +181,6 @@ _SLOT_KEY_FILES = (
     "src/worktree_manager/__init__.py",
     "src/worktree_manager/__main__.py",
 )
-
-
-def _invalidate_slot_completion(slot: Path) -> None:
-    """Remove ``slot``'s completion marker, if any, before any mutation of
-    ``slot`` begins. A slot is proven complete only by this marker having
-    been published as the LAST step of a fully successful
-    ``_copy_payload_unsafe()`` -- invalidating it first (rather than
-    relying on the mutation that follows to remove it, which can itself
-    fail partway through) guarantees no stale marker from a slot's
-    previous occupant can ever survive an interrupted rebuild of the same
-    path and be mistaken for proof that the NEW content is complete.
-
-    Only a missing marker (the ordinary case: no prior install, or one
-    already invalidated) is swallowed. Any OTHER failure -- a
-    ``PermissionError`` from the marker still being held open, most
-    notably -- must propagate rather than let mutation proceed with a
-    stale marker still in place: ``_copy_payload``'s own boundary
-    normalizes it to the one exception type ``self_install()`` catches,
-    aborting the install instead of silently risking exactly the
-    stale-proof-of-completeness state this marker exists to prevent.
-    """
-    try:
-        (slot / _SLOT_COMPLETE_MARKER).unlink()
-    except FileNotFoundError:
-        pass
 
 
 def _mark_slot_complete(slot: Path) -> None:
@@ -422,6 +398,60 @@ def _core_install_satisfied(version: str, root: Path | None = None) -> bool:
         and binstub_present() is not None
         and not _binstubs_are_stale()
     )
+
+
+def _core_install_satisfied_gaps(version: str, root: Path | None = None) -> list[str]:
+    """Human-readable reasons :func:`_core_install_satisfied` returned
+    ``False`` for ``version`` -- one entry per failing sub-check.
+
+    A caller falling through to a full reinstall on a ``False`` result must
+    never do so silently (#5219's requested fix 2): this is what let a
+    manifest-only gap silently escalate to "full reinstall" in practice,
+    even while ``doctor`` was reporting the very same install as fully
+    healthy (``doctor`` only compares the marker to the running version --
+    it does not check slot completeness or binstub staleness at all).
+    """
+    r = root or default_root()
+    gaps: list[str] = []
+    cur = current_version(r)
+    if cur != version:
+        gaps.append(f"current-version marker is {cur!r}, not {version!r}")
+    if not _slot_is_complete(version_slot(version, r)):
+        gaps.append(
+            f"slot {version_slot(version, r)} is missing its completion marker "
+            "or a key file"
+        )
+    stub = binstub_present()
+    if stub is None:
+        gaps.append("no binstub found in ~/.local/bin")
+    elif _binstubs_are_stale():
+        gaps.append(f"binstub {stub} content does not match this version's template")
+    return gaps
+
+
+def _currently_running_from(slot: Path) -> bool:
+    """``True`` when *this process's own interpreter* lives inside ``slot``.
+
+    Checked by path containment against the running interpreter
+    (``sys.executable``), never by a version-string comparison -- the whole
+    point is to catch this even when :func:`_core_install_satisfied`
+    incorrectly disagrees that the version matches (#5219). Overwriting
+    such a slot is a **self-overwrite**: on Windows, ``shutil.rmtree``
+    cannot delete the currently-open venv's ``python.exe`` (``WinError 5:
+    Access is denied``), and even where deletion nominally succeeds on
+    another platform, destroying your own on-disk payload mid-execution is
+    never something a reinstall needs to do -- the process already proves
+    this exact version runs.
+    """
+    try:
+        exe = Path(sys.executable).resolve()
+    except OSError:
+        return False
+    try:
+        slot_resolved = slot.resolve()
+    except OSError:
+        slot_resolved = slot
+    return slot_resolved == exe or slot_resolved in exe.parents
 
 
 def needs_install(version: str, root: Path | None = None) -> bool:
@@ -706,12 +736,6 @@ def _copy_payload(payload_dir: Path, slot: Path) -> None:
 
 
 def _copy_payload_unsafe(payload_dir: Path, slot: Path) -> None:
-    # Invalidate completion FIRST, before any mutation -- see
-    # _invalidate_slot_completion's own docstring for why this must not be
-    # left to the rmtree below (which can itself fail partway through).
-    _invalidate_slot_completion(slot)
-    if slot.exists():
-        shutil.rmtree(slot)
     if payload_dir.is_symlink():
         # symlinks=True on the copytree below only protects symlinks
         # encountered DURING the walk of payload_dir's own tree -- it
@@ -722,41 +746,92 @@ def _copy_payload_unsafe(payload_dir: Path, slot: Path) -> None:
         # dir could itself be a symlink; the earlier
         # (payload/"pyproject.toml").is_file() check would still pass
         # (it follows the link), copytree would dereference it, and
-        # _find_any_symlink(slot) afterward would see no link at all
-        # (the slot's own root is never included in its own scan).
+        # _find_any_symlink(staging) afterward would see no link at all
+        # (the staged root is never included in its own scan).
         raise RuntimeError(
             f"refusing to install this payload: {payload_dir} is a "
             "symlink -- a payload root must be a real directory, not a "
             "link to an external tree"
         )
-    ignore = shutil.ignore_patterns(".git", ".venv", "__pycache__", "*.pyc")
-    # symlinks=True: a payload staged by self_update's tarball fetch may
-    # carry a preserved (not dereferenced -- see _fetch_via_tarball's own
-    # symlinks=True) symlink; copying it here with the default
-    # symlinks=False would dereference it at this second hop, still
-    # smuggling external content into the published slot one step later
-    # and defeating _materialize_payload_pointers' downstream symlink
-    # rejection.
-    shutil.copytree(payload_dir, slot, ignore=ignore, symlinks=True)
-    bad = _find_any_symlink(slot)
-    if bad is not None:
-        shutil.rmtree(slot, ignore_errors=True)
-        raise RuntimeError(
-            f"refusing to install this payload: {bad} is a symlink -- a "
-            "self-installed slot must contain only real files (a symlink "
-            "anywhere in it could resolve outside the slot at runtime)"
-        )
-    _materialize_payload_pointers(payload_dir, slot)
-    missing = [rel for rel in _SLOT_KEY_FILES if not (slot / rel).is_file()]
-    if missing:
-        raise RuntimeError(
-            f"refusing to mark {slot} complete: payload is missing "
-            + ", ".join(missing)
-        )
-    # Published only here, as the LAST step of a fully successful copy +
-    # materialization that has itself verified every _SLOT_KEY_FILES entry
-    # is present -- this is what proves the slot complete.
-    _mark_slot_complete(slot)
+    # Build the replacement content in a sibling STAGING directory first,
+    # and only atomically swap it into `slot` once proven complete -- never
+    # rmtree + recopy `slot` in place (#5219). This closes two distinct
+    # failure modes at once:
+    #
+    # 1. Any failure while building the replacement (an unresolvable
+    #    vendor-pointer, a missing key file, a transient OS error) leaves a
+    #    previously-good `slot` completely untouched -- there is nothing to
+    #    clean up and nothing to repair on the next attempt.
+    # 2. On Windows, `slot` can be the CURRENTLY-RUNNING interpreter's own
+    #    directory (see `_currently_running_from` -- self_install() refuses
+    #    to even attempt this case explicitly, but this swap is also safe
+    #    on its own merits): `shutil.rmtree` cannot delete an open
+    #    `python.exe` (`WinError 5: Access is denied`), but `os.replace`
+    #    CAN rename a directory containing one out from under the running
+    #    process -- the same trick ordinary Windows self-updaters rely on.
+    #    The running process's already-open file handles stay valid after
+    #    the rename.
+    staging = slot.with_name(f"{slot.name}.staging.{os.getpid()}.{uuid.uuid4().hex}")
+    if staging.exists():
+        shutil.rmtree(staging, ignore_errors=True)
+    try:
+        ignore = shutil.ignore_patterns(".git", ".venv", "__pycache__", "*.pyc")
+        # symlinks=True: a payload staged by self_update's tarball fetch may
+        # carry a preserved (not dereferenced -- see _fetch_via_tarball's own
+        # symlinks=True) symlink; copying it here with the default
+        # symlinks=False would dereference it at this second hop, still
+        # smuggling external content into the published slot one step later
+        # and defeating _find_any_symlink's downstream rejection.
+        shutil.copytree(payload_dir, staging, ignore=ignore, symlinks=True)
+        bad = _find_any_symlink(staging)
+        if bad is not None:
+            raise RuntimeError(
+                f"refusing to install this payload: {bad} is a symlink -- a "
+                "self-installed slot must contain only real files (a symlink "
+                "anywhere in it could resolve outside the slot at runtime)"
+            )
+        _materialize_payload_pointers(payload_dir, staging)
+        missing = [rel for rel in _SLOT_KEY_FILES if not (staging / rel).is_file()]
+        if missing:
+            raise RuntimeError(
+                f"refusing to mark {staging} complete: payload is missing "
+                + ", ".join(missing)
+            )
+        # Published only here, as proof the STAGED copy is complete --
+        # strictly before it is swapped into `slot` below, so the swap only
+        # ever publishes an already-proven-complete replacement.
+        _mark_slot_complete(staging)
+        _swap_in_staged_slot(staging, slot)
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+
+def _swap_in_staged_slot(staging: Path, slot: Path) -> None:
+    """Atomically publish ``staging`` as ``slot``.
+
+    Two renames, never one rmtree + copy: if ``slot`` already exists, it is
+    first renamed out of the way to a ``retired`` sibling name (a directory
+    rename never requires closing files already open inside it), then
+    ``staging`` is renamed into ``slot``'s now-vacated name. If the second
+    rename fails, the retired directory is renamed straight back so a
+    previously-working install is never left stripped (#5219's requested
+    fix 3). Reuses :func:`_replace_with_retry` -- the same transient-
+    ``PermissionError``-retrying ``os.replace`` the control-plane provider
+    manifest writer already relies on.
+    """
+    retired: Path | None = None
+    if slot.exists():
+        retired = slot.with_name(f"{slot.name}.retired.{os.getpid()}.{uuid.uuid4().hex}")
+        _replace_with_retry(slot, retired)
+    try:
+        _replace_with_retry(staging, slot)
+    except OSError:
+        if retired is not None:
+            _replace_with_retry(retired, slot)
+        raise
+    if retired is not None:
+        shutil.rmtree(retired, ignore_errors=True)
 
 
 # ── legacy artifact recognition + cleanup ────────────────────────────────
@@ -984,20 +1059,40 @@ def self_install(
         if not needs_install(version, r):
             return SelfInstallResult(version=version, action="already-current", root=str(r),
                                      slot=str(slot), marker=version, cleaned=cleaned)
+        if _currently_running_from(slot):
+            # This process's own interpreter lives inside `slot`.
+            # `_core_install_satisfied` disagreeing with what `doctor`
+            # reports healthy is the commonest trigger (see
+            # `_core_install_satisfied_gaps` below) -- without this guard
+            # that disagreement falls through to a full reinstall that
+            # tries to overwrite the currently-executing slot, which
+            # Windows cannot satisfy (WinError 5 on the open `python.exe`)
+            # and which leaves the install permanently wedged (#5219).
+            # Refuse clearly instead: the process already proves this
+            # exact version runs, so there is nothing a reinstall could
+            # fix here anyway.
+            gaps = _core_install_satisfied_gaps(version, r)
+            reason = (
+                f"already running worktree-manager {version} from {slot} -- "
+                "refusing to reinstall over the currently-executing slot"
+            )
+            if gaps:
+                reason += f" (would-be reinstall triggers: {'; '.join(gaps)})"
+            return SelfInstallResult(version=version, action="already-current", root=str(r),
+                                     slot=str(slot), marker=current_version(r),
+                                     reason=reason, cleaned=cleaned)
         _reap_stranded_cutover_passive(r, mux_daemon_cutover)
         try:
             _copy_payload(pd, slot)
         except RuntimeError as e:
-            # _materialize_payload_pointers() raises when a vendor-pointer copy
-            # inside the payload can't be resolved/expanded -- _copy_payload
-            # has already copytree'd the payload into slot by that point, so a
-            # bare re-raise would leave a partially-populated, broken slot on
-            # disk that a later needs_install() version-existence check could
-            # mistake for a valid install and skip retrying. Remove it so a
-            # retry starts clean, and report the failure rather than crashing
-            # the caller (self_update's own contract is best-effort/non-fatal).
-            if slot.exists():
-                shutil.rmtree(slot, ignore_errors=True)
+            # _copy_payload builds the replacement entirely in a sibling
+            # staging directory and only atomically swaps it into `slot`
+            # once proven complete (#5219) -- any failure along that path
+            # (an unresolvable vendor-pointer copy, a missing key file, a
+            # transient OS error) leaves a previously-good `slot`
+            # untouched (or still absent, for a fresh install), so there
+            # is nothing to clean up here; just report the failure
+            # (self_update's own contract is best-effort/non-fatal).
             return SelfInstallResult(version=version, action="error", root=str(r),
                                      slot=str(slot), reason=str(e), cleaned=cleaned)
     finally:
