@@ -1369,6 +1369,40 @@ def test_run_direct_launch_fallback_honors_front_door_cli_wait_override(monkeypa
     assert post_exit_calls == [("example", "wt-1")]
 
 
+def test_resolve_direct_launch_plan_honors_front_door_cli_command_and_env_override(monkeypatch):
+    """``_resolve_direct_launch_plan`` (and its sibling helpers) call
+    ``_agent_worktrees_launch_command``/``_launch_probe_env`` to build the
+    ``resolve`` subprocess invocation. Those were bare local calls after the
+    Worktree-Manager-launch split (copilot-extensions#5287 follow-up, second
+    review round): an override applied on ``front_door_cli`` was silently
+    ignored, so a test/caller patching the launch command or probe env on
+    that compatibility root saw no effect on the actual subprocess
+    invocation."""
+    monkeypatch.setattr(_fdc, "_agent_worktrees_launch_command", lambda project: ["stub-argv"])
+    monkeypatch.setattr(_fdc, "_launch_probe_env", lambda: {"STUB": "1"})
+
+    captured: dict = {}
+
+    class _FakeProc:
+        returncode = 0
+        stdout = json.dumps({"action": "none", "exit_code": 0})
+
+    def _fake_run(args, **kwargs):
+        captured["args"] = args
+        captured["env"] = kwargs.get("env")
+        return _FakeProc()
+
+    monkeypatch.setattr(m.subprocess, "run", _fake_run)
+
+    plan, project = m._resolve_direct_launch_plan("example", ["--foo"])
+
+    assert captured["args"][0] == "stub-argv"
+    assert captured["args"][1:] == ["resolve", "--no-mux", "--foo"]
+    assert captured["env"] == {"STUB": "1"}
+    assert plan == {"action": "none", "exit_code": 0}
+    assert project == "example"
+
+
 def test_cmd_launch_uses_relocated_worktree_manager_launcher_when_available(
     monkeypatch, tmp_path
 ):

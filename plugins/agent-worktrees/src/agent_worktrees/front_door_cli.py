@@ -551,6 +551,7 @@ _discover_control_plane_provider_manifests = _cpp._discover_control_plane_provid
 # monkeypatch.setattr(m, "<name>", ...) keep working exactly as before.
 from .worktree_manager_launch import (  # noqa: E402 -- re-export position matches original definition site
     _CONTROL_PLANE_PROVIDER_ENV,  # noqa: F401 -- re-exported for tests/__main__
+    _ControlPlaneProviderManifest,  # noqa: F401 -- re-exported for tests/__main__
     _WORKTREE_MANAGER_BIN,  # noqa: F401 -- re-exported for tests/__main__
     _WORKTREE_MANAGER_ENGINE_ARGV_ENV,  # noqa: F401 -- re-exported for tests/__main__
     _WORKTREE_MANAGER_INSTALL_PS1,  # noqa: F401 -- re-exported for tests/__main__
@@ -563,6 +564,7 @@ from .worktree_manager_launch import (  # noqa: E402 -- re-export position match
     _current_version_slot,  # noqa: F401 -- re-exported for tests/__main__
     _exec_worktree_manager,  # noqa: F401 -- re-exported for tests/__main__
     _launch_probe_env,  # noqa: F401 -- re-exported for tests/__main__
+    _parse_comparable_version,  # noqa: F401 -- re-exported for tests/__main__
     _probe_worktree_manager_version,  # noqa: F401 -- re-exported for tests/__main__
     _provider_command_display_name,  # noqa: F401 -- re-exported for tests
     _resolve_direct_launch_plan,  # noqa: F401 -- re-exported for tests/__main__

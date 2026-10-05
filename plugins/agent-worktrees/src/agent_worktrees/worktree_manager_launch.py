@@ -115,7 +115,7 @@ def _probe_worktree_manager_version(
             capture_output=True,
             text=True,
             timeout=15,
-            env=_launch_probe_env(),
+            env=_core_helper("_launch_probe_env", _launch_probe_env)(),
         )
     except (OSError, subprocess.SubprocessError):
         return None, None
@@ -244,14 +244,14 @@ def _resolve_direct_launch_plan(
     project: str | None, passthrough: list[str]
 ) -> tuple[dict[str, object], str | None]:
     """Resolve the same launch plan the mux launchers consume, but in Python."""
-    resolve_args = _agent_worktrees_launch_command(project)
+    resolve_args = _core_helper("_agent_worktrees_launch_command", _agent_worktrees_launch_command)(project)
     resolve_args += ["resolve", "--no-mux", *passthrough]
     proc = subprocess.run(
         resolve_args,
         stdout=subprocess.PIPE,
         stderr=None,
         text=True,
-        env=_launch_probe_env(),
+        env=_core_helper("_launch_probe_env", _launch_probe_env)(),
     )
     if proc.returncode != 0:
         return {"action": "none", "exit_code": proc.returncode}, project
@@ -281,9 +281,9 @@ def _wait_for_launch_child(proc: subprocess.Popen) -> int:
 
 
 def _run_post_exit_for_direct_launch(project: str | None, worktree_id: str) -> None:
-    post_args = _agent_worktrees_launch_command(project)
+    post_args = _core_helper("_agent_worktrees_launch_command", _agent_worktrees_launch_command)(project)
     post_args += ["post-exit", worktree_id]
-    result = subprocess.run(post_args, env=_launch_probe_env())
+    result = subprocess.run(post_args, env=_core_helper("_launch_probe_env", _launch_probe_env)())
     if result.returncode != 0:
         output.warn(
             f"Post-exit finalization failed (exit code {result.returncode}). "
@@ -302,9 +302,9 @@ def _run_direct_launch_fallback(project: str | None, passthrough: list[str]) -> 
             return int(plan.get("exit_code", 0) or 0)
         if action == "refresh":
             if _core()._env_get("WORKTREE_NO_UPDATE") != "1":
-                update_args = _agent_worktrees_launch_command(project)
+                update_args = _core_helper("_agent_worktrees_launch_command", _agent_worktrees_launch_command)(project)
                 update_args.append("update")
-                result = subprocess.run(update_args, env=_launch_probe_env())
+                result = subprocess.run(update_args, env=_core_helper("_launch_probe_env", _launch_probe_env)())
                 if result.returncode != 0:
                     output.warn("Full update returned non-zero -- continuing to relaunch")
             continue
@@ -327,7 +327,7 @@ def _run_direct_launch_fallback(project: str | None, passthrough: list[str]) -> 
         if not isinstance(cmd, list) or not all(isinstance(item, str) for item in cmd):
             output.err("Resolved launch plan is missing an executable command.")
             return 1
-        child_env = _launch_probe_env()
+        child_env = _core_helper("_launch_probe_env", _launch_probe_env)()
         plan_env = plan.get("env")
         if isinstance(plan_env, dict):
             for key, value in plan_env.items():

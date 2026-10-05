@@ -1695,6 +1695,20 @@ def test_select_control_plane_provider_honors_front_door_cli_override(monkeypatc
     assert selected is stub_manifest
 
 
+def test_front_door_cli_reexports_control_plane_provider_manifest_and_version_parser():
+    """``_ControlPlaneProviderManifest`` and ``_parse_comparable_version``
+    previously existed on ``front_door_cli`` (via its old ``_cpp``/local
+    definitions) but were not re-exported after the Worktree-Manager-launch
+    split moved their defining code to worktree_manager_launch.py
+    (copilot-extensions#5287 follow-up, second review round). Importing
+    either name from front_door_cli must keep working -- same underlying
+    object as worktree_manager_launch's own definition, not a copy."""
+    from agent_worktrees import worktree_manager_launch as _wml
+
+    assert _fdc._ControlPlaneProviderManifest is _wml._ControlPlaneProviderManifest
+    assert _fdc._parse_comparable_version is _wml._parse_comparable_version
+
+
 def test_bare_falls_back_to_picker_when_manager_broken(monkeypatch, tmp_path):
     """End-to-end: a broken Manager on PATH must NOT dead-end bare launch --
     the seam falls back to the bundled Picker (DQ8 invariant)."""

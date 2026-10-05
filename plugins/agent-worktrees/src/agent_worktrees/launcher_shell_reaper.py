@@ -237,7 +237,9 @@ def select_orphan_launcher_shells(
             skipped.append({"pid": pid, "reason": "live-descendant"})  # (3)
             continue
         ppid = int(p.get("ppid", -1) or -1)
-        parent_alive = _ancestor_chain_intact(ppid, by_pid, pid_alive)
+        parent_alive = _core()._self_override("_ancestor_chain_intact", _ancestor_chain_intact)(
+            ppid, by_pid, pid_alive
+        )
         if ppid > 0 and parent_alive:
             skipped.append({"pid": pid, "reason": "parent-alive"})  # (5)
             continue

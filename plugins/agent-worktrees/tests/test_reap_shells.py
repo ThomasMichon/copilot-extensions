@@ -223,6 +223,32 @@ def test_ancestor_chain_intact_walks_with_real_probe():
     )
 
 
+def test_select_orphan_launcher_shells_honors_overridden_ancestor_check(monkeypatch):
+    """``select_orphan_launcher_shells`` must resolve ``_ancestor_chain_intact``
+    through ``_self_override`` (as the Windows enumerator dispatch already
+    does), not a bare call -- otherwise an override applied on the
+    compatibility root (``cli``, i.e. ``__main__``) is silently ignored once
+    the predicate lives in a separate module from the helper it calls
+    (copilot-extensions#5287 follow-up, second review round: a monkeypatch on
+    ``cli._ancestor_chain_intact`` stopped being observed after the
+    launcher-shell-reaper split). Same shape as
+    ``test_ancestor_chain_spares_when_every_hop_is_alive`` (every hop
+    genuinely alive -> ordinarily spared), but with the root helper
+    overridden to always report "dead" -- the override must flip the outcome
+    to reaped."""
+    monkeypatch.setattr(cli, "_ancestor_chain_intact", lambda ppid, by_pid, pid_alive: False)
+    procs = [
+        _p(360, ppid=361),
+        {"pid": 361, "ppid": 362, "name": "pwsh.exe", "cmdline": _LAUNCH_CMD,
+         "create_epoch": OLD, "session_id": 1},
+    ]
+    reap, skipped = cli.select_orphan_launcher_shells(
+        procs, now=NOW, idle_grace_secs=3600.0, self_pid=424242,
+        pid_alive=lambda pid: pid in (361, 362))
+    assert {p["pid"] for p in reap} == {360, 361}
+    assert 360 not in _reasons(skipped)
+
+
 def test_service_session_zero_is_spared():
     procs = [_p(400, sid=0)]
     reap, skipped = _select(procs)
