@@ -214,6 +214,84 @@ def test_exclusive_key_blocks_second_task_spawn(q):
     assert len(q.list_reservations(state=SpawnState.ACTIVE)) == 1
 
 
+def test_record_cold_release_exclusive_frees_sibling_spawn(q):
+    """An awaiting_steer-style cold (release_exclusive=True) lets a sibling
+    task sharing the same exclusive_key spawn instead of queuing behind a
+    task that is purely waiting on an operator answer."""
+    t1 = q.create("review old", exclusive_key="review:repo:42")
+    t2 = q.create("review new", exclusive_key="review:repo:42")
+
+    r1, ok1 = q.reserve_spawn(t1.id)
+    q.record_spawn(r1.key, session_handle="sess-1", worktree="wt-1")
+    q.record_cold(r1.key, release_exclusive=True)
+
+    r2, ok2 = q.reserve_spawn(t2.id)
+
+    assert ok1 is True
+    assert ok2 is True
+    assert r2.task_id == t2.id
+    assert r2.key != r1.key
+
+
+def test_record_cold_default_still_blocks_sibling_spawn(q):
+    """Without release_exclusive, a cold reservation still fences the key --
+    existing (non-steering) cold-suspension behavior is unchanged."""
+    t1 = q.create("review old", exclusive_key="review:repo:42")
+    t2 = q.create("review new", exclusive_key="review:repo:42")
+
+    r1, _ = q.reserve_spawn(t1.id)
+    q.record_spawn(r1.key, session_handle="sess-1", worktree="wt-1")
+    q.record_cold(r1.key)
+
+    r2, ok2 = q.reserve_spawn(t2.id)
+
+    assert ok2 is False
+    assert r2.key == r1.key
+
+
+def test_record_spawn_reacquires_exclusive_key_on_resume(q):
+    """Resuming a released-cold reservation (no sibling active) reacquires
+    its exclusive_key, re-fencing it for any future sibling."""
+    t1 = q.create("review old", exclusive_key="review:repo:42")
+    t2 = q.create("review new", exclusive_key="review:repo:42")
+
+    r1, _ = q.reserve_spawn(t1.id)
+    q.record_spawn(r1.key, session_handle="sess-1", worktree="wt-1")
+    q.record_cold(r1.key, release_exclusive=True)
+
+    resumed = q.record_spawn(r1.key, session_handle="sess-1", worktree="wt-1")
+    assert resumed.state == SpawnState.SPAWNED
+    assert resumed.exclusive_released is False
+
+    r2, ok2 = q.reserve_spawn(t2.id)
+    assert ok2 is False
+    assert r2.key == r1.key
+
+
+def test_record_spawn_reacquire_defers_when_sibling_active(q):
+    """Resuming while a sibling has already claimed the released key raises
+    ExclusiveKeyBusyError -- a legitimate "retry later", never a crash."""
+    from agent_dispatch.queue import ExclusiveKeyBusyError
+
+    t1 = q.create("review old", exclusive_key="review:repo:42")
+    t2 = q.create("review new", exclusive_key="review:repo:42")
+
+    r1, _ = q.reserve_spawn(t1.id)
+    q.record_spawn(r1.key, session_handle="sess-1", worktree="wt-1")
+    q.record_cold(r1.key, release_exclusive=True)
+
+    r2, ok2 = q.reserve_spawn(t2.id)
+    assert ok2 is True
+    q.record_spawn(r2.key, session_handle="sess-2", worktree="wt-2")
+
+    with pytest.raises(ExclusiveKeyBusyError):
+        q.record_spawn(r1.key, session_handle="sess-1", worktree="wt-1")
+
+    # The attempted resume must not have mutated reservation state.
+    still_cold = q.get_reservation(r1.key)
+    assert still_cold.state == SpawnState.COLD
+
+
 def test_exclusive_key_reuses_prior_worktree_after_settle(q):
     t1 = q.create("review old", exclusive_key="review:repo:42")
     r1, _ = q.reserve_spawn(t1.id)

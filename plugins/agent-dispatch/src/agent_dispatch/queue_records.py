@@ -230,6 +230,7 @@ class SpawnReservation:
     driver: str | None = None
     release_requested: bool = False
     release_disposition: str | None = None
+    exclusive_released: bool = False
     detail: str | None = None
     conclusion_state: str | None = None
     conclusion_detail: str | None = None
@@ -255,6 +256,7 @@ class SpawnReservation:
             driver=row["driver"],
             release_requested=bool(row["release_requested"]),
             release_disposition=row["release_disposition"],
+            exclusive_released=bool(row["exclusive_released"]),
             detail=row["detail"],
             conclusion_state=row["conclusion_state"],
             conclusion_detail=row["conclusion_detail"],

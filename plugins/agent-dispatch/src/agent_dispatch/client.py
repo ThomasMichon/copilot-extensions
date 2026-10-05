@@ -855,9 +855,12 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, Complet
             )
         )
 
-    def record_cold(self, key: str) -> dict:
+    def record_cold(self, key: str, *, release_exclusive: bool = False) -> dict:
         return self._unwrap(
-            self._http.post(f"/spawn-reservations/{key}/cold")
+            self._http.post(
+                f"/spawn-reservations/{key}/cold",
+                json={"release_exclusive": release_exclusive},
+            )
         )
 
     def record_spawn_conclusion(

@@ -77,6 +77,10 @@ class FailSpawnBody(ReservationDetailBody):
     confirmed_absent: bool = False
 
 
+class RecordColdBody(BaseModel):
+    release_exclusive: bool = False
+
+
 class RequestSpawnReleaseBody(BaseModel):
     detail: str | None = None
     disposition: str = "failed"
@@ -298,8 +302,10 @@ def register_spawn_routes(
         return result
 
     @app.post("/spawn-reservations/{key}/cold")
-    def record_cold(key: str) -> dict:
-        result = _reservation_guard(lambda: queue.record_cold(key))
+    def record_cold(key: str, body: RecordColdBody = RecordColdBody()) -> dict:
+        result = _reservation_guard(
+            lambda: queue.record_cold(key, release_exclusive=body.release_exclusive)
+        )
         bus.publish({"type": "spawn.cold", "reservation": result})
         return result
 
