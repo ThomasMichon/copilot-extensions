@@ -879,6 +879,27 @@ class InProcessRuntime:
             return True
         return self.cache is not None and self.cache.has_any_live()
 
+    def close_admission(self) -> None:
+        """Stop accepting new push observations without tearing down the
+        server/cache (unlike :meth:`shutdown`). Every subsequent
+        ``apply_observation`` becomes ``{"applied": False, "reason":
+        "closed"}`` (see :meth:`ManagedMuxCache.close`'s own contract) --
+        already-recorded entries and reads (``live_session_names``,
+        ``has_any_entries``) are untouched.
+
+        Wired into the resident status-monitor's own drain-only state: once
+        that daemon observes it has been superseded, service-architecture
+        discipline requires it to stop admitting anything that would grow
+        its bounded scope -- a *new* (project, worktree_id) mux-mapping
+        pushed by a future Worktree Manager mux-companion daemon is exactly
+        that, even though nothing calls this seam yet. Closing admission
+        here pre-emptively, rather than waiting for that caller to exist,
+        keeps the contract already documented on ``apply_observation``
+        actually enforced the moment it matters (copilot-extensions#5326
+        follow-up)."""
+        if self.cache is not None:
+            self.cache.close()
+
     def shutdown(self) -> None:
         if self.server is not None:
             # Stop accepting new work first. `CoalescingServer.close()`
