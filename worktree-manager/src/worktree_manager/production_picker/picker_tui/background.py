@@ -1,12 +1,21 @@
-"""The one sanctioned way to run blocking work off the Picker's render flow.
+"""The shared "spawn a worker, post its outcome to the Inbox" lifecycle.
 
-See ``inbox.py``'s module docstring for why this exists: before it, each
-call site (``_run_bg``, ``_apply_from_worker``, the setup-reload worker, ...)
-hand-rolled its own thread + marshalling + cancellation/error bookkeeping.
-``run_background`` is the ONE implementation of that shape now; every call
-site becomes a thin, signature-preserving wrapper around it (see
-``PickerScreen._run_bg`` and ``_apply_from_worker``) so no caller needs to
-change.
+See ``inbox.py``'s module docstring for the larger picture: before it,
+each call site that spawned a background thread (``_run_bg``, the
+setup-reload worker, ...) hand-rolled its own thread + marshalling +
+cancellation/error bookkeeping. ``run_background`` is the ONE
+implementation of that "spawn + marshal the outcome back" shape now --
+``PickerScreen._run_bg`` is a thin, signature-preserving wrapper around it
+so its callers needed zero changes.
+
+Not every producer goes through ``run_background``: a worker that
+already runs on its own thread for other reasons (one already spawned via
+``threading.Thread``/``LiveLoader``, a setup/reload collect pass, ...) --
+``_apply_from_worker``'s callers among them -- posts its outcome directly
+into the owning screen's ``Inbox`` instead of being spawned by, or routed
+through, this module at all. ``Inbox.post()`` is what both shapes have in
+common; ``run_background`` is only the shared *spawn* lifecycle for the
+callers that need one.
 """
 from __future__ import annotations
 

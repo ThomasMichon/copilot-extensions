@@ -71,11 +71,41 @@ class _CallFinder(ast.NodeVisitor):
     referenced -- a bound-method reference with no call is not itself a
     marshalling attempt, though in practice this call is always invoked
     directly), including through a locally-assigned alias (e.g.
-    ``marshal = self.app.call_from_thread; marshal(fn)``)."""
+    ``marshal = self.app.call_from_thread; marshal(fn)``).
+
+    Aliases are tracked **per lexical scope** (module level, and freshly
+    for each function/method body) rather than pooled across the whole
+    module: an unrelated parameter or local named ``marshal`` in a
+    different function must never be flagged just because some other
+    function happens to alias ``call_from_thread`` under the same name.
+    Reassigning an already-tracked alias name to something else (a
+    non-``call_from_thread`` value) clears it within its own scope, so it
+    stops being flagged from that point on.
+    """
 
     def __init__(self) -> None:
         self.hits: list[int] = []
-        self.aliases: set[str] = set()
+        self._scopes: list[set[str]] = [set()]
+
+    @property
+    def _aliases(self) -> set[str]:
+        return self._scopes[-1]
+
+    def _visit_new_scope(self, node: ast.AST) -> None:
+        self._scopes.append(set())
+        try:
+            self.generic_visit(node)
+        finally:
+            self._scopes.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_new_scope(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._visit_new_scope(node)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self._visit_new_scope(node)
 
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func
@@ -83,7 +113,7 @@ class _CallFinder(ast.NodeVisitor):
         if isinstance(func, ast.Attribute):
             flagged = func.attr == _FLAGGED_ATTR
         elif isinstance(func, ast.Name):
-            flagged = func.id == _FLAGGED_ATTR or func.id in self.aliases
+            flagged = func.id == _FLAGGED_ATTR or func.id in self._aliases
         if flagged:
             self.hits.append(node.lineno)
         self.generic_visit(node)
@@ -95,11 +125,16 @@ class _CallFinder(ast.NodeVisitor):
         # in the flagged attribute) or `marshal = call_from_thread` (an
         # alias of an alias).
         if isinstance(value, ast.Attribute) and value.attr == _FLAGGED_ATTR:
-            self.aliases.add(target.id)
+            self._aliases.add(target.id)
         elif isinstance(value, ast.Name) and (
-            value.id == _FLAGGED_ATTR or value.id in self.aliases
+            value.id == _FLAGGED_ATTR or value.id in self._aliases
         ):
-            self.aliases.add(target.id)
+            self._aliases.add(target.id)
+        else:
+            # A non-aliasing reassignment of a previously-tracked name
+            # shadows it -- the name no longer refers to call_from_thread
+            # from this point on in this scope.
+            self._aliases.discard(target.id)
 
     def visit_Assign(self, node: ast.Assign) -> None:
         for target in node.targets:

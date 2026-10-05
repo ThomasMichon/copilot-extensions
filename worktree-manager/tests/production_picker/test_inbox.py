@@ -349,62 +349,106 @@ def test_a_post_racing_a_failing_wake_still_gets_its_own_retry():
     assert inbox.drain() == {"slot-a": "a", "slot-b": "b"}
 
 
-def test_a_post_racing_a_concurrent_drain_never_strands_its_slot():
-    """A regression for the lost-wake race: a post() arriving while a
-    concurrent drain() is between "snapshot the pending batch" and "reset
-    the wake flag" must not see a stale `_wake_queued == True` and skip its
-    own wake, stranding its slot until some unrelated future drain. Hammer
-    concurrent posts and drains from many threads and confirm every posted
-    value is eventually observed by some drain -- the property this race
-    would violate (a slot silently never drained, and the wake never
-    retried) if the two steps were not serialized together."""
+def test_a_post_racing_a_concurrent_drain_still_gets_a_genuine_wake_attempt():
+    """A regression for the lost-wake race: ``drain()`` must hold
+    ``_wake_lock`` across BOTH its data snapshot (under ``_lock``) and its
+    flag reset as one atomic section -- never two separate critical
+    sections -- so a post() racing a drain can never observe a stale
+    ``_wake_queued == True`` in the gap between them and skip its own real
+    wake attempt, stranding its slot until some unrelated future drain (or
+    forever, if nothing else ever drains again).
+
+    This hooks the RELEASE of the inner ``_lock`` specifically -- the
+    exact seam a buggy two-critical-section ``drain()`` would have a gap
+    at -- and forces a racing post() to attempt its own wake exactly
+    during that window. Under the real (fixed) implementation, ``_lock``
+    is nested inside an outer, still-held ``_wake_lock``, so the racing
+    post() must block instead of proceeding on stale state (and does
+    attempt a genuine, new delivery once the drain completes). Verified
+    against a deliberately reverted two-critical-section ``drain()``
+    (matching the pre-fix shape) to confirm this test actually fails
+    there: the racing post observes the stale flag, returns success
+    without ever calling ``post_message`` again, and its slot is left
+    unresolved by this exchange.
+    """
     owner = _RecordingOwner()
-    inbox = Inbox(owner)  # constructed on this thread; posts come from others
-    total = 200
-    observed: dict[str, str] = {}
-    observed_lock = threading.Lock()
-    stop = threading.Event()
+    inbox = Inbox(owner)  # home thread == this test's own thread
 
-    def _drainer():
-        while not stop.is_set():
-            batch = inbox.drain()
-            if batch:
-                with observed_lock:
-                    observed.update(batch)
+    data_lock_released = threading.Event()
+    resume_drain = threading.Event()
+    real_lock = inbox._lock
 
-    drainer_threads = [threading.Thread(target=_drainer) for _ in range(3)]
-    for t in drainer_threads:
-        t.start()
+    class _SlowLock:
+        """Wraps the real data lock, pausing (holding nothing, but not
+        yet letting the wrapped ``with`` block that used it return
+        control to its caller) right after its first release -- the
+        precise point a buggy ``drain()`` would separately, later,
+        acquire ``_wake_lock`` to reset the flag, with nothing held in
+        between."""
 
-    def _poster(i):
-        inbox.post(f"slot-{i}", f"value-{i}")
+        def __init__(self):
+            self._first = True
 
-    poster_threads = [
-        threading.Thread(target=_poster, args=(i,)) for i in range(total)
-    ]
-    for t in poster_threads:
-        t.start()
-    for t in poster_threads:
-        t.join(timeout=10)
-        assert not t.is_alive()
+        def __enter__(self):
+            real_lock.acquire()
+            return self
 
-    # Give the drainers a final bounded window to pick up anything posted
-    # right at the tail end, then stop them and sweep once more ourselves.
-    deadline = time.monotonic() + 5
-    while len(observed) < total and time.monotonic() < deadline:
-        time.sleep(0.01)
-    stop.set()
-    for t in drainer_threads:
-        t.join(timeout=5)
-    with observed_lock:
-        observed.update(inbox.drain())
+        def __exit__(self, *exc_info):
+            is_first, self._first = self._first, False
+            real_lock.release()
+            if is_first:
+                data_lock_released.set()
+                resume_drain.wait(timeout=5)
+            return False
 
-    assert len(observed) == total, (
-        f"expected all {total} posted slots to be drained, got "
-        f"{len(observed)} -- a lost wake would strand some here"
+    inbox._lock = _SlowLock()
+
+    # Seed one pending slot directly -- bypassing post() itself, which
+    # would hit the home-thread shortcut on this test's own thread and
+    # apply inline rather than leaving something for drain() to snapshot.
+    inbox._slots["seed"] = "seed-value"
+    inbox._pending["seed"] = None
+
+    drain_result = {}
+
+    def _drain():
+        drain_result["batch"] = inbox.drain()
+
+    t_drain = threading.Thread(target=_drain)
+    t_drain.start()
+    # drain()'s data snapshot has just completed and released `_lock` --
+    # but (under the fix) it is still inside the OUTER `with
+    # self._wake_lock:` block, paused before resetting the flag.
+    assert data_lock_released.wait(timeout=5)
+
+    post_result = {}
+
+    def _post():
+        post_result["ok"] = _post_from_other_thread(inbox, "slot", "value")
+
+    t_post = threading.Thread(target=_post)
+    t_post.start()
+    time.sleep(0.05)
+    assert t_post.is_alive(), (
+        "post() must still be blocked (on the still-held outer wake "
+        "lock) here -- proceeding past this point on stale state, "
+        "before the drain has reset the flag, is exactly the lost-wake "
+        "bug this test guards against"
     )
-    for i in range(total):
-        assert observed[f"slot-{i}"] == f"value-{i}"
+
+    resume_drain.set()
+    t_drain.join(timeout=5)
+    t_post.join(timeout=5)
+    assert not t_drain.is_alive()
+    assert not t_post.is_alive()
+
+    assert drain_result["batch"] == {"seed": "seed-value"}
+    assert post_result["ok"] is True
+    # The real point: the racing post must have made its OWN genuine
+    # delivery attempt (a real `post_message` call), never silently folded
+    # into state the drain had already resolved.
+    assert len(owner.messages) == 1
+    assert inbox.drain() == {"slot": "value"}
 
 
 def test_home_thread_post_logs_a_raising_closure_instead_of_escaping(caplog):

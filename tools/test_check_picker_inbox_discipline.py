@@ -101,6 +101,43 @@ def test_flags_alias_of_an_alias(repo):
     assert any("call_from_thread(" in p for p in guard.verify())
 
 
+def test_alias_in_one_function_does_not_flag_an_unrelated_name_in_another(repo):
+    """An alias assigned inside one function must not leak into a sibling
+    function -- a parameter or local that merely happens to share the
+    same name (``marshal``) there, unrelated to call_from_thread, must
+    never be flagged."""
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_focus.py",
+        "def f(self):\n"
+        "    marshal = self.app.call_from_thread\n"
+        "    marshal(fn)\n"
+        "\n"
+        "def g(self, marshal):\n"
+        "    marshal(fn)\n",
+    )
+    problems = guard.verify()
+    assert any("call_from_thread(" in p and ":3:" in p for p in problems)
+    assert not any(":6:" in p for p in problems)
+
+
+def test_reassigning_an_alias_to_a_safe_callable_clears_it(repo):
+    """Once an alias name is reassigned to something that is NOT
+    call_from_thread, it must stop being flagged -- a stale alias
+    tracked forever would reject perfectly safe code reusing that name."""
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_selection.py",
+        "def f(self):\n"
+        "    marshal = self.app.call_from_thread\n"
+        "    marshal = some_safe_callable\n"
+        "    marshal(fn)\n",
+    )
+    assert guard.verify() == []
+
+
 def test_docstring_mention_not_flagged(repo):
     d = _picker_tui_dir(repo)
     _write(
