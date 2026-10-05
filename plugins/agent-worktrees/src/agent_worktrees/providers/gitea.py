@@ -13,7 +13,7 @@ import time
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote
 
-from ..pr_contract import Comment, CommentThread, PRSnapshot, Review, ThreadsResult
+from ..pr_contract import Comment, CommentThread, PRDiff, PRSnapshot, Review, ThreadsResult
 from .base import ProviderError, PRScope, PullResult, run_cli
 
 # HTTP statuses (plus the synthetic 0 = curl-level failure) worth retrying when
@@ -1049,3 +1049,76 @@ class GiteaProvider:
             "gitea: resolving review conversations is not exposed by the Gitea "
             "REST API (resolve them in the web UI)."
         )
+
+    def get_diff(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> PRDiff:
+        """Return the PR's current unified diff via Gitea's ``.diff`` endpoint."""
+        if not token:
+            return PRDiff(
+                supported=False,
+                error="Gitea provider needs a token to read a PR diff.",
+            )
+        try:
+            status, body = self._curl(
+                "GET", self._api(api_base, f"/repos/{repo}/pulls/{number}.diff"), token,
+            )
+        except ProviderError as exc:
+            return PRDiff(supported=True, error=str(exc))
+        if status != 200:
+            return PRDiff(
+                supported=True, error=f"gitea diff GET returned HTTP {status}"
+            )
+        return PRDiff(diff=body)
+
+    def post_comment(
+        self, repo: str, number: int, body: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        """Post a general PR comment via Gitea's issue-comments endpoint."""
+        if not token:
+            return "Gitea provider needs a token to post a comment."
+        status, response = self._curl(
+            "POST",
+            self._api(api_base, f"/repos/{repo}/issues/{number}/comments"),
+            token,
+            payload={"body": body},
+        )
+        if status not in (200, 201):
+            return (
+                f"Gitea PR #{number} comment failed (HTTP {status}): "
+                f"{response.strip()[:300]}"
+            )
+        return ""
+
+    _REVIEW_EVENT_MAP = {
+        "APPROVED": "APPROVED",
+        "CHANGES_REQUESTED": "REQUEST_CHANGES",
+        "COMMENTED": "COMMENT",
+    }
+
+    def submit_review(
+        self, repo: str, number: int, *, event: str, body: str = "",
+        api_base: str = "", token: str | None = None,
+    ) -> str:
+        """Publish a review verdict via Gitea's pulls-reviews endpoint."""
+        if not token:
+            return "Gitea provider needs a token to submit a review."
+        gitea_event = self._REVIEW_EVENT_MAP.get(event.upper())
+        if gitea_event is None:
+            return (
+                f"gitea: unknown review event {event!r} (expected one of "
+                f"{tuple(self._REVIEW_EVENT_MAP)})."
+            )
+        status, response = self._curl(
+            "POST",
+            self._api(api_base, f"/repos/{repo}/pulls/{number}/reviews"),
+            token,
+            payload={"event": gitea_event, "body": body},
+        )
+        if status not in (200, 201):
+            return (
+                f"Gitea PR #{number} review failed (HTTP {status}): "
+                f"{response.strip()[:300]}"
+            )
+        return ""

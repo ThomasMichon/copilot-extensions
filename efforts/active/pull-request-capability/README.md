@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-phase worktrees
 - **Created:** 2026-09-15
-- **Status:** Active (Phase 2 + Phase 2d landed; Phase 3 next)
+- **Status:** Active (Phase 2 + Phase 2d + Phase 3 landed; Phase 4 next)
 - **Vision:** [`plugins/agent-worktrees/pull-requests`](../../../visions/plugins/agent-worktrees/pull-requests/README.md)
   (all three Features: `conformance-verified-mock-provider`,
   `foreign-repo-pr-operations`, `reviewer-capable-provider`)
@@ -179,17 +179,28 @@ trace; not repeated here (public-artifact rule: keep this effort generic).
       (21 tests) and the CLI-dispatch tests in
       `test_pr_create_claimant_guard.py` (9 tests).
 
-### Phase 3 — Reviewer-capable provider
-- [ ] Extend the `PRProvider` protocol with reviewer-side operations: read
+### Phase 3 — Reviewer-capable provider (Done 2026-10-05)
+- [x] Extend the `PRProvider` protocol with reviewer-side operations: read
       current diff/surrounding context, read/post comments, read/resolve
       review threads, publish a verdict — per Vision
-      §Features/`reviewer-capable-provider`.
-- [ ] Implement across `github`, `gitea`, `azure-devops`, and `mock`.
-- [ ] Extend the conformance contract to cover the new operations for every
-      provider, including `mock`.
-- [ ] Expose the new operations through the CLI alongside the existing
-      `pr-*` family.
-- [ ] **Carry forward the `@copilot`-mention guard.** `GitHubProvider`
+      §Features/`reviewer-capable-provider`. (`get_comment_threads`/
+      `resolve_threads` already existed from Phase 1; this phase added
+      `get_diff`, `post_comment`, `submit_review`.)
+- [x] Implement across `github`, `gitea`, `azure-devops`, and `mock`.
+      `azure-devops.get_diff` is explicitly unsupported (no REST/CLI call
+      returns a unified-diff text, only structured per-iteration changes);
+      every other operation is implemented on all four providers.
+- [x] Extend the conformance contract to cover the new operations for every
+      provider, including `mock` (6 new mock-lifecycle tests in
+      `test_pr_provider_conformance.py`; structural coverage for all four
+      providers already comes free from the protocol/`isinstance` check).
+- [x] Expose the new operations through the CLI alongside the existing
+      `pr-*` family: `pr-diff`, `pr-comment`, `pr-review` (`--approve` /
+      `--request-changes` / `--comment`), wired through
+      `pr_reviewer_ops.py` (new, mirrors `pr_nudge_ops.py`'s active-PR
+      resolution + provider-mismatch guard) and the `_LAZY_DISPATCH_TABLE`/
+      `COMMAND_MAP` fast-path plumbing.
+- [x] **Carry forward the `@copilot`-mention guard.** `GitHubProvider`
       already hard-blocks a bare `@copilot` mention in `create_pull()`
       (title/body) and `publish_source_marker()` via the shared
       `reject_copilot_mention()` helper in `providers/base.py` (landed in
@@ -203,6 +214,9 @@ trace; not repeated here (public-artifact rule: keep this effort generic).
       (only do so if either forge grows a comparable
       mention-invokes-an-autonomous-agent hazard — today `@copilot` has no
       special meaning there, so this is GitHub-only unless that changes).
+      **Decided:** GitHub-only for now, per the above reasoning;
+      `github.post_comment`/`submit_review` call `reject_copilot_mention()`,
+      `gitea`/`azure-devops` do not.
 
 ### Phase 4 — Validate and land
 - [ ] Full `plugins/agent-worktrees` test suite passes with all three
@@ -232,6 +246,59 @@ trace; not repeated here (public-artifact rule: keep this effort generic).
 _Pending._
 
 ## Journal
+
+### 2026-10-05 — Phase 3: reviewer-capable provider (done)
+Picked up this effort from a context handoff naming Phase 3 as the next
+slice. Implemented the vision's `reviewer-capable-provider` Feature in a
+fresh worktree:
+
+- Added `get_diff`/`post_comment`/`submit_review` to the `PRProvider`
+  protocol (`get_comment_threads`/`resolve_threads` already existed from
+  Phase 1 -- "read/resolve review threads" was already covered). New
+  `PRDiff` dataclass in `pr_contract.py` mirrors `ThreadsResult`'s
+  `supported`/`error` shape.
+- Implemented all three across `github` (`gh pr diff` / `gh pr comment` /
+  `gh pr review --approve|--request-changes|--comment`), `gitea` (Gitea's
+  `.diff` endpoint / issue-comments POST / `pulls/{n}/reviews` POST with
+  its own `REQUEST_CHANGES` vocabulary), `azure-devops` (`get_diff` is
+  explicitly unsupported -- ADO exposes only structured per-iteration
+  changes, no unified-diff text; `submit_review` casts an `az repos pr
+  set-vote` vote for `APPROVED`/`CHANGES_REQUESTED` and posts `body` as a
+  comment thread for all three verdicts, since ADO votes carry no free
+  text of their own and have no "comment only" vote), and `mock` (full
+  fidelity: fabricated diff text via a new `set_diff()` test helper, a
+  `comments` list, and real `Review` records via `submit_review`).
+- `github.post_comment`/`submit_review` call the existing
+  `reject_copilot_mention()` guard on caller-supplied text, same as
+  `create_pull`/`publish_source_marker`; decided (per the Plan's own
+  framing) not to add it to `gitea`/`azure-devops` today, since `@copilot`
+  has no autonomous-agent meaning there.
+- Extended `test_pr_provider_conformance.py`'s mock lifecycle with 6 new
+  tests; added 3 new per-provider test classes (18 tests) to
+  `test_providers.py` covering each provider's success/failure paths
+  (mirroring the existing thread-op test classes).
+- Exposed `pr-diff` / `pr-comment` / `pr-review` through the CLI: new
+  `pr_reviewer_ops.py` (mirrors `pr_nudge_ops.py`'s active-tracked-PR
+  resolution + provider/credential-mismatch guard), wired through
+  `pr_state_cli.py`'s parsers/handlers and `__main__.py`'s
+  `COMMAND_MAP`/`_LAZY_DISPATCH_TABLE` fast-path plumbing (verified via
+  `test_lazy_dispatch.py`'s own regeneration-and-diff guard). 10 new tests
+  in `test_pr_reviewer_ops.py`.
+- Updated `docs/cli-reference.md`'s verb table with the three new entries.
+- Full suite: 6855 passed, 28 skipped, plus two pre-existing
+  environment-dependent failures unrelated to this change (confirmed by
+  reproducing both against the pre-change tree) --
+  `test_doctor.py::test_no_drift_when_consistent` (a stray
+  `leaked_agent_rt_root` finding from this machine's real runtime state)
+  and `test_registration_home.py`'s `agent-home` teardown check (a real
+  `gh` CLI write to `~/.local/state/gh/device-id` during the run).
+
+Not done this phase (deferred, not scope creep): Phase 2's own still-open
+item -- extending the conformance contract to run once against a local
+target and once against a foreign-addressed target -- remains open per
+that phase's Journal entry; `agent-dispatch/reviewer`'s own potential
+adoption of these new operations is Phase 4's call per the Plan, not this
+phase's.
 
 ### 2026-10-05 — Phase 2d: foreign PR creation + auto-claim (done)
 Operator-directed: implement the `--from-branch` already-pushed-branch
