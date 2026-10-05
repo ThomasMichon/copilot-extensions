@@ -1,7 +1,7 @@
 """Reactive producer -- turn inbound webhooks into tasks.
 
 A tiny HTTP app (FastAPI, reusing the coordinator's existing deps) that maps
-two generic, forge-neutral event shapes onto tasks:
+three generic, forge-neutral event shapes onto tasks:
 
 * ``POST /webhook/pr`` -- a git-forge pull-request event. When the PR is
   **merged**, a follow-up task is created with ``source="pr-webhook"`` and
@@ -12,13 +12,30 @@ two generic, forge-neutral event shapes onto tasks:
   creates a remediation task with ``source="telemetry"`` and
   ``origin_ref="<alert-id>"``. Accepts both an Alertmanager-style
   ``{"alerts": [...]}`` batch and a single flat alert object.
+* ``POST /webhook/issue`` -- a git-forge issue event (GitHub's own
+  ``issues`` webhook shape: ``action`` / ``issue`` / ``repository``, which
+  Gitea mirrors closely enough to reuse the same extraction). Unlike the PR
+  and telemetry hooks (one fixed template each), this route is driven by a
+  list of **rules** (``config["issues"]``) so several independent label-
+  watching backlogs (e.g. two different standing worker pools, each reacting
+  to its own forge label) can share one listener and one config file. Each
+  matching rule creates a task with ``source="issue-webhook"`` and
+  ``origin_ref="issue/<n>"``. This is the reactive half of a
+  "webhook-primary, polling-fallback" pair: the periodic poller that
+  inspired this route (an aperture-labs ``tools/*-trigger.py`` script, one
+  per backlog) keeps running on its own longer interval as a backstop for a
+  missed/undelivered webhook, using the exact same ``<task_label>:<repo
+  full name>#<issue number>`` dedup-key shape this route defaults to, so
+  either path colliding on the same issue returns the same task rather than
+  creating a duplicate.
 
 Every task carries a deterministic ``dedup_key`` so a redelivered webhook (or
 a retry) doesn't double-enqueue. The app talks to the coordinator through an
 ordinary :class:`DispatchClient` -- it is a *producer*, not part of the
-coordinator core (which stays free of any PR/alert logic). This keeps the
-public substrate generic; deployment-specific routing (which forge, which
-alertmanager, which lane) lives in the deployer's config, not here.
+coordinator core (which stays free of any PR/alert/issue logic). This keeps
+the public substrate generic; deployment-specific routing (which forge,
+which alertmanager, which lane, which label backlog) lives in the deployer's
+config, not here.
 
 Config (JSON), all keys optional::
 
@@ -39,7 +56,20 @@ Config (JSON), all keys optional::
         "title_template": "Investigate alert: {name}",
         "prompt_template": "Alert {name} is {status} (severity {severity}) ...",
         "require": [], "labels": ["telemetry"], "proposed": false
-      }
+      },
+      "issues": [
+        {
+          "name": "ci-failure-fix-worker",         # identifies this rule in skip reasons
+          "match_actions": ["opened", "labeled"],  # default: opened, labeled
+          "match_labels": ["ci-failure-signature"],# ALL must be present on the issue
+          "repo_allowlist": ["ThomasMichon/copilot-extensions"],  # optional
+          "repo": "tmichon/aperture-labs",          # dispatch lane (else default_repo)
+          "task_label": "ci-failure-fix-worker",    # dedup-key prefix + default template field
+          "title_template": "drive: {title}",
+          "prompt_template": "Resolve {repo_full_name}#{number} ({url}): {title}\\n\\n{body}",
+          "require": [], "labels": ["ci-failure-fix-worker"], "proposed": false
+        }
+      ]
     }
 """
 
@@ -102,6 +132,37 @@ def extract_pr(payload: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def extract_issue(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalize a git-forge issue webhook into a flat dict, or ``None`` if
+    the body isn't a recognizable issue event. Handles the shape GitHub's
+    ``issues`` event uses (Gitea's own issue webhook is close enough to the
+    same ``action``/``issue``/``repository`` layout to reuse this)."""
+    issue = payload.get("issue")
+    if not isinstance(issue, dict):
+        return None
+    number = issue.get("number")
+    if number is None:
+        return None
+    repo = payload.get("repository") or {}
+    remote = repo.get("clone_url") or repo.get("html_url") or repo.get("ssh_url")
+    raw_labels = issue.get("labels") or []
+    labels = [
+        label.get("name")
+        for label in raw_labels
+        if isinstance(label, dict) and label.get("name")
+    ]
+    return {
+        "number": number,
+        "title": issue.get("title", ""),
+        "body": issue.get("body") or "",
+        "url": issue.get("html_url") or issue.get("url", ""),
+        "labels": labels,
+        "action": payload.get("action", ""),
+        "repo_remote": remote,
+        "repo_full_name": repo.get("full_name", ""),
+    }
+
+
 def _iter_alerts(payload: dict[str, Any]):
     """Yield one flat alert dict per alert in ``payload`` (batch or single)."""
     alerts = payload.get("alerts")
@@ -141,6 +202,11 @@ _DEFAULT_ALERT_PROMPT = (
     "Alert {name} is {status} (severity {severity}) on {target}. Investigate "
     "and remediate. " + UNTRUSTED_EXTERNAL_CONTENT_NOTE
 )
+_DEFAULT_ISSUE_TITLE = "{task_label}: {repo_full_name}#{number} {title}"
+_DEFAULT_ISSUE_PROMPT = (
+    "Issue {repo_full_name}#{number} ({url}) was {action}: {title}\n\n{body}\n\n"
+    + UNTRUSTED_EXTERNAL_CONTENT_NOTE
+)
 
 
 def build_app(
@@ -160,6 +226,7 @@ def build_app(
     inbound_token = cfg.get("inbound_token")
     pr_cfg = cfg.get("pr") or {}
     tel_cfg = cfg.get("telemetry") or {}
+    issue_rules = cfg.get("issues") or []
 
     if client_factory is None:
         _default_url = "http://127.0.0.1:9847"  # marketplace-isolation: allow legacy-compatibility
@@ -258,6 +325,72 @@ def build_app(
                     source="telemetry",
                     origin_ref=str(alert["id"]),
                     dedup_key=f"alert:{lane}:{alert['id']}:{alert['status']}",
+                )
+                created.append(task)
+        return {"created": created, "skipped": skipped}
+
+    @app.post("/webhook/issue")
+    def issue_hook(
+        payload: dict = Body(...),  # noqa: B008 (FastAPI dependency-injection idiom)
+        authorization: str | None = Header(default=None),
+    ) -> dict:
+        _guard(authorization)
+        issue = extract_issue(payload)
+        if issue is None:
+            return {"skipped": "not an issue event"}
+        created: list[dict] = []
+        skipped: list[dict] = []
+        issue_labels = set(issue["labels"])
+        with client_factory() as client:
+            for rule in issue_rules:
+                name = rule.get("name", "issue-rule")
+                match_actions = rule.get("match_actions") or ["opened", "labeled"]
+                if issue["action"] not in match_actions:
+                    skipped.append({
+                        "rule": name, "number": issue["number"],
+                        "reason": f"action {issue['action']!r} not matched",
+                    })
+                    continue
+                required_labels = set(rule.get("match_labels") or [])
+                if required_labels and not required_labels.issubset(issue_labels):
+                    skipped.append({
+                        "rule": name, "number": issue["number"],
+                        "reason": "label filter not satisfied",
+                    })
+                    continue
+                repo_allowlist = rule.get("repo_allowlist")
+                if repo_allowlist and issue["repo_full_name"] not in repo_allowlist:
+                    skipped.append({
+                        "rule": name, "number": issue["number"],
+                        "reason": f"repo {issue['repo_full_name']!r} not in allowlist",
+                    })
+                    continue
+                lane = rule.get("repo") or default_repo
+                if not lane:
+                    skipped.append({
+                        "rule": name, "number": issue["number"], "reason": "no repo (lane)",
+                    })
+                    continue
+                task_label = rule.get("task_label", name)
+                fields = {
+                    "number": issue["number"], "title": issue["title"], "body": issue["body"],
+                    "url": issue["url"], "action": issue["action"], "repo": lane,
+                    "repo_full_name": issue["repo_full_name"], "task_label": task_label,
+                }
+                task = client.create(
+                    _fmt(rule.get("title_template", _DEFAULT_ISSUE_TITLE), fields),
+                    repo=lane,
+                    prompt=_fmt(rule.get("prompt_template", _DEFAULT_ISSUE_PROMPT), fields),
+                    proposed=bool(rule.get("proposed", False)),
+                    requires=rule.get("require", []),
+                    labels=rule.get("labels", []),
+                    affinity=rule.get("affinity", {}),
+                    source="issue-webhook",
+                    origin_ref=f"issue/{issue['number']}",
+                    dedup_key=(
+                        rule.get("dedup_key")
+                        or f"{task_label}:{issue['repo_full_name']}#{issue['number']}"
+                    ),
                 )
                 created.append(task)
         return {"created": created, "skipped": skipped}

@@ -143,6 +143,120 @@ def test_telemetry_severity_allowlist():
     assert r.json()["created"] == []
 
 
+_CI_FAILURE_ISSUE = {
+    "action": "opened",
+    "issue": {
+        "number": 5287,
+        "title": "CI failure: guards (full-tree, non-PR-scoped)",
+        "body": "## Summary\n\nmodule-size guard failed.",
+        "html_url": "https://github.com/ThomasMichon/copilot-extensions/issues/5287",
+        "labels": [{"name": "ci-failure-signature"}, {"name": "bug"}],
+    },
+    "repository": {
+        "full_name": "ThomasMichon/copilot-extensions",
+        "clone_url": "https://github.com/ThomasMichon/copilot-extensions.git",
+    },
+}
+
+_ISSUE_RULES_CONFIG = {
+    "issues": [
+        {
+            "name": "ci-failure-fix-worker",
+            "match_labels": ["ci-failure-signature"],
+            "repo_allowlist": ["ThomasMichon/copilot-extensions"],
+            "repo": "tmichon/aperture-labs",
+            "task_label": "ci-failure-fix-worker",
+            "labels": ["ci-failure-fix-worker"],
+        }
+    ]
+}
+
+
+def test_issue_matching_rule_creates_task():
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    r = tc.post("/webhook/issue", json=_CI_FAILURE_ISSUE)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["skipped"] == []
+    task = body["created"][0]
+    assert task["source"] == "issue-webhook"
+    assert task["origin_ref"] == "issue/5287"
+    assert task["repo"] == "tmichon/aperture-labs"
+    assert task["labels"] == ["ci-failure-fix-worker"]
+    assert task["dedup_key"] == "ci-failure-fix-worker:ThomasMichon/copilot-extensions#5287"
+    assert len(sink) == 1
+
+
+def test_issue_dedup_key_matches_poller_format():
+    """The webhook path's default dedup key must collide with whatever the
+    periodic poller (e.g. tools/ci-failure-fix-worker-trigger.py's own
+    ``build_dedup_key``) would derive for the same issue, so either path
+    creating the task first is idempotent against the other."""
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    tc.post("/webhook/issue", json=_CI_FAILURE_ISSUE)
+    assert sink[0]["dedup_key"] == "ci-failure-fix-worker:ThomasMichon/copilot-extensions#5287"
+
+
+def test_issue_default_prompt_frames_event_fields_as_untrusted():
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    tc.post("/webhook/issue", json=_CI_FAILURE_ISSUE)
+    assert "untrusted subject data" in sink[0]["prompt"]
+
+
+def test_issue_label_filter_not_satisfied_is_skipped():
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {
+        **_CI_FAILURE_ISSUE,
+        "issue": {**_CI_FAILURE_ISSUE["issue"], "labels": [{"name": "bug"}]},
+    }
+    r = tc.post("/webhook/issue", json=body)
+    assert r.json()["created"] == []
+    assert "label filter" in r.json()["skipped"][0]["reason"]
+    assert sink == []
+
+
+def test_issue_action_not_matched_is_skipped():
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {**_CI_FAILURE_ISSUE, "action": "closed"}
+    r = tc.post("/webhook/issue", json=body)
+    assert r.json()["created"] == []
+    assert "action" in r.json()["skipped"][0]["reason"]
+    assert sink == []
+
+
+def test_issue_repo_allowlist_rejects_other_repo():
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {
+        **_CI_FAILURE_ISSUE,
+        "repository": {**_CI_FAILURE_ISSUE["repository"], "full_name": "someone/else"},
+    }
+    r = tc.post("/webhook/issue", json=body)
+    assert r.json()["created"] == []
+    assert "not in allowlist" in r.json()["skipped"][0]["reason"]
+    assert sink == []
+
+
+def test_issue_non_issue_body_skipped():
+    tc, _ = _client(_ISSUE_RULES_CONFIG)
+    r = tc.post("/webhook/issue", json={"hello": "world"})
+    assert r.json()["skipped"] == "not an issue event"
+
+
+def test_issue_multiple_rules_each_independently_matched():
+    tc, sink = _client({
+        "issues": [
+            {"name": "a", "match_labels": ["ci-failure-signature"], "repo": "lane-a",
+             "task_label": "a-worker"},
+            {"name": "b", "match_labels": ["needs-decomposition"], "repo": "lane-b",
+             "task_label": "b-worker"},
+        ]
+    })
+    r = tc.post("/webhook/issue", json=_CI_FAILURE_ISSUE)
+    assert len(r.json()["created"]) == 1
+    assert len(r.json()["skipped"]) == 1
+    assert sink[0]["repo"] == "lane-a"
+
+
 def test_inbound_token_guard():
     tc, sink = _client({"inbound_token": "secret"})
     assert tc.post("/webhook/pr", json=_MERGED_PR).status_code == 401
