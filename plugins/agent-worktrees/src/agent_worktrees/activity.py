@@ -130,6 +130,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -454,7 +455,18 @@ def _cleanup_old_prune_markers(path: Path, *, current_bucket: int) -> None:
 
 def _dispatch_background_prune(path: Path) -> None:
     """Fire-and-forget a detached worker that prunes *path*. Never blocks,
-    never raises into the caller."""
+    never raises into the caller.
+
+    The ``Popen`` handle is retained and reaped on a daemon thread (not
+    discarded) even though the child is otherwise fully detached
+    (``start_new_session``/``DETACHED_PROCESS``): on POSIX, detaching a
+    session does not reap the child -- a caller that never waits on it
+    leaves an exited worker as a zombie until this process starts another
+    subprocess or exits. A long-lived caller (the picker, a resident
+    daemon) could accumulate one zombie per dispatch over its lifetime.
+    ``Thread(target=proc.wait)`` performs that blocking wait off the
+    caller's own thread, so dispatch itself still returns immediately.
+    """
     try:
         from agent_procutil import (
             detached_kwargs,
@@ -464,7 +476,7 @@ def _dispatch_background_prune(path: Path) -> None:
 
         python = windowless_python(sys.executable)
         env = {**os.environ, **windowless_python_env(sys.executable)}
-        subprocess.Popen(
+        proc = subprocess.Popen(
             [
                 python, "-I", "-m", "agent_worktrees", "activity-prune-worker",
                 str(path), str(RETENTION_DAYS),
@@ -473,6 +485,7 @@ def _dispatch_background_prune(path: Path) -> None:
             stderr=subprocess.DEVNULL, env=env,
             **detached_kwargs(breakaway=True),
         )
+        threading.Thread(target=proc.wait, daemon=True).start()
     except Exception:
         log.debug("activity: failed to dispatch background prune for %s", path, exc_info=True)
 

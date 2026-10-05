@@ -276,6 +276,30 @@ def test_prune_drops_old_lines(patch_install_dir: Path):
     assert remaining[0]["worktree_id"] == "new"
 
 
+def test_dispatch_background_prune_reaps_the_child_without_blocking(monkeypatch):
+    """A long-lived caller (the picker, a resident daemon) must never
+    accumulate zombie/unreaped children from repeated dispatches: the
+    ``Popen`` handle is retained and waited on from a background thread,
+    not discarded."""
+    import threading
+    import time
+
+    wait_called = threading.Event()
+
+    class FakeProc:
+        def wait(self):
+            wait_called.set()
+
+    monkeypatch.setattr(activity.subprocess, "Popen", lambda *a, **k: FakeProc())
+
+    start = time.monotonic()
+    activity._dispatch_background_prune(Path("/does/not/matter/activity.jsonl"))
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 1, "dispatch itself must return immediately"
+    assert wait_called.wait(timeout=2), "the child must be reaped via a background thread"
+
+
 def test_prune_concurrent_invocations_never_corrupt_the_log(tmp_path: Path):
     """Adjacent debounce windows are allowed to each dispatch their own
     worker (see _claim_prune_marker's grace window), so two real `_prune()`
