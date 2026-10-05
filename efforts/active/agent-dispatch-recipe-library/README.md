@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`)
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-09-30
-- **Status:** Active (Phases 1, 3-9 done; Phase 2 reviewer adapters remain intentionally deferred/tracked separately)
+- **Status:** Active (Phase 9 done; only the separately tracked Phase 2 reviewer adapters and Phase 3 single-emitter-primitive follow-on remain)
 - **Vision:** `visions/plugins/agent-dispatch/README.md` (§*The recipe*)
   advances *loop-recipes* from "four fixed archetypes, hand-declared per
   consumer" to "named, extendable templates a consumer instantiates with a
