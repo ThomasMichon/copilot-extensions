@@ -100,10 +100,10 @@ CMD_ARG_KEYS = ("command", "cmd", "script", "commandLine", "commandline", "input
 # exemption lives (see ``_GIT_FF_ONLY_FLAG``). The optional ``-C <path>``
 # uses the same quoted-or-unquoted grammar as ``_GIT_SUBCOMMAND`` below
 # (``"[^"]*"|'[^']*'|\S+``, not a bare ``\S+``) -- an anchor path containing
-# a space (``-C "my anchor path" commit ...``) previously made ``\S+``
-# match only the first word, so the whole early-out failed to match and the
-# entire per-segment analysis below was skipped outright, silently
-# allowing the write (review finding on PR #5317).
+# a space (``-C "my anchor path" commit ...``) otherwise makes ``\S+``
+# match only the first word, so the whole early-out fails to match and the
+# entire per-segment analysis below is skipped outright, silently allowing
+# the write.
 _WRITE_VERBS = re.compile(
     "|".join([
         "Set-Content", "Add-Content", "Out-File", "New-Item", "Remove-Item",
@@ -204,15 +204,23 @@ _GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
 # than enumerate every safe flag. ``-f``/``--force`` (move, overwriting an
 # existing name), ``-d``/``-D``/``--delete``, ``-m``/``-M``/``--move``, and
 # ``-c``/``-C``/``--copy`` are the mutating forms; their absence means this
-# invocation cannot move/delete/rename/copy any ref. A plain
-# ``git branch <new-name>`` (create, no flag at all) is a known, accepted
-# gap of this heuristic -- lower-risk than force-moving/deleting/copying an
-# EXISTING ref (the incident class this exemption targets), and consistent
-# with this guard's stated bias toward under- rather than over-triggering.
+# invocation cannot move/delete/rename/copy any ref. Git accepts these
+# short forms COMBINED into a single token (``-df`` deletes with force,
+# exactly like ``-d -f``) -- matching only a standalone ``-f``/``-d``/etc.
+# would miss that cluster entirely (and the safe list's own short flags,
+# ``v``/``a``/``r``, never collide with a mutating letter, so a combined
+# safe cluster like ``-vv``/``-av`` is never mistaken for one). The second
+# alternative below therefore matches ANY single-dash token containing one
+# of the mutating letters anywhere in it, not just a token equal to one of
+# them. A plain ``git branch <new-name>`` (create, no flag at all) is a
+# known, accepted gap of this heuristic -- lower-risk than force-moving/
+# deleting/copying an EXISTING ref (the incident class this exemption
+# targets), and consistent with this guard's stated bias toward under-
+# rather than over-triggering.
 _GIT_BRANCH_MUTATING_FLAG = re.compile(
-    r"""(?:^|\s)["']?(?:-f|--force|-d|-D|--delete|-m|-M|--move|-c|-C|--copy)
-        ["']?(?=\s|$)""",
-    re.IGNORECASE | re.VERBOSE,
+    r'(?:^|\s)["\']?(?:--force|--delete|--move|--copy)["\']?(?=\s|$)'
+    r'|(?:^|\s)-[A-Za-z]*[dDfmMcC][A-Za-z]*(?=\s|$)',
+    re.IGNORECASE,
 )
 
 # Leading benign prefixes to strip so a write verb after them is still seen at

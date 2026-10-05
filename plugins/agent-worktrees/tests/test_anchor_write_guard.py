@@ -16,6 +16,8 @@ import sys
 
 import pytest
 
+pytestmark = pytest.mark.guard
+
 # The guard ships as a standalone script under scripts/ (deployed to
 # ~/.agent-worktrees/bin/), not as a package module -- load it by path.
 _GUARD_PATH = Path(__file__).resolve().parents[1] / "scripts" / "anchor_write_guard.py"
@@ -157,8 +159,7 @@ def test_shell_git_commit_into_anchor_with_spaced_quoted_dashC_path_denies(tmp_p
     """A quoted ``-C "<anchor path with a space>"`` must still be caught by
     the cheap early-out: a bare ``\\S+`` there only matched the first word
     of the quoted path, so the whole early-out missed the match and the
-    entire per-segment analysis was skipped, silently allowing the write
-    (review finding on PR #5317)."""
+    entire per-segment analysis was skipped, silently allowing the write."""
     root = _main_checkout(tmp_path, "my anchor repo")
     spaced_anchor = [{"name": "myrepo", "path": str(root)}]
     d = guard.decide(_shell(f'git -C "{root}" commit -m x', tmp_path),
@@ -288,6 +289,17 @@ def test_shell_git_branch_delete_from_anchor_cwd_denies(tmp_path, anchor):
 def test_shell_git_branch_move_rename_from_anchor_cwd_denies(tmp_path, anchor):
     gp = anchor[0]["path"]
     d = guard.decide(_shell("git branch -m old-name new-name", gp), env={},
+                     home=tmp_path, anchors=anchor)
+    assert d and d["permissionDecision"] == "deny"
+
+
+def test_shell_git_branch_combined_short_flags_from_anchor_cwd_denies(tmp_path, anchor):
+    """Git accepts short flags COMBINED into one token (``-df`` = force
+    delete, exactly like ``-d -f``) -- a regex matching only a standalone
+    ``-f``/``-d``/etc. would miss this cluster entirely, wrongly treating a
+    real deletion as a safe read-only invocation."""
+    gp = anchor[0]["path"]
+    d = guard.decide(_shell("git branch -df stale-branch", gp), env={},
                      home=tmp_path, anchors=anchor)
     assert d and d["permissionDecision"] == "deny"
 
