@@ -1,0 +1,9 @@
+{
+  "comment": "status-monitor: stop overriding CutoverOrchestrator's drain_timeout default (30s -> 300s), fixing orphaned-daemon accumulation on large fleets",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
