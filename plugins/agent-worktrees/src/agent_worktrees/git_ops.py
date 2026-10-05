@@ -880,45 +880,6 @@ class PushResult:
             parts.append(f"git (stderr): {self.stderr.strip()}")
         return ("\n" + "\n".join(parts)) if parts else ""
 
-
-def pr_branch_non_fast_forward_hint(*, retry_command: str) -> str:
-    """Likely-local attribution for a retryable PR-branch push rejection.
-
-    A retryable push failure on a PR/feature branch often means either THIS
-    worktree previously rewrote that branch itself (for example an earlier
-    create-pr/push-changes republish) or another actor updated the remote
-    branch after our last fetch/observation. Callers should surface both
-    possibilities rather than pretending every lease mismatch is external --
-    or vice versa.
-    """
-    return (
-        "This could be caused either by this worktree's own earlier "
-        "create-pr/push-changes rewrite of the PR branch or by another actor "
-        "updating the remote branch after your last fetch/observation. "
-        f"Fetch/inspect the remote PR branch if needed, then re-run {retry_command}."
-    )
-
-
-def push_failure_detail(result: object) -> str:
-    """Best-effort failure detail for PushResult-like objects.
-
-    Some tests and older helper shims supply lightweight objects carrying only
-    ``stderr``/``stdout`` without the newer ``failure_detail`` property. Accept
-    either shape so callers can surface the underlying git output uniformly.
-    """
-    detail = getattr(result, "failure_detail", "")
-    if isinstance(detail, str) and detail:
-        return detail
-    parts = []
-    stdout = str(getattr(result, "stdout", "") or "").strip()
-    stderr = str(getattr(result, "stderr", "") or "").strip()
-    if stdout:
-        parts.append(f"git (stdout): {stdout}")
-    if stderr:
-        parts.append(f"git (stderr): {stderr}")
-    return ("\n" + "\n".join(parts)) if parts else ""
-
-
 def push(
     remote: str,
     branch: str,

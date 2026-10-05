@@ -49,6 +49,7 @@ from . import (
     obligations,
     output,
     permissions,
+    push_diagnostics,
     procs,
     sessions,
     tracking,
@@ -561,7 +562,7 @@ def push_changes(
             # Both streams matter -- git's own protocol error lands on
             # stderr, but a hook's own check output (e.g. a module-size-cap
             # violation's `[FAIL] ...` detail) commonly lands on stdout.
-            detail = git_ops.push_failure_detail(res)
+            detail = push_diagnostics.push_failure_detail(res)
             if detail:
                 output.err(detail.lstrip("\n"))
             # Only a non-fast-forward race is fixed by fetch+rebase+retry.
@@ -852,11 +853,11 @@ def _push_changes_pr(
             output.err(f"Failed to push {feature} to {remote}.")
             if pushed.retryable:
                 output.err(
-                    git_ops.pr_branch_non_fast_forward_hint(
+                    push_diagnostics.pr_branch_non_fast_forward_hint(
                         retry_command="agent-worktrees push-changes"
                     )
                 )
-            detail = git_ops.push_failure_detail(pushed)
+            detail = push_diagnostics.push_failure_detail(pushed)
             if detail:
                 output.err(detail.lstrip("\n"))
             if pushed_pr is not None and pushed_pr.state in ("", "creating"):
@@ -999,11 +1000,11 @@ def _push_changes_pr_refspec(
             output.err(f"Failed to push {wt_branch} to {remote}/{feature}.")
             if pushed.retryable:
                 output.err(
-                    git_ops.pr_branch_non_fast_forward_hint(
+                    push_diagnostics.pr_branch_non_fast_forward_hint(
                         retry_command="agent-worktrees push-changes"
                     )
                 )
-            detail = git_ops.push_failure_detail(pushed)
+            detail = push_diagnostics.push_failure_detail(pushed)
             if detail:
                 output.err(detail.lstrip("\n"))
             if pushed_pr is not None and pushed_pr.state in ("", "creating"):
