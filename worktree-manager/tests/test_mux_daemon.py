@@ -1440,6 +1440,109 @@ def test_ensure_status_monitor_running_scrubs_session_credentials(monkeypatch):
     assert env.get("SOME_OTHER_VAR") == "kept"
 
 
+def test_runtime_health_reports_version_attached_clients_and_busy(tmp_path):
+    """Phase 1 of copilot-extensions#5001 (``worktree-manager daemons
+    status``) needs each resident daemon's own self-reported version and
+    load, not just a bare ready/draining flag."""
+    from worktree_manager import __version__
+
+    runtime = mux_daemon.MuxDaemonRuntime(mux_daemon.registry_path(tmp_path))
+    runtime.start()
+    try:
+        assert runtime.server is not None
+        health = runtime.health()
+        assert health == {
+            "status": "ready",
+            "version": __version__,
+            "attached_clients": 0,
+            "busy": False,
+        }
+
+        runtime.server.subscribe("client-1")
+        runtime.begin_drain()
+        health = runtime.health()
+        assert health["status"] == "draining"
+        assert health["attached_clients"] == 1
+    finally:
+        runtime.shutdown()
+
+
+def test_health_over_the_real_wire_excludes_its_own_probe_from_load(tmp_path):
+    """A health REQUEST is itself an accepted handler and a touched
+    subscriber for its own duration (``CoalescingServer``'s accept-time
+    counter / ``touch()``), so calling ``runtime.health()`` directly
+    in-process (the test above) can never exercise that inflation -- only a
+    real round trip over the wire can. With exactly one genuinely attached
+    (persistent) subscriber and no other in-flight request, a real
+    ``mux-cutover-health-v1`` call must still report ``attached_clients ==
+    1`` and ``busy is False``, not 2/True from double-counting its own
+    transient probe connection."""
+    runtime = mux_daemon.MuxDaemonRuntime(mux_daemon.registry_path(tmp_path))
+    runtime.start()
+    try:
+        assert runtime.server is not None
+        runtime.server.subscribe("persistent-session")
+
+        rv = mux_daemon.rendezvous_fields(runtime.server)
+        host, port, token = mux_daemon.endpoint_from_rendezvous(
+            {
+                "manager_mux_endpoint": rv["manager_mux_endpoint"],
+                "manager_mux_token": rv["manager_mux_token"],
+            }
+        )
+        client_id = wcs_client.new_client_id()
+        try:
+            health = wcs_client.request(
+                host,
+                port,
+                token,
+                kind=mux_daemon.mux_daemon_cutover.health_kind(),
+                key="control",
+                payload={},
+                request_deadline_s=5.0,
+                client_id=client_id,
+            )
+        finally:
+            wcs_client.release(host, port, token, client_id, timeout=5.0)
+
+        assert health["attached_clients"] == 1
+        assert health["busy"] is False
+    finally:
+        runtime.shutdown()
+
+
+def test_health_excludes_every_concurrently_in_flight_control_request(tmp_path):
+    """Two concurrently in-flight cutover-control requests (e.g. two
+    overlapping ``daemons status`` health probes, or a probe racing an
+    in-flight drain) must each be excluded from reported load -- not just a
+    flat "one" contribution, which would double-count the other request
+    whenever more than one control request happens to be in flight at
+    once."""
+    runtime = mux_daemon.MuxDaemonRuntime(mux_daemon.registry_path(tmp_path))
+    runtime.start()
+    try:
+        assert runtime.server is not None
+        runtime.server.subscribe("persistent-session")
+        # Simulate two concurrently in-flight control requests directly:
+        # each is an accepted handler plus a touched subscriber for its own
+        # duration, exactly like a real one.
+        runtime.server.subscribe("probe-1")
+        runtime.server.subscribe("probe-2")
+        runtime.server._on_request_accepted()
+        runtime.server._on_request_accepted()
+        runtime._begin_control_request()
+        runtime._begin_control_request()
+
+        health = runtime.health(exclude_current_request=True)
+
+        assert health["attached_clients"] == 1
+        assert health["busy"] is False
+    finally:
+        runtime.server._on_request_finished()
+        runtime.server._on_request_finished()
+        runtime.shutdown()
+
+
 def test_scrub_session_credentials_is_case_insensitive():
     """Copilot review finding on PR #3839: Windows environment-variable
     names are case-insensitive, so a parent carrying `gh_token`,

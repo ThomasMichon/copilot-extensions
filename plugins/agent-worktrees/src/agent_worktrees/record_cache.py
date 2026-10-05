@@ -53,7 +53,12 @@ _TRANSIENT_PROJECTION_ATTRS = (
 )
 
 
-def cached_load(path: Path, loader: Callable[[Path], "WorktreeRecord"]) -> "WorktreeRecord":
+def cached_load(
+    path: Path,
+    loader: Callable[[Path], "WorktreeRecord"],
+    *,
+    copy_result: bool = True,
+) -> "WorktreeRecord":
     """``loader(path)``, memoized on the file's own ``(mtime_ns, size)``.
 
     Returns an independent copy each time -- ``WorktreeRecord`` is a plain
@@ -64,6 +69,21 @@ def cached_load(path: Path, loader: Callable[[Path], "WorktreeRecord"]) -> "Work
     back to a different caller -- returning a fresh ``copy.deepcopy`` per hit
     keeps the cache purely a read-parse accelerator, never a shared-mutable-
     state hazard.
+
+    ``copy_result=False`` (picker-performance-and-responsiveness Phase 3)
+    opts OUT of that copy and hands back the cache's own object directly --
+    a real, measured CPU cost at scale: live `py-spy` profiling of the
+    resident status-monitor daemon caught ``MainThread`` sampled inside this
+    function's ``copy.deepcopy`` call, on a machine with 100+ tracked
+    records where a sweep calls this path ``O(tracked records x live
+    sessions)`` times. Safe **only** for a caller that never mutates the
+    record it reads and never retains it past the current call (e.g. a
+    pure comparison/lookup scan) -- every other caller MUST keep the
+    default. This is an explicit, narrow, opt-in escape hatch, not a
+    general policy change: as of this writing exactly one caller
+    (``tracking.find_worktree_id_by_cwd``, via ``list_records``) uses it,
+    and it was audited to confirm it only reads ``worktree_path``/
+    ``worktree_id`` and never assigns to the record it receives.
     """
     key = str(path)
     try:
@@ -76,11 +96,11 @@ def cached_load(path: Path, loader: Callable[[Path], "WorktreeRecord"]) -> "Work
     with _cache_lock:
         cached = _cache.get(key)
         if cached is not None and (cached[0], cached[1]) == stamp:
-            return copy.deepcopy(cached[2])
+            return cached[2] if not copy_result else copy.deepcopy(cached[2])
     rec = loader(path)
     with _cache_lock:
         _cache[key] = (stamp[0], stamp[1], rec)
-    return copy.deepcopy(rec)
+    return rec if not copy_result else copy.deepcopy(rec)
 
 
 def store(path: Path, record: "WorktreeRecord") -> None:

@@ -3281,6 +3281,43 @@ class TestSystemWorktreeKind:
         assert [r.worktree_id for r in sessions_only] == ["s1"]
         assert len(list_records(tmp_path)) == 2
 
+    def test_list_records_copy_records_false_skips_the_deep_copy(self, tmp_path: Path):
+        """picker-performance-and-responsiveness Phase 3: the resident
+        status-monitor's hot path (``find_worktree_id_by_cwd``, called once
+        per live session per sweep) opts out of ``list_records``'s normal
+        per-record ``copy.deepcopy`` via ``copy_records=False`` -- verify
+        the records returned really are the cache's own objects (so the
+        CPU cost this phase removes is actually gone), while the default
+        call every other caller uses is unaffected."""
+        record_cache.clear()
+        save_record(self._base(worktree_id="s1", kind="session"), tmp_path / "s1.yaml")
+
+        default_a = list_records(tmp_path)[0]
+        default_b = list_records(tmp_path)[0]
+        assert default_a is not default_b, "default callers must still get independent copies"
+
+        shared_a = list_records(tmp_path, copy_records=False)[0]
+        shared_b = list_records(tmp_path, copy_records=False)[0]
+        assert shared_a is shared_b, "copy_records=False must hand back the cache's own object"
+        assert shared_a.worktree_id == default_a.worktree_id == "s1"
+
+    def test_find_worktree_id_by_cwd_unaffected_by_the_copy_skip(self, tmp_path: Path, monkeypatch):
+        """The actual hot-path caller must still resolve correctly with the
+        deep copy skipped -- this is a pure read (``worktree_path``/
+        ``worktree_id`` only), so dropping the copy must not change behavior."""
+        record_cache.clear()
+        proj_dir = tmp_path / "proj"
+        save_record(
+            self._base(worktree_id="s1", kind="session", worktree_path=str(proj_dir)),
+            tmp_path / "s1.yaml",
+        )
+        import agent_worktrees.tracking as tracking_mod
+        monkeypatch.setattr(tracking_mod.cfg, "tracking_dir", lambda name=None: tmp_path)
+
+        assert find_worktree_id_by_cwd(str(proj_dir / "sub")) == "s1"
+        assert find_worktree_id_by_cwd(str(proj_dir)) == "s1"
+        assert find_worktree_id_by_cwd(str(tmp_path / "other")) is None
+
     def test_create_new_record_system(self, tmp_path: Path):
         rec = create_new_record(
             "sys-x", "worktree/sys-x", "/tmp/sys-x", "test-repo", "test", "wsl",

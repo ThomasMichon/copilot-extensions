@@ -460,27 +460,24 @@ def build_compute(
                 worktree_locks[key] = lock
             return lock
 
+    _control_dispatch: dict[str, Callable] = {
+        mux_daemon_cutover.health_kind(): lambda rt, _p: rt.health(exclude_current_request=True),
+        mux_daemon_cutover.drain_kind(): lambda rt, p: rt.drain(p),
+        mux_daemon_cutover.undrain_kind(): lambda rt, _p: rt.undrain(),
+        mux_daemon_cutover.shutdown_kind(): lambda rt, _p: rt.request_shutdown(),
+        mux_daemon_cutover.adopt_kind(): lambda rt, _p: rt.promote(),
+    }
+
     def _compute(kind: str, payload: dict) -> dict:
-        if kind == mux_daemon_cutover.health_kind():
+        control_fn = _control_dispatch.get(kind)
+        if control_fn is not None:
             if runtime is None:
                 raise ValueError("mux_daemon cutover control is unavailable")
-            return runtime.health()
-        if kind == mux_daemon_cutover.drain_kind():
-            if runtime is None:
-                raise ValueError("mux_daemon cutover control is unavailable")
-            return runtime.drain(payload)
-        if kind == mux_daemon_cutover.undrain_kind():
-            if runtime is None:
-                raise ValueError("mux_daemon cutover control is unavailable")
-            return runtime.undrain()
-        if kind == mux_daemon_cutover.shutdown_kind():
-            if runtime is None:
-                raise ValueError("mux_daemon cutover control is unavailable")
-            return runtime.request_shutdown()
-        if kind == mux_daemon_cutover.adopt_kind():
-            if runtime is None:
-                raise ValueError("mux_daemon cutover control is unavailable")
-            return runtime.promote()
+            runtime._begin_control_request()
+            try:
+                return control_fn(runtime, payload)
+            finally:
+                runtime._end_control_request()
         if kind != KIND:
             raise ValueError(f"mux_daemon does not serve kind={kind!r}")
         if runtime is not None and not runtime.accepting_requests():
@@ -673,6 +670,10 @@ class MuxDaemonRuntime:
         self._self_retire_generation: int | None = None
         self._self_retire_confirms = 0
         self._self_retire_confirmations = 2
+        # Concurrently in-flight cutover-control requests; see health()'s
+        # docstring.
+        self._control_requests_in_flight = 0
+        self._control_requests_lock = threading.Lock()
 
     def start(self) -> None:
         try:
@@ -740,8 +741,39 @@ class MuxDaemonRuntime:
         self.begin_drain()
         self.retire_requested = True
 
-    def health(self) -> dict:
-        return {"status": "draining" if self.draining else "ready"}
+    def _begin_control_request(self) -> None:
+        with self._control_requests_lock:
+            self._control_requests_in_flight += 1
+
+    def _end_control_request(self) -> None:
+        with self._control_requests_lock:
+            self._control_requests_in_flight -= 1
+
+    def health(self, *, exclude_current_request: bool = False) -> dict:
+        """Report this daemon's own idle/load state for ``daemons status``.
+
+        Over the real wire, every cutover-control request (this probe
+        included) is itself an accepted handler/touched subscriber for its
+        own duration, so a naive read of ``active_handler_count()``/
+        ``subscriber_count()`` always includes every in-flight one. Set
+        only by the wire dispatch (``_control_requests_in_flight``),
+        ``exclude_current_request`` excludes that whole count, not a flat
+        one; a direct in-process call leaves it ``False`` (already accurate).
+        """
+        from . import __version__
+
+        attached_clients = self.server.subscriber_count() if self.server is not None else 0
+        active_handlers = self.server.active_handler_count() if self.server is not None else 0
+        if exclude_current_request:
+            in_flight = self._control_requests_in_flight
+            attached_clients = max(0, attached_clients - in_flight)
+            active_handlers = max(0, active_handlers - in_flight)
+        return {
+            "status": "draining" if self.draining else "ready",
+            "version": __version__,
+            "attached_clients": attached_clients,
+            "busy": active_handlers > 0,
+        }
 
     def promote(self) -> dict:
         self.admissions_open = True

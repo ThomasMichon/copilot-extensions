@@ -2,12 +2,31 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 from agent_worktrees import activity, handoff_trace
+
+
+def _claim_prune_marker_in_subprocess(args: tuple[str, object]) -> bool:
+    """Module-level (picklable) target for a real multi-process race test --
+    see test_claim_prune_marker_atomic_under_real_multiprocess_race. Waits on
+    a shared barrier first so every worker's claim attempt genuinely
+    overlaps instead of running strictly one after another."""
+    log_str, barrier = args
+    barrier.wait()
+    return activity._claim_prune_marker(Path(log_str))
+
+
+def _prune_in_subprocess(args: tuple[str, object]) -> int:
+    """Module-level (picklable) target for a real multi-process concurrent-
+    rewrite test -- see test_prune_concurrent_invocations_never_corrupt_the_log."""
+    log_str, barrier = args
+    barrier.wait()
+    return activity._prune(Path(log_str), retention_days=7)
 
 
 @pytest.fixture
@@ -252,6 +271,228 @@ def test_prune_drops_old_lines(patch_install_dir: Path):
     )
     kept = activity._prune(log, retention_days=7)
     assert kept == 1
+    remaining = activity.read_events()
+    assert len(remaining) == 1
+    assert remaining[0]["worktree_id"] == "new"
+
+
+def test_dispatch_background_prune_reaps_the_child_without_blocking(monkeypatch):
+    """A long-lived caller (the picker, a resident daemon) must never
+    accumulate zombie/unreaped children from repeated dispatches: the
+    ``Popen`` handle is retained and waited on from a background thread,
+    not discarded."""
+    import threading
+    import time
+
+    wait_called = threading.Event()
+
+    class FakeProc:
+        def wait(self):
+            wait_called.set()
+
+    monkeypatch.setattr(activity.subprocess, "Popen", lambda *a, **k: FakeProc())
+
+    start = time.monotonic()
+    activity._dispatch_background_prune(Path("/does/not/matter/activity.jsonl"))
+    elapsed = time.monotonic() - start
+
+    assert elapsed < 1, "dispatch itself must return immediately"
+    assert wait_called.wait(timeout=2), "the child must be reaped via a background thread"
+
+
+def test_prune_concurrent_invocations_never_corrupt_the_log(tmp_path: Path):
+    """Adjacent debounce windows are allowed to each dispatch their own
+    worker (see _claim_prune_marker's grace window), so two real `_prune()`
+    calls against the same log can genuinely overlap. Each must use its own
+    temp file (not a fixed shared name) -- released together from a shared
+    barrier so the overlap is real, not sequential, the final file must
+    still be entirely valid, retention-filtered JSONL, never interleaved or
+    truncated garbage from two processes racing on the same temp path."""
+    import concurrent.futures
+    import multiprocessing
+
+    log = tmp_path / "activity.jsonl"
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    new_ts = datetime.now(timezone.utc).isoformat()
+    log.write_text(
+        f'{{"ts": "{old_ts}", "event": "x", "worktree_id": "old"}}\n'
+        f'{{"ts": "{new_ts}", "event": "x", "worktree_id": "new"}}\n'
+    )
+
+    n = 6
+    with multiprocessing.Manager() as manager:
+        barrier = manager.Barrier(n)
+        with concurrent.futures.ProcessPoolExecutor(max_workers=n) as pool:
+            list(pool.map(_prune_in_subprocess, [(str(log), barrier)] * n))
+
+    lines = log.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    rec = json.loads(lines[0])
+    assert rec["worktree_id"] == "new"
+
+
+def test_log_event_never_prunes_inline(patch_install_dir: Path, monkeypatch):
+    """A large log must dispatch a background worker, never rewrite inline.
+
+    log_event() can be called mid-interaction (a picker action, a submenu
+    open); a synchronous multi-second rewrite on that path would freeze the
+    caller between keypresses. This proves log_event() never calls the
+    actual rewrite (`_prune`) itself once the size threshold is crossed --
+    only the cheap, fire-and-forget dispatch.
+    """
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("x" * (activity._PRUNE_SIZE_BYTES + 1))
+
+    prune_calls = []
+    dispatch_calls = []
+    monkeypatch.setattr(activity, "_prune", lambda *a, **k: prune_calls.append((a, k)) or 0)
+    monkeypatch.setattr(
+        activity, "_dispatch_background_prune", lambda path: dispatch_calls.append(path)
+    )
+
+    activity.log_event("worktree_created", worktree_id="wt-1")
+
+    assert prune_calls == []
+    assert dispatch_calls == [log]
+
+
+def test_maybe_prune_dispatches_once_per_debounce_window(patch_install_dir: Path, monkeypatch):
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("x" * (activity._PRUNE_SIZE_BYTES + 1))
+
+    dispatch_calls = []
+    monkeypatch.setattr(
+        activity, "_dispatch_background_prune", lambda path: dispatch_calls.append(path)
+    )
+
+    activity._maybe_prune(log)
+    activity._maybe_prune(log)
+    activity._maybe_prune(log)
+
+    assert len(dispatch_calls) == 1, "debounce marker should suppress repeat dispatches"
+
+
+def test_maybe_prune_redispatches_in_a_new_debounce_window(patch_install_dir: Path, monkeypatch):
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("x" * (activity._PRUNE_SIZE_BYTES + 1))
+
+    dispatch_calls = []
+    monkeypatch.setattr(
+        activity, "_dispatch_background_prune", lambda path: dispatch_calls.append(path)
+    )
+    fake_now = [1_700_000_000.0]
+    monkeypatch.setattr(activity.time, "time", lambda: fake_now[0])
+
+    activity._maybe_prune(log)
+    assert len(dispatch_calls) == 1
+
+    fake_now[0] += 10  # still inside the same window
+    activity._maybe_prune(log)
+    assert len(dispatch_calls) == 1
+
+    fake_now[0] += activity._PRUNE_DEBOUNCE_SECONDS  # a fresh window
+    activity._maybe_prune(log)
+    assert len(dispatch_calls) == 2
+
+
+def test_claim_prune_marker_is_exclusive_per_window(patch_install_dir: Path):
+    """Each debounce window has exactly one winner: claiming it twice for
+    the same window returns ``True`` then ``False``."""
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+
+    first = activity._claim_prune_marker(log)
+    second = activity._claim_prune_marker(log)
+
+    assert first is True
+    assert second is False
+
+
+def test_claim_prune_marker_cleans_up_only_beyond_the_grace_window(
+    patch_install_dir: Path, monkeypatch
+):
+    """A marker exactly one window behind ("current - 1") is preserved, not
+    cleaned up -- it may still be an in-flight claim by a caller that read
+    the clock right at the previous window's tail and was then descheduled
+    before completing its own exclusive create. Only a marker two or more
+    windows behind is safe to remove."""
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+
+    fake_now = [1_700_000_000.0]
+    monkeypatch.setattr(activity.time, "time", lambda: fake_now[0])
+    assert activity._claim_prune_marker(log) is True
+    oldest_marker = activity._prune_marker_path(log)
+
+    fake_now[0] += activity._PRUNE_DEBOUNCE_SECONDS  # one window later
+    assert activity._claim_prune_marker(log) is True
+    assert oldest_marker.exists(), (
+        "the immediately-preceding window's marker must survive -- it may "
+        "still be a delayed caller's in-flight claim"
+    )
+    middle_marker = activity._prune_marker_path(log)
+
+    fake_now[0] += activity._PRUNE_DEBOUNCE_SECONDS  # two windows later
+    assert activity._claim_prune_marker(log) is True
+    assert not oldest_marker.exists(), "two windows behind is safe to clean up"
+    assert middle_marker.exists(), "still only one window behind -- preserved"
+
+
+def test_claim_prune_marker_atomic_under_real_multiprocess_race(tmp_path: Path):
+    """Many real OS processes (not threads, not sequential in-process calls)
+    racing on the same debounce window, released together from a shared
+    barrier so the claim attempts genuinely overlap: exactly one may win."""
+    import concurrent.futures
+    import multiprocessing
+
+    log = tmp_path / "activity.jsonl"
+    n = 12
+    with multiprocessing.Manager() as manager:
+        barrier = manager.Barrier(n)
+        with concurrent.futures.ProcessPoolExecutor(max_workers=n) as pool:
+            results = list(
+                pool.map(
+                    _claim_prune_marker_in_subprocess,
+                    [(str(log), barrier)] * n,
+                )
+            )
+
+    assert results.count(True) == 1, f"expected exactly one winner, got {results}"
+
+
+def test_maybe_prune_skips_small_file(patch_install_dir: Path, monkeypatch):
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text('{"ts": "2026-01-01T00:00:00+00:00", "event": "x"}\n')
+
+    dispatch_calls = []
+    monkeypatch.setattr(
+        activity, "_dispatch_background_prune", lambda path: dispatch_calls.append(path)
+    )
+
+    activity._maybe_prune(log)
+    assert dispatch_calls == []
+
+
+def test_activity_prune_worker_cmd_invokes_prune(patch_install_dir: Path, monkeypatch):
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    new_ts = datetime.now(timezone.utc).isoformat()
+    log.write_text(
+        f'{{"ts": "{old_ts}", "event": "x", "worktree_id": "old"}}\n'
+        f'{{"ts": "{new_ts}", "event": "x", "worktree_id": "new"}}\n'
+    )
+
+    class Args:
+        path = str(log)
+        retention_days = "7"
+
+    rc = activity.cmd_activity_prune_worker(Args())
+    assert rc == 0
     remaining = activity.read_events()
     assert len(remaining) == 1
     assert remaining[0]["worktree_id"] == "new"

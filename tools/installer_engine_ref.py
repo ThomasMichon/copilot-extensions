@@ -22,7 +22,7 @@ REPO = Path(__file__).resolve().parent.parent
 CANONICAL_DIR = REPO / "libs" / "installer-engine"
 FILES = ("installer-engine.ps1", "installer-engine.sh")
 INSTALLER_SCRIPTS = ("install.ps1", "install.sh")
-ADOPTERS = ("agent-pull-requests", "agent-logger")
+ADOPTERS = ("agent-pull-requests", "agent-logger", "agent-vault")
 
 _LOCAL_LINES = {
     "ps1": ". (Join-Path $PSScriptRoot 'installer-engine.ps1')",

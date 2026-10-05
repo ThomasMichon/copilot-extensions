@@ -96,55 +96,82 @@ boot_trace_escape_json() {
 # (RETENTION_DAYS=7, _PRUNE_SIZE_BYTES=512*1024) so a launch that emits
 # boot_trace lines but never triggers a later Python-side log_event() call
 # (e.g. it exits before the real module runs any activity-logging code path)
-# does not grow activity.jsonl unbounded. Best-effort and lossy under a
-# concurrent writer during the rewrite, same posture as the Python pruner's
-# own documented tradeoff. Never lets a pruning failure affect the caller.
+# does not grow activity.jsonl unbounded.
+#
+# The rewrite itself is NEVER run inline here. This can run on every single
+# launch (including one dispatched from a live picker session), and
+# rewriting a multi-megabyte log line-by-line takes several seconds -- long
+# enough to freeze that picker between keypresses. Instead, once the file is
+# large, this claims the current debounce window's marker (see
+# boot_trace_claim_prune_marker) and hands the actual rewrite to a detached
+# `agent_worktrees activity-prune-worker` child -- mirroring the Python-side
+# activity._dispatch_background_prune -- so the caller never waits on it.
+# Best-effort throughout: a pruning failure (or no runtime yet resolved to
+# dispatch the worker with) never affects the caller.
 boot_trace_maybe_prune() {
     local log_path="$1" size
     size="$(wc -c < "$log_path" 2>/dev/null)" || return 0
     size="${size//[[:space:]]/}"
     [[ "$size" =~ ^[0-9]+$ ]] || return 0
     (( size >= 524288 )) || return 0
-    local cutoff
-    cutoff="$(boot_trace_prune_cutoff_iso)" || return 0
-    local tmp="${log_path}.prune.$$"
-    if LC_ALL=C awk -v cutoff="$cutoff" '
-        {
-            # Tolerate both the compact form this shell writer produces
-            # ("ts":"...") and the space-after-colon form Python'"'"'s
-            # json.dumps (default separators) writes for every OTHER
-            # activity.jsonl event ("ts": "...") -- matching only the
-            # compact form previously treated every real Python-emitted
-            # record as unparseable, retaining them forever and defeating
-            # the whole point of this prune (Copilot review, PR #3310).
-            match($0, /"ts"[[:space:]]*:[[:space:]]*"/)
-            if (RSTART == 0) { print; next }
-            rest = substr($0, RSTART + RLENGTH)
-            j = index(rest, "\"")
-            if (j == 0) { print; next }
-            ts = substr(rest, 1, j - 1)
-            if (ts >= cutoff) print
-        }
-    ' "$log_path" > "$tmp" 2>/dev/null; then
-        mv -f "$tmp" "$log_path" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
-    else
-        rm -f "$tmp" 2>/dev/null || true
+    [[ -n "${AGENT_RT_PY:-}" ]] || return 0  # no runtime yet to dispatch the worker with
+    boot_trace_claim_prune_marker "$log_path" || return 0
+    # `( cmd & )` alone only backgrounds the worker -- it stays in this
+    # shell's own session/process group, so a terminal teardown, SSH
+    # disconnect, or process-group signal can still kill it after the
+    # marker above has already claimed the hour's dispatch slot (losing
+    # that window's prune until the next bucket). `setsid` gives it its
+    # own session, the same real detachment agent_procutil.detached_kwargs()
+    # provides on the Python path (start_new_session=True); `nohup` is the
+    # fallback where `setsid` isn't installed (e.g. stock macOS) -- it
+    # won't survive a process-group-wide signal, but does survive the
+    # common SIGHUP-on-hangup case this review was raised against.
+    local detach=()
+    if command -v setsid >/dev/null 2>&1; then
+        detach=(setsid)
+    elif command -v nohup >/dev/null 2>&1; then
+        detach=(nohup)
     fi
+    ( PYTHONPATH="" "${detach[@]}" "$AGENT_RT_PY" -I -m agent_worktrees activity-prune-worker \
+        "$log_path" 7 </dev/null >/dev/null 2>&1 & ) || true
 }
 
-boot_trace_prune_cutoff_iso() {
-    local now cutoff raw
-    now="$(date +%s 2>/dev/null)" || return 1
-    cutoff=$((now - 7 * 86400))
-    if raw="$(date -u -d "@$cutoff" +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null)"; then
-        printf '%s\n' "$raw"
-        return 0
-    fi
-    if raw="$(date -u -r "$cutoff" +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null)"; then
-        printf '%s\n' "$raw"
-        return 0
-    fi
-    return 1
+# Atomically claims *this debounce window's* dispatch slot for $log_path, so
+# a burst of concurrent launches -- all seeing the log large at the same
+# time -- dispatches at most one background prune for this window, not one
+# per launch. Mirrors the Python-side activity._claim_prune_marker: each
+# window gets its own marker file (named by its epoch-hour bucket number).
+# `set -C` (noclobber) makes the shell's own redirection fail if that exact
+# marker already exists, giving an atomic exclusive create. Unlike a single
+# shared marker refreshed in place, there is no separate "renew a stale
+# marker" step and therefore no window where multiple processes can all
+# believe they renewed the same claim.
+boot_trace_claim_prune_marker() {
+    local log_path="$1" now_epoch bucket marker
+    now_epoch="$(date +%s 2>/dev/null || echo 0)"
+    bucket=$(( now_epoch / 3600 ))
+    marker="${log_path}.prune-marker.${bucket}"
+    ( set -o noclobber; : > "$marker" ) 2>/dev/null || return 1
+    # Cleans up markers at least 2 whole windows behind $bucket -- never the
+    # immediately-preceding one ($bucket - 1). Mirrors the Python-side
+    # activity._PRUNE_MARKER_CLEANUP_GRACE_WINDOWS: a caller that read the
+    # clock right at the previous window's tail and was then descheduled
+    # before its (otherwise instantaneous) exclusive create can still be
+    # holding that bucket's claim-in-flight -- deleting it here would let
+    # that delayed caller's create succeed a second time once it resumes,
+    # dispatching a duplicate worker. Requiring a full extra window's worth
+    # of delay between reading the clock and one file-create call makes
+    # that race a scheduling pathology, not a realistic occurrence -- same
+    # best-effort posture as the rest of this module.
+    local cutoff=$(( bucket - 1 ))
+    local f suffix
+    for f in "${log_path}.prune-marker."*; do
+        [[ -e "$f" ]] || continue
+        suffix="${f#"${log_path}.prune-marker."}"
+        [[ "$suffix" =~ ^[0-9]+$ ]] || continue  # not one of ours -- leave it alone
+        (( suffix < cutoff )) && rm -f -- "$f" 2>/dev/null
+    done
+    return 0
 }
 
 boot_trace() {

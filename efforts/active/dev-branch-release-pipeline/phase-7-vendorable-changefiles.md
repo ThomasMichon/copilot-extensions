@@ -192,19 +192,106 @@ changefiles and auto-bumps."
       last-shipped-on-`main` source and apply the same coalesced
       consumer/vendorable bump resolution promotion does, not recompute its
       own narrower approximation.
-- [ ] Give a local dev checkout (built straight off `dev`, never promoted)
-      a non-release identity distinct from both a real shipped version and
-      the bare `"0.0.0"` placeholder, or route local installs through a
-      generated preview/dev slot instead of the raw repo-tree version —
+- [ ] Route **ordinary numbered `install`/`update` flows** (never the
+      existing mutable `dev`-slot editable-install path, which must stay
+      exactly as it is today — an editable install straight from the
+      worktree so source edits take effect without rebuilding, per
+      `docs/patterns/mutable-dev-slot.md:44-54,170-176` and the pilot
+      implementation at
+      `plugins/agent-codespaces/scripts/install.sh:635-715`) through a
+      generated preview build instead of installing the raw repo-tree
+      `plugin.json` version directly. A numbered install always
+      materializes a real hypothetical version via `preview_release.py`
+      (already being extended above for the same seeding/propagation model
+      as promotion) first, then installs that generated slot.
       `agent-bridge`'s own install script derives its immutable slot from
-      `pyproject.toml` and explicitly **rejects** a `plugin.json` version of
-      `"0.0.0"` as a downgrade from any already-shipped install
-      (`scripts/install.sh:242-250,1901-1932`), so placeholder values as
-      currently scoped would break the documented pre-merge local-install
-      path outright, including a repeated local install over an existing
-      release. This needs its own resolved design, not just a validation
-      afterthought — raise it back to the operator if the resolution isn't
-      a clear implementation detail once scoped.
+      `pyproject.toml` and explicitly **rejects** a `plugin.json` version
+      of `"0.0.0"` as a downgrade from any already-shipped install
+      (`scripts/install.sh:242-250,1901-1932`), so installing straight off
+      `dev`'s placeholder values would break that numbered-install path
+      outright; routing it through a generated preview build sidesteps
+      that entirely since the thing actually installed never carries the
+      `"0.0.0"` placeholder itself. `preview_release.py` today only writes
+      its computed hypothetical version into `PREVIEW.json`'s own
+      metadata — the `plugin.json`/`pyproject.toml` copies it materializes
+      for actual install are left unchanged
+      (`tools/preview_release.py:151-172`), so this sidestep only works
+      once the preview build is also taught to write the computed version
+      into every one of those copied, generated files, not just report it.
+      It must also persist the generated preview snapshot durably (not a
+      scratch tree that may be cleaned up) and write it as `source.path` —
+      the operative payload location runtime consumers actually
+      dereference and execute from — while recording the originating
+      checkout's own commit/branch/dirty-state **separately**, in the
+      install contract's dedicated `commit`/`branch`/`dirty` fields
+      (`docs/install-contract.md:1718-1723`), never by repointing
+      `source.path` itself at the raw checkout. Durable snapshots need an
+      owner and a reclamation rule: the existing runtime GC
+      (`libs/versioned-runtime/versioned_runtime.py:924-972`) only reclaims
+      `versions/*` slots, not this new persisted-snapshot tree, so repeated
+      dirty numbered installs would otherwise leak one payload tree per
+      build forever. Define a retention policy (deferred to
+      implementation) that preserves every snapshot still referenced by a
+      current/fallback/live slot and safely reclaims only unreferenced
+      ones — never a time- or count-based heuristic that could evict a
+      still-referenced snapshot.
+- [ ] Give the numbered-install preview route a concrete enforcement seam,
+      not just a stated intent — today's documented local-testing flow
+      invokes `plugins/*/scripts/install.*` directly
+      (`CONTRIBUTING.md:1012-1017`), and those installers infer their own
+      local source from their own script path
+      (`docs/install-contract.md:1729-1741`), so simply *having*
+      `preview_release.py` changes nothing unless the documented commands
+      themselves are updated to go through it. Either make
+      `install.sh`/`install.ps1` detect a placeholder (`"0.0.0"`) source
+      version and redirect to/require a preview build first, or make the
+      preview-generated directory the one new documented numbered-install
+      entry point and update `CONTRIBUTING.md`'s local-testing section
+      accordingly — inventory every existing entry point this needs to
+      change, not just the general intent to "route through preview." The
+      mutable `dev`-slot editable-install command/entry point is unaffected
+      and keeps installing straight from the worktree exactly as today.
+- [ ] **Decided:** every numbered runtime slot is immutable by
+      repo-wide invariant (`docs/patterns/README.md:120-130`,
+      `visions/plugin-services/README.md:159-169`) — only `versions/dev`
+      may ever be rebuilt in place (`docs/patterns/mutable-dev-slot.md:
+      44-54`). A preview's hypothetical version is computed purely from the
+      pending changefiles' bump *type*, not content, so two different dirty
+      checkouts (or the same checkout before/after a further uncommitted
+      edit) can compute the identical version while holding different
+      bytes — installing both as the same numbered slot would silently
+      overwrite an existing immutable slot and break rollback/concurrent-
+      process safety, the exact thing numbered immutability exists to
+      prevent. The preview route must therefore mint a **content-distinct**
+      identity for every numbered-install preview build rather than reusing
+      the bare computed version as-is; a rebuild against truly unchanged
+      content (identical hash) may still reuse its own slot, anything else
+      always mints a new one. Slot separation by itself is **not**
+      sufficient: `agent_worktrees.reconcile` decides whether to deploy by
+      comparing *reported version strings* for equality
+      (`reconcile.py:1990-2004`'s `_versions_equal`), not by slot id, so a
+      distinct slot carrying the SAME reported base version as a later real
+      promoted build would still be skipped as "already equal" even though
+      its bytes differ. The exact identity scheme is an implementation-time
+      decision, not a plan-time one, but it must satisfy both of these
+      together: the *reported version string itself* (not just the backing
+      slot) must differ whenever content differs, so reconciliation's own
+      equality check is never fooled; and it must stay precedence-safe
+      against the existing comparators —
+      `agent_worktrees.reconcile._version_lt`'s PEP 440 ordering sorts
+      `1.2.3.dev1+abc` *after* bare `1.2.3.dev1`, which can make a later
+      real promoted build look like a downgrade and get skipped, and the
+      canonical runtime sorter (`libs/versioned-runtime/versioned_runtime.py:
+      135-149`) only recognizes `X.Y.Z[-devN]`, dropping any suffixed form
+      into its unsupported fallback bucket. Implementation must either pick
+      a reported-version scheme proven both content-distinguishing and
+      precedence-neutral against every one of those comparators, or extend
+      `_versions_equal`/the runtime sorter alongside it — "keep the slot id
+      distinct but leave the version string as-is" is explicitly ruled out,
+      not an available option — and the Validation Plan item below requires
+      proving the real promoted build supersedes an installed preview
+      across reconciliation, downgrade guards, and runtime fallback/GC
+      before this is considered done.
 - [ ] Extend the placeholder-conversion inventory and migration to cover
       every vendorable's own `libs/<lib>/pyproject.toml` (canonical and
       every real copy), not just per-plugin manifests and hook-owned
@@ -229,6 +316,19 @@ changefiles and auto-bumps."
    post-generation promotion invariant against the `main` snapshot (see the
    Plan item above) rather than surviving as an unchanged, separately-run
    file.
+4. **Local install under placeholder versions:** scoped to ordinary
+   numbered `install`/`update` flows only — route those through a generated
+   preview build (`preview_release.py`) rather than giving a local `dev`
+   checkout its own distinct non-release version identity, so
+   `agent-bridge`'s downgrade rejection of `"0.0.0"` never comes into play.
+   The existing mutable `dev`-slot editable-install path is explicitly
+   **excluded** and keeps installing straight from the worktree exactly as
+   today. Every numbered runtime slot stays immutable: a numbered-install
+   preview build mints a content-distinct identity, so two builds with
+   different content never collide on one slot even if their computed base
+   version matches — only a byte-identical rebuild may reuse its own slot.
+   The exact identity scheme is deferred to implementation (see the Plan
+   item above and the precedence-safety requirement it carries).
 
 ## Validation Plan
 
@@ -267,11 +367,68 @@ changefiles and auto-bumps."
       a plugin reached only through a vendorable's propagated changefile
       (not just one with its own direct entry), and never reports a bogus
       `0.0.x` preview derived from the `"0.0.0"` placeholder.
-- [ ] A local install from a `dev` checkout (never promoted) succeeds, both
-      fresh and as a repeat install over an existing real-versioned
-      release — confirm `agent-bridge`'s install script's downgrade
-      rejection does not fire against whatever non-release identity this
-      phase gives a local `dev` checkout.
+- [ ] The generated preview tree's own `plugin.json`/`pyproject.toml`
+      copies carry the computed hypothetical version, not the `"0.0.0"`
+      placeholder `PREVIEW.json` alone would report it as — inspect the
+      materialized files directly, not just the preview's reported summary.
+- [ ] A numbered install/update from a `dev` checkout (never promoted)
+      succeeds, both fresh and as a repeat install over an existing
+      real-versioned release — confirm the install path actually goes
+      through `preview_release.py`'s generated slot rather than
+      `plugin.json` directly, so `agent-bridge`'s install script's downgrade
+      rejection of `"0.0.0"` never fires.
+- [ ] The mutable `dev`-slot editable-install path is unaffected by any of
+      the above: it still installs straight from the worktree with live
+      source edits taking effect without a rebuild, exactly as it does
+      today.
+- [ ] Running the documented numbered-install command as written (not a
+      preview-aware variant) on a `dev` checkout either transparently
+      routes through the preview build or is explicitly rejected/redirected
+      — it never silently installs the raw `"0.0.0"` placeholder.
+- [ ] After a preview-routed numbered install, the install contract's
+      `source.path` (and `payload-dir`, where present) resolve to the
+      **durable, persisted generated preview snapshot** — never a
+      scratch/temp directory that may be cleaned up, and never back at the
+      raw originating checkout. `source.path` is the operative payload
+      location runtime consumers actually dereference and execute from
+      (e.g. `agent_bridge/loop_governance.py:58-64`,
+      `agent-bridge/scripts/install.sh:1307-1319`); pointing it at the raw
+      checkout would let reconciliation/bootstrap execute the unrewritten
+      `"0.0.0"` payload and silently bypass the preview. Origin
+      traceability (which checkout this build came from) lives in the
+      install contract's own dedicated `commit`/`branch`/`dirty` fields
+      (`docs/install-contract.md:1718-1723`), not in `source.path` — those
+      fields alone carry the originating-checkout identity; `source.path`
+      stays on the persisted preview snapshot throughout. Today's
+      installers derive `commit`/`branch`/`dirty` by running `git -C
+      "$plugin_path/.."` against their own install location, which only
+      works because `plugin_path` IS the source checkout today — once
+      `source.path` is the generated snapshot instead, that same
+      derivation would read the snapshot's own (non-)git state, not the
+      originating checkout's. The preview-install path must therefore
+      capture `commit`/`branch`/`dirty` from the originating checkout
+      explicitly, at preview-generation time, and pass them through to the
+      installed manifest rather than re-deriving them post-hoc from
+      `source.path`. Use a **dirty branch** as the test case and assert all
+      three installed manifest fields match the origin while `source.path`
+      still points at the snapshot.
+- [ ] Two numbered-install preview builds with the SAME computed base
+      version but DIFFERENT content (e.g. two dirty checkouts sharing a
+      pending changefile set) mint two distinct numbered slots AND report
+      two distinct reported version identities — not slot separation
+      alone; a byte-identical rebuild of the same content may reuse its
+      own slot and identity.
+- [ ] A later REAL promoted release supersedes a previously-installed
+      preview build that reported the same base version: reconciliation
+      (`agent_worktrees.reconcile`'s `_versions_equal`/`_version_lt`),
+      downgrade guards, and runtime fallback/GC all correctly deploy the
+      real release rather than treating it as already-equal or a
+      downgrade -- exercise this transition explicitly, not just the
+      preview-vs-preview distinct-slot case above.
+- [ ] A removed/superseded numbered slot's persisted preview snapshot is
+      reclaimed once no current/fallback/live slot references it, and a
+      snapshot still referenced by any such slot survives a GC pass that
+      also removes an unrelated unreferenced snapshot.
 - [ ] Every vendorable's own `libs/<lib>/pyproject.toml` (canonical and
       real copies) reads `"0.0.0"` on `dev` alongside the per-plugin
       manifests, and vendorable seeding (above) still recovers its real

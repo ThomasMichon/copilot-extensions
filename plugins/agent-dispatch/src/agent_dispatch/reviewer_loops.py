@@ -6,7 +6,6 @@ import json
 import logging
 import math
 import os
-import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -23,6 +22,7 @@ from .registrar import (
 )
 from .producers.evaluator import Abandon, Confirm, Decision, EvaluatorError, NoOp
 from .registrations import RegistrationKind
+from .review_target_refs import parse_review_target_ref
 
 log = logging.getLogger("agent-dispatch.reviewer-loops")
 
@@ -41,9 +41,6 @@ _KNOWN_KEYS = frozenset(
         "stale_after_days",
     }
 )
-_GITHUB_PR_PAYLOAD_REF = re.compile(r"^github-pr:(?P<repo>[^#]+)#(?P<number>\d+)$")
-
-
 def _mapping(data: Mapping, key: str) -> dict:
     value = data.get(key)
     if not isinstance(value, Mapping):
@@ -215,14 +212,11 @@ def _reviewer_loop_payload(task: Mapping[str, Any]) -> Mapping[str, Any] | None:
     return decoded
 
 
-def _reviewer_loop_payload_ref(task: Mapping[str, Any]) -> tuple[str, int] | None:
+def _reviewer_loop_payload_ref(task: Mapping[str, Any]):
     payload_ref = task.get("payload_ref")
     if not isinstance(payload_ref, str) or not payload_ref:
         return None
-    match = _GITHUB_PR_PAYLOAD_REF.fullmatch(payload_ref)
-    if match is None:
-        return None
-    return match.group("repo"), int(match.group("number"))
+    return parse_review_target_ref(payload_ref)
 
 
 def _timestamp(value: object) -> float | None:
@@ -249,7 +243,7 @@ def _provider_snapshot(
     target = _reviewer_loop_payload_ref(task)
     if target is None:
         return None
-    repo, number = target
+    repo, number = target.observation_repo, target.number
     db_path = _store_path(observation_store_path)
     if not db_path.exists():
         return None
