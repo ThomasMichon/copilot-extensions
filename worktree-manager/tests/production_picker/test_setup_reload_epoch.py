@@ -263,11 +263,15 @@ def _install_setup_race(screen, *, first_tag: str, second_tag: str) -> dict[str,
 def test_setup_reload_records_a_diagnosed_failure_when_waking_the_render_flow_fails():
     """#5220: when waking the render flow to apply the collected payload
     fails (most commonly the App's event loop not running, or already
-    stopped/shutting down -- here simulated by a screen with no working
-    ``post_message`` at all), the collected payload must not be silently
-    dropped -- a diagnosed failure must land in ``_setup_failed_epoch`` so a
-    poller (capture.py's ``_wait_for_initial_setup``) sees the actual cause
-    instead of spinning until its own unrelated timeout.
+    stopped/shutting down -- here simulated by a screen whose
+    ``post_message`` always raises), the collected payload must not be
+    silently dropped -- a diagnosed failure must land in
+    ``_setup_failed_epoch`` so a poller (capture.py's
+    ``_wait_for_initial_setup``) sees the actual cause instead of
+    spinning until its own unrelated timeout. The diagnosed failure must
+    also preserve the REAL underlying exception (via ``Inbox.post()``'s
+    own ``on_wake_failed`` callback), not just a generic "could not wake"
+    message with no further detail.
     """
     disposed = threading.Event()
     failed = threading.Event()
@@ -276,13 +280,9 @@ def test_setup_reload_records_a_diagnosed_failure_when_waking_the_render_flow_fa
         def cancel(self):
             disposed.set()
 
-    class _App:
-        def call_from_thread(self, fn):
-            raise RuntimeError("app already exited")
-
     class _Screen(PickerScreenRuntimeMixin):
         def __init__(self):
-            self.app = _App()
+            self.app = object()  # resolvable but unrelated
             self._bg_cancel = threading.Event()
             self._setup_epoch = 0
             self._setup_applied_epoch = 0
@@ -291,6 +291,9 @@ def test_setup_reload_records_a_diagnosed_failure_when_waking_the_render_flow_fa
             self._setup_payloads_lock = threading.Lock()
             self.applied = []
             self.failures: list[tuple[int, Exception]] = []
+
+        def post_message(self, message):
+            raise RuntimeError("app already exited")
 
         def _prime_setup_reload(self):
             return None
@@ -324,7 +327,9 @@ def test_setup_reload_records_a_diagnosed_failure_when_waking_the_render_flow_fa
     assert len(screen.failures) == 1
     failed_epoch, err = screen.failures[0]
     assert failed_epoch == epoch
-    assert "could not wake the render flow" in str(err)
+    # The REAL underlying exception, not a generic message -- confirms
+    # the diagnosability detail actually reaches the failure record.
+    assert "app already exited" in str(err)
 
 
 def test_setup_reload_wake_failure_leaves_no_stale_closure_for_a_later_drain():
@@ -571,6 +576,62 @@ def test_setup_reload_wake_failure_fallback_does_not_downgrade_a_newer_failure()
     # been allowed to downgrade `_setup_failed_epoch` back down after the
     # newer one was already recorded.
     assert screen._setup_failed_epoch != first_epoch
+
+
+def test_setup_reload_epoch_allocation_blocks_while_the_fallback_holds_its_lock():
+    """A regression for the narrower bytecode-level race: re-checking
+    epoch currency immediately before publishing is not, by itself,
+    atomic with epoch ALLOCATION -- a newer reload's own
+    ``_next_setup_epoch()`` call could still interleave between that
+    check passing and the publish actually running without a lock shared
+    across both. Force the interleaving directly: hold the fallback's
+    lock open past its own check (simulating being paused mid-publish)
+    and confirm a concurrent ``_next_setup_epoch()`` call genuinely
+    blocks until it releases, rather than slipping through.
+    """
+
+    class _Screen(PickerScreenRuntimeMixin):
+        def __init__(self):
+            self._setup_epoch = 1
+
+    screen = _Screen()
+    lock = screen._ensure_setup_epoch_lock()
+    # A second call must return the SAME lock instance -- this is what
+    # makes allocation and the fallback's check+publish mutually
+    # exclusive in the first place.
+    assert screen._ensure_setup_epoch_lock() is lock
+
+    holding = threading.Event()
+    release = threading.Event()
+
+    def _hold_lock_like_the_fallback_does():
+        with lock:
+            holding.set()
+            release.wait(timeout=5)
+
+    t = threading.Thread(target=_hold_lock_like_the_fallback_does)
+    t.start()
+    assert holding.wait(timeout=5)
+
+    allocated = {}
+
+    def _allocate():
+        allocated["epoch"] = screen._next_setup_epoch()
+
+    t2 = threading.Thread(target=_allocate)
+    t2.start()
+    time.sleep(0.05)
+    assert t2.is_alive(), (
+        "_next_setup_epoch() must block while the fallback's lock is "
+        "held -- proceeding here is exactly the race this lock exists "
+        "to close"
+    )
+
+    release.set()
+    t.join(timeout=5)
+    t2.join(timeout=5)
+    assert not t.is_alive() and not t2.is_alive()
+    assert allocated["epoch"] == 2
 
 
 def test_setup_reload_records_a_diagnosed_failure_when_app_is_unresolvable():

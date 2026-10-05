@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from textual.message import Message
 
@@ -89,7 +89,13 @@ class Inbox:
         self._wake_lock = threading.RLock()
         self._home_thread_id = threading.get_ident()
 
-    def post(self, slot: str, value: Any) -> bool:
+    def post(
+        self,
+        slot: str,
+        value: Any,
+        *,
+        on_wake_failed: Callable[[Exception | None], None] | None = None,
+    ) -> bool:
         """Record *value* under *slot*, coalescing with any prior,
         not-yet-drained value for the same slot (last write wins).
 
@@ -122,6 +128,20 @@ class Inbox:
         to a direct, off-thread diagnostic write of its own, the same
         documented, narrow exception already established for a producer
         with nowhere else to send an outcome.
+
+        ``on_wake_failed``, if given, is called with the underlying
+        exception ``post_message`` raised (or ``None`` if it instead
+        returned ``False`` without raising -- an already-closing/closed
+        pump) exactly when a *needed* wake genuinely fails to deliver.
+        This is how a caller with its own diagnosability contract (like
+        the one above) can recover the REAL cause instead of only a
+        generic "could not wake" message -- the plain ``bool`` return
+        alone can't carry that detail without changing what every other,
+        ordinary caller of ``post()`` receives. Never called on the
+        home-thread path (nothing there is a "wake failure" -- the value
+        is applied directly, or recorded for later, not queued as a
+        message at all); any exception IT raises is logged and swallowed,
+        never allowed to mask the original wake failure it was reporting.
         """
         with self._lock:
             self._slots[slot] = value
@@ -220,6 +240,16 @@ class Inbox:
             # of the real cause.
             exc_info=wake_exc,
         )
+        if on_wake_failed is not None:
+            try:
+                on_wake_failed(wake_exc)
+            except Exception:
+                # A caller's own diagnostic callback raising must never
+                # mask the original wake failure it was reporting.
+                log.warning(
+                    "Inbox.post(%r): on_wake_failed callback itself "
+                    "raised", slot, exc_info=True,
+                )
         return False
 
     def drain(self) -> dict[str, Any]:

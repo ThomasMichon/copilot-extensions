@@ -362,6 +362,86 @@ def test_post_message_returning_false_without_raising_still_counts_as_a_failed_w
     assert inbox.drain() == {"slot": "value"}
 
 
+def _post_from_other_thread_with_callback(inbox, slot, value, on_wake_failed):
+    result = {}
+
+    def _run():
+        result["ok"] = inbox.post(slot, value, on_wake_failed=on_wake_failed)
+
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=5)
+    assert not t.is_alive()
+    return result["ok"]
+
+
+def test_on_wake_failed_receives_the_real_underlying_exception():
+    """A caller with its own diagnosability contract (the setup-reload
+    worker's #5220 fix) needs the REAL underlying exception, not just a
+    generic ``False`` -- ``on_wake_failed`` is how it recovers that detail
+    without changing what every other, ordinary caller of ``post()``
+    receives."""
+    inbox = Inbox(_BrokenOwner())
+    received: list[Exception | None] = []
+    ok = _post_from_other_thread_with_callback(
+        inbox, "slot", "value", received.append
+    )
+    assert ok is False
+    assert len(received) == 1
+    assert isinstance(received[0], RuntimeError)
+    assert "owner already torn down" in str(received[0])
+
+
+def test_on_wake_failed_receives_none_when_post_message_returns_false_without_raising():
+    inbox = Inbox(_ClosingOwner())
+    received: list[Exception | None] = []
+    ok = _post_from_other_thread_with_callback(
+        inbox, "slot", "value", received.append
+    )
+    assert ok is False
+    assert received == [None]
+
+
+def test_on_wake_failed_is_never_called_on_a_successful_wake():
+    inbox = Inbox(_RecordingOwner())
+    received: list[Exception | None] = []
+    ok = _post_from_other_thread_with_callback(
+        inbox, "slot", "value", received.append
+    )
+    assert ok is True
+    assert received == []
+
+
+def test_on_wake_failed_is_never_called_on_the_home_thread_path():
+    """The home-thread path never queues a wake message at all (the value
+    is applied directly, or recorded for later) -- ``on_wake_failed`` is
+    specifically about a FAILED WAKE, which can't happen there."""
+    inbox = Inbox(_BrokenOwner())  # home thread == this test's own thread
+    received: list[Exception | None] = []
+    ok = inbox.post("status", "ready", on_wake_failed=received.append)
+    assert ok is True
+    assert received == []
+
+
+def test_a_raising_on_wake_failed_callback_does_not_mask_the_original_failure(caplog):
+    inbox = Inbox(_BrokenOwner())
+
+    def _bad_callback(exc):
+        raise ValueError("callback bug")
+
+    with caplog.at_level(logging.WARNING, logger="agent-worktrees.picker"):
+        ok = _post_from_other_thread_with_callback(
+            inbox, "slot", "value", _bad_callback
+        )
+    assert ok is False
+    assert any(
+        "on_wake_failed callback itself raised" in r.message
+        for r in caplog.records
+    )
+    # The value is still recorded -- the callback's own bug didn't lose it.
+    assert inbox.drain() == {"slot": "value"}
+
+
 def test_wake_failure_resets_wake_state_so_a_later_post_retries_the_wake():
     """A raised/false wake must not leave ``_wake_queued`` stuck ``True`` --
     otherwise every later post in the same batch (even for an unrelated

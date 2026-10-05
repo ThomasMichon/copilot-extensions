@@ -15,6 +15,13 @@ from .. import update_stage
 
 log = logging.getLogger("agent-worktrees.picker")
 
+#: Guards the lazy, exactly-once construction of each screen's own
+#: `_setup_epoch_lock` (see `PickerScreenRuntimeMixin._ensure_setup_epoch_lock`).
+#: A single shared, module-level lock -- not any per-screen attribute, since
+#: not every test double that constructs this mixin directly sets the same
+#: fixed set of attributes `PickerScreen.__init__` does.
+_SETUP_EPOCH_LOCK_INIT_LOCK = threading.Lock()
+
 
 #: Minimum time between real ``update_stage.indicator_state()`` polls
 #: (picker-performance-and-responsiveness Phase A). That call is a full
@@ -451,9 +458,39 @@ class PickerScreenRuntimeMixin:
         except Exception:
             pass
 
+    def _ensure_setup_epoch_lock(self) -> threading.Lock:
+        """Lazily resolve ``self._setup_epoch_lock`` -- the dedicated lock
+        serializing epoch allocation (``_next_setup_epoch``) against the
+        wake-failure fallback's own epoch-currency check + failure
+        publication (see ``_start_setup_reload_worker``). Without a SHARED
+        lock across both, "check epoch currency, then publish" is a
+        classic check-then-act race: a newer reload can allocate a fresh
+        epoch (and, if its own wake also fails, publish its own newer
+        failure) in the gap between an older worker's check passing and
+        its own publish actually running, letting that older worker
+        downgrade `_setup_failed_epoch` back down afterward.
+
+        Guarded by a shared, module-level lock (`_SETUP_EPOCH_LOCK_INIT_LOCK`)
+        so this lazy construction itself can't race two different
+        `Lock()` instances into existence for the SAME screen -- each
+        screen still ends up with its own dedicated `_setup_epoch_lock`,
+        created at most once. Production code reaches it the normal way
+        via `PickerScreen.__init__` constructing it eagerly; a test
+        double that never ran that `__init__` gets it lazily instead.
+        """
+        lock = getattr(self, "_setup_epoch_lock", None)
+        if lock is not None:
+            return lock
+        with _SETUP_EPOCH_LOCK_INIT_LOCK:
+            lock = getattr(self, "_setup_epoch_lock", None)
+            if lock is None:
+                lock = self._setup_epoch_lock = threading.Lock()
+            return lock
+
     def _next_setup_epoch(self) -> int:
-        self._setup_epoch += 1
-        return self._setup_epoch
+        with self._ensure_setup_epoch_lock():
+            self._setup_epoch += 1
+            return self._setup_epoch
 
     def _dispose_setup_payload(self, payload: _SetupPayload | None) -> None:
         if payload is None:
@@ -796,7 +833,10 @@ class PickerScreenRuntimeMixin:
                     ),
                 )
                 return
-            if not inbox.post(f"setup-reload:{epoch}", _apply):
+            wake_error: list[Exception] = []
+            if not inbox.post(
+                f"setup-reload:{epoch}", _apply, on_wake_failed=wake_error.append
+            ):
                 # The posted `_apply` closure is still sitting in the inbox
                 # at this point (post() only failed to *wake* the render
                 # flow, never the record itself) -- if left there, a later,
@@ -834,28 +874,53 @@ class PickerScreenRuntimeMixin:
                 # this outcome to.
                 if inbox.discard(f"setup-reload:{epoch}"):
                     self._dispose_setup_payload(self._release_setup_payload(epoch))
-                    # Re-check epoch currency immediately before
-                    # publishing the failure, not just once at the top of
-                    # `_worker()`: a wake failure only surfaces after
-                    # `_collect_setup_payload()` and `inbox.post()` have
-                    # both already run, a real window in which a NEWER
-                    # reload can have started and bumped `_setup_epoch`
-                    # (and -- if its own wake also failed -- already
-                    # recorded ITS OWN, newer failure). Without this,
-                    # this now-superseded worker could publish an OLDER
-                    # epoch over that newer failure, and
-                    # `_wait_for_initial_setup()` -- which only accepts a
-                    # failure matching the CURRENT epoch -- would stop
-                    # seeing a match, recreating the very timeout this
-                    # fallback exists to prevent.
-                    if not cancel.is_set() and epoch == self._setup_epoch:
-                        self._apply_setup_failure(
-                            epoch,
-                            RuntimeError(
-                                "could not wake the render flow to apply "
-                                "this setup/reload payload"
-                            ),
-                        )
+                    # Serialize the epoch-currency check with the actual
+                    # publish under the SAME lock `_next_setup_epoch()`
+                    # uses for epoch allocation -- re-checking currency
+                    # immediately before publishing is not enough on its
+                    # own (a classic check-then-act race): without a
+                    # shared lock, a newer reload could still allocate a
+                    # fresh epoch (and, if its own wake also failed,
+                    # publish its own newer failure) in the gap between
+                    # this check passing and this call actually running,
+                    # letting this now-superseded worker downgrade
+                    # `_setup_failed_epoch` back down afterward.
+                    # `_wait_for_initial_setup()` only accepts a failure
+                    # matching the CURRENT epoch, so that downgrade would
+                    # recreate the very timeout this fallback exists to
+                    # prevent.
+                    # Serialize the epoch-currency check with the actual
+                    # publish under the SAME lock `_next_setup_epoch()`
+                    # uses for epoch allocation -- re-checking currency
+                    # immediately before publishing is not enough on its
+                    # own (a classic check-then-act race): without a
+                    # shared lock, a newer reload could still allocate a
+                    # fresh epoch (and, if its own wake also failed,
+                    # publish its own newer failure) in the gap between
+                    # this check passing and this call actually running,
+                    # letting this now-superseded worker downgrade
+                    # `_setup_failed_epoch` back down afterward.
+                    # `_wait_for_initial_setup()` only accepts a failure
+                    # matching the CURRENT epoch, so that downgrade would
+                    # recreate the very timeout this fallback exists to
+                    # prevent.
+                    with self._ensure_setup_epoch_lock():
+                        if not cancel.is_set() and epoch == self._setup_epoch:
+                            # Prefer the real underlying exception
+                            # `post_message` raised, when there was one --
+                            # falling back to a generic message only when
+                            # the wake instead returned `False` without
+                            # raising at all (an already-closing/closed
+                            # pump), which carries no further detail of
+                            # its own.
+                            underlying = wake_error[0] if wake_error else None
+                            self._apply_setup_failure(
+                                epoch,
+                                underlying or RuntimeError(
+                                    "could not wake the render flow to "
+                                    "apply this setup/reload payload"
+                                ),
+                            )
 
         threading.Thread(
             target=_worker, name=f"picker-setup-reload:{epoch}", daemon=True
