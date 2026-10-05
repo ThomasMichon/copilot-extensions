@@ -227,6 +227,24 @@ class TaskStore:
         processing), returns that task instead of creating a duplicate.
         Uses BEGIN IMMEDIATE to prevent concurrent duplicate inserts.
 
+        Full-vs-incremental sequencing (a full reindex renders any
+        *covered* incremental redundant -- it never competes with one):
+
+        - Enqueuing a ``full=True`` task cancels every currently-``queued``
+          ``full=False`` task it covers: ``source='all'`` covers every
+          source, a specific source covers only its own exact match.
+          Left alone, those incrementals would just redo work this full
+          run is about to redo anyway. This is belt-and-suspenders with
+          ``dequeue_next``'s full-first priority ordering, which already
+          keeps a *still-queued* full task from running after an
+          incremental queued earlier for the same scope.
+        - Enqueuing a ``full=False`` task that's already covered by an
+          existing ``queued`` or ``processing`` ``full=True`` task (exact
+          source match, or a covering ``source='all'`` full) is itself
+          redundant -- this returns that covering full task instead of
+          inserting a new row, so incremental requests never pile up
+          uselessly behind a full reindex already in flight.
+
         ``trigger_source`` records what initiated this task (e.g.
         'api:agent_index_reindex', 'webhook:forge:push', 'cli', 'mcp').
         """
@@ -247,6 +265,53 @@ class TaskStore:
                 record = _row_to_record(existing)
                 log.info("Deduped: existing task %s covers source=%s full=%s", record.id, source, full)
                 return record
+
+            if full:
+                # A full reindex supersedes any queued incremental it covers --
+                # cancel them rather than let them (uselessly) run right
+                # before this full run redoes the same ground.
+                if source == "all":
+                    superseded = conn.execute(
+                        "SELECT id FROM tasks WHERE status = 'queued' AND full = 0",
+                    ).fetchall()
+                else:
+                    superseded = conn.execute(
+                        "SELECT id FROM tasks WHERE status = 'queued' AND full = 0 AND source = ?",
+                        (source,),
+                    ).fetchall()
+                for sup_row in superseded:
+                    conn.execute(
+                        """UPDATE tasks
+                           SET status = 'cancelled', finished_at = ?, updated_at = ?
+                           WHERE id = ? AND status = 'queued'""",
+                        (now, now, sup_row["id"]),
+                    )
+                    log.info(
+                        "Cancelled queued incremental task %s: superseded by "
+                        "full reindex (source=%s)",
+                        sup_row["id"], source,
+                    )
+            else:
+                # Redundant-incremental check: an in-flight or queued full
+                # reindex that already covers this source makes a fresh
+                # incremental request a no-op once it runs -- defer to it
+                # instead of enqueuing a doomed duplicate.
+                covering = conn.execute(
+                    """SELECT * FROM tasks
+                       WHERE full = 1 AND status IN ('queued', 'processing')
+                         AND (source = 'all' OR source = ?)
+                       ORDER BY created_at LIMIT 1""",
+                    (source,),
+                ).fetchone()
+                if covering:
+                    conn.rollback()
+                    record = _row_to_record(covering)
+                    log.info(
+                        "Skipped incremental for source=%s: covered by full "
+                        "reindex task %s",
+                        source, record.id,
+                    )
+                    return record
 
             conn.execute(
                 """INSERT INTO tasks
@@ -270,6 +335,14 @@ class TaskStore:
     def dequeue_next(self) -> TaskRecord | None:
         """Atomically claim the next queued task for processing.
 
+        Full tasks are prioritized ahead of incremental ones (``ORDER BY
+        full DESC``) so a full reindex never sits behind -- or races -- an
+        incremental for the same scope; ``enqueue()`` additionally cancels
+        any *already*-queued incremental a new full request covers, but
+        this ordering is what protects the other direction: an incremental
+        enqueued before a full for the same scope still defers to it.
+        Within each priority tier, tasks are served FIFO by ``created_at``.
+
         Returns ``None`` if the queue is empty.
         """
         now = time.time()
@@ -277,7 +350,8 @@ class TaskStore:
         try:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT id FROM tasks WHERE status = 'queued' ORDER BY created_at LIMIT 1",
+                "SELECT id FROM tasks WHERE status = 'queued' "
+                "ORDER BY full DESC, created_at ASC LIMIT 1",
             ).fetchone()
             if row is None:
                 conn.rollback()
