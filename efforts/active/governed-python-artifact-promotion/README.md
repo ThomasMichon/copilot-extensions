@@ -1141,6 +1141,92 @@ win grows with build complexity.
   (`governed_feed_trust.py` 591 lines). Smoke-tested for real again with
   a freshly-generated key: `icacls` still confirms only `NT
   AUTHORITY\SYSTEM` and the owning user have access.
+- `tools/build_toolchain_lock.py` hit 997/1,000 lines with no headroom.
+  Split its "what index does this machine trust" concern (project/user/
+  system `uv.toml`/`pyproject.toml` discovery, the trust-policy
+  allowlist check) into a new `tools/governed_feed_trust.py`, re-
+  imported/re-exported from `build_toolchain_lock.py` exactly like that
+  module is re-imported from `build_python_artifacts.py` -- a component
+  boundary, not a reusability concern. Verified behavior-neutral (151
+  tests) before adding anything new.
+- A twenty-fourth review round found 1 new issue plus 3 previously
+  missed. (1) `_restrict_file_to_owner`'s owner resolution used the
+  `USERDOMAIN`/`USERNAME` environment variables -- ordinary, caller-
+  controlled process environment, not an authenticated property of the
+  process token; a modified environment could make the hardening grant/
+  verify against a forged principal. Fixed with a new
+  `_current_token_identity` helper resolving the REAL current process
+  token's account name and SID via `whoami /user /fo csv /nh`, never
+  `os.environ`; `icacls` now grants by the resolved SID, and the final
+  verification compares `icacls`'s own resolved display name, sourced
+  from that same OS-backed identity. (2) `_project_uv_toml_candidates`
+  stopped its upward walk at ANY `pyproject.toml`, even one with no
+  `[tool.uv]` table -- `uv` itself ignores such a file and keeps
+  searching parents, so a child/leaf package's own plain
+  `pyproject.toml` could shadow a real parent project's index. Fixed
+  with a `_pyproject_declares_tool_uv` peek before stopping the walk.
+  (3) the POSIX system-level config tier checked `/etc/uv/uv.toml`
+  before `/etc/xdg/uv/uv.toml` unconditionally, never consulting
+  `XDG_CONFIG_DIRS` at all -- now honors `XDG_CONFIG_DIRS` (colon-
+  separated, in listed order; defaulting to `/etc/xdg` when unset/empty)
+  before falling back to `/etc/uv/uv.toml`, matching uv's own
+  `locate_system_config_xdg`/`system_config_file`. (4) two stale
+  comments still referenced the removed round-13 quarantine design --
+  reworded to state only the current invariant.
+
+  11 more unit tests (181 total, all passing). `check-module-size.py`
+  passes (`governed_feed_trust.py` 688 lines, `build_toolchain_lock.py`
+  883 lines, `build_python_artifacts.py` 995 lines -- razor-thin, ~5
+  lines of headroom). Smoke-tested for real again against the live
+  governed feed, confirming via `Get-Acl`/`icacls` that the provenance
+  key and index-config files carry genuinely owner-only ACLs.
+- A twenty-fifth review round found 5 more genuine issues, plus
+  confirmed 3 stale review threads already resolved (round 20's HMAC
+  keying; the pre-existing CI gating for this test module) rather than
+  re-fixing them. (1) a TOCTOU race: the occupied-by-other-identity
+  check ran BEFORE interpreter-identity resolution (itself a real `uv
+  python find` subprocess), leaving a window where a concurrent,
+  different-identity publisher could populate `venv_dir` during that gap
+  and get silently reused. Extracted into `_target_dir_for_identity`,
+  now called as the LAST thing before the reuse/build decision. (2) the
+  credential-bearing index-config temp file was a SIBLING of the
+  staging venv directory in the caller-selected (possibly multi-
+  principal-writable) `target_dir.parent`, reopened by pathname after
+  hardening -- another local principal there could rename/replace/
+  symlink its path before `uv` opened it via `UV_CONFIG_FILE`. Fixed by
+  hardening the STAGING DIRECTORY itself right after creation and moving
+  the config file inside it (removed explicitly before the directory is
+  renamed to publish, or it would be published right along with it).
+  (3) `whoami`/`icacls` were invoked by bare name -- resolved through the
+  current directory/`PATH`, where a substituted executable could forge
+  the identity or no-op the hardening. Both now resolve
+  `%SystemRoot%\System32\<tool>.exe` via a new `_trusted_system32_tool`
+  helper, failing closed if missing. (4) `_pyproject_declares_tool_uv`
+  treated a malformed/unreadable `pyproject.toml` the same as one with
+  no `[tool.uv]` table, silently certifying a DIFFERENT parent project's
+  index -- `uv` itself errors on a malformed one instead; now
+  distinguishes the two and fails closed. (5) 4 re-exported-only names
+  tripped this repo's required `ruff check --select F,E9` (F401) --
+  marked with `# noqa: F401`. Fixing (5) revealed this test module's own
+  CI step had never actually been REACHED in 24+ prior rounds (the
+  `guards + lint` job always failed earlier at this same lint step
+  first); running it for the first time caught one further, pre-
+  existing, genuinely cross-platform test bug (a Windows-literal-path
+  assertion that never matched on Linux CI) -- fixed alongside. Live
+  smoke testing (not the automated review) then surfaced two more real
+  bugs in the new directory-level hardening itself: `OWNER RIGHTS` (a
+  dynamic per-object principal directories inherit by default) needed
+  adding to the broad-principal strip list, and combining
+  `/inheritance:r` + `/grant:r` in one `icacls` call does not reliably
+  produce an inheritable ACE for the granted principal on a directory --
+  fixed by adding explicit `(OI)(CI)` inheritance flags to the grant.
+
+  10 more unit tests (191 total, all passing). `check-module-size.py`
+  and `ruff check --select F,E9` both pass. Smoke-tested for real again
+  against the live governed feed: `resolve_toolchain_lock` succeeds, the
+  index-config file leaves no leftovers anywhere, and the published
+  venv's own ACL is hardened to only the resolved identity and `NT
+  AUTHORITY\SYSTEM`.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 
