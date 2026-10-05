@@ -19,8 +19,10 @@ validates.
 """
 from __future__ import annotations
 
+import csv
 import hashlib
 import hmac
+import io
 import os
 import re
 import secrets
@@ -49,6 +51,56 @@ class ArtifactBuildError(Exception):
     re-imports/re-exports it exactly like every other name moved here."""
 
 
+def _current_token_identity() -> tuple[str, str]:
+    """The CURRENT PROCESS TOKEN's own authenticated account name and SID,
+    resolved via the OS itself (``whoami /user``) -- NEVER via the
+    `USERDOMAIN`/`USERNAME` environment variables. Those are ordinary,
+    caller-controlled process environment, not an authenticated property
+    of the process token: a modified environment can set them to an
+    arbitrary principal while the real token remains whatever it actually
+    is, letting `_restrict_file_to_owner` grant Full Control to that
+    forged principal while its own verification step then accepts the
+    same forged name as "expected". `whoami /user` instead asks the OS
+    who this process's token actually is.
+
+    Returns ``(account_name, sid)``: ``account_name`` is the resolved
+    ``DOMAIN\\user`` display form (used for the final ACL verification,
+    which compares against `icacls`'s own resolved display names);
+    ``sid`` is the canonical ``S-1-5-...`` form (used for the `/grant:r`
+    call itself -- unambiguous and locale-independent, unlike a display
+    name, and accepted by `icacls` as `*S-1-5-...`).
+
+    Raises `ArtifactBuildError` if `whoami` fails, or its output cannot be
+    parsed into a plausible ``(name, sid)`` pair -- a credential-bearing
+    file must never be ACL'd against an identity this process could not
+    itself confirm."""
+    result = subprocess.run(
+        ["whoami", "/user", "/fo", "csv", "/nh"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise ArtifactBuildError(
+            "could not resolve the current process token's identity via "
+            "'whoami /user' -- refusing to restrict a credential-bearing "
+            f"file's ACL against an unverified identity:\n"
+            f"{result.stdout}\n{result.stderr}"
+        )
+    try:
+        row = next(csv.reader(io.StringIO(result.stdout.strip())))
+        account_name, sid = row[0], row[1]
+    except (StopIteration, IndexError) as exc:
+        raise ArtifactBuildError(
+            "could not parse 'whoami /user' output to resolve the "
+            f"current process token's identity: {result.stdout!r}"
+        ) from exc
+    if not account_name or not sid.upper().startswith("S-1-"):
+        raise ArtifactBuildError(
+            "'whoami /user' returned an implausible identity "
+            f"(name={account_name!r}, sid={sid!r}) -- refusing to trust it"
+        )
+    return account_name, sid
+
+
 def _restrict_file_to_owner(path: Path) -> None:
     """Best-effort hardens ``path``'s ACCESS CONTROL to the owning user
     only, beyond the POSIX mode bits already applied at creation. `0o600`
@@ -65,29 +117,26 @@ def _restrict_file_to_owner(path: Path) -> None:
     (`_provenance_key`) -- both are credential-bearing.
 
     On Windows: strips inherited permissions and grants Full Control to
-    only the current user plus `SYSTEM` (required for normal OS
-    housekeeping, e.g. antivirus scanning) via `icacls` -- a standard
-    Windows tool, no new dependency. On POSIX: a no-op: the `0o600` mode
-    bits already applied at creation are authoritative there.
+    only the current user (resolved via `_current_token_identity`, never
+    the `USERDOMAIN`/`USERNAME` environment variables) plus `SYSTEM`
+    (required for normal OS housekeeping, e.g. antivirus scanning) via
+    `icacls` -- a standard Windows tool, no new dependency. On POSIX: a
+    no-op: the `0o600` mode bits already applied at creation are
+    authoritative there.
 
-    Raises `ArtifactBuildError` on any failure (the current user cannot be
-    determined, or `icacls` itself fails) -- a credential-bearing file
-    whose ACL could not be VERIFIED restrictive (via this command's own
-    exit code) must never be silently trusted as protected."""
+    Raises `ArtifactBuildError` on any failure (the current token's
+    identity cannot be resolved, or `icacls` itself fails) -- a
+    credential-bearing file whose ACL could not be VERIFIED restrictive
+    (via this command's own exit code) must never be silently trusted as
+    protected."""
     if sys.platform != "win32":
         return
-    owner = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}".strip("\\")
-    if not owner or not os.environ.get("USERNAME"):
-        raise ArtifactBuildError(
-            f"{path}: could not determine the current user to restrict "
-            "this credential-bearing file's ACL to -- refusing to "
-            "proceed with an unverified, possibly-inherited ACL"
-        )
+    account_name, sid = _current_token_identity()
     result = subprocess.run(
         [
             "icacls", str(path),
             "/inheritance:r",
-            "/grant:r", f"{owner}:F", "SYSTEM:F",
+            "/grant:r", f"*{sid}:F", "SYSTEM:F",
         ],
         capture_output=True, text=True,
     )
@@ -122,9 +171,12 @@ def _restrict_file_to_owner(path: Path) -> None:
     # credential-bearing file whose ACL cannot be confirmed restrictive
     # must never be silently trusted as protected. Parses the exact
     # PRINCIPAL name from each ACE line (everything before `:(`) and
-    # compares it EXACTLY (normalized lowercase) against the owner and
-    # the literal "NT AUTHORITY\SYSTEM" -- a prior SUBSTRING check here
-    # wrongly accepted e.g. `DOMAIN\svc-backup` when the owner was
+    # compares it EXACTLY (normalized lowercase) against the resolved
+    # token's own account name and the literal "NT AUTHORITY\SYSTEM" --
+    # `icacls` resolves the granted `*<sid>` back to this same display
+    # name when it can, so comparing names here (rather than re-parsing
+    # SIDs out of the query output) still works. A prior SUBSTRING check
+    # here wrongly accepted e.g. `DOMAIN\svc-backup` when the owner was
     # `DOMAIN\svc`, or any principal merely containing the word "system",
     # since the preceding `/remove:g` step intentionally leaves any
     # OTHER, non-broad explicit ACE in place (one could legitimately
@@ -149,7 +201,7 @@ def _restrict_file_to_owner(path: Path) -> None:
         principal = line.split(":(", 1)[0].strip()
         if principal:
             principals.append(principal)
-    expected = {owner.lower(), "nt authority\\system"}
+    expected = {account_name.lower(), "nt authority\\system"}
     unexpected = [p for p in principals if p.lower() not in expected]
     if unexpected:
         raise ArtifactBuildError(
@@ -407,21 +459,44 @@ def _trusted_index_hosts(env: dict) -> set[str]:
     return {_normalize_hostname(h.strip()) for h in raw.split(",") if h.strip()}
 
 
+def _pyproject_declares_tool_uv(path: Path) -> bool:
+    """Whether ``path`` (a `pyproject.toml`) carries a `[tool.uv]` table.
+    `uv` itself treats a `pyproject.toml` with no `[tool.uv]` table as if
+    it were not there at all for project-config-discovery purposes,
+    continuing to search parent directories rather than stopping at it
+    -- see `_project_uv_toml_candidates`. An unparseable file is treated
+    the same way (not a candidate) rather than raising here: a definitive
+    parse failure is surfaced later, when `_effective_default_index_url`
+    re-reads and re-parses whatever candidate this function actually
+    allows through."""
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return False
+    tool = data.get("tool") if isinstance(data, dict) else None
+    return isinstance(tool, dict) and isinstance(tool.get("uv"), dict)
+
+
 def _project_uv_toml_candidates() -> list[tuple[Path, bool]]:
     """Project-level uv config, in uv's own HIGHEST precedence tier --
     walks upward from the CURRENT WORKING DIRECTORY (never a hardcoded
     root) looking for a `uv.toml` (preferred over a sibling
     `pyproject.toml`) or a `pyproject.toml` carrying a `[tool.uv]` table,
-    stopping at the FIRST directory where either is found. Returns
-    ``(path, is_pyproject)`` pairs so the caller parses each according to
-    its own shape."""
+    stopping at the FIRST directory where either is found. A
+    `pyproject.toml` with NO `[tool.uv]` table is never treated as a stop
+    -- `uv` itself ignores such a file and keeps searching parent
+    directories (see `_pyproject_declares_tool_uv`), so a child/leaf
+    package's own plain `pyproject.toml` must not shadow a REAL parent
+    project's `uv.toml`/`[tool.uv]`-bearing `pyproject.toml` further up.
+    Returns ``(path, is_pyproject)`` pairs so the caller parses each
+    according to its own shape."""
     cwd = Path.cwd()
     for directory in (cwd, *cwd.parents):
         uv_toml = directory / "uv.toml"
         if uv_toml.is_file():
             return [(uv_toml, False)]
         pyproject = directory / "pyproject.toml"
-        if pyproject.is_file():
+        if pyproject.is_file() and _pyproject_declares_tool_uv(pyproject):
             return [(pyproject, True)]
     return []
 
@@ -459,8 +534,24 @@ def _effective_uv_toml_candidates(env: dict) -> list[Path]:
         candidates.append(Path(xdg) / "uv" / "uv.toml")
     elif home:
         candidates.append(Path(home) / ".config" / "uv" / "uv.toml")
+    # System-level: `uv` itself first checks every directory listed in
+    # `XDG_CONFIG_DIRS` (colon-separated, in listed order; defaulting to
+    # the single directory `/etc/xdg` when unset/empty), using the FIRST
+    # one with an actual `uv/uv.toml` and consulting no others. Only when
+    # NONE of those exist does it fall back to `/etc/uv/uv.toml` (see
+    # `locate_system_config_xdg`/`system_config_file` in uv's own
+    # `crates/uv-dirs/src/lib.rs`). The caller below already stops at the
+    # first EXISTING candidate in this returned list, so appending these
+    # in uv's own order reproduces "first found wins" without any
+    # special-casing here -- the PRIOR version of this function checked
+    # `/etc/uv/uv.toml` before `/etc/xdg/uv/uv.toml` unconditionally and
+    # never consulted `XDG_CONFIG_DIRS` at all, which could pin a
+    # different index than uv's own effective configuration.
+    xdg_config_dirs = env.get("XDG_CONFIG_DIRS") or "/etc/xdg"
+    for config_dir in xdg_config_dirs.split(":"):
+        if config_dir:
+            candidates.append(Path(config_dir) / "uv" / "uv.toml")
     candidates.append(Path("/etc/uv/uv.toml"))
-    candidates.append(Path("/etc/xdg/uv/uv.toml"))
     return candidates
 
 

@@ -182,12 +182,11 @@ def _alternate_toolchain_dir(
     NOT match whatever currently occupies the shared ``venv_dir`` slot.
 
     `resolve_toolchain_lock` routes here instead of renaming/disturbing an
-    occupied ``venv_dir``: another process may be actively building
-    against it RIGHT NOW, and a rename-aside ("quarantine") of a live venv
-    is itself a race (this effort's prior quarantine design had exactly
-    that flaw). Keying on the identity itself (not a disposable per-call
-    directory) means repeat calls with the same differing identity still
-    share one reusable path."""
+    occupied ``venv_dir``: moving or renaming an occupied venv can
+    invalidate another process's active build against it RIGHT NOW.
+    Keying on the identity itself (not a disposable per-call directory)
+    means repeat calls with the same differing identity still share one
+    reusable path."""
     identity = _toolchain_identity_hash(validated_index_url, python)
     return venv_dir.parent / f".{venv_dir.name}.alt-{identity[:16]}"
 
@@ -512,13 +511,12 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
 
     A venv at ``venv_dir`` that does NOT match (different index/python,
     no marker, or an empty/partial directory -- manually pre-created, or
-    crash residue) is never trusted OR built into directly: another
-    process may be actively building against it right now, so moving it
-    aside is itself a race (this effort's prior quarantine design had
-    exactly that flaw), and building into an existing incomplete
-    directory would make the publish rename fail (Windows rejects
-    renaming onto an existing destination). Instead THIS call resolves
-    into a deterministic sibling keyed on its own identity
+    crash residue) is never trusted OR built into directly: moving or
+    renaming an occupied venv can invalidate another process's active
+    build against it, and building into an existing incomplete directory
+    would make the publish rename fail (Windows rejects renaming onto an
+    existing destination). Instead THIS call resolves into a
+    deterministic sibling keyed on its own identity
     (`_alternate_toolchain_dir`).
 
     Never resolves from an untrusted index (`_validated_trusted_index_url`,

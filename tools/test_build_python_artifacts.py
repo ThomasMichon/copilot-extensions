@@ -9,6 +9,29 @@ from pathlib import Path
 
 import pytest
 
+#: Canned `whoami /user /fo csv /nh` identity used by every test that
+#: exercises `_restrict_file_to_owner`'s Windows ACL hardening --
+#: `_current_token_identity` (round 24) resolves the current process
+#: token's account name/SID via this OS command, never via the
+#: `USERDOMAIN`/`USERNAME` environment variables.
+_FAKE_TOKEN_ACCOUNT = "REDMOND\\svc"
+_FAKE_TOKEN_SID = "S-1-5-21-1111111111-2222222222-3333333333-1001"
+
+
+def _whoami_user_stdout(account: str = _FAKE_TOKEN_ACCOUNT, sid: str = _FAKE_TOKEN_SID) -> str:
+    return f'"{account}","{sid}"\r\n'
+
+
+def _fake_whoami_run(cmd: list[str]) -> subprocess.CompletedProcess | None:
+    """Returns a canned successful `whoami /user` result for ``cmd``, or
+    ``None`` if ``cmd`` isn't a `whoami` invocation at all -- callers chain
+    this before their own `icacls`-specific handling in a shared
+    `fake_run`."""
+    if cmd[:1] == ["whoami"]:
+        return subprocess.CompletedProcess(cmd, 0, stdout=_whoami_user_stdout(), stderr="")
+    return None
+
+
 #: Captured at import time, BEFORE any test's monkeypatching -- the one
 #: genuine `subprocess.run`, for the single test that deliberately needs
 #: it (`test_query_marker_environment_against_real_interpreter`). `
@@ -39,6 +62,12 @@ btl = sys.modules["build_toolchain_lock"]
 # `_opaque_index_identity`'s own internal call to `_provenance_key_dir`
 # resolves via THIS module's globals, not `btl`'s re-exported binding.
 gft = sys.modules["governed_feed_trust"]
+#: Captured at import time, BEFORE the autouse fixture below patches it on
+#: every test -- the one genuine `_current_token_identity`, for the
+#: dedicated tests that exercise its own real `whoami`-parsing logic
+#: (same "capture the real one before any monkeypatching" reasoning as
+#: `_REAL_SUBPROCESS_RUN` above).
+_REAL_CURRENT_TOKEN_IDENTITY = gft._current_token_identity
 
 
 @pytest.fixture(autouse=True)
@@ -49,22 +78,31 @@ def _isolated_provenance_key_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     this test's own `tmp_path` for every test, automatically.
 
     Also stubs `subprocess.run` to a trivial always-succeeding no-op by
-    default: on this machine (genuinely Windows), `_provenance_key`'s own
-    call to `_restrict_file_to_owner` would otherwise shell out to REAL
-    `icacls` against a path inside pytest's own tmp tree for every test
-    that merely touches `_opaque_index_identity`/`_provenance_key` --
-    those paths carry the SAME untrusted-mount-point quirk documented
-    elsewhere in this file's own pytest-teardown workarounds, and
-    `icacls` behaves unreliably against them, unrelated to this fix's
-    actual correctness (verified separately via real smoke tests against
-    normal paths). Any test that needs its OWN subprocess behavior
-    (nearly every `resolve_toolchain_lock`/`build_wheel` test) overrides
-    this default later in its own body, same as any other monkeypatch
-    stacking in this file."""
+    default, AND stubs `_current_token_identity` to a canned identity
+    (`_FAKE_TOKEN_ACCOUNT`/`_FAKE_TOKEN_SID`) so `_restrict_file_to_owner`
+    never needs a real `whoami` either: on this machine (genuinely
+    Windows), `_provenance_key`'s own call to `_restrict_file_to_owner`
+    would otherwise shell out to REAL `icacls`/`whoami` against a path
+    inside pytest's own tmp tree for every test that merely touches
+    `_opaque_index_identity`/`_provenance_key` -- those paths carry the
+    SAME untrusted-mount-point quirk documented elsewhere in this file's
+    own pytest-teardown workarounds, and `icacls` behaves unreliably
+    against them, unrelated to this fix's actual correctness (verified
+    separately via real smoke tests against normal paths). Any test that
+    needs its OWN subprocess behavior (nearly every
+    `resolve_toolchain_lock`/`build_wheel` test) overrides this default
+    later in its own body, same as any other monkeypatch stacking in this
+    file; a test that specifically exercises the REAL
+    `_current_token_identity` (its own `whoami`-parsing logic) restores
+    it via `_REAL_CURRENT_TOKEN_IDENTITY`, same pattern."""
     monkeypatch.setattr(gft, "_provenance_key_dir", lambda: tmp_path / "provenance-key-dir")
     monkeypatch.setattr(
         gft.subprocess, "run",
         lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""),  # noqa: ARG005
+    )
+    monkeypatch.setattr(
+        gft, "_current_token_identity",
+        lambda: (_FAKE_TOKEN_ACCOUNT, _FAKE_TOKEN_SID),
     )
 
 
@@ -1795,8 +1833,6 @@ def test_provenance_key_hardens_acl_on_windows(
     # `_restrict_file_to_owner` hardening.
     monkeypatch.setattr(gft, "_provenance_key_dir", lambda: tmp_path / "key-dir")
     monkeypatch.setattr(gft.sys, "platform", "win32")
-    monkeypatch.setenv("USERDOMAIN", "REDMOND")
-    monkeypatch.setenv("USERNAME", "svc")
     seen_cmds: list[list[str]] = []
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
@@ -1810,7 +1846,7 @@ def test_provenance_key_hardens_acl_on_windows(
     grant_cmd = seen_cmds[0]
     assert grant_cmd[0] == "icacls"
     assert "/inheritance:r" in grant_cmd
-    assert "REDMOND\\svc:F" in grant_cmd
+    assert f"*{_FAKE_TOKEN_SID}:F" in grant_cmd
 
 
 def test_provenance_key_concurrent_callers_converge_on_one_key(
@@ -2120,11 +2156,66 @@ def test_effective_uv_toml_candidates_posix_includes_system_paths(
 ):
     # Regression: /etc/uv/uv.toml and /etc/xdg/uv/uv.toml (system-level)
     # must also be discovered -- matching this repo's own install.sh
-    # precedent (_ensure_uv_index), not just the user-level path.
+    # precedent (_ensure_uv_index), not just the user-level path. uv's
+    # own precedence (round 24) checks `XDG_CONFIG_DIRS` (default
+    # `/etc/xdg` when unset) BEFORE falling back to `/etc/uv/uv.toml`.
     monkeypatch.setattr(btl.sys, "platform", "linux")
     candidates = btl._effective_uv_toml_candidates({"HOME": "/home/x"})
-    assert Path("/etc/uv/uv.toml") in candidates
     assert Path("/etc/xdg/uv/uv.toml") in candidates
+    assert Path("/etc/uv/uv.toml") in candidates
+    assert candidates.index(Path("/etc/xdg/uv/uv.toml")) < candidates.index(Path("/etc/uv/uv.toml"))
+
+
+def test_effective_uv_toml_candidates_posix_honors_xdg_config_dirs(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Regression (round 24): a SET `XDG_CONFIG_DIRS` (colon-separated, in
+    # listed order) must be consulted instead of the hardcoded `/etc/xdg`
+    # default, with `/etc/uv/uv.toml` only as a final fallback -- matching
+    # uv's own `locate_system_config_xdg`/`system_config_file`
+    # (`crates/uv-dirs/src/lib.rs`), which previously went unconsulted
+    # entirely here.
+    monkeypatch.setattr(btl.sys, "platform", "linux")
+    candidates = btl._effective_uv_toml_candidates(
+        {"HOME": "/home/x", "XDG_CONFIG_DIRS": "/opt/first:/opt/second"}
+    )
+    assert candidates == [
+        Path("/home/x/.config/uv/uv.toml"),
+        Path("/opt/first/uv/uv.toml"),
+        Path("/opt/second/uv/uv.toml"),
+        Path("/etc/uv/uv.toml"),
+    ]
+
+
+def test_effective_uv_toml_candidates_posix_xdg_config_dirs_ignores_empty_entries(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(btl.sys, "platform", "linux")
+    candidates = btl._effective_uv_toml_candidates(
+        {"XDG_CONFIG_DIRS": ":/opt/only::"}
+    )
+    assert Path("/opt/only/uv/uv.toml") in candidates
+    assert not any(str(c).startswith("//") for c in candidates)
+
+
+def test_effective_default_index_url_honors_first_existing_xdg_config_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression (round 24): with multiple `XDG_CONFIG_DIRS` entries, the
+    # FIRST one that actually exists is used -- a later entry (or
+    # `/etc/uv/uv.toml`) must never be consulted once an earlier one is
+    # found.
+    monkeypatch.setattr(btl.sys, "platform", "linux")
+    first_dir = tmp_path / "first"  # deliberately does not exist
+    second_dir = tmp_path / "second"
+    (second_dir / "uv").mkdir(parents=True)
+    (second_dir / "uv" / "uv.toml").write_text(
+        'index-url = "https://second.internal/simple/"\n', encoding="utf-8"
+    )
+    env = {"XDG_CONFIG_DIRS": f"{first_dir}:{second_dir}"}
+    assert btl._effective_default_index_url(env) == (
+        "https://second.internal/simple/", None,
+    )
 
 
 def test_governed_feed_not_configured_via_supplemental_index_table_only(
@@ -2442,6 +2533,12 @@ def test_governed_feed_project_pyproject_without_tool_uv_table_is_ignored(
 ):
     # A pyproject.toml with no [tool.uv] table at all carries no uv
     # config -- must not be mistaken for an empty-but-present index.
+    # Regression (round 24): since this gate no longer stops at such a
+    # file, it keeps walking upward past `project_dir` -- a blocking,
+    # index-free `uv.toml` at `tmp_path` itself stops that walk before it
+    # can reach a REAL ambient uv.toml further up this machine's actual
+    # filesystem (e.g. a real per-user config outside pytest's control).
+    (tmp_path / "uv.toml").write_text("", encoding="utf-8")
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     (project_dir / "pyproject.toml").write_text(
@@ -2449,6 +2546,63 @@ def test_governed_feed_project_pyproject_without_tool_uv_table_is_ignored(
     )
     monkeypatch.chdir(project_dir)
     assert btl._effective_default_index_url({}) is None
+
+
+def test_project_uv_toml_candidates_continues_past_pyproject_without_tool_uv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression (round 24): `uv` itself ignores a `pyproject.toml` with
+    # no `[tool.uv]` table and keeps searching parent directories -- this
+    # must never be returned as a candidate, so a child/leaf package's
+    # own plain `pyproject.toml` cannot shadow a REAL parent project's
+    # `uv.toml` further up.
+    parent_dir = tmp_path / "parent"
+    child_dir = parent_dir / "child"
+    child_dir.mkdir(parents=True)
+    (parent_dir / "uv.toml").write_text("", encoding="utf-8")
+    (child_dir / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\n', encoding="utf-8"
+    )
+    monkeypatch.chdir(child_dir)
+    assert gft._project_uv_toml_candidates() == [(parent_dir / "uv.toml", False)]
+
+
+def test_project_uv_toml_candidates_treats_malformed_pyproject_as_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # A pyproject.toml that fails to parse is treated the same as one
+    # with no [tool.uv] table -- not a candidate, walk continues upward.
+    # (A HIGHER-precedence candidate that IS selected and THEN fails to
+    # parse is a different, separately-tested case --
+    # `_effective_default_index_url` fails closed on that instead.)
+    parent_dir = tmp_path / "parent"
+    child_dir = parent_dir / "child"
+    child_dir.mkdir(parents=True)
+    (parent_dir / "uv.toml").write_text("", encoding="utf-8")
+    (child_dir / "pyproject.toml").write_text("not = [valid toml", encoding="utf-8")
+    monkeypatch.chdir(child_dir)
+    assert gft._project_uv_toml_candidates() == [(parent_dir / "uv.toml", False)]
+
+
+def test_governed_feed_project_discovery_skips_nested_pyproject_without_tool_uv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Same regression as above, exercised end-to-end through
+    # `_effective_default_index_url`: the real parent project's own
+    # `uv.toml` must still be found and honored.
+    parent_dir = tmp_path / "parent"
+    child_dir = parent_dir / "child"
+    child_dir.mkdir(parents=True)
+    (parent_dir / "uv.toml").write_text(
+        'index-url = "https://parent.internal/simple/"\n', encoding="utf-8"
+    )
+    (child_dir / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\n', encoding="utf-8"
+    )
+    monkeypatch.chdir(child_dir)
+    assert btl._effective_default_index_url({}) == (
+        "https://parent.internal/simple/", None,
+    )
 
 
 def test_governed_feed_project_discovery_skipped_when_uv_config_file_set(
@@ -3126,8 +3280,6 @@ def test_restrict_file_to_owner_invokes_icacls_on_windows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr(btl.sys, "platform", "win32")
-    monkeypatch.setenv("USERDOMAIN", "REDMOND")
-    monkeypatch.setenv("USERNAME", "svc")
     seen_cmds: list[list[str]] = []
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
@@ -3145,18 +3297,43 @@ def test_restrict_file_to_owner_invokes_icacls_on_windows(
     assert grant_cmd[0] == "icacls"
     assert grant_cmd[1] == str(target)
     assert "/inheritance:r" in grant_cmd
-    assert "REDMOND\\svc:F" in grant_cmd
+    assert f"*{_FAKE_TOKEN_SID}:F" in grant_cmd
     assert "SYSTEM:F" in grant_cmd
     assert remove_cmd[:3] == ["icacls", str(target), "/remove:g"]
     assert verify_cmd == ["icacls", str(target)]
+
+
+def test_restrict_file_to_owner_ignores_forged_environment_variables(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression (round 24): `USERDOMAIN`/`USERNAME` are ordinary,
+    # caller-controlled process environment, not an authenticated
+    # property of the process token -- a forged value here must NOT be
+    # granted/verified against; only the identity resolved via
+    # `_current_token_identity` (OS-backed, mocked by the autouse fixture
+    # to `_FAKE_TOKEN_ACCOUNT`/`_FAKE_TOKEN_SID`) matters.
+    monkeypatch.setattr(btl.sys, "platform", "win32")
+    monkeypatch.setenv("USERDOMAIN", "ATTACKER-DOMAIN")
+    monkeypatch.setenv("USERNAME", "attacker")
+    seen_cmds: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        seen_cmds.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(btl.subprocess, "run", fake_run)
+    target = tmp_path / "secret.toml"
+    btl._restrict_file_to_owner(target)
+
+    grant_cmd = seen_cmds[0]
+    assert f"*{_FAKE_TOKEN_SID}:F" in grant_cmd
+    assert not any("attacker" in str(arg).lower() for arg in grant_cmd)
 
 
 def test_restrict_file_to_owner_fails_closed_when_icacls_fails(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
     monkeypatch.setattr(btl.sys, "platform", "win32")
-    monkeypatch.setenv("USERDOMAIN", "REDMOND")
-    monkeypatch.setenv("USERNAME", "svc")
     monkeypatch.setattr(
         btl.subprocess, "run",
         lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="denied"),  # noqa: ARG005
@@ -3165,12 +3342,19 @@ def test_restrict_file_to_owner_fails_closed_when_icacls_fails(
         btl._restrict_file_to_owner(tmp_path / "secret.toml")
 
 
-def test_restrict_file_to_owner_fails_closed_when_user_unknown(
+def test_restrict_file_to_owner_fails_closed_when_identity_cannot_be_resolved(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
+    # Regression (round 24): a credential-bearing file must never be
+    # ACL'd against an identity this process could not itself confirm --
+    # if `_current_token_identity` cannot resolve one (e.g. `whoami`
+    # itself failed), `_restrict_file_to_owner` must fail closed too.
     monkeypatch.setattr(btl.sys, "platform", "win32")
-    monkeypatch.delenv("USERNAME", raising=False)
-    monkeypatch.delenv("USERDOMAIN", raising=False)
+
+    def fake_identity():
+        raise bpa.ArtifactBuildError("could not resolve the current process token's identity")
+
+    monkeypatch.setattr(gft, "_current_token_identity", fake_identity)
     with pytest.raises(bpa.ArtifactBuildError):
         btl._restrict_file_to_owner(tmp_path / "secret.toml")
 
@@ -3183,8 +3367,6 @@ def test_restrict_file_to_owner_rejects_similarly_named_principal(
     # query listing `REDMOND\svc-backup` must NOT be accepted just
     # because it CONTAINS the real owner `REDMOND\svc` as a substring.
     monkeypatch.setattr(btl.sys, "platform", "win32")
-    monkeypatch.setenv("USERDOMAIN", "REDMOND")
-    monkeypatch.setenv("USERNAME", "svc")
     target = tmp_path / "secret.toml"
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
@@ -3193,8 +3375,8 @@ def test_restrict_file_to_owner_rejects_similarly_named_principal(
             return subprocess.CompletedProcess(
                 cmd, 0,
                 stdout=(
-                    f"{target} REDMOND\\svc:(F)\n"
-                    "                REDMOND\\svc-backup:(F)\n"
+                    f"{target} {_FAKE_TOKEN_ACCOUNT}:(F)\n"
+                    f"                {_FAKE_TOKEN_ACCOUNT}-backup:(F)\n"
                     "                NT AUTHORITY\\SYSTEM:(F)\n"
                 ),
                 stderr="",
@@ -3213,8 +3395,6 @@ def test_restrict_file_to_owner_rejects_principal_containing_word_system(
     # "system" (e.g. a local account literally named that) must not be
     # mistaken for `NT AUTHORITY\SYSTEM` by a loose substring check.
     monkeypatch.setattr(btl.sys, "platform", "win32")
-    monkeypatch.setenv("USERDOMAIN", "REDMOND")
-    monkeypatch.setenv("USERNAME", "svc")
     target = tmp_path / "secret.toml"
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
@@ -3222,7 +3402,7 @@ def test_restrict_file_to_owner_rejects_principal_containing_word_system(
             return subprocess.CompletedProcess(
                 cmd, 0,
                 stdout=(
-                    f"{target} REDMOND\\svc:(F)\n"
+                    f"{target} {_FAKE_TOKEN_ACCOUNT}:(F)\n"
                     "                REDMOND\\notsystem:(F)\n"
                 ),
                 stderr="",
@@ -3234,6 +3414,63 @@ def test_restrict_file_to_owner_rejects_principal_containing_word_system(
         btl._restrict_file_to_owner(target)
 
 
+def test_current_token_identity_parses_whoami_output(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Exercises the REAL `_current_token_identity` (the autouse fixture
+    # mocks it for every other test) against a canned `whoami /user`
+    # response.
+    monkeypatch.setattr(gft, "_current_token_identity", _REAL_CURRENT_TOKEN_IDENTITY)
+    monkeypatch.setattr(
+        gft.subprocess, "run",
+        lambda cmd, **kwargs: _fake_whoami_run(cmd),  # noqa: ARG005
+    )
+    account_name, sid = gft._current_token_identity()
+    assert account_name == _FAKE_TOKEN_ACCOUNT
+    assert sid == _FAKE_TOKEN_SID
+
+
+def test_current_token_identity_fails_closed_when_whoami_fails(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(gft, "_current_token_identity", _REAL_CURRENT_TOKEN_IDENTITY)
+    monkeypatch.setattr(
+        gft.subprocess, "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="denied"),  # noqa: ARG005
+    )
+    with pytest.raises(bpa.ArtifactBuildError):
+        gft._current_token_identity()
+
+
+def test_current_token_identity_fails_closed_on_unparseable_output(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(gft, "_current_token_identity", _REAL_CURRENT_TOKEN_IDENTITY)
+    monkeypatch.setattr(
+        gft.subprocess, "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout="garbage, not csv\n", stderr=""),  # noqa: ARG005
+    )
+    with pytest.raises(bpa.ArtifactBuildError):
+        gft._current_token_identity()
+
+
+def test_current_token_identity_fails_closed_on_implausible_sid(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # `whoami` succeeding with a well-formed CSV row whose second column
+    # isn't actually SID-shaped must still be rejected -- a parse SUCCESS
+    # is not the same as a plausible identity.
+    monkeypatch.setattr(gft, "_current_token_identity", _REAL_CURRENT_TOKEN_IDENTITY)
+    monkeypatch.setattr(
+        gft.subprocess, "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(  # noqa: ARG005
+            cmd, 0, stdout='"REDMOND\\svc","not-a-sid"\r\n', stderr="",
+        ),
+    )
+    with pytest.raises(bpa.ArtifactBuildError):
+        gft._current_token_identity()
+
+
 def test_resolve_toolchain_lock_hardens_index_config_acl_on_windows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -3243,8 +3480,6 @@ def test_resolve_toolchain_lock_hardens_index_config_acl_on_windows(
     # ACL on Windows.
     _assume_governed_feed_configured(monkeypatch)
     monkeypatch.setattr(btl.sys, "platform", "win32")
-    monkeypatch.setenv("USERDOMAIN", "REDMOND")
-    monkeypatch.setenv("USERNAME", "svc")
     venv_dir = tmp_path / "toolchain-venv"
     hardened_before_write: list[bool] = []
 
