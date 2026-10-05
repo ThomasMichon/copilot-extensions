@@ -292,6 +292,12 @@ SINGLE_INSTANCE_LEASE_DIR="$PLUGIN_DIR/libs/single-instance-lease"
 if [[ ! -f "$SINGLE_INSTANCE_LEASE_DIR/pyproject.toml" ]]; then
     SINGLE_INSTANCE_LEASE_DIR="$REPO_ROOT/libs/single-instance-lease"
 fi
+# remote-login-shell dir (uv-editable canonical reference in a dev checkout,
+# real copy in a materialized release payload): plugin-vendored or repo-root.
+REMOTE_LOGIN_SHELL_DIR="$PLUGIN_DIR/libs/remote-login-shell"
+if [[ ! -f "$REMOTE_LOGIN_SHELL_DIR/pyproject.toml" ]]; then
+    REMOTE_LOGIN_SHELL_DIR="$REPO_ROOT/libs/remote-login-shell"
+fi
 
 DEPLOY_SOURCE_PATHS=("plugins/agent-codespaces/")
 INSTALLER_REL_PATH="plugins/agent-codespaces/scripts/install.sh"
@@ -447,7 +453,8 @@ PY
 }
 
 # uv pip install the vendored libs (ssh-manager, credential-relay, zdd,
-# venue-copilot, session-liveness-probe, single-instance-lease) then agent-codespaces into the given
+# venue-copilot, session-liveness-probe, single-instance-lease,
+# remote-login-shell) then agent-codespaces into the given
 # venv python. Non-editable by default; deps
 # resolved from pyproject.toml. The vendored libs are force-reinstalled so a
 # local code change propagates even without a version bump (uv otherwise skips
@@ -489,6 +496,10 @@ _install_package_into() {
         _fail "single-instance-lease source not found at $SINGLE_INSTANCE_LEASE_DIR"
         return 1
     fi
+    if [[ ! -f "$REMOTE_LOGIN_SHELL_DIR/pyproject.toml" ]]; then
+        _fail "remote-login-shell source not found at $REMOTE_LOGIN_SHELL_DIR"
+        return 1
+    fi
     if [[ "$mode" == "--editable" ]]; then
         uv pip install --python "$py" --editable "$SSH_MGR_DIR" --quiet || {
             _fail "ssh-manager install failed"; return 1; }
@@ -504,6 +515,8 @@ _install_package_into() {
             _fail "session-liveness-probe install failed"; return 1; }
         uv pip install --python "$py" --editable "$SINGLE_INSTANCE_LEASE_DIR" --quiet || {
             _fail "single-instance-lease install failed"; return 1; }
+        uv pip install --python "$py" --editable "$REMOTE_LOGIN_SHELL_DIR" --quiet || {
+            _fail "remote-login-shell install failed"; return 1; }
         uv pip install --python "$py" --editable "$PLUGIN_DIR" --quiet || {
             _fail "agent-codespaces install failed"; return 1; }
         return 0
@@ -522,6 +535,8 @@ _install_package_into() {
         _fail "session-liveness-probe install failed"; return 1; }
     uv pip install --python "$py" --reinstall-package agent-single-instance-lease "$SINGLE_INSTANCE_LEASE_DIR" --quiet || {
         _fail "single-instance-lease install failed"; return 1; }
+    uv pip install --python "$py" --reinstall-package agent-remote-login-shell "$REMOTE_LOGIN_SHELL_DIR" --quiet || {
+        _fail "remote-login-shell install failed"; return 1; }
     uv pip install --python "$py" --reinstall-package agent-codespaces "$PLUGIN_DIR" --quiet || {
         _fail "agent-codespaces install failed"; return 1; }
 }

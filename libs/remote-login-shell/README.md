@@ -15,8 +15,13 @@ unreachable, even though it works fine from an actual interactive/login
 session.
 
 Forcing a login shell (``<shell> -lc``) makes the POSIX target source its own
-login-shell startup files before running the command, matching what an
-interactive session already gets.
+**login** startup files (``~/.profile``, or a login-only ``.bash_profile``/
+``.bash_login``) before running the command -- not the interactive-only
+portion of ``~/.bashrc``, since ``-lc`` starts a non-interactive login shell,
+never an interactive one. A PATH addition must live in one of those
+login-loaded files (or in ``~/.bashrc`` content placed *before* its own
+interactive-shell guard, as in the Borealis fix this library's docstring
+cites) to be reachable this way.
 
 Before this library existed, at least four plugins (``agent-ssh``,
 ``agent-codespaces``, ``agent-bridge``, ``agent-worktrees``) each

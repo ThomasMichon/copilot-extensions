@@ -1579,7 +1579,8 @@ do_install() {
         exit 1
     fi
     # --refresh-package agent-procutil / agent-plugin-resolve /
-    # agent-dropin-registry / agent-plugin-activation: none of these has a
+    # agent-dropin-registry / agent-plugin-activation / agent-remote-login-shell:
+    # none of these has a
     # dedicated install call of its own (all resolved transitively while
     # installing agent-bridge below), so they never get an explicit
     # cache-bust anywhere else. uv's local-path build cache is keyed by
@@ -1597,6 +1598,7 @@ do_install() {
             --reinstall-package agent-plugin-resolve --refresh-package agent-plugin-resolve \
             --reinstall-package agent-dropin-registry --refresh-package agent-dropin-registry \
             --reinstall-package agent-plugin-activation --refresh-package agent-plugin-activation \
+            --reinstall-package agent-remote-login-shell --refresh-package agent-remote-login-shell \
             "$PLUGIN_DIR" --quiet; then
         _fail "Package install failed"
         exit 1
@@ -2145,7 +2147,8 @@ _update_core() {
         return 1
     fi
     # --refresh-package agent-procutil / agent-plugin-resolve /
-    # agent-dropin-registry / agent-plugin-activation: see the matching
+    # agent-dropin-registry / agent-plugin-activation / agent-remote-login-shell:
+    # see the matching
     # comment in the initial-install path above -- none has a dedicated
     # install call, all are only ever resolved transitively here, and
     # agent-procutil was directly implicated in a live LAUNCH_ACP "session
@@ -2156,6 +2159,7 @@ _update_core() {
             --reinstall-package agent-plugin-resolve --refresh-package agent-plugin-resolve \
             --reinstall-package agent-dropin-registry --refresh-package agent-dropin-registry \
             --reinstall-package agent-plugin-activation --refresh-package agent-plugin-activation \
+            --reinstall-package agent-remote-login-shell --refresh-package agent-remote-login-shell \
             "$PLUGIN_DIR" --quiet; then
         _fail "Package update failed"
         return 1

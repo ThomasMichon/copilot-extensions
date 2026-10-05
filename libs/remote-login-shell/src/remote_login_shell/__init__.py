@@ -10,8 +10,12 @@ interactive/login session.
 
 Forcing a login shell (``<shell> -lc``, using the caller's configured shell
 itself -- never a hardcoded ``bash`` substituted for a different configured
-one) makes the POSIX target source its own login-shell startup files before
-running the command, matching what an interactive session already gets.
+one) makes the POSIX target source its own **login** startup files (e.g.
+``~/.profile``) before running the command -- not the interactive-only
+portion of ``~/.bashrc``, since ``-lc`` starts a non-interactive login
+shell, never an interactive one. A PATH addition must live in a login-loaded
+file (or in ``~/.bashrc`` content placed before its own interactive-shell
+guard) to be reachable this way.
 
 This module is the single shared source for that wrapping, vendored (shared,
 not duplicated) across every plugin that execs a command over SSH -- see

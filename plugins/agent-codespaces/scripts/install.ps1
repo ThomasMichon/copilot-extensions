@@ -367,6 +367,12 @@ $SingleInstanceLeaseDir = Join-Path $PluginDir 'libs\single-instance-lease'
 if (-not (Test-Path (Join-Path $SingleInstanceLeaseDir 'pyproject.toml'))) {
     $SingleInstanceLeaseDir = Join-Path $RepoRoot 'libs\single-instance-lease'
 }
+# remote-login-shell dir (uv-editable canonical reference in a dev checkout,
+# real copy in a materialized release payload): plugin-vendored or repo-root.
+$RemoteLoginShellDir = Join-Path $PluginDir 'libs\remote-login-shell'
+if (-not (Test-Path (Join-Path $RemoteLoginShellDir 'pyproject.toml'))) {
+    $RemoteLoginShellDir = Join-Path $RepoRoot 'libs\remote-login-shell'
+}
 
 $DeploySourcePaths = @('plugins/agent-codespaces/')
 $InstallerRelPath  = 'plugins/agent-codespaces/scripts/install.ps1'
@@ -619,7 +625,8 @@ function Assert-Uv {
 
 function Install-PackageInto {
     <# uv pip install the vendored libs (ssh-manager, credential-relay, zdd,
-       venue-copilot, session-liveness-probe, single-instance-lease) then agent-codespaces into the
+       venue-copilot, session-liveness-probe, single-instance-lease,
+       remote-login-shell) then agent-codespaces into the
        given venv python. Non-editable by default;
        deps resolved from pyproject.toml. The vendored libs are force-reinstalled
        so a local code change propagates even without a version bump (uv
@@ -658,6 +665,10 @@ function Install-PackageInto {
     }
     if (-not (Test-Path (Join-Path $SingleInstanceLeaseDir 'pyproject.toml'))) {
         Write-ServiceErr "single-instance-lease source not found at $SingleInstanceLeaseDir"
+        return $false
+    }
+    if (-not (Test-Path (Join-Path $RemoteLoginShellDir 'pyproject.toml'))) {
+        Write-ServiceErr "remote-login-shell source not found at $RemoteLoginShellDir"
         return $false
     }
     # Pre-strip: rename any locked console-script trampoline aside so uv can write
@@ -713,6 +724,13 @@ function Install-PackageInto {
     if ($LASTEXITCODE -ne 0) {
         $ErrorActionPreference = $prevEAP
         Write-ServiceErr "single-instance-lease install failed"
+        return $false
+    }
+    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-remote-login-shell' })
+    & uv pip install --python $Python @modeArgs "$RemoteLoginShellDir" --quiet 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        $ErrorActionPreference = $prevEAP
+        Write-ServiceErr "remote-login-shell install failed"
         return $false
     }
     $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-codespaces' })

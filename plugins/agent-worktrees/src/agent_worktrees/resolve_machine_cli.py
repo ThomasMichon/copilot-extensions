@@ -258,9 +258,11 @@ def _wrap_remote_command(shell: str, command: str) -> str:
 
     Forcing a login shell (``<shell> -lc``, using the CONFIGURED shell
     itself -- never a hardcoded ``bash`` substituted for a different
-    configured one) makes the POSIX target source its own login-shell
-    startup files before running ``command``, matching what an interactive
-    session already gets. Windows (``pwsh``) targets are left untouched --
+    configured one) makes the POSIX target source its own **login** startup
+    files (e.g. ``~/.profile``) before running ``command`` -- not the
+    interactive-only portion of ``~/.bashrc``, since ``-lc`` starts a
+    non-interactive login shell, never an interactive one. Windows
+    (``pwsh``) targets are left untouched --
     this exact non-login-shell PATH gap is POSIX-specific; PowerShell's own
     profile-loading rules differ and are out of scope here. Only wraps for
     an EXPLICIT, documented POSIX shell (:func:`remote_login_shell.is_posix_login_shell`)
