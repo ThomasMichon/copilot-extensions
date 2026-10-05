@@ -186,13 +186,26 @@ def extract_issue(payload: dict[str, Any]) -> dict[str, Any] | None:
         for label in raw_labels
         if isinstance(label, dict) and isinstance(label.get("name"), str) and label.get("name")
     ]
+    action = payload.get("action", "")
+    # Gitea's 'label_updated' fires for both additions and removals
+    # (distinguished by changes.added_labels / removed_labels), unlike
+    # GitHub's 'labeled', which is add-only by construction. Compute
+    # whether this specific delivery actually added a label so the
+    # route can treat a removal-only 'label_updated' as the no-op it is,
+    # rather than matching it the same as a true addition.
+    label_was_added = action != "label_updated"
+    if action == "label_updated":
+        changes = payload.get("changes")
+        added = changes.get("added_labels") if isinstance(changes, dict) else None
+        label_was_added = isinstance(added, list) and len(added) > 0
     return {
         "number": number,
         "title": issue.get("title", ""),
         "body": issue.get("body") or "",
         "url": issue.get("html_url") or issue.get("url", ""),
         "labels": labels,
-        "action": payload.get("action", ""),
+        "action": action,
+        "label_was_added": label_was_added,
         "repo_remote": remote,
         "repo_full_name": repo_full_name,
     }
@@ -395,6 +408,18 @@ def build_app(
                     skipped.append({
                         "rule": name, "number": issue["number"],
                         "reason": f"action {issue['action']!r} not matched",
+                    })
+                    continue
+                if issue["action"] == "label_updated" and not issue["label_was_added"]:
+                    # A Gitea label_updated delivery for a pure removal (no
+                    # changes.added_labels) is not a new-work signal -- the
+                    # issue's current label set may still satisfy
+                    # match_labels even though nothing was actually added,
+                    # which would otherwise enqueue a spurious duplicate
+                    # once an earlier task for this issue goes terminal.
+                    skipped.append({
+                        "rule": name, "number": issue["number"],
+                        "reason": "label_updated with no added labels (removal-only)",
                     })
                     continue
                 required_labels = set(rule.get("match_labels") or [])

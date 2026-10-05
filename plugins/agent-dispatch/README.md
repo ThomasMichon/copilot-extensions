@@ -1126,8 +1126,10 @@ A small HTTP app that maps three generic, forge-neutral event shapes onto tasks:
   independent **rules** (`config["issues"]`) rather than one fixed template, so
   several label-watching backlogs can share one listener. Each rule matches on
   issue `action` (default `opened`/`labeled`/`label_updated` -- the latter is
-  Gitea's own added-label action name) and a set of required forge labels,
-  optionally restricts to a repo allowlist, and creates a task
+  Gitea's own label-change action name, fired for both additions and
+  removals; a pure removal, with no `changes.added_labels`, is treated as a
+  no-op and never enqueues) and a set of required forge labels, optionally
+  restricts to a repo allowlist, and creates a task
   (`source=issue-webhook`, `origin_ref=issue/<n>`) with a deterministic
   `dedup_key` of `<task_label>:<repo full name>#<issue number>` -- this is the
   reactive half of a "webhook-primary, polling-fallback" pair: a deployer-owned

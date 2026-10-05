@@ -240,14 +240,37 @@ def test_issue_action_not_matched_is_skipped():
 
 
 def test_issue_gitea_label_updated_action_matches_default_rule():
-    """Gitea's own added-label webhook action is 'label_updated' (GitHub's
-    is 'labeled') -- the default match_actions must cover both so an
-    adopter doesn't have to know to override it just to run on Gitea."""
+    """Gitea's own label webhook action is 'label_updated' (GitHub's is
+    'labeled') -- the default match_actions must cover both so an adopter
+    doesn't have to know to override it just to run on Gitea. Modeled with
+    a realistic changes.added_labels payload, since label_updated alone
+    doesn't distinguish an addition from a removal."""
     tc, sink = _client(_ISSUE_RULES_CONFIG)
-    body = {**_CI_FAILURE_ISSUE, "action": "label_updated"}
+    body = {
+        **_CI_FAILURE_ISSUE,
+        "action": "label_updated",
+        "changes": {"added_labels": [{"name": "ci-failure-signature"}]},
+    }
     r = tc.post("/webhook/issue", json=body)
     assert len(r.json()["created"]) == 1
     assert len(sink) == 1
+
+
+def test_issue_gitea_label_updated_pure_removal_does_not_enqueue():
+    """Gitea's label_updated also fires for a pure label removal. Even
+    though the issue's current label set may still satisfy match_labels,
+    removing an unrelated label is not new-work and must not enqueue a
+    (potentially duplicate, once an earlier task goes terminal) task."""
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {
+        **_CI_FAILURE_ISSUE,
+        "action": "label_updated",
+        "changes": {"removed_labels": [{"name": "bug"}]},
+    }
+    r = tc.post("/webhook/issue", json=body)
+    assert r.json()["created"] == []
+    assert "removal-only" in r.json()["skipped"][0]["reason"]
+    assert sink == []
 
 
 def test_issue_repo_allowlist_rejects_other_repo():
