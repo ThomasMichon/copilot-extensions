@@ -262,6 +262,27 @@ def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(tmp_path: Pat
     shutil.rmtree(tmp_path / "libs")
 
     if os.name == "nt":
+        provision = subprocess.run(
+            [
+                pwsh,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(snapshot / "scripts" / "install.ps1"),
+                "provision",
+                "-NoService",
+                "-InstallDir",
+                str(home / ".agent-vault"),
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=420,
+            check=False,
+        )
+        assert provision.returncode == 0, provision.stderr
+
         invoke = subprocess.run(
             [
                 pwsh,
