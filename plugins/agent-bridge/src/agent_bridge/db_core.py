@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -200,8 +200,15 @@ CREATE TABLE IF NOT EXISTS live_sessions (
     latest_progress TEXT,
     cli_mode INTEGER NOT NULL DEFAULT 0,
     venue TEXT,
+    process_started_at REAL,
     registered_at REAL NOT NULL,
     updated_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS live_session_aliases (
+    alias_session_id TEXT PRIMARY KEY,
+    target_session_id TEXT NOT NULL,
+    created_at REAL NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS live_messages (
@@ -247,6 +254,8 @@ CREATE TABLE IF NOT EXISTS pending_prompts (
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id, event_id);
 CREATE INDEX IF NOT EXISTS idx_live_sessions_worktree ON live_sessions(worktree_id);
+CREATE INDEX IF NOT EXISTS idx_live_session_aliases_target
+    ON live_session_aliases(target_session_id);
 CREATE INDEX IF NOT EXISTS idx_live_messages_pending
     ON live_messages(session_id, delivered_at, id);
 CREATE INDEX IF NOT EXISTS idx_pending_prompts_session

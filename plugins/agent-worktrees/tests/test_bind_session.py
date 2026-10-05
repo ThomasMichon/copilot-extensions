@@ -938,3 +938,49 @@ class TestSessionRole:
     def test_parser_accepts_json_compatibility_flag(self):
         args = m.build_parser().parse_args(["session-role", "--json"])
         assert args.json is True
+
+
+def test_list_row_keeps_a_yielded_head_resumable(tmp_tracking_dir: Path, monkeypatch_config) -> None:
+    """A head that opened a handoff no successor ever linked here (it was
+    consumed from another checkout) stays the row's resumable session, so a
+    Resume reopens it instead of starting a blank one."""
+    _save_record(tmp_tracking_dir, "wt-yield", "/tmp/src/wt-yield")
+    tracking.register_session("wt-yield", "orchestrator")
+    rec = load_record(tmp_tracking_dir / "wt-yield.yaml")
+    tracking.open_handoff(rec, "orchestrator", "task-elsewhere")
+    rec = load_record(tmp_tracking_dir / "wt-yield.yaml")
+    assert rec.resolved_head_session is None  # the ledger still hides it as head
+
+    row = m._worktree_to_dict(rec)
+    assert row["last_session_id"] == "orchestrator"
+    assert row["head_yielded"] is True
+
+    tracking.register_session("wt-yield", "successor")  # a successor that does register wins
+    row = m._worktree_to_dict(load_record(tmp_tracking_dir / "wt-yield.yaml"))
+    assert row["last_session_id"] == "successor"
+    assert "head_yielded" not in row
+
+
+def test_resume_reopens_a_yielded_head_over_a_newer_conversation(
+    tmp_tracking_dir: Path, tmp_session_state_dir: Path, monkeypatch_config, monkeypatch,
+) -> None:
+    """Resume's execution-time resolver agrees with the listing: the yielded
+    head is the target, ahead of a newer non-head conversation the filesystem
+    fallback would pick -- as long as it still has conversation data."""
+    from conftest import make_session_dir
+
+    from agent_worktrees import sessions
+
+    _save_record(tmp_tracking_dir, "wt-yres", "/tmp/src/wt-yres")
+    tracking.register_session("wt-yres", "orchestrator")
+    tracking.open_handoff(load_record(tmp_tracking_dir / "wt-yres.yaml"), "orchestrator", "t-x")
+    rec = load_record(tmp_tracking_dir / "wt-yres.yaml")
+    assert rec.resolved_head_session is None
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_session_state_dir)
+    monkeypatch.setattr(sessions, "find_latest_session_id_fast", lambda path, regs: "newer")
+
+    make_session_dir(tmp_session_state_dir, "orchestrator", "/tmp/src/wt-yres",
+                     has_events_file=False)  # a stub: not resumable
+    assert sessions.resolve_resume_target(rec) == "newer"
+    make_session_dir(tmp_session_state_dir, "orchestrator", "/tmp/src/wt-yres")
+    assert sessions.resolve_resume_target(rec) == "orchestrator"

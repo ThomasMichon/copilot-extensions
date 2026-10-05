@@ -25,10 +25,10 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
-import { InFlightMessages, controlPlan, deliveryPlan, modeApplied } from "./delivery.mjs";
+import { InFlightMessages, adoptSessionId, drainControls, drainInbox, serializedRegister } from "./delivery.mjs";
 import { firstLoadThisSession } from "./announce.mjs";
 import { makeBridgeEndpoint } from "./bridge-endpoint.mjs";
-import { resolveMetadataAsync } from "./metadata.mjs";
+import { processIdentity, resolveMetadataAsync } from "./metadata.mjs";
 
 // --- Constants ---
 const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
@@ -172,22 +172,47 @@ async function bridgeGetJson(path) {
   }
 }
 
-async function register() {
-  if (!state.sessionId) return;
-  const payload = { session_id: state.sessionId, ...(state.meta || {}) };
-  const ok = await bridgeFetch("POST", "/api/v1/live-sessions", payload);
-  if (ok && !state.registered) {
-    state.registered = true;
-    extLog(`registered live session ${state.sessionId} with local bridge`);
-  }
-}
+// Session metadata (machine, worktree, ...), resolved off the event loop from
+// load. Registration waits for it -- never readiness: see serializedRegister.
+const metadataReady = resolveMetadataAsync()
+  .then((meta) => { state.meta = meta; })
+  .catch((e) => extLog(`metadata resolution failed (degrading, session unaffected): ${e.message}`));
+
+const register = serializedRegister(
+  state,
+  async (id) => {
+    if (!state.base || !state.token) return false;
+    try {
+      const body = { session_id: id, ...processIdentity(), ...(state.meta || {}) };
+      const res = await fetchBridge("POST", "/api/v1/live-sessions", body);
+      if (res.ok) return true;
+      if (res.status === 409) {
+        const body = await res.json().catch(() => null);
+        if (body?.detail?.reason === "incarnation_mismatch") {
+          extLog(`bridge refused ${id} for this process (another incarnation's row); keeping the registered id`);
+          return "rejected";
+        }
+      }
+      return false;
+    } catch {
+      return false; // bridge down/unreachable -> the next heartbeat retries
+    }
+  },
+  (id) => extLog(`registered live session ${id} with local bridge`),
+  { ready: metadataReady },
+);
 
 async function deregister() {
-  if (!state.sessionId) return;
-  await bridgeFetch(
-    "DELETE",
-    `/api/v1/live-sessions/${encodeURIComponent(state.sessionId)}`,
-  );
+  // Every id this process registered, once no registration is left in flight
+  // (a rename can leave the placeholder's row and the resumed one). An id
+  // folded into its successor is already gone; its DELETE is a no-op. Each
+  // carries this process's identity, so a row another process registered under
+  // the id meanwhile (between these DELETEs) is left alone by the bridge.
+  const { pid, process_started_at: started } = processIdentity();
+  const who = `pid=${encodeURIComponent(pid)}&process_started_at=${encodeURIComponent(started)}`;
+  for (const id of await register.close()) {
+    await bridgeFetch("DELETE", `/api/v1/live-sessions/${encodeURIComponent(id)}?${who}`);
+  }
 }
 
 // Drain the represented-event queue to the bridge's ingest endpoint. Runs off
@@ -239,98 +264,26 @@ async function pollInbox() {
   if (!state.sessionId || !state.registered) return;
   state.delivering = true;
   try {
-    const data = await bridgeGetJson(
-      `/api/v1/live-sessions/${encodeURIComponent(state.sessionId)}/messages`,
-    );
-    const messages = data?.messages;
-    if (!Array.isArray(messages) || messages.length === 0) return;
-    const delivered = [];
-    let aborted = false;
-    for (const msg of messages) {
-      if (!msg || typeof msg.id !== "number") continue;
-      try {
-        const plan = deliveryPlan(msg);
-        // One abort per batch: a second interrupt in the same batch must not
-        // cancel the turn the first one just started.
-        if (plan.abortFirst && !aborted) {
-          aborted = true;
-          try {
-            await session.abort();
-          } catch (e) {
-            extLog(`abort failed before message ${msg.id}: ${e.message}`);
-          }
-          // The abort discarded every message still pending in the CLI;
-          // re-send those (oldest first) so the interrupt loses nothing.
-          for (const earlier of state.inFlight.takeBefore(msg.id)) {
-            await session.send({ ...deliveryPlan(earlier).options, mode: "immediate" });
-            state.inFlight.sent(earlier);
-          }
-        }
-        await session.send(plan.options);
-        state.inFlight.sent(msg);
-        delivered.push(msg.id);
-      } catch (e) {
-        // Stop the batch on the first send failure; unacked messages redeliver.
-        extLog(`deliver failed for message ${msg.id}: ${e.message}`);
-        break;
-      }
-    }
-    if (delivered.length > 0) {
-      await bridgeFetch(
-        "POST",
-        `/api/v1/live-sessions/${encodeURIComponent(state.sessionId)}/messages/ack`,
-        { ids: delivered },
-      );
-    }
+    await drainInbox(state.sessionId, {
+      getJson: bridgeGetJson, post: bridgeFetch, session, inFlight: state.inFlight, log: extLog,
+    });
   } finally {
     state.delivering = false;
   }
 }
 
 // Poll the bridge for session controls (a mode change: what `/autopilot on`
-// does from this terminal) and apply them through the CLI's own RPC. The poll
-// claims each control (it is returned once, and its requester can no longer
-// withdraw it), and every claimed control gets an outcome -- applied or
-// rejected -- so the bridge's `POST /mode` reports what really happened.
-// Controls are polled apart from messages, so they're never delivered as a
-// prompt; an older bridge without /controls just answers 404 (null here).
+// does from this terminal) and apply them through the CLI's own RPC
+// (``drainControls`` in delivery.mjs). Controls are polled apart from
+// messages, so they're never delivered as a prompt.
 async function pollControls() {
   if (state.controlling) return;
   if (!state.sessionId || !state.registered) return;
   state.controlling = true;
   try {
-    const data = await bridgeGetJson(
-      `/api/v1/live-sessions/${encodeURIComponent(state.sessionId)}/controls`,
-    );
-    const controls = data?.messages;
-    if (!Array.isArray(controls) || controls.length === 0) return;
-    const applied = [];
-    const rejected = [];
-    for (const c of controls) {
-      if (!c || typeof c.id !== "number") continue;
-      const plan = controlPlan(c);
-      if (plan.action === "skip") {
-        extLog(`control ${c.id} rejected: ${plan.reason}`);
-        rejected.push(c.id);
-        continue;
-      }
-      try {
-        const result = await session.rpc.mode.set({ mode: plan.mode });
-        if (modeApplied(result)) {
-          extLog(`control ${c.id}: mode set to ${plan.mode} (from ${c.sender || "bridge"})`);
-          applied.push(c.id);
-        } else {
-          extLog(`control ${c.id}: mode ${plan.mode} not applied (${result?.status || "no status"})`);
-          rejected.push(c.id);
-        }
-      } catch (e) {
-        extLog(`control ${c.id}: mode ${plan.mode} failed: ${e.message}`);
-        rejected.push(c.id);
-      }
-    }
-    const ack = `/api/v1/live-sessions/${encodeURIComponent(state.sessionId)}/controls/ack`;
-    if (applied.length > 0) await bridgeFetch("POST", ack, { ids: applied, applied: true });
-    if (rejected.length > 0) await bridgeFetch("POST", ack, { ids: rejected, applied: false });
+    await drainControls(state.sessionId, {
+      getJson: bridgeGetJson, post: bridgeFetch, session, log: extLog,
+    });
   } finally {
     state.controlling = false;
   }
@@ -375,17 +328,17 @@ const session = await joinSession({
 });
 
 // Observe-only, non-blocking: the ONLY work done on the CLI event loop. Just
-// note that the session is alive and capture the session id if the env var was
-// missing. No I/O, no await -- returns immediately (hot-potato). Bridge writes
+// note that the session is alive and follow its session id (a missing env var,
+// or a resume that renamed the conversation). No I/O, no await -- returns immediately (hot-potato). Bridge writes
 // happen on the heartbeat timer below. Phase 5 will extend this to buffer
 // events into a bounded queue that a decoupled flusher drains to the bridge.
 session.on((event) => {
   try {
     state.lastEventAt = Date.now();
     state.inFlight.observe(event);
-    if (!state.sessionId && event?.sessionId) {
-      state.sessionId = event.sessionId;
-      // Late session id -> kick a one-off registration off the event loop.
+    if (adoptSessionId(state, event?.sessionId)) {
+      // A late id, or a resume that renamed this conversation: register it
+      // off the event loop (the bridge folds a renamed placeholder into it).
       setTimeout(() => register().catch(() => {}), 0);
     }
     // Represent (Phase 5): enqueue whitelisted events for the flusher. This is
@@ -431,16 +384,13 @@ try {
   });
   state.base = endpoint.ep.base;
   state.token = endpoint.ep.token;
-  // state.meta starts unset -- resolveMetadataAsync() below fills it in the
+  // state.meta starts unset -- metadataReady (above) fills it in the
   // background. Deliberately NOT awaited here: this whole init block must
   // finish (and the extension report ready) without waiting on any child
-  // process. register()'s payload spreads `...(state.meta || {})`, so the
-  // very first heartbeat may go out with only session_id if metadata hasn't
-  // resolved yet -- self-correcting on the next HEARTBEAT_MS tick, which is a
-  // fully acceptable trade for never blocking readiness on it.
-  resolveMetadataAsync()
-    .then((meta) => { state.meta = meta; })
-    .catch((e) => extLog(`metadata resolution failed (degrading, session unaffected): ${e.message}`));
+  // process. Registration alone waits for it (it carries this process's
+  // identity, processIdentity(), and spreads `...(state.meta || {})`), so a
+  // placeholder is registered with its machine and worktree and a resume
+  // that renames it can fold it in. A failed lookup registers without them.
 
   if (!state.token) {
     extLog("no local agent-bridge auth token found; not registering (ok)");

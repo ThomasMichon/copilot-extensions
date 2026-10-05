@@ -27,6 +27,7 @@ from ..session_manager import (
     ProviderTargetRefreshError,
     SessionManager,
 )
+from .worktree_binstub import resolve_local_binstub as _resolve_local_binstub
 from .worktree_holders import (
     chosen_holder_id as _chosen_holder_id,
     reservation_conflict_detail as _reservation_conflict_detail,
@@ -505,21 +506,6 @@ async def _run_local(
     """Run ``<project> <args>`` locally (defaults to ``list --json``)."""
     stdout, _stderr = await _run_local_ex(project, args, timeout=timeout)
     return stdout
-
-
-def _resolve_local_binstub(project: str) -> str:
-    """Resolve *project*'s binstub to a directly-executable path.
-
-    ``asyncio.create_subprocess_exec`` never consults Windows' ``PATHEXT``
-    the way a shell does, so an extensionless name can't resolve to the
-    installed ``.cmd``/``.ps1`` shim (``FileNotFoundError: [WinError 2]``).
-    ``shutil.which`` does the same PATHEXT-aware lookup on every platform.
-    """
-    import shutil
-    from pathlib import Path
-
-    explicit = Path.home() / ".local" / "bin" / project
-    return shutil.which(str(explicit)) or shutil.which(project) or project
 
 
 async def _run_local_ex(

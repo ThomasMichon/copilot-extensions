@@ -375,7 +375,7 @@ class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
                 except Exception:
                     detail = str(exc)
                 detail_text = str(detail).lower()
-                if exc.code == 503 and "initializing" in detail_text:
+                if exc.code == 503 and any(w in detail_text for w in ("initializing", "merging")):
                     if readiness_deadline is None:
                         readiness_deadline = (
                             _time.monotonic() + self._connect_grace

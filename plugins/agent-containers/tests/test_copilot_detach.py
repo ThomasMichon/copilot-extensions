@@ -362,8 +362,36 @@ def test_missing_daemon_port_fails_before_keeper(seams, monkeypatch):
     assert seams.keeper == []
 
 
-def test_launch_failure_stops_started_keeper_and_kills_created_mux(seams, monkeypatch):
+def test_unsubmitted_seed_on_registered_session_is_delivered_over_bridge(seams, monkeypatch, capsys):
+    from venue_copilot import refs as venue_refs
+
     unseeded = json.dumps({"ok": True, "created": True, "seed_submitted": False})
+    sent = []
+    monkeypatch.setattr(venue_refs, "deliver_note", lambda sid, note, **kw: sent.append((sid, note)) or True)
+
+    def fake_run(argv, **kwargs):
+        cmd = argv[-1]
+        seams.run.append(cmd)
+        if "agent-worktrees embody" in cmd:
+            return types.SimpleNamespace(returncode=0, stdout=unseeded, stderr="")
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(detach.subprocess, "run", fake_run)
+    rc = detach.cmd_detach(
+        _args(), require_live_relay_port=lambda: 61234, relay_healthy=lambda p: True
+    )
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["seed_delivery"] == "bridge"
+    assert out["seeded"] is True
+    assert sent == [("sid-42", "do the task")]
+    assert "repo-1" not in seams.stop_keeper
+    assert not any("tmux kill-session" in cmd for cmd in seams.run)
+
+
+def test_unsubmitted_seed_without_registration_stops_keeper_and_kills_created_mux(seams, monkeypatch):
+    unseeded = json.dumps({"ok": True, "created": True, "seed_submitted": False})
+    monkeypatch.setattr(venue_detached, "await_claim", lambda scope, rid, timeout: None)
 
     def fake_run(argv, **kwargs):
         cmd = argv[-1]

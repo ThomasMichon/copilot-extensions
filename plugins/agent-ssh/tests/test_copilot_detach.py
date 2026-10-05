@@ -758,8 +758,34 @@ def test_missing_agent_worktrees_message(seams, monkeypatch, capsys):
     assert seams.stop_keeper == [("devbox", "anchor-repo@devbox")]
 
 
-def test_launch_failure_cleanup_kills_mux_and_stops_keeper(seams, monkeypatch):
+def test_unsubmitted_seed_on_registered_session_is_delivered_over_bridge(seams, monkeypatch, capsys):
+    from venue_copilot import refs as venue_refs
+
     unseeded = json.dumps({"ok": True, "created": True, "seed_submitted": False})
+    sent = []
+    monkeypatch.setattr(venue_refs, "deliver_note", lambda sid, note, **kw: sent.append((sid, note)) or True)
+
+    def remote(_cfg, command, *, timeout=60.0):
+        seams.remote.append(command)
+        if "agent-worktrees embody" in command:
+            return 0, unseeded, ""
+        if "tmux kill-session" in command:
+            return 0, "STOPPED\n", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(detach, "_remote", remote)
+    assert detach.cmd_detach(_args()) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["seed_delivery"] == "bridge"
+    assert out["seeded"] is True
+    assert sent == [("sid-42", "do the task")]
+    assert not any("tmux kill-session" in command for command in seams.remote)
+    assert seams.stop_keeper == []
+
+
+def test_unsubmitted_seed_without_registration_kills_mux_and_stops_keeper(seams, monkeypatch):
+    unseeded = json.dumps({"ok": True, "created": True, "seed_submitted": False})
+    monkeypatch.setattr(venue_detached, "await_claim", lambda scope, rid, timeout: None)
 
     def remote(_cfg, command, *, timeout=60.0):
         seams.remote.append(command)
@@ -811,6 +837,8 @@ def test_rejoin_launch_failure_does_not_release_existing_keeper_hold(seams, monk
         return 0, "", ""
 
     monkeypatch.setattr(detach, "_remote", remote)
+    # A real launch failure: the created session never registers.
+    monkeypatch.setattr(venue_detached, "await_claim", lambda scope, rid, timeout: None)
 
     assert detach.cmd_detach(_args()) == 1
 

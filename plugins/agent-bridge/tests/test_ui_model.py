@@ -239,6 +239,41 @@ def test_session_model_folds_real_server_sse_frames(tmp_path) -> None:
     assert out["md"] == [{"t": "p", "inl": [{"t": "text", "text": "done <b>not html</b>"}]}]
 
 
+def test_an_untranslatable_reconnect_replays_without_duplicating_history(tmp_path) -> None:
+    """The bridge restarts at 0 when it can't translate a cursor across a merge
+    and replays its current log: the viewer's model starts over rather than fold
+    every event in twice -- whether the restart comes on a reconnect's headers or
+    in-band. A translated merge keeps the folded history."""
+    out = _run(tmp_path, """
+      const msg = (id, text) => [`agent_message`, { text }, 1, id];
+      const fold = (model) => { for (const e of [msg(1, "one"), ["turn_complete", {}, 1, 2], msg(3, "two")]) model.apply(...e); };
+      const results = {};
+      for (const how of ["header", "in-band"]) {
+        let model = new m.SessionModel();
+        fold(model);
+        const start = how === "header" ? Number("0") : 0;
+        const next = m.followContinuity(model, "c-new", start);
+        model = next.model;
+        fold(model);  // the replay of the current log
+        results[how] = { replay: next.replay, agents: model.blocks.filter((b) => b.type === "agent").length,
+                         continuity: model.continuity };
+      }
+      const kept = new m.SessionModel();
+      fold(kept);
+      const translated = m.followContinuity(kept, "c-merged", 7);
+      const fresh = m.followContinuity(new m.SessionModel(), "c-first", 0);
+      const unnamed = m.followContinuity(kept, "c-merged", NaN);
+      return { results, translated: [translated.replay, translated.model === kept, kept.lastId,
+                                     kept.blocks.length],
+               fresh: fresh.replay, unnamed: [unnamed.replay, kept.lastId] };
+    """)
+    for how in ("header", "in-band"):
+        assert out["results"][how] == {"replay": True, "agents": 2, "continuity": "c-new"}, how
+    assert out["translated"][:3] == [False, True, 7] and out["translated"][3] > 0
+    assert out["fresh"] is False  # nothing consumed yet: 0 is just the start
+    assert out["unnamed"] == [False, 7]  # no cursor named: the position stays
+
+
 def test_markdown_links_are_http_only(tmp_path) -> None:
     out = _run(tmp_path, r"""
       return m.parseInline("see [x](javascript:alert(1)) and [ok](https://example.com/a) or https://b.c/d.")

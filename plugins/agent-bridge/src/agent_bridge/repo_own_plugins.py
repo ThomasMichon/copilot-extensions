@@ -32,7 +32,12 @@ import logging
 from pathlib import Path
 
 from plugin_resolve import (
+    MarketplaceSourceKind,
     has_plugin_manifest,
+    load_marketplace,
+    local_marketplace_path,
+    marketplace_source_kind,
+    plugin_dir,
     read_repo_settings,
     resolve_repo_plugins,
     split_source,
@@ -132,4 +137,132 @@ def repo_plugin_dir_args(anchor: str | Path | None) -> list[str]:
         return args
     except Exception as exc:  # pragma: no cover - defensive
         log.debug("repo own-plugin staging failed for %s: %s", anchor, exc)
+        return []
+
+
+def _resolve_ref_dir(source: str, repo_roots: list[Path]) -> Path | None:
+    """Resolve one ``PluginRef`` source to a local payload dir, or ``None``.
+
+    Mirrors ``agent_codespaces.plugin_staging``'s local-marketplace lookup
+    (first-wins across ``repo_roots``, shadowing-safe) without depending on
+    that package -- both consume the same shared ``plugin_resolve``
+    primitives. The **first** ``repo_roots`` entry whose settings declare
+    ``marketplace`` at all *claims* it, regardless of source kind: a local
+    declaration there resolves directly (success or failure stops here,
+    never falling through to a different anchor's declaration of the same
+    marketplace name); a non-local (remote) declaration there falls back to
+    the installed-plugin payload instead, since there is no local source to
+    read. Either way, a later anchor's own declaration of the same
+    marketplace name is never consulted -- it would silently load a
+    different or stale payload than the one the winning anchor actually
+    declares. Only a marketplace **undeclared** by every ``repo_roots``
+    entry falls back to the installed payload. Fail-safe -> ``None``.
+    """
+    name, marketplace = split_source(source)
+    if not name or not marketplace:
+        return None
+    for root in repo_roots:
+        try:
+            settings = read_repo_settings(root)
+        except Exception:  # pragma: no cover - defensive
+            continue
+        if marketplace not in settings.marketplaces:
+            continue
+        if marketplace_source_kind(marketplace, settings) is not MarketplaceSourceKind.LOCAL:
+            # This anchor claims the marketplace name with a non-local
+            # (remote) source -- there's nothing local to read here, but a
+            # later anchor's own declaration of the same name must still
+            # not be consulted. Fall back to the installed payload only.
+            return _installed_dir(name, marketplace)
+        # This anchor claims the marketplace name -- resolve exactly here,
+        # success or failure, and never consult another anchor or the
+        # installed inventory for this source.
+        mp_root = local_marketplace_path(marketplace, settings, repo_dir=root)
+        if mp_root is None:
+            return None
+        mp_root = mp_root.resolve()
+        mp = load_marketplace(mp_root)
+        # The loaded manifest must actually self-identify as the requested
+        # marketplace -- a stale/misconfigured declaration pointing at a
+        # directory whose own marketplace.json carries a different `name`
+        # must never be trusted to resolve `name`, even if it happens to
+        # declare a plugin of that same name (plugin_resolve.resolve_repo_
+        # plugins applies the identical check).
+        payload = (
+            plugin_dir(mp, name) if mp is not None and mp.name == marketplace else None
+        )
+        if payload is None:
+            return None
+        payload = payload.resolve()
+        try:
+            payload.relative_to(mp_root)
+        except ValueError:
+            log.warning(
+                "Refusing plugin %s outside marketplace root %s: %s",
+                source, mp_root, payload,
+            )
+            return None
+        return payload if has_plugin_manifest(payload) else None
+    return _installed_dir(name, marketplace)
+
+
+def related_plugin_dir_args(
+    repo: str | None, repo_roots: list[Path] | None = None,
+) -> list[str]:
+    """``--plugin-dir`` args for control-repo-declared related plugins.
+
+    The **local-loopback** counterpart of a namespace-resolved (``codespace:``/
+    ``container:``) target's ``extra_plugins`` staging: resolves every
+    ``related_plugins_for_repo(repo)`` entry to a concrete payload dir on
+    **this** machine (the dispatching machine, which a local-loopback target
+    shares) rather than staging it anywhere -- there is nothing to copy, only
+    to resolve. ``repo_roots`` defaults to every control-plane anchor
+    (:func:`related_plugins.control_plane_anchors`). Fail-safe -> ``[]``; a
+    source resolvable nowhere is skipped, never raised. A single reference
+    that raises (e.g. a filesystem error) is likewise recorded as
+    unresolved and does not abort resolution of the remaining references --
+    one broken plugin must never discard an already-resolved stack.
+    """
+    try:
+        from .related_plugins import control_plane_anchors, related_plugins_for_repo
+
+        roots = (
+            list(repo_roots) if repo_roots is not None else control_plane_anchors()
+        )
+        refs = related_plugins_for_repo(repo, anchors=roots)
+        if not refs:
+            return []
+        args: list[str] = []
+        resolved: list[str] = []
+        unresolved: list[str] = []
+        for ref in refs:
+            try:
+                payload = _resolve_ref_dir(ref.source, roots)
+            except Exception as exc:  # pragma: no cover - defensive
+                log.debug(
+                    "related-repo plugin resolution raised for %s: %s",
+                    ref.source, exc,
+                )
+                unresolved.append(ref.source)
+                continue
+            if payload is None:
+                unresolved.append(ref.source)
+                continue
+            args.extend(["--plugin-dir", str(payload)])
+            resolved.append(ref.source)
+        if resolved:
+            log.info(
+                "Resolved %d related-repo plugin(s) for local-loopback repo=%s "
+                "-> --plugin-dir: %s",
+                len(resolved), repo, resolved,
+            )
+        if unresolved:
+            log.warning(
+                "related-repo plugin(s) for repo=%s not resolvable locally -- "
+                "NOT staged: %s",
+                repo, unresolved,
+            )
+        return args
+    except Exception as exc:  # pragma: no cover - defensive
+        log.debug("related-repo plugin resolution failed for repo=%s: %s", repo, exc)
         return []

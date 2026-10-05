@@ -22,9 +22,11 @@ A copilot-extensions plugin that provides:
   CLI session (tmux, inside the CodeSpace) into your terminal; `copilot <name>
   --detach` starts it for an orchestrating agent instead (JSON handle; the
   Connection Owner keeps its relay + host-bridge forwards alive), observable and
-  steerable through agent-bridge; `--ref-file <path>` hands the worker a
-  reference file (HAR trace, transcript, logs) without the orchestrator
-  reading it; `--reverse-forward VENUE:HOST` keeps a host port (e.g. a
+  steerable through agent-bridge; if a new session registers but the seed
+  cannot be typed into the TTY prompt, the seed is delivered over that same
+  bridge message lane instead of stopping the session; `--ref-file <path>`
+  hands the worker a reference file (HAR trace, transcript, logs) without the
+  orchestrator reading it; `--reverse-forward VENUE:HOST` keeps a host port (e.g. a
   browser's DevTools) reachable inside the venue; `--forward PORT[:VENUE]`
   keeps a venue port (e.g. the worker's dev server) reachable on this host;
   `--stop` ends it. See the

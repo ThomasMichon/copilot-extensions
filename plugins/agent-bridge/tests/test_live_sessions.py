@@ -246,6 +246,62 @@ def test_migration_v9_to_v10_adds_driven_by(tmp_path: Path) -> None:
         db.close()
 
 
+def test_migration_v23_to_v24_adds_live_session_aliases(tmp_path: Path) -> None:
+    """A pre-v24 database gains the live-session alias table."""
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        "CREATE TABLE schema_version (version INTEGER NOT NULL);"
+        "INSERT INTO schema_version (version) VALUES (23);"
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(db_path)
+    try:
+        ver = db.execute_read("SELECT version FROM schema_version")[0]["version"]
+        assert ver == SCHEMA_VERSION
+        db.execute_write(
+            "INSERT INTO live_session_aliases "
+            "(alias_session_id, target_session_id, created_at) VALUES (?, ?, ?)",
+            ("old", "new", 123.0),
+        )
+        rows = db.execute_read(
+            "SELECT target_session_id FROM live_session_aliases WHERE alias_session_id=?",
+            ("old",),
+        )
+        assert rows[0]["target_session_id"] == "new"
+    finally:
+        db.close()
+
+
+def test_migration_v24_alone_installs_aliases_triggers_and_start_time(tmp_path: Path) -> None:
+    """The v24 migration is self-contained: run on its own (without the
+    every-init ensure path) it still installs the alias table, both triggers
+    and ``live_sessions.process_started_at``."""
+    db = Database(tmp_path / "b.db")
+    try:
+        conn = db._get_conn()
+        conn.executescript(
+            "DROP TRIGGER live_sessions_retired_id_fence;"
+            "DROP TRIGGER live_sessions_drop_orphaned_aliases;"
+            "DROP TABLE live_session_aliases;"
+            "ALTER TABLE live_sessions DROP COLUMN process_started_at;"
+            "UPDATE schema_version SET version = 23;"
+        )
+        db._migrate(conn, 23)
+        triggers = {
+            r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")
+        }
+        fence, cleanup = "live_sessions_retired_id_fence", "live_sessions_drop_orphaned_aliases"
+        assert {fence, cleanup} <= triggers
+        columns = {r[1] for r in conn.execute("PRAGMA table_info(live_sessions)")}
+        assert "process_started_at" in columns
+        assert db.execute_read("SELECT version FROM schema_version")[0]["version"] == 24
+    finally:
+        db.close()
+
+
 # -- Route layer ------------------------------------------------------------
 
 
@@ -379,6 +435,19 @@ def test_route_driven_by_surfaces(client: TestClient) -> None:
     assert client.get("/api/v1/live-sessions/cli-o").json()["driven_by"] is None
 
 
+def test_another_process_on_an_expired_row_gets_the_refusal_the_extension_reads(
+    client: TestClient, tmp_db: Database,
+) -> None:
+    """A crashed process's expired row: a resumed process (other pid) is
+    refused with ``detail.reason == "incarnation_mismatch"``, which the
+    extension reads to keep serving under the id it already registered."""
+    assert client.post("/api/v1/live-sessions", json={"session_id": "resumed", "pid": 11}).status_code == 200
+    tmp_db.execute_write("UPDATE live_sessions SET status='expired' WHERE session_id='resumed'")
+    r = client.post("/api/v1/live-sessions", json={"session_id": "resumed", "pid": 22})
+    assert r.status_code == 409
+    assert r.json()["detail"]["reason"] == "incarnation_mismatch"
+
+
 def test_route_register_is_heartbeat_upsert(client: TestClient) -> None:
     first = client.post(
         "/api/v1/live-sessions", json={"session_id": "s", "machine": "a"}
@@ -440,6 +509,22 @@ def test_db_update_live_turn_state(tmp_db: Database) -> None:
     assert row["last_activity_at"] == now + 5
 
 
+def test_db_update_live_turn_state_follows_a_rollover_alias(tmp_db: Database) -> None:
+    """A rollover committed between the ack and the turn-state update still
+    lands the state on the successor, not the retired predecessor id."""
+    now = time.time()
+    tmp_db.register_live_session(
+        "cli-new", machine="m", cwd=None, worktree_id="wt-t", repo=None,
+        branch=None, pid=None, role=None, now=now,
+    )
+    tmp_db.execute_write(
+        "INSERT INTO live_session_aliases (alias_session_id, target_session_id, created_at) "
+        "VALUES (?, ?, ?)", ("cli-old", "cli-new", now),
+    )
+    tmp_db.update_live_turn_state("cli-old", turn_state="running", last_activity_at=now + 5)
+    assert tmp_db.get_live_session("cli-new")["turn_state"] == "running"
+
+
 def test_fresh_db_has_turn_state_columns(tmp_db: Database) -> None:
     cols = {r["name"] for r in tmp_db.execute_read("PRAGMA table_info(live_sessions)")}
     assert {"turn_state", "last_activity_at"} <= cols
@@ -471,6 +556,67 @@ def client_with_store(tmp_db: Database) -> TestClient:
     app.state.live_event_store = LiveEventStore()
     app.include_router(live_sessions.router)
     return TestClient(app)
+
+
+def test_a_deregister_leaves_a_replacement_registered_by_another_process(
+    client_with_store: TestClient,
+) -> None:
+    """Between an exiting extension's cleanup DELETEs another process registers
+    one of its ids: the DELETE carries the exiting process's identity, so the
+    replacement's row (and its queue) is left alone; its own DELETE removes it."""
+    c = client_with_store
+    c.post("/api/v1/live-sessions",
+           json={"session_id": "A", "pid": 2222, "process_started_at": 500.0})
+    gone = c.delete("/api/v1/live-sessions/A", params={"pid": 1111, "process_started_at": 100.0})
+    assert gone.status_code == 200
+    assert c.get("/api/v1/live-sessions/A").status_code == 200  # the replacement survives
+    same_pid_restarted = {"pid": 2222, "process_started_at": 100.0}
+    c.delete("/api/v1/live-sessions/A", params=same_pid_restarted)
+    assert c.get("/api/v1/live-sessions/A").status_code == 200  # a reused pid, another process
+    c.delete("/api/v1/live-sessions/A", params={"pid": 2222, "process_started_at": 500.0})
+    assert c.get("/api/v1/live-sessions/A").status_code == 404
+    # Without identity (an older extension), a DELETE behaves as before.
+    c.post("/api/v1/live-sessions", json={"session_id": "B", "pid": 3333})
+    c.delete("/api/v1/live-sessions/B")
+    assert c.get("/api/v1/live-sessions/B").status_code == 404
+
+
+@pytest.mark.parametrize("started", ["NaN", "Infinity", "-Infinity"])
+def test_a_non_finite_process_start_is_refused(client_with_store: TestClient, started: str) -> None:
+    """NaN never compares as different (``abs(nan - x) >= tol`` is false), so it would
+    pass for any process: a registration or deregistration carrying one is refused."""
+    c = client_with_store
+    c.post("/api/v1/live-sessions", json={"session_id": "A", "pid": 2222, "process_started_at": 500.0})
+    r = c.post("/api/v1/live-sessions", content=(
+        '{"session_id": "A", "pid": 2222, "process_started_at": %s}' % started),
+        headers={"Content-Type": "application/json"})
+    assert r.status_code == 422
+    assert c.delete("/api/v1/live-sessions/A", params={"pid": 2222, "process_started_at": started.lower()}
+                    ).status_code == 422
+    assert c.get("/api/v1/live-sessions/A").status_code == 200  # untouched
+
+
+def test_result_routes_answer_a_merge_still_copying_with_a_retryable_503(
+    client_with_store: TestClient, monkeypatch,
+) -> None:
+    """A snapshot whose merge is still copying events at its deadline is not
+    validated (a valid token would look like replaced history): both result
+    routes answer a retryable 503 instead."""
+    from agent_bridge.live_representation import LiveEventStore, MergePendingError
+
+    c = client_with_store
+    c.post("/api/v1/live-sessions", json={"session_id": "s1", "worktree_id": "wt-1"})
+
+    def pending(self, session_id, *, timeout=5.0):
+        raise MergePendingError(session_id)
+
+    monkeypatch.setattr(LiveEventStore, "snapshot", pending)
+    for path in ("/api/v1/live-sessions/s1/result",
+                 "/api/v1/live-sessions/s1/result/detail?ref=x"):
+        got = c.get(path)
+        assert got.status_code == 503, path
+        assert got.headers["retry-after"] == "1"
+        assert "history is merging" in got.json()["detail"]
 
 
 def test_route_ingest_updates_turn_state(client_with_store: TestClient) -> None:

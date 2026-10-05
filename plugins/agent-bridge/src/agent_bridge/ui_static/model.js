@@ -131,6 +131,27 @@ function outputText(content) {
 }
 
 /**
+ * Adopt the continuity (and its start cursor) the bridge names for a stream:
+ * on a reconnect's response headers, or in-band after a merge. A merge it
+ * could translate renumbers the cursor and keeps the folded history. One it
+ * couldn't (e.g. its map was lost in a daemon restart) restarts at 0 and
+ * replays the whole current log -- never 0 once this view has consumed
+ * events otherwise -- so the old history must go, or every replayed event
+ * would be folded in twice. Returns the model to keep using and whether the
+ * caller must drop what it rendered from the old one.
+ */
+export function followContinuity(model, continuity, start) {
+  if (Number.isFinite(start) && start === 0 && model.lastId > 0) {
+    const fresh = new SessionModel();
+    fresh.continuity = continuity;
+    return { model: fresh, replay: true };
+  }
+  if (Number.isFinite(start)) model.lastId = start;
+  model.continuity = continuity;
+  return { model, replay: false };
+}
+
+/**
  * Folds the live event stream into display blocks: user messages, agent
  * messages, and one collapsed "work" block per run of tools/thoughts between
  * them. apply() returns the indices of blocks it changed so a renderer can

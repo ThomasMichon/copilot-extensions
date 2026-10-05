@@ -74,10 +74,30 @@ def test_deliver_note_sends_over_stdin():
         calls.append((argv, kw.get("input")))
         return type("R", (), {"returncode": 0})()
 
-    assert venue_refs.deliver_note("sid-1", "see /x/y.har", run=run)
+    assert venue_refs.deliver_note("sid-1", "see /x/y.har", run=run, operation="launch-1")
     argv, stdin = calls[0]
-    assert argv[1:] == ["send", "sid-1", "--prompt-file", "-", "--no-wait", "--steer"]
+    assert argv[1:7] == ["send", "sid-1", "--prompt-file", "-", "--no-wait", "--steer"]
     assert stdin == "see /x/y.har"
+
+    def key(i):
+        return calls[i][0][calls[i][0].index("--idempotency-key") + 1]
+
+    # A retry of the same delivery reuses its key: the bridge answers an
+    # ambiguous earlier attempt instead of enqueueing the note twice.
+    assert venue_refs.deliver_note("sid-1", "see /x/y.har", run=run, operation="launch-1")
+    assert key(1) == key(0)
+    # A later, separate delivery of the same text is really sent: a new key.
+    assert venue_refs.deliver_note("sid-1", "see /x/y.har", run=run, operation="launch-2")
+    assert key(2) != key(0)
+    assert venue_refs.deliver_note("sid-1", "see /x/y.har", run=run)  # no operation: its own
+    assert venue_refs.deliver_note("sid-1", "see /x/y.har", run=run)
+    assert len({key(0), key(2), key(3), key(4)}) == 4
+    assert venue_refs.deliver_note("sid-1", "another note", run=run, operation="launch-1")
+    assert key(5) != key(0)
+    # A retry naming the id the placeholder was renamed to reaches the same
+    # session: the same key, so an accepted-but-unanswered first send isn't run twice.
+    assert venue_refs.deliver_note("resumed-sid", "see /x/y.har", run=run, operation="launch-1")
+    assert key(6) == key(0)
 
 
 def test_deliver_note_is_steered_and_bounded():
@@ -89,6 +109,17 @@ def test_deliver_note_is_steered_and_bounded():
 
     assert venue_refs.deliver_note("sid-1", "note", run=run)
     assert seen.get("timeout") == 60
+
+
+def test_deliver_note_can_require_a_daemon_protocol():
+    calls = []
+
+    def run(argv, **kw):
+        calls.append(argv)
+        return type("R", (), {"returncode": 3})()  # the daemon is too old
+
+    assert venue_refs.deliver_note("sid-1", "note", run=run, min_daemon_protocol=20) is False
+    assert calls[0][-2:] == ["--min-daemon-protocol", "20"]
 
 
 def test_a_wedged_bridge_reports_failed_delivery():
