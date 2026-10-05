@@ -71,7 +71,10 @@ invoke_uv_venv_resilient() {
     if [[ $rc -eq 0 && -f "$venv_dir/pyvenv.cfg" ]]; then
         return 0
     fi
-    return "${rc:-1}"
+    if [[ $rc -eq 0 ]]; then
+        return 1
+    fi
+    return "$rc"
 }
 
 ensure_uv() {
@@ -236,8 +239,13 @@ new_signed_venv() {
         _warn "Existing venv python present but pyvenv.cfg is missing at $venv_dir/pyvenv.cfg (shared interpreter race, #6852) -- rebuilding"
         rm -rf "$venv_dir"
     fi
-    invoke_uv_venv_resilient "$uv_cmd" "$venv_dir" --python "$python_version" --allow-existing >/dev/null || \
-        invoke_uv_venv_resilient "$uv_cmd" "$venv_dir" --allow-existing >/dev/null
+    local venv_out
+    if ! venv_out="$(invoke_uv_venv_resilient "$uv_cmd" "$venv_dir" --python "$python_version" --allow-existing 2>&1)"; then
+        if ! venv_out="$(invoke_uv_venv_resilient "$uv_cmd" "$venv_dir" --allow-existing 2>&1)"; then
+            [[ -n "$venv_out" ]] && printf '%s\n' "$venv_out" >&2
+            return 1
+        fi
+    fi
 }
 
 write_deploy_manifest() {

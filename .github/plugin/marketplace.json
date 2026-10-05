@@ -18,7 +18,7 @@
     {
       "name": "agent-pull-requests",
       "description": "Cross-repository pull-request CLI for API-driven status/create/merge/wait flows, addressed directly by owner/repo with no local checkout required. Deployed as a self-contained versioned runtime via the shared vendored installer engine, with a real agent-pull-requests binstub; initially mediated through agent-worktrees account resolution.",
-      "version": "0.1.5-dev1",
+      "version": "0.1.6-dev1",
       "source": "plugins/agent-pull-requests",
       "defaultEnabled": false
     },
@@ -62,7 +62,7 @@
     {
       "name": "agent-logger",
       "description": "Reusable Copilot CLI session logging - segment sessions into digestible chunks, write Markdown session logs, sync local or validated provider-rescued sessions to a configurable target, and optionally run a scheduled orchestrator that crunches a backlog into committed logs",
-      "version": "0.2.2-dev1",
+      "version": "0.2.3-dev1",
       "source": "plugins/agent-logger"
     },
     {

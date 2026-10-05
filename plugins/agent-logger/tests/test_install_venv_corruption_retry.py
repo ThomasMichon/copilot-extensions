@@ -1,5 +1,5 @@
 """Regression coverage for the transient venv-corruption retry wrapper
-(#6852) in agent-logger's install.ps1 -- mirrored from agent-bridge's fix for
+(#6852) in the shared installer engine -- mirrored from agent-bridge's fix for
 the same shared uv-managed-interpreter race. A concurrent `uv venv` from
 another installer landing on the same slot can leave `python.exe` present
 but `pyvenv.cfg` missing/incomplete, so `uv venv --allow-existing` fails
@@ -12,6 +12,7 @@ plain `uv venv` -- surfacing any other failure immediately."""
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -19,7 +20,8 @@ from pathlib import Path
 import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
-_INSTALL_PS1 = PLUGIN / "scripts" / "install.ps1"
+_INSTALL_PS1 = PLUGIN.parents[1] / "libs" / "installer-engine" / "installer-engine.ps1"
+_INSTALL_SH = PLUGIN.parents[1] / "libs" / "installer-engine" / "installer-engine.sh"
 
 
 def _extract_ps1_functions(*names: str) -> str:
@@ -44,7 +46,7 @@ def _run_harness(
     harness = tmp_path / f"harness-{shell.replace('.exe', '')}.ps1"
     harness.write_text(
         _extract_ps1_functions(
-            "Test-IsSreModuleMismatch", "Test-IsVenvCorruption", "Invoke-UvVenvResilient"
+            "Invoke-NativeCapture", "Test-IsSreModuleMismatch", "Test-IsVenvCorruption", "Invoke-UvVenvResilient"
         )
         + f"""
 
@@ -65,6 +67,59 @@ function Start-Sleep {{ param([int]$Seconds) Add-Content -LiteralPath '{delays_f
         check=True,
         capture_output=True,
         text=True,
+    )
+
+
+def _extract_sh_functions(*names: str) -> str:
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    chunks = []
+    for name in names:
+        start = text.index(f"{name}()")
+        end = text.index("\n}\n", start)
+        chunks.append(text[start : end + 2])
+    return "\n\n".join(chunks)
+
+
+def _run_sh_harness(
+    tmp_path: Path, uv_stub_body: str, extra_script: str, delays_file: Path
+) -> subprocess.CompletedProcess:
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is not installed")
+    harness = tmp_path / "harness.sh"
+    harness.write_text(
+        "#!/bin/sh\nset -eu\n"
+        + _extract_sh_functions(
+            "test_is_sre_module_mismatch",
+            "test_is_venv_corruption",
+            "invoke_uv_venv_resilient",
+        )
+        + f"""
+
+_warn() {{ echo "WARN: $*"; }}
+
+{uv_stub_body}
+
+{extra_script}
+""",
+        encoding="utf-8",
+    )
+    harness.chmod(0o755)
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir(exist_ok=True)
+    sleep_stub = fake_bin / "sleep"
+    sleep_stub.write_text(
+        f'#!/bin/sh\necho "$1" >> "{delays_file}"\nexit 0\n',
+        encoding="utf-8",
+    )
+    sleep_stub.chmod(0o755)
+    env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ.get('PATH', '')}"}
+    return subprocess.run(
+        [bash, str(harness)],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
     )
 
 
@@ -139,3 +194,34 @@ Write-Host "EXIT:$($result.ExitCode)"
     assert "EXIT:1" in result.stdout
     assert counter_file.read_text(encoding="utf-8").strip() == "1"
     assert _delays(delays_file) == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX bash environment only")
+def test_posix_success_without_pyvenv_cfg_still_fails_after_retries(tmp_path: Path) -> None:
+    venv_dir = tmp_path / "venv"
+    venv_dir.mkdir()
+    counter_file = tmp_path / "attempt-count.txt"
+    counter_file.write_text("0", encoding="utf-8")
+    delays_file = tmp_path / "delays.txt"
+    uv_stub = f"""
+uv() {{
+    n=$(cat '{counter_file}')
+    n=$((n + 1))
+    echo "$n" > '{counter_file}'
+    echo 'Created venv'
+    return 0
+}}
+"""
+    extra = f"""
+if out=$(invoke_uv_venv_resilient uv '{venv_dir}' --python 3.10 --allow-existing); then
+    echo "EXIT:0"
+else
+    echo "EXIT:1"
+fi
+echo "OUT:$out"
+"""
+    result = _run_sh_harness(tmp_path, uv_stub, extra, delays_file)
+    assert "uv venv reported success but pyvenv.cfg is missing" in result.stdout
+    assert "EXIT:1" in result.stdout
+    assert counter_file.read_text(encoding="utf-8").strip() == "4"
+    assert _delays(delays_file) == [3, 6, 10]

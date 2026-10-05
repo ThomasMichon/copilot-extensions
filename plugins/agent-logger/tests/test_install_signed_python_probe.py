@@ -1,5 +1,4 @@
-"""Regression coverage for `Get-SignedBasePython` in agent-logger's
-install.ps1: probing `py -3.13`/`-3.12`/`-3.11`/`-3.10` must not abort
+"""Regression coverage for `Get-SignedBasePython` in the shared installer engine: probing `py -3.13`/`-3.12`/`-3.11`/`-3.10` must not abort
 provisioning when a candidate minor version simply isn't installed.
 
 The `py` launcher writes "No suitable Python runtime found" to stderr for any
@@ -23,7 +22,7 @@ from pathlib import Path
 import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
-_INSTALL_PS1 = PLUGIN / "scripts" / "install.ps1"
+_INSTALL_PS1 = PLUGIN.parents[1] / "libs" / "installer-engine" / "installer-engine.ps1"
 
 
 def _extract_ps1_function(name: str) -> str:
@@ -53,6 +52,7 @@ $env:OS = 'Windows_NT'
 {path_prefix}
 {py_stub_body}
 
+{_extract_ps1_function("Invoke-NativeCapture")}
 {_extract_ps1_function("Get-SignedBasePython")}
 
 $result = Get-SignedBasePython

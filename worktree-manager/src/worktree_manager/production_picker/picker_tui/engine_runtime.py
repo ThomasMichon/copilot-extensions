@@ -573,10 +573,12 @@ class PickerScreenRuntimeMixin:
         self._prime_setup_reload()
         epoch = self._next_setup_epoch()
         cancel = self._bg_cancel
+        app_lookup_error: Exception | None = None
         try:
             app = self.app
-        except Exception:
+        except Exception as exc:
             app = None
+            app_lookup_error = exc
 
         def _worker():
             payload = None
@@ -610,12 +612,41 @@ class PickerScreenRuntimeMixin:
                 self.refresh()
 
             if app is None:
+                # `self.app` was not resolvable when this worker was
+                # scheduled (e.g. this screen wasn't yet mounted into a
+                # running App). This used to silently drop the collected
+                # payload -- neither `_setup_applied_epoch` nor
+                # `_setup_failed_epoch` was ever set, so a poller (most
+                # notably capture.py's `_wait_for_initial_setup`, used by
+                # the headless `picker screenshot`/`picker mock` capture
+                # path) would spin until ITS OWN unrelated timeout instead
+                # of ever seeing the real cause (#5220). Record a
+                # diagnosed failure directly (best-effort: there is no
+                # live App to hop back onto via `call_from_thread` here,
+                # so this mutates the screen's attributes off-thread,
+                # exactly as already-established off-thread pollers like
+                # `_poll_update_state` do) rather than dropping silently.
                 self._dispose_setup_payload(self._release_setup_payload(epoch))
+                self._apply_setup_failure(
+                    epoch,
+                    app_lookup_error
+                    or RuntimeError(
+                        "no Textual App was resolvable for this screen when "
+                        "the setup/reload worker was scheduled (self.app "
+                        "was None)"
+                    ),
+                )
                 return
             try:
                 app.call_from_thread(_apply)
-            except Exception:
+            except Exception as exc:
+                # Same silent-drop gap as above, for the OTHER failure mode:
+                # `call_from_thread` itself raising -- most commonly the
+                # App's event loop not running, or already stopped/
+                # shutting down (#5220). Record the real exception instead
+                # of a generic downstream timeout.
                 self._dispose_setup_payload(self._release_setup_payload(epoch))
+                self._apply_setup_failure(epoch, exc)
 
         threading.Thread(
             target=_worker, name=f"picker-setup-reload:{epoch}", daemon=True

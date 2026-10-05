@@ -91,6 +91,18 @@ def test_apply_installs_marker_slot_and_binstub(tmp_path, monkeypatch):
     assert payload["provider_root"] == str(root.resolve())
 
 
+def test_windows_binstubs_force_utf8_mode():
+    """``worktree-manager.cmd``/``.ps1`` must set ``PYTHONUTF8=1`` so the
+    launched interpreter's stdout/stderr are UTF-8 regardless of the active
+    console codepage (#5218) -- a Windows console defaults to the system ANSI
+    codepage (e.g. ``cp1252``), which crashes on a status glyph like
+    ``\u2713``/``\u2192`` unless UTF-8 mode is forced before the interpreter
+    starts.
+    """
+    assert 'set "PYTHONUTF8=1"' in si._cmd_binstub()
+    assert "$env:PYTHONUTF8 = '1'" in si._ps1_binstub()
+
+
 def test_apply_reaps_stranded_cutover_passive_before_copying_payload(tmp_path, monkeypatch):
     """A slot left occupied by an abandoned cutover passive (spawned by
     ``mux_daemon_cutover.spawn_passive`` with its ``cwd`` pinned inside the
@@ -384,11 +396,11 @@ def test_copy_payload_oserror_is_normalized_to_a_clean_error_result(tmp_path, mo
 
 
 def test_marker_invalidation_permission_error_aborts_instead_of_proceeding(tmp_path, monkeypatch):
-    """A ``PermissionError`` invalidating a prior slot's completion marker
-    (e.g. the marker file itself is momentarily held open) must abort the
-    install rather than being swallowed and letting mutation proceed with
-    a stale marker still on disk. Only a genuinely absent marker
-    (``FileNotFoundError``) is the ordinary, ignorable case.
+    """A ``PermissionError`` on the final atomic swap into ``slot`` (e.g. a
+    transient Windows access-denied exhausting ``_replace_with_retry``'s own
+    retries) must abort the install cleanly, restoring the previously-good
+    slot rather than leaving it half-replaced or stripped (#5219's
+    requested fix 3 -- the full-copy failure path must be non-destructive).
     """
     pd = _fake_payload(tmp_path, "1.2.3")
     root = tmp_path / "root"
@@ -397,22 +409,101 @@ def test_marker_invalidation_permission_error_aborts_instead_of_proceeding(tmp_p
     self_install(pd, root=root, dry_run=False)
     assert current_version(root) == "1.2.3"
 
-    real_unlink = Path.unlink
-
-    def _flaky_unlink(self, *a, **k):
-        if self.name == si._SLOT_COMPLETE_MARKER:
-            raise PermissionError(13, "Access is denied")
-        return real_unlink(self, *a, **k)
-
-    monkeypatch.setattr(Path, "unlink", _flaky_unlink)
-    # Force a reinstall of the SAME version so _copy_payload_unsafe's
-    # invalidation step actually runs against a marker that already exists.
+    # Force a reinstall of the SAME version so _copy_payload_unsafe's swap
+    # actually runs against a slot that already holds a previously-good
+    # install.
     monkeypatch.setattr(si, "_binstubs_are_stale", lambda: True)
+
+    real_replace_with_retry = si._replace_with_retry
+    calls: list[tuple[Path, Path]] = []
+
+    def _flaky_replace(src, dst, **kwargs):
+        calls.append((src, dst))
+        # Let the FIRST rename (slot -> retired) succeed; fail the SECOND
+        # (staging -> slot) -- matching what a transient Windows
+        # access-denied on the final publish step looks like.
+        if len(calls) == 2:
+            raise PermissionError(5, "Access is denied")
+        return real_replace_with_retry(src, dst, **kwargs)
+
+    monkeypatch.setattr(si, "_replace_with_retry", _flaky_replace)
+
+    slot = version_slot("1.2.3", root)
+    original_init = (slot / "src" / "worktree_manager" / "__init__.py").read_text()
 
     res = self_install(pd, root=root, dry_run=False)
 
     assert res.action == "error"
     assert "Access is denied" in (res.reason or "")
+    # Two renames attempted (slot -> retired, then staging -> slot, which
+    # fails), plus a third restoring retired -> slot.
+    assert len(calls) == 3
+    # The previously-good slot must be restored exactly as it was -- never
+    # left half-replaced or stripped.
+    assert slot.is_dir()
+    assert (slot / "src" / "worktree_manager" / "__init__.py").read_text() == original_init
+    assert current_version(root) == "1.2.3"
+
+
+def test_self_install_refuses_to_overwrite_the_currently_running_slot(tmp_path, monkeypatch):
+    """#5219: when ``slot`` is the directory this process's own interpreter
+    is running from, self-install must refuse the destructive full-reinstall
+    path instead of attempting a self-overwrite -- a ``shutil.rmtree``/copy
+    onto an open ``python.exe`` fails with ``WinError 5: Access is denied``
+    on Windows, and the (now-removed) failure handling used to leave the
+    slot permanently wedged. This is the headline fix: refuse up front
+    rather than ever attempting it, regardless of why ``needs_install``
+    thinks a reinstall is required.
+    """
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+    self_install(pd, root=root, dry_run=False)
+    assert current_version(root) == "1.2.3"
+
+    # Simulate _core_install_satisfied disagreeing with a healthy install
+    # (the manifest-only-stale false-positive this issue traces) so
+    # self_install falls through past the manifest-only-repair branch.
+    monkeypatch.setattr(si, "_slot_is_complete", lambda slot: False)
+
+    slot = version_slot("1.2.3", root)
+    fake_exe = slot / ".venv" / "Scripts" / "python.exe"
+    fake_exe.parent.mkdir(parents=True)
+    fake_exe.write_text("not a real interpreter")
+    monkeypatch.setattr(si.sys, "executable", str(fake_exe))
+
+    copied: list[int] = []
+    monkeypatch.setattr(si, "_copy_payload", lambda *a, **k: copied.append(1))
+
+    res = self_install(pd, root=root, dry_run=False)
+
+    assert copied == [], "must never attempt to overwrite the currently-running slot"
+    assert res.action == "already-current"
+    assert "currently-executing slot" in (res.reason or "")
+    # The slot -- and the "python.exe" the process is running from -- must
+    # still exist, completely untouched.
+    assert fake_exe.exists()
+
+
+def test_core_install_satisfied_gaps_names_each_failing_check(tmp_path, monkeypatch):
+    """#5219's requested fix 2: a fall-through to a full reinstall must
+    never be silent about why ``_core_install_satisfied`` returned False --
+    this is what let a narrow (manifest-only) gap silently escalate to "full
+    reinstall" in practice.
+    """
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+    self_install(pd, root=root, dry_run=False)
+
+    assert si._core_install_satisfied_gaps("1.2.3", root) == []
+    missing_slot = version_slot("9.9.9", root)
+    assert si._core_install_satisfied_gaps("9.9.9", root) == [
+        "current-version marker is '1.2.3', not '9.9.9'",
+        f"slot {missing_slot} is missing its completion marker or a key file",
+    ]
 
 
 def test_stale_provider_manifest_forces_repair(tmp_path, monkeypatch):

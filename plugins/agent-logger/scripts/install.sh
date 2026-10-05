@@ -204,94 +204,13 @@ ok()   { log "OK" "$1"; }
 chg()  { log "->" "$1"; }
 warn() { log "WARN" "$1"; }
 
-# Detects `AssertionError: SRE module mismatch` -- a transient race on a
-# shared uv-managed Python interpreter that surfaces when several installers
-# hit it in quick succession during one big `agent-worktrees update --force`
-# sweep (#6785, mirrored from agent-bridge's install.sh). The interpreter
-# reliably heals within seconds once the sweep's other uv invocations finish
-# touching it, so a short-delay retry recovers cleanly.
-_is_sre_module_mismatch() {
-    grep -q 'SRE module mismatch' <<<"$1"
-}
+_ok()  { ok "$1"; }
+_step(){ log '...' "$1"; }
+_warn(){ warn "$1"; }
+_fail(){ printf '  [FAIL] %s\n' "$1" >&2; }
 
-# Detects the pyvenv.cfg variant of the shared uv-managed-interpreter race
-# first seen above (_is_sre_module_mismatch): a concurrent `uv venv` from
-# another installer landing on the same slot can leave python present but
-# pyvenv.cfg missing/incomplete, so `uv venv --allow-existing` (or any later
-# uv Python-interpreter probe against that slot) fails immediately with uv
-# exit code 106 / "failed to locate pyvenv.cfg" (#6852, mirrored from
-# agent-bridge). The slot self-heals once the other install finishes writing
-# it, so a short-delay retry recovers cleanly.
-_is_venv_corruption() {
-    grep -qE 'failed to locate pyvenv\.cfg|exit code:? ?106' <<<"$1"
-}
-
-# Runs `uv pip install "$@"`, capturing combined output. On the transient SRE
-# module mismatch signature (see _is_sre_module_mismatch), retries with
-# backoff (up to 3 extra attempts: 3s/6s/10s); any other failure, or a
-# mismatch persisting after all retries, is returned as-is for the caller to
-# handle/fail on as before.
-_uv_pip_install_resilient() {
-    local out delay
-    if out="$(uv pip install "$@" 2>&1)"; then
-        printf '%s\n' "$out"
-        return 0
-    fi
-    for delay in 3 6 10; do
-        if ! _is_sre_module_mismatch "$out"; then
-            break
-        fi
-        warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
-        sleep "$delay"
-        if out="$(uv pip install "$@" 2>&1)"; then
-            printf '%s\n' "$out"
-            return 0
-        fi
-    done
-    printf '%s\n' "$out" >&2
-    return 1
-}
-
-# A venv is only healthy when BOTH its python binary and pyvenv.cfg exist --
-# checking the binary alone treats a #6852-corrupted slot (python present,
-# pyvenv.cfg missing) as already healthy and never rebuilds it.
-_venv_healthy() {
-    [[ -x "$1/bin/python" && -f "$1/pyvenv.cfg" ]]
-}
-
-# Runs `uv venv "$venv_dir" "$@"`, retrying with backoff (3s/6s/10s) on the
-# transient SRE-module-mismatch (#6785) or pyvenv.cfg-corruption (#6852)
-# races. Also treats a zero-exit run that didn't actually leave a pyvenv.cfg
-# behind at "$venv_dir/pyvenv.cfg" as a failure worth retrying -- uv can exit
-# 0 while still racing another concurrent writer touching the same slot.
-_uv_venv_resilient() {
-    local venv_dir="$1"; shift
-    local out rc delay
-    out="$(uv venv "$venv_dir" "$@" 2>&1)"; rc=$?
-    for delay in 3 6 10; do
-        if [[ $rc -eq 0 && -f "$venv_dir/pyvenv.cfg" ]]; then
-            printf '%s\n' "$out"
-            return 0
-        fi
-        if [[ $rc -eq 0 ]]; then
-            warn "uv venv reported success but pyvenv.cfg is missing at $venv_dir/pyvenv.cfg (shared interpreter race, #6852) -- retrying in ${delay}s"
-        elif _is_sre_module_mismatch "$out"; then
-            warn "uv venv hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
-        elif _is_venv_corruption "$out"; then
-            warn "uv venv hit a transient pyvenv.cfg corruption (shared Python cache race, #6852) -- retrying in ${delay}s"
-        else
-            break
-        fi
-        sleep "$delay"
-        out="$(uv venv "$venv_dir" "$@" 2>&1)"; rc=$?
-    done
-    if [[ $rc -eq 0 && -f "$venv_dir/pyvenv.cfg" ]]; then
-        printf '%s\n' "$out"
-        return 0
-    fi
-    printf '%s\n' "$out" >&2
-    return 1
-}
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/installer-engine.sh"
 
 # === install-contract:v3 versioned-venv (agent-logger: .venv-as-symlink) ===
 # Immutable per-version runtime (#581): build the venv into versions/<version> and
@@ -448,81 +367,6 @@ _git_info() {
     echo "$commit $branch $dirty"
 }
 
-# Unified schema_version 3 manifest writer. Self-contained per plugin (no shared
-# module -- plugins are pulled independently from the marketplace). Records the
-# source footprint (local vs marketplace) and is written atomically (temp+move).
-_write_deploy_manifest() {
-    local service="agent-logger" plugin="agent-logger"
-    local manifest="${INSTALL_DIR}/deploy-manifest.json"
-    local kind
-    kind="$(_source_kind "$PLUGIN_DIR")"
-
-    local ver="0.0.0"
-    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then
-        ver=$(grep -m1 '^version' "$PLUGIN_DIR/pyproject.toml" | sed 's/.*"\(.*\)".*/\1/' || echo "0.0.0")
-    fi
-
-    # Git provenance only applies to a local checkout.
-    local commit="null" branch="null" dirty="false"
-    if [[ "$kind" == "local" ]]; then
-        local repo_root c b d
-        repo_root="$(cd "$PLUGIN_DIR/.." && pwd)"
-        read -r c b d <<< "$(_git_info "$repo_root")"
-        commit="\"$c\""; branch="\"$b\""; dirty="$d"
-    fi
-
-    local tmp="$manifest.tmp"
-    cat > "$tmp" << EOF
-{
-  "schema_version": 3,
-  "service": "$service",
-  "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
-  "source": {
-    "kind": "$kind",
-    "path": "$PLUGIN_DIR",
-    "repo": "copilot-extensions",
-    "plugin": "$plugin",
-    "version": "$ver",
-    "commit": $commit,
-    "branch": $branch,
-    "dirty": $dirty
-  },
-  "venv": "$VENV",
-  "runtime": "python"
-}
-EOF
-    mv -f "$tmp" "$manifest"
-    ok "deploy manifest written (source: $kind)"
-}
-
-# --- self-provisioning helpers (runtime-self-provisioning pattern) -----------
-# Vendor a standalone uv into the runtime tool dir when uv is absent (pristine or
-# governed box) instead of dead-ending; add it to PATH for this run.
-_ensure_uv() {
-    command -v uv >/dev/null 2>&1 && return 0
-    local tooldir="${INSTALL_DIR}/tool"
-    if [ -x "${tooldir}/uv" ]; then export PATH="${tooldir}:$PATH"; return 0; fi
-    chg "uv not found -- vendoring a standalone uv into ${tooldir}"
-    mkdir -p "${tooldir}"
-    local url="https://astral.sh/uv/install.sh" script="${tooldir}/uv-install.sh" got=""
-    if command -v curl >/dev/null 2>&1; then curl -LsSf "$url" -o "$script" 2>/dev/null && got=1; fi
-    if [ -z "$got" ] && command -v wget >/dev/null 2>&1; then wget -qO "$script" "$url" 2>/dev/null && got=1; fi
-    if [ -z "$got" ] && command -v python3 >/dev/null 2>&1; then
-        python3 - "$url" "$script" <<'PY' 2>/dev/null && got=1
-import sys, urllib.request
-urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
-PY
-    fi
-    if [ -n "$got" ] && [ -s "$script" ]; then
-        env UV_INSTALL_DIR="${tooldir}" UV_UNMANAGED_INSTALL="${tooldir}" INSTALLER_NO_MODIFY_PATH=1 sh "$script" >/dev/null 2>&1 || true
-    fi
-    [ -x "${tooldir}/bin/uv" ] && [ ! -x "${tooldir}/uv" ] && ln -sf "${tooldir}/bin/uv" "${tooldir}/uv" 2>/dev/null || true
-    if [ -x "${tooldir}/uv" ]; then export PATH="${tooldir}:$PATH"; ok "vendored uv into ${tooldir}"; return 0; fi
-    warn "uv is required but not found, and vendoring failed (no reachable uv installer). Install uv, then retry."
-    return 1
-}
-
 # Serialize the complete mutating installer. The session-start reconciler and
 # agent-worktrees universal reconciler may discover the same version drift at
 # once; flock is process-held and released automatically on every exit path.
@@ -545,7 +389,10 @@ if [[ "$ACTION" != "status" ]]; then
     # process may acquire an uncontended lock after the newer install exits.
     if [[ "$ACTION" =~ ^(install|update|provision|stamp)$ ]]; then
         __desired="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/plugin.json" | head -1)"
-        __current="$(tr -d '[:space:]' < "$INSTALL_DIR/current-version" 2>/dev/null || true)"
+        __current=""
+        if [[ -f "$INSTALL_DIR/current-version" ]]; then
+            __current="$(tr -d '[:space:]' < "$INSTALL_DIR/current-version")"
+        fi
         __deployed=""
         __lock_py="$(command -v python3 || command -v python || true)"
         if [[ -n "$__lock_py" && -f "$INSTALL_DIR/deploy-manifest.json" ]]; then
@@ -736,6 +583,61 @@ deploy_runtime_helpers() {
     done
 }
 
+_resolve_snapshot_engine_source() {
+    local ext="$1"
+    local local_engine="$SCRIPT_DIR/installer-engine.${ext}"
+    local canonical_engine="$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.${ext}"
+    if [[ -f "$local_engine" ]]; then
+        printf '%s' "$local_engine"
+    else
+        printf '%s' "$canonical_engine"
+    fi
+}
+
+_rewrite_snapshot_engine_ref() {
+    local path="$1" canonical_ref="$2" local_ref="$3"
+    local tmp="$path.tmp.$$"
+    : > "$tmp"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        local cr=""
+        if [[ "$line" == *$'\r' ]]; then
+            cr=$'\r'
+            line=${line%$'\r'}
+        fi
+        if [[ "$line" == "$canonical_ref" ]]; then
+            printf '%s%s\n' "$local_ref" "$cr" >> "$tmp"
+        else
+            printf '%s%s\n' "$line" "$cr" >> "$tmp"
+        fi
+    done < "$path"
+    mv -f "$tmp" "$path"
+}
+
+_materialize_snapshot_engine() {
+    local snapshot_dir="$1"
+    local scripts_dir="$snapshot_dir/scripts"
+    local sh_src ps1_src sh_dest ps1_dest
+    mkdir -p "$scripts_dir"
+    sh_src="$(_resolve_snapshot_engine_source sh)"
+    ps1_src="$(_resolve_snapshot_engine_source ps1)"
+    sh_dest="$scripts_dir/installer-engine.sh"
+    ps1_dest="$scripts_dir/installer-engine.ps1"
+    if [[ "$sh_src" != "$sh_dest" ]]; then
+        cp -f "$sh_src" "$sh_dest"
+    fi
+    if [[ "$ps1_src" != "$ps1_dest" ]]; then
+        cp -f "$ps1_src" "$ps1_dest"
+    fi
+    _rewrite_snapshot_engine_ref \
+        "$scripts_dir/install.sh" \
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"' \
+        '. "$SCRIPT_DIR/installer-engine.sh"'
+    _rewrite_snapshot_engine_ref \
+        "$scripts_dir/install.ps1" \
+        ". (Join-Path \$PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')" \
+        ". (Join-Path \$PSScriptRoot 'installer-engine.ps1')"
+}
+
 deploy_auxiliary_compatibility_binstubs() {
     mkdir -p "${LOCAL_BIN}"
     local name
@@ -765,12 +667,56 @@ STUBEOF
     ok "auxiliary compatibility binstubs: 5 commands on PATH"
 }
 
+_snapshot_requires_materialized_engine() {
+    local snapshot_dir="$1"
+    local sh="$snapshot_dir/scripts/install.sh"
+    local ps1="$snapshot_dir/scripts/install.ps1"
+    {
+        [[ -f "$sh" ]] && (
+            grep -Fq '. "$SCRIPT_DIR/installer-engine.sh"' "$sh" ||
+            grep -Fq '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"' "$sh"
+        )
+    } && return 0
+    {
+        [[ -f "$ps1" ]] && (
+            grep -Fq ". (Join-Path \$PSScriptRoot 'installer-engine.ps1')" "$ps1" ||
+            grep -Fq ". (Join-Path \$PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')" "$ps1"
+        )
+    } && return 0
+    return 1
+}
+
+_materialize_snapshot_libs() {
+    local snapshot_dir="$1"
+    local libs_dir="$snapshot_dir/libs"
+    local lib src
+    mkdir -p "$libs_dir"
+    for lib in config-migrate agent-procutil dropin-registry plugin-resolve plugin-activation; do
+        src="$PLUGIN_DIR/libs/$lib"
+        if [[ ! -f "$src/pyproject.toml" ]]; then
+            src="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/$lib"
+        fi
+        [[ -f "$src/pyproject.toml" ]] || continue
+        if [[ "$src" != "$libs_dir/$lib" ]]; then
+            rm -rf "$libs_dir/$lib"
+            cp -a "$src" "$libs_dir/$lib"
+        fi
+    done
+}
+
 publish_payload_snapshot() {
     mkdir -p "${INSTALL_DIR}/snapshots"
     local snapshot_dir="${INSTALL_DIR}/snapshots/${SRC_VERSION}"
     if [ -d "$snapshot_dir" ]; then
         if [ ! -f "$snapshot_dir/plugin.json" ] || \
            [ ! -x "$snapshot_dir/bin/agent-logger" ]; then
+            printf 'ERROR: existing agent-logger snapshot is incomplete; refusing replacement: %s\n' \
+                "$snapshot_dir" >&2
+            return 1
+        fi
+        if _snapshot_requires_materialized_engine "$snapshot_dir" && \
+           { [ ! -f "$snapshot_dir/scripts/installer-engine.sh" ] || \
+             [ ! -f "$snapshot_dir/scripts/installer-engine.ps1" ]; }; then
             printf 'ERROR: existing agent-logger snapshot is incomplete; refusing replacement: %s\n' \
                 "$snapshot_dir" >&2
             return 1
@@ -793,6 +739,8 @@ publish_payload_snapshot() {
             "$snapshot_tmp/.pytest_cache" \
             "$snapshot_tmp/.mypy_cache" \
             "$snapshot_tmp/tests"
+        _materialize_snapshot_libs "$snapshot_tmp"
+        _materialize_snapshot_engine "$snapshot_tmp"
         mv "$snapshot_tmp" "$snapshot_dir"
     fi
 
@@ -827,20 +775,30 @@ install_package() {
   # Self-acquire uv (vendored if absent) + mirror the governed pip index to uv so
   # a solo/standalone install works on a pristine or governed box.
   _ensure_uv_index
-  _ensure_uv || exit 1
+  UV_CMD="$(ensure_uv "${INSTALL_DIR}" tool 1 || true)"
+  if [[ -z "${UV_CMD}" ]]; then
+    printf 'ERROR: uv is required but could not be resolved or acquired\n' >&2
+    exit 1
+  fi
 
-  if ! _venv_healthy "${VENV}"; then
-    if [[ -x "${VENV}/bin/python" ]]; then
-      warn "Existing venv python present but pyvenv.cfg is missing at ${VENV}/pyvenv.cfg (shared interpreter race, #6852) -- rebuilding"
-      rm -rf "${VENV}"
-    fi
+  if [[ ! -x "${VENV}/bin/python" || ! -f "${VENV}/pyvenv.cfg" ]]; then
     _versioned_slot_clean
-    if ! _uv_venv_resilient "${VENV}" --python 3.10 --allow-existing; then
-      _uv_venv_resilient "${VENV}" --allow-existing
+    if ! new_signed_venv "${UV_CMD}" "${VENV}" "3.10"; then
+      printf 'ERROR: Failed to create venv at %s\n' "${VENV}" >&2
+      exit 1
     fi
     chg "created venv at ${VENV}"
   fi
-  _uv_pip_install_resilient --python "${VENV}/bin/python" 'setuptools>=83.0.0' --quiet
+  local setuptools_out
+  if ! setuptools_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" 'setuptools>=83.0.0' --quiet); then
+    printf '%s\n' "$setuptools_out" >&2
+    exit 1
+  fi
+  local pyyaml_out
+  if ! pyyaml_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" 'pyyaml>=6.0' --quiet); then
+    printf '%s\n' "$pyyaml_out" >&2
+    exit 1
+  fi
   # Install vendored first-party dependencies from their local paths before the
   # main package, then install agent-logger itself with --no-deps so deep
   # staged payload paths do not force uv to rebuild the same path dependency
@@ -850,14 +808,22 @@ install_package() {
     cfg_migrate_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/config-migrate"
   fi
   if [ -f "${cfg_migrate_dir}/pyproject.toml" ]; then
-    _uv_pip_install_resilient --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-config-migrate "${cfg_migrate_dir}" --quiet
+    local cfg_migrate_out
+    if ! cfg_migrate_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-config-migrate "${cfg_migrate_dir}" --quiet); then
+      printf '%s\n' "$cfg_migrate_out" >&2
+      exit 1
+    fi
   fi
   local procutil_dir="${PLUGIN_DIR}/libs/agent-procutil"
   if [ ! -f "${procutil_dir}/pyproject.toml" ]; then
     procutil_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/agent-procutil"
   fi
   if [ -f "${procutil_dir}/pyproject.toml" ]; then
-    _uv_pip_install_resilient --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-procutil "${procutil_dir}" --quiet
+    local procutil_out
+    if ! procutil_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-procutil "${procutil_dir}" --quiet); then
+      printf '%s\n' "$procutil_out" >&2
+      exit 1
+    fi
   fi
   # plugin_activation's own transitive deps first, then plugin_activation
   # itself (schema v3's registered-project trust gate; module
@@ -868,23 +834,42 @@ install_package() {
     dropin_registry_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/dropin-registry"
   fi
   if [ -f "${dropin_registry_dir}/pyproject.toml" ]; then
-    _uv_pip_install_resilient --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-dropin-registry "${dropin_registry_dir}" --quiet
+    local dropin_registry_out
+    if ! dropin_registry_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-dropin-registry "${dropin_registry_dir}" --quiet); then
+      printf '%s\n' "$dropin_registry_out" >&2
+      exit 1
+    fi
   fi
   local plugin_resolve_dir="${PLUGIN_DIR}/libs/plugin-resolve"
   if [ ! -f "${plugin_resolve_dir}/pyproject.toml" ]; then
     plugin_resolve_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/plugin-resolve"
   fi
   if [ -f "${plugin_resolve_dir}/pyproject.toml" ]; then
-    _uv_pip_install_resilient --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-plugin-resolve "${plugin_resolve_dir}" --quiet
+    local plugin_resolve_out
+    if ! plugin_resolve_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-plugin-resolve "${plugin_resolve_dir}" --quiet); then
+      printf '%s\n' "$plugin_resolve_out" >&2
+      exit 1
+    fi
   fi
   local plugin_activation_dir="${PLUGIN_DIR}/libs/plugin-activation"
   if [ ! -f "${plugin_activation_dir}/pyproject.toml" ]; then
     plugin_activation_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/plugin-activation"
   fi
   if [ -f "${plugin_activation_dir}/pyproject.toml" ]; then
-    _uv_pip_install_resilient --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-plugin-activation "${plugin_activation_dir}" --quiet
+    local plugin_activation_out
+    if ! plugin_activation_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-plugin-activation "${plugin_activation_dir}" --quiet); then
+      printf '%s\n' "$plugin_activation_out" >&2
+      exit 1
+    fi
   fi
-  _uv_pip_install_resilient --python "${VENV}/bin/python" --no-build-isolation --no-deps "${PLUGIN_DIR}" --quiet
+  export INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="${PLUGIN_DIR}"
+  local install_out
+  if ! install_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --no-deps "${PLUGIN_DIR}" --quiet); then
+    unset INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB
+    printf '%s\n' "$install_out" >&2
+    exit 1
+  fi
+  unset INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB
   ok "installed agent-logger package"
 
   deploy_runtime_helpers
@@ -1148,7 +1133,7 @@ case "${ACTION}" in
     write_units
     systemctl --user daemon-reload
     systemctl --user enable --now "${TIMER_NAME}.timer"
-    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then _write_deploy_manifest; fi
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then write_deploy_manifest "agent-logger" "agent-logger" "${INSTALL_DIR}" "${PLUGIN_DIR}" "${VENV}"; fi
     ok "timer enabled (every 4h)"
     ;;
   stamp)
@@ -1156,14 +1141,14 @@ case "${ACTION}" in
     ;;
   provision)
     if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package; fi
-    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then _write_deploy_manifest; fi
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then write_deploy_manifest "agent-logger" "agent-logger" "${INSTALL_DIR}" "${PLUGIN_DIR}" "${VENV}"; fi
     ok "runtime provisioned"
     ;;
   update)
     if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package; fi
     write_units
     systemctl --user daemon-reload || true
-    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then _write_deploy_manifest; fi
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then write_deploy_manifest "agent-logger" "agent-logger" "${INSTALL_DIR}" "${PLUGIN_DIR}" "${VENV}"; fi
     ok "package + units updated"
     ;;
   uninstall)

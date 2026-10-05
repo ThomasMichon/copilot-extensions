@@ -4,6 +4,8 @@ programmatic, non-agentic, out-of-plugin entry point.
 
 from __future__ import annotations
 
+import pytest
+
 from worktree_manager import __version__
 from worktree_manager import __main__ as entrypoint
 from worktree_manager.__main__ import main
@@ -55,3 +57,44 @@ def test_is_not_a_plugin_payload():
     import worktree_manager
 
     assert not hasattr(worktree_manager, "PLUGIN_MANIFEST")
+
+
+def test_ensure_utf8_streams_reconfigures_a_non_utf8_stdout(monkeypatch):
+    """A console bound to a non-UTF-8 codepage (e.g. Windows' default
+    ``cp1252``) must not crash when a command prints a status glyph like
+    ``\u2713``/``\u2192`` (#5218) -- ``_ensure_utf8_streams`` reconfigures
+    stdout/stderr to UTF-8 regardless of what the process inherited.
+    """
+    import io
+
+    cp1252_stdout = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    cp1252_stderr = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(entrypoint.sys, "stdout", cp1252_stdout)
+    monkeypatch.setattr(entrypoint.sys, "stderr", cp1252_stderr)
+
+    # Before reconfiguring: printing the glyph raises, reproducing the crash.
+    with pytest.raises(UnicodeEncodeError):
+        print("\u2713 done", file=cp1252_stdout)
+        cp1252_stdout.flush()
+
+    entrypoint._ensure_utf8_streams()
+
+    assert cp1252_stdout.encoding.lower().replace("_", "-") == "utf-8"
+    assert cp1252_stderr.encoding.lower().replace("_", "-") == "utf-8"
+    # After reconfiguring, the same glyph no longer raises.
+    print("\u2713 done", file=cp1252_stdout)
+    cp1252_stdout.flush()
+
+
+def test_ensure_utf8_streams_tolerates_a_stream_without_reconfigure():
+    """A stream lacking ``reconfigure`` (e.g. a plain pipe/mock in a test
+    harness) must not make this best-effort guard raise."""
+
+    class _NoReconfigure:
+        pass
+
+    stream = _NoReconfigure()
+    assert getattr(stream, "reconfigure", None) is None
+    # Exercises the ``reconfigure is None: continue`` branch directly;
+    # _ensure_utf8_streams() itself only ever touches sys.stdout/sys.stderr.
+    entrypoint._ensure_utf8_streams()

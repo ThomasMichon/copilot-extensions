@@ -250,8 +250,16 @@ def _install_setup_race(screen, *, first_tag: str, second_tag: str) -> dict[str,
     }
 
 
-def test_setup_reload_disposes_payload_when_marshal_back_to_ui_fails():
+def test_setup_reload_records_a_diagnosed_failure_when_marshal_back_to_ui_fails():
+    """#5220: when ``call_from_thread`` itself raises (most commonly the
+    App's event loop not running, or already stopped/shutting down), the
+    collected payload must not be silently dropped -- a diagnosed failure
+    (the real exception) must land in ``_setup_failed_epoch`` so a poller
+    (capture.py's ``_wait_for_initial_setup``) sees the actual cause instead
+    of spinning until its own unrelated timeout.
+    """
     disposed = threading.Event()
+    failed = threading.Event()
 
     class _Loader:
         def cancel(self):
@@ -271,6 +279,7 @@ def test_setup_reload_disposes_payload_when_marshal_back_to_ui_fails():
             self._pending_setup_payloads = {}
             self._setup_payloads_lock = threading.Lock()
             self.applied = []
+            self.failures: list[tuple[int, Exception]] = []
 
         def _prime_setup_reload(self):
             return None
@@ -290,15 +299,83 @@ def test_setup_reload_disposes_payload_when_marshal_back_to_ui_fails():
             self.applied.append(payload)
 
         def _apply_setup_failure(self, epoch, err):
-            raise AssertionError(f"unexpected failure path: {epoch} {err}")
+            self.failures.append((epoch, err))
+            failed.set()
 
         def refresh(self):
             return None
 
     screen = _Screen()
-    screen._start_setup_reload_worker()
+    epoch = screen._start_setup_reload_worker()
     assert disposed.wait(timeout=5)
+    assert failed.wait(timeout=5)
     assert screen.applied == []
+    assert len(screen.failures) == 1
+    failed_epoch, err = screen.failures[0]
+    assert failed_epoch == epoch
+    assert "app already exited" in str(err)
+
+
+def test_setup_reload_records_a_diagnosed_failure_when_app_is_unresolvable():
+    """#5220's other traced failure mode: ``self.app`` raising/being ``None``
+    when the worker was scheduled (e.g. the screen wasn't yet mounted into
+    a running App). Must record a diagnosed failure, not drop silently.
+    """
+    disposed = threading.Event()
+    failed = threading.Event()
+
+    class _Loader:
+        def cancel(self):
+            disposed.set()
+
+    class _Screen(PickerScreenRuntimeMixin):
+        def __init__(self):
+            self._bg_cancel = threading.Event()
+            self._setup_epoch = 0
+            self._setup_applied_epoch = 0
+            self._setup_failed_epoch = 0
+            self._pending_setup_payloads = {}
+            self._setup_payloads_lock = threading.Lock()
+            self.applied = []
+            self.failures: list[tuple[int, Exception]] = []
+
+        @property
+        def app(self):
+            raise RuntimeError("no active app for this screen")
+
+        def _prime_setup_reload(self):
+            return None
+
+        def _collect_setup_payload(self):
+            return _payload("live").__class__(
+                **{
+                    **_payload("live").__dict__,
+                    "loader": _Loader(),
+                }
+            )
+
+        def _invalidate_setup_reload_caches(self):
+            return None
+
+        def _apply_setup_payload(self, payload):
+            self.applied.append(payload)
+
+        def _apply_setup_failure(self, epoch, err):
+            self.failures.append((epoch, err))
+            failed.set()
+
+        def refresh(self):
+            return None
+
+    screen = _Screen()
+    epoch = screen._start_setup_reload_worker()
+    assert disposed.wait(timeout=5)
+    assert failed.wait(timeout=5)
+    assert screen.applied == []
+    assert len(screen.failures) == 1
+    failed_epoch, err = screen.failures[0]
+    assert failed_epoch == epoch
+    assert "no active app" in str(err)
 
 
 def test_setup_reload_unmount_disposes_payload_if_marshalled_callback_never_runs():
