@@ -176,10 +176,15 @@ def related_plugins_for_repo(
     """Related-repo plugins the control plane side-loads for ``repo``.
 
     ``repo`` is a dispatched target's workspace repo (e.g.
-    ``example-org/example-web-codespaces``). It is matched (case-insensitive)
-    against each related entry's ``locus.codespace.repo`` /
-    ``locus.container.repo``; the first matching entry's ``plugins`` are
-    returned. Fail-safe: unknown repo / missing files -> ``[]``.
+    ``example-org/example-web-codespaces``) **or** a static-registry
+    project/repo name (e.g. ``example-web``, for a local-loopback or SSH
+    target with no separate CodeSpace/container workspace repo of its own).
+    Matched (case-insensitive) against each related entry's
+    ``locus.codespace.repo`` / ``locus.container.repo``, falling back to the
+    entry's own registry key -- the project name itself, which is what a
+    local/SSH static target's ``repo`` actually is. The first matching
+    entry's ``plugins`` are returned. Fail-safe: unknown repo / missing files
+    -> ``[]``.
     """
     if not repo:
         return []
@@ -191,9 +196,11 @@ def related_plugins_for_repo(
         related = data.get("related")
         if not isinstance(related, dict):
             continue
-        for entry in related.values():
+        for key, entry in related.items():
             if not isinstance(entry, dict):
                 continue
-            if any(r.lower() == target for r in _entry_repos(entry)):
+            if key.lower() == target or any(
+                r.lower() == target for r in _entry_repos(entry)
+            ):
                 return _parse_plugin_items(entry.get("plugins"))
     return []

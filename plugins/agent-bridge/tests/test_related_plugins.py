@@ -85,6 +85,37 @@ def test_container_repo_also_matches(tmp_path: Path):
     assert [r.source for r in refs] == ["only@mkt"]
 
 
+def test_entry_key_matches_for_local_ssh_targets(tmp_path: Path):
+    # A static-registry local/SSH target has no codespace/container repo
+    # coordinate of its own -- only the related.yaml entry's own registry
+    # key, which is what a local-loopback/SSH dispatch's ``project`` is.
+    _write_related(
+        tmp_path,
+        "related:\n"
+        "  copilot-extensions:\n"
+        "    locus:\n"
+        "      preferred: local\n"
+        "      machines: [dev6]\n"
+        "    plugins:\n"
+        "      - only@mkt\n",
+    )
+    refs = rp.related_plugins_for_repo("copilot-extensions", anchors=[tmp_path])
+    assert [r.source for r in refs] == ["only@mkt"]
+
+
+def test_entry_key_match_is_case_insensitive(tmp_path: Path):
+    _write_related(
+        tmp_path,
+        "related:\n"
+        "  Copilot-Extensions:\n"
+        "    locus: { preferred: local }\n"
+        "    plugins:\n"
+        "      - only@mkt\n",
+    )
+    refs = rp.related_plugins_for_repo("copilot-extensions", anchors=[tmp_path])
+    assert [r.source for r in refs] == ["only@mkt"]
+
+
 def test_control_plane_anchors_from_topology(tmp_path, monkeypatch):
     # A topology whose machines_yaml lives at an anchor with related.yaml.
     _write_related(tmp_path, _RELATED)

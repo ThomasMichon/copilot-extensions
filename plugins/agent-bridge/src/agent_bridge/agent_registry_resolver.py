@@ -580,6 +580,24 @@ class AgentResolver:
             log.debug("own-plugin arg staging failed: %s", exc)
             return []
 
+    def _related_plugin_args(self, config) -> list[str]:
+        """``--plugin-dir`` args for control-repo-declared related plugins.
+
+        The local-loopback counterpart of ``extra_plugins`` staging for a
+        namespace-resolved (``codespace:``/``container:``) target: resolves
+        ``related_plugins_for_repo`` against the launching repo's own project
+        name, since a local-loopback target shares this machine's filesystem
+        and needs no remote staging.
+        """
+        try:
+            from .repo_own_plugins import related_plugin_dir_args
+
+            project = getattr(config, "project", None)
+            return related_plugin_dir_args(project)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.debug("related-plugin arg resolution failed: %s", exc)
+            return []
+
     def _resolve_static(self, agent_name: str) -> SpawnTarget:
         """Resolve via the static / auto-discovered registry."""
         canonical = self.canonical_agent_name(agent_name)
@@ -607,7 +625,11 @@ class AgentResolver:
                 type="local",
                 cwd=config.cwd,
                 copilot_path=config.copilot_path,
-                copilot_args=config.copilot_args + self._own_plugin_args(config),
+                copilot_args=(
+                    config.copilot_args
+                    + self._own_plugin_args(config)
+                    + self._related_plugin_args(config)
+                ),
                 env=config.env,
                 project=config.project,
                 mcp_servers=config.mcp_servers,
@@ -647,7 +669,11 @@ class AgentResolver:
                 type="local",
                 cwd=config.cwd,
                 copilot_path=config.copilot_path,
-                copilot_args=config.copilot_args + self._own_plugin_args(config),
+                copilot_args=(
+                    config.copilot_args
+                    + self._own_plugin_args(config)
+                    + self._related_plugin_args(config)
+                ),
                 env=config.env,
                 project=config.project,
                 mcp_servers=config.mcp_servers,

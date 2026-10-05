@@ -513,13 +513,30 @@ def _resolve_local_binstub(project: str) -> str:
     ``asyncio.create_subprocess_exec`` never consults Windows' ``PATHEXT``
     the way a shell does, so an extensionless name can't resolve to the
     installed ``.cmd``/``.ps1`` shim (``FileNotFoundError: [WinError 2]``).
-    ``shutil.which`` does the same PATHEXT-aware lookup on every platform.
+
+    ``shutil.which`` only applies its own PATHEXT-aware suffix search when
+    given a **bare** command name; a candidate that already contains a
+    directory component (like the explicit ``~/.local/bin/<project>`` path
+    below) is checked for an *exact* match only, with no suffix search at
+    all -- so it silently misses the installed ``.cmd``/``.ps1`` shim sitting
+    right next to it. Try the exact name first, then each ``PATHEXT`` suffix
+    directly against that same directory, before falling back to a bare
+    ``shutil.which(project)`` PATH search.
     """
     import shutil
     from pathlib import Path
 
     explicit = Path.home() / ".local" / "bin" / project
-    return shutil.which(str(explicit)) or shutil.which(project) or project
+    if explicit.is_file():
+        return str(explicit)
+    if os.name == "nt":
+        for ext in os.environ.get("PATHEXT", "").split(os.pathsep):
+            if not ext:
+                continue
+            candidate = explicit.with_name(explicit.name + ext)
+            if candidate.is_file():
+                return str(candidate)
+    return shutil.which(project) or project
 
 
 async def _run_local_ex(

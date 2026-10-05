@@ -13,8 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from agent_bridge import repo_own_plugins
+from agent_bridge import related_plugins, repo_own_plugins
 from agent_bridge.repo_own_plugins import repo_plugin_dir_args
+from agent_bridge.transport import PluginRef
 
 
 def _write(path: Path, data: dict) -> None:
@@ -318,3 +319,76 @@ def test_claude_settings_local_overrides_claude_base(tmp_path):
     args = repo_plugin_dir_args(anchor)
 
     assert str(anchor / ".ai" / "cap") in args
+
+
+# ---------------------------------------------------------------------------
+# `related_plugin_dir_args` -- the local-loopback counterpart of a
+# namespace-resolved target's ``extra_plugins`` staging: resolves a
+# control-repo-declared related plugin against the dispatching machine's own
+# control-plane anchors (no remote copy -- loopback shares this filesystem).
+# ---------------------------------------------------------------------------
+
+def test_related_plugin_resolved_from_declaring_anchor(tmp_path, monkeypatch):
+    control_anchor = tmp_path / "control-repo"
+    _make_local_marketplace(control_anchor / ".ai", "control-local", "enhancer")
+    # The marketplace manifest above is Copilot-native shaped; point the
+    # control anchor's own settings at it as a local marketplace.
+    _make_repo(
+        control_anchor,
+        enabled={},
+        marketplaces={
+            "control-local": {
+                "source": {"source": "directory", "path": str(control_anchor / ".ai")}
+            }
+        },
+    )
+    repo_own_plugins._INSTALLED = tmp_path / "installed"
+
+    monkeypatch.setattr(
+        related_plugins,
+        "related_plugins_for_repo",
+        lambda repo, anchors=None: [PluginRef("enhancer@control-local", enable=True)],
+    )
+
+    args = repo_own_plugins.related_plugin_dir_args(
+        "target-repo", repo_roots=[control_anchor]
+    )
+
+    assert args == [
+        "--plugin-dir", str(control_anchor / ".ai" / "plugins" / "enhancer"),
+    ]
+
+
+def test_related_plugin_falls_back_to_installed(tmp_path, monkeypatch):
+    installed = tmp_path / "installed"
+    _write(installed / "control-local" / "enhancer" / "plugin.json", {"name": "enhancer"})
+    repo_own_plugins._INSTALLED = installed
+
+    monkeypatch.setattr(
+        related_plugins,
+        "related_plugins_for_repo",
+        lambda repo, anchors=None: [PluginRef("enhancer@control-local", enable=True)],
+    )
+
+    args = repo_own_plugins.related_plugin_dir_args("target-repo", repo_roots=[])
+
+    assert args == ["--plugin-dir", str(installed / "control-local" / "enhancer")]
+
+
+def test_related_plugin_unresolvable_is_skipped_not_raised(tmp_path, monkeypatch):
+    repo_own_plugins._INSTALLED = tmp_path / "installed"
+    monkeypatch.setattr(
+        related_plugins,
+        "related_plugins_for_repo",
+        lambda repo, anchors=None: [PluginRef("ghost@nowhere", enable=True)],
+    )
+
+    assert repo_own_plugins.related_plugin_dir_args("target-repo", repo_roots=[]) == []
+
+
+def test_related_plugin_no_refs_returns_empty(monkeypatch):
+    monkeypatch.setattr(
+        related_plugins, "related_plugins_for_repo", lambda repo, anchors=None: [],
+    )
+    assert repo_own_plugins.related_plugin_dir_args("target-repo") == []
+    assert repo_own_plugins.related_plugin_dir_args(None) == []
