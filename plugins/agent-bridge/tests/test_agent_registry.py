@@ -2139,6 +2139,53 @@ class TestVenueBoundResolve:
         assert "/related/SPO.Core" in target.copilot_args
 
     @pytest.mark.asyncio
+    async def test_repo_at_machine_rebind_never_re_resolves_old_project(self):
+        # Regression (#5306 review): the old approach re-resolved the
+        # venue's default project's plugin args a SECOND time to compute a
+        # "stale suffix" to strip -- if that second resolution ever
+        # returned something different (a setting changed, a transient
+        # failure) the strip would silently fail and leave the default
+        # project's plugins attached alongside the requested repo's. The
+        # fix rebuilds copilot_args from old_config.copilot_args directly,
+        # so _own_plugin_args/_related_plugin_args must never be called
+        # with the OLD ("dotfiles") project at all during the rebind --
+        # only with the final bound ("SPO.Core") one.
+        from unittest.mock import patch
+        local = self.machines["host-dev6"]
+        own_calls: list[str] = []
+        related_calls: list[str] = []
+
+        def _own(project, cwd=None):
+            own_calls.append(project)
+            # Deliberately returns something DIFFERENT each time it's
+            # called for "dotfiles" -- proves this project is never
+            # re-resolved a second time (the old bug's exact failure mode).
+            if project == "dotfiles":
+                return ["--plugin-dir", f"/own/dotfiles-call-{len(own_calls)}"]
+            return ["--plugin-dir", f"/own/{project}"]
+
+        def _related(project):
+            related_calls.append(project)
+            return ["--plugin-dir", f"/related/{project}"]
+
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local, "windows"),
+        ):
+            resolver = AgentResolver(self.agents, self.machines)
+            with (
+                patch.object(resolver, "_own_plugin_args", side_effect=_own),
+                patch.object(resolver, "_related_plugin_args", side_effect=_related),
+            ):
+                target = await resolver.resolve_async("SPO.Core@dev6")
+
+        assert own_calls.count("dotfiles") == 1
+        assert related_calls.count("dotfiles") == 1
+        assert "/own/dotfiles-call-1" not in target.copilot_args
+        assert "/own/SPO.Core" in target.copilot_args
+        assert "/related/SPO.Core" in target.copilot_args
+
+    @pytest.mark.asyncio
     async def test_repo_at_machine_rebind_preserves_cwd_fallback(self):
         # Regression (#5306 review): a venue whose own project has no
         # registry anchor resolves its own-plugin args via the cwd fallback

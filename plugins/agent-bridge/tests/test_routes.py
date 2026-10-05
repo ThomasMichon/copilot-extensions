@@ -3331,6 +3331,38 @@ def test_resolve_local_binstub_normalizes_pathext_whitespace_and_dot(
 
 
 @pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="PATHEXT fallback is a Windows-only concern.",
+)
+@pytest.mark.parametrize("pathext_value", [None, ""])
+def test_resolve_local_binstub_falls_back_to_default_pathext_when_unset_or_empty(
+    pathext_value, tmp_path, monkeypatch,
+) -> None:
+    """Regression (#5306 review): an unset OR empty ``PATHEXT`` must not
+    silently zero every suffix candidate -- fall back to the same built-in
+    default list ``shutil.which`` itself uses, or an extensionless project
+    name misses an existing ``.cmd`` shim and falls through to the
+    unresolved name."""
+    from pathlib import Path
+
+    from agent_bridge.routes.worktrees import _resolve_local_binstub
+
+    bin_dir = tmp_path / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    shim = bin_dir / "private-downstream-repo.cmd"
+    shim.write_text("@echo off\n")
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    if pathext_value is None:
+        monkeypatch.delenv("PATHEXT", raising=False)
+    else:
+        monkeypatch.setenv("PATHEXT", pathext_value)
+    resolved = _resolve_local_binstub("private-downstream-repo")
+    import os as _os
+    assert _os.path.normcase(resolved) == _os.path.normcase(str(shim))
+
+
+@pytest.mark.skipif(
     sys.platform == "win32",
     reason="POSIX execute-permission semantics; Windows has no X_OK concept "
     "for a plain file and always takes the PATHEXT branch instead.",

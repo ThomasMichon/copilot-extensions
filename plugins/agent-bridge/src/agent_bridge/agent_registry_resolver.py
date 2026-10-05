@@ -403,43 +403,46 @@ class AgentResolver:
         """Rebind a machine/local venue target to run ``<repo>``'s binstub.
 
         ``target`` was resolved via ``_resolve_static(venue)`` against
-        *venue*'s own default project. Only a **local-loopback** target's
-        ``copilot_args`` carries that default project's own-plugin and
-        related-plugin ``--plugin-dir`` args baked in (the ``type="ssh"``
-        branches never add them -- that's Phase 2 work) -- strip exactly
-        that (known, reconstructible) suffix before appending the final
-        bound ``repo``'s own args, and leave a genuine remote-SSH target's
-        ``copilot_args`` (its explicitly configured values) completely
-        untouched: recomputing "stale" args for a project that was never
-        actually appended risks matching a real, user-configured suffix by
-        coincidence and silently deleting it. ``target.cwd`` is the venue's
-        own checkout, not the bound repo's -- it is only a valid anchor
-        fallback for the final resolution when ``repo`` IS that same
-        default project (no actual project change, just re-confirming the
-        same one); for any other ``repo`` it must not be passed at all, or
-        a different, unrelated project would silently resolve the venue's
-        own checkout's plugins as if they belonged to it.
+        *venue*'s own default project, so a local-loopback target's
+        ``copilot_args`` already has that default project's own-plugin and
+        related-plugin ``--plugin-dir`` args appended (the ``type="ssh"``
+        branches never add them -- that's Phase 2 work). Rather than trying
+        to strip that suffix back out of ``target.copilot_args`` (which
+        requires re-resolving the exact same plugin args a second time and
+        trusting they come back byte-identical -- a changed setting or a
+        transient resolution failure between the two calls would silently
+        leave the default project's plugins attached alongside the
+        requested repo's), rebuild ``copilot_args`` from
+        ``old_config.copilot_args`` -- the stable, already-known **base**
+        before any plugin resolution was ever appended -- plus a single
+        fresh resolution for the final bound ``repo``. A genuine remote-SSH
+        target's ``copilot_args`` (its explicitly configured values) is
+        left completely untouched -- it never had plugin args appended in
+        the first place. ``target.cwd`` is the venue's own checkout, not
+        the bound repo's -- it is only a valid anchor fallback for the
+        final resolution when ``repo`` IS that same default project (no
+        actual project change, just re-confirming the same one); for any
+        other ``repo`` it must not be passed at all, or a different,
+        unrelated project would silently resolve the venue's own
+        checkout's plugins as if they belonged to it.
         """
         if target.type == "local":
             import dataclasses
 
             canonical = self.canonical_agent_name(venue)
             old_config = self._agents.get(canonical) if canonical else None
-            copilot_args = list(target.copilot_args)
-            if old_config is not None:
-                stale = (
-                    self._own_plugin_args(old_config.project, old_config.cwd)
-                    + self._related_plugin_args(old_config.project)
-                )
-                if stale and copilot_args[-len(stale):] == stale:
-                    copilot_args = copilot_args[: -len(stale)]
+            base_args = (
+                list(old_config.copilot_args)
+                if old_config is not None
+                else list(target.copilot_args)
+            )
             cwd_fallback = (
                 target.cwd
                 if old_config is not None and repo == old_config.project
                 else None
             )
             copilot_args = (
-                copilot_args
+                base_args
                 + self._own_plugin_args(repo, cwd_fallback)
                 + self._related_plugin_args(repo)
             )

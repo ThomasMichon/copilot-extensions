@@ -547,11 +547,18 @@ def _resolve_local_binstub(project: str) -> str:
     # Deliberately narrower than PATHEXT (which also lists .PS1/.PY/.JS/...
     # for an interactive shell's own lookup, not direct process creation).
     direct_launch_exts = {".COM", ".EXE", ".BAT", ".CMD"}
+    # shutil.which's own hardcoded fallback when PATHEXT is unset/empty in
+    # the environment (cmd.exe itself falls back to the same built-in list)
+    # -- without it, a missing/blank PATHEXT silently zeroes every suffix
+    # candidate below and every lookup falls through to the unresolved name.
+    _win_default_pathext = ".COM;.EXE;.BAT;.CMD;.VBS;.JS;.WS;.MSC"
 
     explicit = Path.home() / ".local" / "bin" / project
     if os.name == "nt":
         pathext = []
-        for raw in os.environ.get("PATHEXT", "").split(os.pathsep):
+        for raw in (os.environ.get("PATHEXT") or _win_default_pathext).split(
+            os.pathsep
+        ):
             # Entries can carry stray whitespace, and (rarely) omit the
             # leading dot -- normalize both before matching/building a
             # candidate name, or a well-formed extension like " .CMD" would
