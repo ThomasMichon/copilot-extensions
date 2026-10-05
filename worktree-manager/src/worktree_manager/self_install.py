@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 import uuid
 from dataclasses import dataclass
@@ -180,31 +181,6 @@ _SLOT_KEY_FILES = (
     "src/worktree_manager/__init__.py",
     "src/worktree_manager/__main__.py",
 )
-
-
-def _invalidate_slot_completion(slot: Path) -> None:
-    """Remove ``slot``'s completion marker, if any, before any mutation of
-    ``slot`` begins. A slot is proven complete only by this marker having
-    been published as the LAST step of a fully successful
-    ``_copy_payload_unsafe()`` -- invalidating it first (rather than
-    relying on the mutation that follows to remove it, which can itself
-    fail partway through) guarantees no stale marker from a slot's
-    previous occupant can ever survive an interrupted rebuild of the same
-    path and be mistaken for proof that the NEW content is complete.
-
-    Only a missing marker (the ordinary case: no prior install, or one
-    already invalidated) is swallowed. Any OTHER failure -- a
-    ``PermissionError`` from the marker still being held open, most
-    notably -- must propagate rather than let mutation proceed with a
-    stale marker still in place: ``_copy_payload``'s own boundary
-    normalizes it to the one exception type ``self_install()`` catches,
-    aborting the install instead of silently risking exactly the
-    stale-proof-of-completeness state this marker exists to prevent.
-    """
-    try:
-        (slot / _SLOT_COMPLETE_MARKER).unlink()
-    except FileNotFoundError:
-        pass
 
 
 def _mark_slot_complete(slot: Path) -> None:
@@ -424,6 +400,60 @@ def _core_install_satisfied(version: str, root: Path | None = None) -> bool:
     )
 
 
+def _core_install_satisfied_gaps(version: str, root: Path | None = None) -> list[str]:
+    """Human-readable reasons :func:`_core_install_satisfied` returned
+    ``False`` for ``version`` -- one entry per failing sub-check.
+
+    A caller falling through to a full reinstall on a ``False`` result must
+    never do so silently (#5219's requested fix 2): this is what let a
+    manifest-only gap silently escalate to "full reinstall" in practice,
+    even while ``doctor`` was reporting the very same install as fully
+    healthy (``doctor`` only compares the marker to the running version --
+    it does not check slot completeness or binstub staleness at all).
+    """
+    r = root or default_root()
+    gaps: list[str] = []
+    cur = current_version(r)
+    if cur != version:
+        gaps.append(f"current-version marker is {cur!r}, not {version!r}")
+    if not _slot_is_complete(version_slot(version, r)):
+        gaps.append(
+            f"slot {version_slot(version, r)} is missing its completion marker "
+            "or a key file"
+        )
+    stub = binstub_present()
+    if stub is None:
+        gaps.append("no binstub found in ~/.local/bin")
+    elif _binstubs_are_stale():
+        gaps.append(f"binstub {stub} content does not match this version's template")
+    return gaps
+
+
+def _currently_running_from(slot: Path) -> bool:
+    """``True`` when *this process's own interpreter* lives inside ``slot``.
+
+    Checked by path containment against the running interpreter
+    (``sys.executable``), never by a version-string comparison -- the whole
+    point is to catch this even when :func:`_core_install_satisfied`
+    incorrectly disagrees that the version matches (#5219). Overwriting
+    such a slot is a **self-overwrite**: on Windows, ``shutil.rmtree``
+    cannot delete the currently-open venv's ``python.exe`` (``WinError 5:
+    Access is denied``), and even where deletion nominally succeeds on
+    another platform, destroying your own on-disk payload mid-execution is
+    never something a reinstall needs to do -- the process already proves
+    this exact version runs.
+    """
+    try:
+        exe = Path(sys.executable).resolve()
+    except OSError:
+        return False
+    try:
+        slot_resolved = slot.resolve()
+    except OSError:
+        slot_resolved = slot
+    return slot_resolved == exe or slot_resolved in exe.parents
+
+
 def needs_install(version: str, root: Path | None = None) -> bool:
     r = root or default_root()
     return not (
@@ -489,117 +519,17 @@ def _write_marker(root: Path, version: str) -> None:
     tmp.replace(root / MARKER)  # atomic publish
 
 
-def _materialize_payload_pointers(payload_dir: Path, slot: Path) -> None:
-    """Expand any vendor-pointer lib copies under a freshly-copied
-    ``slot/libs/*``, AND any `uv`-editable canonical-reference entry in
-    ``slot/pyproject.toml`` (the mechanism that superseded the
-    src-passthrough directory-pointer form -- vendor-pointer-generalization
-    effort, Phase 1), into real, self-contained content -- a standalone
-    self-installed slot (or a self-updated one fetched via git/tarball) has
-    no ``libs/``+``plugins/`` monorepo ancestor of its own, so neither the
-    src-passthrough pointer stub's runtime ``_find_repo_root`` walk NOR a
-    `uv`-editable entry's escaping relative ``path`` can ever resolve
-    there; every pointer/reference MUST be materialized into a real copy
-    before (or as part of) publishing this slot, exactly the way a
-    `main`-branch release already does.
-
-    Uses ``_trusted_pointer_materializer`` -- a real, statically-shipped
-    copy of ``tools/materialize_main.py``'s pointer-expansion core, NOT a
-    dynamic load of the fetched ``tools/materialize_main.py`` itself.
-    ``self_update`` supports user-configured forks/canary refs (see
-    ``source_config.py``), so the fetched tree is untrusted input;
-    dynamically loading and executing a file FROM it would hand a
-    compromised or merely untrusted update source arbitrary code
-    execution with the updater's own privileges. This module's code
-    always comes from the already-installed, already-trusted running
-    process -- only canonical file BYTES are ever read from the fetch.
-
-    ``payload_dir`` is the SOURCE being copied (still-live at the moment
-    this runs, whether a dev checkout or a freshly fetched self_update
-    staging tree -- see ``self_update``'s git-clone/tarball paths, both of
-    which now guarantee a ``libs/`` sibling next to the payload) -- also
-    the correct base a `uv`-editable entry's relative ``path`` was
-    authored against, since ``payload_dir`` and ``slot`` share the same
-    nesting depth (a plain ``copytree``, not a re-rooted layout). Resolves
-    canonical from ``payload_dir.parent`` -- if that ancestor lacks a real
-    ``libs/`` (and thus can't provide canonical content), any pointer/
-    reference found in the copied slot is an unresolvable, permanently-
-    broken import for whoever runs it next, so this raises rather than
-    silently shipping it.
-    """
-    from . import _trusted_pointer_materializer as materializer
-
-    libs_dir = slot / "libs"
-    # Discover pointer markers and uv-editable references FIRST, before
-    # deciding whether canonical is even reachable -- a normal payload with
-    # only real (non-pointer, non-escaping) dependencies has nothing to
-    # materialize at all, so there's no reason to fail (or even inspect)
-    # canonical reachability for it.
-    unresolved = materializer.find_pointers_in_libs_dir(libs_dir) if libs_dir.is_dir() else []
-    try:
-        uv_refs = materializer.find_uv_editable_refs(payload_dir)
-    except materializer.ManifestUnreadable as e:
-        raise RuntimeError(f"cannot install this payload: {e}") from e
-    if not unresolved and not uv_refs:
-        return
-    monorepo_root = payload_dir.parent
-    has_canonical = (monorepo_root / "libs").is_dir()
-    if not has_canonical:
-        names = sorted(p.parent.name for p in unresolved) + sorted(
-            lib for _name, _raw_path, lib, _editable in uv_refs
-        )
-        raise RuntimeError(
-            f"cannot install this payload: libs/{{{', '.join(names)}}} are "
-            "unmaterialized vendor pointers or uv-editable canonical "
-            "references, but no monorepo ancestor (libs/) is reachable "
-            "from the fetched payload to resolve canonical content from -- "
-            "self_update's fetch must provide the full monorepo shape, not "
-            "just the worktree-manager/ subtree"
-        )
-    try:
-        log = materializer.materialize_libs_dir(libs_dir, canonical_root=monorepo_root) if unresolved else []
-        log.extend(materializer.materialize_uv_editable_ref_into(
-            source_consumer_dir=payload_dir, dest_consumer_dir=slot,
-            canonical_root=monorepo_root, dest_root=slot,
-        ) if uv_refs else [])
-    except Exception as e:  # noqa: BLE001 -- normalize ANY materialization
-        # failure (a malformed pointer's json.JSONDecodeError/KeyError, an
-        # OSError from a copy/remove failure, ...) into the one exception
-        # type self_install() knows to catch and translate to its
-        # documented action="error" result -- letting an unexpected
-        # exception type escape here would violate self_update's own
-        # best-effort/non-fatal contract just as readily as a raw
-        # RuntimeError would.
-        raise RuntimeError(
-            f"pointer materialization under {libs_dir} failed: {e}"
-        ) from e
-    failures = [line for line in log if line.startswith("SKIP ")]
-    if failures:
-        raise RuntimeError(
-            "refusing to install this payload: pointer materialization "
-            "was rejected for " + "; ".join(failures)
-        )
-
-
-def _find_any_symlink(tree: Path) -> Path | None:
-    """The first path under (and including) ``tree`` that is a symlink, or
-    ``None`` if none is found. Unlike the pointer-specific checks in
-    ``_materialize_payload_pointers`` (which only ever examine canonical's
-    ``src``/``tests`` and the pointer marker itself), this scans the WHOLE
-    copied payload: a symlink anywhere else in it (unrelated to any vendor
-    pointer) would still survive into the published slot untouched and
-    could resolve outside it at runtime -- ``symlinks=True`` on the
-    copytree calls preserves such a symlink faithfully rather than
-    dereferencing it, but preservation alone doesn't make it SAFE to
-    publish; this is the final blanket check before a slot goes live."""
-    if tree.is_symlink():
-        return tree
-    if not tree.is_dir():
-        return None
-    for entry in sorted(tree.rglob("*")):
-        if entry.is_symlink():
-            return entry
-    return None
+# Payload build/validate/atomic-publish -- see self_install_payload.py's own
+# module docstring for why this is a separate module (purely a line-count
+# split; no behavior change). _copy_payload is imported here so the one
+# existing call site below (and tests that
+# `monkeypatch.setattr(si, "_copy_payload", ...)`) keep working unchanged
+# against this module's own namespace. Its own internal helpers
+# (_copy_payload_unsafe, _materialize_payload_pointers, _find_any_symlink,
+# _swap_in_staged_slot) have no other caller in this module and are not
+# re-exported here -- reach them via `self_install_payload` directly if ever
+# needed.
+from .self_install_payload import _copy_payload
 
 
 class _CutoverLockBusy(Exception):
@@ -681,84 +611,6 @@ def _reap_stranded_cutover_passive(root: Path, mux_daemon_cutover) -> None:
         mux_daemon_cutover._reap_abandoned_passive(root, record)
     except Exception:  # noqa: BLE001, S110 -- reap is best-effort, never fatal to install
         pass
-
-
-def _copy_payload(payload_dir: Path, slot: Path) -> None:
-    try:
-        _copy_payload_unsafe(payload_dir, slot)
-    except RuntimeError:
-        # Already our one normalized, self_install()-caught boundary type --
-        # re-raise as-is (don't re-wrap).
-        raise
-    except OSError as e:
-        # shutil.rmtree(slot)/shutil.copytree() can themselves raise a bare
-        # OSError -- most notably a Windows PermissionError (WinError 32)
-        # when the slot directory is still held open by another process's
-        # cwd (a stranded OR still-legitimately-running mux-daemon pinned
-        # there -- see copilot-extensions#4999). self_install() only
-        # catches RuntimeError at its boundary (matching
-        # _materialize_payload_pointers' own boundary below), so any
-        # filesystem failure here must be normalized to that type for
-        # self_install()'s cleanup-and-report ("best-effort slot removal,
-        # report action='error'") to run instead of this exception
-        # escaping uncaught (``_slot_is_complete`` is what then lets a
-        # later run detect and repair a slot that cleanup could not fully
-        # remove).
-        raise RuntimeError(f"copying payload into {slot} failed: {e}") from e
-
-
-def _copy_payload_unsafe(payload_dir: Path, slot: Path) -> None:
-    # Invalidate completion FIRST, before any mutation -- see
-    # _invalidate_slot_completion's own docstring for why this must not be
-    # left to the rmtree below (which can itself fail partway through).
-    _invalidate_slot_completion(slot)
-    if slot.exists():
-        shutil.rmtree(slot)
-    if payload_dir.is_symlink():
-        # symlinks=True on the copytree below only protects symlinks
-        # encountered DURING the walk of payload_dir's own tree -- it
-        # cannot protect payload_dir being a symlink ITSELF (shutil.
-        # copytree always creates dst as a real directory, so there's
-        # nowhere for a preserved-root-symlink object to go). In the
-        # git-backed self_update path, a checked-out worktree-manager/
-        # dir could itself be a symlink; the earlier
-        # (payload/"pyproject.toml").is_file() check would still pass
-        # (it follows the link), copytree would dereference it, and
-        # _find_any_symlink(slot) afterward would see no link at all
-        # (the slot's own root is never included in its own scan).
-        raise RuntimeError(
-            f"refusing to install this payload: {payload_dir} is a "
-            "symlink -- a payload root must be a real directory, not a "
-            "link to an external tree"
-        )
-    ignore = shutil.ignore_patterns(".git", ".venv", "__pycache__", "*.pyc")
-    # symlinks=True: a payload staged by self_update's tarball fetch may
-    # carry a preserved (not dereferenced -- see _fetch_via_tarball's own
-    # symlinks=True) symlink; copying it here with the default
-    # symlinks=False would dereference it at this second hop, still
-    # smuggling external content into the published slot one step later
-    # and defeating _materialize_payload_pointers' downstream symlink
-    # rejection.
-    shutil.copytree(payload_dir, slot, ignore=ignore, symlinks=True)
-    bad = _find_any_symlink(slot)
-    if bad is not None:
-        shutil.rmtree(slot, ignore_errors=True)
-        raise RuntimeError(
-            f"refusing to install this payload: {bad} is a symlink -- a "
-            "self-installed slot must contain only real files (a symlink "
-            "anywhere in it could resolve outside the slot at runtime)"
-        )
-    _materialize_payload_pointers(payload_dir, slot)
-    missing = [rel for rel in _SLOT_KEY_FILES if not (slot / rel).is_file()]
-    if missing:
-        raise RuntimeError(
-            f"refusing to mark {slot} complete: payload is missing "
-            + ", ".join(missing)
-        )
-    # Published only here, as the LAST step of a fully successful copy +
-    # materialization that has itself verified every _SLOT_KEY_FILES entry
-    # is present -- this is what proves the slot complete.
-    _mark_slot_complete(slot)
 
 
 # ── legacy artifact recognition + cleanup ────────────────────────────────
@@ -986,20 +838,40 @@ def self_install(
         if not needs_install(version, r):
             return SelfInstallResult(version=version, action="already-current", root=str(r),
                                      slot=str(slot), marker=version, cleaned=cleaned)
+        if _currently_running_from(slot):
+            # This process's own interpreter lives inside `slot`.
+            # `_core_install_satisfied` disagreeing with what `doctor`
+            # reports healthy is the commonest trigger (see
+            # `_core_install_satisfied_gaps` below) -- without this guard
+            # that disagreement falls through to a full reinstall that
+            # tries to overwrite the currently-executing slot, which
+            # Windows cannot satisfy (WinError 5 on the open `python.exe`)
+            # and which leaves the install permanently wedged (#5219).
+            # Refuse clearly instead: the process already proves this
+            # exact version runs, so there is nothing a reinstall could
+            # fix here anyway.
+            gaps = _core_install_satisfied_gaps(version, r)
+            reason = (
+                f"already running worktree-manager {version} from {slot} -- "
+                "refusing to reinstall over the currently-executing slot"
+            )
+            if gaps:
+                reason += f" (would-be reinstall triggers: {'; '.join(gaps)})"
+            return SelfInstallResult(version=version, action="already-current", root=str(r),
+                                     slot=str(slot), marker=current_version(r),
+                                     reason=reason, cleaned=cleaned)
         _reap_stranded_cutover_passive(r, mux_daemon_cutover)
         try:
             _copy_payload(pd, slot)
         except RuntimeError as e:
-            # _materialize_payload_pointers() raises when a vendor-pointer copy
-            # inside the payload can't be resolved/expanded -- _copy_payload
-            # has already copytree'd the payload into slot by that point, so a
-            # bare re-raise would leave a partially-populated, broken slot on
-            # disk that a later needs_install() version-existence check could
-            # mistake for a valid install and skip retrying. Remove it so a
-            # retry starts clean, and report the failure rather than crashing
-            # the caller (self_update's own contract is best-effort/non-fatal).
-            if slot.exists():
-                shutil.rmtree(slot, ignore_errors=True)
+            # _copy_payload builds the replacement entirely in a sibling
+            # staging directory and only atomically swaps it into `slot`
+            # once proven complete (#5219) -- any failure along that path
+            # (an unresolvable vendor-pointer copy, a missing key file, a
+            # transient OS error) leaves a previously-good `slot`
+            # untouched (or still absent, for a fresh install), so there
+            # is nothing to clean up here; just report the failure
+            # (self_update's own contract is best-effort/non-fatal).
             return SelfInstallResult(version=version, action="error", root=str(r),
                                      slot=str(slot), reason=str(e), cleaned=cleaned)
     finally:
