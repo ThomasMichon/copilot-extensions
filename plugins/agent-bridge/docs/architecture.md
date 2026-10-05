@@ -223,7 +223,7 @@ re-read already-consumed content and never moves the cursor. See
 [Streaming & the delivery cursor](../README.md#streaming--the-delivery-cursor)
 in the README for the consumer model.
 
-**Backward paging** (protocol version 21,
+**Backward paging** (protocol version 22,
 `EVENTS_BEFORE_PAGING_PROTOCOL_VERSION`): `GET .../events?before=<id>&limit=<n>`
 is not a stream. It returns one JSON page `{session_id, events, has_more}` with
 the newest `limit` (default 200, max 1000) events whose id is `< before`, in
