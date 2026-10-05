@@ -103,7 +103,8 @@ always render as `FINAL`. The canonical closure descriptor
   default `status-interval` tick never fetches), a requested `--fetch` that
   itself failed, one or more held claims, or one or more open follow-ups. A
   `MERGED` block may carry a compact `C<N>`/`F<N>` marker suffix for held
-  claims / open follow-ups.
+  claims / open follow-ups, plus an `XM<N>` marker (see below) when some of
+  those held claims are purely cross-machine.
 
 A cached or fetch-free descriptor **never** reports `FINAL`, even when the
 underlying facts would otherwise qualify -- proving a worktree safe to clean
@@ -144,6 +145,25 @@ true). The mux/PSMux status segment (below) renders `compact` directly, so
 it picks up both markers automatically; the Picker does not yet consume
 `compact` (still a separate, unstarted slice -- see the 2026-09-15 Journal
 entry on Picker label parity).
+
+##### Cross-machine held claims (worktree-claims-transitive-finalization, Phase 4)
+
+A held `worktree`-kind claim naming a **different** machine isn't stuck on
+anything local -- `finalize`'s own `_settle_parent_obligation` explicitly
+defers that case to the lease-mirror/sweep rather than resolving it inline
+(see [architecture.md](architecture.md)). When **every** held claim on a
+worktree is one of these, `cleanup_disposition` reports the
+`held-claims-cross-machine` bucket instead of the generic `held-claims` --
+same safety posture (still not cleanable, still `blocked`), but a distinct
+reason ("cross-machine claim settling (self-clears)") so an operator isn't
+left guessing why an otherwise-clean worktree hasn't gone `FINAL`. A single
+same-machine or non-`worktree`-kind claim in the mix keeps the generic
+bucket -- never collapsed into "self-clears" when something might genuinely
+need attention. The sub-count rides the `open_claims` fact as
+`cross_machine_held` and renders its own `XM<N>` `compact` marker (alongside
+the ordinary `C<N>`) -- both additive: the wire-safe `held-claims` blocker
+code and `DESCRIPTOR_VERSION` are unchanged, so an older consumer degrades
+gracefully to the generic reading.
 
 ### The status core — an orthogonal disposition layer
 

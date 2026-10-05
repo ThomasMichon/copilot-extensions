@@ -1,0 +1,9 @@
+{
+  "comment": "Distinguish a purely cross-machine held claim (self-clears via the lease-mirror/sweep) from a genuinely held one: new held-claims-cross-machine cleanup bucket, XM<N> compact marker, and Picker disposition-chip entries for held-claims/held-claims-cross-machine (worktree-claims-transitive-finalization effort, Phase 4).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

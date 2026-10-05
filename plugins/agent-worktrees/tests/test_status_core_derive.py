@@ -237,3 +237,28 @@ class TestFollowUpBucket:
     def test_fallback_unflagged_finalized_is_clean(self):
         assert derive._bucket_from_raw(
             {"id": "x", "status": "finalized"}) == "clean"
+
+
+class TestHeldClaimsBucket:
+    """worktree-claims-transitive-finalization (effort), Phase 4: the
+    ``held-claims``/``held-claims-cross-machine`` cleanup buckets emitted by
+    ``prune.cleanup_disposition`` had no disposition-chip entry at all until
+    now (a held-claims-blocked worktree rendered no chip) -- the
+    cross-machine variant needs its own calmer reason distinct from the
+    generic one.
+    """
+
+    def test_held_claims_bucket_has_a_review_chip(self):
+        assert derive.BUCKET_DISPO["held-claims"] == "REVIEW"
+        assert "held-claims" in derive.BUCKET_REASON
+
+    def test_cross_machine_bucket_has_its_own_reason(self):
+        assert derive.BUCKET_DISPO["held-claims-cross-machine"] == "REVIEW"
+        assert derive.BUCKET_REASON["held-claims-cross-machine"] != (
+            derive.BUCKET_REASON["held-claims"])
+
+    def test_authoritative_cross_machine_bucket_passthrough(self):
+        n = derive.norm(
+            _raw(cleanup_bucket="held-claims-cross-machine"),
+            "anomalous-potato", "win")
+        assert n["cleanup_bucket"] == "held-claims-cross-machine"

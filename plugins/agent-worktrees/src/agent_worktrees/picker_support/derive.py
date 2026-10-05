@@ -286,6 +286,8 @@ BUCKET_DISPO = {
     "unused": "REVIEW",
     "conversation": "REVIEW",
     "follow-up": "REVIEW",
+    "held-claims": "REVIEW",
+    "held-claims-cross-machine": "REVIEW",
     "closed-unmerged": "REVIEW",
     "gone": "REVIEW",
     "dirty": "UNSAFE",
@@ -303,6 +305,14 @@ BUCKET_REASON = {
     "unused": "idle · no commits/turns",
     "conversation": "chat history, no commits",
     "follow-up": "agent flagged follow-ups",
+    # worktree-claims-transitive-finalization (effort), Phase 4: a worktree
+    # whose own git/PR state is otherwise clean can still be held open by a
+    # resource claim it holds elsewhere (a codespace, a container, another
+    # worktree...). The cross-machine variant below is a narrower case --
+    # purely a lease-mirror sync lag, not something needing attention -- so it
+    # gets its own, calmer reason text rather than sharing this generic one.
+    "held-claims": "resource claim(s) still held",
+    "held-claims-cross-machine": "cross-machine claim settling (self-clears)",
     "closed-unmerged": "PR closed unmerged",
     "gone": "dir missing",
     "dirty": "uncommitted work",
