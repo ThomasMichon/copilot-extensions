@@ -39,6 +39,7 @@ from .prereqs import detect_baseline, missing
 from .provision import apply as provision_apply
 from .provision import plan as provision_plan
 from .provision import restart_needed
+from .relocated_launch import _relocated_launch_script, _run_relocated_mux_launch
 from .self_install import self_install
 from .self_install import status as self_status
 
@@ -1222,61 +1223,6 @@ def _is_windows() -> bool:
     return os.name == "nt"
 
 
-def _relocated_launch_script():
-    """Locate the Manager-owned launch-session script, this package's own
-    canonical muxed-launch implementation (Phase 3b Sub-slice 2a).
-
-    ``worktree-manager/bin/launch-session.{ps1,sh}`` is copied verbatim into
-    this package's own ``bin/`` sibling directory -- present both in an
-    installed versioned slot (``<root>/versions/<ver>/{src,bin}``) and in a
-    source checkout (``worktree-manager/{src,bin}``), since both layouts put
-    ``bin/`` two levels above this file. Returns ``None`` when the sibling
-    script is absent, so callers degrade to the graceful non-muxed launcher.py
-    path (DQ9) exactly as before this script existed.
-    """
-    root = Path(__file__).resolve().parents[2]
-    name = "launch-session.ps1" if _is_windows() else "launch-session.sh"
-    script = root / "bin" / name
-    return script if script.exists() else None
-
-
-def _run_relocated_mux_launch(req, plan, script) -> int:
-    """Delegate an ordinary local launch to the relocated launch-session
-    script -- the ONE canonical muxed-launch implementation (DQ9). The script
-    performs its own resolve/launch/attach/post-exit; this passes the
-    already-resolved ``plan.worktree_id`` (never re-issuing ``--new``/
-    ``--base``), so a ``mode == "new"`` request cannot create a second
-    worktree by re-triggering creation inside the script's own resolve call.
-    """
-    args = ["--project", req.project]
-    if req.mode == "base":
-        args.append("--base")
-    else:
-        worktree_id = str(getattr(plan, "worktree_id", None) or req.worktree_id or "")
-        if not worktree_id:
-            print("error: could not resolve a worktree id for this launch.")
-            return 1
-        args += ["--worktree-id", worktree_id]
-        if req.mode == "bare-resume":
-            args.append("--bare-resume")
-    if getattr(req, "no_mux", False):
-        os.environ["WORKTREE_NO_MUX"] = "1"
-
-    if _is_windows():
-        argv = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(script), *args]
-        proc = subprocess.Popen(argv)
-        try:
-            return proc.wait()
-        except KeyboardInterrupt:
-            try:
-                return proc.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                return 130  # 128 + SIGINT(2)
-    os.execvp("bash", ["bash", str(script), *args])
-    return 1  # unreachable -- os.execvp replaces the process
-
-
 def _run_launch(req) -> int:
     """Resolve + execute the operator's launch/resume (real engine)."""
     from . import launcher
@@ -1285,7 +1231,11 @@ def _run_launch(req) -> int:
         return code
     if plan.action == "none":
         return plan.exit_code
+    new_window = bool(getattr(req, "new_window", False))
     if plan.action == "remote":
+        if new_window:
+            print('error: "new window" launches are supported only for local worktrees.')
+            return 1
         if getattr(req, "ahp", False):
             print("error: AHP is supported only for same-machine launches")
             return 1
@@ -1330,6 +1280,9 @@ def _run_launch(req) -> int:
                     return 1
                 use_ahp = True
     if use_ahp:
+        if new_window:
+            print('error: "new window" launches are not yet supported for AHP-backed sessions.')
+            return 1
         from . import ahp_provider, engine_client, manager_config
 
         if getattr(req, "machine", None):
@@ -1362,6 +1315,9 @@ def _run_launch(req) -> int:
         script = _relocated_launch_script()
         if script is not None:
             return _run_relocated_mux_launch(req, plan, script)
+    if new_window:
+        print('error: "new window" launches require the relocated launch-session script, which was not found.')
+        return 1
     return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
 
 def _cmd_setup(rest: list[str]) -> int:

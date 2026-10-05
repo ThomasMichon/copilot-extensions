@@ -1,0 +1,13 @@
+{
+  "comment": "Phase 9: relocate 'Launch in new window' terminal-spawning from agent-worktrees into worktree-manager (fixes mux-daemon registration gap, #5210)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "minor"
+    }
+  ]
+}

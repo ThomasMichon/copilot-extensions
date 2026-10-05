@@ -131,13 +131,21 @@ real code, not assumption:
    `agent-worktrees copilot` (`plugins/agent-worktrees/src/agent_worktrees
    /copilot_cli.py:37-57`) already has `--seed` ("Seed prompt injected as
    the session's first interactive turn once Copilot is ready") and
-   `--seed-ready-timeout`, plus `--new`/`--headed` -- its own comment even
-   names "a caller (e.g. the Worktree Manager Picker)" as the reason
-   `--headed` exists. **But the Picker's actual "New worktree" creation
-   flow does NOT go through this command at all** -- `headed_actions.py`'s
-   `open_worktree_cli_headed()` (the ONLY Picker call site that invokes
-   `copilot --headed`) is only reachable for an EXISTING worktree row
-   ("Launch in new window"), never the creation path. The creation path's
+   `--seed-ready-timeout`, plus `--new`. **Note (2026-10-04, Phase 9 of
+   `worktree-manager-control-plane`, #5210):** `copilot --headed` itself has
+   since been retired -- it duplicated terminal-window-spawning mechanics
+   Phase 3b had already relocated out of agent-worktrees, and as a result
+   never ran `launch-session.{ps1,sh}`'s mux-daemon registration.
+   `headed_actions.py`'s `open_worktree_cli_headed()` (the Picker's "Launch
+   in new window" verb, reachable only for an EXISTING worktree row, never
+   this creation path) now calls `_run_launch` in-process with
+   `LaunchRequest.new_window=True` instead -- the window-opening mechanic
+   is a launch-plan MODIFIER on the ordinary resume decision, not a
+   separate command. If this effort still wants a headed/new-window option
+   for the creation path, compose it the same way (`LaunchRequest(mode="new",
+   new_window=True, seed_prompt=...)`), not via the retired
+   `copilot --headed`. **The Picker's actual "New worktree" creation
+   flow does NOT go through `agent-worktrees copilot` at all** -- its
    own `launch-session.ps1`/`.sh` is a separate, older, more elaborate
    script that does NOT currently forward to `agent-worktrees copilot
    --seed` internally (confirmed: no `--seed` reference anywhere in that
@@ -540,7 +548,7 @@ real code, not assumption:
       -> real worktree + real mux session + real Copilot process) was
       chained end-to-end** via `psmux`-driven `python -m worktree_manager
       picker copilot-extensions` (no `--demo`), landing a genuine git
-      worktree (`tmichon-cloud1-win-20261003-040634-e27a`, clean `git
+      worktree (a fresh dated worktree id, clean `git
       status`, correct branch) and a real spawned Copilot v1.0.91 session.
       The `embody` contract fired (`"seeded": true`) confirming the exact
       delivery mechanism proven in isolation on 2026-10-02 now also fires
@@ -2091,7 +2099,7 @@ buttons->prompt per the dialog's own docstring and test comments -- a
 focus-detection false negative from an earlier too-fast test, not a real
 bug, is why this took several attempts to pin down), Tab-Tab back to
 Create, Enter once. This produced a genuinely new, correctly-formed git
-worktree (`tmichon-cloud1-win-20261003-040634-e27a`: clean `git status`,
+worktree (a fresh dated worktree id: clean `git status`,
 correct `worktree/...` branch, real commit history) and a real spawned
 `wt-...` psmux session running actual Copilot v1.0.91. A direct `embody
 --worktree-id ... --json` call against it returned `"resumed": true,
