@@ -60,6 +60,8 @@ def _run_harness(extra_script: str) -> subprocess.CompletedProcess[str]:
         "function Write-Ok { param($m) Write-Host \"OK: $m\" }\n"
         "function Write-Warn { param($m) Write-Host \"WARN: $m\" }\n"
         "function Write-Skip { param($m) Write-Host \"SKIP: $m\" }\n"
+        + _extract_function_block("Get-SourceKind")
+        + "\n\n"
         + _extract_function_block("New-PluginBuildSnapshot")
         + "\n\n"
         + extra_script
@@ -75,6 +77,15 @@ def _run_harness(extra_script: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _marketplace_plugin_dir(tmp_path: Path) -> Path:
+    """A path shaped like a real marketplace-installed payload, so
+    Get-SourceKind classifies it as 'marketplace' -- the only kind
+    New-PluginBuildSnapshot actually snapshots (a local dev checkout is
+    left at its own checkout path; see
+    test_local_checkout_is_never_snapshotted)."""
+    return tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions" / "agent-dispatch"
+
+
 def _seed_plugin_dir(plugin_dir: Path) -> None:
     plugin_dir.mkdir(parents=True)
     (plugin_dir / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
@@ -88,7 +99,7 @@ def _seed_plugin_dir(plugin_dir: Path) -> None:
 
 
 def test_copies_payload_into_a_versioned_snapshot_under_install_dir(tmp_path: Path) -> None:
-    plugin_dir = tmp_path / "payload" / "agent-dispatch"
+    plugin_dir = _marketplace_plugin_dir(tmp_path)
     install_dir = tmp_path / "install"
     _seed_plugin_dir(plugin_dir)
 
@@ -109,8 +120,32 @@ Write-Output "RESULT:$result"
     assert (plugin_dir / "pyproject.toml").exists()
 
 
+def test_local_checkout_is_never_snapshotted(tmp_path: Path) -> None:
+    """A local dev checkout's pyproject.toml declares its
+    `[tool.uv.sources]` workspace path deps relative to the monorepo root
+    (e.g. `../../libs/zdd`), which only resolves from the checkout's own
+    location. Copying just $PluginDir's own tree into a flat snapshot would
+    orphan those relative paths, breaking the documented
+    direct-from-worktree install path local testing relies on -- so a
+    checkout (Get-SourceKind returns anything but 'marketplace') must be
+    left at its own path entirely, with no snapshot created at all."""
+    plugin_dir = tmp_path / "checkout" / "plugins" / "agent-dispatch"
+    install_dir = tmp_path / "install"
+    _seed_plugin_dir(plugin_dir)
+
+    extra = f"""
+$result = New-PluginBuildSnapshot -PluginDir "{plugin_dir}" -InstallDir "{install_dir}" -Version "0.1.0-dev1"
+Write-Output "RESULT:$result"
+"""
+    result = _run_harness(extra)
+    snap_dir = Path(result.stdout.split("RESULT:", 1)[1].strip().splitlines()[0])
+
+    assert snap_dir == plugin_dir
+    assert not (install_dir / "snapshots").exists()
+
+
 def test_excludes_vcs_and_build_junk_from_the_snapshot(tmp_path: Path) -> None:
-    plugin_dir = tmp_path / "payload" / "agent-dispatch"
+    plugin_dir = _marketplace_plugin_dir(tmp_path)
     install_dir = tmp_path / "install"
     _seed_plugin_dir(plugin_dir)
 
@@ -126,11 +161,16 @@ Write-Output "RESULT:$result"
 
 
 def test_reuses_an_already_valid_snapshot_for_the_same_version(tmp_path: Path) -> None:
-    """A snapshot for the exact requested version that already looks valid
-    (has a pyproject.toml) is reused as-is rather than deleted and rebuilt
-    byte-identical -- the fast, idempotent path, and the one that makes the
-    replacement race below moot for the common re-run case."""
-    plugin_dir = tmp_path / "payload" / "agent-dispatch"
+    """A marketplace payload's snapshot for the exact requested version
+    that already looks valid (has a pyproject.toml) is reused as-is rather
+    than deleted and rebuilt byte-identical -- the fast, idempotent path,
+    and the one that makes the replacement race below moot for the common
+    re-run case. Safe specifically because a marketplace version string is
+    a real, immutable released package identity (unlike a local checkout,
+    which this function never snapshots at all -- see
+    test_local_checkout_is_never_snapshotted -- precisely because its
+    version string can stay unchanged across edited, uncommitted source)."""
+    plugin_dir = _marketplace_plugin_dir(tmp_path)
     install_dir = tmp_path / "install"
     _seed_plugin_dir(plugin_dir)
     snap_dir = install_dir / "snapshots" / "0.1.0-dev1"
@@ -154,7 +194,7 @@ def test_replaces_an_invalid_existing_snapshot_via_rename_aside(tmp_path: Path) 
     """An existing $snapDir that does NOT look valid (no pyproject.toml --
     e.g. a torn previous write) must still be replaced by a fresh, valid
     snapshot, and the stale copy must not linger afterward."""
-    plugin_dir = tmp_path / "payload" / "agent-dispatch"
+    plugin_dir = _marketplace_plugin_dir(tmp_path)
     install_dir = tmp_path / "install"
     _seed_plugin_dir(plugin_dir)
     snap_dir = install_dir / "snapshots" / "0.1.0-dev1"
@@ -201,12 +241,17 @@ def test_install_stage_is_not_treated_as_already_safe(tmp_path: Path) -> None:
     stamp/install run commonly passes as $PluginDir -- that transient stage
     must NOT be recognized as already-durable (unlike a path under
     $InstallDir/snapshots/): a real versioned snapshot must still be
-    created, not skipped as a redundant no-op."""
+    created, not skipped as a redundant no-op. COPILOT_PLUGIN_STAGED_FROM
+    (set by the self-stage prologue to the ORIGINAL marketplace path)
+    mirrors real self-staged execution so Get-SourceKind still resolves
+    'marketplace' here, the same as it would for the real daemon."""
     install_dir = tmp_path / "install"
     plugin_dir = install_dir / ".install-stage" / "20261005T120000000-1234" / "agent-dispatch"
     _seed_plugin_dir(plugin_dir)
+    original_payload = tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions" / "agent-dispatch"
 
     extra = f"""
+$env:COPILOT_PLUGIN_STAGED_FROM = "{original_payload}"
 $result = New-PluginBuildSnapshot -PluginDir "{plugin_dir}" -InstallDir "{install_dir}" -Version "0.1.0-dev1"
 Write-Output "RESULT:$result"
 """
@@ -219,7 +264,7 @@ Write-Output "RESULT:$result"
 
 
 def test_falls_back_to_the_live_payload_when_no_version_is_resolved(tmp_path: Path) -> None:
-    plugin_dir = tmp_path / "payload" / "agent-dispatch"
+    plugin_dir = _marketplace_plugin_dir(tmp_path)
     install_dir = tmp_path / "install"
     _seed_plugin_dir(plugin_dir)
 
@@ -242,7 +287,7 @@ def test_without_best_effort_a_copy_failure_rethrows(tmp_path: Path) -> None:
     'Stop'` -- rather than silently returning $PluginDir and letting
     Invoke-Stamp publish a marker pointing at the wrong (transient)
     directory while reporting success."""
-    plugin_dir = tmp_path / "payload" / "agent-dispatch"
+    plugin_dir = _marketplace_plugin_dir(tmp_path)
     install_dir = tmp_path / "install"
     # A nonexistent $PluginDir makes Get-ChildItem -LiteralPath throw inside
     # the try block -- a real, generic copy failure, not a validation path.
@@ -263,7 +308,7 @@ try {{
 def test_with_best_effort_a_copy_failure_degrades_to_the_live_payload(tmp_path: Path) -> None:
     """The same failure, but from Install-Runtime's -BestEffort call site,
     must degrade gracefully instead of aborting the whole install."""
-    plugin_dir = tmp_path / "payload" / "agent-dispatch"
+    plugin_dir = _marketplace_plugin_dir(tmp_path)
     install_dir = tmp_path / "install"
     install_dir.mkdir(parents=True)
 
@@ -283,12 +328,17 @@ def test_containment_check_is_a_literal_prefix_not_a_wildcard_match(tmp_path: Pa
     """The no-op containment check must use a literal prefix comparison,
     not `-like` globbing -- a path containing a literal `[` (a valid, if
     unusual, directory-name character) must not be mis-matched as a
-    wildcard character class."""
+    wildcard character class. COPILOT_PLUGIN_STAGED_FROM forces
+    Get-SourceKind to 'marketplace' so this reaches the containment check
+    at all (a bracket-laden $PluginDir has no '.copilot/installed-plugins'
+    substring of its own)."""
     install_dir = tmp_path / "inst[all]"
     plugin_dir = install_dir / "snapshots" / "0.1.0-dev1"
     _seed_plugin_dir(plugin_dir)
+    original_payload = tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions" / "agent-dispatch"
 
     extra = f"""
+$env:COPILOT_PLUGIN_STAGED_FROM = "{original_payload}"
 $result = New-PluginBuildSnapshot -PluginDir "{plugin_dir}" -InstallDir "{install_dir}" -Version "0.1.0-dev1"
 Write-Output "RESULT:$result"
 """

@@ -856,6 +856,18 @@ function New-PluginBuildSnapshot {
        first-use `provision` dispatch does -- avoiding a redundant
        copy-of-a-copy on the already-safe path.
 
+       Also a no-op for a LOCAL dev checkout (Get-SourceKind returns
+       anything other than 'marketplace'): a checkout's pyproject.toml
+       declares its `[tool.uv.sources]` workspace path deps relative to the
+       monorepo root (e.g. `../../libs/zdd`), which only resolves from the
+       checkout's own location -- copying just $PluginDir's own tree into a
+       flat snapshot would orphan those relative paths, breaking the
+       documented direct-from-worktree install path local testing relies
+       on. Only a marketplace payload (whose packaged pyproject.toml
+       already references its OWN co-located `libs/`) is both safe to
+       snapshot and actually exposed to `copilot plugin update`'s locking
+       hazard -- a local checkout is subject to neither.
+
        -BestEffort (Install-Runtime's own call site): on ANY copy failure
        (disk full, permissions) logs a warning and returns $PluginDir
        unchanged -- an acceptable degraded outcome, since the only
@@ -875,6 +887,9 @@ function New-PluginBuildSnapshot {
         [string]$Version,
         [switch]$BestEffort
     )
+    if ((Get-SourceKind -PluginPath $PluginDir) -ne 'marketplace') {
+        return $PluginDir
+    }
     # Containment root is $InstallDir/snapshots specifically, NOT $InstallDir
     # itself -- $InstallDir also hosts the self-stage area
     # ($InstallDir/.install-stage/<ts>-<pid>/, see the self-stage relocation
