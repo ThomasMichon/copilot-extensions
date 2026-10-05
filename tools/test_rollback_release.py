@@ -193,13 +193,10 @@ def test_full_rollback_cycle_blocks_then_force_allows_repromotion(repo: Path):
 
 
 # --- _land_via_pr: version-tolerant `gh pr create` output parsing -----------
-# A real incident (2026-10-04 main-history-rewrite effort): `gh pr create
-# --json number` fails outright on gh 2.101.0 with `unknown flag: --json`
-# -- unlike `pr view`/`pr list`, `gh pr create` has never supported a
-# `--json` flag at all. Both `pause`/`resume --push` hit this every time and
-# had to be landed by hand. These tests pin `_land_via_pr`'s fixed behavior:
-# parse the PR number from `gh pr create`'s own plain stdout (the URL it
-# always prints) instead of requiring `--json`.
+# Unlike `pr view`/`pr list`, `gh pr create` has never supported a `--json`
+# flag at all (`unknown flag: --json`). These tests pin `_land_via_pr`'s
+# behavior: parse the PR number from `gh pr create`'s own plain stdout (the
+# URL it always prints) instead of requiring `--json`.
 
 class _FakeCompleted:
     def __init__(self, returncode: int, stdout: str = "", stderr: str = ""):

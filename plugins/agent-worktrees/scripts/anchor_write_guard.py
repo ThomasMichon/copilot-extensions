@@ -185,20 +185,15 @@ _GIT_FF_ONLY_FLAG = re.compile(
 # A ``-C`` (git change-directory) flag anywhere in a git segment.
 _GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
 
-# ``branch`` is the other write-sub verb with a narrow, precise exemption,
-# added after a live incident: ``git branch -f <name> <ref>`` (e.g. force-
-# moving a stale local ``main`` to match a rewritten ``origin/main``, see
-# docs/pipelines.md's "If main's history is force-rewritten") force-moves a
-# local ref in the anchor -- a genuine mutation this guard exists to catch
-# -- but slipped through entirely before this exemption existed (``branch``
-# was simply absent from ``_GIT_WRITE_SUB``, so the whole subcommand was
-# invisible to the guard; this incident is exactly why ``branch`` was added
-# to that list).
+# ``branch`` is the other write-sub verb with a narrow, precise exemption:
+# listing/inspecting branches is a common, safe operation that should
+# remain allowed even against the anchor, while any mutation of a ref or
+# its config must stay denied.
 #
-# ALLOWLIST, not a blacklist: an earlier revision tried to enumerate known
-# MUTATING flags (``-f``/``-d``/``--force``/etc.) and exempt everything
-# else, but git's ``branch`` subcommand has more mutating forms than any
-# such list reliably enumerates (``--track`` creates a ref + upstream
+# ALLOWLIST, not a blacklist: enumerating known MUTATING flags
+# (``-f``/``-d``/``--force``/etc.) and exempting everything else is
+# insufficient -- git's ``branch`` subcommand has more mutating forms than
+# any such list reliably enumerates (``--track`` creates a ref + upstream
 # config; ``--set-upstream-to``/``--unset-upstream`` rewrite config;
 # ``--edit-description`` opens an editor that rewrites a ref-note; a bare
 # positional name creates a ref) -- a blacklist is only ever as safe as its
@@ -212,20 +207,20 @@ _GIT_DASH_C_FLAG = re.compile(r"(?:^|\s)-C\b", re.IGNORECASE)
 # form of ``--contains <ref>`` instead of ``--contains=<ref>``).
 _GIT_BRANCH_SAFE_LONG_FLAG = re.compile(
     r"""^(?:
-        --list|--all|--remotes|--verbose|--show-current|--column|
-        --no-column|--ignore-case|--omit-empty|--no-abbrev|--no-color|
-        --color(?:=\S+)?|--sort=\S+|--format=\S+|--abbrev=\S+|
-        --points-at=\S+|--contains=\S+|--no-contains=\S+|
+        --list|--all|--remotes|--verbose|--show-current|
+        --column(?:=\S+)?|--no-column|--ignore-case|--omit-empty|
+        --no-abbrev|--no-color|--color(?:=\S+)?|--sort=\S+|--format=\S+|
+        --abbrev=\S+|--points-at=\S+|--contains=\S+|--no-contains=\S+|
         --merged(?:=\S+)?|--no-merged(?:=\S+)?
     )$""",
     re.IGNORECASE | re.VERBOSE,
 )
 # A short-option cluster containing ONLY safe letters (v=verbose,
-# a=all, r=remotes, i=ignore-case) -- e.g. ``-v``, ``-a``, ``-vv``,
-# ``-avr``. Any OTHER letter anywhere in the cluster (including a
+# a=all, r=remotes, i=ignore-case, l=list) -- e.g. ``-v``, ``-a``, ``-vv``,
+# ``-avr``, ``-l``. Any OTHER letter anywhere in the cluster (including a
 # mutating one like ``f``/``d``/``m``/``c``, combined or not) fails this
 # and falls through to "unrecognized -> deny".
-_GIT_BRANCH_SAFE_SHORT_CLUSTER = re.compile(r"^-[vari]+$", re.IGNORECASE)
+_GIT_BRANCH_SAFE_SHORT_CLUSTER = re.compile(r"^-[varil]+$", re.IGNORECASE)
 _GIT_BRANCH_ARG_TOKEN = re.compile(r'"[^"]*"|\'[^\']*\'|\S+')
 
 

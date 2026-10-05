@@ -46,7 +46,7 @@ def _resolve_mbase(cvb, base_ref: str, head_ref: str) -> tuple[str, str] | None:
     ``None`` when either ref is unresolvable OR they share no common
     ancestor at all.
 
-    The latter is a real, confirmed condition for this repo: ``main`` is a
+    The latter is a real, standing condition for this repo: ``main`` is a
     wholesale-regenerated promotion artifact (see
     ``tools/promote_release.py``'s own docstring), so its commit graph has
     always been disjoint from ``dev``'s except for the repo's original fork
@@ -54,11 +54,10 @@ def _resolve_mbase(cvb, base_ref: str, head_ref: str) -> tuple[str, str] | None:
     "If main's history is force-rewritten") changes every commit's SHA on
     `main`'s own line, severing even that shared ancestor. Callers must
     treat ``None`` as "nothing determinable here," never silently fall back
-    to diffing raw ``base_ref`` directly -- that previously produced a
-    large, misleading "changed" set spanning everything that differs
-    between `main`'s last promotion snapshot and the current branch, not
-    this branch's own actual changes (confirmed live immediately after the
-    2026-10-04 rewrite)."""
+    to diffing raw ``base_ref`` directly -- that would produce a large,
+    misleading "changed" set spanning everything that differs between
+    `main`'s last promotion snapshot and the current branch, not this
+    branch's own actual changes."""
     head = cvb._rev_parse(head_ref)
     if head is None:
         return None

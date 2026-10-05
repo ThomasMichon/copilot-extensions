@@ -257,13 +257,11 @@ def test_shell_git_commit_still_denies_alongside_pull_exemption(
     assert d and d["permissionDecision"] == "deny"
 
 
-# -- git branch exemption -- the main-history-rewrite incident class ----------
-# A live incident: recovering a local ``main`` after a deliberate upstream
-# history rewrite (docs/pipelines.md's "If main's history is force-rewritten")
-# used ``git branch -f main origin/main`` directly against the anchor
-# checkout, which the guard did not catch at the time -- ``branch`` was
-# simply absent from the write-subcommand list, so the whole invocation was
-# invisible to it.
+# -- git branch exemption -------------------------------------------------
+# Recovering a local ``main`` after a deliberate upstream history rewrite
+# (docs/pipelines.md's "If main's history is force-rewritten") uses
+# ``git branch -f main origin/main`` directly against the anchor checkout
+# -- a genuine mutation this guard must catch.
 
 def test_shell_git_branch_force_move_into_anchor_denies(tmp_path, anchor):
     gp = anchor[0]["path"]
@@ -331,6 +329,23 @@ def test_shell_git_branch_merged_with_embedded_value_from_anchor_cwd_allows(
     gp = anchor[0]["path"]
     assert guard.decide(_shell("git branch --merged=HEAD", gp), env={},
                         home=tmp_path, anchors=anchor) is None
+
+
+def test_shell_git_branch_column_with_embedded_value_from_anchor_cwd_allows(
+    tmp_path, anchor,
+):
+    """``--column`` also accepts a value-bearing ``=<options>`` form (e.g.
+    ``--column=dense``), not just the bare flag."""
+    gp = anchor[0]["path"]
+    assert guard.decide(_shell("git branch --column=dense", gp), env={},
+                        home=tmp_path, anchors=anchor) is None
+
+
+def test_shell_git_branch_short_list_flag_from_anchor_cwd_allows(tmp_path, anchor):
+    """``-l`` is git's short form of the read-only ``--list`` mode."""
+    gp = anchor[0]["path"]
+    assert guard.decide(_shell("git branch -l", gp), env={}, home=tmp_path,
+                        anchors=anchor) is None
 
 
 # -- allowlist, not a blacklist: every mutating MODE must be caught, not

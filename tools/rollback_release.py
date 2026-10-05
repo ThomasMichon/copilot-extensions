@@ -29,15 +29,12 @@ can), so a raw push to `main` is always rejected. Requires an authenticated
 credentials, not from within ``validate-and-promote.yml``'s CI identity).
 Pass `--no-pr` only against an unprotected/trusted repo (tests use this).
 ``_land_via_pr`` parses the created PR's number from ``gh pr create``'s own
-plain stdout (never ``--json``, which that subcommand has never supported
--- confirmed on gh 2.101.0) and this tool's own state-commit branch shape
-(``release-pipeline/state-*``, single-file diff) is one of
+plain stdout (never ``--json``, which that subcommand has never supported)
+and this tool's own state-commit/revert branch shapes
+(``release-pipeline/state-*``, ``release-pipeline/rollback-*``) are among
 ``.github/workflows/ci.yml``'s ``main-gate`` job's recognized automated-PR
-shapes, so a ``pause``/``resume --push`` PR lands through the normal
-sanctioned flow without an operator admin-bypass merge (both were real gaps
-hit during the 2026-10-04 main-history-rewrite effort; see
-``efforts/done/main-history-rewrite/README.md``'s Gotchas section for the
-incident writeup).
+shapes, so a ``pause``/``resume --push``/``revert --push`` PR lands
+through the normal sanctioned flow without an operator admin-bypass merge.
 
 Guards:
 
@@ -97,13 +94,11 @@ def _land_via_pr(
 
     Deliberately does NOT pass ``gh pr create --json ...``: unlike
     ``pr view``/``pr list``, ``gh pr create`` has never supported a
-    ``--json`` flag at all (confirmed live against gh 2.101.0: ``unknown
-    flag: --json``, not merely an unsupported field list) -- this was a
-    real incident during the 2026-10-04 main-history-rewrite effort, where
-    both ``pause``/``resume --push`` had to be landed by hand each time.
-    Parse the PR number from ``gh pr create``'s own plain stdout instead,
-    which always prints the created PR's URL (and only that, as of gh's
-    documented behavior) regardless of installed version."""
+    ``--json`` flag at all (``unknown flag: --json``, not merely an
+    unsupported field list). Parse the PR number from ``gh pr create``'s
+    own plain stdout instead, which always prints the created PR's URL
+    (and only that, as of gh's documented behavior) regardless of
+    installed version."""
     import re as _re
     import subprocess as _subprocess
 
@@ -142,15 +137,15 @@ def _wait_for_pr_merge(
     ``gh pr merge --squash --auto`` returns as soon as auto-merge is ARMED,
     not once the PR is actually merged -- this repo's required checks (the
     real pending one is `main-gate`'s own sibling job set, a few minutes'
-    wall-clock) still have to pass first. An immediate
-    ``git fetch origin <base> && git rev-parse origin/<base>`` right after
-    that call can therefore resolve to the OLD pre-merge tip, not the new
-    one -- a real race, not merely a hypothetical one, confirmed by review
-    on PR #5317. Poll instead of assuming completion. The final
-    ``git fetch`` (by commit sha, not branch name) is still required even
-    after confirming the merge via the API: callers (``revert``'s own
-    ``git tag -a ... <merged-sha>``) need that commit's OBJECT present in
-    the local repo, which the API call alone never provides."""
+    wall-clock) still have to pass first. Resolving the merge commit via
+    an immediate ``git fetch origin <base> && git rev-parse origin/<base>``
+    right after that call can therefore race the merge and return the OLD
+    pre-merge tip, not the new one. Poll instead of assuming completion.
+    The final ``git fetch`` (by commit sha, not branch name) is still
+    required even after confirming the merge via the API: callers
+    (``revert``'s own ``git tag -a ... <merged-sha>``) need that commit's
+    OBJECT present in the local repo, which the API call alone never
+    provides."""
     import json as _json
     import subprocess as _subprocess
     import time as _time

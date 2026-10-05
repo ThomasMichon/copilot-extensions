@@ -73,7 +73,7 @@ env:
 jobs:
   main-gate:
     name: main source gate
-    # The gate for any PR targeting `main`. Exactly four shapes are legitimate:
+    # The gate for any PR targeting `main`. Exactly five shapes are legitimate:
     # (1) the promotion pipeline's own PR (a release/promote-<run id> branch,
     #     opened via the APERTURE_RELEASE_TOKEN PAT -- a personal fine-grained
     #     token minted under the maintainer's own account, this repo having no
@@ -221,18 +221,35 @@ jobs:
           # -- branch name is always `release-pipeline/rollback-<epoch ms>`
           # (never reused, never hand-typed), generated as a SINGLE
           # mechanical `commit-tree` call that wholesale-restores main's
-          # pre-promotion tree (that commit's own message literally states
-          # "This is a generated revert commit"). Unlike shape (4), this
-          # diff is deliberately NOT single-file (a real tree-wide revert
-          # can touch many files), so it cannot be checked by diff content
-          # the same way -- checked by branch-name PATTERN AND the PR
-          # carrying exactly ONE commit instead: a hand-assembled,
-          # multi-commit PR can never match a single mechanically generated
-          # `commit-tree` push, so this still can't be widened to cover an
-          # arbitrary PR that merely reuses the branch-name prefix.
+          # pre-promotion tree. Unlike shape (4), this diff is deliberately
+          # NOT single-file (a real tree-wide revert can touch many files),
+          # so it cannot be checked by diff content the same way. Branch
+          # name and commit count alone are NOT enough here, though -- any
+          # owner-authored, single-commit PR could otherwise reuse this
+          # prefix to land an arbitrary tree-wide change, since a single
+          # hand-authored commit is routine. Verify the actual shape
+          # instead: the head's SOLE parent must be this PR's base sha
+          # (proving it is a direct, un-rebased child of main's tip at
+          # open time, matching `commit-tree -p <main tip>`), and every
+          # file it changes relative to `BASE_SHA^` (main's own
+          # pre-promotion state) must be the one pipeline-state file --
+          # i.e. the revert's tree, aside from that one file, is byte-
+          # identical to the commit immediately before the promotion it
+          # reverts, exactly what `revert()` constructs.
           if [[ "$HEAD_REF" == release-pipeline/rollback-* && "$PR_COMMITS" == "1" ]]; then
-            echo "Automated rollback_release.py revert PR -- OK. Files:"
-            echo "$changed"
+            parent_count="$(git rev-list --parents -n 1 "$HEAD_SHA" | wc -w)"
+            sole_parent="$(git rev-parse "$HEAD_SHA^" 2>/dev/null || true)"
+            if [[ "$parent_count" != "2" || "$sole_parent" != "$BASE_SHA" ]]; then
+              echo "::error::This PR's head is not a single, direct child of its base (expected exactly one parent equal to \$BASE_SHA) -- refusing to treat it as an automated rollback_release.py revert."
+              exit 1
+            fi
+            rollback_diff="$(git diff --name-only "$BASE_SHA^" "$HEAD_SHA" | grep -v '^\.github/release-pipeline-state\.json$' || true)"
+            if [ -n "$rollback_diff" ]; then
+              echo "::error::This PR's tree (beyond the pipeline-state file) does not match main's pre-promotion state -- refusing to treat it as an automated rollback_release.py revert. Unexpected diff:"
+              echo "::error::$rollback_diff"
+              exit 1
+            fi
+            echo "Automated rollback_release.py revert PR -- OK."
             exit 0
           fi
           non_workflow="$(echo "$changed" | grep -v '^\.github/workflows/' || true)"

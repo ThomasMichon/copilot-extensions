@@ -409,16 +409,14 @@ def _changed_files(base: str) -> list[str] | None:
     (three-dot ``git diff`` fails outright with "no merge base" rather than
     producing an empty/partial diff) so the caller can fall back to a
     full-tree scan either way. The no-common-ancestor case is a real,
-    confirmed condition for this repo specifically: a deliberate `main`
-    history rewrite (see docs/pipelines.md's "If main's history is
-    force-rewritten") changes every commit's SHA on `main`'s own line, so
-    ANY worktree whose branch forked from `dev` (which is every ordinary
-    contributor worktree -- `main` is a generated/promoted artifact, never
-    a fork point) permanently loses its merge-base with the default
-    ``origin/main`` base the moment such a rewrite happens. Before this
-    fix, that produced an unhandled ``CalledProcessError`` crash instead of
-    the gracefully-documented full-tree fallback -- confirmed live
-    immediately after the 2026-10-04 rewrite.
+    standing condition for this repo specifically: `main` is a
+    generated/promoted artifact (see `tools/promote_release.py`'s own
+    docstring), never a fork point, so a branch whose only shared ancestor
+    with `main` was the repo's original root loses even that the moment
+    `main`'s history is ever rewritten (every commit's SHA on `main`'s own
+    line changes along with it -- see docs/pipelines.md's "If main's
+    history is force-rewritten"). Treat this exactly like an unresolvable
+    base -- a full-tree scan, not a crash.
     """
     if not _ref_exists(base):
         return None

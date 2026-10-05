@@ -311,24 +311,20 @@ def check(base_ref: str, head_ref: str) -> tuple[int, list[str]]:
         return 0, []
     mbase = _merge_base(base, head)
     if mbase is None:
-        # `base` resolves but shares no common ancestor with `head` -- the
-        # confirmed, concrete fallout of a deliberate `main` history rewrite
-        # (see docs/pipelines.md's "If main's history is force-rewritten"):
-        # EVERY commit's SHA changes on `main`'s own line, so a `dev`-based
-        # branch's one-time shared ancestor with `main` (the repo's original
-        # fork point) no longer exists under that SHA either. Before this
-        # fix, `mbase = _merge_base(base, head) or base` silently fell back
-        # to a literal two-dot diff against raw `origin/main`'s CURRENT
-        # snapshot -- producing a large, misleading "changed" set spanning
-        # every plugin that happens to differ between `main`'s last
-        # promotion and this branch, not this branch's own actual changes.
-        # Degrade the same way an unresolvable base already does just below
-        # (this tool's own established "never wedge the push over an
-        # infra/topology hiccup" stance) rather than silently mislead. This
-        # is the EXPECTED, permanent outcome for an ordinary `dev`-based
-        # branch against the default `origin/dev` base failing to resolve
-        # (e.g. not yet fetched) -- not a one-off hiccup -- so the message
-        # says so explicitly rather than implying a transient infra issue.
+        # `base` resolves but shares no common ancestor with `head`: `main`
+        # is a generated/promoted artifact (see `tools/promote_release.py`'s
+        # own docstring), never a fork point, so a branch's only shared
+        # ancestor with `main` was always just the repo's original root --
+        # and a `main` history rewrite (docs/pipelines.md's "If main's
+        # history is force-rewritten") changes every commit's SHA on
+        # `main`'s own line, severing even that. Silently falling back to a
+        # literal two-dot diff against the raw base's CURRENT snapshot
+        # would produce a large, misleading "changed" set spanning every
+        # plugin that happens to differ between that snapshot and this
+        # branch, not this branch's own actual changes -- degrade instead
+        # the same way an unresolvable base already does just below (this
+        # tool's own established "never wedge the push over an
+        # infra/topology hiccup" stance).
         print(
             f"check-version-bump: base '{base_ref}' shares no common history with "
             f"HEAD (e.g. after a main history rewrite, or because this base is "
