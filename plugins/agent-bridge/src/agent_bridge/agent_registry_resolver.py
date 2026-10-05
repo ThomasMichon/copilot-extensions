@@ -412,7 +412,11 @@ class AgentResolver:
         ``copilot_args`` (its explicitly configured values) completely
         untouched: recomputing "stale" args for a project that was never
         actually appended risks matching a real, user-configured suffix by
-        coincidence and silently deleting it.
+        coincidence and silently deleting it. The final ``repo``'s own-
+        plugin resolution still receives ``target.cwd`` as its anchor
+        fallback, so a project with no registry anchor (resolved only via
+        ``cwd``, e.g. when ``repo`` equals the venue's own default project)
+        keeps that same fallback through the rebind rather than losing it.
         """
         if target.type == "local":
             import dataclasses
@@ -429,7 +433,7 @@ class AgentResolver:
                     copilot_args = copilot_args[: -len(stale)]
             copilot_args = (
                 copilot_args
-                + self._own_plugin_args(repo)
+                + self._own_plugin_args(repo, target.cwd)
                 + self._related_plugin_args(repo)
             )
             return dataclasses.replace(

@@ -182,9 +182,15 @@ def _resolve_ref_dir(source: str, repo_roots: list[Path]) -> Path | None:
             return None
         mp_root = mp_root.resolve()
         mp = load_marketplace(mp_root)
-        if mp is None:
-            return None
-        payload = plugin_dir(mp, name)
+        # The loaded manifest must actually self-identify as the requested
+        # marketplace -- a stale/misconfigured declaration pointing at a
+        # directory whose own marketplace.json carries a different `name`
+        # must never be trusted to resolve `name`, even if it happens to
+        # declare a plugin of that same name (plugin_resolve.resolve_repo_
+        # plugins applies the identical check).
+        payload = (
+            plugin_dir(mp, name) if mp is not None and mp.name == marketplace else None
+        )
         if payload is None:
             return None
         payload = payload.resolve()
@@ -212,7 +218,10 @@ def related_plugin_dir_args(
     shares) rather than staging it anywhere -- there is nothing to copy, only
     to resolve. ``repo_roots`` defaults to every control-plane anchor
     (:func:`related_plugins.control_plane_anchors`). Fail-safe -> ``[]``; a
-    source resolvable nowhere is skipped, never raised.
+    source resolvable nowhere is skipped, never raised. A single reference
+    that raises (e.g. a filesystem error) is likewise recorded as
+    unresolved and does not abort resolution of the remaining references --
+    one broken plugin must never discard an already-resolved stack.
     """
     try:
         from .related_plugins import control_plane_anchors, related_plugins_for_repo
@@ -227,7 +236,15 @@ def related_plugin_dir_args(
         resolved: list[str] = []
         unresolved: list[str] = []
         for ref in refs:
-            payload = _resolve_ref_dir(ref.source, roots)
+            try:
+                payload = _resolve_ref_dir(ref.source, roots)
+            except Exception as exc:  # pragma: no cover - defensive
+                log.debug(
+                    "related-repo plugin resolution raised for %s: %s",
+                    ref.source, exc,
+                )
+                unresolved.append(ref.source)
+                continue
             if payload is None:
                 unresolved.append(ref.source)
                 continue

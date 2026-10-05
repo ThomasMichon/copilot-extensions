@@ -481,3 +481,84 @@ def test_related_plugin_remote_first_anchor_blocks_local_second_anchor(tmp_path,
     # Falls back to the installed payload (first anchor is remote-sourced,
     # second anchor's local declaration of the same name is never reached).
     assert args == ["--plugin-dir", str(installed / "control-local" / "enhancer")]
+
+
+def test_related_plugin_rejects_manifest_with_mismatched_marketplace_identity(
+    tmp_path, monkeypatch,
+):
+    # Regression (#5306 review): the settings.json entry may declare a
+    # marketplace path whose OWN manifest self-identifies under a different
+    # name (a stale/misconfigured declaration). Even if that mismatched
+    # manifest happens to declare a plugin of the requested name, it must
+    # never be trusted -- matching plugin_resolve.resolve_repo_plugins'
+    # identical mp.name == marketplace check.
+    anchor = tmp_path / "repo"
+    # The manifest at this path self-identifies as "actually-different-mp",
+    # not "control-local" -- the key settings.json declares it under.
+    _make_local_marketplace(anchor / ".ai", "actually-different-mp", "enhancer")
+    _make_repo(
+        anchor,
+        enabled={},
+        marketplaces={
+            "control-local": {
+                "source": {"source": "directory", "path": str(anchor / ".ai")}
+            }
+        },
+    )
+    installed = tmp_path / "installed"
+    repo_own_plugins._INSTALLED = installed
+
+    monkeypatch.setattr(
+        related_plugins,
+        "related_plugins_for_repo",
+        lambda repo, anchors=None: [PluginRef("enhancer@control-local", enable=True)],
+    )
+
+    args = repo_own_plugins.related_plugin_dir_args("target-repo", repo_roots=[anchor])
+
+    assert args == []
+
+
+def test_related_plugin_one_broken_reference_does_not_drop_the_rest(
+    tmp_path, monkeypatch,
+):
+    # Regression (#5306 review): a reference that raises while resolving
+    # (not just one that returns None) must be recorded as unresolved and
+    # must not abort resolution of the remaining references.
+    good_root = tmp_path / "good"
+    _make_local_marketplace(good_root / ".ai", "control-local", "enhancer")
+    _make_repo(
+        good_root,
+        enabled={},
+        marketplaces={
+            "control-local": {
+                "source": {"source": "directory", "path": str(good_root / ".ai")}
+            }
+        },
+    )
+    repo_own_plugins._INSTALLED = tmp_path / "installed"
+
+    monkeypatch.setattr(
+        related_plugins,
+        "related_plugins_for_repo",
+        lambda repo, anchors=None: [
+            PluginRef("before@control-local", enable=True),
+            PluginRef("enhancer@control-local", enable=True),
+            PluginRef("after@control-local", enable=True),
+        ],
+    )
+
+    real_resolve = repo_own_plugins._resolve_ref_dir
+
+    def _flaky(source, repo_roots):
+        if source == "before@control-local":
+            raise OSError("simulated filesystem error")
+        return real_resolve(source, repo_roots)
+
+    monkeypatch.setattr(repo_own_plugins, "_resolve_ref_dir", _flaky)
+
+    args = repo_own_plugins.related_plugin_dir_args(
+        "target-repo", repo_roots=[good_root],
+    )
+
+    assert args == ["--plugin-dir", str(good_root / ".ai" / "plugins" / "enhancer")]

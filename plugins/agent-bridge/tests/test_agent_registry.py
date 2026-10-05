@@ -2139,6 +2139,38 @@ class TestVenueBoundResolve:
         assert "/related/SPO.Core" in target.copilot_args
 
     @pytest.mark.asyncio
+    async def test_repo_at_machine_rebind_preserves_cwd_fallback(self):
+        # Regression (#5306 review): a venue whose own project has no
+        # registry anchor resolves its own-plugin args via the cwd fallback
+        # (_own_plugin_args(project, cwd)). Rebinding to the SAME project
+        # via `<repo>@<venue>` must still receive that fallback -- losing
+        # `cwd` on the rebind call would silently drop those plugins even
+        # though nothing about the actual target changed.
+        from unittest.mock import patch
+        local = self.machines["host-dev6"]
+        agents = {
+            "box": AgentConfig(
+                name="box", project="demo", cwd="/checkout/demo", derived=True,
+            ),
+        }
+
+        def _own(project, cwd=None):
+            if project == "demo" and cwd == "/checkout/demo":
+                return ["--plugin-dir", "/from-cwd/demo"]
+            return []
+
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local, "windows"),
+        ):
+            resolver = AgentResolver(agents, self.machines)
+            with patch.object(resolver, "_own_plugin_args", side_effect=_own):
+                target = await resolver.resolve_async("demo@box")
+
+        assert target.project == "demo"
+        assert "/from-cwd/demo" in target.copilot_args
+
+    @pytest.mark.asyncio
     async def test_repo_at_remote_machine_leaves_ssh_copilot_args_untouched(self):
         # Regression (#5306 review): a genuine-remote (non-loopback) venue
         # never had plugin args appended by _resolve_static in the first
