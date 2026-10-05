@@ -5726,6 +5726,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'post-exit': ('finalize_cli', 'cmd_post_exit'),
     'pr-complete': ('pr_state_cli', 'cmd_pr_complete'),
     'pr-create': ('finalize_cli', 'cmd_create_pr'),
+    'pr-abandon': ('pr_state_cli', 'cmd_pr_abandon'),
     'pr-nudge': ('pr_state_cli', 'cmd_pr_nudge'),
     'pr-ready': ('pr_state_cli', 'cmd_pr_ready'),
     'pr-status': ('pr_state_cli', 'cmd_pr_status'),

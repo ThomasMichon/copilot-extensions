@@ -1,0 +1,9 @@
+{
+  "comment": "pr-abandon: friction-gated, salvage-first PR abandon flow (close_pull provider primitive + two-step confirm gate; #4411 follow-up)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

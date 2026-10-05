@@ -854,6 +854,16 @@ class GiteaProvider:
              expected_head_sha)
         return _unsupported_merge(self.name)
 
+    def close_pull(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        comment: str = "",
+    ) -> str:
+        """Not implemented: pr-abandon is GitHub-only today (Gitea's PR PATCH
+        endpoint supports ``state: closed``, a straightforward future add)."""
+        from .base import _unsupported_close
+        _ = (repo, number, api_base, token, comment)
+        return _unsupported_close(self.name)
+
     def enable_auto_merge(
         self, repo: str, number: int, *, squash: bool = True,
         api_base: str = "", token: str | None = None,
