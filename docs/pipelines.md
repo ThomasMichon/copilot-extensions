@@ -311,12 +311,13 @@ gh pr list --repo ThomasMichon/copilot-extensions --search "is:merged head:relea
 merge-base --is-ancestor <your-merge-sha> origin/main` (or an equivalent
 `gh api .../compare/<old>...<new>` lookup) can report **false** even after
 your change has genuinely shipped: the `promote` job produces a *new*
-commit on `main` by replaying `dev`'s current tree, so your original merge
-commit's SHA never literally appears as an ancestor, even though its
-content landed. Confirm a promotion either via the `release/promote-*` PR
-query above, or by diffing the actual file content on `origin/main`
-against what you expect (`git show origin/main:<path> | grep
-<distinctive string>`) -- never by SHA ancestry.
+commit on `main` by replaying the `gate` job's pinned, validated `dev`
+snapshot (`DEV_SHA`, not necessarily `dev`'s current tip at promotion
+time), so your original merge commit's SHA never literally appears as an
+ancestor, even though its content landed. Confirm a promotion either via
+the `release/promote-*` PR query above, or by diffing the actual file
+content on `origin/main` against what you expect (`git show
+origin/main:<path> | grep <distinctive string>`) -- never by SHA ancestry.
 
 A small, separate **"clear consumed changefiles on dev"** housekeeping PR
 (opened by `purge-consumed-changefiles.yml`) follows on its own **daily**

@@ -59,7 +59,8 @@ base branch.
 >    watch `main`'s commit history) rather than assuming your `dev` merge was
 >    the release -- and never via `git merge-base --is-ancestor <your-sha>
 >    origin/main`, which can report false even after a real promotion
->    (`promote` replays `dev`'s tree into a new commit, so your original SHA
+>    (`promote` replays the gate's pinned, validated `dev` snapshot into a
+>    new commit, not necessarily `dev`'s current tip, so your original SHA
 >    never becomes a literal ancestor). A separate **"clear consumed
 >    changefiles on dev"** housekeeping PR follows on its own daily (or
 >    on-demand) schedule, not per promotion — routine cleanup, not something
