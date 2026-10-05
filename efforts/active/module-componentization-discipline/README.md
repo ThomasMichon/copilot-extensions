@@ -58,6 +58,15 @@ stops a file from growing right up against its existing ceiling commit by
 commit until it tips over) is exactly the failure mode a *proactive*
 discipline — not just the existing reactive guard — is meant to prevent.
 
+**Sibling effort:** `agent_worktrees/__main__.py`'s remaining command-handler
+seams are "effectively exhausted" (see the pecking-order snapshot below) not
+because it's fully split, but because what's left is entangled through the
+`core()`/monkeypatch-on-root compatibility pattern (47 accessors, 317 call
+sites, 112 monkeypatched names) — see
+`efforts/active/compatibility-root-decoupling/README.md` and
+`docs/patterns/compatibility-root-decoupling.md`. That effort's migration is
+what unblocks further splitting here.
+
 ### Current pecking order (snapshot, 2026-09-22, post-`agent-dispatch/queue.py` claim/query slice)
 
 `python tools/rank-module-size.py --limit 20` (vendored duplicates folded in

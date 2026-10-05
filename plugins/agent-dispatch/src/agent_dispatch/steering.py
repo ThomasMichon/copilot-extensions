@@ -67,10 +67,13 @@ def parse_request_input(spec: str | None) -> list[dict]:
     * ``tags:multichoice[perf,api,ux]`` -> a multi-select (answer is a JSON array)
     * ``reason:textarea?feedback=Reject`` -> a field shown only while the
       ``feedback`` choice equals ``Reject``
-    * a trailing ``*`` option in a choice/multichoice bracket declares an
-      **"Other…"** affordance: ``severity:choice[low,med,high,*]`` -> single-select
-      of low/med/high **or** a free-text "other" answer. ``*`` is stripped from
-      ``options`` and recorded as ``allow_other: true``.
+    * **Every choice/multichoice field always allows a free-text "Other…"
+      answer** (``allow_other: true``) -- an operator is never limited to the
+      card author's declared options, no matter which recipe/skill authored
+      the card. A trailing ``*`` option (e.g.
+      ``severity:choice[low,med,high,*]``) is still accepted and stripped from
+      ``options`` for backward compatibility with specs written before this
+      was the default, but it is now a no-op: omitting it changes nothing.
 
     Returns ``[{"name", "type", "options"?, "allow_other"?, "show_when"?}]``
     (``options`` + ``allow_other`` only for a choice/multichoice;
@@ -160,15 +163,16 @@ def parse_request_input(spec: str | None) -> list[dict]:
         if m:
             ftype = m.group(1)
             raw = [o.strip() for o in m.group(2).split(",") if o.strip()]
-            # A trailing/anywhere ``*`` sentinel opts the question into an
-            # "Other…" free-text answer; it is not a real option.
-            allow_other = "*" in raw
+            # Every choice/multichoice field allows a free-text "Other…"
+            # answer by default -- an operator is never stuck with only the
+            # card author's declared options. A trailing/anywhere ``*``
+            # sentinel is still accepted and stripped for backward
+            # compatibility with specs written before this was the default,
+            # but it is not a real option and no longer changes behavior.
             options = [o for o in raw if o != "*"]
             if not options:
                 raise SteeringError(f"{ftype} field {name!r} has no options")
-            field = {"name": name, "type": ftype, "options": options}
-            if allow_other:
-                field["allow_other"] = True
+            field = {"name": name, "type": ftype, "options": options, "allow_other": True}
             if show_when:
                 field["show_when"] = show_when
             fields.append(field)
@@ -280,17 +284,20 @@ def _decode_multi(value: object) -> list[str]:
 def validate_steer_fields(fields: dict, request_input: list[dict] | None) -> None:
     """Best-effort check of an operator's submitted answer against a card's form.
 
-    * A declared **choice**/**multichoice** field's value (when present) must be
-      drawn from its options -- unless the field is ``allow_other`` (a declared
-      "Other…" affordance), in which case any value passes (the operator typed a
-      free-text answer). A ``multichoice`` value is a JSON array of members, each
-      validated the same way.
+    * A declared **choice**/**multichoice** field always carries
+      ``allow_other`` (the default since every such field allows a free-text
+      "Other…" answer), so any value passes validation -- this check exists
+      for forward/backward compatibility with any field that predates that
+      default or has it explicitly suppressed, not as an active gate today.
+      A ``multichoice`` value is a JSON array of members, each validated the
+      same way.
     * Extra/unknown fields pass through (forward-compatible; a surface may send
       more than the card asked for).
     * A missing field is allowed here (a surface may enforce "required" itself);
       the point is to catch a *wrong choice*, not to gate submission.
 
-    Raises :class:`SteeringError` on a value outside a declared choice set.
+    Raises :class:`SteeringError` on a value outside a declared choice set
+    (only reachable today for a field with ``allow_other`` explicitly unset).
     """
     if not request_input:
         return

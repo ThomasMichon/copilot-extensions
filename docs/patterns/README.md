@@ -303,6 +303,16 @@ core of the principles above; a reviewer checks a change against these.
   §Behaviors/ambient-delivery-fails-open*,
   *§Behaviors/resume-stable-context*; see
   [`worktree-scoped-dynamic-guidance.md`](worktree-scoped-dynamic-guidance.md).)
+- **A module extracted from a monolith never grows a reverse-import
+  accessor back into it.** A sibling module calling back into the root it was
+  just split from via a lazy `core()`/`_core()` accessor — kept only so a
+  test's `monkeypatch.setattr(m, "<name>", ...)` against the root still takes
+  effect — is a trap, not a shortcut: it makes every future split preserve
+  the same indirection instead of actually decoupling anything. A genuinely
+  shared helper gets a real shared-module home both siblings import
+  directly; a test patches the module where a name is actually defined,
+  never a historical re-export. See
+  [`compatibility-root-decoupling.md`](compatibility-root-decoupling.md).
 
 ## Patterns
 
@@ -343,6 +353,7 @@ the exemplars, and the vision it serves):
 | [mutable-dev-slot](mutable-dev-slot.md) | The one narrow, worktree-scoped exception to immutable versioned runtimes: a claimed, single-owner `dev` slot an installer may rebuild in place, GC-protected only while claimed, so validating a real unmerged change against the actual deployed CLI no longer needs a throwaway hot-patch |
 | [vendor-pointer](vendor-pointer.md) | How a duplicated payload surface stays DRY on `dev` yet ships self-contained on `main`: file-pointer stubs for mirrored docs, `uv`-editable canonical references for shared libs, direct canonical source lines for the shared installer engine, and the promotion-time copy-and-rewrite tools that turn each dev-time reference back into shipped local content |
 | [dev-main-promotion-pipeline](dev-main-promotion-pipeline.md) | The reusable, repo-portable template for this repo's own `dev`→`main` split: a stable zero-review `main` gated by content-shape (not identity) rather than a redundant second review, a changefile-driven version-bump system, the wholesale-tree-replace promotion mechanic, and the two ruleset misconfigurations that jammed it in production and why |
+| [compatibility-root-decoupling](compatibility-root-decoupling.md) | Why a reverse-import accessor back into a module you just extracted from (kept only so tests can keep monkeypatching the original root) is a trap that self-reinforces against every future split, and how to migrate off it incrementally: a real shared-module home for genuinely shared helpers, tests that patch at the definition site, retired per-name instead of a mass rewrite |
 
 The **runtime deploy contract** (venv + binstub + manifest, `uv`, marketplace-vs-
 runtime split) is its own established pattern doc:
