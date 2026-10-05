@@ -284,32 +284,42 @@ def test_parse_listen_port_handles_missing_and_present_flag():
 
 
 def test_pid_owned_by_current_user_windows_matches_and_mismatches(monkeypatch):
+    """SID-based, not env-var-based: ``USERDOMAIN``/``USERNAME`` are
+    trivially spoofable by whatever spawned this process, so the ownership
+    check must come entirely from the OS's own SID primitives, never from
+    comparing against those environment values."""
     monkeypatch.setattr(os, "name", "nt")
-    monkeypatch.setenv("USERDOMAIN", "WORKGROUP")
-    monkeypatch.setenv("USERNAME", "alice")
+    current_sid = "S-1-5-21-1111111111-2222222222-3333333333-1001"
+    owner_sid = current_sid
 
     def _fake_run(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 0, stdout="WORKGROUP\\alice\n")
+        if "WindowsIdentity" in argv[-1]:
+            return subprocess.CompletedProcess(argv, 0, stdout=current_sid + "\n")
+        return subprocess.CompletedProcess(argv, 0, stdout=owner_sid + "\n")
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
     assert daemons_status._pid_owned_by_current_user(123) is True
 
-    def _fake_run_other(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 0, stdout="WORKGROUP\\mallory\n")
-
-    monkeypatch.setattr(subprocess, "run", _fake_run_other)
+    owner_sid = "S-1-5-21-9999999999-8888888888-7777777777-1002"
     assert daemons_status._pid_owned_by_current_user(123) is False
 
-    def _fake_run_empty(argv, **kwargs):
-        return subprocess.CompletedProcess(argv, 0, stdout="")
+    owner_sid = ""
+    assert daemons_status._pid_owned_by_current_user(123) is False
 
-    monkeypatch.setattr(subprocess, "run", _fake_run_empty)
+    owner_sid = current_sid
+    current_sid = ""
     assert daemons_status._pid_owned_by_current_user(123) is False
 
 
 def test_pid_owned_by_current_user_posix_ps_fallback_matches_and_mismatches(monkeypatch):
     monkeypatch.setattr(os, "name", "posix")
     monkeypatch.setattr(os, "getuid", lambda: 501, raising=False)
+    # Force the ps fallback deterministically regardless of this test's own
+    # host OS: a bare "/proc/<pid>" is never a real directory on a Windows
+    # test runner, but an actual Linux CI host DOES have a real /proc -- an
+    # unstubbed Path.is_dir() there would let the helper read that host's
+    # genuine process table instead of this test's injected ps output.
+    monkeypatch.setattr(daemons_status.Path, "is_dir", lambda self: False)
 
     def _fake_run(argv, **kwargs):
         return subprocess.CompletedProcess(argv, 0, stdout="501\n")
@@ -328,3 +338,18 @@ def test_pid_owned_by_current_user_posix_ps_fallback_matches_and_mismatches(monk
 
     monkeypatch.setattr(subprocess, "run", _fake_run_garbage)
     assert daemons_status._pid_owned_by_current_user(123) is False
+
+
+def test_pid_owned_by_current_user_handles_a_timed_out_probe(monkeypatch):
+    """A probe that times out or can't start must never crash the whole
+    status report (``check=False`` on ``subprocess.run`` does not suppress
+    these) -- it must be treated the same as any other unverifiable
+    ownership: ``False``, not a propagated exception."""
+    monkeypatch.setattr(os, "name", "nt")
+
+    def _raise(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, 10)
+
+    monkeypatch.setattr(subprocess, "run", _raise)
+    assert daemons_status._pid_owned_by_current_user(123) is False
+

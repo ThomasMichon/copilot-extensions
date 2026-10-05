@@ -1543,7 +1543,7 @@ def test_health_excludes_every_concurrently_in_flight_control_request(tmp_path):
         runtime.shutdown()
 
 
-def test_health_requests_use_a_unique_key_to_avoid_coalescing(monkeypatch):
+def test_health_requests_use_a_unique_key_to_avoid_coalescing(tmp_path, monkeypatch):
     """``ControlClient.health()`` must never coalesce with another
     concurrent health request: ``CoalescingServer`` joins any two calls
     sharing the same ``(kind, key)`` into a single ``_compute`` execution,
@@ -1558,7 +1558,14 @@ def test_health_requests_use_a_unique_key_to_avoid_coalescing(monkeypatch):
         return {}
 
     monkeypatch.setattr(mux_daemon.mux_daemon_cutover.ControlClient, "_request", _fake_request)
-    client = mux_daemon.mux_daemon_cutover.ControlClient("http://127.0.0.1:1", root=Path("/tmp"))
+    # Stub the token loader (not the file system): __init__ would otherwise
+    # read/create a real token file at the given root, which this test's
+    # mocked _request never needs and which can fail on a host where that
+    # path isn't writable.
+    monkeypatch.setattr(
+        mux_daemon.mux_daemon_cutover, "load_or_create_control_token", lambda root=None: "tok"
+    )
+    client = mux_daemon.mux_daemon_cutover.ControlClient("http://127.0.0.1:1", root=tmp_path)
 
     client.health()
     client.health()
