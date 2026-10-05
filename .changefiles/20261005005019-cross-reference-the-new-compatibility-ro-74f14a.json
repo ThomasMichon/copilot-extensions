@@ -1,0 +1,9 @@
+{
+  "comment": "Cross-reference the new compatibility-root-decoupling design invariant from the componentizing-modules skill's existing split-mechanics section",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "dev"
+    }
+  ]
+}

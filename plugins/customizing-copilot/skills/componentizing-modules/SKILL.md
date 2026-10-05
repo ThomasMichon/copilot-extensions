@@ -136,6 +136,16 @@ TypeScript file keep growing unsplit.
 
 ## Splitting a compatibility root
 
+**Design invariant: new code should migrate *off* this idiom, not perpetuate
+it.** A `core()`/`_core()` accessor is a trap, not a shortcut — every future
+split has to keep preserving it to stay monkeypatch-safe instead of actually
+decoupling anything. See
+`docs/patterns/compatibility-root-decoupling.md` for the full rationale and
+the incremental (one-name-at-a-time) migration approach, and
+`efforts/active/` for the dedicated tracking effort. The rest of this section
+is the safe way to work *with* an existing, not-yet-decoupled root while
+that migration is in progress — not a recommendation to introduce a new one.
+
 A big `__main__.py`-shaped module usually already has this idiom in play:
 sibling modules define `def _core(): from . import __main__ as core; return
 core`, then call `core.<name>(...)` for anything still living in the root —
