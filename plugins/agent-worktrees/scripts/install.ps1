@@ -1892,6 +1892,23 @@ function Deploy-Package {
         }
     }
 
+    # Vendored remote-login-shell lib (agent-remote-login-shell / module
+    # remote_login_shell, copilot-extensions#5207). Same dev/release-layout
+    # fallback as dropin-registry above.
+    $remoteLoginShellDir = Join-Path $PluginDir 'libs\remote-login-shell'
+    if (-not (Test-Path (Join-Path $remoteLoginShellDir 'pyproject.toml'))) {
+        $remoteLoginShellDir = Join-Path $PluginDir '..\..\libs\remote-login-shell'
+    }
+    if (Test-Path (Join-Path $remoteLoginShellDir 'pyproject.toml')) {
+        $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-remote-login-shell' -PkgDir $remoteLoginShellDir
+        if ($libRes.ExitCode -ne 0) {
+            Write-ServiceErr "remote-login-shell library install failed (exit $($libRes.ExitCode))"
+            if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
+            $ErrorActionPreference = $prevEAP
+            return $false
+        }
+    }
+
     $installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees' -PkgDir $PluginDir
     $rc = $installRes.ExitCode
     $ErrorActionPreference = $prevEAP

@@ -163,6 +163,8 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
     (plugin / "libs" / "venue-copilot" / "pyproject.toml").write_text("", encoding="utf-8")
     (plugin / "libs" / "zdd").mkdir(parents=True)
     (plugin / "libs" / "zdd" / "pyproject.toml").write_text("", encoding="utf-8")
+    (plugin / "libs" / "remote-login-shell").mkdir(parents=True)
+    (plugin / "libs" / "remote-login-shell" / "pyproject.toml").write_text("", encoding="utf-8")
     marker = tmp_path / "pip-fallback-ran"
     fake_python = tmp_path / "python"
     fake_python.write_text(
@@ -183,6 +185,7 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
                 "_resolve_agent_procutil() { _resolve_vendored_lib agent-procutil; }",
                 "_resolve_venue_copilot() { _resolve_vendored_lib venue-copilot; }",
                 "_resolve_zdd() { _resolve_vendored_lib zdd; }",
+                "_resolve_remote_login_shell() { _resolve_vendored_lib remote-login-shell; }",
                 install_package,
                 "HAVE_UV=0",
                 f"VENV_PYTHON='{fake_python}'",
@@ -210,6 +213,7 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
     assert str(plugin / "libs" / "ssh-manager") in fallback_args
     assert str(plugin / "libs" / "venue-copilot") in fallback_args
     assert str(plugin / "libs" / "zdd") in fallback_args
+    assert str(plugin / "libs" / "remote-login-shell") in fallback_args
     assert str(plugin) in fallback_args
 
 
@@ -252,6 +256,9 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
     canonical_zdd = repo_root / "libs" / "zdd"
     canonical_zdd.mkdir(parents=True)
     (canonical_zdd / "pyproject.toml").write_text("", encoding="utf-8")
+    canonical_remote_login_shell = repo_root / "libs" / "remote-login-shell"
+    canonical_remote_login_shell.mkdir(parents=True)
+    (canonical_remote_login_shell / "pyproject.toml").write_text("", encoding="utf-8")
 
     marker = tmp_path / "pip-fallback-ran"
     fake_python = tmp_path / "python"
@@ -273,6 +280,7 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
                 "_resolve_agent_procutil() { _resolve_vendored_lib agent-procutil; }",
                 "_resolve_venue_copilot() { _resolve_vendored_lib venue-copilot; }",
                 "_resolve_zdd() { _resolve_vendored_lib zdd; }",
+                "_resolve_remote_login_shell() { _resolve_vendored_lib remote-login-shell; }",
                 install_package,
                 "HAVE_UV=0",
                 f"VENV_PYTHON='{fake_python}'",
@@ -299,6 +307,7 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
     assert str(canonical_agent_procutil.resolve()) in fallback_args
     assert str(canonical_venue_copilot.resolve()) in fallback_args
     assert str(canonical_zdd.resolve()) in fallback_args
+    assert str(canonical_remote_login_shell.resolve()) in fallback_args
 
 
 def test_powershell_installer_resolves_uv_editable_libs_via_shared_helper() -> None:

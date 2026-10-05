@@ -1,7 +1,7 @@
 {
   "asset": "agent-codespaces.json",
-  "measured_commit": "5cd84cc3f1f83580d00a64b23d063d4fce626c88",
+  "measured_commit": "29890b3d10637e08e65dcbc02242cc9e8b041445",
   "plugin": "agent-codespaces",
-  "release_tag": "coverage-baselines-5cd84cc3f1f83580d00a64b23d063d4fce626c88",
+  "release_tag": "coverage-baselines-29890b3d10637e08e65dcbc02242cc9e8b041445",
   "schema": "copilot-extensions.coverage-baseline-pointer"
 }

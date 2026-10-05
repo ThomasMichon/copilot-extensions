@@ -35,6 +35,10 @@ _BLOCKS = {
         "# Vendored plugin activation/inventory lib (agent-plugin-activation /",
         "# Vendored zero-downtime cutover lib",
     ),
+    "remote-login-shell": (
+        "# Vendored remote-login-shell lib (agent-remote-login-shell / module",
+        "$installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees'",
+    ),
 }
 
 
@@ -69,7 +73,9 @@ $prevEAP = $ErrorActionPreference
     )
 
 
-@pytest.mark.parametrize("lib", ["plugin-resolve", "dropin-registry", "plugin-activation"])
+@pytest.mark.parametrize(
+    "lib", ["plugin-resolve", "dropin-registry", "plugin-activation", "remote-login-shell"]
+)
 def test_lib_resolves_plugin_local_copy_when_present(lib: str, tmp_path: Path):
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
@@ -85,7 +91,9 @@ def test_lib_resolves_plugin_local_copy_when_present(lib: str, tmp_path: Path):
     assert proc.stdout == str(local_lib)
 
 
-@pytest.mark.parametrize("lib", ["plugin-resolve", "dropin-registry", "plugin-activation"])
+@pytest.mark.parametrize(
+    "lib", ["plugin-resolve", "dropin-registry", "plugin-activation", "remote-login-shell"]
+)
 def test_lib_falls_back_to_repo_root_canonical_when_absent(lib: str, tmp_path: Path):
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
@@ -104,7 +112,9 @@ def test_lib_falls_back_to_repo_root_canonical_when_absent(lib: str, tmp_path: P
     assert os.path.realpath(proc.stdout) == os.path.realpath(canonical_lib)
 
 
-@pytest.mark.parametrize("lib", ["plugin-resolve", "dropin-registry", "plugin-activation"])
+@pytest.mark.parametrize(
+    "lib", ["plugin-resolve", "dropin-registry", "plugin-activation", "remote-login-shell"]
+)
 def test_lib_is_a_noop_when_neither_copy_exists(lib: str, tmp_path: Path):
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
@@ -141,3 +151,12 @@ def test_zdd_preinstall_block_exists_before_main_package_install():
     assert zdd_marker in installer
     assert "-PkgName 'agent-zdd'" in installer
     assert installer.index(zdd_marker) < installer.index(main_install)
+
+
+def test_remote_login_shell_preinstall_block_exists_before_main_package_install():
+    installer = INSTALLER.read_text(encoding="utf-8")
+    marker = "# Vendored remote-login-shell lib (agent-remote-login-shell / module"
+    main_install = "$installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees' -PkgDir $PluginDir"
+    assert marker in installer
+    assert "-PkgName 'agent-remote-login-shell'" in installer
+    assert installer.index(marker) < installer.index(main_install)

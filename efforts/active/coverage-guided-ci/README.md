@@ -248,7 +248,7 @@ order.
       trips `exceeded` for the *whole* selection, distinct from
       `selection.select_tests`'s own per-file/per-line triggers. A `None`
       threshold is measured-but-not-enforced, never silently defaulted.
-- [ ] **Curate and validate the fallback set itself**, not just its trigger
+- [x] **Curate and validate the fallback set itself**, not just its trigger
       conditions: today `worktrees-smoke` only has `--collect-only` (no real
       execution) plus the always-run structural `--guards` step, neither of
       which is a genuine "run a safe, evidence-backed subset" fallback the
@@ -269,6 +269,19 @@ order.
       `test-portfolio`'s real tier markers (today it defaults to the full
       baseline, a documented, explicit non-safety-claim) and the curated
       set's own evidenced-assurance validation.
+      **Eligibility wiring done 2026-10-04:** `baseline.py`'s collection
+      driver now records each test's own `portfolio_tier` marker (schema
+      v3) alongside its duration; `fallback.default_tier_eligible_tests`
+      derives the real, portfolio-tier-restricted candidate set from it
+      (T0-T2/untiered, never T3 clean-room or T4 end-to-end -- the tiers
+      `pytest_portfolio_guard.py` itself skips by default); and
+      `decide()` now wires that real set into every `compute_fallback_set`
+      call by default, with an explicit-override escape hatch for a
+      caller that needs a different policy. Evidenced, not assumed: a
+      real (non-mocked) `compute_fallback_set` run against a baseline
+      whose best-scoring test is T4-tiered proves that test is never
+      curated once its tier is excluded, and `covered_fraction` correctly
+      shows the resulting gap rather than hiding it.
 - [x] Wire the smoke-fallback trigger: missing baseline, stale baseline,
       unresolvable/invalidated attribution for a touched file, a changed
       line or module with **no attribution even where its own file has
@@ -345,7 +358,7 @@ copilot-extensions-specific Phase 1.
       line-shifting commits → fork point) resolves to the correct nearest
       ancestor and correctly remaps/invalidates attribution — verified
       against a hand-computed expected result, not just "no exception."
-- [ ] Phase 3: a change touching only files with valid, resolvable
+- [x] Phase 3: a change touching only files with valid, resolvable
       attribution selects a strict subset of the full suite; a change
       touching a file with no baseline entry at all, a change touching a
       **partially-attributed file** (some lines/modules covered, the
@@ -354,6 +367,21 @@ copilot-extensions-specific Phase 1.
       three are auditable after the fact. The fallback tier itself
       genuinely executes its curated set (not collect-only) and that set's
       own assurance is evidenced, not assumed.
+      **Satisfied 2026-10-04:** `TestDecide`'s
+      `test_clean_selection_returns_the_selected_tests` (strict-subset
+      path, composed with `selection.select_tests`'s own dedicated
+      `TestSelectTests` coverage of both `no_baseline_entry` and
+      `line_not_attributed`), `test_selection_fallback_trigger_curates_from_the_full_baseline`
+      (selection-level fallback), and `test_debt_exceeded_falls_back_to_the_curated_set`
+      (debt-exceeded fallback) each assert `mode`/`reason`/`baseline_generation`
+      -- the auditability bar. "Genuinely executes, evidence not assumed"
+      is carried by `fallback.compute_fallback_set` always returning real,
+      directly-executable test node ids (never collect-only names), now
+      restricted by default to `fallback.default_tier_eligible_tests`'s
+      real portfolio-tier set; `TestDefaultTierEligibleTests`'s
+      `test_a_t4_test_with_the_best_coverage_per_cost_score_is_never_curated`
+      proves that restriction holds against a real (non-mocked) curation
+      run, not just the eligibility function in isolation.
 - [ ] Phase 4: construct a change whose regression is caught by a
       genuinely runtime-executed test (not #4353/#4378/#4379's text/AST
       scanner — see that phase's own note on why it can't prove selection)
@@ -371,7 +399,54 @@ _Pending review of this plan._
 
 ## Journal
 
-### 2026-10-04 — Phase 3 slice: Release-asset fetch + orchestrating decide()
+### 2026-10-04 — Phase 3 slice: real tier-restricted fallback eligibility
+Closes the last open Phase 3 checklist item and the Phase 3 Validation Plan
+bullet (both now `[x]`): wiring `fallback.py`'s `eligible_tests` to real
+`test-portfolio` tier markers instead of the full-baseline placeholder its
+own docstring had flagged as non-safety-claim since the Phase 0 pilot.
+
+**`baseline.py`** (schema v3): the collection driver now registers a small
+in-process hook plugin during its real pytest run that records each
+collected item's own `portfolio_tier` marker value (upper-cased, or `None`
+for an untiered test) by nodeid -- independent of whether
+`pytest_portfolio_guard` itself is loaded in this ephemeral run, since a
+test's own decorator is what carries the marker, not the guard plugin.
+Each `tests` entry now carries `portfolio_tier` alongside `duration_s`.
+`_merge_chunk_results` merges the new per-chunk `tiers` dict the same flat-union
+way as `durations`, defaulting a v2-era chunk with no `tiers` key to empty
+rather than raising.
+
+**`fallback.default_tier_eligible_tests`** (new): derives the real eligible
+set directly from a fetched baseline's own `portfolio_tier` data --
+everything except T3 (clean-room) and T4 (end-to-end), the two tiers
+`pytest_portfolio_guard.py` itself skips in every default run unless a
+caller opts in with `--allow-explicit-tiers`. A test with no
+`portfolio_tier` key at all (either genuinely untiered, or a baseline
+collected before schema v3) is treated as eligible, matching the guard's
+own behavior for an undeclared tier. `compute_fallback_set` itself stays a
+general, reusable primitive -- its own `eligible_tests=None` still means
+"no restriction," a deliberately unsafe default no real caller should use
+directly; the safety wiring lives one layer up.
+
+**`decide.py`**: `decide()` now resolves `eligible_tests` once, right after
+fetching the full baseline -- `None` (the default) means "derive the real
+tier-restricted set from this run's own baseline," never "no restriction";
+an explicit caller override still wins outright. Both fallback-curation
+call sites (debt-exceeded, selection-triggered) use the resolved set.
+
+12 new tests: `TestMergeChunkResults` tier-union + v2-compat cases;
+`collect_baseline`'s own mocked round-trip for `portfolio_tier`;
+`TestDefaultTierEligibleTests` (tier inclusion/exclusion, untiered,
+pre-v3-missing-field, case-sensitivity, and a real non-mocked
+`compute_fallback_set` run proving a dominant T4 candidate is genuinely
+never curated once excluded); two `TestDecide` cases proving both fallback
+branches wire the derived set by default and honor an explicit override.
+
+All passing (`python -m pytest tools/test_coverage_guided_selection.py`,
+excluding the two pre-existing Windows path-separator flakes in
+`TestPlanChunks` unrelated to this effort).
+
+
 Closes the two biggest gaps the 2026-10-03 debt-accounting slice left open.
 
 **`correlation.fetch_baseline_asset`** (new): the actual network-I/O step

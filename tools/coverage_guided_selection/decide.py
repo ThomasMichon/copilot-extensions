@@ -20,7 +20,10 @@ lines, which tests should run, and why?*
    or step 5 trips it. Always curated from the **full**, un-remapped
    baseline -- remapping (step 4) drops coverage for exactly the files
    this diff touches, which would shrink the fallback universe precisely
-   on the riskiest files.
+   on the riskiest files. Its own candidate pool is restricted to
+   `fallback.default_tier_eligible_tests`'s real, test-portfolio-tier-
+   derived eligible set (T0-T2/untiered, never T3/T4) unless a caller
+   explicitly overrides `eligible_tests`.
 
 Every path returns one `SelectionDecision`: which tests to run, which mode
 produced them (`"selected"` or `"fallback"`), why, and which baseline
@@ -38,7 +41,7 @@ try:
     from ancestor_resolution import ResolvedBaseline, remap_or_invalidate_baseline, resolve_nearest_baseline
     from correlation import BaselineFetchError, fetch_baseline_asset, require_measured_commit
     from debt import assess_debt
-    from fallback import compute_fallback_set
+    from fallback import compute_fallback_set, default_tier_eligible_tests
     from selection import select_tests
 except ModuleNotFoundError:
     from tools.coverage_guided_selection.ancestor_resolution import (
@@ -48,7 +51,7 @@ except ModuleNotFoundError:
         BaselineFetchError, fetch_baseline_asset, require_measured_commit,
     )
     from tools.coverage_guided_selection.debt import assess_debt
-    from tools.coverage_guided_selection.fallback import compute_fallback_set
+    from tools.coverage_guided_selection.fallback import compute_fallback_set, default_tier_eligible_tests
     from tools.coverage_guided_selection.selection import select_tests
 
 #: Reason string for the one case with no coverage evidence to reason
@@ -134,6 +137,16 @@ def decide(
     file path (relative the same way the baseline's own keys are) -> the
     list of line numbers the diff touched in it.
 
+    `eligible_tests` restricts the fallback tier's own curation candidates
+    (see `fallback.compute_fallback_set`). `None` (the default) is **not**
+    "no restriction" -- it means "derive the real, test-portfolio-tier-
+    restricted default" via `fallback.default_tier_eligible_tests` against
+    this run's own fetched full baseline, once that baseline is available.
+    Pass an explicit `frozenset` only to override that default (e.g. a
+    caller with its own, different tiering policy); passing the full set
+    of every collected test name would defeat the purpose of restricting
+    eligibility at all.
+
     Never raises for an *expected* "can't trust this" outcome (no
     qualifying baseline, a failed asset fetch, a stale/invalidated
     generation) -- each of those is a normal, auditable fallback reason,
@@ -189,6 +202,18 @@ def decide(
         age_threshold_seconds=age_threshold_seconds,
     )
 
+    # Resolve the fallback tier's own real candidate eligibility once,
+    # against THIS run's own fetched full baseline -- `None` means "derive
+    # the real, test-portfolio-tier-restricted default" (see
+    # `fallback.default_tier_eligible_tests`), never "no restriction"; an
+    # explicit override always wins (see the `eligible_tests` parameter's
+    # own docstring above).
+    effective_eligible_tests = (
+        default_tier_eligible_tests(full_baseline)
+        if eligible_tests is None
+        else eligible_tests
+    )
+
     if assessment.exceeded:
         # Curate from the FULL earned baseline, never `remapped`: the
         # remap/invalidate step (below) drops coverage for exactly the
@@ -197,7 +222,9 @@ def decide(
         # coverage. Curation only needs the full, un-remapped per-test
         # coverage/cost data; remapped line coordinates matter only to
         # diff-scoped `select_tests`, not to `compute_fallback_set`.
-        fb = compute_fallback_set(full_baseline, fallback_runtime_budget_s, eligible_tests=eligible_tests)
+        fb = compute_fallback_set(
+            full_baseline, fallback_runtime_budget_s, eligible_tests=effective_eligible_tests
+        )
         return SelectionDecision(
             mode="fallback",
             selected_tests=fb.selected_tests,
@@ -218,7 +245,9 @@ def decide(
     if sel.fallback_triggered:
         # Same reasoning as the debt-exceeded branch above: curate from the
         # full baseline, not the remapped/invalidated one.
-        fb = compute_fallback_set(full_baseline, fallback_runtime_budget_s, eligible_tests=eligible_tests)
+        fb = compute_fallback_set(
+            full_baseline, fallback_runtime_budget_s, eligible_tests=effective_eligible_tests
+        )
         reasons_str = "; ".join(
             f"{r.file}:{r.line} {r.reason}" for r in sel.fallback_reasons
         )

@@ -34,11 +34,22 @@ import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 
-BASELINE_SCHEMA_VERSION = 2
+BASELINE_SCHEMA_VERSION = 3
 # v1: {schema_version, plugin, cov_source, generated_at, tests, coverage}
 # v2: adds `measured_commit` (the `dev` SHA this run was measured against,
 #     see `correlation.py`) -- nullable, so a v1 consumer that only reads
 #     the fields it already knows about is unaffected.
+# v3: each `tests` entry adds `portfolio_tier` (the test's own
+#     `@pytest.mark.portfolio_tier(...)` value, upper-cased, or `None` for
+#     an untiered test) alongside `duration_s` -- lets `fallback.py`'s
+#     curation restrict its candidates to the portfolio's own default,
+#     always-on tiers (see `fallback.default_tier_eligible_tests`) instead
+#     of treating every collected test as an equally-safe smoke-tier
+#     candidate. A v1/v2 reader that only looks at `duration_s` is
+#     unaffected; a v1/v2 baseline (collected before this field existed)
+#     simply has no `portfolio_tier` key per test, which
+#     `default_tier_eligible_tests` treats as eligible (same as an
+#     explicitly untiered test), not as excluded.
 
 # Environment variables that can silently narrow which tests pytest
 # actually collects/runs (e.g. `PYTEST_ADDOPTS=-k smoke` or `-m guard`)
@@ -85,6 +96,28 @@ _DRIVER_SCRIPT = textwrap.dedent(
         test_paths_json, cov_source, cwd, cov_data_file, json_report_file, out_file, basetemp = sys.argv[1:8]
         test_paths = json.loads(test_paths_json)
 
+        # Captured via a hook plugin (not pytest-json-report's own
+        # "keywords" field, which only records marker NAMES present on an
+        # item, never a marker's own argument) -- `fallback.py`'s tier
+        # eligibility needs the actual declared tier value ("T0".."T4"),
+        # not just whether some `portfolio_tier` marker was applied at
+        # all. Independent of whether `pytest_portfolio_guard` itself is
+        # loaded in this ephemeral run: a test's own marker is attached by
+        # its source decorator regardless, so this always sees the real
+        # declared tier even though this driver never registers that
+        # guard plugin.
+        tier_by_nodeid = {}
+
+        class _TierCollector:
+            def pytest_collection_modifyitems(self, items):
+                for item in items:
+                    marker = item.get_closest_marker("portfolio_tier")
+                    tier_by_nodeid[item.nodeid] = (
+                        str(marker.args[0]).upper()
+                        if marker and marker.args
+                        else None
+                    )
+
         exit_code = pytest.main(
             [
                 *test_paths,
@@ -106,7 +139,8 @@ _DRIVER_SCRIPT = textwrap.dedent(
                 # configured-file source.
                 "-o",
                 "addopts=",
-            ]
+            ],
+            plugins=[_TierCollector()],
         )
 
         if exit_code != 0:
@@ -151,7 +185,11 @@ _DRIVER_SCRIPT = textwrap.dedent(
                     total += float(phase_data.get("duration", 0.0))
             durations[nodeid] = total
 
-        Path(out_file).write_text(json.dumps({"durations": durations, "coverage": coverage_map}))
+        Path(out_file).write_text(
+            json.dumps(
+                {"durations": durations, "tiers": tier_by_nodeid, "coverage": coverage_map}
+            )
+        )
         sys.exit(0)
     """
 )
@@ -295,23 +333,29 @@ def _plan_chunks(cwd: Path, test_path: str, max_files_per_chunk: int) -> list[li
 
 
 def _merge_chunk_results(chunks: list[dict]) -> dict:
-    """Combine each chunk's own `{"durations": ..., "coverage": ...}` dict
-    (as `_DRIVER_SCRIPT` emits per chunk) into one. Test durations are a
-    flat union (a given test belongs to exactly one chunk); coverage lines
-    need a real per-line union of attributed test names, since a shared
-    source file touched by tests from more than one chunk would otherwise
-    have one chunk's attribution silently clobber another's."""
+    """Combine each chunk's own `{"durations": ..., "tiers": ..., "coverage":
+    ...}` dict (as `_DRIVER_SCRIPT` emits per chunk) into one. Test
+    durations and tiers are both a flat union (a given test belongs to
+    exactly one chunk); coverage lines need a real per-line union of
+    attributed test names, since a shared source file touched by tests
+    from more than one chunk would otherwise have one chunk's attribution
+    silently clobber another's. `tiers` is read with a default so a chunk
+    dict predating its introduction (schema v2 and earlier) still merges
+    cleanly, with every one of its tests treated as untiered rather than
+    raising a `KeyError`."""
     durations: dict[str, float] = {}
+    tiers: dict[str, str | None] = {}
     coverage: dict[str, dict[str, list[str]]] = {}
     for chunk in chunks:
         durations.update(chunk["durations"])
+        tiers.update(chunk.get("tiers", {}))
         for file, per_line in chunk["coverage"].items():
             merged_file = coverage.setdefault(file, {})
             for line, tests in per_line.items():
                 existing = set(merged_file.get(line, ()))
                 existing.update(tests)
                 merged_file[line] = sorted(existing)
-    return {"durations": durations, "coverage": coverage}
+    return {"durations": durations, "tiers": tiers, "coverage": coverage}
 
 
 def collect_baseline(
@@ -450,7 +494,10 @@ def collect_baseline(
         "cov_source": cov_source,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "measured_commit": measured_commit,
-        "tests": {nodeid: {"duration_s": d} for nodeid, d in merged["durations"].items()},
+        "tests": {
+            nodeid: {"duration_s": d, "portfolio_tier": merged["tiers"].get(nodeid)}
+            for nodeid, d in merged["durations"].items()
+        },
         "coverage": merged["coverage"],
     }
 

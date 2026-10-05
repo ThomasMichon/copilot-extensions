@@ -1017,6 +1017,18 @@ deploy_package() {
         fi
     fi
 
+    # Vendored remote-login-shell lib (agent-remote-login-shell / module
+    # remote_login_shell, copilot-extensions#5207). Same materialized-release
+    # guard as zdd above.
+    local remote_login_shell_dir="$PLUGIN_DIR/libs/remote-login-shell"
+    if [[ -f "$remote_login_shell_dir/pyproject.toml" ]]; then
+        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-remote-login-shell \
+                "$remote_login_shell_dir" --quiet; then
+            err "remote-login-shell library install failed"
+            return 1
+        fi
+    fi
+
     if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-worktrees "$PLUGIN_DIR" --quiet; then
         err "Package install failed"
         return 1

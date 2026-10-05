@@ -194,6 +194,12 @@ def test_installers_preinstall_uv_editable_workspace_dependencies() -> None:
         '--reinstall-package agent-single-instance-lease "$SINGLE_INSTANCE_LEASE_DIR"'
         in install_sh
     )
+    assert 'REMOTE_LOGIN_SHELL_DIR="$PLUGIN_DIR/libs/remote-login-shell"' in install_sh
+    assert '--editable "$REMOTE_LOGIN_SHELL_DIR"' in install_sh
+    assert (
+        '--reinstall-package agent-remote-login-shell "$REMOTE_LOGIN_SHELL_DIR"'
+        in install_sh
+    )
     assert "Join-Path $PluginDir 'libs\\zdd'" in install_ps1
     assert "'agent-zdd'" in install_ps1
     assert '"$ZddDir"' in install_ps1
@@ -206,3 +212,6 @@ def test_installers_preinstall_uv_editable_workspace_dependencies() -> None:
     assert "Join-Path $PluginDir 'libs\\single-instance-lease'" in install_ps1
     assert "'agent-single-instance-lease'" in install_ps1
     assert '"$SingleInstanceLeaseDir"' in install_ps1
+    assert "Join-Path $PluginDir 'libs\\remote-login-shell'" in install_ps1
+    assert "'agent-remote-login-shell'" in install_ps1
+    assert '"$RemoteLoginShellDir"' in install_ps1
