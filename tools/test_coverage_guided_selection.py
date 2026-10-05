@@ -1803,6 +1803,40 @@ class TestDecide:
         # that just dropped this diff's own touched-file coverage.
         assert captured_baseline["value"] is self._FULL_BASELINE
 
+    def test_selection_fallback_unions_real_selected_tests_with_the_curated_set(self, tmp_path, monkeypatch):
+        # Regression: a mixed diff can have SOME changed lines genuinely
+        # attributed (select_tests returns real selected_tests for those)
+        # while others trip the fallback trigger. The fallback must only
+        # ever ADD safety-net coverage for the unattributed lines, never
+        # silently drop already-earned coverage evidence for the
+        # attributed ones.
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: self._resolved())
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", lambda *a, **k: self._FULL_BASELINE)
+        monkeypatch.setattr(decide_mod, "remap_or_invalidate_baseline", lambda *a, **k: self._REMAPPED_BASELINE)
+        clean_debt = debt.DebtAssessment(
+            commit_volume=1, age_seconds=1.0,
+            commit_volume_threshold=None, age_threshold_seconds=None,
+            exceeded=False, reasons=(),
+        )
+        monkeypatch.setattr(decide_mod, "assess_debt", lambda *a, **k: clean_debt)
+        mixed = select.SelectionResult(
+            selected_tests=("test_attributed",), fallback_triggered=True,
+            fallback_reasons=(select.FallbackReason("g.py", 7, "no_baseline_entry"),),
+        )
+        monkeypatch.setattr(decide_mod, "select_tests", lambda *a, **k: mixed)
+        curated = fallback.FallbackSet(
+            selected_tests=("test_smoke", "test_attributed"),  # overlap is fine, union dedupes
+            total_runtime_s=1.0, covered_fraction=0.5, universe_size=2,
+        )
+        monkeypatch.setattr(decide_mod, "compute_fallback_set", lambda *a, **k: curated)
+
+        result = decide_mod.decide(
+            tmp_path, "owner/repo", "plugin", "fork", {"f.py": [3], "g.py": [7]},
+        )
+
+        assert result.mode == "fallback"
+        assert set(result.selected_tests) == {"test_attributed", "test_smoke"}
+
     def test_clean_selection_returns_the_selected_tests(self, tmp_path, monkeypatch):
         monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: self._resolved())
         monkeypatch.setattr(decide_mod, "fetch_baseline_asset", lambda *a, **k: self._FULL_BASELINE)

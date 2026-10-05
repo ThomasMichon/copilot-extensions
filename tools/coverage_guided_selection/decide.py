@@ -222,9 +222,18 @@ def decide(
         reasons_str = "; ".join(
             f"{r.file}:{r.line} {r.reason}" for r in sel.fallback_reasons
         )
+        # UNION, never replace: `select_tests` can return real, attributed
+        # selected_tests for a mixed diff (some changed lines attributed,
+        # others not) alongside fallback_triggered=True for the
+        # unattributed ones. Discarding `sel.selected_tests` here would
+        # silently drop known-good coverage evidence for the attributed
+        # lines just because a DIFFERENT line in the same diff forced a
+        # fallback -- the fallback must only ever ADD safety-net coverage
+        # for what's unattributed, never remove coverage already earned.
+        combined_tests = tuple(sorted(set(sel.selected_tests) | set(fb.selected_tests)))
         return SelectionDecision(
             mode="fallback",
-            selected_tests=fb.selected_tests,
+            selected_tests=combined_tests,
             reason=f"{SELECTION_FALLBACK_PREFIX}{reasons_str}",
             baseline_generation=measured_commit,
             baseline_commit_on_main=resolved.baseline_commit,

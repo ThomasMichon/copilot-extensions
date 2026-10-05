@@ -393,7 +393,7 @@ baseline at all, a failed asset fetch, exceeded coverage-debt, or any
 per-file/per-line selection trigger (`no_baseline_entry`/
 `line_not_attributed`).
 
-26 new tests (`TestFetchBaselineAsset`, `TestDecide`) -- `decide()`'s own
+27 new tests (`TestFetchBaselineAsset`, `TestDecide`) -- `decide()`'s own
 tests monkeypatch its collaborators directly (each already has its own
 dedicated test class) rather than re-exercising them through real git/
 network I/O.
@@ -455,6 +455,15 @@ accuracy gaps the review caught: `SelectionDecision.selected_tests`'s own
 docstring and this README's own Phase 3 checklist entry both omitted the
 pointer-plugin-mismatch path from the list of zero-evidence-fallback
 cases.
+
+**Fourth round of review fixes (same PR):** fixed a real orchestration
+bug -- the selection-level fallback branch replaced `select_tests`' own
+real, attributed `selected_tests` with the curated fallback set entirely,
+instead of union-ing them. A mixed diff (some changed lines genuinely
+attributed, others not) would silently lose known-good coverage evidence
+for the attributed lines just because a *different* line in the same diff
+tripped the fallback trigger. `decide()` now unions both sets; a new
+mixed-case regression test covers it directly.
 
 **Also noted, not caused by this work:** the operator flagged that
 `main`'s history was force-rewritten (via `git filter-repo`) to purge
