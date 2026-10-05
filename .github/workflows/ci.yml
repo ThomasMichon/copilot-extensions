@@ -99,9 +99,22 @@ jobs:
     #     against this gate for a state-commit PR, forcing an admin-merge
     #     bypass every single time `pause`/`resume --push` ran -- see
     #     `tools/rollback_release.py`'s own module docstring and
-    #     `docs/pipelines.md`'s pause/resume section for the full story.
+    #     `docs/pipelines.md`'s pause/resume section for the full story; or
+    # (5) tools/rollback_release.py's own `revert` rollback PR (branch name
+    #     `release-pipeline/rollback-<epoch ms>`, same PAT) -- a wholesale
+    #     revert of main's tree to its pre-promotion state, generated as a
+    #     single `commit-tree` call (`_write_state_commit`/`revert`'s own
+    #     "never a force-push/history-rewrite" commit message), so unlike
+    #     shape (4) its diff is NOT single-file by nature; recognized
+    #     instead by branch-name pattern plus the PR carrying exactly ONE
+    #     commit (`github.event.pull_request.commits == 1`) -- a real,
+    #     hand-assembled multi-commit PR can never match a mechanically
+    #     generated single `commit-tree` push. Added alongside shape (4)
+    #     after the same main-history-rewrite effort found `revert --push`
+    #     hits the identical gap.
     #
-    # Shapes (2), (3), and (4) are enforced by DIFF CONTENT here, not by admin/human bypass --
+    # Shapes (2), (3), (4), and (5) are enforced by DIFF CONTENT or commit-shape here,
+    # not by admin/human bypass --
     # this is deliberate, prompted by a real incident (an unrelated
     # vision-doc PR landed directly on `main` via `gh pr merge --admin`,
     # stranding content that the next promotion would have silently reverted,
@@ -142,13 +155,16 @@ jobs:
           REPO_OWNER: ${{ github.repository_owner }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Used only by shape (5) below -- the PR's own total commit count,
+          # straight from the webhook payload (no extra API call needed).
+          PR_COMMITS: ${{ github.event.pull_request.commits }}
         run: |
           if [[ "$HEAD_REF" == release/promote-* && "$PR_AUTHOR" == "$REPO_OWNER" ]]; then
             echo "Legitimate promotion-pipeline PR -- OK."
             exit 0
           fi
           if [ "$PR_AUTHOR" != "$REPO_OWNER" ]; then
-            echo "::error::This PR targets 'main' and is not the promotion pipeline's own PR. main only ever moves via a release/promote-* PR, a workflow-file-only bootstrap PR, module-size-baseline-widen.yml's own automated PR, or rollback_release.py's own state-commit PR (all by the repo owner). Please retarget this PR's base branch to 'dev' -- see docs/pipelines.md > Release & Versioning."
+            echo "::error::This PR targets 'main' and is not the promotion pipeline's own PR. main only ever moves via a release/promote-* PR, a workflow-file-only bootstrap PR, module-size-baseline-widen.yml's own automated PR, or rollback_release.py's own state-commit/revert PR (all by the repo owner). Please retarget this PR's base branch to 'dev' -- see docs/pipelines.md > Release & Versioning."
             exit 1
           fi
           # Merge-base-relative (three-dot semantics), not a literal
@@ -200,11 +216,30 @@ jobs:
             echo "$changed"
             exit 0
           fi
+          # Fifth legitimate shape: tools/rollback_release.py's own
+          # `revert` rollback PR (see that tool's `revert`/`_land_via_pr`)
+          # -- branch name is always `release-pipeline/rollback-<epoch ms>`
+          # (never reused, never hand-typed), generated as a SINGLE
+          # mechanical `commit-tree` call that wholesale-restores main's
+          # pre-promotion tree (that commit's own message literally states
+          # "This is a generated revert commit"). Unlike shape (4), this
+          # diff is deliberately NOT single-file (a real tree-wide revert
+          # can touch many files), so it cannot be checked by diff content
+          # the same way -- checked by branch-name PATTERN AND the PR
+          # carrying exactly ONE commit instead: a hand-assembled,
+          # multi-commit PR can never match a single mechanically generated
+          # `commit-tree` push, so this still can't be widened to cover an
+          # arbitrary PR that merely reuses the branch-name prefix.
+          if [[ "$HEAD_REF" == release-pipeline/rollback-* && "$PR_COMMITS" == "1" ]]; then
+            echo "Automated rollback_release.py revert PR -- OK. Files:"
+            echo "$changed"
+            exit 0
+          fi
           non_workflow="$(echo "$changed" | grep -v '^\.github/workflows/' || true)"
           if [ -n "$non_workflow" ]; then
             echo "::error::This PR touches file(s) outside .github/workflows/, so it cannot use the workflow-only bootstrap exception:"
             echo "::error::$non_workflow"
-            echo "::error::main only ever moves via a release/promote-* PR, a workflow-file-ONLY bootstrap PR, module-size-baseline-widen.yml's own automated PR, or rollback_release.py's own state-commit PR. Please retarget this PR's base branch to 'dev' -- see docs/pipelines.md > Release & Versioning."
+            echo "::error::main only ever moves via a release/promote-* PR, a workflow-file-ONLY bootstrap PR, module-size-baseline-widen.yml's own automated PR, or rollback_release.py's own state-commit/revert PR. Please retarget this PR's base branch to 'dev' -- see docs/pipelines.md > Release & Versioning."
             exit 1
           fi
           echo "Workflow-file-only bootstrap PR by the repo owner -- OK. Files:"

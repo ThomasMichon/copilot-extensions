@@ -71,6 +71,13 @@ def repo(tmp_path: Path) -> Path:
         ["git", "rev-parse", "HEAD"], cwd=r, capture_output=True, text=True, check=True
     ).stdout.strip()
     _git(r, "update-ref", "refs/remotes/origin/main", base_sha)
+    # Also simulate `origin/dev` at the same point -- this tool's own CLI
+    # default base is `origin/dev` (this repo's real contribution trunk),
+    # so a bare `_run(repo)` with no explicit `--base` needs this ref to
+    # resolve. A SYMBOLIC ref (not a plain `update-ref`) means `origin/dev`
+    # always tracks wherever `origin/main` currently points, in case a
+    # future test advances it mid-run.
+    _git(r, "symbolic-ref", "refs/remotes/origin/dev", "refs/remotes/origin/main")
     return r
 
 
@@ -111,7 +118,7 @@ def test_base_sharing_no_merge_base_degrades_to_soft_skip(repo: Path):
     _git(repo, "update-ref", "refs/remotes/origin/main", rewritten_sha)
     _git(repo, "checkout", "-q", "dev")
 
-    result = _run(repo)
+    result = _run(repo, "--base", "origin/main")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "alpha" not in result.stdout + result.stderr
     assert "shares no common history" in result.stdout + result.stderr

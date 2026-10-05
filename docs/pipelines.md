@@ -384,11 +384,12 @@ never checks out or executes the PR's own code and never runs tests — its
 only effect is that one comment, so it adds no capability a
 non-collaborator didn't already have.
 
-It recognizes `main-gate`'s own four legitimate automated-PR shapes (the
+It recognizes `main-gate`'s own five legitimate automated-PR shapes (the
 release pipeline's own PR, a workflow-only bootstrap PR,
 `module-size-baseline-widen.yml`'s automated PR, and `rollback_release.py`'s
-own pause/resume state-commit PR) by the same branch-name
-and diff-content signature `main-gate` itself checks, not merely by
+own pause/resume state-commit PR and revert rollback PR) by the same
+branch-name and diff-content (or branch-name and commit-count, for the
+revert shape) signature `main-gate` itself checks, not merely by
 "author is the repo owner" — so if this reminder is ever widened to cover
 every PR against `main` rather than only non-owner authors, it still can't
 mistake the release pipeline's own automated PRs for ones that need a
@@ -547,11 +548,24 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 
 > **Mechanical shortcut — release/recovery tooling only, not for an ordinary
 > contributor PR:** `python tools/accumulate_bumps.py --from-diff
-> origin/main --apply` bumps exactly what `check-version-bump.py` requires
+> origin/dev --apply` bumps exactly what `check-version-bump.py` requires
 > for a branch — every touched plugin (all three files plus literal
 > `__version__` fallbacks), every plugin that vendors a changed lib, and
 > the lib itself in all its copies — each only when it is not already
-> ahead of `origin/main`. This writes version manifests **directly**, the
+> ahead of `origin/dev`. Use `origin/dev` here, not `origin/main`: `main`
+> is a disjoint, wholesale-regenerated promotion artifact (see
+> `tools/promote_release.py`'s own docstring) with no real shared ancestry
+> to an ordinary branch except the repo's original fork point — and a
+> deliberate `main` history rewrite (this doc's own "If main's history is
+> force-rewritten" section) severs even that, making `origin/main` a
+> permanently unrelated base this tool now explicitly refuses rather than
+> silently computing a wrong/misleading bump set. The one case that
+> legitimately wants `origin/main` as the base is a true recovery check
+> run directly against a specific already-promoted `main` commit (e.g.
+> auditing exactly what a past promotion bumped) — pass that commit's SHA
+> explicitly rather than the branch name `origin/main`, since the branch
+> itself is just whatever the most recent promotion happens to be. This
+> writes version manifests **directly**, the
 > same way the promotion pipeline itself does, and does **not** consume or
 > even look at pending changefiles — using it on an ordinary `dev` PR
 > bypasses the changefile workflow above entirely. It exists for the

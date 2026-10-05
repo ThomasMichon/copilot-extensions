@@ -334,9 +334,9 @@ def test_shell_git_branch_merged_with_embedded_value_from_anchor_cwd_allows(
 
 
 # -- allowlist, not a blacklist: every mutating MODE must be caught, not
-# just the ones an earlier blacklist happened to enumerate (review finding:
+# just the ones an earlier blacklist happened to enumerate --
 # --track/--set-upstream-to/--unset-upstream/--edit-description all mutate
-# a ref or its config but carried none of the blacklisted flags) ------------
+# a ref or its config but carry none of the blacklisted flags ---------------
 
 def test_shell_git_branch_track_from_anchor_cwd_denies(tmp_path, anchor):
     """``--track`` creates a new ref plus upstream config -- a real

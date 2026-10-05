@@ -117,6 +117,15 @@ def repo(tmp_path: Path) -> Path:
         ["git", "rev-parse", "HEAD"], cwd=r, capture_output=True, text=True, check=True
     ).stdout.strip()
     _git(r, "update-ref", "refs/remotes/origin/main", base_sha)
+    # `check-version-bump.py`'s own CLI default base is now `origin/dev`
+    # (this repo's real contribution trunk; see docs/pipelines.md's
+    # rewrite-boundary section for why `origin/main` is no longer a safe
+    # default), so a bare `_run(repo)` with no explicit `--base` needs this
+    # ref to resolve. Many tests below advance `origin/main` mid-test to
+    # represent a later base point -- a SYMBOLIC ref (not a second
+    # `update-ref`) means `origin/dev` always tracks wherever `origin/main`
+    # currently points, with nothing to keep in sync by hand.
+    _git(r, "symbolic-ref", "refs/remotes/origin/dev", "refs/remotes/origin/main")
     return r
 
 
@@ -148,7 +157,7 @@ def test_base_sharing_no_merge_base_degrades_to_soft_skip(repo: Path):
     _git(repo, "update-ref", "refs/remotes/origin/main", rewritten_sha)
     _git(repo, "checkout", "-q", "main")
 
-    result = _run(repo)
+    result = _run(repo, "--base", "origin/main")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "alpha" not in result.stdout + result.stderr
     assert "shares no common history" in result.stdout + result.stderr

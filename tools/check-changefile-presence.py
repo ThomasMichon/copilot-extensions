@@ -16,7 +16,7 @@ as not-yet-wired is historical and predates that cutover.
 
 Usage::
 
-    python tools/check-changefile-presence.py                 # diff vs origin/main
+    python tools/check-changefile-presence.py                 # diff vs origin/dev
     python tools/check-changefile-presence.py --base <sha>     # diff vs an explicit base
 """
 from __future__ import annotations
@@ -160,8 +160,10 @@ def check(base_ref: str, head_ref: str = "HEAD") -> tuple[int, list[str]]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--base", default="origin/main",
-                    help="base ref to diff against (default: origin/main)")
+    ap.add_argument("--base", default="origin/dev",
+                    help="base ref to diff against (default: origin/dev -- "
+                         "this repo's real contribution trunk; CI always "
+                         "passes an explicit PR base instead)")
     ap.add_argument("--head", default="HEAD", help="head ref (default: HEAD)")
     args = ap.parse_args(argv)
 

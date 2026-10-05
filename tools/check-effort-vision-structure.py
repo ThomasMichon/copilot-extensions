@@ -23,7 +23,7 @@ one, can trigger a finding.
 Usage::
 
     check-effort-vision-structure.py FILE [FILE ...]   # check exactly these paths (pre-commit, staged)
-    check-effort-vision-structure.py                   # diff HEAD vs --base (default origin/main)
+    check-effort-vision-structure.py                   # diff HEAD vs --base (default origin/dev)
     check-effort-vision-structure.py --base <ref>       # diff vs an explicit base
     check-effort-vision-structure.py --all              # check every effort/vision README in the repo
 
@@ -178,7 +178,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("paths", nargs="*", help="explicit README.md paths to check (pre-commit)")
-    ap.add_argument("--base", default="origin/main", help="base ref to diff against (default: origin/main)")
+    ap.add_argument("--base", default="origin/dev",
+                     help="base ref to diff against (default: origin/dev -- "
+                          "this repo's real contribution trunk)")
     ap.add_argument("--head", default="HEAD", help="head ref (default: HEAD)")
     ap.add_argument("--all", action="store_true", help="check every effort/vision README in the repo")
     args = ap.parse_args(argv)

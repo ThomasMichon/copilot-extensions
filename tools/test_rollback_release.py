@@ -210,10 +210,13 @@ class _FakeCompleted:
 
 def test_land_via_pr_parses_number_from_plain_create_url(monkeypatch, repo: Path):
     """``gh pr create`` prints only its PR's URL on success (no ``--json``
-    involved); the merged commit sha is whatever ``_rev_parse`` reports for
-    ``origin/<base_ref>`` after the merge -- fetch/rev-parse are mocked here
-    so the test needs no real GitHub remote."""
+    involved); the merge commit sha comes from polling ``gh pr view`` until
+    it reports ``MERGED`` (see the race-condition tests below), not from an
+    immediate ``git fetch``/``rev-parse`` of the base branch."""
     merge_calls: list[list[str]] = []
+    view_calls: list[list[str]] = []
+    fetch_calls: list[list[str]] = []
+    sha = "deadbeef" * 5
 
     def fake_run(cmd, cwd=None, capture_output=None, text=None):
         if cmd[:3] == ["gh", "pr", "create"]:
@@ -223,19 +226,123 @@ def test_land_via_pr_parses_number_from_plain_create_url(monkeypatch, repo: Path
             merge_calls.append(cmd)
             assert cmd[3] == "4242"
             return _FakeCompleted(0, stdout="merged\n")
+        if cmd[:3] == ["gh", "pr", "view"]:
+            view_calls.append(cmd)
+            return _FakeCompleted(
+                0, stdout=json.dumps({"state": "MERGED", "mergeCommit": {"oid": sha}}),
+            )
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    def fake_git(args, cwd=None):
+        if args[:2] == ["fetch", "origin"]:
+            fetch_calls.append(args)
+        return ""
+
+    import subprocess as _real_subprocess
+    monkeypatch.setattr(_real_subprocess, "run", fake_run)
+    monkeypatch.setattr(rb, "_git", fake_git)
+
+    resolved = rb._land_via_pr(
+        repo=repo, branch="release-pipeline/state-test", base_ref="main",
+        title="t", body="b",
+    )
+    assert resolved == sha
+    assert len(merge_calls) == 1
+    assert len(view_calls) == 1
+    assert fetch_calls == [["fetch", "origin", sha]]
+
+
+def test_land_via_pr_waits_through_pending_checks_before_resolving_merge_commit(
+    monkeypatch, repo: Path,
+):
+    """The core race this fixes: ``gh pr merge --squash --auto`` returns as
+    soon as auto-merge is ARMED, not once the PR is actually merged -- an
+    immediate fetch/rev-parse right after it can resolve the OLD pre-merge
+    tip. Simulate ``gh pr view`` reporting OPEN (checks still pending)
+    across several polls before finally reporting MERGED, and confirm the
+    wait loop actually polls (multiple view calls, real sleeps) rather than
+    trusting the first response."""
+    sha = "cafebabe" * 5
+    view_states = iter(["OPEN", "OPEN", "MERGED"])
+    view_calls = 0
+    sleep_calls: list[float] = []
+
+    def fake_run(cmd, cwd=None, capture_output=None, text=None):
+        nonlocal view_calls
+        if cmd[:3] == ["gh", "pr", "create"]:
+            return _FakeCompleted(0, stdout="https://github.com/o/r/pull/9999\n")
+        if cmd[:3] == ["gh", "pr", "merge"]:
+            return _FakeCompleted(0, stdout="auto-merge enabled\n")
+        if cmd[:3] == ["gh", "pr", "view"]:
+            view_calls += 1
+            state = next(view_states)
+            body = {"state": state}
+            if state == "MERGED":
+                body["mergeCommit"] = {"oid": sha}
+            return _FakeCompleted(0, stdout=json.dumps(body))
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    import subprocess as _real_subprocess
+    import time as _real_time
+    monkeypatch.setattr(_real_subprocess, "run", fake_run)
+    monkeypatch.setattr(rb, "_git", lambda *a, **k: "")
+    monkeypatch.setattr(_real_time, "sleep", lambda s: sleep_calls.append(s))
+
+    resolved = rb._land_via_pr(
+        repo=repo, branch="release-pipeline/state-test", base_ref="main",
+        title="t", body="b",
+    )
+    assert resolved == sha
+    assert view_calls == 3  # OPEN, OPEN, MERGED -- proves it actually polled
+    assert len(sleep_calls) == 2  # one sleep between each of the two OPEN polls
+
+
+def test_land_via_pr_raises_if_pr_closed_without_merging(monkeypatch, repo: Path):
+    def fake_run(cmd, cwd=None, capture_output=None, text=None):
+        if cmd[:3] == ["gh", "pr", "create"]:
+            return _FakeCompleted(0, stdout="https://github.com/o/r/pull/1234\n")
+        if cmd[:3] == ["gh", "pr", "merge"]:
+            return _FakeCompleted(0, stdout="auto-merge enabled\n")
+        if cmd[:3] == ["gh", "pr", "view"]:
+            return _FakeCompleted(0, stdout=json.dumps({"state": "CLOSED"}))
         raise AssertionError(f"unexpected command: {cmd}")
 
     import subprocess as _real_subprocess
     monkeypatch.setattr(_real_subprocess, "run", fake_run)
     monkeypatch.setattr(rb, "_git", lambda *a, **k: "")
-    monkeypatch.setattr(rb, "_rev_parse", lambda ref, cwd: "deadbeef" * 5)
 
-    sha = rb._land_via_pr(
-        repo=repo, branch="release-pipeline/state-test", base_ref="main",
-        title="t", body="b",
-    )
-    assert sha == "deadbeef" * 5
-    assert len(merge_calls) == 1
+    with pytest.raises(pr.PromotionError, match="closed without merging"):
+        rb._land_via_pr(
+            repo=repo, branch="release-pipeline/state-test", base_ref="main",
+            title="t", body="b",
+        )
+
+
+def test_land_via_pr_raises_on_merge_timeout(monkeypatch, repo: Path):
+    def fake_run(cmd, cwd=None, capture_output=None, text=None):
+        if cmd[:3] == ["gh", "pr", "create"]:
+            return _FakeCompleted(0, stdout="https://github.com/o/r/pull/5555\n")
+        if cmd[:3] == ["gh", "pr", "merge"]:
+            return _FakeCompleted(0, stdout="auto-merge enabled\n")
+        if cmd[:3] == ["gh", "pr", "view"]:
+            return _FakeCompleted(0, stdout=json.dumps({"state": "OPEN"}))
+        raise AssertionError(f"unexpected command: {cmd}")
+
+    import subprocess as _real_subprocess
+    import time as _real_time
+    monkeypatch.setattr(_real_subprocess, "run", fake_run)
+    monkeypatch.setattr(rb, "_git", lambda *a, **k: "")
+    monkeypatch.setattr(_real_time, "sleep", lambda s: None)
+    # Fast-forward monotonic() past the deadline on the second read so the
+    # loop times out after exactly one real poll, without a real sleep.
+    clock = iter([0.0, 0.0, 1000.0])
+    monkeypatch.setattr(_real_time, "monotonic", lambda: next(clock))
+
+    with pytest.raises(pr.PromotionError, match="did not merge within"):
+        rb._land_via_pr(
+            repo=repo, branch="release-pipeline/state-test", base_ref="main",
+            title="t", body="b",
+        )
 
 
 def test_land_via_pr_raises_clearly_when_create_output_unparseable(

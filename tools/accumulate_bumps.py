@@ -18,7 +18,7 @@ Usage::
     python tools/accumulate_bumps.py --apply     # write plugin.json / pyproject.toml /
                                                   # marketplace.json, then remove the
                                                   # consumed changefiles
-    python tools/accumulate_bumps.py --from-diff origin/main --apply
+    python tools/accumulate_bumps.py --from-diff origin/dev --apply
         # no changefiles: bump exactly what check-version-bump requires for this
         # branch vs the base -- every touched plugin, every plugin that vendors a
         # changed lib, and the lib itself in all its copies -- each only when it
@@ -583,7 +583,7 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--apply", action="store_true",
                        help="write versions and remove consumed changefiles")
     ap.add_argument("--from-diff", metavar="BASE", default=None,
-                    help="ignore changefiles; bump what this branch needs vs BASE (e.g. origin/main)")
+                    help="ignore changefiles; bump what this branch needs vs BASE (e.g. origin/dev)")
     args = ap.parse_args(argv)
 
     if args.from_diff:
