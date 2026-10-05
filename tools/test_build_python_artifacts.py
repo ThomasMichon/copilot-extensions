@@ -16,6 +16,14 @@ import pytest
 #: `USERDOMAIN`/`USERNAME` environment variables.
 _FAKE_TOKEN_ACCOUNT = "REDMOND\\svc"
 _FAKE_TOKEN_SID = "S-1-5-21-1111111111-2222222222-3333333333-1001"
+#: Canned stand-in for `_well_known_sid_display_name`'s own real
+#: `LookupAccountSidW`/`ConvertStringSidToSidW` resolution -- tests that
+#: restore the REAL `_verify_restricted_acl` (to exercise its parsing/
+#: comparison logic against a fabricated `icacls` transcript) mock this
+#: too, so they never need a genuine Windows OS call either; matches
+#: what those APIs actually resolve `S-1-5-18` to on an English Windows
+#: install, which is also what this repo's own real smoke tests confirm.
+_FAKE_SYSTEM_NAME = "NT AUTHORITY\\SYSTEM"
 
 
 def _whoami_user_stdout(account: str = _FAKE_TOKEN_ACCOUNT, sid: str = _FAKE_TOKEN_SID) -> str:
@@ -3516,6 +3524,7 @@ def test_restrict_file_to_owner_invokes_icacls_on_windows(
 ):
     monkeypatch.setattr(btl.sys, "platform", "win32")
     monkeypatch.setattr(gft, "_verify_restricted_acl", _REAL_VERIFY_RESTRICTED_ACL)
+    monkeypatch.setattr(gft, "_well_known_sid_display_name", lambda sid: _FAKE_SYSTEM_NAME)  # noqa: ARG005
     target = tmp_path / "secret.toml"
     seen_cmds: list[list[str]] = []
 
@@ -3617,6 +3626,7 @@ def test_restrict_file_to_owner_rejects_similarly_named_principal(
     # because it CONTAINS the real owner `REDMOND\svc` as a substring.
     monkeypatch.setattr(btl.sys, "platform", "win32")
     monkeypatch.setattr(gft, "_verify_restricted_acl", _REAL_VERIFY_RESTRICTED_ACL)
+    monkeypatch.setattr(gft, "_well_known_sid_display_name", lambda sid: _FAKE_SYSTEM_NAME)  # noqa: ARG005
     target = tmp_path / "secret.toml"
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
@@ -3646,6 +3656,7 @@ def test_restrict_file_to_owner_rejects_principal_containing_word_system(
     # mistaken for `NT AUTHORITY\SYSTEM` by a loose substring check.
     monkeypatch.setattr(btl.sys, "platform", "win32")
     monkeypatch.setattr(gft, "_verify_restricted_acl", _REAL_VERIFY_RESTRICTED_ACL)
+    monkeypatch.setattr(gft, "_well_known_sid_display_name", lambda sid: _FAKE_SYSTEM_NAME)  # noqa: ARG005
     target = tmp_path / "secret.toml"
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
@@ -3672,6 +3683,7 @@ def test_verify_restricted_acl_fails_closed_on_empty_output(
     # NOT vacuously pass verification just because nothing UNEXPECTED was
     # found in it -- both expected principals must actually be OBSERVED.
     target = tmp_path / "secret.toml"
+    monkeypatch.setattr(gft, "_well_known_sid_display_name", lambda sid: _FAKE_SYSTEM_NAME)  # noqa: ARG005
     monkeypatch.setattr(
         gft.subprocess, "run",
         lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""),  # noqa: ARG005
@@ -3686,6 +3698,7 @@ def test_verify_restricted_acl_fails_closed_when_only_one_expected_principal_pre
     # A transcript naming ONLY the owner (SYSTEM genuinely absent) must
     # also fail closed -- not just the "zero principals" case above.
     target = tmp_path / "secret.toml"
+    monkeypatch.setattr(gft, "_well_known_sid_display_name", lambda sid: _FAKE_SYSTEM_NAME)  # noqa: ARG005
     monkeypatch.setattr(
         gft.subprocess, "run",
         lambda cmd, **kwargs: subprocess.CompletedProcess(  # noqa: ARG005
@@ -3700,6 +3713,7 @@ def test_verify_restricted_acl_passes_with_both_expected_principals(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
     target = tmp_path / "secret.toml"
+    monkeypatch.setattr(gft, "_well_known_sid_display_name", lambda sid: _FAKE_SYSTEM_NAME)  # noqa: ARG005
     monkeypatch.setattr(
         gft.subprocess, "run",
         lambda cmd, **kwargs: subprocess.CompletedProcess(  # noqa: ARG005
@@ -3845,14 +3859,14 @@ def test_well_known_sid_display_name_resolves_system_account():
 def test_resolve_toolchain_lock_hardens_staging_dir_before_index_config_exists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression: the sanitized temp
-    # index-config file must be protected from the moment it exists.
-    # Round 25 moved it INSIDE the staging venv directory and instead
-    # hardens THAT DIRECTORY's own ACL immediately after creation (before
-    # `uv venv` even runs) -- its own parent (`target_dir.parent`) is
-    # caller-selected and may be writable by another local principal, who
-    # could otherwise replace/symlink the config file's own path between
-    # creation and `uv` later opening it via `UV_CONFIG_FILE`.
+    # Regression: the sanitized temp index-config file must be protected
+    # from the moment it exists. It lives INSIDE the staging venv
+    # directory, which instead hardens THAT DIRECTORY's own ACL
+    # immediately after creation (before `uv venv` even runs) -- its own
+    # parent (`target_dir.parent`) is caller-selected and may be writable
+    # by another local principal, who could otherwise replace/symlink the
+    # config file's own path between creation and `uv` later opening it
+    # via `UV_CONFIG_FILE`.
     _assume_governed_feed_configured(monkeypatch)
     monkeypatch.setattr(btl.sys, "platform", "win32")
     venv_dir = tmp_path / "toolchain-venv"

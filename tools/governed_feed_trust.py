@@ -499,17 +499,22 @@ def _provenance_key_lock():
     `ArtifactBuildError` if the lock cannot be acquired within it."""
     lock_path = _provenance_key_dir() / "provenance-key.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    if sys.platform == "win32" or fcntl is None:
+    if hasattr(ctypes, "windll"):
         # A session-local named mutex, keyed off this machine's fixed
         # provenance-key directory so every caller on this machine names
         # the SAME mutex -- `CreateMutexW` both creates and opens an
         # existing mutex of the same name, and the OS releases it
         # automatically if the owning process terminates without an
-        # explicit `ReleaseMutex` (e.g. a crash). The `fcntl is None`
-        # half of this condition only matters off Windows, on a platform
-        # whose Python build lacks `fcntl` entirely -- ctypes' own
-        # `windll` access below only actually works on a genuine Windows
-        # OS either way, independent of what `sys.platform` reports.
+        # explicit `ReleaseMutex` (e.g. a crash). Branches on
+        # `hasattr(ctypes, "windll")` (whether this call would actually
+        # work) rather than `sys.platform == "win32"` -- a test can
+        # legitimately fake `sys.platform` to exercise unrelated Windows-
+        # shaped logic (e.g. `_restrict_file_to_owner`'s own icacls
+        # command construction) on a genuinely non-Windows interpreter,
+        # where `ctypes.windll` does not exist as an attribute at all;
+        # this function's own choice of lock primitive must depend on
+        # what is ACTUALLY callable, never on a value the surrounding
+        # test suite is free to spoof for other reasons.
         mutex_name = (
             "Local\\copilot-extensions-provenance-key-"
             + hashlib.sha256(str(lock_path).encode("utf-8")).hexdigest()[:32]
@@ -537,7 +542,7 @@ def _provenance_key_lock():
         finally:
             ctypes.windll.kernel32.ReleaseMutex(handle)
             ctypes.windll.kernel32.CloseHandle(handle)
-    else:
+    elif fcntl is not None:
         fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
         deadline = time.monotonic() + _PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS
         try:
@@ -560,6 +565,12 @@ def _provenance_key_lock():
                 fcntl.flock(fd, fcntl.LOCK_UN)
         finally:
             os.close(fd)
+    else:
+        raise ArtifactBuildError(
+            "no OS-backed lock mechanism is available on this platform "
+            "(neither ctypes.windll nor fcntl) -- refusing to serialize "
+            "provenance-key creation without one"
+        )
 
 
 def _provenance_key() -> bytes:
