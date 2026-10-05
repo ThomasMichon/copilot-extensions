@@ -133,6 +133,20 @@ def test_non_string_yaml_key_does_not_crash_other_entries(tmp_path: Path):
     assert [r.source for r in refs] == ["only@mkt"]
 
 
+def test_non_string_yaml_key_never_matches_its_string_form(tmp_path: Path):
+    # Regression: a non-string key must be SKIPPED, not coerced via str() --
+    # a repo literally named "42" must not match a YAML int key 42.
+    _write_related(
+        tmp_path,
+        "related:\n"
+        "  42:\n"
+        "    locus: { preferred: local }\n"
+        "    plugins:\n"
+        "      - should-not-match@mkt\n",
+    )
+    assert rp.related_plugins_for_repo("42", anchors=[tmp_path]) == []
+
+
 def test_control_plane_anchors_from_topology(tmp_path, monkeypatch):
     # A topology whose machines_yaml lives at an anchor with related.yaml.
     _write_related(tmp_path, _RELATED)

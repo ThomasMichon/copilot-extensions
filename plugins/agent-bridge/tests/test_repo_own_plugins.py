@@ -359,6 +359,25 @@ def test_related_plugin_resolved_from_declaring_anchor(tmp_path, monkeypatch):
     ]
 
 
+def test_related_plugin_dir_args_passes_repo_roots_as_anchors(tmp_path, monkeypatch):
+    # Regression (#5306 review): related_plugins_for_repo must receive the
+    # SAME repo_roots the caller passed (as `anchors=`), not just use them
+    # later for per-plugin resolution -- otherwise an explicit repo_roots
+    # override has no effect on WHICH related plugins are even discovered.
+    seen_anchors = []
+
+    def _spy(repo, anchors=None):
+        seen_anchors.append(anchors)
+        return []
+
+    monkeypatch.setattr(related_plugins, "related_plugins_for_repo", _spy)
+
+    custom_roots = [tmp_path / "a", tmp_path / "b"]
+    repo_own_plugins.related_plugin_dir_args("target-repo", repo_roots=custom_roots)
+
+    assert seen_anchors == [custom_roots]
+
+
 def test_related_plugin_falls_back_to_installed(tmp_path, monkeypatch):
     installed = tmp_path / "installed"
     _write(installed / "control-local" / "enhancer" / "plugin.json", {"name": "enhancer"})

@@ -3304,6 +3304,33 @@ def test_resolve_local_binstub_path_fallback_skips_ps1_for_cmd(
 
 
 @pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="PATHEXT normalization is a Windows-only concern.",
+)
+def test_resolve_local_binstub_normalizes_pathext_whitespace_and_dot(
+    tmp_path, monkeypatch,
+) -> None:
+    """Regression (#5306 review): ``PATHEXT`` entries can carry stray
+    whitespace or (rarely) omit the leading dot -- both must still match a
+    direct-launch extension and build a correct candidate filename, rather
+    than silently never matching or constructing an unseparated name."""
+    from pathlib import Path
+
+    from agent_bridge.routes.worktrees import _resolve_local_binstub
+
+    bin_dir = tmp_path / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    shim = bin_dir / "private-downstream-repo.cmd"
+    shim.write_text("@echo off\n")
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("PATHEXT", " .PS1 ;CMD;.EXE")  # whitespace + dot-less
+    resolved = _resolve_local_binstub("private-downstream-repo")
+    import os as _os
+    assert _os.path.normcase(resolved) == _os.path.normcase(str(shim))
+
+
+@pytest.mark.skipif(
     sys.platform == "win32",
     reason="POSIX execute-permission semantics; Windows has no X_OK concept "
     "for a plain file and always takes the PATHEXT branch instead.",

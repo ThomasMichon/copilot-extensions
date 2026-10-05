@@ -550,7 +550,19 @@ def _resolve_local_binstub(project: str) -> str:
 
     explicit = Path.home() / ".local" / "bin" / project
     if os.name == "nt":
-        pathext = [e for e in os.environ.get("PATHEXT", "").split(os.pathsep) if e]
+        pathext = []
+        for raw in os.environ.get("PATHEXT", "").split(os.pathsep):
+            # Entries can carry stray whitespace, and (rarely) omit the
+            # leading dot -- normalize both before matching/building a
+            # candidate name, or a well-formed extension like " .CMD" would
+            # silently never match and a dot-less one would build a wrong
+            # (unseparated) candidate filename.
+            ext = raw.strip()
+            if not ext:
+                continue
+            if not ext.startswith("."):
+                ext = "." + ext
+            pathext.append(ext)
         if explicit.suffix.upper() in direct_launch_exts and explicit.is_file():
             return str(explicit)
         for ext in pathext:

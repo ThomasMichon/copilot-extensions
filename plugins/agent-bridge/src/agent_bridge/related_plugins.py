@@ -200,10 +200,13 @@ def related_plugins_for_repo(
             if not isinstance(entry, dict):
                 continue
             # YAML may deserialize an unquoted key as a non-string (int,
-            # bool, etc.) -- normalize before lowercasing so one oddly-typed
-            # entry can't raise and drop every later entry's plugins.
-            if str(key).lower() == target or any(
-                r.lower() == target for r in _entry_repos(entry)
-            ):
+            # bool, etc.) -- a real registry key is always a string, so
+            # skip a non-string key entirely rather than coercing it (which
+            # could create an unintended match, e.g. a repo literally named
+            # "42" matching an int key 42) while still avoiding the .lower()
+            # crash that would otherwise drop every later entry's plugins.
+            if isinstance(key, str) and key.lower() == target:
+                return _parse_plugin_items(entry.get("plugins"))
+            if any(r.lower() == target for r in _entry_repos(entry)):
                 return _parse_plugin_items(entry.get("plugins"))
     return []

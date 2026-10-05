@@ -226,12 +226,12 @@ def related_plugin_dir_args(
     try:
         from .related_plugins import control_plane_anchors, related_plugins_for_repo
 
-        refs = related_plugins_for_repo(repo)
-        if not refs:
-            return []
         roots = (
             list(repo_roots) if repo_roots is not None else control_plane_anchors()
         )
+        refs = related_plugins_for_repo(repo, anchors=roots)
+        if not refs:
+            return []
         args: list[str] = []
         resolved: list[str] = []
         unresolved: list[str] = []
