@@ -1,0 +1,9 @@
+{
+  "comment": "Adopt shared installer engine wrapper for agent-vault",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

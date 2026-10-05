@@ -19,6 +19,9 @@ _step() { printf '  ...    %s\n' "$1"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"
+
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -359,6 +362,18 @@ _source_kind() {
 }
 # === end install-contract:v4 source-kind ===
 
+_git_info() {
+    local path="$1"
+    local commit branch dirty
+    commit=$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+    dirty="false"
+    if [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]]; then
+        dirty="true"
+    fi
+    echo "$commit $branch $dirty"
+}
+
 _installed_version() {
     # The version currently ACTIVE (via the `.venv` link), for the downgrade guard.
     [[ -x "$LINK_PYTHON" ]] || return 1
@@ -428,96 +443,17 @@ _check_keepassxc() {
     fi
 }
 
-_write_binstub() {
-    mkdir -p "$LOCAL_BIN" "$INSTALL_DIR/bin"
-    # Co-deploy the canonical marker-only resolver so the binstub (and any
-    # launcher) resolves the interpreter the ONE uniform way
-    # (uniform-runtime-resolution, #765).
-    for r in resolve-runtime.sh resolve-runtime.ps1; do
-        [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
-    done
-    cat > "$STUB" << 'STUBEOF'
-#!/usr/bin/env bash
-# agent-vault binstub -- self-provisioning (install-on-first-use).
-# Resolves the interpreter SOLELY via the junction-free versioned-runtime marker
-# (the deployed resolve-runtime.sh; uniform-runtime-resolution, #765): current-
-# version -> last-known-good -> newest complete slot. NEVER a `.venv` link, NEVER
-# a PATH python -- when no slot is installed AGENT_RT_PY is empty and we self-
-# provision on first use rather than silently binding the system interpreter.
-export PYTHONUTF8=1
-_name="agent-vault"
-_root="$HOME/.$_name"
-_resolver="$_root/bin/resolve-runtime.sh"
-_resolve() {
-    AGENT_RT_PY=""
-    if [ -f "$_resolver" ]; then
-        AGENT_RT_ROOT="$_root"
-        . "$_resolver"
-    fi
-}
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_vault "$@"
-mkdir -p "$_root"
-_status="$_root/.provision-status"
-printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
-_install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
-[ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
-if [ ! -f "$_install" ]; then
-    printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
-    exit 127
-fi
-_lock="$_root/.provision.lock"
-exec 9>"$_lock"
-command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_vault "$@"
-printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-bash "$_install" provision >&2
-_rc=$?
-_resolve
-if [ "$_rc" -eq 0 ] && [ -n "$AGENT_RT_PY" ]; then
-    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-    exec "$AGENT_RT_PY" -m agent_vault "$@"
-fi
-printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-if [ "$_rc" -eq 0 ]; then
-    printf '%s\n' "[$_name] provisioning reported success but no runtime slot resolved." >&2
-    _rc=1
-else
-    printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2
-fi
-exit "$_rc"
-STUBEOF
-    chmod +x "$STUB"
-    _ok "Binstub: $STUB (self-provisioning)"
-}
-
-# --- self-provisioning helpers (runtime-self-provisioning pattern) -----------
-# Vendor a standalone uv into the runtime tool dir when uv is absent (pristine or
-# governed box) instead of dead-ending; add it to PATH for this run.
-_ensure_uv() {
-    command -v uv >/dev/null 2>&1 && return 0
-    local tooldir="$INSTALL_DIR/tool"
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; return 0; fi
-    _step "uv not found -- vendoring a standalone uv into $tooldir"
-    mkdir -p "$tooldir"
-    local url="https://astral.sh/uv/install.sh" script="$tooldir/uv-install.sh" got=""
-    if command -v curl >/dev/null 2>&1; then curl -LsSf "$url" -o "$script" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v wget >/dev/null 2>&1; then wget -qO "$script" "$url" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v python3 >/dev/null 2>&1; then
-        python3 - "$url" "$script" <<'PY' 2>/dev/null && got=1
-import sys, urllib.request
-urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
-PY
-    fi
-    if [[ -n "$got" && -s "$script" ]]; then
-        env UV_INSTALL_DIR="$tooldir" UV_UNMANAGED_INSTALL="$tooldir" INSTALLER_NO_MODIFY_PATH=1 sh "$script" >/dev/null 2>&1 || true
-    fi
-    [[ -x "$tooldir/bin/uv" && ! -x "$tooldir/uv" ]] && ln -sf "$tooldir/bin/uv" "$tooldir/uv" 2>/dev/null || true
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; _ok "Vendored uv into $tooldir"; return 0; fi
-    _fail "uv is required but not found, and vendoring failed (no reachable uv installer). Install uv, then retry."
-    return 1
+_deploy_binstub() {
+    write_simple_binstub \
+        "agent-vault" \
+        "agent_vault" \
+        "$INSTALL_DIR" \
+        "$LOCAL_BIN" \
+        "$INSTALL_DIR/bin" \
+        "scripts/install.sh" \
+        "AGENT_VAULT_NO_SELFPROVISION" \
+        "$SCRIPT_DIR/resolve-runtime.ps1" \
+        "$SCRIPT_DIR/resolve-runtime.sh"
 }
 
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):
@@ -527,8 +463,8 @@ PY
 _ensure_uv_index() {
     [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
     local idx=""
-    if command -v pip >/dev/null 2>&1; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]')"; fi
-    if [[ -z "$idx" ]] && command -v pip3 >/dev/null 2>&1; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]')"; fi
+    if command -v pip >/dev/null 2>&1; then idx="$(pip config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
+    if [[ -z "$idx" ]] && command -v pip3 >/dev/null 2>&1; then idx="$(pip3 config get global.index-url 2>/dev/null | tr -d '[:space:]' || true)"; fi
     if [[ -z "$idx" ]]; then
         local f
         for f in "${PIP_CONFIG_FILE:-}" "$HOME/.config/pip/pip.conf" "$HOME/.pip/pip.conf" /etc/pip.conf /etc/xdg/pip/pip.conf; do
@@ -546,7 +482,7 @@ do_stamp() {
     echo ''; echo '=== agent-vault stamp (defer runtime to first use) ==='; echo ''
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
-    _write_binstub
+    _deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
 }
 
@@ -572,22 +508,23 @@ _ensure_runtime() {
     _ok "Python: $py"
     # Self-acquire uv (vendored if absent) + mirror the governed pip index to uv
     # so a solo/standalone install works on a pristine or governed box.
-    _ensure_uv || exit 1
+    local uv_cmd=""
     _ensure_uv_index
-    command -v uv >/dev/null 2>&1 && have_uv=1
+    uv_cmd="$(ensure_uv "$INSTALL_DIR" tool 1 || true)"
+    if [[ -z "$uv_cmd" ]]; then
+        _fail 'uv is required but could not be resolved or acquired'
+        exit 1
+    fi
+    have_uv=1
 
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     _ok "Directories: $INSTALL_DIR"
 
     if [[ ! -x "$VENV_PYTHON" ]]; then
-        if [[ "$have_uv" -eq 1 ]]; then
-            _step 'Creating venv via uv...'
-            _versioned_slot_clean
-            uv venv "$VENV_DIR" --allow-existing >/dev/null 2>&1 \
-                || "$py" -m venv "$VENV_DIR" >/dev/null 2>&1
-        else
-            _step 'Creating venv via python -m venv...'
-            "$py" -m venv "$VENV_DIR" >/dev/null 2>&1
+        _versioned_slot_clean
+        if ! new_signed_venv "$uv_cmd" "$VENV_DIR" "3.10"; then
+            _fail "Failed to create venv at $VENV_DIR"
+            exit 1
         fi
         [[ -x "$VENV_PYTHON" ]] || { _fail "Venv creation failed -- $VENV_PYTHON not found"; exit 1; }
         _ok 'Venv created'
@@ -611,18 +548,28 @@ _ensure_runtime() {
         fi
         if [[ -f "$_lib_dir/pyproject.toml" ]]; then
             if [[ "$have_uv" -eq 1 ]]; then
-                uv pip install --python "$VENV_PYTHON" "$_lib_dir" --quiet
+                _lib_out=""
+                if ! _lib_out=$(invoke_uv_pip_install_resilient "${uv_cmd:-uv}" --python "$VENV_PYTHON" "$_lib_dir" --quiet); then
+                    [[ -n "$_lib_out" ]] && printf '%s\n' "$_lib_out" >&2
+                    _fail "$_lib library install failed"
+                    exit 1
+                fi
             else
-                "$VENV_PYTHON" -m pip install --quiet "$_lib_dir"
-            fi || { _fail "$_lib library install failed"; exit 1; }
+                "$VENV_PYTHON" -m pip install --quiet "$_lib_dir" \
+                    || { _fail "$_lib library install failed"; exit 1; }
+            fi
         fi
     done
 
     if [[ "$have_uv" -eq 1 ]]; then
-        uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null \
-            || { _fail 'Failed to install agent-vault package into venv'; exit 1; }
+        pkg_out=""
+        if ! pkg_out=$(INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="$PLUGIN_DIR" invoke_uv_pip_install_resilient "${uv_cmd:-uv}" --python "$VENV_PYTHON" --no-deps "$PLUGIN_DIR" --quiet); then
+            [[ -n "$pkg_out" ]] && printf '%s\n' "$pkg_out" >&2
+            _fail 'Failed to install agent-vault package into venv'
+            exit 1
+        fi
     else
-        "$VENV_PYTHON" -m pip install --quiet "$PLUGIN_DIR" 2>/dev/null \
+        "$VENV_PYTHON" -m pip install --quiet --no-deps "$PLUGIN_DIR" 2>/dev/null \
             || { _fail 'Failed to install agent-vault package into venv'; exit 1; }
     fi
     _ok 'Package installed: agent-vault'
@@ -642,9 +589,9 @@ _ensure_runtime() {
         _versioned_activate || exit 1
     fi
 
-    _write_binstub
+    _deploy_binstub
     _write_askpass
-    _write_manifest
+    write_deploy_manifest "agent-vault" "agent-vault" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR"
     _check_keepassxc
 
     if "$LINK_PYTHON" -c 'import agent_vault' 2>/dev/null; then
@@ -663,52 +610,6 @@ _ensure_runtime() {
         *":$LOCAL_BIN:"*) _ok "PATH: $LOCAL_BIN is on PATH" ;;
         *) _step "Add $LOCAL_BIN to your PATH: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
     esac
-}
-
-_write_manifest() {
-    _git_info() {
-        local path="$1" commit branch dirty
-        commit=$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo "unknown")
-        branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-        dirty="false"
-        [[ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ]] && dirty="true"
-        echo "$commit $branch $dirty"
-    }
-    local manifest="$INSTALL_DIR/deploy-manifest.json"
-    local kind ver commit branch dirty
-    kind="$(_source_kind "$PLUGIN_DIR")"
-    ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null | head -n1)"
-    [[ -n "$ver" ]] || ver="$(_source_version 2>/dev/null || echo 0.0.0)"
-    commit="null"; branch="null"; dirty="false"
-    if [[ "$kind" == "local" ]]; then
-        local repo_root _c _b _d
-        repo_root="$(cd "$PLUGIN_DIR/../.." && pwd)"
-        read -r _c _b _d <<< "$(_git_info "$repo_root")"
-        commit="\"$_c\""; branch="\"$_b\""; dirty="$_d"
-    fi
-    local tmp="$manifest.tmp"
-    cat > "$tmp" << EOF
-{
-  "schema_version": 3,
-  "service": "agent-vault",
-  "deployed_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
-  "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
-  "source": {
-    "kind": "$kind",
-    "path": "$PLUGIN_DIR",
-    "repo": "copilot-extensions",
-    "plugin": "agent-vault",
-    "version": "$ver",
-    "commit": $commit,
-    "branch": $branch,
-    "dirty": $dirty
-  },
-  "venv": "$VENV_DIR",
-  "runtime": "python"
-}
-EOF
-    mv -f "$tmp" "$manifest"
-    _ok "Deploy manifest written (source: $kind)"
 }
 
 _install_service() {
