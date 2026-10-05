@@ -805,11 +805,11 @@ function Install-Runtime {
         }
     }
     if (Get-Command uv -ErrorAction SilentlyContinue) {
-        $pkgResultObj = Invoke-UvPipInstallResilient -UvCommand 'uv' -PayloadDirToScrub $PluginDir -Arguments @('--python', $VenvPython, "$PluginDir", '--quiet')
+            $pkgResultObj = Invoke-UvPipInstallResilient -UvCommand 'uv' -PayloadDirToScrub $PluginDir -Arguments @('--python', $VenvPython, '--no-deps', "$PluginDir", '--quiet')
             $pkgOut = $pkgResultObj.Output
         $pkgResult = $pkgResultObj.ExitCode
     } else {
-        $pkgOut = & $VenvPython -m pip install --quiet "$PluginDir" 2>&1
+            $pkgOut = & $VenvPython -m pip install --quiet --no-deps "$PluginDir" 2>&1
             $pkgResult = $LASTEXITCODE
     }
     $ErrorActionPreference = $prevEAP

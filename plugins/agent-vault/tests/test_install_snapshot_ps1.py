@@ -187,8 +187,6 @@ def test_posix_stamp_wrapper_fails_when_provision_reports_success_without_runtim
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required")
 def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(tmp_path: Path) -> None:
-    if os.name == "nt":
-        pytest.skip("POSIX snapshot-provision harness")
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
@@ -200,30 +198,32 @@ def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(tmp_path: Pat
         for line in (_PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8").splitlines()
         if line.startswith("version = ")
     )
+    expected_version = version.replace("-dev", ".dev")
     env = _isolated_install_env(home)
     internal_index = _host_pip_index_url()
     if internal_index and not (env.get("UV_DEFAULT_INDEX") or env.get("UV_INDEX_URL")):
         env["UV_DEFAULT_INDEX"] = internal_index
-    system_root = home / "systemroot"
-    where_exe = system_root / "System32" / "where.exe"
-    powershell_exe = system_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
-    where_exe.parent.mkdir(parents=True, exist_ok=True)
-    powershell_exe.parent.mkdir(parents=True, exist_ok=True)
-    where_exe.write_text(
-        "#!/usr/bin/env sh\n"
-        "if [ \"$1\" = pwsh ]; then\n"
-        f"  printf '%s\\n' '{pwsh}'\n"
-        "fi\n",
-        encoding="utf-8",
-    )
-    where_exe.chmod(0o755)
-    powershell_exe.write_text(
-        "#!/usr/bin/env sh\n"
-        f"exec '{pwsh}' \"$@\"\n",
-        encoding="utf-8",
-    )
-    powershell_exe.chmod(0o755)
-    env["SystemRoot"] = str(system_root)
+    if os.name != "nt":
+        system_root = home / "systemroot"
+        where_exe = system_root / "System32" / "where.exe"
+        powershell_exe = system_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+        where_exe.parent.mkdir(parents=True, exist_ok=True)
+        powershell_exe.parent.mkdir(parents=True, exist_ok=True)
+        where_exe.write_text(
+            "#!/usr/bin/env sh\n"
+            "if [ \"$1\" = pwsh ]; then\n"
+            f"  printf '%s\\n' '{pwsh}'\n"
+            "fi\n",
+            encoding="utf-8",
+        )
+        where_exe.chmod(0o755)
+        powershell_exe.write_text(
+            "#!/usr/bin/env sh\n"
+            f"exec '{pwsh}' \"$@\"\n",
+            encoding="utf-8",
+        )
+        powershell_exe.chmod(0o755)
+        env["SystemRoot"] = str(system_root)
 
     stamp = [
         pwsh,
@@ -261,30 +261,50 @@ def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(tmp_path: Pat
     shutil.rmtree(payload)
     shutil.rmtree(tmp_path / "libs")
 
-    provision = subprocess.run(
-        [
-            "bash",
-            str(snapshot / "scripts" / "install.sh"),
-            "provision",
-            "--no-service",
-            "--install-dir",
-            str(home / ".agent-vault"),
-        ],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=420,
-        check=False,
-    )
-    assert provision.returncode == 0, provision.stderr
+    if os.name == "nt":
+        invoke = subprocess.run(
+            [
+                pwsh,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(home / ".local" / "bin" / "agent-vault.ps1"),
+                "--version",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=420,
+            check=False,
+        )
+        assert invoke.returncode == 0, invoke.stderr
+        assert f"agent-vault {expected_version}" in invoke.stdout
+    else:
+        provision = subprocess.run(
+            [
+                "bash",
+                str(snapshot / "scripts" / "install.sh"),
+                "provision",
+                "--no-service",
+                "--install-dir",
+                str(home / ".agent-vault"),
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=420,
+            check=False,
+        )
+        assert provision.returncode == 0, provision.stderr
 
-    invoke = subprocess.run(
-        [str(home / ".local" / "bin" / "agent-vault"), "--version"],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    assert invoke.returncode == 0, invoke.stderr
-    assert f"agent-vault {version.replace('-dev', '.dev')}" in invoke.stdout
+        invoke = subprocess.run(
+            [str(home / ".local" / "bin" / "agent-vault"), "--version"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert invoke.returncode == 0, invoke.stderr
+        assert f"agent-vault {expected_version}" in invoke.stdout

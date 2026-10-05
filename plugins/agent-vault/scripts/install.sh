@@ -463,6 +463,7 @@ _deploy_binstub() {
             printf '%s\n' '    exit 1' >> "$tmp"
             printf '%s\n' 'fi' >> "$tmp"
             IFS= read -r _discard || true
+            printf '%s\n' 'exit "${_rc:-1}"' >> "$tmp"
         fi
     done < "$STUB"
     mv -f "$tmp" "$STUB"

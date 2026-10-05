@@ -23,12 +23,14 @@ INSTALLER = PLUGIN / "scripts" / "install.ps1"
 pytestmark = pytest.mark.guard
 
 _LOOP_START = "    foreach ($lib in @('zdd', 'agent-procutil', 'single-instance-lease')) {"
-_LOOP_END = "\n    }\n    if (Get-Command uv -ErrorAction SilentlyContinue) {\n        $pkgResultObj ="
+_LOOP_END = "\n    if (Get-Command uv -ErrorAction SilentlyContinue) {"
 
 
 def _extract_loop() -> str:
     text = INSTALLER.read_text(encoding="utf-8")
-    return _LOOP_START + text.rsplit(_LOOP_START, 1)[1].split(_LOOP_END, 1)[0] + "\n    }"
+    start = text.rfind(_LOOP_START)
+    end = text.index(_LOOP_END, start)
+    return text[start:end]
 
 
 def _run(
