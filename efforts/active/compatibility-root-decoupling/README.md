@@ -143,6 +143,12 @@ Any change that makes these files slightly smaller is a win."
       `SimpleNamespace`-faked whole `_core()` return value carrying the
       migrated name (a shape the Phase 1 tool's static scan cannot see --
       only running the real test suite catches it).
+- [ ] **After any `git sync`/rebase onto a moved base** (not just once
+      before the first push): re-run `--progress`/`--name` and the full
+      test sweep again, not just at the start. The remote base can move
+      and introduce brand-new instances of the exact pattern being
+      migrated (confirmed: PR #5313 landed mid-slice and added fresh
+      `core._json_output` call sites a post-sync rescan alone caught).
 
 ## Proposal
 
@@ -213,6 +219,38 @@ _Pending._
   real test suite per name, not just the tool's zero/zero report -- the
   tool proves no *known-shape* reference remains, not that nothing
   depended on the old behavior.
+- **A real regex bug in the committed tool itself**, found only by CI
+  (not local runs, since the local `pr_state_cli.py`/`finalize_cli.py`
+  state predated an upstream PR landing new code): `\(\)?` in the
+  call-site regex means "a required `(` plus an optional `)`", not
+  "an optional `()` pair" -- so the tool was silently blind to the bare
+  `core.attr(` shape (a plain assigned variable, no call parens) the
+  whole time, undercounting both `--name` and `--progress`. Fixed to
+  `(?:\(\))?`; the corrected `--progress` baseline jumped from 200 to 291
+  call sites repo-wide. This also meant a brand-new upstream PR
+  (#5313, pr-abandon flow, merged to `dev` after this slice's local
+  validation but before its own merge) had introduced fresh
+  `core._json_output`/`core._json_error` call sites in `pr_state_cli.py`
+  and `finalize_cli.py` that a post-sync rebase pulled in cleanly (no
+  conflict, since it was new code) and that both the undercounting bug
+  and the lack of a post-rebase re-scan let slip through to a pushed PR,
+  where CI caught it. Fixed both files; also found and fixed a genuine,
+  unrelated merge-resolution mistake surfaced by the same investigation
+  (a stale, pre-`--from-branch` duplicate `--repo` validation block I'd
+  kept from my own old pre-migration commit during an earlier rebase
+  conflict, which upstream had already correctly replaced -- this broke
+  2 real tests, caught and fixed here). **Takeaway: always re-run
+  `--progress`/`--name` and the full test sweep again after ANY sync/
+  rebase onto a moved base, not just once before the initial push** --
+  the remote base can move and introduce new instances of the exact
+  pattern being migrated.
+- `finalize_cli` ended up genuinely cluster-free once the stale duplicate
+  block above was removed (confirmed via the AST scan + full finalize/
+  pr-creation test suites, 103+35+27 passed) and was added to
+  `_CLUSTER_FREE_MODULES` -- notable given this repo's own standing
+  caution comment on that exact set, warning that a regex-only scan
+  previously shipped a live `create-pr` regression; didn't skip the
+  extra verification just because the AST scan agreed.
 - Next slice: `_resolve_worktree_id` (11 call sites / 40 monkeypatch
   sites) -- re-run `--progress` first, since this slice's corrected
   baseline may have shifted the ranking.

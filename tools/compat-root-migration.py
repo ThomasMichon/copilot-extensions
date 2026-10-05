@@ -87,7 +87,7 @@ def find_core_call_sites(plugin: str, name: str) -> list[str]:
         if not aliases:
             continue
         alias_group = "|".join(re.escape(a) for a in aliases)
-        pattern = re.compile(rf"(?:{alias_group})\(\)?\.{re.escape(name)}\(")
+        pattern = re.compile(rf"(?:{alias_group})(?:\(\))?\.{re.escape(name)}\(")
         for m in pattern.finditer(text):
             line = text.count("\n", 0, m.start()) + 1
             hits.append(f"{path.relative_to(REPO)}:{line}")
@@ -150,7 +150,7 @@ def cmd_progress(plugin: str) -> int:
         if not aliases:
             continue
         alias_group = "|".join(re.escape(a) for a in aliases)
-        call_re = re.compile(rf"(?:{alias_group})\(\)?\.(\w+)\(")
+        call_re = re.compile(rf"(?:{alias_group})(?:\(\))?\.(\w+)\(")
         for name in call_re.findall(text):
             call_names[name] += 1
 

@@ -482,27 +482,6 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
 
         target_repo_arg = getattr(args, "repo", None)
         from_branch = getattr(args, "from_branch", None)
-        if target_repo_arg:
-            from . import pr_config as _pr_config
-
-            resolution = _pr_config.resolve_repo_config_for_slug(config, target_repo_arg)
-            if resolution.resolved and not resolution.same_as_active:
-                msg = (
-                    f"create-pr: --repo {target_repo_arg!r} names a different, "
-                    f"also-registered repo than this worktree's own "
-                    f"({config.repo_name!r}) -- create-pr pushes commits from "
-                    "THIS worktree's own local checkout, which is not a "
-                    f"checkout of {target_repo_arg!r}. There is no "
-                    "already-pushed-branch mode yet. Options: (1) create a "
-                    f"worktree of {target_repo_arg!r} itself and run create-pr "
-                    "from there, or (2) if the branch already exists and is "
-                    f"already pushed to {target_repo_arg!r}, use "
-                    f"`agent-pull-requests create --repo {target_repo_arg} "
-                    "--head <branch> --title ...` instead -- that plugin is "
-                    "built for exactly this (no local checkout required). "
-                    "Do not fall back to gh/az repos/git directly."
-                )
-                return output._json_error(msg) if use_json else (output.err(msg) or 2)
 
         body = getattr(args, "body", None)
         body_file = getattr(args, "body_file", None)
@@ -531,7 +510,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 "local-checkout path. Pass --repo <owner/name> alongside "
                 "it, or drop --from-branch to use the normal local path."
             )
-            return core._json_error(msg) if use_json else (output.err(msg) or 2)
+            return output._json_error(msg) if use_json else (output.err(msg) or 2)
 
         if is_foreign_from_branch:
             if getattr(args, "dry_run", False) or getattr(args, "no_open", False):
@@ -541,7 +520,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                     "skip) -- --dry-run and --no-open are not meaningful "
                     "with it."
                 )
-                return core._json_error(msg) if use_json else (output.err(msg) or 2)
+                return output._json_error(msg) if use_json else (output.err(msg) or 2)
             title = (args.title or "").strip()
             if not title:
                 msg = (
@@ -549,7 +528,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                     "to derive a title from (unlike the local path) -- "
                     "pass a non-blank --title explicitly."
                 )
-                return core._json_error(msg) if use_json else (output.err(msg) or 2)
+                return output._json_error(msg) if use_json else (output.err(msg) or 2)
 
             from . import pr_foreign_create
 
@@ -562,11 +541,11 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 new=getattr(args, "new", False),
             )
             if result.get("error"):
-                return core._json_error(result["error"]) if use_json else (
+                return output._json_error(result["error"]) if use_json else (
                     output.err(result["error"]) or 2
                 )
             if use_json:
-                core._json_output(result)
+                output._json_output(result)
             else:
                 verb = "Reused existing" if result.get("reused") else "Opened"
                 output.ok(
@@ -603,7 +582,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 "built for exactly this (no local checkout required). "
                 "Do not fall back to gh/az repos/git directly."
             )
-            return core._json_error(msg) if use_json else (output.err(msg) or 2)
+            return output._json_error(msg) if use_json else (output.err(msg) or 2)
 
         try:
             result = pr_ops.create_pr(
