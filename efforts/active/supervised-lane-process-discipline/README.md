@@ -107,7 +107,7 @@ stands as originally asked.
 
 ## Plan
 
-### Phase 1 — trace the actual (re-)spawn entry point(s)
+### Phase 1 — trace the actual (re-)spawn entry point(s), and diagnose the crash cause
 - [ ] Identify every code path that can cause a supervised-lane child to be
       (re-)spawned on this machine: a Copilot CLI sessionStart hook, the
       `agent-machines-self-update-sweep`/`-watchdog` scheduled tasks,
@@ -116,6 +116,13 @@ stands as originally asked.
       duplicates get in" question — a lock fixes the symptom; this
       identifies whether multiple independent triggers are racing each
       other in the first place.
+- [ ] Diagnose why an observed supervised-lane child actually exits/crashes
+      in the first place (not only how a duplicate gets spawned) — the
+      original Request explicitly asked this ("are the emitters failing?";
+      confirmed during investigation that emitters were *not* the cause).
+      Capture the real exit reason for at least one reproduced case before
+      moving to Phase 4's logging design, so that design is grounded in an
+      actual observed failure mode rather than a generic shape.
 
 ### Phase 2 — per-managed-child single-instance lock
 - [ ] Give each managed child (keyed by its registration/supervisor id) a
@@ -131,29 +138,61 @@ stands as originally asked.
       reconcile (adopt or terminate) them before reconciling desired state
       fresh — rather than relying solely on in-memory bookkeeping that
       resets on every restart.
+- [ ] **Two-layer termination safety required if termination is chosen**
+      (per `docs/patterns/graceful-daemon-cutover.md` point 5 and
+      `docs/patterns/process-slot-ownership.md`'s fail-safe-defaults
+      rationale — a discovery-time command-line/lock match is a snapshot,
+      not proof at the moment of action; the PID can exit and be reused by
+      an unrelated process in between):
+      1. **Identity-bound termination** — re-verify the PID's identity
+         token (process creation time, analogous to
+         `zdd.diagnostics.process_start_time`/
+         `terminate_pid_if_identity`) immediately before signaling; refuse
+         on any mismatch or uncertainty rather than guessing.
+      2. **Owner validation** — a separate, higher-level check that the
+         candidate is genuinely the orphan being reconciled, not merely an
+         unrelated live process that happens to match superficially.
+      Reuse the *discipline*, not the code — `zdd`'s primitives are
+      explicitly not cross-plugin importable; agent-dispatch needs its own
+      analogous pair. Fail-safe default throughout: an ambiguous case
+      leaves the candidate alone (bounded cost: a lingering idle process)
+      rather than terminating it (unbounded cost: killing a live, in-flight
+      unrelated process).
 
 ### Phase 4 — supervised-lane child logging/health file
 - [ ] Give supervised-lane children the same `ok`/`returncode`/`error`/
       `duration_seconds`-shaped health file emitters already get (or an
       equivalent), so a stall or crash is diagnosable without catching a
-      live PID by luck.
+      live PID by luck. Ground the shape in Phase 1's actual observed crash
+      cause, not a generic guess.
 
 ## Validation Plan
 
-- [ ] **Phase 1:** documented finding (which trigger(s) actually cause
-      duplication) — this phase's deliverable is the trace itself, not a
-      code change; subsequent phases' designs depend on its answer.
+- [ ] **Phase 1:** documented findings — (a) which trigger(s) actually cause
+      duplication, (b) the actual diagnosed cause of at least one observed
+      supervised-lane child exit/crash (confirming or ruling out emitter
+      failure as the cause, per the original Request). This phase's
+      deliverable is the trace+diagnosis itself, not a code change;
+      subsequent phases' designs depend on both answers.
 - [ ] **Phase 2:** automated test simulating two near-simultaneous launch
       attempts for the same managed-child id; exactly one acquires the
       lock, the other exits cleanly (or defers) rather than running
       duplicated.
-- [ ] **Phase 3:** automated test simulating a daemon restart with a
+- [ ] **Phase 3:** **dedicated, direct safety tests for the termination
+      path specifically** — not merely an end-to-end rehearsal (per
+      `graceful-daemon-cutover.md` point 5): (a) a positive case — a
+      genuine stale orphan is correctly identified and terminated; (b) a
+      refusal case — the discovered PID has since exited and been reused
+      by an unrelated process; confirm termination is refused, not
+      attempted, on the identity-token mismatch. Plus the original
+      duplication-avoidance test: simulate a daemon restart with a
       still-alive orphaned child from a previous generation; confirm the
       new daemon detects and reconciles it rather than launching a
       duplicate alongside it.
 - [ ] **Phase 4:** automated test confirming a supervised-lane child's
       health file reflects a real crash (non-zero exit, error captured) the
-      same way an emitter's already does.
+      same way an emitter's already does — using the actual crash shape
+      Phase 1 diagnosed, not a synthetic one.
 - [ ] Dogfood against a live downstream repro-queue fleet if one is
       available during implementation, as supplemental evidence only.
 
@@ -177,3 +216,22 @@ _Pending — begin with Phase 1 (trace the actual spawn entry points)._
 - Operator chose scope **(a)**: fix the duplication within the current
   design. Issue #5301 rewritten accordingly before this effort was created,
   so effort and issue stay consistent from the start.
+
+### 2026-10-05 — Plan PR #5309 review round (COMMENTED, 1 High + 1 Medium)
+- **High:** Phase 3's orphan termination had no safety against a classic
+  PID-reuse race (the discovered PID exits and an unrelated process reuses
+  it before termination actually runs). Read the cited existing patterns
+  (`docs/patterns/graceful-daemon-cutover.md` point 5,
+  `docs/patterns/process-slot-ownership.md`'s fail-safe-defaults rationale)
+  and found agent-worktrees' `zdd` module already solves this with a
+  two-layer discipline (identity-token re-verification immediately before
+  signaling, plus a separate owner-validation check) — not importable
+  cross-plugin, but the *discipline* is now specified for agent-dispatch's
+  own analogous primitive, plus the dedicated positive/refusal safety tests
+  the pattern doc requires (not just an end-to-end rehearsal).
+- Medium: the original Request explicitly asked to diagnose the crash-loop
+  cause ("are the emitters failing?" — confirmed during investigation they
+  were not), but the Plan only committed to tracing *spawn* triggers, never
+  committed to actually diagnosing *why* a child exits. Added that as an
+  explicit Phase 1 validation obligation, and made Phase 4's logging design
+  depend on Phase 1's real diagnosed cause rather than a generic shape.
