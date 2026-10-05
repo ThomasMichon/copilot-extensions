@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh module-size-baseline.json: absorb organic pre-existing drift (shrinks + two grown/newly-crossed files unrelated to any in-flight feature work) so the local pre-push hook's full-tree sweep matches dev's actual state",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
