@@ -99,22 +99,29 @@ def test_posix_maybe_prune_skips_when_no_runtime_resolved(tmp_path: Path):
 def test_posix_maybe_prune_dispatches_detached_and_does_not_block(tmp_path: Path):
     """A large file with a resolved runtime must claim exactly one marker
     for the current window and return almost immediately -- the dispatched
-    worker runs detached, never inline on this path (between keypresses)."""
+    worker runs detached, never inline on this path (between keypresses) --
+    and the dispatched child must actually have launched successfully."""
     bash = _bash()
     assert bash is not None
     log = tmp_path / "activity.jsonl"
     log.write_text("x" * 600_000, encoding="utf-8")
     # A stub "python" standing in for the real interpreter: proves the
     # dispatch is detached/non-blocking without re-testing the real worker's
-    # prune logic (covered by the Python test suite). Sleeps well past the
-    # assertion below if it were ever awaited inline.
+    # prune logic (covered by the Python test suite). Reads its marker path
+    # from an exported env var rather than argv -- the production dispatch's
+    # fixed argv shape (`-I -m agent_worktrees activity-prune-worker <path>
+    # 7`) is irrelevant to what this stub needs to prove. Sleeps well past
+    # the elapsed-time assertion below if it were ever awaited inline.
+    stub_marker = tmp_path / "worker-ran"
     stub_py = tmp_path / "stub-python"
     stub_py.write_text(
-        "#!/usr/bin/env bash\nsleep 2\necho ran >> \"$1\"\n", encoding="utf-8",
+        '#!/usr/bin/env bash\nsleep 2\necho ran >> "$STUB_PRUNE_MARKER"\n',
+        encoding="utf-8",
     )
     stub_py.chmod(0o755)
     script = (
         f"{_prune_functions_source()}\n"
+        f'export STUB_PRUNE_MARKER="{_bash_path(bash, stub_marker)}"\n'
         f'AGENT_RT_PY="{_bash_path(bash, stub_py)}"\n'
         f'boot_trace_maybe_prune "{_bash_path(bash, log)}"\n'
     )
@@ -127,6 +134,12 @@ def test_posix_maybe_prune_dispatches_detached_and_does_not_block(tmp_path: Path
     )
     markers = list(tmp_path.glob("activity.jsonl.prune-marker.*"))
     assert len(markers) == 1
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not stub_marker.exists():
+        time.sleep(0.05)
+    assert stub_marker.exists(), "the dispatched child never actually launched"
+    assert stub_marker.read_text(encoding="utf-8").strip() == "ran"
 
 
 @pytest.mark.skipif(_bash() is None, reason="a conformant Bash is unavailable")

@@ -403,13 +403,7 @@ def _claim_prune_marker(path: Path) -> bool:
     with an exclusive create (``O_CREAT | O_EXCL``). Unlike a single shared
     marker refreshed in place, there is no separate "renew a stale marker"
     step -- and therefore no window where multiple processes can all
-    believe they renewed the same claim. Markers from STRICTLY OLDER
-    windows are opportunistically cleaned up on a successful claim
-    (best-effort: a cleanup race never affects correctness, only tidiness)
-    -- never a marker whose own bucket is >= ours, since a concurrent
-    caller in an adjacent (e.g. the very next) window may have already
-    claimed it; deleting that marker would let a second caller re-claim the
-    same window and dispatch a duplicate worker.
+    believe they renewed the same claim.
     """
     bucket = _prune_marker_bucket()
     marker = path.with_name(f"{path.name}.prune-marker.{bucket}")
@@ -422,8 +416,26 @@ def _claim_prune_marker(path: Path) -> bool:
     return True
 
 
+# How many whole debounce windows a marker must be behind the current one
+# before cleanup may delete it. 1 (not 0) is deliberate: a caller that read
+# the clock right at the tail of bucket N-1 and was then descheduled before
+# its (otherwise instantaneous) O_CREAT|O_EXCL claim can still be holding
+# that bucket's claim-in-flight when a different caller's cleanup pass, now
+# in bucket N, runs -- deleting bucket N-1 at that point would let the
+# descheduled caller's claim succeed a second time once it resumes,
+# dispatching a duplicate worker. Only ever cleaning bucket <= N-2 means
+# that race now requires a caller to be descheduled for over a FULL
+# extra debounce window (~_PRUNE_DEBOUNCE_SECONDS) between reading the
+# clock and completing one `os.open()` call -- not eliminated in theory,
+# but not a realistic scheduling delay either, and proportionate to a
+# diagnostic log's own debounce (same best-effort posture as the rest of
+# this module).
+_PRUNE_MARKER_CLEANUP_GRACE_WINDOWS = 1
+
+
 def _cleanup_old_prune_markers(path: Path, *, current_bucket: int) -> None:
     prefix = f"{path.name}.prune-marker."
+    cutoff = current_bucket - _PRUNE_MARKER_CLEANUP_GRACE_WINDOWS
     try:
         for sibling in path.parent.glob(f"{prefix}*"):
             suffix = sibling.name[len(prefix):]
@@ -431,7 +443,7 @@ def _cleanup_old_prune_markers(path: Path, *, current_bucket: int) -> None:
                 sibling_bucket = int(suffix)
             except ValueError:
                 continue  # not one of ours (or malformed) -- leave it alone
-            if sibling_bucket < current_bucket:
+            if sibling_bucket < cutoff:
                 try:
                     sibling.unlink()
                 except OSError:

@@ -129,25 +129,31 @@ boot_trace_maybe_prune() {
 # marker already exists, giving an atomic exclusive create. Unlike a single
 # shared marker refreshed in place, there is no separate "renew a stale
 # marker" step and therefore no window where multiple processes can all
-# believe they renewed the same claim. Markers from STRICTLY OLDER windows
-# are opportunistically cleaned up on a successful claim (best-effort: a
-# cleanup race never affects correctness, only tidiness) -- never a marker
-# whose own bucket is >= ours, since a concurrent caller in an adjacent
-# (e.g. the very next) window may have already claimed it; deleting that
-# marker would let a second caller re-claim the same window and dispatch a
-# duplicate worker.
+# believe they renewed the same claim.
 boot_trace_claim_prune_marker() {
     local log_path="$1" now_epoch bucket marker
     now_epoch="$(date +%s 2>/dev/null || echo 0)"
     bucket=$(( now_epoch / 3600 ))
     marker="${log_path}.prune-marker.${bucket}"
     ( set -o noclobber; : > "$marker" ) 2>/dev/null || return 1
+    # Cleans up markers at least 2 whole windows behind $bucket -- never the
+    # immediately-preceding one ($bucket - 1). Mirrors the Python-side
+    # activity._PRUNE_MARKER_CLEANUP_GRACE_WINDOWS: a caller that read the
+    # clock right at the previous window's tail and was then descheduled
+    # before its (otherwise instantaneous) exclusive create can still be
+    # holding that bucket's claim-in-flight -- deleting it here would let
+    # that delayed caller's create succeed a second time once it resumes,
+    # dispatching a duplicate worker. Requiring a full extra window's worth
+    # of delay between reading the clock and one file-create call makes
+    # that race a scheduling pathology, not a realistic occurrence -- same
+    # best-effort posture as the rest of this module.
+    local cutoff=$(( bucket - 1 ))
     local f suffix
     for f in "${log_path}.prune-marker."*; do
         [[ -e "$f" ]] || continue
         suffix="${f#"${log_path}.prune-marker."}"
         [[ "$suffix" =~ ^[0-9]+$ ]] || continue  # not one of ours -- leave it alone
-        (( suffix < bucket )) && rm -f -- "$f" 2>/dev/null
+        (( suffix < cutoff )) && rm -f -- "$f" 2>/dev/null
     done
     return 0
 }

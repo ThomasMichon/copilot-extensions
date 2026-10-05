@@ -347,20 +347,34 @@ def test_claim_prune_marker_is_exclusive_per_window(patch_install_dir: Path):
     assert second is False
 
 
-def test_claim_prune_marker_cleans_up_older_windows(patch_install_dir: Path, monkeypatch):
+def test_claim_prune_marker_cleans_up_only_beyond_the_grace_window(
+    patch_install_dir: Path, monkeypatch
+):
+    """A marker exactly one window behind ("current - 1") is preserved, not
+    cleaned up -- it may still be an in-flight claim by a caller that read
+    the clock right at the previous window's tail and was then descheduled
+    before completing its own exclusive create. Only a marker two or more
+    windows behind is safe to remove."""
     log = activity.log_path()
     log.parent.mkdir(parents=True, exist_ok=True)
 
     fake_now = [1_700_000_000.0]
     monkeypatch.setattr(activity.time, "time", lambda: fake_now[0])
     assert activity._claim_prune_marker(log) is True
-    old_marker = activity._prune_marker_path(log)
-    assert old_marker.exists()
+    oldest_marker = activity._prune_marker_path(log)
 
-    fake_now[0] += activity._PRUNE_DEBOUNCE_SECONDS
+    fake_now[0] += activity._PRUNE_DEBOUNCE_SECONDS  # one window later
     assert activity._claim_prune_marker(log) is True
+    assert oldest_marker.exists(), (
+        "the immediately-preceding window's marker must survive -- it may "
+        "still be a delayed caller's in-flight claim"
+    )
+    middle_marker = activity._prune_marker_path(log)
 
-    assert not old_marker.exists()
+    fake_now[0] += activity._PRUNE_DEBOUNCE_SECONDS  # two windows later
+    assert activity._claim_prune_marker(log) is True
+    assert not oldest_marker.exists(), "two windows behind is safe to clean up"
+    assert middle_marker.exists(), "still only one window behind -- preserved"
 
 
 def test_claim_prune_marker_atomic_under_real_multiprocess_race(tmp_path: Path):
