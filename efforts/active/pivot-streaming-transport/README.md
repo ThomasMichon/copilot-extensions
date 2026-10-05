@@ -1658,3 +1658,71 @@ require_complete-split bullet).
 
 Replied-to inline; the resurfaced Guiding Intent thread needed no further
 action.
+
+### 2026-10-03 — Phase 3b landed: agent-bridge daemon-side agent-roster cache
+Implemented per `phase-3-design.md`'s 3b section in full: `AgentRosterCache`
+(new `agent_registry_cache.py`) is a background-refreshed, supervised cache
+fronting `AgentResolver`'s namespace-resolver scan, started alongside the
+daemon's own resolver swap in `app.py`'s `_initialize_readiness()` and
+gated into readiness via `wait_until_warm()` (a zero-downtime cutover never
+promotes a generation whose cache hasn't completed at least one scan
+attempt per already-known namespace).
+
+- **Per-namespace state machine**: UNINITIALIZED / OK / FAILED, each with a
+  freshness deadline (3x the refresh interval); a stale, incomplete, or
+  uninitialized namespace opportunistically joins its own single-flight
+  refresh on every `GET /api/v1/agents`, independent of `force_refresh` --
+  an old CLI's plain retry loop still triggers a real rescan.
+- **`force_refresh`/`require_complete`** are new, protocol-gated
+  (`AGENT_ROSTER_CACHE_PROTOCOL_VERSION`, HTTP generation 22) query
+  parameters. Without `require_complete` the response shape is byte-for-byte
+  unchanged from Phase 2 (healthy rows + `incomplete_namespaces`, never a
+  `503`) -- verified by a dedicated test driving an intentionally-incomplete
+  cache through the plain route. `require_complete` escalates "nothing
+  authoritative to serve" (pre-first-discovery startup, retry exhaustion, or
+  a persistently-failing discovery generation) to a `503`, even while an
+  individual namespace still has a fresh last-known-good value.
+- **`refresh_provider_resolvers()`** (`agent_registry_resolver.py`) now
+  returns a `DiscoveryResult` (`ok`/`raised`/`failed_namespaces`) instead of
+  `None`, and its per-manifest replacement loop is transactional: the new
+  resolver is constructed *before* the old one is unregistered, so a
+  construction failure leaves the previous resolver (and its cache entry)
+  registered and authoritative instead of opening a gap. Only a genuinely
+  clean pass advances the cache's own discovery-generation freshness.
+- **Single-flight + generation-guarded publication** per namespace: a
+  provider replacement (same namespace, different resolver object identity)
+  invalidates the cache entry immediately in `_reconcile_namespace_set()`
+  (never lazily, only on the next scan attempt), and a scan's result is
+  discarded rather than published if the namespace's provider or generation
+  moved on while it was in flight.
+- Dedicated regression tests in new `tests/test_agent_roster_cache.py`
+  cover every named 3b failure mode from the Validation Plan: uninitialized
+  recovery, a persistently-failing background refresh, concurrent
+  single-flight refreshes, generation-guarded publication against a
+  slower/earlier scan, provider add/remove/replace (plus the dedicated
+  replacement-constructor-failure path), the default-response-unchanged
+  contract, and the `503` contract across all three of its triggers
+  (pre-discovery startup, retry exhaustion, stale discovery generation).
+  Route-level tests in `test_routes.py` cover the wire-level wiring
+  (cache-present vs. cache-absent fallback, a stale cache left bound to a
+  swapped-out resolver falling back safely, and the query-param plumbing).
+- Contract registry: bumped `HTTP_PROTOCOL_VERSION` to generation 22 (after
+  rebasing past dev's own generation-21 `live_session_alias` bump), added the
+  `agent_roster_cache` capability constant, and registered a new
+  `fixtures/http/current/agents-list-response.json` fixture (the first
+  current fixture for `routes/agents.py`, now tracked as a semantic source)
+  alongside the regenerated health/protocol-constants/session-create-response
+  fixtures; `previous-generation-21/health.json` preserves the prior
+  generation's evidence. `python tools/check-agent-bridge-contracts.py`
+  passes.
+- Full targeted suite green (`test_agent_roster_cache.py`,
+  `test_agent_registry.py`, `test_provider_sources.py`,
+  `test_cli_namespace_resolver.py`, `test_client_routing.py`,
+  `test_inventory_streaming.py`, the four `test_startup_*_nonblocking.py`
+  files, `test_contract_registry.py`, `test_client_connect.py`,
+  `test_wire_compat.py`, and `test_routes.py`'s `TestAgentRoutes`) -- 370+11
+  tests, no regressions. A pre-existing, unrelated failure
+  (`test_resolve_local_binstub_uses_pathext_aware_resolution`, confirmed to
+  fail identically on an unmodified `dev` checkout on this machine) is
+  excluded from that count.
+- **3c remains deferred** per the design doc's own gate -- not started.

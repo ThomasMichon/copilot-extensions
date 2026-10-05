@@ -915,8 +915,10 @@ class ServiceConfig(BaseModel):
     worktree_discovery_interval: float = Field(
         default=0,
         description="Seconds between periodic worktree discovery sweeps. "
-        "0 disables periodic crawling (on-demand only).",
-    )
+        "0 disables periodic crawling (on-demand only).")
+    agent_roster_cache_interval: float = Field(
+        default=12.0, ge=1.0, allow_inf_nan=False,
+        description="Agent-roster cache rescan interval (Phase 3b), seconds (floor 1.0).")
     idle_shutdown_seconds: int = Field(
         default=0,
         description="If > 0, the daemon exits after this many seconds with no "

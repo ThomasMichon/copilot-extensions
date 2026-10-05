@@ -5,30 +5,27 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-import time
+import threading
 from dataclasses import replace
 from typing import Any
 
-from dropin_registry import Finding, WarningTracker
+from dropin_registry import WarningTracker
 
 from .agent_registry_common import (
     AgentConfig,
     AmbiguousAgentError,
 )
-from .agent_registry_namespace import (
-    CliNamespaceResolver,
-    NamespaceResolver,
-    RestrictedCliNamespaceResolver,
-)
+from .agent_registry_discovery import _ProviderDiscoveryMixin
+from .agent_registry_namespace import NamespaceResolver
 from .cold_store_sources import ColdStoreProviderRegistry
-from .provider_sources import ProviderManifest, scan_provider_registry
+from .provider_sources import ProviderManifest
 from .topology import MachineConfig, SshEnvironment
 from .transport import PluginRef, SpawnTarget
 
 log = logging.getLogger("agent-bridge")
 
 
-class AgentResolver:
+class AgentResolver(_ProviderDiscoveryMixin):
     """Resolves agent names to SpawnTargets using topology + registry."""
 
     def __init__(
@@ -53,6 +50,24 @@ class AgentResolver:
         self._provider_manifests: dict[str, ProviderManifest] = {}
         self._provider_namespaces: set[str] = set()
         self._provider_warning_tracker = WarningTracker()
+        #: Monotonically bumped by every successful, applied
+        #: :meth:`_apply_provider_report` call -- shared across *every*
+        #: caller (the daemon-side cache, the dispatch-task route,
+        #: ``resolve_async()``), not just one cache instance. Rejects an
+        #: in-flight scan that captured an older generation from applying
+        #: its now-stale report over a newer one -- see
+        #: :meth:`_apply_provider_report`.
+        self._apply_generation: int = 0
+        #: In-flight count of ``scan_provider_registry()`` attempts for the
+        #: current generation -- see :meth:`_scan_provider_report`.
+        self._scan_attempts_in_flight: int = 0
+        #: Guards ``_scan_attempts_in_flight`` and the generation-check/
+        #: stamp decision -- ``_scan_provider_report`` runs both on the
+        #: event loop thread and on a daemon worker thread (via the
+        #: cache's ``_run_in_daemon_thread``), so the counter's plain
+        #: ``+=``/``-=`` is a genuine cross-thread race without it. Never
+        #: held across the slow ``scan_provider_registry()`` call itself.
+        self._scan_lock = threading.Lock()
         self.cold_store = ColdStoreProviderRegistry()
         self._alias_index: dict[str, tuple[MachineConfig, SshEnvironment]] = {}
         for machine in machines.values():
@@ -155,101 +170,6 @@ class AgentResolver:
     def namespace_resolvers(self) -> dict[str, NamespaceResolver]:
         """Read-only view of registered namespace resolvers."""
         return dict(self._namespace_resolvers)
-
-    def refresh_provider_resolvers(self, *, force: bool = False) -> None:
-        """Register namespace resolvers from the ``providers.d`` manifest registry."""
-        now = time.monotonic()
-        if not force and (now - self._provider_scan_ts) < self._provider_scan_ttl:
-            return
-        self._provider_scan_ts = now
-
-        try:
-            report = scan_provider_registry(previous=self._provider_entries)
-        except Exception:
-            log.warning("Provider manifest discovery failed", exc_info=True)
-            return
-
-        findings = list(report.findings)
-        for manifest in report.manifests.values():
-            if (
-                manifest.namespace in self._namespace_resolvers
-                and manifest.namespace not in self._provider_namespaces
-            ):
-                findings.append(
-                    Finding(
-                        registry="providers.d",
-                        entry=manifest.source_path,
-                        status="inactive",
-                        reason="duplicate",
-                        target=manifest.namespace,
-                        owner=manifest.plugin,
-                        remedy="Remove the provider entry or rename its namespace.",
-                        detail="namespace conflicts with a built-in resolver",
-                    )
-                )
-        warning_batch = self._provider_warning_tracker.select(findings)
-        for finding in warning_batch.emitted:
-            target = f" target={finding.target}" if finding.target else ""
-            log.warning(
-                "%s: %s (%s)%s; run `agent-bridge doctor`",
-                finding.registry,
-                finding.entry,
-                finding.reason,
-                target,
-            )
-        if warning_batch.suppressed:
-            log.warning(
-                "providers.d: %d additional finding(s) suppressed; "
-                "run `agent-bridge doctor`",
-                warning_batch.suppressed,
-            )
-        if warning_batch.recovered:
-            log.info(
-                "providers.d: %d prior finding(s) recovered",
-                warning_batch.recovered,
-            )
-
-        desired = dict(report.manifests)
-        desired_namespaces = set(desired)
-        for namespace in sorted(self._provider_namespaces - desired_namespaces):
-            self.unregister_namespace_resolver(namespace)
-            self._provider_manifests.pop(namespace, None)
-
-        for manifest in desired.values():
-            namespace = manifest.namespace
-            current = self._provider_manifests.get(namespace)
-            if current == manifest and namespace in self._provider_namespaces:
-                continue
-            if namespace in self._provider_namespaces:
-                self.unregister_namespace_resolver(namespace)
-                self._provider_namespaces.discard(namespace)
-                self._provider_manifests.pop(namespace, None)
-            elif namespace in self._namespace_resolvers:
-                continue
-            cls = RestrictedCliNamespaceResolver if manifest.restricted else CliNamespaceResolver
-            try:
-                self.register_namespace_resolver(
-                    cls(
-                        manifest.namespace,
-                        manifest.command[0],
-                        command=list(manifest.command),
-                    )
-                )
-                self._provider_namespaces.add(namespace)
-                self._provider_manifests[namespace] = manifest
-                log.info(
-                    "Registered %s: namespace resolver from %s",
-                    namespace,
-                    manifest.source_path,
-                )
-            except Exception:
-                log.warning(
-                    "Failed to register '%s:' from %s",
-                    manifest.namespace,
-                    manifest.source_path,
-                    exc_info=True,
-                )
-        self._provider_entries = dict(report.entries)
 
     def _parse_namespaced_agent(
         self, agent_name: str,
@@ -819,6 +739,62 @@ class AgentResolver:
             "provider": config.provider,
         }
 
+    async def scan_namespace_async(self, prefix: str) -> list[dict[str, Any]]:
+        """Scan one namespace resolver, bounded by
+        ``AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT``, returning the same
+        agent-dict shape ``list_agents_async`` publishes. Raises
+        (``asyncio.TimeoutError`` or whatever the resolver itself raises) on
+        failure -- the caller decides how to treat that: ``list_agents_async``
+        marks the namespace incomplete for *that* call;
+        :class:`AgentRosterCache` (3b) marks its cache entry ``FAILED`` and
+        retains whatever last-known-good rows it already had, internally."""
+        from . import agent_registry as compat
+
+        resolver = self._namespace_resolvers[prefix]
+        resolver_timeout = compat._namespace_list_resolver_timeout()
+        list_kwargs: dict[str, Any] = {}
+        if resolver_timeout > 0:
+            try:
+                params = inspect.signature(resolver.list).parameters
+            except (TypeError, ValueError):
+                params = {}
+            if "timeout" in params:
+                list_kwargs["timeout"] = resolver_timeout
+        coro = resolver.list(**list_kwargs)
+        if resolver_timeout <= 0:
+            agents = await coro
+        else:
+            agents = await asyncio.wait_for(coro, timeout=resolver_timeout)
+        return [self._format_namespace_agent(prefix, agent, resolver) for agent in agents]
+
+    def _format_namespace_agent(
+        self, prefix: str, agent: Any, resolver: NamespaceResolver,
+    ) -> dict[str, Any]:
+        return {
+            "name": f"{prefix}:{agent.name}",
+            "display_name": agent.display_name or agent.name,
+            "description": agent.description,
+            "icon": agent.icon,
+            "aliases": [f"{prefix}:{alias}" for alias in getattr(agent, "aliases", [])],
+            "managed": False,
+            "spawnable_as_target": True,
+            "spawnable": True,
+            "target_type": "command",
+            "host": "",
+            "ssh_user": None,
+            "ssh_environment": None,
+            "cwd": None,
+            "copilot_path": None,
+            "copilot_args": [],
+            "worktree_root": None,
+            "env": {},
+            "project": None,
+            "auto_discovered": False,
+            "provider": prefix,
+            "bare_addressable": getattr(resolver, "bare_addressable", True),
+            "state": agent.state,
+        }
+
     def list_agents(self) -> list[dict[str, Any]]:
         """List all agents with metadata for the API."""
         result = []
@@ -829,42 +805,29 @@ class AgentResolver:
         return result
 
     async def list_agents_async(self) -> list[dict[str, Any]]:
-        """List all agents including namespace-resolved agents."""
-        from . import agent_registry as compat
+        """List all agents including namespace-resolved agents.
 
+        A direct, uncached per-call scan of every registered namespace
+        resolver -- the pre-3b shape, still used by any caller that doesn't
+        go through :class:`AgentRosterCache` (e.g. the daemon's own
+        pre-topology-ready placeholder resolver, or a test that exercises
+        the resolver directly)."""
         self.refresh_provider_resolvers()
         result = self.list_agents()
         prefixes = list(self._namespace_resolvers.keys())
-        resolver_timeout = compat._namespace_list_resolver_timeout()
-
-        async def _bounded_list(prefix: str) -> Any:
-            resolver = self._namespace_resolvers[prefix]
-            list_kwargs: dict[str, Any] = {}
-            if resolver_timeout > 0:
-                try:
-                    params = inspect.signature(resolver.list).parameters
-                except (TypeError, ValueError):
-                    params = {}
-                if "timeout" in params:
-                    list_kwargs["timeout"] = resolver_timeout
-            coro = resolver.list(**list_kwargs)
-            if resolver_timeout <= 0:
-                return await coro
-            return await asyncio.wait_for(coro, timeout=resolver_timeout)
 
         listings = await asyncio.gather(
-            *(_bounded_list(prefix) for prefix in prefixes),
+            *(self.scan_namespace_async(prefix) for prefix in prefixes),
             return_exceptions=True,
         )
         incomplete_namespaces: list[str] = []
         for prefix, outcome in zip(prefixes, listings):
             if isinstance(outcome, asyncio.TimeoutError):
                 log.warning(
-                    "Namespace resolver '%s' timed out listing agents after %ss "
+                    "Namespace resolver '%s' timed out listing agents "
                     "(AGENT_BRIDGE_NAMESPACE_LIST_RESOLVER_TIMEOUT) -- dropped "
                     "from this listing, not blocking the rest",
                     prefix,
-                    resolver_timeout,
                 )
                 incomplete_namespaces.append(prefix)
                 continue
@@ -876,31 +839,6 @@ class AgentResolver:
                 )
                 incomplete_namespaces.append(prefix)
                 continue
-            resolver = self._namespace_resolvers[prefix]
-            for agent in outcome:
-                result.append({
-                    "name": f"{prefix}:{agent.name}",
-                    "display_name": agent.display_name or agent.name,
-                    "description": agent.description,
-                    "icon": agent.icon,
-                    "aliases": [f"{prefix}:{alias}" for alias in getattr(agent, "aliases", [])],
-                    "managed": False,
-                    "spawnable_as_target": True,
-                    "spawnable": True,
-                    "target_type": "command",
-                    "host": "",
-                    "ssh_user": None,
-                    "ssh_environment": None,
-                    "cwd": None,
-                    "copilot_path": None,
-                    "copilot_args": [],
-                    "worktree_root": None,
-                    "env": {},
-                    "project": None,
-                    "auto_discovered": False,
-                    "provider": prefix,
-                    "bare_addressable": getattr(resolver, "bare_addressable", True),
-                    "state": agent.state,
-                })
+            result.extend(outcome)
         self._last_incomplete_namespaces = incomplete_namespaces
         return result

@@ -16,6 +16,7 @@ from fastapi import FastAPI
 
 from . import __version__, telemetry
 from .agent_registry import AgentResolver, daemon_resolver
+from .app_agent_roster import start_agent_roster_cache, stop_agent_roster_cache
 from .auth import BearerAuthMiddleware
 from .config import load_config, load_or_create_auth_token
 from .db import Database
@@ -482,7 +483,7 @@ async def lifespan(app: FastAPI):
                 app.state.resolver = resolver
                 mgr.set_resolver(resolver)
                 app.state.topology_ready = True
-
+                await start_agent_roster_cache(app, resolver, cfg)
                 if resolver.agents or resolver.machines:
                     from .routes.worktrees import get_cache
                     wt_cache = get_cache()
@@ -1043,6 +1044,7 @@ async def lifespan(app: FastAPI):
     # Shutdown: stop worktree discovery
     from .routes.worktrees import get_cache
     await get_cache().stop()
+    await stop_agent_roster_cache(app)  # Phase 3b
 
     # Shutdown: prepare in-flight turns for the frontend restart. By default
     # (dotfiles#1661) this is DETACH-ONLY -- it does NOT cancel the remote

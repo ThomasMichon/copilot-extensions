@@ -240,6 +240,72 @@ def test_list_agents_with_incomplete_defaults_empty_on_older_daemon(
     assert known is False
 
 
+def test_list_agents_with_incomplete_omits_params_for_old_daemon(
+    cfg_dir: Path, monkeypatch,
+):
+    """`force_refresh`/`require_complete` (Phase 3b, generation 22) must
+    never be sent to a daemon that doesn't advertise
+    `AGENT_ROSTER_CACHE_PROTOCOL_VERSION` -- an old daemon would otherwise
+    silently ignore them while returning its own old-shape response, but
+    the gate keeps intent explicit and avoids a gating regression that
+    could someday send a param an old daemon mishandles."""
+    client = BridgeClient.from_config()
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        client, "_request",
+        lambda method, path, **kw: calls.append((method, path, kw)) or {
+            "agents": [], "topology_errors": [],
+        },
+    )
+    monkeypatch.setattr(client, "daemon_supports", lambda min_version: False)
+    client.list_agents_with_incomplete(force_refresh=True, require_complete=True)
+    assert calls == [("GET", "/api/v1/agents", {"params": None})]
+
+
+def test_list_agents_with_incomplete_sends_params_for_generation_22_daemon(
+    cfg_dir: Path, monkeypatch,
+):
+    """Against a daemon that does advertise the capability, both params are
+    serialized as the literal string `"true"` (the wire contract's own
+    boolean-as-string convention, matching every other query-param flag in
+    this client)."""
+    client = BridgeClient.from_config()
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        client, "_request",
+        lambda method, path, **kw: calls.append((method, path, kw)) or {
+            "agents": [], "topology_errors": [],
+        },
+    )
+    monkeypatch.setattr(client, "daemon_supports", lambda min_version: True)
+    client.list_agents_with_incomplete(force_refresh=True, require_complete=True)
+    assert calls == [
+        (
+            "GET", "/api/v1/agents",
+            {"params": {"force_refresh": "true", "require_complete": "true"}},
+        ),
+    ]
+
+
+def test_list_agents_with_incomplete_omits_params_when_neither_requested(
+    cfg_dir: Path, monkeypatch,
+):
+    """Even against a capability-aware daemon, neither param is sent unless
+    the caller actually asked for one -- the plain default call stays a
+    plain `GET` with no query string at all."""
+    client = BridgeClient.from_config()
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        client, "_request",
+        lambda method, path, **kw: calls.append((method, path, kw)) or {
+            "agents": [], "topology_errors": [],
+        },
+    )
+    monkeypatch.setattr(client, "daemon_supports", lambda min_version: True)
+    client.list_agents_with_incomplete()
+    assert calls == [("GET", "/api/v1/agents", {"params": None})]
+
+
 def test_live_message_payload_includes_expected_session(cfg_dir: Path, monkeypatch):
     client = BridgeClient.from_config()
     calls = []

@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 21,
+        "current": 22,
         "minimum": 1,
-        "previous_generation": 20,
+        "previous_generation": 21,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -27,7 +27,8 @@
           18,
           19,
           20,
-          21
+          21,
+          22
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -65,21 +66,22 @@
         "remote_session_copilot_args": 18,
         "live_session_mode": 19,
         "cli_mode_unclaimed_release": 20,
-        "live_session_alias": 21
+        "live_session_alias": 21,
+        "agent_roster_cache": 22
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "136dcf6e0a84c1d3c7c2dad31a4f934ff3d9785d7a8b6dfb49d94d7b39ea185a",
+          "sha256": "9a43c5e5be8e168317f882636330d0c81f94094ab7792e329e15bf261a567888",
           "semantic": true,
           "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "c4693eb71026d5a19a25a6b36c9c72bc69852b4f55447c86829a6d17529b00ab",
+          "sha256": "c3c9852ad2323268568b5affd84dcb3384134f0c81075f616720187ca57cbdcb",
           "semantic": false,
-          "non_semantic_reason": "Live-message request/response models gained an optional delivery urgency field, then its default changed from \"queue\" to \"steer\" (noted inline on the field, not the docstring, to stay within the module's grandfathered line-count ceiling), and the live-session registration request gained an optional process_started_at (its inline note says the routes refuse a non-finite one); the representative session-create wire shape is unchanged."
+          "non_semantic_reason": "Live-message request/response models gained an optional delivery urgency field, then its default changed from \"queue\" to \"steer\"; the live-session registration request gained an optional process_started_at; and ServiceConfig gained an agent_roster_cache_interval field (Phase 3b), whose validation floor was later raised from gt=0 to ge=1.0 to match AgentRosterCache's own runtime clamp. The representative session-create wire shape is unchanged."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
@@ -100,6 +102,12 @@
           "non_semantic_reason": "Remote live-message pass-through gained an optional delivery field, then its default changed from \"queue\" to \"steer\"; the registered remote session-create fixture is unchanged."
         },
         {
+          "path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "sha256": "018edf6b0806f590d160ac255e05b84c2dd801bd2f7c47a627b335997b09e166",
+          "semantic": true,
+          "non_semantic_reason": null
+        },
+        {
           "path": "plugins/agent-bridge/tests/test_wire_compat.py",
           "sha256": "83728e07defb2ce501055554ec7c26e9707038a04c477e75e18b23525a0620a4",
           "semantic": false,
@@ -109,8 +117,20 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
-          "sha256": "ccf8a0ef1bbb84d787a0b425005aac168d248db53c5dad1bc18af4899801bce2",
+          "sha256": "30ca6a508f112d332cab47dee57cf8f6ad92d8653e5d524f683b9fd2d5f8818e",
           "role": "current health response",
+          "generation": 22
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/current/agents-list-response.json",
+          "sha256": "c92b62fc72f4061878426ab50ab995d959d99c05f7d7e0624b4952939266c6b7",
+          "role": "current agent-roster list response (force_refresh/require_complete, Phase 3b)",
+          "generation": 22
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-21/health.json",
+          "sha256": "4f7dd7a00093d5ea2542df5bac0d0c59e8d56cf4f3da0e43016bc9fb9c9c439a",
+          "role": "previous HTTP generation health evidence",
           "generation": 21
         },
         {
@@ -139,9 +159,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "4b863372bb1337be98f686fdbd2853680c1b9c2aded8eb641453b31f1df3441e",
+          "sha256": "e1de4f327ec2f14332dc9792b5c43f3fb80d1b2d53d3318c6f233e262b897b63",
           "role": "current session-create response",
-          "generation": 21
+          "generation": 22
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
@@ -169,9 +189,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/protocol-constants.json",
-          "sha256": "12ed3bcf800a0dd067dcb3d06745fb64db92b2776299f5903f5fe3fe3c0fd9b8",
+          "sha256": "52a2d57b6a456afae44052bd258f04002ed0b1b49667abc0351db44019c466d2",
           "role": "current HTTP range and capability constants",
-          "generation": 21
+          "generation": 22
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-command.json",
@@ -212,28 +232,68 @@
       ],
       "provenance": [
         {
-          "commit": "a1a5686c355af79ee922e13e6b15572348b8f54e",
+          "commit": "8e3b5282bb1131c87c8cbb2a2c43ec8913ada253",
           "plugin_version": "0.4.1-dev3",
           "generation": 21,
           "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "source_git_blob": "43deacceae4889dadf67bd9b9205a873c05af0cb",
+          "source_git_blob": "e9e11bb5e2857f7f4b67cd87c1164e070f4ccba4",
           "capture_method": "Read production constants from the pushed head revision; HTTP_PROTOCOL_VERSION is 21 and live_session_alias is introduced at generation 21."
         },
         {
-          "commit": "a1a5686c355af79ee922e13e6b15572348b8f54e",
+          "commit": "8e3b5282bb1131c87c8cbb2a2c43ec8913ada253",
           "plugin_version": "0.4.1-dev3",
           "generation": 21,
           "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "source_git_blob": "c1059a6d14fd1582f18face9207a93722a63e7ce",
+          "source_git_blob": "e450e1a7f4be8a95e315106fbcccbb55cbeb9597",
           "capture_method": "Serialize StartSessionResponse from the pushed head revision; its protocol_version default follows HTTP generation 21."
         },
         {
-          "commit": "a1a5686c355af79ee922e13e6b15572348b8f54e",
+          "commit": "8e3b5282bb1131c87c8cbb2a2c43ec8913ada253",
           "plugin_version": "0.4.1-dev3",
           "generation": 21,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
           "source_git_blob": "366c8900d9b7823a48c1012ea754deeb2492b51d",
           "capture_method": "Invoke the health route shape from the pushed head revision with controlled empty runtime state; the response advertises HTTP generation 21."
+        },
+        {
+          "commit": "a2ac3a0e5cca766b86e14c39c629ee34245911fa",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 22,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "2ebddedbf14a6afd20fec2c87d19ca82fa43b0d9",
+          "capture_method": "Read production constants from the pushed head revision; HTTP_PROTOCOL_VERSION is 22 and agent_roster_cache is introduced at generation 22 (pivot-streaming-transport Phase 3b), rebased past generation 21's live_session_alias."
+        },
+        {
+          "commit": "a2ac3a0e5cca766b86e14c39c629ee34245911fa",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 22,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "b327a741794f6e6e312c8221894dc76eacc6a52d",
+          "capture_method": "Serialize StartSessionResponse from the pushed head revision; its protocol_version default follows HTTP generation 22. ServiceConfig also gains agent_roster_cache_interval (Phase 3b), which does not affect this response shape."
+        },
+        {
+          "commit": "a2ac3a0e5cca766b86e14c39c629ee34245911fa",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 22,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+          "source_git_blob": "366c8900d9b7823a48c1012ea754deeb2492b51d",
+          "capture_method": "Invoke the health route shape from the pushed head revision with controlled empty runtime state; the response advertises HTTP generation 22. The route itself is unchanged from generation 21."
+        },
+        {
+          "commit": "a2ac3a0e5cca766b86e14c39c629ee34245911fa",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 22,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "GET /api/v1/agents gains the protocol-gated force_refresh/require_complete query parameters fronting the new agent-roster background cache (pivot-streaming-transport Phase 3b), landing at generation 22 after rebasing past generation 21's live_session_alias; the default (no-parameter) response shape is unchanged from generation 20, and the resolver-absent response is the pre-3b bare {\"agents\": []} shape. The route itself is unchanged since its original generation-21 capture."
+        },
+        {
+          "commit": "7e4d2f5aa306486936528b3e13f938a5a9ca0081",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 21,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/agents.py",
+          "source_git_blob": "2a43e444714acb70c152ed3d06983b04f38c2023",
+          "capture_method": "GET /api/v1/agents gains the protocol-gated force_refresh/require_complete query parameters fronting the new agent-roster background cache (pivot-streaming-transport Phase 3b); the default (no-parameter) response shape is unchanged from generation 20, and the resolver-absent response is the pre-3b bare {\"agents\": []} shape."
         },
         {
           "commit": "18e14154b13fa26ecc155cb2ecba1d7b1604a9fd",
