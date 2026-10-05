@@ -510,6 +510,39 @@ def test_config_secret_takes_precedence_over_env_var(monkeypatch):
     assert sink == []
 
 
+def test_github_secret_command_fallback(monkeypatch):
+    """Resolved once at build_app() construction, mirroring
+    config.py's own resolve_shared_token() command indirection -- lets a
+    deployer fetch the secret from an external store (a vault CLI) rather
+    than ever writing the raw value to a local env file."""
+    monkeypatch.setenv("AGENT_DISPATCH_WEBHOOK_GITHUB_SECRET_COMMAND", "echo whsec")
+    tc, sink = _client({})
+    body_bytes = json.dumps(_MERGED_PR).encode("utf-8")
+    sig = _github_signature("whsec", body_bytes)
+    r = tc.post(
+        "/webhook/pr",
+        content=body_bytes,
+        headers={"X-Hub-Signature-256": sig, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 200
+    assert len(sink) == 1
+
+
+def test_github_secret_direct_env_takes_precedence_over_command(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_WEBHOOK_GITHUB_SECRET", "env-secret")
+    monkeypatch.setenv("AGENT_DISPATCH_WEBHOOK_GITHUB_SECRET_COMMAND", "echo command-secret")
+    tc, sink = _client({})
+    body_bytes = json.dumps(_MERGED_PR).encode("utf-8")
+    sig = _github_signature("env-secret", body_bytes)
+    r = tc.post(
+        "/webhook/pr",
+        content=body_bytes,
+        headers={"X-Hub-Signature-256": sig, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 200
+    assert len(sink) == 1
+
+
 def test_malformed_json_body_is_a_400_not_a_500():
     tc, _ = _client()
     r = tc.post(
@@ -522,6 +555,31 @@ def test_non_object_json_body_is_a_400():
     tc, _ = _client()
     r = tc.post("/webhook/pr", json=["not", "an", "object"])
     assert r.status_code == 400
+
+
+def test_empty_body_is_a_400_not_a_silent_skip():
+    tc, sink = _client()
+    r = tc.post("/webhook/pr", content=b"", headers={"Content-Type": "application/json"})
+    assert r.status_code == 400
+    assert sink == []
+
+
+def test_invalid_utf8_body_is_a_400_not_a_500():
+    tc, sink = _client()
+    r = tc.post("/webhook/pr", content=b"\xff\xfe", headers={"Content-Type": "application/json"})
+    assert r.status_code == 400
+    assert sink == []
+
+
+def test_non_ascii_signature_header_is_a_401_not_a_500():
+    tc, sink = _client({"github_secret": "whsec"})
+    r = tc.post(
+        "/webhook/pr",
+        json=_MERGED_PR,
+        headers=[(b"x-hub-signature-256", "sha256=\u00e9".encode("latin-1"))],
+    )
+    assert r.status_code == 401
+    assert sink == []
 
 
 def test_health():

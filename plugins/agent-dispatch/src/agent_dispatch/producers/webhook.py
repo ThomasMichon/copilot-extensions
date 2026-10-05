@@ -91,6 +91,7 @@ Config (JSON), all keys optional::
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -102,6 +103,7 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, Request
 
 from ..client import DispatchClient
+from ..config import run_token_command
 from ..identity import canonicalize_remote
 from . import UNTRUSTED_EXTERNAL_CONTENT_NOTE
 
@@ -115,6 +117,11 @@ def _verify_github_signature(secret: str, body: bytes, signature_header: str | N
     ever signs the raw body with a shared secret). Mirrors
     ``github_pr_review_webhook.py``'s own ``_verify_signature``."""
     if not signature_header or not signature_header.startswith("sha256="):
+        return False
+    if not signature_header.isascii():
+        # hmac.compare_digest requires ASCII-only str operands and raises
+        # TypeError otherwise -- a non-ASCII header is simply never a
+        # valid signature, never a 500.
         return False
     expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(f"sha256={expected}", signature_header)
@@ -298,12 +305,22 @@ def build_app(
     # config, materialized verbatim to a spec file -- see
     # supervisor_registration.py) must never carry a literal secret, so a
     # deployer sets these via a local, non-committed env file instead
-    # (e.g. this host's own supervisor.env) and omits the config key.
-    inbound_token = cfg.get("inbound_token") or os.environ.get(
-        "AGENT_DISPATCH_WEBHOOK_INBOUND_TOKEN"
+    # (e.g. this host's own supervisor.env) and omits the config key. A
+    # *_COMMAND variant is also accepted, resolved once here at process
+    # startup (not re-fetched per request) via the same indirection
+    # config.py's own resolve_shared_token() uses: the command's stdout IS
+    # the secret, fetched on demand from an external store (a vault CLI)
+    # so the raw value never has to sit in a committed file OR a
+    # long-lived local env file on disk.
+    inbound_token = (
+        cfg.get("inbound_token")
+        or os.environ.get("AGENT_DISPATCH_WEBHOOK_INBOUND_TOKEN")
+        or run_token_command(os.environ.get("AGENT_DISPATCH_WEBHOOK_INBOUND_TOKEN_COMMAND", ""))
     )
-    github_secret = cfg.get("github_secret") or os.environ.get(
-        "AGENT_DISPATCH_WEBHOOK_GITHUB_SECRET"
+    github_secret = (
+        cfg.get("github_secret")
+        or os.environ.get("AGENT_DISPATCH_WEBHOOK_GITHUB_SECRET")
+        or run_token_command(os.environ.get("AGENT_DISPATCH_WEBHOOK_GITHUB_SECRET_COMMAND", ""))
     )
     pr_cfg = cfg.get("pr") or {}
     tel_cfg = cfg.get("telemetry") or {}
@@ -342,10 +359,10 @@ def build_app(
             if authorization != expected:
                 raise HTTPException(status_code=401, detail="invalid inbound token")
         if not body:
-            return {}
+            raise HTTPException(status_code=400, detail="empty body")
         try:
             payload = json.loads(body)
-        except json.JSONDecodeError as error:
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
             raise HTTPException(status_code=400, detail="invalid JSON body") from error
         if not isinstance(payload, dict):
             raise HTTPException(status_code=400, detail="JSON body must be an object")
@@ -355,13 +372,7 @@ def build_app(
     def health() -> dict:
         return {"status": "ok", "producer": "webhook"}
 
-    @app.post("/webhook/pr")
-    async def pr_hook(
-        request: Request,
-        authorization: str | None = Header(default=None),
-        x_hub_signature_256: str | None = Header(default=None),
-    ) -> dict:
-        payload = await _guard_and_parse(request, authorization, x_hub_signature_256)
+    def _pr_work(payload: dict) -> dict:
         pr = extract_pr(payload)
         if pr is None:
             return {"skipped": "not a pull-request event"}
@@ -392,13 +403,21 @@ def build_app(
             )
         return {"created": task}
 
-    @app.post("/webhook/telemetry")
-    async def telemetry_hook(
+    @app.post("/webhook/pr")
+    async def pr_hook(
         request: Request,
         authorization: str | None = Header(default=None),
         x_hub_signature_256: str | None = Header(default=None),
     ) -> dict:
+        # The client_factory()/client.create() work below is synchronous
+        # (httpx.Client, a blocking network call with a default 10s
+        # timeout) -- run it off the event loop via asyncio.to_thread so a
+        # slow coordinator stalls only this request's own worker thread,
+        # never unrelated concurrent deliveries or /health.
         payload = await _guard_and_parse(request, authorization, x_hub_signature_256)
+        return await asyncio.to_thread(_pr_work, payload)
+
+    def _telemetry_work(payload: dict) -> dict:
         on_status = tel_cfg.get("on_status", ["firing"])
         severities = tel_cfg.get("severities")
         created: list[dict] = []
@@ -438,13 +457,16 @@ def build_app(
                 created.append(task)
         return {"created": created, "skipped": skipped}
 
-    @app.post("/webhook/issue")
-    async def issue_hook(
+    @app.post("/webhook/telemetry")
+    async def telemetry_hook(
         request: Request,
         authorization: str | None = Header(default=None),
         x_hub_signature_256: str | None = Header(default=None),
     ) -> dict:
         payload = await _guard_and_parse(request, authorization, x_hub_signature_256)
+        return await asyncio.to_thread(_telemetry_work, payload)
+
+    def _issue_work(payload: dict) -> dict:
         issue = extract_issue(payload)
         if issue is None:
             return {"skipped": "not an issue event"}
@@ -538,6 +560,15 @@ def build_app(
                 )
                 created.append(task)
         return {"created": created, "skipped": skipped}
+
+    @app.post("/webhook/issue")
+    async def issue_hook(
+        request: Request,
+        authorization: str | None = Header(default=None),
+        x_hub_signature_256: str | None = Header(default=None),
+    ) -> dict:
+        payload = await _guard_and_parse(request, authorization, x_hub_signature_256)
+        return await asyncio.to_thread(_issue_work, payload)
 
     return app
 

@@ -129,7 +129,7 @@ def test_load_config_never_runs_the_control_token_command(monkeypatch):
     discarding the first result."""
     calls: list[str] = []
     monkeypatch.setattr(
-        config_mod, "_run_token_command", lambda cmd: calls.append(cmd) or "should-not-surface"
+        config_mod, "run_token_command", lambda cmd: calls.append(cmd) or "should-not-surface"
     )
     monkeypatch.setenv("AGENT_DISPATCH_CONTROL_TOKEN_COMMAND", "printf unused")
     assert load_config().control_token is None
@@ -301,10 +301,10 @@ def test_producer_capability_prefers_command_and_falls_back_to_env(monkeypatch):
         "AGENT_DISPATCH_PRODUCER_CAPABILITY_COMMAND",
         "fetch capability",
     )
-    monkeypatch.setattr(config_mod, "_run_token_command", lambda _command: "fetched")
+    monkeypatch.setattr(config_mod, "run_token_command", lambda _command: "fetched")
     assert producer_capability() == "fetched"
 
-    monkeypatch.setattr(config_mod, "_run_token_command", lambda _command: None)
+    monkeypatch.setattr(config_mod, "run_token_command", lambda _command: None)
     assert producer_capability() == "ambient"
 
 
