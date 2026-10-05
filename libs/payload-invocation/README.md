@@ -27,7 +27,9 @@ path. `windowsCatalogShim` defaults to `powershell`; a plugin whose stdio
 contract requires entry through a native process may select `cmd`, in which case
 the Windows catalog names the generated `.cmd` and reports `shell: "cmd"`.
 Callers invoke that path through the platform shell and should pass structured
-input through stdin or a request file rather than inline CMD arguments.
+input through stdin or a request file rather than inline CMD arguments; the
+generated Windows catalog says so beside the `argv` (`cmd.exe` ends a command at
+a newline, so a multi-line argument is silently cut off).
 `provisionMode` defaults to `snapshot`, where first use stamps the owning
 payload and provisions through its published snapshot. A self-staging installer
 may select `direct`; the payload shim then invokes that same installer with

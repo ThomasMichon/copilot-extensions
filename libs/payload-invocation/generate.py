@@ -293,6 +293,16 @@ def render(
     windows_catalog_shell = (
         "cmd" if data["windowsCatalogShim"] == "cmd" else "direct"
     )
+    # A .cmd shim runs under cmd.exe, which ends a command at a newline: a
+    # multi-line argument is silently cut off there, and nothing downstream can
+    # tell. Say so where an agent reads the argv.
+    windows_catalog_note_ps = (
+        "    ''\n"
+        "    'Each `argv` here is a `.cmd` shim: `cmd.exe` ends the command at a newline, "
+        "so a multi-line argument is silently cut off. Pass multi-line or quote-heavy "
+        "input through stdin or a file option instead.'\n"
+        if data["windowsCatalogShim"] == "cmd" else ""
+    )
     windows_cmd_host_block = (
         'set "_PSHOST="\n'
         'for /f "delims=" %%I in (\'"%SystemRoot%\\System32\\where.exe" '
@@ -379,6 +389,7 @@ def render(
         "INSTALLER": str(data["installer"]),
         "WINDOWS_CATALOG_SUFFIX": windows_catalog_suffix,
         "WINDOWS_CATALOG_SHELL": windows_catalog_shell,
+        "WINDOWS_CATALOG_NOTE_PS": windows_catalog_note_ps,
         "WINDOWS_CMD_HOST_BLOCK": windows_cmd_host_block,
         "PROVISION_POSIX": provision_posix,
         "PROVISION_POWERSHELL": provision_powershell,

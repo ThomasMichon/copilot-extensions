@@ -1779,6 +1779,26 @@ def test_manifest_can_select_cmd_for_windows_catalog(tmp_path: Path) -> None:
     assert '"%_PSHOST%" -NoProfile' in cmd
 
 
+def test_a_cmd_catalog_warns_that_a_newline_ends_the_command(tmp_path: Path) -> None:
+    """cmd.exe ends a command at a newline, so a multi-line argument to a .cmd
+    shim is silently cut off: the catalog an agent reads says so -- in the
+    single-command and the `commands` manifest forms alike. A PowerShell shim
+    passes arguments intact and carries no such note."""
+    for build in (_manifest, _multi_manifest):
+        root = tmp_path / build.__name__
+        root.mkdir()
+        manifest = build(root)
+        catalog_path = manifest.parent / "scripts" / "emit-command-catalog.ps1"
+        plain = generator.expected_files(manifest)[catalog_path]
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        data["windowsCatalogShim"] = "cmd"
+        manifest.write_text(json.dumps(data), encoding="utf-8")
+        cmd_catalog = generator.expected_files(manifest)[catalog_path]
+        assert "cut off" not in plain, build.__name__
+        assert "`cmd.exe` ends the command at a newline" in cmd_catalog, build.__name__
+        assert "stdin or a file option" in cmd_catalog, build.__name__
+
+
 def test_manifest_rejects_unknown_windows_catalog_shim(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     data = json.loads(manifest.read_text(encoding="utf-8"))
