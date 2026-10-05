@@ -68,6 +68,7 @@ from .engine_helpers import (
     target_rows,
 )
 from .engine_input import PickerScreenInputMixin
+from .inbox import Inbox
 from .engine_live_screens import MsgViewScreen, ProgressScreen, SessionsViewScreen
 from .engine_loading import PickerScreenLoadingMixin
 from .engine_maintenance_actions import PickerScreenMaintenanceActionsMixin
@@ -236,6 +237,13 @@ class PickerScreen(
         # extension of it) has visibility into what is still outstanding.
         self._bg_cancel = threading.Event()
         self._bg_threads: set[threading.Thread] = set()
+        # The sole sanctioned path for a background producer to reach this
+        # screen's render flow -- see inbox.py's module docstring. Every
+        # ``_run_bg``/``_apply_from_worker`` caller already routes through
+        # it; a NEW producer must too (enforced by
+        # tools/check-picker-inbox-discipline.py), never a bespoke thread +
+        # ``app.call_from_thread`` of its own.
+        self.inbox = Inbox(self)
         self._setup_epoch = 0
         self._setup_applied_epoch = 0
         self._setup_failed_epoch = 0

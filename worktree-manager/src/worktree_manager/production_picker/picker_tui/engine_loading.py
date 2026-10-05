@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import contextlib
+import itertools
 import os
 import threading
 import time
 
 from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_loader, target_rows
+from .inbox import ensure_inbox
 from .selection import ListSelection
 from .. import project_config as cfg
+
+#: Supplies a unique suffix for ``_apply_from_worker``'s inbox slot name,
+#: cheaper than a fresh ``uuid4()`` per call (this can run on a hot path --
+#: a frequent loader update) and already thread-safe: CPython's
+#: ``itertools.count.__next__`` is a single, atomic C-level operation.
+_WORKER_APPLY_SEQ = itertools.count()
 
 # How long the Picker's shared config-cache scope (below) keeps a direct-file
 # snapshot before treating it as stale and recomputing it. Long enough to cover
@@ -273,12 +281,17 @@ class PickerScreenLoadingMixin:
 
         self._apply_from_worker(apply)
     def _apply_from_worker(self, callback):
-        """Apply on Textual's thread; inline only for direct main-thread tests."""
-        try:
-            self.app.call_from_thread(callback)
-        except Exception:
-            if threading.current_thread() is threading.main_thread():
-                callback()
+        """Apply *callback* on the render thread via its ``Inbox`` -- the
+        sole sanctioned marshalling path (see inbox.py). Safe to call from
+        ANY thread, including the render thread itself (a direct-main-thread
+        test): ``Inbox.post`` -> ``MessagePump.post_message`` never raises on
+        the caller's own identity, unlike ``app.call_from_thread`` -- and
+        posting from the inbox's own home thread applies immediately rather
+        than waiting on a wake that, with no event loop running yet, might
+        never come."""
+        ensure_inbox(self).post(
+            f"worker-apply:{next(_WORKER_APPLY_SEQ)}", callback
+        )
     def _prepare_live_source(self, snapshot):
         """Resolve source/config-derived values on the setup worker."""
         source_tabs = getattr(self.src, "source_tabs", None)
