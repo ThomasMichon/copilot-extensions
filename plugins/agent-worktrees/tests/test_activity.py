@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -18,6 +19,14 @@ def _claim_prune_marker_in_subprocess(args: tuple[str, object]) -> bool:
     log_str, barrier = args
     barrier.wait()
     return activity._claim_prune_marker(Path(log_str))
+
+
+def _prune_in_subprocess(args: tuple[str, object]) -> int:
+    """Module-level (picklable) target for a real multi-process concurrent-
+    rewrite test -- see test_prune_concurrent_invocations_never_corrupt_the_log."""
+    log_str, barrier = args
+    barrier.wait()
+    return activity._prune(Path(log_str), retention_days=7)
 
 
 @pytest.fixture
@@ -265,6 +274,37 @@ def test_prune_drops_old_lines(patch_install_dir: Path):
     remaining = activity.read_events()
     assert len(remaining) == 1
     assert remaining[0]["worktree_id"] == "new"
+
+
+def test_prune_concurrent_invocations_never_corrupt_the_log(tmp_path: Path):
+    """Adjacent debounce windows are allowed to each dispatch their own
+    worker (see _claim_prune_marker's grace window), so two real `_prune()`
+    calls against the same log can genuinely overlap. Each must use its own
+    temp file (not a fixed shared name) -- released together from a shared
+    barrier so the overlap is real, not sequential, the final file must
+    still be entirely valid, retention-filtered JSONL, never interleaved or
+    truncated garbage from two processes racing on the same temp path."""
+    import concurrent.futures
+    import multiprocessing
+
+    log = tmp_path / "activity.jsonl"
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    new_ts = datetime.now(timezone.utc).isoformat()
+    log.write_text(
+        f'{{"ts": "{old_ts}", "event": "x", "worktree_id": "old"}}\n'
+        f'{{"ts": "{new_ts}", "event": "x", "worktree_id": "new"}}\n'
+    )
+
+    n = 6
+    with multiprocessing.Manager() as manager:
+        barrier = manager.Barrier(n)
+        with concurrent.futures.ProcessPoolExecutor(max_workers=n) as pool:
+            list(pool.map(_prune_in_subprocess, [(str(log), barrier)] * n))
+
+    lines = log.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 1
+    rec = json.loads(lines[0])
+    assert rec["worktree_id"] == "new"
 
 
 def test_log_event_never_prunes_inline(patch_install_dir: Path, monkeypatch):

@@ -483,6 +483,16 @@ def _prune(path: Path, retention_days: int) -> int:
     Returns the number of lines kept. Best-effort: a concurrent append
     during the rewrite could be lost, which is acceptable for a
     diagnostic log. Unparseable lines are kept.
+
+    Adjacent debounce windows are deliberately allowed to each dispatch
+    their own worker (see ``_claim_prune_marker``'s grace window), so two
+    ``_prune()`` calls against the same *path* can genuinely run
+    concurrently. The rewrite's temp file is therefore named per-process
+    (``.tmp.<pid>``), never a fixed shared name -- two processes writing and
+    replacing through the same temp path could otherwise interleave and
+    corrupt the result, or race each other's ``replace()``. Both workers
+    still converge on a valid (if redundant) prune of the same file; they
+    simply never share a write target while doing it.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
     kept: list[str] = []
@@ -498,7 +508,7 @@ def _prune(path: Path, retention_days: int) -> int:
     except OSError:
         return 0
 
-    tmp = path.with_name(path.name + ".tmp")
+    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
     try:
         tmp.write_text(
             ("\n".join(kept) + "\n") if kept else "", encoding="utf-8"
