@@ -100,7 +100,7 @@ def test_live_session_alias_capability_is_advertised() -> None:
 
 
 def test_events_before_paging_capability_is_advertised() -> None:
-    assert EVENTS_BEFORE_PAGING_PROTOCOL_VERSION == 22
+    assert EVENTS_BEFORE_PAGING_PROTOCOL_VERSION == 23
     assert EVENTS_BEFORE_PAGING_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
 
 
