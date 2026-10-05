@@ -248,6 +248,13 @@ new_signed_venv() {
     fi
 }
 
+source_kind_for_path() {
+    case "$(printf '%s' "$1" | tr '\\' '/')" in
+        */.copilot/installed-plugins/*) printf 'marketplace' ;;
+        *) printf 'local' ;;
+    esac
+}
+
 write_deploy_manifest() {
     local service="$1" plugin="$2" install_path="$3" plugin_path="$4" venv_path="$5"
     local additional_json="${6:-}" source_path_override="${7:-}" version_override="${8:-}"
@@ -256,7 +263,7 @@ write_deploy_manifest() {
     provenance_path="${source_path_override:-$plugin_path}"
     provenance_json_path="${provenance_path//\\//}"
     provenance_json_path="${provenance_json_path//\"/\\\"}"
-    kind="$(_source_kind "$provenance_path")"
+    kind="$(source_kind_for_path "$provenance_path")"
     ver="$version_override"
     if [[ -z "$ver" ]]; then
         ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$plugin_path/pyproject.toml" 2>/dev/null | head -n1 || true)"

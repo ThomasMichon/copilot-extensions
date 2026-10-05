@@ -1,0 +1,21 @@
+{
+  "comment": "Finalize installer engine follow-up fixes",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}
