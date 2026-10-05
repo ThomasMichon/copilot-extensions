@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -367,6 +367,85 @@ def test_spawn_in_kill_on_close_job_kills_and_closes_job_when_resume_fails(monke
 
     with pytest.raises(RuntimeError, match="failed to resume suspended process"):
         asyncio.run(pu.spawn_in_kill_on_close_job("python"))
+
+    assert process.killed
+    assert ("AssignProcessToJobObject", 101, 202) in fake.calls
+    assert ("NtResumeProcess", 202) in fake.calls
+    assert [call[1] for call in fake.calls if call[0] == "CloseHandle"].count(101) == 1
+
+
+def test_spawn_sync_in_kill_on_close_job_noop_off_windows(monkeypatch):
+    process = _FakeProcess()
+    spawn = Mock(return_value=process)
+    monkeypatch.setattr(pu, "_is_windows", lambda: False)
+    monkeypatch.setattr(pu.subprocess, "Popen", spawn)
+
+    result, job = pu.spawn_sync_in_kill_on_close_job(["python"], creationflags=7)
+
+    assert result is process
+    assert job is None
+    assert spawn.call_args.args == (["python"],)
+    assert spawn.call_args.kwargs["creationflags"] == 7
+
+
+def test_spawn_sync_in_kill_on_close_job_assigns_before_resuming(monkeypatch):
+    fake = _FakeKernel32()
+    ntdll = _FakeNtdll(fake.calls)
+    process = _FakeProcess()
+    spawn = Mock(return_value=process)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(pu, "_kernel32", lambda: fake)
+    monkeypatch.setattr(pu, "_ntdll", lambda: ntdll)
+    monkeypatch.setattr(pu.subprocess, "Popen", spawn)
+
+    result, job = pu.spawn_sync_in_kill_on_close_job(
+        ["python"], creationflags=pu._CREATE_NO_WINDOW
+    )
+
+    assert result is process
+    assert job is not None
+    assert spawn.call_args.kwargs["creationflags"] == (
+        pu._CREATE_NO_WINDOW | pu._CREATE_SUSPENDED
+    )
+    operations = [call[0] for call in fake.calls]
+    assert operations.index("AssignProcessToJobObject") < operations.index("NtResumeProcess")
+    assert not process.killed
+    job.close()
+
+
+def test_spawn_sync_in_kill_on_close_job_resumes_when_assignment_fails(monkeypatch):
+    fake = _FakeKernel32()
+    fake.fail = "AssignProcessToJobObject"
+    ntdll = _FakeNtdll(fake.calls)
+    process = _FakeProcess()
+    spawn = Mock(return_value=process)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(pu, "_kernel32", lambda: fake)
+    monkeypatch.setattr(pu, "_ntdll", lambda: ntdll)
+    monkeypatch.setattr(pu.ctypes, "get_last_error", lambda: 5, raising=False)
+    monkeypatch.setattr(pu.subprocess, "Popen", spawn)
+
+    result, job = pu.spawn_sync_in_kill_on_close_job(["python"])
+
+    assert result is process
+    assert job is None
+    assert any(call[0] == "AssignProcessToJobObject" for call in fake.calls)
+    assert any(call[0] == "NtResumeProcess" for call in fake.calls)
+    assert not process.killed
+
+
+def test_spawn_sync_in_kill_on_close_job_kills_and_closes_job_when_resume_fails(monkeypatch):
+    fake = _FakeKernel32()
+    ntdll = _FakeNtdll(fake.calls, resume_status=-1)
+    process = _FakeProcess()
+    spawn = Mock(return_value=process)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(pu, "_kernel32", lambda: fake)
+    monkeypatch.setattr(pu, "_ntdll", lambda: ntdll)
+    monkeypatch.setattr(pu.subprocess, "Popen", spawn)
+
+    with pytest.raises(RuntimeError, match="failed to resume suspended process"):
+        pu.spawn_sync_in_kill_on_close_job(["python"])
 
     assert process.killed
     assert ("AssignProcessToJobObject", 101, 202) in fake.calls
