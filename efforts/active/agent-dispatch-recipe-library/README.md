@@ -4,15 +4,16 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`)
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-09-30
-- **Status:** Active (Phases 1, 3-8 done; Phase 2 reviewer adapters and Phase 9 docs remain)
+- **Status:** Active (Phases 1, 3-9 done; Phase 2 reviewer adapters remain intentionally deferred/tracked separately)
 - **Vision:** `visions/plugins/agent-dispatch/README.md` (§*The recipe*)
   advances *loop-recipes* from "four fixed archetypes, hand-declared per
   consumer" to "named, extendable templates a consumer instantiates with a
   handful of params"; `visions/plugins/agent-dispatch/repository-issue-loop/README.md`
-  and `visions/plugins/agent-dispatch/reviewer/README.md` advance their own
-  already-declared `provider-neutral-backlog-capability` /
-  `provider-neutral-review-capability` features from should-be to realized
-  (Azure DevOps + Gitea adapters).
+  and `visions/plugins/agent-dispatch/reviewer/README.md` now reflect the
+  realized `extends:` model, the four named recipe instantiations, the
+  realized GitHub + Azure DevOps backlog-provider surface (with Gitea still a
+  deferred stub), and the still-partial reviewer-side provider neutrality
+  (GitHub realized; Azure DevOps + Gitea reviewer adapters still open).
 - **Umbrella issue:** #4691 (claimed and expanded by this effort — was an
   unplanned placeholder for the `extends:` model alone; this effort's scope
   also covers the provider-adapter gap and four new named recipes, all
@@ -413,16 +414,16 @@ below — read it before starting any Phase 3 work).
       archive state with issues closed and PRs merged.
 
 ### Phase 9 — Docs
-- [ ] `plugins/agent-dispatch/README.md`: document the `extends:` model, the
+- [x] `plugins/agent-dispatch/README.md`: document the `extends:` model, the
       six recipes (existing four plus the two truly new engines this effort
       adds none of — clarify that c/d/e/f are named instantiations, not new
       archetypes), and the ADO/Gitea adapters.
-- [ ] Update `visions/plugins/agent-dispatch/README.md`,
+- [x] Update `visions/plugins/agent-dispatch/README.md`,
       `.../repository-issue-loop/README.md`, and `.../reviewer/README.md` to
       mark `provider-neutral-backlog-capability` /
       `provider-neutral-review-capability` realized, and add the `extends:`
       model + four named recipes as realized features.
-- [ ] Publish a migration note for a consumer moving a hand-written
+- [x] Publish a migration note for a consumer moving a hand-written
       `kind: repository-issue-loop`/`reviewer-loop` declaration (with inline
       custom scripts) onto the new `extends:`-based thin form.
 
@@ -1376,3 +1377,39 @@ suite green (3743 passed, 23 skipped, the one known flake above).
 - Focused validation after the fix:
   - `python tools/run-plugin-tests.py agent-dispatch -k "effort_driver or effort_driver_loop_expansion_builds_periodic_emitter_command or builtin_effort_driver_loop" --timeout 600 --plugin-timeout 2400`
     → **14 passed**
+
+### 2026-10-04 (same day) — Phase 9 docs landed
+- Completed the final documentation pass in `plugins/agent-dispatch/README.md`:
+  clarified the `extends:` model as the thin-declaration adoption path,
+  documented the shipped global recipe set as four base archetypes plus four
+  named instantiations, explicitly called out that `backlog-triager`,
+  `issue-reproducer`, and `effort-builder` are `repository-issue-loop`
+  parameterizations while `effort-driver` is the distinct repo-local
+  `effort-driver-loop`, and added provider-state notes for backlog adapters
+  (GitHub + Azure DevOps realized; Gitea still the deferred `#4825` stub) and
+  reviewer adapters (GitHub only; Azure DevOps/Gitea still open).
+- Published concrete migration notes in that README for both a
+  hand-written `repository-issue-loop` declaration and a hand-written
+  `reviewer-loop` declaration with repo-local emitter wiring, showing each
+  verbose direct declaration collapsing to a thin `extends: "global:..."`
+  form with only the genuinely repo-specific fields left in place.
+- Revised the standing visions in place, in should-be/current-state register:
+  `visions/plugins/agent-dispatch/README.md` now describes the shipped
+  `extends:` bases and named recipe library as the default reuse surface;
+  `visions/plugins/agent-dispatch/repository-issue-loop/README.md` now treats
+  GitHub + Azure DevOps backlog providers as realized on the shared surface,
+  with Gitea as a separately tracked future adopter; and
+  `visions/plugins/agent-dispatch/reviewer/README.md` now treats reviewer
+  adoption through shipped recipe bases as the common path while stating
+  reviewer-side provider neutrality precisely as partial (GitHub realized,
+  Azure DevOps/Gitea adapters still future work).
+- Validation for this docs phase: `python tools/check-docs-consistency.py`
+  stays green, and the full plugin test/doc gate run for the PR is the
+  remaining merge-time confirmation.
+- With Phase 9 checked off, every planned phase in this effort is now closed
+  except the two explicitly deferred, separately tracked follow-ons:
+  Phase 2's Azure DevOps/Gitea reviewer adapters and Phase 3's single-emitter-
+  primitive taxonomy refactor. The effort's own Plan is therefore complete
+  modulo those named follow-ons. Whether to mark the effort archived under this
+  repo's planning convention remains an explicit decision for the orchestrating
+  session/operator, not something to do unilaterally here.

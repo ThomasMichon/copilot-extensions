@@ -5,7 +5,7 @@
 - **Scope:** leaf (a child of the
   [agent-dispatch](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-09-02
+- **Last revised:** 2026-10-04
 - **Reality docs:** [`docs/architecture.md`](../../../../docs/architecture.md) ·
   `plugins/agent-dispatch/` · `plugins/agent-worktrees/`
 
@@ -22,9 +22,10 @@ and one resumable session lineage. Pull request updates wake that reviewer; they
 never replace its task, workspace, or accumulated understanding.
 
 Repository adoption is primarily declarative. A repository supplies policy,
-identity, eligibility, guidance, and provider bindings; reusable reviewer and PR
-modules supply task authoring, revision observation, verdict publication,
-suspend/resume, retry accounting, and landing.
+identity, eligibility, guidance, and provider bindings, most often by
+extending a shipped reviewer recipe base rather than re-copying a whole loop.
+Reusable reviewer and PR modules supply task authoring, revision observation,
+verdict publication, suspend/resume, retry accounting, and landing.
 
 ## Concepts & Components
 
@@ -72,16 +73,21 @@ than allocating a fresh workspace or restarting the review.
 
 A repository can enable a reviewer loop by declaring its target, eligibility,
 acting identity, reviewer role, landing model, capacity, and any reliability
-policy stricter than the standard default. The runtime expands that declaration
+policy stricter than the standard default. In the common case it extends a
+shipped `reviewer` or `conflict-resolution` recipe base rather than spelling
+out the whole standing charter itself. The runtime expands that declaration
 into the standard producer, evaluator, worker, update-watcher, and status
 behavior.
 
 ### provider-neutral-review-capability
 
-The reusable pull-request capability covers the common cooperative review operations
-across supported forges. Provider differences stay behind adapters; reviewer
-policy does not reimplement subprocess invocation, identity classification,
-revision parsing, verdict rendering, wait loops, or merge guards.
+The reusable pull-request capability covers the common cooperative review
+operations across supported forges. Provider differences stay behind adapters;
+reviewer policy does not reimplement subprocess invocation, identity
+classification, revision parsing, verdict rendering, wait loops, or merge
+guards. GitHub is the fully realized adapter on that surface today; Azure
+DevOps and Gitea remain future adopters of the same contract rather than
+fork-specific reviewer engines.
 
 ### revision-driven-resume
 
