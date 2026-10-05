@@ -523,10 +523,11 @@ function Invoke-UvPipInstallResilient {
 function Invoke-UvVenvResilient {
     param(
         [Parameter(Mandatory)][string]$VenvDir,
-        [Parameter(Mandatory)][string[]]$Arguments
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [string]$UvCommand = 'uv'
     )
 
-    return (Invoke-UvVenvResilientShared -VenvDir $VenvDir -Arguments $Arguments -UvCommand 'uv')
+    return (Invoke-UvVenvResilientShared -VenvDir $VenvDir -Arguments $Arguments -UvCommand $UvCommand)
 }
 
 function Ensure-Uv {
@@ -649,16 +650,6 @@ function Ensure-Uv {
     $env:PATH = "$toolDir;$env:PATH"
     Write-Ok "Vendored uv into $toolDir"
     return $true
-}
-
-function New-SignedVenv {
-    return [bool](New-SignedVenvShared `
-        -VenvDir $VenvDir `
-        -VenvPython $VenvPython `
-        -PythonVersion '3.10' `
-        -UvCommand 'uv' `
-        -RequireSignedBase ($env:OS -eq 'Windows_NT') `
-        -AllowExisting $true)
 }
 
 function Get-PayloadHash {
@@ -1038,48 +1029,14 @@ function Get-SignedBasePython {
 }
 
 function New-SignedVenv {
-    <# Create or rebuild $VenvDir so its python.exe is SAC-trusted. Prefers a
-       signed base Python via `--copies`; rebuilds an existing unsigned venv;
-       falls back to uv (unsigned) when no signed Python exists. Returns $true
-       if $VenvPython AND $VenvDir\pyvenv.cfg are both present afterward --
-       checking python.exe alone would treat a #6852-corrupted slot
-       (python.exe present, pyvenv.cfg missing) as already healthy and never
-       rebuild it. #>
-    # #935: toss an INCOMPLETE prior slot first so we never `uv venv
-    # --allow-existing` over a half-built corpse (the current/active slot is
-    # never tossed). No-op in legacy mode.
     Invoke-VersionedSlotClean
-    $cfgPath = Join-Path $VenvDir 'pyvenv.cfg'
-    if (Test-Path $VenvPython) {
-        $sig = if ($env:OS -eq 'Windows_NT') { try { (Get-AuthenticodeSignature $VenvPython).Status } catch { 'Unknown' } } else { 'Valid' }
-        if ($sig -ne 'Valid' -and (Get-SignedBasePython)) {
-            Write-Step 'Existing venv python is unsigned (Smart App Control-incompatible) -- rebuilding from signed Python'
-            try { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop }
-            catch { Write-Warn "Could not remove existing venv (in use?): $_" }
-        } elseif (-not (Test-Path $cfgPath)) {
-            Write-Warn "Existing venv python.exe present but pyvenv.cfg is missing at $cfgPath (shared interpreter race, #6852) -- rebuilding"
-            try { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop }
-            catch { Write-Warn "Could not remove corrupted venv (in use?): $_" }
-        }
-    }
-    if ((Test-Path $VenvPython) -and (Test-Path $cfgPath)) { return $true }
-
-    $signedBase = Get-SignedBasePython
-    if ($signedBase) {
-        & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
-        if ((Test-Path $VenvPython) -and (Test-Path $cfgPath)) {
-            Write-Ok "Venv created from signed Python ($signedBase)"
-            return $true
-        }
-        Write-Warn 'Signed-Python venv creation failed -- falling back to uv'
-    } elseif ($env:OS -eq 'Windows_NT') {
-        Write-Warn 'No signed system Python found -- using uv (unsigned). On Smart App Control machines, install python.org Python 3.10+ and re-run.'
-    }
-    $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments @('--python', '3.10', '--allow-existing')
-    if ($result.ExitCode -ne 0 -or -not (Test-Path $cfgPath)) {
-        $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments @('--allow-existing')
-    }
-    return ((Test-Path $VenvPython) -and (Test-Path $cfgPath))
+    return [bool](New-SignedVenvShared `
+        -VenvDir $VenvDir `
+        -VenvPython $VenvPython `
+        -PythonVersion '3.10' `
+        -UvCommand 'uv' `
+        -RequireSignedBase ($env:OS -eq 'Windows_NT') `
+        -AllowExisting $true)
 }
 
 # #1643: venue providers (agent-codespaces / agent-containers) are PURE
@@ -1967,11 +1924,11 @@ function Materialize-SnapshotVendoredLibs {
         'zdd'                  = (Resolve-Zdd)
         'single-instance-lease'= (Resolve-SingleInstanceLease)
         'config-migrate'       = (Resolve-ConfigMigrate)
-        'agent-procutil'       = (Resolve-AgentProcutil)
-        'plugin-resolve'       = (Resolve-PluginResolve)
-        'dropin-registry'      = (Resolve-DropinRegistry)
-        'plugin-activation'    = (Resolve-PluginActivation)
-        'remote-login-shell'   = (Resolve-RemoteLoginShell)
+        'agent-procutil'       = (Resolve-VendoredLib -LibName 'agent-procutil')
+        'plugin-resolve'       = (Resolve-VendoredLib -LibName 'plugin-resolve')
+        'dropin-registry'      = (Resolve-VendoredLib -LibName 'dropin-registry')
+        'plugin-activation'    = (Resolve-VendoredLib -LibName 'plugin-activation')
+        'remote-login-shell'   = (Resolve-VendoredLib -LibName 'remote-login-shell')
     }
     foreach ($entry in $sources.GetEnumerator()) {
         $source = $entry.Value

@@ -1195,12 +1195,8 @@ appropriately larger/riskier for one sitting):
     -> PASS (`140 passed, 12 skipped, 3107 deselected`)
   - final full suite after the conversion:
     `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-bridge --reinstall --admission-wait 540`
-    -> same result as the baseline: main suite PASS (`625 passed, 1 skipped`),
-    with the same transient relay-probe flake in the later wrapper suite; a
-    bounded confirmation rerun of only that test
-    (`-k relay_ping_probe_command_round_trips_against_real_listener`)
-    passed immediately (`1 passed, 1 skipped, 3257 deselected`), confirming it
-    remained unrelated ambient flakiness rather than a regression from this leg
+    -> PASS (all 8 sub-suites green after the review-fix pass; aggregate
+    `3228 passed, 31 skipped`)
   - shared-engine regression suites:
     `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-pull-requests --reinstall --admission-wait 540`
     -> PASS (`26 passed`)
