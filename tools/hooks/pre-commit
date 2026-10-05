@@ -18,6 +18,9 @@
 #      the canonical section-set contract from efforts/README.md and
 #      visions/README.md § Local conventions. See
 #      tools/check-effort-vision-structure.py.
+#   4. check-large-files -- every staged file: a generous cap for images, a
+#      tight cap for everything else, and an outright ban on source
+#      maps/raw diffs. See tools/check-large-files.py.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
@@ -93,6 +96,31 @@ if [[ ${#STAGED_EFFORT_VISION[@]} -gt 0 ]]; then
         echo "" >&2
         echo "pre-commit: effort/vision structure validation failed (see errors above)." >&2
         echo "  Fix it, or run with --no-verify to bypass (discouraged)." >&2
+        failed=1
+    fi
+fi
+
+# --- 4. check-large-files on every staged file -------------------------------
+# --diff-filter=d (exclude only Deletions), not ACM: a rename or type-change
+# (R/T) must still be checked at its destination path, or renaming an
+# oversized/disallowed file to dodge detection would silently bypass this.
+STAGED_ALL=()
+while IFS= read -r -d '' f; do
+    STAGED_ALL+=("$f")
+done < <(git diff --cached --name-only --diff-filter=d -z)
+
+if [[ ${#STAGED_ALL[@]} -gt 0 ]]; then
+    if [[ ${#PY[@]} -eq 0 ]]; then
+        echo "pre-commit: python not found -- skipping large-file check" >&2
+    # "--" before the file list: a staged file whose name happens to look
+    # like a flag (e.g. a file literally named "--all") must never be
+    # parsed as one, which would silently switch the guard into full-tree
+    # mode (checking HEAD) instead of checking the actual staged paths.
+    elif ! "${PY[@]}" "$ROOT/tools/check-large-files.py" -- "${STAGED_ALL[@]}"; then
+        echo "" >&2
+        echo "pre-commit: large-file check failed (see errors above)." >&2
+        echo "  Store a large generated artifact as a Release asset/CI artifact" >&2
+        echo "  instead, or run with --no-verify to bypass (discouraged)." >&2
         failed=1
     fi
 fi

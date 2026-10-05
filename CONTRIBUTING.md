@@ -1457,16 +1457,47 @@ binstub in `~/.local/bin/`.
     `needs-decomposition`-labeled tracking issue naming it, for a dedicated
     decomposition pass rather than diffuse pressure on whichever future PR
     happens to touch the file next.
+- **Check-in size: a tight default cap, a generous image cap, no source
+  maps/raw diffs ever** (`tools/check-large-files.py`). `main`'s history had
+  accumulated ~300MB across 160+ oversized `.github/coverage-baselines/`
+  blobs (up to ~14MB each) before that design moved to GitHub Release
+  assets (see PRs #5078/#5085/#5097/#5098 and the `main-history-rewrite`
+  effort, which purged the backlog) — this guard exists so a generated data
+  dump, a bundled build output, or another large artifact can't quietly
+  recur the same way. A full sweep of the tracked corpus at the time this
+  guard was added found the largest legitimate non-image file at ~440KB and
+  the largest legitimate image (a demo GIF) at ~1.7MB; both caps below sit
+  comfortably above those with real headroom, while still catching a
+  runaway blob outright:
+  - **Images** (`.png`, `.jpg`/`.jpeg`, `.gif`, `.svg`, `.webp`, `.ico`,
+    `.bmp`, `.avif`) get a generous **3MB** cap — a screenshot, a design
+    preview, or a demo GIF is expected to be checked in.
+  - **Everything else** gets a **1MB** cap — comfortably above any
+    currently-tracked legitimate file, but well below the old
+    coverage-baseline blobs this guard exists to prevent recurring.
+  - **`.map`, `.diff`, and `.patch` files are never checked in, regardless
+    of size** — a source map and a raw diff/patch are generated-or-derived
+    build/workflow byproducts, not source a reviewer should see in a PR.
+  - Like `check-module-size.py`, this only checks files a diff actually
+    adds or modifies (staged files for pre-commit; the push/PR range for
+    pre-push/CI) — a pre-existing large file you didn't touch never blocks
+    an unrelated change. `--all` additionally runs an unconditional
+    full-tree sweep in CI (`guards-full-sweep` on `dev`, and on any non-PR
+    `ci.yml` trigger), so organic drift on trunk is still caught outside any
+    single diff.
 
 ### Git Hooks
 
 The repo ships git hooks under `tools/hooks/`:
 
 - **`pre-commit`** — on staged files: `ruff check --select F,E9` on Python
-  (unused imports/vars, undefined names, syntax errors), and
+  (unused imports/vars, undefined names, syntax errors),
   `tools/check-skills.py` on any staged `SKILL.md` (frontmatter validity, `name`
   rules, and the **1024-char `description` limit** the Copilot CLI enforces —
-  over it, the loader silently drops the skill).
+  over it, the loader silently drops the skill),
+  `tools/check-effort-vision-structure.py` on any staged effort/vision
+  `README.md`, and `tools/check-large-files.py` on every staged file (see
+  below).
 - **`pre-push`** — runs the repo-wide guards: `tools/check-install-contract.py`
   (the [install contract](docs/install-contract.md)),
   `tools/check-no-internal-identifiers.py`, `tools/check-vendored-libs-sync.py`,
@@ -1478,8 +1509,9 @@ The repo ships git hooks under `tools/hooks/`:
   (no config/Dockerfile/install-script/CI-workflow file may hardcode a public
   package-feed URL as the only usable endpoint — this repo runs on machines
   whose default feed is network-blocked and replaced with an internal mirror),
-  and `tools/check-module-size.py` (the 1,000-line-per-module cap and
-  shrink-only baseline described above).
+  `tools/check-module-size.py` (the 1,000-line-per-module cap and
+  shrink-only baseline described above), and `tools/check-large-files.py`
+  (the oversized-file cap described below).
 
 CI also runs `tools/check-marketplace-isolation.py` in report-only mode. It
 inventories legacy unqualified runtime roots, generic global plugin commands,

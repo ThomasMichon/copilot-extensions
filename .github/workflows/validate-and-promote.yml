@@ -354,6 +354,8 @@ jobs:
         run: python tools/check-vendored-libs-sync.py
       - name: Docs consistency
         run: python tools/check-docs-consistency.py
+      - name: Large files (full sweep, unconditional)
+        run: python tools/check-large-files.py --all
 
   report-failure:
     name: report failure (Phase 1 watchdog; detection + dedup only, no fix attempt)
