@@ -262,7 +262,7 @@ def test_issue_malformed_repository_is_not_a_500():
     body = {**_CI_FAILURE_ISSUE, "repository": "not-an-object"}
     r = tc.post("/webhook/issue", json=body)
     assert r.status_code == 200
-    assert r.json()["created"] == []
+    assert r.json()["skipped"] == "not an issue event"
     assert sink == []
 
 

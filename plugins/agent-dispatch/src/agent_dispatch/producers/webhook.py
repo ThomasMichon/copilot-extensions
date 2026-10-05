@@ -144,7 +144,12 @@ def extract_issue(payload: dict[str, Any]) -> dict[str, Any] | None:
         return None
     repo = payload.get("repository")
     if not isinstance(repo, dict):
-        repo = {}
+        # Without a recognizable repository object there is no repo to
+        # resolve a lane/allowlist against -- treat this the same as any
+        # other unrecognizable body (never silently fall back to "no
+        # repository", which a rule with a fixed `repo` and no
+        # `repo_allowlist` would otherwise happily process).
+        return None
     remote = repo.get("clone_url") or repo.get("html_url") or repo.get("ssh_url")
     raw_labels = issue.get("labels")
     if not isinstance(raw_labels, list):

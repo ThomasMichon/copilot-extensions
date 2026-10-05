@@ -533,9 +533,9 @@ mismatches remain unclaimable and emit a bounded, fingerprinted
   `origin_ref=pr/<n>`, lane from the payload's repo remote),
   `POST /webhook/telemetry` (a **firing** alert -> remediation task,
   `source=telemetry`), and `POST /webhook/issue` (a forge issue event matched
-  against a list of independent, config-driven rules -> task, `source=
-  issue-webhook`, `origin_ref=issue/<n>`). Deterministic `dedup_key`s make
-  redelivery safe.
+  against a list of independent, config-driven rules -> task,
+  `source=issue-webhook`, `origin_ref=issue/<n>`). Deterministic `dedup_key`s
+  make redelivery safe.
 - **`<agent-dispatch catalog argv[0]> evaluate --spec <cfg>`** -- the *evaluator*: pipe one task
   lifecycle event (stdin or `--event-file`) through a declarative rule set that
   decides what happens next (emit a follow-up task, or nothing). Hook-like; the
