@@ -51,6 +51,7 @@ def create_foreign_pr_from_branch(
     base: str | None = None,
     draft: bool = False,
     attribution: bool | None = None,
+    new: bool = False,
 ) -> dict:
     """Open a PR on ``target_repo`` from ``from_branch`` (already pushed
     there by some other process) and claim it onto ``worktree_id``'s own
@@ -58,6 +59,12 @@ def create_foreign_pr_from_branch(
     (``url``/``number``/``state``/``pr_opened``/...) on success, or
     ``{"error": "..."}`` on a resolution/provider failure -- never raises for
     an expected failure mode.
+
+    Idempotent by default (``new=False``, matching ``create_pr``'s own
+    "safe to re-run" contract): a retry for the SAME ``from_branch`` reuses
+    any still-open PR already found there (``result["reused"]``) instead of
+    asking the provider to open a duplicate. Pass ``new=True`` to force a
+    fresh PR unconditionally.
 
     ``target_repo`` must already be a DIFFERENT, registered repo (the caller
     is expected to have already rejected ``same_as_active`` -- see
@@ -152,9 +159,12 @@ def create_foreign_pr_from_branch(
         else:
             full_body = attr.strip_marker(body or "")
     elif effective_attribution is True:
-        marker = attr.build_marker(
-            worktree_id, machine=machine, session=session, head=from_branch,
-        )
+        # `build_marker`'s own `head=` parameter is documented as a commit
+        # SHA (the local path passes its own just-pushed squash commit's
+        # SHA) -- this no-checkout path never has one verified before the
+        # provider call, so it's omitted rather than passing the branch
+        # NAME as if it were authoritative SHA metadata.
+        marker = attr.build_marker(worktree_id, machine=machine, session=session)
         full_body = attr.append_marker(body or "", marker)
     else:
         full_body = attr.strip_marker(body or "")
@@ -170,7 +180,28 @@ def create_foreign_pr_from_branch(
     try:
         provider = providers.get_provider(prcfg.provider)
         token = providers.account_token_for_slug(scope.repo, prcfg)
-        pull = provider.create_pull(scope, token=token)
+        reused = False
+        pull = None
+        if not new:
+            # Idempotency (matches `create_pr`'s own contract -- safe to
+            # re-run): a retried `--repo/--from-branch` call for the SAME
+            # head must reuse any still-open PR rather than asking the
+            # forge to open a duplicate (which normally just fails once a
+            # head already has an open PR, but is never something to rely
+            # on across every provider). `--new`-equivalent callers skip
+            # this and always open fresh.
+            existing = provider.find_pull_by_head(
+                target_repo, from_branch, api_base=scope.api_base, token=token,
+            )
+            if existing is not None:
+                existing_state = _OPEN_STATE_ALIASES.get(existing.state, existing.state) or "open"
+                if not tracking._pr_is_terminal(
+                    tracking.PRRecord(state=existing_state),
+                ):
+                    pull = existing
+                    reused = True
+        if pull is None:
+            pull = provider.create_pull(scope, token=token)
     except (providers.ProviderError, OSError) as e:
         return {"error": str(e), "repo": target_repo}
 
@@ -184,16 +215,25 @@ def create_foreign_pr_from_branch(
         "head": from_branch,
         "base": base_branch,
         "pr_opened": True,
+        "reused": reused,
     }
     if getattr(pull, "label_error", ""):
         result["pr_label_error"] = pull.label_error
 
+    claimed_ref = None
+    claim_worktree_id = worktree_id
+    claim_machine = ""
+    claim_project = ""
     try:
-        # Reload under the record lock -- RIGHT BEFORE the claim
-        # read-modify-write, not the pre-network-call snapshot above --
-        # so a concurrent CLI's own claim/settle in the gap while this
-        # function was awaiting the provider can't be silently clobbered
-        # by saving a stale copy over it.
+        # Lock only the load/mutate/save window -- RIGHT BEFORE the claim
+        # read-modify-write, not the pre-network-call snapshot above, so a
+        # concurrent CLI's own claim/settle in the gap while this function
+        # awaited the provider can't be silently clobbered by saving a
+        # stale copy. `claim_history.record_pr_event` runs AFTER this
+        # block, never inside it: it takes its own separate filesystem
+        # lock and does real I/O, and holding this worktree's record lock
+        # across that risks starving a concurrent `require_sidecar=True`
+        # updater into a timeout.
         with tracking._RecordLock(rec_path, require_sidecar=True):
             record = tracking.load_record(rec_path) if rec_path.exists() else None
             if record is None:
@@ -204,12 +244,10 @@ def create_foreign_pr_from_branch(
             )
             claimed_ref = _ensure_pr_claim(record, target_pr)
             tracking.save_record(record)
-            if claimed_ref:
-                claim_history.record_pr_event(
-                    claimed_ref, worktree_id=record.worktree_id,
-                    machine=record.machine, event="claimed", project=record.repo,
-                )
-            result["claimed"] = bool(claimed_ref)
+            claim_worktree_id, claim_machine, claim_project = (
+                record.worktree_id, record.machine, record.repo,
+            )
+        result["claimed"] = bool(claimed_ref)
     except FileNotFoundError:
         result["claimed"] = False
         result["claim_warning"] = (
@@ -226,5 +264,10 @@ def create_foreign_pr_from_branch(
             f"PR opened ({pull.url}), but claiming it onto worktree "
             f"{worktree_id!r} failed: {e}. Run `agent-worktrees claims "
             f"add pr {pull.url} --worktree {worktree_id}` manually."
+        )
+    if claimed_ref:
+        claim_history.record_pr_event(
+            claimed_ref, worktree_id=claim_worktree_id,
+            machine=claim_machine, event="claimed", project=claim_project,
         )
     return result

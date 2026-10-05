@@ -537,6 +537,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 title=title, body=body or "",
                 draft=getattr(args, "draft", False) or getattr(args, "hold", False),
                 attribution=(False if getattr(args, "no_attribution", False) else None),
+                new=getattr(args, "new", False),
             )
             if result.get("error"):
                 return core._json_error(result["error"]) if use_json else (
@@ -545,8 +546,9 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             if use_json:
                 core._json_output(result)
             else:
+                verb = "Reused existing" if result.get("reused") else "Opened"
                 output.ok(
-                    f"Opened PR #{result.get('number')} via foreign-repo "
+                    f"{verb} PR #{result.get('number')} via foreign-repo "
                     f"create: {result.get('url', '')}"
                 )
                 print(

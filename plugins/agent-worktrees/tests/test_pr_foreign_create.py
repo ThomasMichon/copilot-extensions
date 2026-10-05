@@ -23,10 +23,16 @@ class _FakePull:
 class _FakeProvider:
     name = "gitea"
 
-    def __init__(self, result=None, error=None):
+    def __init__(self, result=None, error=None, existing=None):
         self._result = result
         self._error = error
+        self._existing = existing
         self.calls: list = []
+        self.find_calls: list = []
+
+    def find_pull_by_head(self, repo, head, *, api_base="", token=None):
+        self.find_calls.append((repo, head, api_base, token))
+        return self._existing
 
     def create_pull(self, scope, *, token=None):
         self.calls.append((scope, token))
@@ -446,3 +452,96 @@ class TestCreateForeignPrFromBranch:
         assert "session=latest-live-session" in scope.body
         assert "spawning-session-should-be-ignored" not in scope.body
         assert "process-own-machine-should-be-ignored" not in scope.body
+
+    def test_reuses_an_existing_open_pr_on_the_same_head_instead_of_duplicating(
+        self, monkeypatch, _tracking_setup,
+    ):
+        """Matches create_pr's own idempotent "safe to re-run" contract: a
+        retried --repo/--from-branch call for the SAME head must not ask
+        the forge to open a duplicate PR."""
+        _tracking_d, wid = _tracking_setup
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: _foreign_resolution(),
+        )
+        existing_pull = _FakePull(url="https://example/pr/11", number=11, state="open")
+        fake_provider = _FakeProvider(existing=existing_pull)
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
+
+        result = pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="x",
+        )
+        assert result["reused"] is True
+        assert result["number"] == 11
+        assert result["claimed"] is True
+        assert fake_provider.calls == []  # create_pull was never called
+        assert len(fake_provider.find_calls) == 1
+
+    def test_ignores_a_terminal_existing_pr_and_opens_a_fresh_one(
+        self, monkeypatch, _tracking_setup,
+    ):
+        _tracking_d, wid = _tracking_setup
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: _foreign_resolution(),
+        )
+        terminal_pull = _FakePull(url="https://example/pr/12", number=12, state="merged")
+        fresh_pull = _FakePull(url="https://example/pr/13", number=13, state="open")
+        fake_provider = _FakeProvider(result=fresh_pull, existing=terminal_pull)
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
+
+        result = pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="x",
+        )
+        assert result.get("reused", False) is False
+        assert result["number"] == 13
+        assert len(fake_provider.calls) == 1
+
+    def test_new_flag_skips_the_reuse_lookup_entirely(self, monkeypatch, _tracking_setup):
+        _tracking_d, wid = _tracking_setup
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: _foreign_resolution(),
+        )
+        existing_pull = _FakePull(url="https://example/pr/14", number=14, state="open")
+        fresh_pull = _FakePull(url="https://example/pr/15", number=15, state="open")
+        fake_provider = _FakeProvider(result=fresh_pull, existing=existing_pull)
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
+
+        result = pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="x", new=True,
+        )
+        assert result["number"] == 15
+        assert fake_provider.find_calls == []
+        assert len(fake_provider.calls) == 1
+
+    def test_raw_marker_never_passes_the_branch_name_as_a_sha(
+        self, monkeypatch, _tracking_setup,
+    ):
+        """build_marker's `head=` is documented as a commit SHA; this
+        no-checkout path has no verified SHA before creation and must omit
+        the field rather than passing the branch name as if it were one."""
+        _tracking_d, wid = _tracking_setup
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: _foreign_resolution(source_attribution=True),
+        )
+        fake_provider = _FakeProvider(
+            result=_FakePull(url="https://example/pr/16", number=16),
+        )
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
+
+        pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo",
+            from_branch="my-unverified-branch-name", title="x", body="hello",
+        )
+        scope, _token = fake_provider.calls[0]
+        assert "head=my-unverified-branch-name" not in scope.body
+        assert "worktree=" in scope.body
