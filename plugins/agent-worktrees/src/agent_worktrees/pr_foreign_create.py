@@ -32,6 +32,13 @@ from .providers import attribution as attr
 from .providers import base as providers
 from .pr_ops import _ensure_pr_claim
 
+#: Per-provider "this PR is open" vocabulary, normalized to the literal
+#: "open" `_ensure_pr_claim`/`tracking.PRRecord` require -- Azure DevOps'
+#: own `create_pull()` returns its native `status` value (``"active"``)
+#: verbatim, never the cross-provider "open" literal every other provider
+#: uses, so an unnormalized ADO PR would silently open unclaimed.
+_OPEN_STATE_ALIASES = {"active": "open"}
+
 
 def create_foreign_pr_from_branch(
     worktree_id: str,
@@ -77,6 +84,15 @@ def create_foreign_pr_from_branch(
 
     repo_cfg = resolution.repo_config
     prcfg = repo_cfg.pr
+    if not prcfg.enabled:
+        return {
+            "error": (
+                f"PR mode is not enabled for '{target_repo}'. That repo's "
+                "own config must set pr.enabled: true before anything can "
+                "open a PR against it."
+            ),
+            "repo": target_repo,
+        }
     base_branch = base or repo_cfg.default_branch
 
     missing_body = pr_ops.missing_required_body_sections(body, prcfg.required_body_sections)
@@ -91,26 +107,36 @@ def create_foreign_pr_from_branch(
         }
 
     rec_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
-    record = tracking.load_record(rec_path) if rec_path.exists() else None
+    pre_record = tracking.load_record(rec_path) if rec_path.exists() else None
 
     machine = getattr(config, "machine", "") or ""
-    session = getattr(record, "parent_session", "") if record else ""
-    codename = getattr(record, "codename", "") if record else ""
+    session = getattr(pre_record, "parent_session", "") if pre_record else ""
+    codename = getattr(pre_record, "codename", "") if pre_record else ""
 
     # Same tri-state resolution `create_pr`'s own local path uses:
     # `prcfg.source_attribution` (a per-repo "codename" | True | False
     # config value, NOT a bool-only toggle) is the default, overridden only
     # by an explicit `attribution=` argument (today only ever `False`, from
-    # `--no-attribution` -- `None` otherwise). Unlike the local path, this
-    # lean no-checkout path never attempts a live codename BACKFILL on a
-    # missing/invalid codename -- it degrades to no marker rather than
-    # guessing or crashing, consistent with this module's "new sibling
-    # function, not a retrofit" scope.
+    # `--no-attribution` -- `None` otherwise).
     effective_attribution = (
         prcfg.source_attribution if attribution is None else attribution
     )
     if effective_attribution == "codename":
-        if is_valid_handle(codename):
+        # Same provenance gate the local path's codename-mode branch
+        # applies (`attribution.may_publish_codename`): a codename from a
+        # CUSTOM wordlist only publishes when this repo has explicitly
+        # opted into source attribution (`source_attribution_configured`);
+        # the bare implicit default never does, closing exactly the
+        # custom-vocabulary-leak case that check exists to prevent. This
+        # lean no-checkout path never attempts a live codename BACKFILL on
+        # a missing/invalid codename (unlike the local path) -- it
+        # degrades to no marker rather than guessing or crashing.
+        if is_valid_handle(codename) and attr.may_publish_codename(
+            codename_source=(
+                getattr(pre_record, "codename_source", None) if pre_record else None
+            ),
+            source_attribution_configured=prcfg.source_attribution_configured,
+        ):
             full_body = attr.append_marker(body or "", attr.build_codename_marker(codename))
         else:
             full_body = attr.strip_marker(body or "")
@@ -137,11 +163,12 @@ def create_foreign_pr_from_branch(
     except (providers.ProviderError, OSError) as e:
         return {"error": str(e), "repo": target_repo}
 
+    normalized_state = _OPEN_STATE_ALIASES.get(pull.state, pull.state) or "open"
     result: dict = {
         "repo": target_repo,
         "url": pull.url,
         "number": pull.number,
-        "state": pull.state or "open",
+        "state": normalized_state,
         "draft": bool(draft),
         "head": from_branch,
         "base": base_branch,
@@ -150,11 +177,19 @@ def create_foreign_pr_from_branch(
     if getattr(pull, "label_error", ""):
         result["pr_label_error"] = pull.label_error
 
-    if record is not None:
-        try:
+    try:
+        # Reload under the record lock -- RIGHT BEFORE the claim
+        # read-modify-write, not the pre-network-call snapshot above --
+        # so a concurrent CLI's own claim/settle in the gap while this
+        # function was awaiting the provider can't be silently clobbered
+        # by saving a stale copy over it.
+        with tracking._RecordLock(rec_path, require_sidecar=True):
+            record = tracking.load_record(rec_path) if rec_path.exists() else None
+            if record is None:
+                raise FileNotFoundError(f"no tracking record for {worktree_id!r}")
             target_pr = tracking.PRRecord(
                 repo=target_repo, number=pull.number, url=pull.url,
-                state=pull.state or "open",
+                state=normalized_state,
             )
             claimed_ref = _ensure_pr_claim(record, target_pr)
             tracking.save_record(record)
@@ -164,23 +199,21 @@ def create_foreign_pr_from_branch(
                     machine=record.machine, event="claimed", project=record.repo,
                 )
             result["claimed"] = bool(claimed_ref)
-        except Exception as e:
-            # The PR already exists on the provider by this point -- a
-            # claim-persistence failure must never read as the create
-            # itself failing (there is nothing left to roll back). Degrade
-            # to the same claim_warning shape the "no tracking record"
-            # branch below uses, so the caller always has a concrete,
-            # actionable next step.
-            result["claimed"] = False
-            result["claim_warning"] = (
-                f"PR opened ({pull.url}), but claiming it onto worktree "
-                f"{worktree_id!r} failed: {e}. Run `agent-worktrees claims "
-                f"add pr {pull.url} --worktree {worktree_id}` manually."
-            )
-    else:
+    except FileNotFoundError:
         result["claimed"] = False
         result["claim_warning"] = (
             f"no tracking record found for worktree {worktree_id!r} -- PR "
             "opened but not claimed; run `claims add pr` manually"
+        )
+    except Exception as e:
+        # The PR already exists on the provider by this point -- a
+        # claim-persistence failure must never read as the create itself
+        # failing (there is nothing left to roll back). Degrade to a
+        # warning with a concrete manual recovery command instead.
+        result["claimed"] = False
+        result["claim_warning"] = (
+            f"PR opened ({pull.url}), but claiming it onto worktree "
+            f"{worktree_id!r} failed: {e}. Run `agent-worktrees claims "
+            f"add pr {pull.url} --worktree {worktree_id}` manually."
         )
     return result

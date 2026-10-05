@@ -63,14 +63,16 @@ def _config(worktree_repo="caller-repo"):
 def _foreign_resolution(
     *, same_as_active=False, provider="gitea", labels=(),
     required_body_sections=(), source_attribution="codename",
+    enabled=True, source_attribution_configured=True,
 ):
     repo_cfg = cfg.RepoConfig(
         anchor="/tmp/other-anchor", worktree_root="/tmp/other-wt",
         default_branch="dev", remote="origin",
         pr=cfg.PRConfig(
-            enabled=True, provider=provider, labels=labels,
+            enabled=enabled, provider=provider, labels=labels,
             required_body_sections=required_body_sections,
             source_attribution=source_attribution,
+            source_attribution_configured=source_attribution_configured,
         ),
     )
     return pr_config.ForeignRepoResolution(
@@ -288,3 +290,113 @@ class TestCreateForeignPrFromBranch:
         assert result["claimed"] is False
         assert "claim_warning" in result
         assert fake_pull.url in result["claim_warning"]
+
+    def test_refuses_when_the_target_repo_has_pr_mode_disabled(
+        self, monkeypatch, _tracking_setup,
+    ):
+        _tracking_d, wid = _tracking_setup
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: _foreign_resolution(enabled=False),
+        )
+        fake_provider = _FakeProvider(
+            result=_FakePull(url="https://example/pr/6", number=6),
+        )
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
+
+        result = pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="x",
+        )
+        assert "error" in result
+        assert "not enabled" in result["error"]
+        assert fake_provider.calls == []
+
+    def test_normalizes_azure_devops_active_state_to_open_for_the_claim(
+        self, monkeypatch, _tracking_setup,
+    ):
+        """ADO's own create_pull() returns its native status ("active"),
+        never the cross-provider "open" literal _ensure_pr_claim requires --
+        an unnormalized ADO PR would otherwise silently open unclaimed."""
+        _tracking_d, wid = _tracking_setup
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: _foreign_resolution(provider="azure-devops"),
+        )
+        fake_pull = _FakePull(
+            url="https://example/pr/7", number=7, state="active",
+        )
+        monkeypatch.setattr(
+            providers, "get_provider", lambda name: _FakeProvider(result=fake_pull),
+        )
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
+
+        result = pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="x",
+        )
+        assert result["state"] == "open"
+        assert result["claimed"] is True
+        record = tracking.load_record(_tracking_d / f"{wid}.yaml")
+        refs = [c.ref for c in record.resources if c.kind == "pr"]
+        assert fake_pull.url in refs
+
+    def test_codename_from_a_custom_wordlist_never_publishes_unconfigured(
+        self, monkeypatch, _tracking_setup,
+    ):
+        """Mirrors the local path's provenance gate: an implicit (never
+        explicitly reviewed) custom-wordlist codename must never publish,
+        even though it's a syntactically valid handle."""
+        _tracking_d, wid = _tracking_setup
+        record = tracking.load_record(_tracking_d / f"{wid}.yaml")
+        record.codename = "shimmering-quartz"
+        record.codename_source = "custom"
+        tracking.save_record(record)
+
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: _foreign_resolution(
+                source_attribution="codename", source_attribution_configured=False,
+            ),
+        )
+        fake_provider = _FakeProvider(
+            result=_FakePull(url="https://example/pr/8", number=8),
+        )
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
+
+        pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="x", body="hello",
+        )
+        scope, _token = fake_provider.calls[0]
+        assert "agent-worktrees:source" not in scope.body
+        assert "shimmering-quartz" not in scope.body
+
+    def test_codename_from_a_custom_wordlist_publishes_once_configured(
+        self, monkeypatch, _tracking_setup,
+    ):
+        _tracking_d, wid = _tracking_setup
+        record = tracking.load_record(_tracking_d / f"{wid}.yaml")
+        record.codename = "shimmering-quartz"
+        record.codename_source = "custom"
+        tracking.save_record(record)
+
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: _foreign_resolution(
+                source_attribution="codename", source_attribution_configured=True,
+            ),
+        )
+        fake_provider = _FakeProvider(
+            result=_FakePull(url="https://example/pr/9", number=9),
+        )
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
+
+        pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="x", body="hello",
+        )
+        scope, _token = fake_provider.calls[0]
+        assert "shimmering-quartz" in scope.body
