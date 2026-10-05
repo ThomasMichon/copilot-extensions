@@ -252,6 +252,77 @@ class TestComputeFallbackSet:
         assert first.selected_tests == second.selected_tests
 
 
+class TestDefaultTierEligibleTests:
+    """`fallback.default_tier_eligible_tests` -- the real portfolio-tier
+    restriction `decide()` wires into `compute_fallback_set` by default
+    (coverage-guided-ci Phase 3 checklist item: wire `eligible_tests` to
+    real `test-portfolio` tier markers)."""
+
+    def _baseline_with_tiers(self, **tier_by_test: str | None) -> dict:
+        return {
+            "tests": {name: {"portfolio_tier": tier} for name, tier in tier_by_test.items()},
+            "coverage": {},
+        }
+
+    def test_excludes_t3_and_t4_includes_t0_through_t2(self) -> None:
+        baseline = self._baseline_with_tiers(
+            test_t0="T0", test_t1="T1", test_t2="T2", test_t3="T3", test_t4="T4",
+        )
+        eligible = fallback.default_tier_eligible_tests(baseline)
+        assert eligible == {"test_t0", "test_t1", "test_t2"}
+
+    def test_untiered_test_is_eligible(self) -> None:
+        baseline = self._baseline_with_tiers(test_none=None)
+        assert fallback.default_tier_eligible_tests(baseline) == {"test_none"}
+
+    def test_a_v2_baseline_with_no_portfolio_tier_key_at_all_is_eligible(self) -> None:
+        # A baseline collected before schema v3 added `portfolio_tier` has
+        # no such key on any test entry at all -- `.get` must default this
+        # to eligible, matching an explicitly untiered test, not excluded.
+        baseline = {"tests": {"test_old": {"duration_s": 0.1}}, "coverage": {}}
+        assert fallback.default_tier_eligible_tests(baseline) == {"test_old"}
+
+    def test_empty_baseline_yields_an_empty_eligible_set(self) -> None:
+        assert fallback.default_tier_eligible_tests({"tests": {}, "coverage": {}}) == frozenset()
+
+    def test_tier_value_is_matched_case_sensitively_as_recorded(self) -> None:
+        # `baseline.py`'s own driver always upper-cases the recorded tier
+        # (`str(marker.args[0]).upper()`), so a lower-case "t3" here is a
+        # malformed/foreign value this function must not special-case into
+        # exclusion -- only the exact upper-case "T3"/"T4" are ineligible.
+        baseline = self._baseline_with_tiers(test_lower="t3")
+        assert fallback.default_tier_eligible_tests(baseline) == {"test_lower"}
+
+    def test_a_t4_test_with_the_best_coverage_per_cost_score_is_never_curated(
+        self,
+    ) -> None:
+        # Real (non-mocked) integration between `default_tier_eligible_tests`
+        # and `compute_fallback_set`: a T4 end-to-end test that would
+        # otherwise dominate the greedy ranking (covers everything, costs
+        # almost nothing) must never appear in the curated set once its
+        # tier is excluded -- proving the restriction's assurance is real,
+        # not merely that the eligibility function returns the right set
+        # in isolation.
+        baseline = {
+            "tests": {
+                "test_t4_cheap_and_total": {"duration_s": 0.001, "portfolio_tier": "T4"},
+                "test_t0_real": {"duration_s": 1.0, "portfolio_tier": "T0"},
+            },
+            "coverage": {
+                "file.py": {
+                    "1": ["test_t4_cheap_and_total", "test_t0_real"],
+                    "2": ["test_t4_cheap_and_total"],
+                },
+            },
+        }
+        eligible = fallback.default_tier_eligible_tests(baseline)
+        fb = fallback.compute_fallback_set(baseline, runtime_budget_s=10.0, eligible_tests=eligible)
+        assert fb.selected_tests == ("test_t0_real",)
+        # file.py#2 is only ever covered by the excluded T4 test -- the
+        # gap must show up as incomplete, never silently hidden.
+        assert fb.covered_fraction == pytest.approx(0.5)
+
+
 class TestNoStdlibModuleNameCollisions:
     """Incident regression (the `select.py` shadowing-stdlib outage): this
     package's `baseline.py` is invoked directly as a script by
@@ -709,6 +780,32 @@ class TestMergeChunkResults:
             "tests/test_b.py::test_2",
         ]
 
+    def test_tiers_union_across_chunks(self) -> None:
+        chunks = [
+            {
+                "durations": {"tests/test_a.py::test_1": 0.1},
+                "tiers": {"tests/test_a.py::test_1": "T0"},
+                "coverage": {},
+            },
+            {
+                "durations": {"tests/test_b.py::test_2": 0.2},
+                "tiers": {"tests/test_b.py::test_2": None},
+                "coverage": {},
+            },
+        ]
+        merged = baseline_mod._merge_chunk_results(chunks)
+        assert merged["tiers"] == {
+            "tests/test_a.py::test_1": "T0",
+            "tests/test_b.py::test_2": None,
+        }
+
+    def test_tiers_default_to_empty_when_a_chunk_predates_the_field(self) -> None:
+        # A v2-era chunk dict (no "tiers" key at all) must merge cleanly,
+        # not raise KeyError.
+        chunks = [{"durations": {"t": 0.1}, "coverage": {}}]
+        merged = baseline_mod._merge_chunk_results(chunks)
+        assert merged["tiers"] == {}
+
 
 class TestBaselineCollectionErrorContract:
     """Fast, mocked tests for the two non-clean collection outcomes --
@@ -802,6 +899,42 @@ class TestBaselineCollectionErrorContract:
             plugin="mocked",
         )
         assert local_result["measured_commit"] is None
+
+    def test_portfolio_tier_round_trips_per_test_into_the_baseline_dict(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Same mocked-subprocess shape as the measured_commit test above:
+        # the driver's own out-file now also carries a "tiers" entry per
+        # nodeid (schema v3), which `collect_baseline` must merge into
+        # each test's own `portfolio_tier` field alongside `duration_s` --
+        # and a test absent from "tiers" (an untiered test, or a v2-era
+        # chunk dict missing the key entirely) must round-trip as `None`,
+        # never raise or silently disappear.
+        import json as json_module
+
+        def _fake_run(args, **kwargs):
+            out_file = Path(args[-2])
+            out_file.write_text(
+                json_module.dumps(
+                    {
+                        "durations": {"test_tiered": 0.1, "test_untiered": 0.2},
+                        "tiers": {"test_tiered": "T1"},
+                        "coverage": {},
+                    }
+                )
+            )
+            return type(
+                "FakeCompletedProcess",
+                (),
+                {"returncode": 0, "stdout": "", "stderr": ""},
+            )()
+
+        monkeypatch.setattr(baseline_mod.subprocess, "run", _fake_run)
+        result = baseline_mod.collect_baseline(
+            cwd=tmp_path, test_path="tests", cov_source="src", plugin="mocked",
+        )
+        assert result["tests"]["test_tiered"] == {"duration_s": 0.1, "portfolio_tier": "T1"}
+        assert result["tests"]["test_untiered"] == {"duration_s": 0.2, "portfolio_tier": None}
 
     def test_subprocess_env_scrubs_ambient_containment_variables(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -1815,6 +1948,69 @@ class TestDecide:
         # remap wasn't even called here.
         assert captured_baseline["value"] is self._FULL_BASELINE
 
+    def test_debt_exceeded_fallback_defaults_eligible_tests_to_the_real_tier_set(
+        self, tmp_path, monkeypatch,
+    ):
+        # Phase 3 checklist item: `eligible_tests` must default to the
+        # real, test-portfolio-tier-restricted set derived from THIS run's
+        # own fetched baseline (T0-T2/untiered, never T3/T4) -- not the
+        # full, unrestricted baseline `fallback.compute_fallback_set`'s own
+        # `None` sentinel would otherwise mean.
+        tiered_baseline = {
+            "measured_commit": "m1", "generated_at": "2026-01-01T00:00:00+00:00",
+            "coverage": {},
+            "tests": {
+                "test_t0": {"portfolio_tier": "T0"},
+                "test_t4": {"portfolio_tier": "T4"},
+            },
+        }
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: self._resolved())
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", lambda *a, **k: tiered_baseline)
+        over_debt = debt.DebtAssessment(
+            commit_volume=100, age_seconds=1.0,
+            commit_volume_threshold=5, age_threshold_seconds=None,
+            exceeded=True, reasons=("commit_volume 100 exceeds threshold 5",),
+        )
+        monkeypatch.setattr(decide_mod, "assess_debt", lambda *a, **k: over_debt)
+        captured_kwargs = {}
+
+        def _fake_compute_fallback_set(_baseline, *_a, **kwargs):
+            captured_kwargs.update(kwargs)
+            return fallback.FallbackSet(selected_tests=(), total_runtime_s=0.0, covered_fraction=0.0, universe_size=0)
+
+        monkeypatch.setattr(decide_mod, "compute_fallback_set", _fake_compute_fallback_set)
+
+        decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {}, commit_volume_threshold=5)
+
+        assert captured_kwargs["eligible_tests"] == {"test_t0"}
+
+    def test_debt_exceeded_fallback_honors_an_explicit_eligible_tests_override(
+        self, tmp_path, monkeypatch,
+    ):
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: self._resolved())
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", lambda *a, **k: self._FULL_BASELINE)
+        over_debt = debt.DebtAssessment(
+            commit_volume=100, age_seconds=1.0,
+            commit_volume_threshold=5, age_threshold_seconds=None,
+            exceeded=True, reasons=("commit_volume 100 exceeds threshold 5",),
+        )
+        monkeypatch.setattr(decide_mod, "assess_debt", lambda *a, **k: over_debt)
+        captured_kwargs = {}
+
+        def _fake_compute_fallback_set(_baseline, *_a, **kwargs):
+            captured_kwargs.update(kwargs)
+            return fallback.FallbackSet(selected_tests=(), total_runtime_s=0.0, covered_fraction=0.0, universe_size=0)
+
+        monkeypatch.setattr(decide_mod, "compute_fallback_set", _fake_compute_fallback_set)
+        override = frozenset({"test_custom"})
+
+        decide_mod.decide(
+            tmp_path, "owner/repo", "plugin", "fork", {},
+            commit_volume_threshold=5, eligible_tests=override,
+        )
+
+        assert captured_kwargs["eligible_tests"] is override
+
     def test_selection_fallback_trigger_curates_from_the_full_baseline(self, tmp_path, monkeypatch):
         monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: self._resolved())
         monkeypatch.setattr(decide_mod, "fetch_baseline_asset", lambda *a, **k: self._FULL_BASELINE)
@@ -1855,6 +2051,43 @@ class TestDecide:
         # Curated from the FULL earned baseline, never the remapped one
         # that just dropped this diff's own touched-file coverage.
         assert captured_baseline["value"] is self._FULL_BASELINE
+
+    def test_selection_fallback_defaults_eligible_tests_to_the_real_tier_set(
+        self, tmp_path, monkeypatch,
+    ):
+        tiered_baseline = {
+            "measured_commit": "m1", "generated_at": "2026-01-01T00:00:00+00:00",
+            "coverage": {},
+            "tests": {
+                "test_t2": {"portfolio_tier": "T2"},
+                "test_t3": {"portfolio_tier": "T3"},
+            },
+        }
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: self._resolved())
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", lambda *a, **k: tiered_baseline)
+        monkeypatch.setattr(decide_mod, "remap_or_invalidate_baseline", lambda *a, **k: self._REMAPPED_BASELINE)
+        clean_debt = debt.DebtAssessment(
+            commit_volume=1, age_seconds=1.0,
+            commit_volume_threshold=None, age_threshold_seconds=None,
+            exceeded=False, reasons=(),
+        )
+        monkeypatch.setattr(decide_mod, "assess_debt", lambda *a, **k: clean_debt)
+        triggered = select.SelectionResult(
+            selected_tests=(), fallback_triggered=True,
+            fallback_reasons=(select.FallbackReason("f.py", 3, "no_baseline_entry"),),
+        )
+        monkeypatch.setattr(decide_mod, "select_tests", lambda *a, **k: triggered)
+        captured_kwargs = {}
+
+        def _fake_compute_fallback_set(_baseline, *_a, **kwargs):
+            captured_kwargs.update(kwargs)
+            return fallback.FallbackSet(selected_tests=(), total_runtime_s=0.0, covered_fraction=0.0, universe_size=0)
+
+        monkeypatch.setattr(decide_mod, "compute_fallback_set", _fake_compute_fallback_set)
+
+        decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {"f.py": [3]})
+
+        assert captured_kwargs["eligible_tests"] == {"test_t2"}
 
     def test_selection_fallback_unions_real_selected_tests_with_the_curated_set(self, tmp_path, monkeypatch):
         # Regression: a mixed diff can have SOME changed lines genuinely
