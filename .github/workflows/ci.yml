@@ -231,11 +231,19 @@ jobs:
           # instead: the head's SOLE parent must be this PR's base sha
           # (proving it is a direct, un-rebased child of main's tip at
           # open time, matching `commit-tree -p <main tip>`), and every
-          # file it changes relative to `BASE_SHA^` (main's own
-          # pre-promotion state) must be the one pipeline-state file --
-          # i.e. the revert's tree, aside from that one file, is byte-
-          # identical to the commit immediately before the promotion it
-          # reverts, exactly what `revert()` constructs.
+          # file it changes relative to the REAL promotion commit's OWN
+          # parent must be the one pipeline-state file -- i.e. the
+          # revert's tree, aside from that one file, is byte-identical to
+          # the commit immediately before the promotion it reverts,
+          # exactly what `revert()` constructs. The "real promotion
+          # commit" is NOT simply `BASE_SHA^`: the documented operator
+          # flow is pause THEN revert, so a pause/resume bookkeeping
+          # commit is often main's actual tip by the time `revert` runs,
+          # making `BASE_SHA` itself that pause commit and `BASE_SHA^` the
+          # promotion commit being reverted, not its parent. Walk
+          # `BASE_SHA`'s history for the most recent `promote-*`-tagged
+          # commit instead, mirroring `_find_last_promotion_commit`
+          # exactly, and compare against THAT commit's parent.
           if [[ "$HEAD_REF" == release-pipeline/rollback-* && "$PR_COMMITS" == "1" ]]; then
             parent_count="$(git rev-list --parents -n 1 "$HEAD_SHA" | wc -w)"
             sole_parent="$(git rev-parse "$HEAD_SHA^" 2>/dev/null || true)"
@@ -243,7 +251,18 @@ jobs:
               echo "::error::This PR's head is not a single, direct child of its base (expected exactly one parent equal to \$BASE_SHA) -- refusing to treat it as an automated rollback_release.py revert."
               exit 1
             fi
-            rollback_diff="$(git diff --name-only "$BASE_SHA^" "$HEAD_SHA" | grep -v '^\.github/release-pipeline-state\.json$' || true)"
+            promotion_commit=""
+            for sha in $(git log --format=%H "$BASE_SHA"); do
+              if git tag --points-at "$sha" | grep -q '^promote-'; then
+                promotion_commit="$sha"
+                break
+              fi
+            done
+            if [ -z "$promotion_commit" ]; then
+              echo "::error::Could not find a tagged promotion commit reachable from this PR's base -- refusing to treat it as an automated rollback_release.py revert."
+              exit 1
+            fi
+            rollback_diff="$(git diff --name-only "$promotion_commit^" "$HEAD_SHA" | grep -v '^\.github/release-pipeline-state\.json$' || true)"
             if [ -n "$rollback_diff" ]; then
               echo "::error::This PR's tree (beyond the pipeline-state file) does not match main's pre-promotion state -- refusing to treat it as an automated rollback_release.py revert. Unexpected diff:"
               echo "::error::$rollback_diff"
