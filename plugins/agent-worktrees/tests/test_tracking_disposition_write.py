@@ -65,6 +65,7 @@ def test_reactivates_finalized_worktree_on_follow_up(record_path):
     assert result == {
         "ok": True,
         "follow_up": True,
+        "paused": False,
         "title": None,
         "summary": "Begin the next change",
         "activity": "",
@@ -87,6 +88,31 @@ def test_summary_only_preserves_finalized_status(record_path):
     record = tracking.load_record(record_path)
     assert record.status == "finalized"
     assert record.completed_at == "2026-09-26T01:00:00"
+
+
+def test_paused_does_not_reactivate_finalized_worktree(record_path):
+    """Unlike `follow_up=True`, `paused=True` must never flip status/
+    completed_at -- it's a purely informational, independent overlay."""
+    result = tracking_disposition_write.apply_status_disposition(
+        {
+            "worktree_id": "wt-disp",
+            "yaml_path": str(record_path),
+            "summary": "Leave this open on purpose",
+            "paused": True,
+        }
+    )
+    assert result == {
+        "ok": True,
+        "follow_up": False,
+        "paused": True,
+        "title": None,
+        "summary": "Leave this open on purpose",
+        "activity": "",
+    }
+    record = tracking.load_record(record_path)
+    assert record.status == "finalized"
+    assert record.completed_at == "2026-09-26T01:00:00"
+    assert record.paused is True
 
 
 def test_terminal_managed_worktree_is_refused(record_path):

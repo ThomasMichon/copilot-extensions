@@ -2637,3 +2637,37 @@ guardrail, and the explicit out-of-scope-instruction enforcement
 version field) -- continuing standing monitoring for the next natural
 occurrence, or considering a deliberate, carefully-scoped trial for
 those specifically, per the Validation Plan above.
+
+### 2026-10-05 — Issue #5276 (the CRLF verifier crash) fixed
+
+PR #5305: `verify-issue`'s `SIGNATURE`/`RUN_ID` `grep` pipelines ran
+under `set -euo pipefail` with no `|| true` -- a no-match `grep` exits
+1, `pipefail` propagates it through the assignment, and `-e` aborted
+the whole step before any diagnostic `::warning::` ran or `authorized`
+was ever written. The step (and run) concluded `failure` (a crash), not
+the intended clean `authorized=false` decline -- true for ANY
+unparseable body, not just the CRLF case that surfaced it. Fixed two
+ways: normalize the fetched body once (`tr -d '\r'`) so CRLF content
+matches identically to LF, and append `|| true` to both `grep`
+pipelines so a genuine non-match reaches the existing `-z` check
+instead of aborting. Also corrected the same stale
+"currently-reproducible failure" comment wording the PR #5273 journal
+PR's review already caught in the journal itself -- it had drifted back
+into this source file's own inline comment too.
+
+Recompiled with `gh aw compile --action-tag <SHA>` using the
+**previously pinned SHA**, not a floating version tag -- confirmed
+zero-diff on the `github/gh-aw/actions/setup` pin before pushing,
+avoiding the exact action-pin regression PR #5135 hit once already.
+Action-pin, compiler-version, trusted-CI, and module-size guards all
+passed. One real review finding this round: the PR description was
+missing the repo's required Documentation-impact statement
+(`CONTRIBUTING.md`) -- added it (none needed; this is an internal
+CI-mechanism fix with no user-facing docs surface) and merged. Closed
+#5276. The `dev` -> `main` promotion pipeline is triggered by each
+green `dev` build, not a schedule (`docs/pipelines.md`) -- given how
+frequently `dev` has been building green around this session (several
+promotions observed within the hour), no manual main-bootstrap PR was
+needed this time (unlike PR #4338's one-off case, where promotion had
+genuinely stalled ~12.5h) -- the fix rides the next green-build-
+triggered promotion rather than waiting on a timer.

@@ -3429,6 +3429,79 @@ class TestSystemWorktreeKind:
         assert final.summary == "unrelated update"
         assert final.pending_seed_revision == 1
 
+    def test_stale_full_record_writer_cannot_erase_a_concurrent_pause(
+        self, tmp_path: Path,
+    ):
+        """A process (e.g. `finalize.py`) that loaded the record BEFORE a
+        concurrent `status --paused` write, and holds that stale snapshot
+        across its own Git/network work before saving, must not silently
+        overwrite the already-persisted `paused=True` with its own stale
+        `paused=False` -- `_save_record_unlocked` merges `paused` the same
+        way it already does for `pending_seed`/`effort_revision`: the
+        ON-DISK `paused_revision` wins when it is newer."""
+        path = tmp_path / "wt-stale-pause.yaml"
+        rec = create_new_record(
+            "wt-stale-pause", "worktree/wt-stale-pause", "/tmp/wt-stale-pause",
+            "test-repo", "test", "wsl", tmp_path,
+        )
+        assert rec.paused_revision == 0
+        save_record(rec, path)
+
+        # Another process (e.g. finalize.py) loads the SAME on-disk state
+        # before the pause, then holds it across its own slow work.
+        stale = load_record(path)
+        assert stale.paused is False
+
+        # Meanwhile, `status --paused` happens under the record lock and
+        # is saved first.
+        set_disposition(rec, paused=True, save=False)
+        assert rec.paused_revision == 1
+        save_record(rec, path)
+        assert load_record(path).paused is True
+
+        # The stale writer's later save (unaware of the pause) must not
+        # revert it, even though it also legitimately changes an unrelated
+        # field.
+        stale.summary = "unrelated update"
+        save_record(stale, path)
+
+        final = load_record(path)
+        assert final.paused is True
+        assert final.summary == "unrelated update"
+        assert final.paused_revision == 1
+
+    def test_stale_pause_merge_preserves_the_newer_status_note_at(
+        self, tmp_path: Path,
+    ):
+        """Adopting the on-disk `paused` must not also adopt the stale
+        writer's own (older) `status_note_at` -- that would erase the
+        pause write's freshness/glance-ordering timestamp even though the
+        record correctly ends up `paused=True`."""
+        path = tmp_path / "wt-stale-pause-ts.yaml"
+        rec = create_new_record(
+            "wt-stale-pause-ts", "worktree/wt-stale-pause-ts",
+            "/tmp/wt-stale-pause-ts", "test-repo", "test", "wsl", tmp_path,
+        )
+        save_record(rec, path)
+
+        # A stale writer loads before the pause -- its own status_note_at
+        # is whatever the record had at that point (None, here).
+        stale = load_record(path)
+        assert stale.status_note_at is None
+
+        set_disposition(rec, paused=True, save=False)
+        pause_stamp = rec.status_note_at
+        assert pause_stamp is not None
+        save_record(rec, path)
+
+        # The stale writer's later save must not erase that fresher stamp.
+        stale.summary = "unrelated update"
+        save_record(stale, path)
+
+        final = load_record(path)
+        assert final.paused is True
+        assert final.status_note_at == pause_stamp
+
     def test_create_new_record_bound_agent_whitespace_normalizes_to_none(
         self, tmp_path: Path,
     ):
@@ -3656,6 +3729,60 @@ class TestSetDisposition:
         assert stored.endswith("\u2026")            # truncated with an ellipsis
         assert stored.startswith("Session a900")     # keeps the leading text
         assert load_record(p).title_asserted is True
+
+    def test_set_paused_is_purely_informational(self, tmp_path: Path, monkeypatch):
+        """`paused` never reopens a finalized owner (unlike `follow_up=True`)
+        and never affects `status`/`completed_at` -- it's a parallel,
+        independent overlay."""
+        rec = self._rec(status="finalized", completed_at="2026-09-01T00:00:00")
+        p = tmp_path / "wt.yaml"
+        monkeypatch.setattr("agent_worktrees.tracking.save_record",
+                            lambda record, path=None: save_record(record, p))
+        set_disposition(rec, paused=True)
+        loaded = load_record(p)
+        assert loaded.paused is True
+        assert loaded.status == "finalized"  # unchanged -- no gate interaction
+        assert loaded.completed_at == "2026-09-01T00:00:00"
+
+    def test_paused_round_trips_and_omits_when_false(self, tmp_path: Path, monkeypatch):
+        rec = self._rec()
+        p = tmp_path / "wt.yaml"
+        monkeypatch.setattr("agent_worktrees.tracking.save_record",
+                            lambda record, path=None: save_record(record, p))
+        set_disposition(rec, summary="s")
+        assert load_record(p).paused is False
+        assert "paused" not in p.read_text()  # emitted only when True
+
+        set_disposition(load_record(p), paused=True)
+        assert "paused: true" in p.read_text()
+        assert load_record(p).paused is True
+
+        set_disposition(load_record(p), paused=False)
+        assert load_record(p).paused is False
+        # The `paused` key itself is omitted once cleared, but
+        # `paused_revision` persists -- same convention as
+        # `pending_seed`/`pending_seed_revision`: the revision must survive
+        # the value returning to its default so a later stale save can
+        # still be detected and rejected (see the dedicated
+        # `_save_record_unlocked` stale-writer tests).
+        content = p.read_text()
+        assert "paused: true" not in content
+        assert "paused_revision: 2" in content
+
+    def test_paused_independent_of_follow_up(self, tmp_path: Path, monkeypatch):
+        rec = self._rec()
+        p = tmp_path / "wt.yaml"
+        monkeypatch.setattr("agent_worktrees.tracking.save_record",
+                            lambda record, path=None: save_record(record, p))
+        set_disposition(rec, follow_up=True, paused=True)
+        loaded = load_record(p)
+        assert loaded.follow_up is True
+        assert loaded.paused is True
+        # Clearing one leaves the other untouched.
+        set_disposition(loaded, follow_up=False)
+        again = load_record(p)
+        assert again.follow_up is False
+        assert again.paused is True
 
     def test_summary_strips_illegal_controls_before_write(
         self, tmp_path: Path, monkeypatch

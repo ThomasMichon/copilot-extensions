@@ -193,6 +193,7 @@ def compute(project: str, worktree_id: str) -> dict:
             "title": record.title,
             "summary": record.summary,
             "follow_up": record.follow_up,
+            "paused": record.paused,
             "resume_count": record.resume_count,
             "status": str(record.status),
             "history": history,
