@@ -60,6 +60,7 @@ function Start-Sleep {{ param([int]$Seconds) Add-Content -LiteralPath '{delays_f
         check=True,
         capture_output=True,
         text=True,
+        timeout=20,
     )
 
 

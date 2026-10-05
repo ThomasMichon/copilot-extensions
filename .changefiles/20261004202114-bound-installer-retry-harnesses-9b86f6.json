@@ -1,0 +1,9 @@
+{
+  "comment": "bound installer retry harnesses",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

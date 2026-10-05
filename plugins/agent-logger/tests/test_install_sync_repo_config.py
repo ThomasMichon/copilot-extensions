@@ -804,6 +804,7 @@ Write-SyncTaskLauncher
             # decision for this stub repo dir, which has no real git remotes.
             "AGENT_LOGGER_TRUST_REPO_CONFIG": str(repo_dir),
         },
+        timeout=20,
     )
 
     launcher_text = task_launcher.read_text(encoding="utf-8")
@@ -861,8 +862,8 @@ Write-SyncTaskLauncher
         capture_output=True,
         text=True,
         env=env,
+        timeout=20,
     )
 
     launcher_text = task_launcher.read_text(encoding="utf-8")
     assert "AGENT_LOGGER_REPO_CONFIG" not in launcher_text
-

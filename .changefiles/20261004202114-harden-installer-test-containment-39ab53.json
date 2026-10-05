@@ -1,0 +1,9 @@
+{
+  "comment": "harden installer test containment",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
