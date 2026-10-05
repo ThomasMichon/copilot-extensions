@@ -6,8 +6,9 @@
 # PR, including from people who were never granted any access (billed to
 # the repo owner, and giving an unreviewed outsider a free automated pass
 # through the same visible review surface trusted contributors get). This
-# workflow replaces that automatic trigger -- see CONTRIBUTING.md for the
-# ruleset-side change removing the native `copilot_code_review` rule.
+# workflow replaces that automatic trigger -- see docs/pipelines.md § Review
+# automation for the ruleset-side change removing the native
+# `copilot_code_review` rule.
 #
 # Why Maintainer-only, not "any invited collaborator": GitHub's
 # `requestReviewers` API call for `copilot-pull-request-reviewer[bot]`
@@ -23,7 +24,8 @@
 # (a fine-grained PAT for the owner, scoped to ONLY this repo, with ONLY
 # `Pull requests: write` + `Metadata: read` -- no other scopes) exists to
 # make the request as that licensed account instead of the bot. A
-# Maintainer already holds ruleset self-merge bypass (see CONTRIBUTING.md),
+# Maintainer already holds ruleset self-merge bypass (see docs/pipelines.md
+# § Review automation),
 # so requesting on their behalf extends no new trust. A Contributor's PR
 # still requires a Maintainer's own approving review before merge regardless
 # of Copilot's verdict, so leaving Contributors on the manual-only path

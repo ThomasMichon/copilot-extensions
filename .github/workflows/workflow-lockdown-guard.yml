@@ -77,8 +77,8 @@
 # or a Maintainer who isn't actively trying to defeat it), NOT a
 # cryptographically hard guarantee against a Write Maintainer deliberately
 # trying to forge it -- the same category of trust already accepted
-# elsewhere in this governance model (see CONTRIBUTING.md's actor-vs-author
-# bypass note).
+# elsewhere in this governance model (see docs/pipelines.md § Review
+# automation's actor-vs-author bypass note).
 #
 # IMPORTANT: this uses `pull_request_target`, not `pull_request`. A plain
 # `pull_request` trigger runs the workflow DEFINITION from the PR's own head

@@ -1172,7 +1172,7 @@ isn't clear, and stop -- do not open a pull request.
 
 Never touch `.github/workflows/**`, and never hand-edit a version field in
 `plugin.json`/`pyproject.toml`/`marketplace.json` (add a changefile instead,
-exactly like any other contributor, per `CONTRIBUTING.md`). If your diagnosis
+exactly like any other contributor, per `docs/pipelines.md`). If your diagnosis
 seems to require either of these, stop and escalate instead -- do not attempt
 a partial fix that avoids them by coincidence. (These paths are also stripped
 from your patch deterministically before any PR is created -- see this
@@ -1183,7 +1183,7 @@ instruction alone as the reason they're safe to avoid.)
 
 If your fix touches any file under `plugins/**`, add a pending changefile for
 it exactly like any other contributor would: run
-`python tools/changefile.py add ...` (see `CONTRIBUTING.md` for the exact
+`python tools/changefile.py add ...` (see `docs/pipelines.md` for the exact
 usage) before opening your pull request. A plugin change without one fails
 this repository's own `Changefile presence` check and can never be promoted,
 regardless of how correct the underlying fix is.

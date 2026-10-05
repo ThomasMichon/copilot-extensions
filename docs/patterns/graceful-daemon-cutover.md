@@ -509,7 +509,7 @@ cheaper than a review round.
    vendored/shared library, the changefile names every **consuming plugin**
    whose payload actually changed as a result (never the shared library
    itself — a library like `zdd`/`ssh-manager` isn't independently released;
-   see CONTRIBUTING.md's changefile requirement); the PR's Documentation
+   see docs/pipelines.md's changefile requirement); the PR's Documentation
    impact statement matches the final diff, not an earlier draft; no
    unrelated generated/vendored directory rode along in the diff (`git
    status`/`git diff --stat` against your intended file list before

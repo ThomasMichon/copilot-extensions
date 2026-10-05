@@ -1166,7 +1166,7 @@ All three version sources must agree:
 | `pyproject.toml` | Runtime `--version` output |
 | `.github/plugin/marketplace.json` | GitHub-hosted marketplace catalog |
 
-See [CONTRIBUTING.md](../../../CONTRIBUTING.md) for versioning details.
+See [docs/pipelines.md](../../../docs/pipelines.md) for versioning details.
 
 ## Picker Pivot Registry (Cross-Plugin)
 

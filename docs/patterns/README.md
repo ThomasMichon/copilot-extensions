@@ -138,8 +138,10 @@ core of the principles above; a reviewer checks a change against these.
   `COPILOT_EXT_NO_VERSIONED` opt-out and the legacy in-place-venv fork are retired.
   (Serves *Vision plugin-services §Behaviors/immutable-versioned-runtime*; tracked
   in dotfiles #581.)
-- **A version bump ships the change.** Every plugin change bumps its version in the
-  same commit (see `CONTRIBUTING.md`); an un-bumped push is silently ignored.
+- **A version bump ships the change.** Every plugin change adds a changefile in the
+  same PR (see `docs/pipelines.md`); the promotion pipeline applies the actual
+  version bump when it consumes that changefile. An un-changefiled plugin
+  change is silently ignored by the marketplace.
 - **Enabling a runtime provisions it.** A runtime plugin that a repo/session
   **enables** is installed, started, and kept **version-matched to its enabled
   payload automatically at session start** — idempotent, version-keyed, throttled,

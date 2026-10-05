@@ -331,7 +331,7 @@ def main() -> int:
             "pyproject.toml (runtime plugins), marketplace.json entry, and any "
             "checked-in numeric development-version fallback; worktree-manager "
             "must agree across pyproject.toml and its __version__. "
-            "See CONTRIBUTING.md § 'Where the version lives'.",
+            "See docs/pipelines.md § Where the mechanically-applied bump lands.",
             file=sys.stderr,
         )
         return 1

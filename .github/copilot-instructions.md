@@ -12,7 +12,8 @@ than this file -- keeping review-only directives out of the file that also
 shapes Chat and coding-agent behavior.
 
 The full guides are [`AGENTS.md`](../AGENTS.md) (development guide),
-[`CONTRIBUTING.md`](../CONTRIBUTING.md) (versioning & release), and
+[`CONTRIBUTING.md`](../CONTRIBUTING.md) (contributor process), [`docs/pipelines.md`](../docs/pipelines.md)
+(CI/CD gating & versioning), and
 [`docs/install-contract.md`](../docs/install-contract.md).
 
 ## What this repo is
@@ -101,7 +102,9 @@ These repo-specific rules must be followed by any change:
   agent specifically.
 - [`AGENTS.md`](../AGENTS.md) — repository structure, per-plugin lifecycles, and
   the complete "what NOT to do" list.
-- [`CONTRIBUTING.md`](../CONTRIBUTING.md) — the full versioning scheme, git
-  hooks, and per-plugin deploy pipelines.
+- [`CONTRIBUTING.md`](../CONTRIBUTING.md) — git hooks, the full
+  contributor PR flow, and per-plugin deploy pipelines.
+- [`docs/pipelines.md`](../docs/pipelines.md) — CI/CD gating, the full
+  versioning scheme, and the `dev` → `main` promotion pipeline.
 - [`docs/install-contract.md`](../docs/install-contract.md) — the install
   contract every runtime plugin must satisfy.

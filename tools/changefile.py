@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Changefiles: capture a plugin's version-bump intent at PR time without
-picking an exact version number (CONTRIBUTING.md's manual three-file bump is
-what this tool is meant to eventually replace -- see the dev-branch-release-
-pipeline effort, ThomasMichon/copilot-extensions#3336).
+picking an exact version number -- the current changefile-driven release
+flow (see docs/pipelines.md § Release & Versioning, and the dev-branch-
+release-pipeline effort, ThomasMichon/copilot-extensions#3336, which
+replaced the old manual three-file version bump this way).
 
 A changefile is a small JSON file under ``.changefiles/`` naming which
 plugin(s) a PR touches and how big the change is (``major`` / ``minor`` /
