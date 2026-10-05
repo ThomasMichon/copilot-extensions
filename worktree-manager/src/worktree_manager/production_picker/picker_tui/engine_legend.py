@@ -25,7 +25,7 @@ class LegendScreen(ModalScreen[None]):
     content, no gather/IO), mirroring ``engine_dialogs.WtDetailsScreen``."""
 
     CSS = """
-    LegendScreen { align: center middle; background: $background; }
+    LegendScreen { align: center middle; background: $background 55%; }
     LegendScreen > #legend-frame {
         width: 84; height: auto; max-height: 90%;
         border: round #ffaf00; background: $surface; padding: 1 2;

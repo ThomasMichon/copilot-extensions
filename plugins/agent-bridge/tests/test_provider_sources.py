@@ -481,6 +481,42 @@ def _bridge_providers_dir(monkeypatch, tmp_path):
     return tmp_path
 
 
+def test_refresh_indeterminate_scan_reports_not_ok_but_keeps_prior_manifests(
+    monkeypatch, tmp_path,
+):
+    """`scan_provider_registry()` can retain a previous manifest set while
+    reporting `indeterminate` findings (a transient activation/command-
+    access evidence gap) -- a resolver set that's actually gone stale must
+    never be reported as a clean (`ok=True`) discovery pass just because
+    nothing outright failed or raised. `AgentRosterCache` relies on this to
+    keep a `require_complete` caller's discovery-generation freshness from
+    advancing on an indeterminate scan."""
+    from agent_bridge import provider_sources
+
+    _bridge_providers_dir(monkeypatch, tmp_path)
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+    _write_v1_provider(tmp_path, plugin_root)
+
+    monkeypatch.setattr(
+        provider_sources, "resolve_active_plugins", lambda: _activation(plugin_root),
+    )
+    resolver = AgentResolver({}, {})
+    clean = resolver.refresh_provider_resolvers(force=True)
+    assert clean.ok is True
+    assert "codespace" in resolver.namespace_resolvers
+
+    uncertain = _activation(plugin_root, authority=ScanAuthority.INDETERMINATE)
+    monkeypatch.setattr(provider_sources, "resolve_active_plugins", lambda: uncertain)
+    indeterminate = resolver.refresh_provider_resolvers(force=True)
+    assert indeterminate.ok is False
+    assert indeterminate.raised is False
+    assert indeterminate.failed_namespaces == []
+    # The prior manifest is retained -- an indeterminate scan is "can't
+    # confirm", not "confirmed empty".
+    assert "codespace" in resolver.namespace_resolvers
+
+
 def test_refresh_registers_from_manifest(monkeypatch, tmp_path):
     _bridge_providers_dir(monkeypatch, tmp_path)
     _write(tmp_path, "codespaces.json",
@@ -575,6 +611,61 @@ def test_refresh_missing_dir_is_noop(monkeypatch, tmp_path):
     resolver = AgentResolver({}, {})
     resolver.refresh_provider_resolvers(force=True)
     assert resolver.namespace_resolvers == {}
+
+
+# -- _scan_provider_report: concurrent-attempt TTL-stamp race -----------------
+
+
+def test_raised_scan_defers_ts_stamp_while_a_sibling_scan_is_in_flight(monkeypatch):
+    """If a raised scan's own generation hasn't moved yet but a *sibling*
+    attempt against the same generation is still in flight (e.g. the
+    cache's own worker-thread scan, still mid-scan), the raise must not
+    stamp ``_provider_scan_ts`` -- doing so would let a concurrent,
+    non-forced caller skip scanning and read the stale registry for up to
+    the full TTL window, even though the sibling's own eventual result
+    (success or failure) hasn't been accounted for yet. The generation
+    check alone can't tell these two cases apart: it reads the same
+    (unmoved) value whether nothing else has ever been in flight, or a
+    sibling is still running."""
+    resolver = AgentResolver({}, {})
+
+    def _raise(**kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        "agent_bridge.agent_registry_discovery.scan_provider_registry", _raise,
+    )
+
+    # Simulate a sibling attempt (e.g. the cache's own worker-thread scan)
+    # already having started under the same generation and not yet done.
+    resolver._scan_attempts_in_flight = 1
+    outcome = resolver._scan_provider_report(force=True)
+
+    assert outcome.raised is True
+    assert resolver._provider_scan_ts == 0.0
+    assert resolver._scan_attempts_in_flight == 1  # back down to just the sibling
+
+
+def test_raised_scan_stamps_ts_once_it_is_the_last_in_flight_attempt(monkeypatch):
+    """Once the generation hasn't moved and no sibling attempt remains in
+    flight either, a raised scan DOES stamp the timestamp -- the existing,
+    already-covered behavior for the simple, single-attempt case must
+    stay unchanged."""
+    resolver = AgentResolver({}, {})
+
+    def _raise(**kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(
+        "agent_bridge.agent_registry_discovery.scan_provider_registry", _raise,
+    )
+
+    outcome = resolver._scan_provider_report(force=True)
+
+    assert outcome.raised is True
+    assert resolver._provider_scan_ts > 0.0
+    assert resolver._scan_attempts_in_flight == 0
+
 
 
 # -- daemon_resolver: golden path (no topology) --------------------------------

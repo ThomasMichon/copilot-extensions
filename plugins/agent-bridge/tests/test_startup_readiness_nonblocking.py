@@ -212,3 +212,74 @@ def test_shutdown_does_not_wait_for_blocked_topology_thread(
     release.set()
 
     assert shutdown_elapsed < 2.0
+
+
+def test_readiness_waits_for_agent_roster_cache_warm_up(tmp_path, monkeypatch):
+    """Phase 3b: `app.state.ready` (and `/health`'s `ready`) must stay False
+    until the agent-roster cache has completed its own first scan attempt
+    for every known namespace -- not merely once the resolver itself is
+    constructed. This is the integration seam a zero-downtime cutover
+    relies on to never promote a generation whose cache is still fully
+    uninitialized."""
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv(
+        "AGENT_WORKTREES_PROJECTS_YAML",
+        str(tmp_path / "nonexistent-projects.yaml"),
+    )
+    from agent_bridge.agent_registry import AgentResolver
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    class _BlockingNamespaceResolver:
+        prefix = "blocked"
+
+        async def list(self):
+            entered.set()
+            await asyncio.to_thread(release.wait, 10)
+            return []
+
+        async def resolve(self, name):  # pragma: no cover - unused
+            raise NotImplementedError
+
+        async def ensure_ready(self, name):  # pragma: no cover - unused
+            raise NotImplementedError
+
+    def real_resolver_with_blocked_namespace(cfg):
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_BlockingNamespaceResolver())
+        return resolver
+
+    monkeypatch.setattr(
+        app_module, "daemon_resolver", real_resolver_with_blocked_namespace,
+    )
+
+    cfg = ServiceConfig(
+        port=0,
+        bind="127.0.0.1",
+        db_path=str(tmp_path / "test.db"),
+        enable_credential_relay=False,
+        agent_roster_cache_interval=60.0,
+    )
+    app = create_app(config=cfg, token="test-token")
+    app.state.publish_on_ready = False
+    app.state.background_readiness = True
+
+    with TestClient(app) as client:
+        assert entered.wait(timeout=2)
+
+        # The namespace scan is still blocked -- readiness must not have
+        # been published yet.
+        health = client.get("/health").json()
+        assert health["ready"] is False
+
+        release.set()
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            health = client.get("/health").json()
+            if health["ready"]:
+                break
+            time.sleep(0.02)
+
+        assert health["ready"] is True
+

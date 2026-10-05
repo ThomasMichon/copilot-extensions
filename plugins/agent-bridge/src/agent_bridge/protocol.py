@@ -27,9 +27,6 @@ The daemon advertises both on ``/health``; ``BridgeClient`` reads them (see
 
 from __future__ import annotations
 
-# Current HTTP wire-contract version this build speaks.
-HTTP_PROTOCOL_VERSION = 21
-
 # First version that exposes the harness-owned relay interruption capability.
 RELAY_INTERRUPT_PROTOCOL_VERSION = 2
 
@@ -120,6 +117,24 @@ CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION = 20
 # tokens sent through the old handle reach the resumed session. A caller holding
 # a pre-rename handle gates on it; an older daemon rejects the old id instead.
 LIVE_SESSION_ALIAS_PROTOCOL_VERSION = 21
+
+# First version whose GET /api/v1/agents honors the ``force_refresh`` and
+# ``require_complete`` query parameters (pivot-streaming-transport Phase 3b:
+# the agent-roster daemon-side background cache). Both are real request
+# parameters with server behavior -- not an additive, tolerant-reader
+# response field -- so a caller gates sending either on this rather than
+# blind-sending them to an older daemon, which would silently ignore an
+# unrecognized ``require_complete=true`` and still return its own old-shape
+# response (harmless: the new client degrades to treating that ``200`` the
+# same way it always has). Reverse skew (an old CLI never sending either
+# parameter, talking to a new cached daemon) needs no gate at all -- the
+# cache's own opportunistic single-flight refresh on any incomplete/
+# uninitialized/stale namespace still fires for a plain, unparameterized GET.
+AGENT_ROSTER_CACHE_PROTOCOL_VERSION = 22
+
+# Current HTTP wire-contract version this build speaks -- bumped alongside the
+# constant just above it.
+HTTP_PROTOCOL_VERSION = 22
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

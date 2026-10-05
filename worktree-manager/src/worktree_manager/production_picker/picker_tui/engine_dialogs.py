@@ -43,7 +43,7 @@ class QuitConfirmScreen(ModalScreen[bool]):
     """
 
     CSS = """
-    QuitConfirmScreen { align: center middle; background: $background; }
+    QuitConfirmScreen { align: center middle; background: $background 55%; }
     QuitConfirmScreen > #quit-frame {
         width: 48; height: auto; border: round #ffaf00;
         background: $surface; padding: 1 2;
@@ -99,7 +99,7 @@ class ProfConfirmScreen(ModalScreen[bool]):
     """
 
     CSS = """
-    ProfConfirmScreen { align: center middle; background: $background; }
+    ProfConfirmScreen { align: center middle; background: $background 55%; }
     ProfConfirmScreen > #prof-frame {
         width: 72; height: auto; max-height: 90%;
         border: round #ffaf00; background: $surface; padding: 1 2;
@@ -205,7 +205,7 @@ class TaskMenuScreen(ModalScreen[int]):
     """
 
     CSS = """
-    TaskMenuScreen { align: center middle; background: $background; }
+    TaskMenuScreen { align: center middle; background: $background 55%; }
     TaskMenuScreen > #task-frame {
         width: 72; height: auto; border: round #ffaf00;
         background: $surface; padding: 0 1;
@@ -294,7 +294,7 @@ class SubMenuScreen(ModalScreen[tuple]):
     """
 
     CSS = """
-    SubMenuScreen { align: center middle; background: $background; }
+    SubMenuScreen { align: center middle; background: $background 55%; }
     SubMenuScreen > #sub-frame {
         width: 72; height: auto; max-height: 90%;
         border: round #ffaf00; background: $surface; padding: 1 2;
@@ -575,7 +575,7 @@ class WtDetailsScreen(ModalScreen[None]):
     """
 
     CSS = """
-    WtDetailsScreen { align: center middle; background: $background; }
+    WtDetailsScreen { align: center middle; background: $background 55%; }
     WtDetailsScreen > #details-frame {
         width: 84; height: auto; max-height: 90%;
         border: round #ffaf00; background: $surface; padding: 1 2;
@@ -694,7 +694,7 @@ class ScopeDlgScreen(ModalScreen[bool]):
     """
 
     CSS = """
-    ScopeDlgScreen { align: center middle; background: $background; }
+    ScopeDlgScreen { align: center middle; background: $background 55%; }
     ScopeDlgScreen > #scope-frame {
         width: 68; height: auto; max-height: 90%;
         border: round #ffaf00; background: $surface; padding: 1 2;
@@ -881,7 +881,7 @@ class CfgMenuScreen(ModalScreen[int]):
     """
 
     CSS = """
-    CfgMenuScreen { align: center middle; background: $background; }
+    CfgMenuScreen { align: center middle; background: $background 55%; }
     CfgMenuScreen > #cfg-frame {
         width: 56; height: auto; max-height: 80%;
         border: round #ffaf00; background: $surface; padding: 1 2;
@@ -941,7 +941,7 @@ class MaintMenuScreen(ModalScreen[int]):
     """
 
     CSS = """
-    MaintMenuScreen { align: center middle; background: $background; }
+    MaintMenuScreen { align: center middle; background: $background 55%; }
     MaintMenuScreen > #maint-frame {
         width: 64; height: auto; border: round #ffaf00;
         background: $surface; padding: 1 2;

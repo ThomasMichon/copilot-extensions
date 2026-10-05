@@ -625,14 +625,15 @@ class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
         return agents, errors
 
     def list_agents_with_incomplete(
-        self,
+        self, *, force_refresh: bool = False, require_complete: bool = False,
     ) -> tuple[list[dict[str, Any]], list[str], list[str], bool]:
         """GET /api/v1/agents incl. topology errors, namespaces incomplete
         this call, and whether the response carries the key at all (an
-        older daemon omits it entirely rather than sending an empty list --
-        key *presence* is the capability signal, no protocol negotiation
-        needed)."""
-        resp = self._request("GET", "/api/v1/agents")
+        older daemon omits it, since key *presence* is the capability
+        signal, no protocol negotiation needed)."""
+        from .client_agents import agent_roster_params
+        params = agent_roster_params(self, force_refresh, require_complete)
+        resp = self._request("GET", "/api/v1/agents", params=params or None)
         if not resp:
             return [], [], [], False
         capability_known = "incomplete_namespaces" in resp

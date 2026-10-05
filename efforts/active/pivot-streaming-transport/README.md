@@ -308,7 +308,7 @@ insufficient.)_
       across `coordinator_tasks.py`, `mcp_http.py`, and
       `coordinator_verification.py` needs at least one bus event (audited
       as a standing, provisional requirement, not a closed list).
-- [ ] **3b — agent-bridge daemon-side cache** (land first; full detail:
+- [x] **3b — agent-bridge daemon-side cache** (land first; full detail:
       [phase-3-design.md](phase-3-design.md)): move the per-call resolver
       scan into the daemon as a background-refreshed, supervised cache;
       `GET /api/v1/agents` becomes a cheap read for a healthy cache hit
@@ -1658,3 +1658,132 @@ require_complete-split bullet).
 
 Replied-to inline; the resurfaced Guiding Intent thread needed no further
 action.
+
+### 2026-10-03 — Phase 3b landed: agent-bridge daemon-side agent-roster cache
+Implemented per `phase-3-design.md`'s 3b section in full: `AgentRosterCache`
+(new `agent_registry_cache.py`) is a background-refreshed, supervised cache
+fronting `AgentResolver`'s namespace-resolver scan, started alongside the
+daemon's own resolver swap in `app.py`'s `_initialize_readiness()` and
+gated into readiness via `wait_until_warm()` (a zero-downtime cutover never
+promotes a generation whose cache hasn't completed at least one scan
+attempt per already-known namespace).
+
+- **Per-namespace state machine**: UNINITIALIZED / OK / FAILED, each with a
+  freshness deadline (3x the refresh interval); a stale, incomplete, or
+  uninitialized namespace opportunistically joins its own single-flight
+  refresh on every `GET /api/v1/agents`, independent of `force_refresh` --
+  an old CLI's plain retry loop still triggers a real rescan.
+- **`force_refresh`/`require_complete`** are new, protocol-gated
+  (`AGENT_ROSTER_CACHE_PROTOCOL_VERSION`, HTTP generation 22) query
+  parameters. Without `require_complete` the response shape is byte-for-byte
+  unchanged from Phase 2 (healthy rows + `incomplete_namespaces`, never a
+  `503`) -- verified by a dedicated test driving an intentionally-incomplete
+  cache through the plain route. `require_complete` escalates "nothing
+  authoritative to serve" (pre-first-discovery startup, retry exhaustion, or
+  a persistently-failing discovery generation) to a `503`, even while an
+  individual namespace still has a fresh last-known-good value.
+- **`refresh_provider_resolvers()`** (`agent_registry_resolver.py`) now
+  returns a `DiscoveryResult` (`ok`/`raised`/`failed_namespaces`) instead of
+  `None`, and its per-manifest replacement loop is transactional: the new
+  resolver is constructed *before* the old one is unregistered, so a
+  construction failure leaves the previous resolver (and its cache entry)
+  registered and authoritative instead of opening a gap. Only a genuinely
+  clean pass advances the cache's own discovery-generation freshness.
+- **Single-flight + generation-guarded publication** per namespace: a
+  provider replacement (same namespace, different resolver object identity)
+  invalidates the cache entry immediately in `_reconcile_namespace_set()`
+  (never lazily, only on the next scan attempt), and a scan's result is
+  discarded rather than published if the namespace's provider or generation
+  moved on while it was in flight.
+- Dedicated regression tests in new `tests/test_agent_roster_cache.py`
+  cover every named 3b failure mode from the Validation Plan: uninitialized
+  recovery, a persistently-failing background refresh, concurrent
+  single-flight refreshes, generation-guarded publication against a
+  slower/earlier scan, provider add/remove/replace (plus the dedicated
+  replacement-constructor-failure path), the default-response-unchanged
+  contract, and the `503` contract across all three of its triggers
+  (pre-discovery startup, retry exhaustion, stale discovery generation).
+  Route-level tests in `test_routes.py` cover the wire-level wiring
+  (cache-present vs. cache-absent fallback, a stale cache left bound to a
+  swapped-out resolver falling back safely, and the query-param plumbing).
+- Contract registry: bumped `HTTP_PROTOCOL_VERSION` to generation 22 (after
+  rebasing past dev's own generation-21 `live_session_alias` bump), added the
+  `agent_roster_cache` capability constant, and registered a new
+  `fixtures/http/current/agents-list-response.json` fixture (the first
+  current fixture for `routes/agents.py`, now tracked as a semantic source)
+  alongside the regenerated health/protocol-constants/session-create-response
+  fixtures; `previous-generation-21/health.json` preserves the prior
+  generation's evidence. `python tools/check-agent-bridge-contracts.py`
+  passes.
+- Full targeted suite green (`test_agent_roster_cache.py`,
+  `test_agent_registry.py`, `test_provider_sources.py`,
+  `test_cli_namespace_resolver.py`, `test_client_routing.py`,
+  `test_inventory_streaming.py`, the four `test_startup_*_nonblocking.py`
+  files, `test_contract_registry.py`, `test_client_connect.py`,
+  `test_wire_compat.py`, and `test_routes.py`'s `TestAgentRoutes`) -- 370+11
+  tests, no regressions. A pre-existing, unrelated failure
+  (`test_resolve_local_binstub_uses_pathext_aware_resolution`, confirmed to
+  fail identically on an unmodified `dev` checkout on this machine) is
+  excluded from that count.
+- **3c remains deferred** per the design doc's own gate -- not started.
+
+### 2026-10-05 — Phase 3b PR (#5166) merged after 28 review rounds
+Drove PR #5166 through 28 rounds of automated Copilot review plus a mid-flight
+rebase (origin/dev had advanced far enough to need a squash-then-rebase pass --
+see the `git-collaboration` skill's technique -- renumbering
+`AGENT_ROSTER_CACHE_PROTOCOL_VERSION`/`HTTP_PROTOCOL_VERSION` to 22 since dev
+had already claimed 21 for `live_session_alias`, and reconciling
+`contract/registry.json` across both capabilities). Genuine bugs fixed along
+the way (beyond the 2026-10-03 implementation entry above): `get_snapshot()`'s
+unbounded per-namespace single-flight join; two abandon-path generation-bump
+gaps letting a stale scan's result pass the publish guard; `stop()`'s own
+cancellation being swallowed by the child-task cancellation handler;
+`_loop()`'s `finally` clearing a replacement loop's fresh timestamp;
+`start_agent_roster_cache()` publishing readiness without a single successful
+discovery pass; `_maybe_refresh_discovery`'s unbounded retry loop (now
+`max_wait`-bounded for `get_snapshot()` callers); a TTL-stamp race in
+`_scan_provider_report`'s raised-scan branch (now counted via a
+`threading.Lock`-guarded in-flight counter); and `ServiceConfig.
+agent_roster_cache_interval` accepting a cadence (`gt=0`, later `0.1`-`0.99`)
+that `AgentRosterCache.__init__`'s own `max(1.0, ...)` clamp silently
+overrides (fixed by raising the field to `ge=1.0` to match).
+`agent_registry_resolver.py` was split (`agent_registry_discovery.py`, a new
+`_ProviderDiscoveryMixin`) to stay under the module-size cap after the rebase;
+`app.py`/`client.py`/`models.py` needed a small, user-approved, justified
+widening of their shrink-only ceilings (2 lines each) after exhausting safe
+trimming -- recorded in `tools/module-size-baseline.json`.
+
+The key process lesson: a finding that gets a code fix but no explicit
+"Fixed:" reply on its review thread resurfaces verbatim in the next round
+(confirmed directly -- 4 round-27 findings fixed in code but unreplied-to
+reappeared in round 28 with the same discussion IDs). Every finding that gets
+a code change now also gets an explicit reply; one (the ceiling-widening
+finding) got an explanatory acknowledgment instead of a "Fixed:" claim, since
+widening was the deliberate, approved outcome, not a reversal.
+
+Round 28 (the last) closed out two new findings (the `ge=1.0` cadence-floor
+fix above, and a stale test docstring naming a since-removed
+`refresh_provider_resolvers_async()`/`asyncio.to_thread` design in
+`test_agent_roster_cache.py`) plus re-confirmed the 4 resurfaced round-27
+findings via replies. After pushing, CI hit several rounds of a transient
+"job was not acquired by Runner of type hosted" infra failure (unrelated to
+the change) across `PR gate`, `Governed Python artifact build`,
+`request-review-if-maintainer`, and `workflow-lockdown-guard` -- resolved by
+rerunning each failed job until it landed on a live runner. The automated
+Copilot review's round 29 did not arrive within an hour of the final push (a
+`COMMENTED`-only verdict, never a blocking one, per this repo's own
+commented-review-verdict fallback policy); with every required check green,
+mergeable clean, and all 6 round-28 threads addressed, merged via
+`gh pr merge --squash --admin` (the identity's Maintainer bypass rights).
+Merged at 2026-10-05T22:40:49Z. Worktree finalized; branch confirmed fully on
+`origin/dev`.
+
+**Next**: Phase 3b is done. Remaining Plan items: **3a** (agent-dispatch
+relay, full detail in `phase-3-design.md`) -- not yet started; **3c**
+(agent-bridge roster-change SSE) stays deliberately deferred per the design
+doc's own gate until 3b is measured insufficient; **Phase 4** (segment-level
+diffing in the Picker's render path) and **Phase 5** (Group C fresh-hint
+trust in `picker-reconcile-local`) are both still fully unstarted. The
+Validation Plan's "Phase 3 (design review gate)" line (3a's relay and 3b's
+cache both landed and measured) still needs 3a to close before that gate is
+satisfied.

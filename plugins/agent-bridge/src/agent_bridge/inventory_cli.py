@@ -127,13 +127,21 @@ def _cmd_agents(args: argparse.Namespace) -> None:
     _report_topology_errors(topology_errors)
 
 
-def _fetch_agent_rows(args: argparse.Namespace) -> tuple[list[dict], list[str], bool]:
+def _fetch_agent_rows(
+    args: argparse.Namespace, *, force_refresh: bool = False, require_complete: bool = False,
+) -> tuple[list[dict], list[str], bool]:
     """Fetch + project-filter the agent roster -- the same selection logic
     as the plain ``agents`` path above, factored out so the ``--stream``/
     ``--subscribe`` loop can call it repeatedly from inside one long-lived
     process. Raises (``BridgeClientError``/``BridgeConnectionError`` or a
     topology-profile error, via :class:`RuntimeError`) rather than printing
     and exiting -- the caller frames that as an ``error`` envelope instead.
+
+    ``force_refresh``/``require_complete`` are the explicit, protocol-gated
+    signals (pivot-streaming-transport Phase 3b) :func:`_fetch_complete_initial_rows`
+    sets on its bounded initial-scan attempts -- harmless against an older
+    daemon (``BridgeClient`` only sends either once the daemon advertises
+    support).
 
     Returns ``(rows, incomplete_namespaces, capability_known)``: a namespace
     resolver that times out/fails on this call silently drops its agents
@@ -146,7 +154,9 @@ def _fetch_agent_rows(args: argparse.Namespace) -> tuple[list[dict], list[str], 
     core = _core()
     client = core._get_client()
     agents, topology_errors, incomplete_namespaces, capability_known = (
-        client.list_agents_with_incomplete()
+        client.list_agents_with_incomplete(
+            force_refresh=force_refresh, require_complete=require_complete,
+        )
     )
     if topology_errors:
         raise RuntimeError("; ".join(topology_errors)[:200])
@@ -250,14 +260,42 @@ INITIAL_SCAN_RETRY_BACKOFF_SECS = 0.5
 def _fetch_complete_initial_rows(args: argparse.Namespace) -> list[dict]:
     """The initial-scan fetch with bounded retry-until-complete (or
     retries-exhausted) -- see :data:`INITIAL_SCAN_MAX_RETRIES`. Raises
-    whatever :func:`_fetch_agent_rows` raises on the final attempt."""
-    rows, incomplete, _capability_known = _fetch_agent_rows(args)
+    whatever :func:`_fetch_agent_rows` raises on the final attempt.
+
+    Every attempt sends ``require_complete=True`` (Phase 3b): against a
+    cached daemon that enforces the fail-closed contract, a persistently
+    incomplete cache raises ``BridgeClientError(503)`` instead of silently
+    returning a partial/empty roster as if it were authoritative -- exactly
+    the gap this initial scan exists to close. A ``503`` on a non-final
+    attempt is caught and treated the same as an "incomplete" result (keep
+    retrying); only the final attempt's ``503`` is allowed to propagate as
+    this initial scan's own visible failure. Retries additionally pass
+    ``force_refresh=True``: against a cached daemon this triggers an
+    immediate out-of-band rescan of the still-incomplete namespace(s)
+    instead of waiting out the cache's own freshness deadline -- a pure
+    latency optimization, not the only way a rescan can happen (a cached
+    daemon already opportunistically joins a single-flight rescan for any
+    namespace it itself observes as incomplete/uninitialized/stale on
+    *any* GET, so even an old client that never sends either parameter at
+    all still gets a real rescan on each of its own plain retries)."""
+    from .client import BridgeClientError
+
     attempt = 0
-    while incomplete and attempt < INITIAL_SCAN_MAX_RETRIES:
+    while True:
+        try:
+            rows, incomplete, _capability_known = _fetch_agent_rows(
+                args, force_refresh=attempt > 0, require_complete=True,
+            )
+        except BridgeClientError as exc:
+            if exc.status != 503 or attempt >= INITIAL_SCAN_MAX_RETRIES:
+                raise
+            time.sleep(INITIAL_SCAN_RETRY_BACKOFF_SECS)
+            attempt += 1
+            continue
+        if not incomplete or attempt >= INITIAL_SCAN_MAX_RETRIES:
+            return rows
         time.sleep(INITIAL_SCAN_RETRY_BACKOFF_SECS)
-        rows, incomplete, _capability_known = _fetch_agent_rows(args)
         attempt += 1
-    return rows
 
 
 def _run_agents_stream(args: argparse.Namespace) -> int:

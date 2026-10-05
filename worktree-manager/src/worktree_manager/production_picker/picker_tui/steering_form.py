@@ -75,7 +75,7 @@ class PivotFormScreen(FieldQuestionsMixin, ModalScreen[dict]):
     Esc behaves exactly like Save (nothing is lost); Ctrl+S saves explicitly."""
 
     CSS = """
-    PivotFormScreen { align: center middle; background: $background; }
+    PivotFormScreen { align: center middle; background: $background 55%; }
     PivotFormScreen > #steer-frame {
         width: 90%; height: 90%;
         border: round #ffaf00; background: $surface; padding: 0 1;
