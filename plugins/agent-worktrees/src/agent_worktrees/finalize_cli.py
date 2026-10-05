@@ -491,55 +491,95 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 msg = f"Could not read --body-file '{body_file}': {e}"
                 return core._json_error(msg) if use_json else (output.err(msg) or 1)
 
+        resolution = None
         if target_repo_arg:
             from . import pr_config as _pr_config
 
             resolution = _pr_config.resolve_repo_config_for_slug(config, target_repo_arg)
-            if resolution.resolved and not resolution.same_as_active:
-                if from_branch:
-                    from . import pr_foreign_create
 
-                    result = pr_foreign_create.create_foreign_pr_from_branch(
-                        worktree_id, config,
-                        target_repo=target_repo_arg, from_branch=from_branch,
-                        title=args.title or "", body=body or "",
-                        draft=getattr(args, "draft", False) or getattr(args, "hold", False),
-                        attribution=(False if getattr(args, "no_attribution", False) else None),
-                    )
-                    if result.get("error"):
-                        return core._json_error(result["error"]) if use_json else (
-                            output.err(result["error"]) or 2
-                        )
-                    if use_json:
-                        core._json_output(result)
-                    else:
-                        output.ok(
-                            f"Opened PR #{result.get('number')} via foreign-repo "
-                            f"create: {result.get('url', '')}"
-                        )
-                        print(
-                            f"  head/base: {result.get('head')} -> {result.get('base')}"
-                        )
-                        if not result.get("claimed"):
-                            output.warn(result.get("claim_warning", "PR not claimed."))
-                    return 0
+        is_foreign_from_branch = bool(
+            from_branch and resolution is not None and resolution.resolved
+            and not resolution.same_as_active
+        )
+        if from_branch and not is_foreign_from_branch:
+            msg = (
+                "create-pr: --from-branch requires --repo naming a "
+                "different, registered repo (resolved and not this "
+                "worktree's own active repo) -- it has no meaning for the "
+                "local-checkout path. Pass --repo <owner/name> alongside "
+                "it, or drop --from-branch to use the normal local path."
+            )
+            return core._json_error(msg) if use_json else (output.err(msg) or 2)
+
+        if is_foreign_from_branch:
+            if getattr(args, "dry_run", False) or getattr(args, "no_open", False):
                 msg = (
-                    f"create-pr: --repo {target_repo_arg!r} names a different, "
-                    f"also-registered repo than this worktree's own "
-                    f"({config.repo_name!r}) -- create-pr pushes commits from "
-                    "THIS worktree's own local checkout, which is not a "
-                    f"checkout of {target_repo_arg!r}. Options: (1) pass "
-                    f"--from-branch <branch> if that branch is ALREADY PUSHED "
-                    f"to {target_repo_arg!r} by some other process (skips the "
-                    "local checkout entirely, auto-claims the PR onto THIS "
-                    f"worktree), (2) create a worktree of {target_repo_arg!r} "
-                    "itself and run create-pr from there, or (3) use "
-                    f"`agent-pull-requests create --repo {target_repo_arg} "
-                    "--head <branch> --title ...` instead -- that plugin is "
-                    "built for exactly this (no local checkout required). "
-                    "Do not fall back to gh/az repos/git directly."
+                    "create-pr: --from-branch opens a real PR immediately "
+                    "(there is no local squash/push step to preview or "
+                    "skip) -- --dry-run and --no-open are not meaningful "
+                    "with it."
                 )
                 return core._json_error(msg) if use_json else (output.err(msg) or 2)
+            title = (args.title or "").strip()
+            if not title:
+                msg = (
+                    "create-pr: --from-branch has no local commit history "
+                    "to derive a title from (unlike the local path) -- "
+                    "pass a non-blank --title explicitly."
+                )
+                return core._json_error(msg) if use_json else (output.err(msg) or 2)
+
+            from . import pr_foreign_create
+
+            result = pr_foreign_create.create_foreign_pr_from_branch(
+                worktree_id, config,
+                target_repo=target_repo_arg, from_branch=from_branch,
+                title=title, body=body or "",
+                draft=getattr(args, "draft", False) or getattr(args, "hold", False),
+                attribution=(False if getattr(args, "no_attribution", False) else None),
+            )
+            if result.get("error"):
+                return core._json_error(result["error"]) if use_json else (
+                    output.err(result["error"]) or 2
+                )
+            if use_json:
+                core._json_output(result)
+            else:
+                output.ok(
+                    f"Opened PR #{result.get('number')} via foreign-repo "
+                    f"create: {result.get('url', '')}"
+                )
+                print(
+                    f"  head/base: {result.get('head')} -> {result.get('base')}"
+                )
+                if result.get("pr_label_error"):
+                    output.warn(
+                        f"PR opened, but a label did not apply: "
+                        f"{result['pr_label_error']}. Re-apply the label(s) "
+                        f"via the provider."
+                    )
+                if not result.get("claimed"):
+                    output.warn(result.get("claim_warning", "PR not claimed."))
+            return 0
+
+        if resolution is not None and resolution.resolved and not resolution.same_as_active:
+            msg = (
+                f"create-pr: --repo {target_repo_arg!r} names a different, "
+                f"also-registered repo than this worktree's own "
+                f"({config.repo_name!r}) -- create-pr pushes commits from "
+                "THIS worktree's own local checkout, which is not a "
+                f"checkout of {target_repo_arg!r}. Options: (1) pass "
+                f"--from-branch <branch> if that branch is ALREADY PUSHED "
+                f"to {target_repo_arg!r} by some other process (skips the "
+                "local checkout entirely, auto-claims the PR onto THIS "
+                f"worktree), (2) create a worktree of {target_repo_arg!r} "
+                "itself and run create-pr from there, or (3) use "
+                f"`agent-pull-requests create --repo {target_repo_arg} "
+                "--head <branch> --title ...` instead -- that plugin is "
+                "built for exactly this (no local checkout required). "
+                "Do not fall back to gh/az repos/git directly."
+            )
+            return core._json_error(msg) if use_json else (output.err(msg) or 2)
 
         try:
             result = pr_ops.create_pr(

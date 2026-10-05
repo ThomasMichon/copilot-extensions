@@ -295,3 +295,92 @@ class TestCreatePrFromBranch:
         rc = m.cmd_create_pr(args)
 
         assert rc == 2
+
+
+    def test_from_branch_without_a_resolved_foreign_repo_is_refused(
+        self, pr_repo, monkeypatch,
+    ):
+        """--from-branch with no --repo (or an unresolved/active one) has no
+        meaning for the local-checkout path and must never silently fall
+        through to it."""
+        config, wid, _wt_path, _ = pr_repo
+        monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
+        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(
+            worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
+        )
+        called = {"create_pr": False, "foreign": False}
+        monkeypatch.setattr(
+            m.pr_ops, "create_pr",
+            lambda *a, **k: called.__setitem__("create_pr", True) or {},
+        )
+        monkeypatch.setattr(
+            pr_foreign_create, "create_foreign_pr_from_branch",
+            lambda *a, **k: called.__setitem__("foreign", True) or {},
+        )
+
+        args = _args(["create-pr", wid, "--from-branch", "topic", "--title", "x"])
+        rc = m.cmd_create_pr(args)
+
+        assert rc == 2
+        assert called["create_pr"] is False
+        assert called["foreign"] is False
+
+    def test_from_branch_rejects_dry_run(self, pr_repo, monkeypatch):
+        config, wid, _wt_path, _ = pr_repo
+        monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
+        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(
+            worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
+        )
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda cfg_, slug: pr_config.ForeignRepoResolution(
+                config.repos["ext"], "other-repo", same_as_active=False
+            ),
+        )
+        called = {"foreign": False}
+        monkeypatch.setattr(
+            pr_foreign_create, "create_foreign_pr_from_branch",
+            lambda *a, **k: called.__setitem__("foreign", True) or {},
+        )
+
+        args = _args([
+            "create-pr", wid, "--repo", "owner/other-repo",
+            "--from-branch", "topic", "--title", "x", "--dry-run",
+        ])
+        rc = m.cmd_create_pr(args)
+
+        assert rc == 2
+        assert called["foreign"] is False
+
+    def test_from_branch_requires_a_non_blank_title(self, pr_repo, monkeypatch):
+        config, wid, _wt_path, _ = pr_repo
+        monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
+        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(
+            worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
+        )
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda cfg_, slug: pr_config.ForeignRepoResolution(
+                config.repos["ext"], "other-repo", same_as_active=False
+            ),
+        )
+        called = {"foreign": False}
+        monkeypatch.setattr(
+            pr_foreign_create, "create_foreign_pr_from_branch",
+            lambda *a, **k: called.__setitem__("foreign", True) or {},
+        )
+
+        args = _args([
+            "create-pr", wid, "--repo", "owner/other-repo",
+            "--from-branch", "topic", "--title", "   ",
+        ])
+        rc = m.cmd_create_pr(args)
+
+        assert rc == 2
+        assert called["foreign"] is False

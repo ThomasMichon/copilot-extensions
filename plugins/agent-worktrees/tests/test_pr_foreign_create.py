@@ -60,11 +60,18 @@ def _config(worktree_repo="caller-repo"):
     )
 
 
-def _foreign_resolution(*, same_as_active=False, provider="gitea", labels=()):
+def _foreign_resolution(
+    *, same_as_active=False, provider="gitea", labels=(),
+    required_body_sections=(), source_attribution="codename",
+):
     repo_cfg = cfg.RepoConfig(
         anchor="/tmp/other-anchor", worktree_root="/tmp/other-wt",
         default_branch="dev", remote="origin",
-        pr=cfg.PRConfig(enabled=True, provider=provider, labels=labels),
+        pr=cfg.PRConfig(
+            enabled=True, provider=provider, labels=labels,
+            required_body_sections=required_body_sections,
+            source_attribution=source_attribution,
+        ),
     )
     return pr_config.ForeignRepoResolution(
         repo_cfg, "owner/other-repo", same_as_active=same_as_active,
@@ -200,3 +207,84 @@ class TestCreateForeignPrFromBranch:
         scope, _token = fake_provider.calls[0]
         assert "agent-worktrees:source" not in scope.body
         assert "hello" in scope.body
+
+    def test_respects_the_target_repos_required_body_sections(
+        self, monkeypatch, _tracking_setup,
+    ):
+        _tracking_d, wid = _tracking_setup
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: _foreign_resolution(
+                required_body_sections=("## Intent",),
+            ),
+        )
+        fake_provider = _FakeProvider(
+            result=_FakePull(url="https://example/pr/3", number=3),
+        )
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
+
+        result = pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="x", body="no intent section here",
+        )
+        assert "error" in result
+        assert "required non-empty section" in result["error"]
+        assert fake_provider.calls == []  # never reached the provider
+
+    def test_defaults_attribution_from_the_target_repos_own_config(
+        self, monkeypatch, _tracking_setup,
+    ):
+        """``attribution=None`` (the default, no ``--no-attribution``) must
+        resolve from the TARGET repo's own ``pr.source_attribution``, not an
+        unconditional True -- a target configured ``source_attribution:
+        false`` must never get a marker just because the caller didn't pass
+        --no-attribution."""
+        _tracking_d, wid = _tracking_setup
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: _foreign_resolution(source_attribution=False),
+        )
+        fake_provider = _FakeProvider(
+            result=_FakePull(url="https://example/pr/4", number=4),
+        )
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
+
+        pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="x", body="hello",
+        )
+        scope, _token = fake_provider.calls[0]
+        assert "agent-worktrees:source" not in scope.body
+
+    def test_a_claim_persistence_exception_degrades_to_a_warning(
+        self, monkeypatch, _tracking_setup,
+    ):
+        """The PR already exists on the provider once ``_ensure_pr_claim``/
+        ``save_record``/``record_pr_event`` run -- any exception there must
+        never escape and read as the whole create failing."""
+        _tracking_d, wid = _tracking_setup
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: _foreign_resolution(),
+        )
+        fake_pull = _FakePull(url="https://example/pr/5", number=5)
+        monkeypatch.setattr(
+            providers, "get_provider", lambda name: _FakeProvider(result=fake_pull),
+        )
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
+        monkeypatch.setattr(
+            tracking, "save_record",
+            lambda record: (_ for _ in ()).throw(OSError("disk full")),
+        )
+
+        result = pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="x",
+        )
+        assert result["pr_opened"] is True
+        assert result["url"] == fake_pull.url
+        assert result["claimed"] is False
+        assert "claim_warning" in result
+        assert fake_pull.url in result["claim_warning"]

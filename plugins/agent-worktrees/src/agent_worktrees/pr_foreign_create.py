@@ -26,7 +26,7 @@ not a full tracked-PR record.
 """
 from __future__ import annotations
 
-from . import claim_history, config as cfg, pr_config, tracking
+from . import claim_history, config as cfg, pr_config, pr_ops, tracking
 from .codename import is_valid_handle
 from .providers import attribution as attr
 from .providers import base as providers
@@ -79,6 +79,17 @@ def create_foreign_pr_from_branch(
     prcfg = repo_cfg.pr
     base_branch = base or repo_cfg.default_branch
 
+    missing_body = pr_ops.missing_required_body_sections(body, prcfg.required_body_sections)
+    if missing_body:
+        return {
+            "error": (
+                "PR body is missing required non-empty section(s): "
+                + ", ".join(missing_body)
+                + ". Pass --body or --body-file before opening the PR."
+            ),
+            "repo": target_repo,
+        }
+
     rec_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     record = tracking.load_record(rec_path) if rec_path.exists() else None
 
@@ -86,20 +97,28 @@ def create_foreign_pr_from_branch(
     session = getattr(record, "parent_session", "") if record else ""
     codename = getattr(record, "codename", "") if record else ""
 
-    want_attribution = True if attribution is None else bool(attribution)
-    if want_attribution:
-        if is_valid_handle(codename) and attr.may_publish_codename(
-            codename_source=(
-                getattr(record, "codename_source", None) if record else None
-            ),
-            source_attribution_configured=prcfg.source_attribution_configured,
-        ):
+    # Same tri-state resolution `create_pr`'s own local path uses:
+    # `prcfg.source_attribution` (a per-repo "codename" | True | False
+    # config value, NOT a bool-only toggle) is the default, overridden only
+    # by an explicit `attribution=` argument (today only ever `False`, from
+    # `--no-attribution` -- `None` otherwise). Unlike the local path, this
+    # lean no-checkout path never attempts a live codename BACKFILL on a
+    # missing/invalid codename -- it degrades to no marker rather than
+    # guessing or crashing, consistent with this module's "new sibling
+    # function, not a retrofit" scope.
+    effective_attribution = (
+        prcfg.source_attribution if attribution is None else attribution
+    )
+    if effective_attribution == "codename":
+        if is_valid_handle(codename):
             full_body = attr.append_marker(body or "", attr.build_codename_marker(codename))
         else:
-            marker = attr.build_marker(
-                worktree_id, machine=machine, session=session, head=from_branch,
-            )
-            full_body = attr.append_marker(body or "", marker)
+            full_body = attr.strip_marker(body or "")
+    elif effective_attribution is True:
+        marker = attr.build_marker(
+            worktree_id, machine=machine, session=session, head=from_branch,
+        )
+        full_body = attr.append_marker(body or "", marker)
     else:
         full_body = attr.strip_marker(body or "")
 
@@ -132,18 +151,32 @@ def create_foreign_pr_from_branch(
         result["pr_label_error"] = pull.label_error
 
     if record is not None:
-        target_pr = tracking.PRRecord(
-            repo=target_repo, number=pull.number, url=pull.url,
-            state=pull.state or "open",
-        )
-        claimed_ref = _ensure_pr_claim(record, target_pr)
-        tracking.save_record(record)
-        if claimed_ref:
-            claim_history.record_pr_event(
-                claimed_ref, worktree_id=record.worktree_id,
-                machine=record.machine, event="claimed", project=record.repo,
+        try:
+            target_pr = tracking.PRRecord(
+                repo=target_repo, number=pull.number, url=pull.url,
+                state=pull.state or "open",
             )
-        result["claimed"] = bool(claimed_ref)
+            claimed_ref = _ensure_pr_claim(record, target_pr)
+            tracking.save_record(record)
+            if claimed_ref:
+                claim_history.record_pr_event(
+                    claimed_ref, worktree_id=record.worktree_id,
+                    machine=record.machine, event="claimed", project=record.repo,
+                )
+            result["claimed"] = bool(claimed_ref)
+        except Exception as e:
+            # The PR already exists on the provider by this point -- a
+            # claim-persistence failure must never read as the create
+            # itself failing (there is nothing left to roll back). Degrade
+            # to the same claim_warning shape the "no tracking record"
+            # branch below uses, so the caller always has a concrete,
+            # actionable next step.
+            result["claimed"] = False
+            result["claim_warning"] = (
+                f"PR opened ({pull.url}), but claiming it onto worktree "
+                f"{worktree_id!r} failed: {e}. Run `agent-worktrees claims "
+                f"add pr {pull.url} --worktree {worktree_id}` manually."
+            )
     else:
         result["claimed"] = False
         result["claim_warning"] = (

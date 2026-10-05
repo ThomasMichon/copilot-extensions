@@ -235,9 +235,12 @@ def _journal_pr_claim(worktree_id: str, url: str, *, note: str) -> str | None:
     ``worktree_id``'s own ledger. Returns an error string on failure (never
     raises) -- a failed journal must never un-create the PR that already
     exists; the caller surfaces it as a warning instead."""
-    proc = _run_agent_worktrees_raw(
-        ["claims", "add", "pr", url, "--worktree", worktree_id, "--note", note, "--json"]
-    )
+    try:
+        proc = _run_agent_worktrees_raw(
+            ["claims", "add", "pr", url, "--worktree", worktree_id, "--note", note, "--json"]
+        )
+    except (RuntimeError, OSError) as e:
+        return str(e)
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout).strip() or "unknown claims-add failure"
         return detail

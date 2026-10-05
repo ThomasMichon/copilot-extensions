@@ -225,6 +225,43 @@ def test_create_surfaces_a_claim_journal_failure_as_a_warning_not_a_create_failu
     assert "claim_warning" in payload
 
 
+def test_create_degrades_a_claim_journal_spawn_error_to_a_warning(monkeypatch, capsys):
+    """``_journal_pr_claim`` must never let a spawn failure (agent-worktrees
+    missing on PATH, OSError) escape and crash the CLI after the PR already
+    exists on the provider."""
+    monkeypatch.setattr(
+        "agent_pull_requests.__main__._resolve_claimant_worktree_id",
+        lambda: "caller-wt-1",
+    )
+
+    def _raising_run_agent_worktrees_raw(argv):
+        raise RuntimeError("agent-worktrees command not found on PATH")
+
+    monkeypatch.setattr(
+        "agent_pull_requests.__main__._run_agent_worktrees_raw",
+        _raising_run_agent_worktrees_raw,
+    )
+    monkeypatch.setattr(
+        "agent_pull_requests.__main__._github_create",
+        lambda repo, head, base, title, body, draft: {
+            "repo": repo, "number": 8, "title": title,
+            "url": f"https://github.com/{repo}/pull/8",
+            "head": head, "base": base, "isDraft": draft,
+        },
+    )
+
+    rc = main([
+        "create", "--repo", "octo/example", "--head", "feature/x",
+        "--title", "Add x", "--json",
+    ])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["number"] == 8
+    assert payload["claimed_by"] is None
+    assert "not found on PATH" in payload["claim_warning"]
+
+
 def test_build_parser_merge_defaults_to_squash():
     args = build_parser().parse_args(["merge", "--repo", "octo/example", "--number", "5"])
 
