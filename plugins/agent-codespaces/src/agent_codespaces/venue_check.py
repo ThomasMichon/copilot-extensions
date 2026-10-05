@@ -86,6 +86,9 @@ class VenueReadiness:
     #: The venue's installed ``agent-bridge`` plugin version (``copilot plugin
     #: list``), ``None`` when absent or unreadable.
     agent_bridge_plugin_version: str | None = None
+    #: The host bridge's version, when the caller looked it up: a venue plugin
+    #: provably older than it is a gap (see :func:`plugin_behind`).
+    agent_bridge_host_version: str | None = None
     agent_worktrees_state: str = "absent"  # absent | lean | full
     agent_worktrees_version: str | None = None
     raw_stdout: str = ""
@@ -101,11 +104,17 @@ class VenueReadiness:
         return self.agent_worktrees_state == "full"
 
     @property
+    def agent_bridge_plugin_stale(self) -> bool:
+        """Installed, but provably older than the host bridge (when it was looked up)."""
+        return self.agent_bridge_plugin and plugin_behind(
+            self.agent_bridge_plugin_version, self.agent_bridge_host_version)
+
+    @property
     def ready(self) -> bool:
         """Every precondition the venue `copilot` verb actually needs."""
         return (
             self.copilot_present and self.tmux and self.agent_worktrees_full
-            and self.agent_bridge_plugin
+            and self.agent_bridge_plugin and not self.agent_bridge_plugin_stale
         )
 
     @property
@@ -124,6 +133,11 @@ class VenueReadiness:
                 "agent-bridge Copilot plugin not installed (CLI-mode session "
                 "would never self-register)"
             )
+        elif self.agent_bridge_plugin_stale:
+            gaps.append(
+                f"agent-bridge Copilot plugin {self.agent_bridge_plugin_version} is older "
+                f"than the host bridge ({self.agent_bridge_host_version})"
+            )
         return gaps
 
     def to_dict(self) -> dict[str, Any]:
@@ -138,6 +152,7 @@ class VenueReadiness:
             "sudo_nopasswd": self.sudo_nopasswd,
             "agent_bridge_plugin": self.agent_bridge_plugin,
             "agent_bridge_plugin_version": self.agent_bridge_plugin_version,
+            "agent_bridge_host_version": self.agent_bridge_host_version,
             "agent_worktrees_state": self.agent_worktrees_state,
             "agent_worktrees_version": self.agent_worktrees_version,
             "gaps": self.gaps,
@@ -332,7 +347,8 @@ async def remediate_remote_venue(
             result.skipped.append(
                 "install agent-bridge plugin (no copilot CLI to install it into)"
             )
-    elif plugin_behind(readiness.agent_bridge_plugin_version, bridge_version):
+    elif plugin_behind(readiness.agent_bridge_plugin_version,
+                       bridge_version or readiness.agent_bridge_host_version):
         # Present but stale: an old plugin's own CLI can start a venue-local
         # daemon over the forwarded host route (fixed since), stranding every
         # session's registration on it. Installing only when missing never
