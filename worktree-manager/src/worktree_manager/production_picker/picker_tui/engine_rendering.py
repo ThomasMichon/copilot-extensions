@@ -439,9 +439,13 @@ class PickerScreenRenderingMixin:
             # worktree row of its own, so it is surfaced here instead --
             # local-machine-only (never fleet-aggregated, see
             # ``_poll_orphan_state``), hence the explicit "local" qualifier
-            # so this is never mistaken for a cross-machine count.
+            # so this is never mistaken for a cross-machine count. Kept in
+            # the compact form too (never just "⚠N"): a narrow terminal
+            # dropping either the scope or the 'o' key would read as a
+            # possible fleet count, or make the modal undiscoverable.
             n = len(self._orphans)
-            t.append(f"  ⚠{n}" if compact else f"  ⚠ {n} orphaned (local, 'o')",
+            t.append(f"  ⚠{n}(local,'o')" if compact
+                      else f"  ⚠ {n} orphaned (local, 'o')",
                       style=C_WARN)
         return t
     def _top_pad(self, W, more_above, scrolled):

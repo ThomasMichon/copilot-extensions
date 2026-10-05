@@ -96,7 +96,13 @@ class PickerScreenRuntimeMixin:
         Uses ``getattr`` defaults for its own cache attrs (not a bare
         ``self._orphans...`` read): some lightweight test doubles mix in
         this ``PickerScreenRuntimeMixin`` directly without running the real
-        ``PickerScreen.__init__`` that normally seeds them."""
+        ``PickerScreen.__init__`` that normally seeds them.
+
+        Each call starts its own independent background thread (via
+        ``_run_bg``), so the mount-time poll and a forced 'r' poll can
+        overlap; a generation counter (bumped per call, compared in
+        ``_done``) guards against an older request finishing after a
+        newer one and clobbering its fresher snapshot with stale data."""
         now = time.monotonic()
         checked_at = getattr(self, "_orphans_checked_at", None)
         if not force and checked_at is not None and now - checked_at < self._ORPHAN_POLL_SECS:
@@ -106,6 +112,9 @@ class PickerScreenRuntimeMixin:
         if not callable(fetch):
             return
 
+        generation = getattr(self, "_orphans_poll_generation", 0) + 1
+        self._orphans_poll_generation = generation
+
         def _work():
             try:
                 return fetch()
@@ -113,8 +122,10 @@ class PickerScreenRuntimeMixin:
                 return None
 
         def _done(rows):
-            if rows is not None:
+            if rows is not None and getattr(
+                    self, "_orphans_poll_generation", generation) == generation:
                 self._orphans = rows
+
 
         self._run_bg("orphan-check", _work, _done, quiet=True)
     def _maybe_repoll(self):

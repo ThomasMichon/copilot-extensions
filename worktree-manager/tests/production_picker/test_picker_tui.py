@@ -5301,7 +5301,11 @@ def test_orphan_chip_appears_in_status_text_when_orphans_present():
     text = s.status_text(False).plain
     assert "1 orphaned (local, 'o')" in text
     assert "\u26a0" in text   # ⚠
-    assert "1 orphaned" in s.status_text(True).plain or "\u26a01" in s.status_text(True).plain
+    # The compact form (used when the full status doesn't fit) still
+    # preserves the local scope and the 'o' shortcut -- never a bare
+    # "⚠N" that a narrow terminal could mistake for a fleet-wide count.
+    compact = s.status_text(True).plain
+    assert "\u26a01(local,'o')" in compact
 
 
 def test_poll_orphan_state_fetches_from_source_orphans(monkeypatch):
@@ -5340,6 +5344,40 @@ def test_poll_orphan_state_is_a_noop_when_source_lacks_orphans_hook(monkeypatch)
     assert s._orphans == []
 
 
+def test_poll_orphan_state_discards_an_older_in_flight_result(monkeypatch):
+    """Each ``_poll_orphan_state`` call starts its own independent
+    background thread, so an older (slower) request can finish AFTER a
+    newer one. The older request's result must never clobber the newer
+    snapshot -- the generation guard in ``_done`` must reject it."""
+    s = PickerScreen(_fixture_source(), live=False)
+    s.setup_sync_for_tests()
+
+    pending_done = []
+
+    def _deferred_run_bg(_label, work, done=None, **_kwargs):
+        # Run `work()` immediately (as the real thread would, eventually),
+        # but stash `done` so the TEST controls completion order instead of
+        # the real (indeterminate) thread-scheduling order.
+        result = work()
+        pending_done.append((result, done))
+
+    monkeypatch.setattr(s, "_run_bg", _deferred_run_bg)
+
+    s.src.orphans = lambda: [{"kind": "codespace", "ref": "cs-OLD"}]
+    s._poll_orphan_state(force=True)               # generation 1, queued
+    s.src.orphans = lambda: [{"kind": "codespace", "ref": "cs-NEW"}]
+    s._poll_orphan_state(force=True)                # generation 2, queued
+
+    assert len(pending_done) == 2
+    # The NEWER request (generation 2) completes first...
+    pending_done[1][1](pending_done[1][0])
+    assert s._orphans == [{"kind": "codespace", "ref": "cs-NEW"}]
+    # ...then the OLDER, slower request (generation 1) finally completes --
+    # its stale result must be discarded, not re-applied over the newer one.
+    pending_done[0][1](pending_done[0][0])
+    assert s._orphans == [{"kind": "codespace", "ref": "cs-NEW"}]
+
+
 def test_poll_orphan_state_respects_the_cache_ttl_unless_forced(monkeypatch):
     s = PickerScreen(_fixture_source(), live=False)
     s.setup_sync_for_tests()
@@ -5363,9 +5401,8 @@ def test_poll_orphan_state_always_fetches_on_a_fresh_low_uptime_clock(monkeypatc
     """Regression: a just-booted host/container's ``time.monotonic()`` can
     read well under ``_ORPHAN_POLL_SECS`` (120s). The cache must key off
     "never polled yet" (``None``), not a bare ``0.0`` timestamp -- comparing
-    a real small monotonic reading against literal ``0.0`` wrongly looked
-    "already fresh" and skipped the very first fetch (seen in CI, never
-    locally, where the dev host's own uptime happens to exceed 120s)."""
+    a real small monotonic reading against literal ``0.0`` wrongly looks
+    "already fresh" and skips the very first fetch."""
     from worktree_manager.production_picker.picker_tui import engine_runtime
 
     s = PickerScreen(_fixture_source(), live=False)

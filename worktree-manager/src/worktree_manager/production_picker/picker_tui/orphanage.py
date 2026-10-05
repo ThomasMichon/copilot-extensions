@@ -7,9 +7,10 @@ Surfaces the local machine's durable claims-orphanage -- obligations
 re-homed by an ``--abandon`` finalize, awaiting ``agent-worktrees claims
 cleanup``. A re-homed obligation has no worktree row of its own to render
 on (its source worktree is already gone), which is exactly why this is a
-fleet-wide/screen-level surface rather than a per-row marker -- see
+screen-level surface rather than a per-row marker -- see
 ``PickerScreenRuntimeMixin._poll_orphan_state`` for how ``self._orphans``
-is populated and why it is deliberately local-machine-only."""
+is populated and why it is deliberately local-machine-only (never
+fleet-aggregated)."""
 from __future__ import annotations
 
 from rich.text import Text
