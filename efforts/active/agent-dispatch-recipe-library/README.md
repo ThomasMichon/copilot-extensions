@@ -1325,3 +1325,20 @@ suite green (3743 passed, 23 skipped, the one known flake above).
      repository-issue-loop pattern), changing this effort's canonical status to
      `Active (...)`, and synchronizing the active-effort index row.
 - Focused Phase 8 tests after the fixes: **123 passed**.
+
+### 2026-10-04 (same day) — Review feedback, round 5
+- Automated review caught one final real integration bug: the supervisor's
+  registration launcher still recognized only `command` and
+  `repository_issue_loop` emitter specs as **periodic emitters**, so the new
+  inline `effort_driver_loop` spec would have been mis-launched down the
+  legacy webhook path and never ticked. Fixed `supervisor_registration.
+  build_command()` to treat `effort_driver_loop` the same as the other
+  periodic emitter shapes, and added a regression test in
+  `test_supervisor_daemon.py` proving an expanded effort-driver declaration
+  materializes to `agent-dispatch emitter serve ... --holder <machine>` rather
+  than `webhook --config`.
+- Focused validation after the fix:
+  - `python tools/run-plugin-tests.py agent-dispatch -k effort_driver --timeout 600 --plugin-timeout 2400`
+    → **10 passed**
+  - `python tools/run-plugin-tests.py agent-dispatch -k "effort_driver_loop_expansion_builds_periodic_emitter_command or builtin_effort_driver_loop" --timeout 600 --plugin-timeout 2400`
+    → **2 passed**
