@@ -390,6 +390,11 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         admission_closed = True
         published_lock = False
         _close_request_surfaces()
+        # Stop admitting new managed-mux push observations too (a genuine
+        # "new source" admission vector, distinct from worktree_status_runtime's
+        # stateless per-worktree reads, which stay open -- see close_admission's
+        # own docstring).
+        managed_mux_runtime.close_admission()
 
     worktree_status_runtime = worktree_status_daemon.InProcessRuntime()
     worktree_status_runtime.start(

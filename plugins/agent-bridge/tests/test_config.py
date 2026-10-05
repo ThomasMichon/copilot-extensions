@@ -470,3 +470,30 @@ class TestInRepoBridgeConfig:
         assert cfg is not None
         assert cfg.default_copilot_args == ["--model", "base"]
         assert cfg.default_env == {"K": "v"}
+
+
+class TestAgentRosterCacheIntervalValidation:
+    """Phase 3b: `agent_roster_cache_interval` must stay a finite number of
+    seconds, at least 1.0 -- `AgentRosterCache.__init__` silently clamps
+    anything below 1.0 up to it (`max(1.0, refresh_interval)`), so accepting
+    a smaller value here would validate a cadence the cache never actually
+    honors. An infinite value would make the cache's freshness deadline and
+    watchdog timeout infinite too, so a successful roster could stay
+    "fresh" forever and background supervision would never run again."""
+
+    @pytest.mark.parametrize(
+        "value", [0, 0.5, -1.0, float("-inf"), float("inf"), float("nan")],
+    )
+    def test_rejects_below_the_caches_own_floor_and_non_finite_values(self, value):
+        with pytest.raises(Exception):
+            ServiceConfig(agent_roster_cache_interval=value)
+
+    def test_accepts_a_normal_value_at_or_above_the_floor(self):
+        cfg = ServiceConfig(agent_roster_cache_interval=30.0)
+        assert cfg.agent_roster_cache_interval == 30.0
+        cfg_at_floor = ServiceConfig(agent_roster_cache_interval=1.0)
+        assert cfg_at_floor.agent_roster_cache_interval == 1.0
+
+    def test_default_is_unaffected(self):
+        cfg = ServiceConfig()
+        assert cfg.agent_roster_cache_interval == 12.0
