@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`)
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-09-30
-- **Status:** In Progress (Phase 1 done)
+- **Status:** Active (Phases 1, 3-8 done; Phase 2 reviewer adapters and Phase 9 docs remain)
 - **Vision:** `visions/plugins/agent-dispatch/README.md` (§*The recipe*)
   advances *loop-recipes* from "four fixed archetypes, hand-declared per
   consumer" to "named, extendable templates a consumer instantiates with a
@@ -402,14 +402,14 @@ below — read it before starting any Phase 3 work).
       effort-creation PR with all issues assigned.
 
 ### Phase 8 — Named recipe: effort-driver (Request item f)
-- [ ] Ship a global recipe (a `goal-driven` specialization): takes an
+- [x] Ship a global recipe (a `goal-driven` specialization): takes an
       assigned effort and drives it — PRs as needed, resolving bugs/hurdles
       — until it reaches archive state via its last PR.
-- [ ] Emitter sources from the active efforts in the consumer's own bound
+- [x] Emitter sources from the active efforts in the consumer's own bound
       state root (repo-local; no forge adapter needed here).
-- [ ] Evaluator requires the named effort in archive state, with evidence
+- [x] Evaluator requires the named effort in archive state, with evidence
       the PRs were made and the constituent issues resolved.
-- [ ] Tests: a fixture effort with open constituent issues drives to
+- [x] Tests: a fixture effort with open constituent issues drives to
       archive state with issues closed and PRs merged.
 
 ### Phase 9 — Docs
@@ -1205,3 +1205,174 @@ suite green (3743 passed, 23 skipped, the one known flake above).
     - 792 passed
     - 24 passed, 1 skipped
   - none of the effort-noted unrelated flakes appeared in this run.
+
+### 2026-10-04 — Phase 8: effort-driver named recipe landed
+- Added an eighth built-in global recipe template,
+  `global:effort-driver`, with a new built-in `worker_identity:
+  effort-driver`, `require_verification: true`, an opaque shared
+  `evaluator_ref: effort-driver`, and a bounded task contract specialized to
+  driving one already-assigned tracked effort through its remaining PRs
+  until the effort itself reaches archive state.
+- **Design decision — why this is its own `kind: effort-driver-loop` instead
+  of another `repository-issue-loop` parameterization:** Phase 7's
+  effort-builder still reused `repository-issue-loop` because the discovery
+  problem stayed "take a query or named set of repository issues and reserve
+  them." Phase 8's discovery problem is materially different: there is no
+  forge-backed issue list here at all. The source of work is the consumer's
+  own state root (`efforts/active/<slug>/README.md`-shaped state), so the
+  shipped standing loop is a new repo-local emitter kind that scans active
+  effort READMEs and authors one goal-driven task per eligible effort. The
+  generic emitter runtime was extended with a second built-in tick path
+  (`effort_driver_loop`) alongside the existing `repository_issue_loop`,
+  while the declaration still expands to the same ordinary emitter + one
+  headless worker lane shape.
+- Added the built-in worker identity
+  `agent_dispatch/identities/effort-driver.identity.md`. Its charter is
+  explicitly the execution-only half of the effort-builder/effort-driver
+  boundary: drive the already-named effort through implementation, review,
+  merge, and archive; do **not** create a replacement effort for work that
+  already belongs to the named one, and do **not** collapse back into raw
+  issue triage as the objective.
+- **Shared-vs-consumer evaluator split (same deliberate pattern as Phases
+  5-7):** the shipped recipe fixes the reusable lifecycle contract
+  (`require_verification` + `evaluator_ref`) and the repo-local
+  effort-discovery source, but does **not** hardcode one repository's exact
+  archive convention, merged-PR proof shape, or "constituent issues
+  resolved" evidence contract. A consumer repo supplies its own trusted
+  evaluator registration under `evaluator_ref: effort-driver` to define what
+  counts as archive state there.
+- Documentation updated: `plugins/agent-dispatch/README.md` now documents
+  `global:effort-driver` in the shipped global-recipes table (and corrects
+  that table's stale shipped-recipe count) plus the same shared-recipe /
+  repo-scoped-evaluator adoption split as `effort-builder`.
+- Tests added:
+  - `test_effort_driver_loops.py`: the new loop expands to one emitter + one
+    headless worker lane, discovers active efforts from a repo-local state
+    root, and authors the expected goal-driven task contract for the named
+    effort while leaving unrelated active efforts untouched. Explicit
+    `effort_slugs` behave as an all-or-nothing selector (missing named
+    efforts suppress creation rather than silently creating a partial set).
+  - `test_registrar_recipes.py`: `global:effort-driver` resolves end to end
+    through `read_declaration_file_set`, stamps the expected verification
+    fields, and the built-in identity resolves.
+  - `test_producers_emitter.py`: the generic emitter runtime now dispatches
+    the new built-in `effort_driver_loop` tick path and threads the stamped
+    `cwd` into its validation exactly as it already does for
+    `repository_issue_loop`.
+  - `test_verification.py`: a fixture trusted script evaluator keyed by
+    `effort-driver` confirms completion only when the named effort has left
+    `efforts/active/`, appeared at its archive path, and the archived README
+    carries durable PR + constituent-issue evidence; still-active and
+    weak-evidence fixtures stay submitted.
+- Validation:
+  - focused Phase 8 tests: **123 passed**
+  - install contract: **OK**
+  - full `agent-dispatch` suite: re-run twice via
+    `python tools/run-plugin-tests.py agent-dispatch --timeout 600 --plugin-timeout 2400`;
+    both runs hit only the already-noted pre-existing aggregate flake
+    `test_liveness_gc_publishes_a_bus_event_for_auto_suspend_with_zero_requeued`
+    (`test_liveness_gc*` is the exact known Phase 7 flake class called out in
+    this effort's operator brief). Isolated rerun of that single test passed
+    immediately, confirming the failure shape stayed flaky-only-in-aggregate
+    rather than a Phase 8 regression.
+
+### 2026-10-04 (same day) — Review feedback, round 1
+- Automated review caught two real duplicate-suppression bugs in the new
+  effort-driver loop, both fixed:
+  1. **Medium**: the first version treated `submitted` tasks as terminal for
+     per-effort suppression, so a task whose evaluator returned `noop` would
+     still allow the next cadence to create a duplicate effort-driver task for
+     the same still-active effort. Fixed by removing `submitted` from the
+     loop's terminal set and adding a regression test that a submitted task
+     suppresses re-creation on a later cadence.
+  2. **Medium**: the first version scanned the newest 1,000 tasks in the repo
+     and suppressed effort creation from that unfiltered corpus. Once the repo
+     had enough unrelated tasks, an older still-active effort task could fall
+     out of that window and the loop would emit a duplicate. Fixed by
+     discovering the active efforts first, then querying the queue per effort
+     key (`exclusive_key` for active-task suppression, `origin_ref` for
+     same-occurrence suppression) with `limit=1`, plus a regression test that
+     the plan uses those per-effort lookups rather than a whole-corpus scan.
+- Focused Phase 8 tests after the fixes: **123 passed**.
+
+### 2026-10-04 (same day) — Review feedback, round 2
+- Automated review caught one more real portability bug in the new
+  effort-driver loop: the first version serialized `readme_relative` with the
+  host platform's native path separator, then fed that platform-shaped string
+  into the persistent `exclusive_key` / `dedup_key`. That would let the same
+  active effort receive different suppression keys on Windows vs. Linux,
+  defeating cross-machine dedup for a lane that can legally move between
+  eligible producer hosts. Fixed by canonicalizing repo-relative effort paths to
+  POSIX form (`relative_path.as_posix()`) before they ever reach task payloads
+  or persistent keys, and updated the focused effort-driver tests to assert the
+  canonical forward-slash form explicitly.
+- Focused Phase 8 tests after the fix: **123 passed**.
+
+### 2026-10-04 (same day) — Review feedback, rounds 3-4
+- Automated review then found two more correctness/polish gaps, both fixed:
+  1. **Medium**: the first version persisted the producer machine's absolute
+     `state_root` into emitted tasks. A worker or trusted evaluator running on
+     another eligible machine could not rely on that host-local path. Fixed by
+     carrying only the repo-relative effort README path (`efforts/active/...`)
+     plus the effort slug in task payloads/prompts; resolving the actual bound
+     state root is left to the consumer's own execution context (the same place
+     the repo-scoped trusted evaluator already owns).
+  2. **Medium/Low**: `worker_filters` had been temporarily accepted as an input
+     declaration key even though it is a derived/internal field, and this
+     effort's status surfaces were out of sync (`README.md` said
+     `In Progress`, `efforts/README.md` still said `Draft`). Fixed by
+     rejecting `worker_filters` from authored declarations again (matching the
+     repository-issue-loop pattern), changing this effort's canonical status to
+     `Active (...)`, and synchronizing the active-effort index row.
+- Focused Phase 8 tests after the fixes: **123 passed**.
+
+### 2026-10-04 (same day) — Review feedback, round 5
+- Automated review caught one final real integration bug: the supervisor's
+  registration launcher still recognized only `command` and
+  `repository_issue_loop` emitter specs as **periodic emitters**, so the new
+  inline `effort_driver_loop` spec would have been mis-launched down the
+  legacy webhook path and never ticked. Fixed `supervisor_registration.
+  build_command()` to treat `effort_driver_loop` the same as the other
+  periodic emitter shapes, and added a regression test in
+  `test_supervisor_daemon.py` proving an expanded effort-driver declaration
+  materializes to `agent-dispatch emitter serve ... --holder <machine>` rather
+  than `webhook --config`.
+- Focused validation after the fix:
+  - `python tools/run-plugin-tests.py agent-dispatch -k effort_driver --timeout 600 --plugin-timeout 2400`
+    → **10 passed**
+  - `python tools/run-plugin-tests.py agent-dispatch -k "effort_driver_loop_expansion_builds_periodic_emitter_command or builtin_effort_driver_loop" --timeout 600 --plugin-timeout 2400`
+    → **2 passed**
+
+### 2026-10-04 (same day) — Review feedback, round 6
+- Automated review's remaining genuine concern was default eligibility: the
+  first effort-driver declaration shape would scan `efforts/active/` and drive
+  **every** README there when `effort_slugs` was omitted, which would include
+  Draft efforts in this repository's own active tree and violate the recipe's
+  "already-assigned effort" boundary. Fixed by making `effort_slugs` required:
+  a consumer must name one or more active effort slugs explicitly, and the
+  repo-local scan now serves only to resolve those named efforts from the bound
+  state root rather than to auto-adopt every active README by default.
+- Documentation updated in `plugins/agent-dispatch/README.md` to call out that
+  explicit selector requirement for `global:effort-driver`.
+- Focused validation after the fix:
+  - `python tools/run-plugin-tests.py agent-dispatch -k effort_driver --timeout 600 --plugin-timeout 2400`
+    → **14 passed**
+
+### 2026-10-04 (same day) — Review feedback, round 7
+- Automated review's remaining real gaps were the *other* eager-validation path
+  and the effort record's own coverage claim:
+  1. `registrations.py` still only routed `command` and
+     `repository_issue_loop` emitter specs through eager `validate_spec()`,
+     so an inline `effort_driver_loop` registration could still bypass that
+     validation even though the supervisor launcher path was fixed in round 5.
+     Fixed by teaching `validate_registration(RegistrationKind.EMITTER, ...)`
+     the new builtin, with a dedicated regression test.
+  2. The Phase 8 checklist/journal claimed end-to-end lifecycle coverage more
+     strongly than the tests actually demonstrated. Added a lifecycle test that
+     starts from a real active effort README, runs `effort_driver_loop.run_tick`
+     to author the task payload, then moves that same effort into the archive
+     with merged-PR / closed-issue evidence and confirms the queued submitted
+     task through the trusted `effort-driver` evaluator.
+- Focused validation after the fix:
+  - `python tools/run-plugin-tests.py agent-dispatch -k "effort_driver or effort_driver_loop_expansion_builds_periodic_emitter_command or builtin_effort_driver_loop" --timeout 600 --plugin-timeout 2400`
+    → **14 passed**

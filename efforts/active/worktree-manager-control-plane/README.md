@@ -931,7 +931,7 @@ worktree-manager.
       does not land, since it already covers this exact scope.
 - [ ] Keep configuration examples synthetic and repository-neutral.
 
-### Phase 9 — Relocate "Launch in new window" terminal spawning out of agent-worktrees (Planned — #5210)
+### Phase 9 — Relocate "Launch in new window" terminal spawning out of agent-worktrees (Done — #5210, PR #5232)
 
 Continues the Phase 3b/3e relocation precedent for a capability that landed
 *after* Phase 3b closed and re-introduced the exact violation that phase
@@ -954,35 +954,48 @@ performs the mux-daemon registration. This is exactly the "GUI window"
 presentation concern the `session-hosting` vision already assigns to the
 Worktree Manager, re-introduced into agent-worktrees.
 
-- [ ] **Step 1 — relocate terminal-spawning mechanics.** Move
-      `headed_launch._windows_spawn`/`_posix_spawn` (the `wt.exe`/
-      `CREATE_NEW_CONSOLE`/`osascript`/POSIX-terminal-emulator probing) from
-      `plugins/agent-worktrees` into `worktree-manager/bin`/
-      `worktree-manager/src`, alongside the already-relocated
-      `launch-session.{ps1,sh}`.
-- [ ] **Step 2 — make "new window" a launch-plan modifier, not a dedicated
-      verb.** Worktree Manager's own launcher gains a "new window" modifier
-      composable with its existing Resume/Bare/No-mux options (mirroring how
-      `--no-mux`/`--bare-resume` already compose): it opens the new OS window
-      running the *same* `launch-session.{ps1,sh}` plan execution used for
-      every other launch, so `Invoke-ManagedMuxRegister` always runs
-      regardless of which window modifier was chosen. Update
-      `picker_tui/headed_actions.py`'s "Launch in new window" Actions verb to
-      invoke this modifier instead of `agent-worktrees copilot --headed`.
-- [ ] **Step 3 — retire the agent-worktrees terminal-popping path.** Once the
-      Picker no longer depends on it, remove `headed_launch.py`'s
-      platform-terminal-emulator knowledge and `copilot --headed`'s
-      window-popping responsibility from agent-worktrees (keep attach-only
-      semantics there, if any caller still needs a bare attach), closing the
-      Non-Goal the `session-hosting` vision already states ("Not a
-      configuration mode of agent-worktrees").
-- [ ] **Step 4 — regression coverage.** Add a test asserting a "new window"
-      launch registers a live mux-daemon mapping identical to an ordinary
-      muxed Resume launch (extending the Phase 3b-era
-      `test_terminal_decoupling.py`/launcher-script regression style) when
-      mux is enabled, and registers none when composed with `--no-mux` (mux
-      is bypassed entirely in that case) — so a future new launch-plan
-      modifier can't silently bypass registration for a muxed variant again.
+- [x] **Step 1 — relocate terminal-spawning mechanics.** Moved the
+      `wt.exe`/`CREATE_NEW_CONSOLE`/`osascript`/POSIX-terminal-emulator
+      probing from `plugins/agent-worktrees`' `headed_launch.py` into a new
+      `worktree_manager.new_window_spawn` module, generalized to wrap an
+      arbitrary argv (not a fixed `attach-session` command), alongside the
+      already-relocated `launch-session.{ps1,sh}`.
+- [x] **Step 2 — make "new window" a launch-plan modifier, not a dedicated
+      verb.** Added `LaunchRequest.new_window`, composable with the existing
+      mode/no_mux/ahp fields; `_run_relocated_mux_launch` opens the new OS
+      window running the *same* `launch-session.{ps1,sh}` plan execution used
+      for every other launch when set, so `Invoke-ManagedMuxRegister` always
+      runs regardless of which window modifier was chosen (and refuses,
+      rather than silently falling back to blocking the live Picker, for a
+      remote/AHP/missing-script plan). `picker_tui/headed_actions.py`'s
+      "Launch in new window" Actions verb now calls `_run_launch` in-process
+      with `new_window=True` instead of `agent-worktrees copilot --headed`,
+      forwarding the submenu's own `no_mux`/`ahp` toggles (a review finding:
+      composing with the separate "Bare resume" entry remains unsupported,
+      documented as a known limitation).
+- [x] **Step 3 — retire the agent-worktrees terminal-popping path.** Removed
+      `headed_launch.py` and `copilot --headed`/`--json` entirely;
+      `agent-worktrees copilot` keeps only its plain attach-only semantics,
+      closing the Non-Goal the `session-hosting` vision already states ("Not
+      a configuration mode of agent-worktrees").
+- [x] **Step 4 — regression coverage.** Added `test_new_window_spawn.py`
+      (direct platform-dispatch tests mirroring the deleted agent-worktrees
+      coverage, plus an AppleScript-injection regression) and
+      `TestRunLaunchNewWindow` in `test_production_picker_transplant.py`
+      (argv parity between new-window and ordinary launches, explicit-env
+      composition with `--no-mux`, and refusal guards for remote/AHP/missing-
+      script requests).
+
+Review also surfaced and fixed two concurrency hazards introduced by running
+`_run_launch` in-process from a *live* Picker TUI thread (every other call
+site only ever runs after `app.exit()` has torn the TUI down): a thread-
+unsafe `contextlib.redirect_stdout` (replaced with a nested, refcounted,
+thread-scoped stdout proxy that composes safely with pytest's own per-test
+`capsys`/`capfd` swap) and a global `os.environ` mutation for `--no-mux`
+(replaced with an explicit child `env` passed to the spawn call). A High-
+severity AppleScript-injection finding (shell-quoting alone doesn't escape
+the AppleScript string literal the quoted command is embedded in) was also
+fixed with a dedicated `_applescript_quote` helper and regression test.
 
 ### Bug sweep — linked open bugs (2026-09-24)
 
@@ -1012,14 +1025,14 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   rejection.
 - **Non-agentic + idempotent.** `setup` is dry-run by default and re-runnable;
   re-running the bootstrap one-liner is version-gated (a no-op when current).
-- **"New window" registers like every other muxed launch.** A launch using
-  the relocated "new window" modifier (Phase 9), composed with mux enabled,
-  produces a `mux-mapping.json` entry with `"live": true` and a fresh
-  `observed_at`, identical in shape and timing to an ordinary muxed
-  Resume/Bare launch — proved by a regression test, not only manual
-  confirmation. A `--no-mux` launch correctly registers no mux mapping at
-  all, muxed or not; the regression test asserts registration only for the
-  muxed variants, never for `--no-mux`.
+- **"New window" registers like every other muxed launch (Done, Phase 9).**
+  A launch using the relocated "new window" modifier runs the IDENTICAL
+  `launch-session.{ps1,sh}` argv an ordinary muxed Resume launch would
+  (proved by `test_new_window_argv_matches_the_ordinary_launch_argv`), so
+  its `Invoke-ManagedMuxRegister` call always fires the same way. A
+  `--no-mux` launch composed with `new_window` passes its override as an
+  explicit child `env` to the spawn call rather than mutating `os.environ`
+  globally (`test_new_window_passes_no_mux_as_an_explicit_child_env_not_a_global_mutation`).
 
 ## Coordination
 
@@ -1053,6 +1066,35 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-04/05** — Executed and landed Phase 9 (PR #5232, merged): moved
+  `wt.exe`/`CREATE_NEW_CONSOLE`/`osascript`/POSIX-terminal probing into a new
+  `worktree_manager.new_window_spawn` module (generalized to an arbitrary
+  argv); added `LaunchRequest.new_window` as a composable launch-plan
+  modifier wired through `_run_relocated_mux_launch`/`_run_launch` (split
+  into a new `relocated_launch.py` sibling module to stay under
+  `__main__.py`'s module-size cap); rewired `headed_actions.py` to call
+  `_run_launch` in-process instead of the retired
+  `agent-worktrees copilot --headed`; deleted `headed_launch.py` and
+  `copilot --headed`/`--json` entirely. Review (PR #5232) caught real bugs
+  beyond the original plan: a High-severity AppleScript-injection gap
+  (shell-quoting alone doesn't escape the AppleScript string literal the
+  quoted command sits inside — fixed with `_applescript_quote` + a
+  regression test), a thread-unsafe `contextlib.redirect_stdout` (this is
+  the first call site to run `_run_launch` from a *live* Picker TUI thread
+  rather than after `app.exit()`; fixed with a nested, refcounted,
+  thread-scoped stdout proxy that composes correctly with pytest's own
+  per-test `capsys` swap, which is what surfaced the bug), a global
+  `os.environ` mutation leaking `WORKTREE_NO_MUX=1` into later/concurrent
+  spawns (fixed with an explicit child `env`), and dropped `no_mux`/`ahp`
+  submenu toggles (fixed by forwarding them through the dispatch site).
+  Restored direct platform-dispatch tests (`test_new_window_spawn.py`)
+  matching the deleted agent-worktrees coverage. 362 tests passing across
+  the touched surfaces (agent-worktrees' `test_copilot.py` full +
+  `-k "headed or copilot"` suite subset, worktree-manager's new-window/
+  relocated-launch suites). A full worktree-manager suite run separately
+  surfaced 8 pre-existing, unrelated Windows-symlink-extraction failures
+  (none touch files in this diff) — not this phase's concern. Phase 9 is
+  **Done**.
 - **2026-10-04** — Filed Phase 9 and issue #5210: an operator-reported symptom
   ("Launch in new window" doesn't set up mux instances correctly with the
   status monitor) traced to `agent-worktrees copilot --headed`/

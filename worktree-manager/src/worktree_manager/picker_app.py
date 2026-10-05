@@ -134,6 +134,17 @@ class LaunchRequest:
     boundary, compose by mux capability, run). ``mode`` maps to the engine's
     ``resolve`` selectors: ``resume`` -> ``--worktree-id``, ``bare-resume`` ->
     ``--worktree-id --bare-resume``, ``new`` -> ``--new``.
+
+    ``new_window``, unlike every other field here, is NOT dispatched through
+    the exit-the-app-then-run cycle above -- it opens a brand-new, visible
+    terminal window running the launch while the Picker/TUI keeps running
+    (see ``headed_actions.open_worktree_cli_headed``), so it is only ever
+    handed directly to ``_run_launch`` from inside a still-running screen,
+    never via ``LaunchRequest`` -> ``app.exit()`` -> the ``_run_production_picker``
+    dispatch loop. Supported only for a local, mux-presented launch resolved
+    to the relocated ``launch-session.{ps1,sh}`` script; requesting it for a
+    remote/AHP/non-exec plan is a clear error in ``_run_launch``, never a
+    silent fallback that would block the caller's own process instead.
     """
 
     project: str
@@ -145,6 +156,7 @@ class LaunchRequest:
     machine: str | None = None
     environment: str | None = None
     seed_prompt: str | None = None
+    new_window: bool = False
 
 
 def _state_cell(w: Worktree) -> str:

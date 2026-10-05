@@ -35,8 +35,8 @@ from typing import TYPE_CHECKING, Any
 from dropin_registry import Finding, ScanAuthority, WarningTracker
 from plugin_activation import ActivationReport
 
-from .install_paths import install_dir as dispatch_install_dir
 from . import repo_config
+from .install_paths import install_dir as dispatch_install_dir
 from .registrar import ProfileDeclaration, RegistrarError, load_declaration
 from .registrar_lane_aliases import (  # noqa: F401 -- re-exported for existing call sites/tests
     ENFORCE_REGISTERED_REPOS_ENV,
@@ -262,7 +262,7 @@ def add_pointer(
     location: str | Path,
     *,
     kind: str = "dir",
-    owner: str | None | Any = _UNSET,
+    owner: str | Any | None = _UNSET,
     aliases: Iterable[str] | None = None,
     base: Path | None = None,
 ) -> Pointer:
@@ -443,7 +443,7 @@ def _field_defining_hop_is_cross_repo(
         template.get("extends"),
         base_dir=next_base_dir,
         repo_root=repo_root,
-        _chain=_chain + (identity,),
+        _chain=(*_chain, identity),
     )
 
 
@@ -531,6 +531,10 @@ def read_declaration_file_set(
         declarations = expand_repository_issue_loop(
             data, repo_root=repo_root, inherited_script_fields=inherited_script_fields
         )
+    elif data.get("kind") == "effort-driver-loop":
+        from .effort_driver_loops import expand_effort_driver_loop
+
+        declarations = expand_effort_driver_loop(data, repo_root=repo_root)
     else:
         declarations = (
             load_declaration(

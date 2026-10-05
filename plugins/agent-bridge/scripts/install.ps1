@@ -249,6 +249,100 @@ function Write-Fail { param([string]$Msg) Write-Host "  [FAIL] $Msg" -Foreground
 function Write-Step { param([string]$Msg) Write-Host "  ...    $Msg" -ForegroundColor DarkGray }
 function Write-Warn { param([string]$Msg) Write-Host "  [WARN] $Msg" -ForegroundColor Yellow }
 
+# Stable, documented contract (ThomasMichon/copilot-extensions#5066): a file
+# containing a single epoch-seconds expiry, present for the duration of a
+# live-service update/start lifecycle -- any downstream consumer (a local
+# liveness watchdog, a diagnostic tool) can check its content without
+# needing any plugin-specific caller-side wrapping. $UpdateMarker itself is
+# set once $InstallDir is finalized below; these two functions only
+# reference it at call time, so defining them here is safe.
+#
+# Process-local: true once THIS invocation holds a refcount slot.
+$script:UpdateMarkerHeld = $false
+
+# Reference-counted, not single-owner: Invoke-Update holding the marker for
+# a long cutover and a separate, brief Invoke-Start both legitimately want
+# it live at once, and a single-owner/last-writer-wins scheme would let the
+# SHORT invocation's own exit delete the marker while the LONG one is still
+# mid-transition -- the marker must stay present until every concurrent
+# holder has released its own slot, not just the most recent one. A named
+# System.Threading.Mutex (the standard cross-process lock primitive on
+# Windows -- `flock` has no equivalent here) makes increment/decrement
+# atomic across processes.
+#
+# `New-Item -Force` the parent directory first: on a fresh or deleted
+# install root, $InstallDir itself may not exist yet at the point either
+# live-service lifecycle starts (its own provisioning step is what would
+# normally create it) -- the marker must not fail BEFORE that provisioning
+# ever gets a chance to run.
+function Get-UpdateMarkerMutex {
+    $name = 'Local\' + ($UpdateMarker -replace '[^a-zA-Z0-9]', '_') + '_refcount'
+    return New-Object System.Threading.Mutex($false, $name)
+}
+function Write-UpdateMarker {
+    param([int]$TtlSeconds = $UpdateMarkerTtlDefault)
+    if ($script:UpdateMarkerHeld) { return }
+    New-Item -ItemType Directory -Force -Path (Split-Path $UpdateMarker -Parent) | Out-Null
+    $countPath = "$UpdateMarker.refcount"
+    $mutex = Get-UpdateMarkerMutex
+    $acquired = $false
+    try {
+        $acquired = $mutex.WaitOne(10000)
+        $count = 0
+        if (Test-Path $countPath) {
+            $raw = Get-Content -Path $countPath -Raw -ErrorAction SilentlyContinue
+            if ($raw) { [int]::TryParse($raw.Trim(), [ref]$count) | Out-Null }
+        }
+        if ($count -eq 0) {
+            # First holder: stamp a fresh marker. A later joiner deliberately
+            # does NOT refresh the expiry -- the TTL is a safety-net backstop,
+            # not a per-holder renewal lease.
+            $expiry = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + $TtlSeconds
+            $tmp = "$UpdateMarker.$([Guid]::NewGuid().ToString('N'))"
+            Set-Content -Path $tmp -Value $expiry -NoNewline
+            Move-Item -Path $tmp -Destination $UpdateMarker -Force
+        }
+        $count++
+        $tmp2 = "$countPath.$([Guid]::NewGuid().ToString('N'))"
+        Set-Content -Path $tmp2 -Value $count -NoNewline
+        Move-Item -Path $tmp2 -Destination $countPath -Force
+        $script:UpdateMarkerHeld = $true
+    } finally {
+        if ($acquired) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
+# Releases this invocation's own refcount slot; only the holder that takes
+# the count to zero actually removes the marker file, so it stays present
+# for the full duration of whichever concurrent transition runs longest.
+function Clear-UpdateMarker {
+    if (-not $script:UpdateMarkerHeld) { return }
+    $script:UpdateMarkerHeld = $false
+    $countPath = "$UpdateMarker.refcount"
+    $mutex = Get-UpdateMarkerMutex
+    $acquired = $false
+    try {
+        $acquired = $mutex.WaitOne(10000)
+        $count = 0
+        if (Test-Path $countPath) {
+            $raw = Get-Content -Path $countPath -Raw -ErrorAction SilentlyContinue
+            if ($raw) { [int]::TryParse($raw.Trim(), [ref]$count) | Out-Null }
+        }
+        if ($count -gt 0) { $count-- }
+        if ($count -le 0) {
+            Remove-Item -Path $UpdateMarker -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path $countPath -Force -ErrorAction SilentlyContinue
+        } else {
+            $tmp = "$countPath.$([Guid]::NewGuid().ToString('N'))"
+            Set-Content -Path $tmp -Value $count -NoNewline
+            Move-Item -Path $tmp -Destination $countPath -Force
+        }
+    } finally {
+        if ($acquired) { $mutex.ReleaseMutex() }
+        $mutex.Dispose()
+    }
+}
+
 # -- Paths -------------------------------------------------------------------
 
 # #935: bound uv's per-request network wait so a hung index/download degrades to
@@ -261,6 +355,8 @@ $PluginDir  = (Resolve-Path (Join-Path $ScriptDir '..')).Path
 $legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-bridge'))
 $InstallDir = if ($InstallDir) { $InstallDir } else { $legacyInstallDir }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+$UpdateMarker = Join-Path $InstallDir 'update-in-progress'
+$UpdateMarkerTtlDefault = 1200  # 20 min -- generous past any observed real cutover
 $publishGlobalBinstubs = [StringComparer]::OrdinalIgnoreCase.Equals(
     $InstallDir,
     $legacyInstallDir
@@ -2416,15 +2512,29 @@ function Invoke-Start {
         return
     }
 
-    # Decide what to do about anything already serving.
+    # Resolve the already-healthy no-op FIRST, as its own early return --
+    # nothing is disrupted on this path, so the marker below must never be
+    # written for it (review finding on an earlier draft of this change:
+    # publishing the marker only after a Stop-DaemonProcesses call left a
+    # window where the daemon was already stopped without watchdog
+    # suppression covering it).
     $proc = Get-RunningProcess
+    if ($proc -and -not $Fresh -and (Test-HealthOnce)) {
+        Write-Warn "agent-bridge is already running (pid=$($proc.Id))"
+        return
+    }
+
+    # From here on every path genuinely disrupts something (a fresh drain, a
+    # wedged-process replace, or a clean cold start) -- mark the lifecycle
+        # before any of that begins. try/finally (not a trap, which PowerShell
+        # only fires for terminating errors, not a clean `return`) covers every
+        # remaining exit path uniformly.
+        Write-UpdateMarker
+        try {
     if ($proc) {
         if ($Fresh) {
             Write-Step "Draining existing daemon (pid=$($proc.Id)) to start fresh..."
             Stop-DaemonProcesses | Out-Null
-        } elseif (Test-HealthOnce) {
-            Write-Warn "agent-bridge is already running (pid=$($proc.Id))"
-            return
         } else {
             # Process exists but the port does not answer -- a wedged/zombie
             # daemon. Replace it rather than leaving the service unhealthy.
@@ -2435,6 +2545,7 @@ function Invoke-Start {
 
     $logFile = Join-Path $InstallDir 'agent-bridge.log'
     $errFile = Join-Path $InstallDir 'agent-bridge-err.log'
+
 
     # Prefer the scheduled task to start the daemon whenever one is registered
     # -- for BOTH headless (S4U/Password, session 0) and at-logon (interactive)
@@ -2539,6 +2650,9 @@ Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
 
     Write-Fail 'agent-bridge failed to start -- check agent-bridge.log / agent-bridge-err.log'
     exit 1
+    } finally {
+                Clear-UpdateMarker
+    }
 }
 
 function Invoke-Stop {
@@ -2733,10 +2847,28 @@ function Invoke-Update {
         return
     }
 
+    # Mark the live-service update lifecycle as in-progress (ce#5066) so a
+    # local liveness watchdog never force-restarts a daemon that is
+    # legitimately, briefly down for drain/stop/stage/start or a zero-downtime
+    # cutover -- ONLY when a local daemon transition can actually happen.
+    # Resolve the forward-route check FIRST: that branch never drains/
+    # stops/starts anything local, so marking it would advertise a live
+    # transition where none occurs (review finding on an earlier draft).
+    # Cleared in the existing try/finally below alongside Exit-InstallLock,
+    # so every exit path (success, a cutover-then-fallback, a failed
+    # update's rollback, or an unhandled terminating error) covers it
+    # uniformly -- PowerShell's `finally` runs even on `exit` within the
+    # same call stack, exactly like this codebase already relies on for the
+    # install lock.
     $activeForward = Test-ActiveIsForward
     if ($activeForward) {
         Write-Step 'Forwarded host bridge route detected -- updating runtime files without draining/stopping/starting a local daemon'
     }
+    if (-not $activeForward) {
+        Write-UpdateMarker
+    }
+    try {
+
     $predecessorSignature = if ($activeForward) { '' } else { Get-ActiveSignature }
 
     # Stop running instance first -- a rebuild/repair of the venv (below) must
@@ -3054,6 +3186,9 @@ function Invoke-Update {
     }
 
     Write-Ok 'Update complete'
+    } finally {
+            Clear-UpdateMarker
+    }
 }
 
 # -- Dispatch ----------------------------------------------------------------
