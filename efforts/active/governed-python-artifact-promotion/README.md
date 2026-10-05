@@ -1281,6 +1281,35 @@ win grows with build complexity.
   and `ruff check --select F,E9 --output-format=github .` both pass
   clean. Smoke-tested for real again against the live governed feed,
   including directly exercising the real OS mutex/flock acquisition.
+- Round 28's push broke the required `guards + lint` Ubuntu job again:
+  the new `windows_only`-marker split revealed that tests forcing
+  `sys.platform == "win32"` to exercise Windows-shaped code on the real
+  Linux runner now hit genuine `ctypes.windll.*` calls, and
+  `ctypes.windll` does not exist as an attribute at all on non-Windows
+  platforms (unlike `fcntl`, a cleanly-absent importable module). Fixed
+  by branching `_provenance_key_lock` on `hasattr(ctypes, "windll")`
+  (actual capability) instead of `sys.platform` (spoofable), and by
+  mocking `_well_known_sid_display_name` directly at the handful of test
+  sites that restore the real `_verify_restricted_acl` but run on Linux.
+  198/198 tests pass; `guards + lint` finally went green END-TO-END for
+  the first time in the PR's history (~12.5 min run, every step
+  including the late `ruff` step actually reached and passed).
+- A twenty-ninth review round (generated against the round-28 commit,
+  predating the ctypes.windll fix above) found one more genuine issue:
+  the named Windows mutex (`Local\...`) used by `_provenance_key_lock`
+  is scoped to ONE Terminal Services session, so two processes for the
+  same account in different sessions would each wait on a DIFFERENT
+  mutex object, reopening the exact race this lock exists to close.
+  Replaced the named mutex with a `LockFileEx` byte-range lock on the
+  lock file itself -- visible host-wide regardless of session, with no
+  separate kernel-namespace ACL to get right, and still released
+  automatically by the OS the instant the holding handle closes for any
+  reason. The round's other finding (a stale "Round 25 moved..." test
+  comment) was already resolved by the ctypes.windll-fix commit above,
+  which this review predates. 198/198 tests pass, ruff/module-size
+  checks clean, and smoke-tested genuine cross-PROCESS exclusion
+  directly: a parent process holds the lock, a real child process
+  blocks until the parent releases, then acquires immediately.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 
