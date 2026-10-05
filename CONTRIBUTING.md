@@ -41,8 +41,9 @@ base branch.
 >    take one side; `dev` may have moved the same files). There is no need to
 >    open a fresh PR; the existing one keeps its history/discussion.
 > 2. **A broken `dev` build blocks *every* release, not just your change.**
->    The promotion pipeline only fires on a green `dev` CI run
->    (`workflow_run` → validate → promote, all one workflow); if the run your
+>    The promotion pipeline only fires on a green `dev` CI run (a separate
+>    cheap filter workflow reacts to `CI` completing and dispatches the
+>    validate/promote workflow); if the run your
 >    PR merged into is red, **nothing promotes to `main` until a later `dev`
 >    commit is green again** — your fix included. Contributors are expected to
 >    fix a CI failure on `dev` promptly (a revert is always acceptable if a
@@ -56,10 +57,10 @@ base branch.
 >    confirm your change actually shipped, watch for that candidate PR
 >    merging (`gh pr list --search "is:merged head:release/promote-"`, or just
 >    watch `main`'s commit history) rather than assuming your `dev` merge was
->    the release. A small, separate **"clear consumed changefiles on dev"**
->    housekeeping PR normally follows each successful promotion a few minutes
->    later — that one is routine cleanup, not something you need to review or
->    act on, but don't be surprised to see it land right after yours.
+>    the release. A separate **"clear consumed changefiles on dev"**
+>    housekeeping PR follows on its own daily (or on-demand) schedule, not per
+>    promotion — routine cleanup, not something you need to review or
+>    act on, but don't be surprised to see one land within a day.
 >
 > See [docs/pipelines.md § Promotion: dev → main](docs/pipelines.md#promotion-dev--main)
 > for the full mechanics and how to preview a pending release without

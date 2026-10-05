@@ -249,7 +249,7 @@ jobs:
         # release/recovery check (docs/pipelines.md § Release & Versioning)
         # -- so its own regression suite still needs to run somewhere, not
         # just when a dependent guard's tests happen to exercise it.
-        # Path-gated (23 tests, each launching the real script as a
+        # Path-gated (over 20 tests, each launching the real script as a
         # subprocess inside a throwaway git repo): too heavy to run
         # unconditionally on every PR per this repo's change-scoped CI
         # policy, so it only runs when a file it actually exercises changed
