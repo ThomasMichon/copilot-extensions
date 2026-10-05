@@ -35,17 +35,9 @@ import sqlite3
 import uuid
 from collections.abc import Callable
 
-from .queue_records import SpawnReservation, SpawnState, Status, TaskError
+from .queue_records import ExclusiveKeyBusyError, SpawnReservation, SpawnState, Status, TaskError
 
 log = logging.getLogger("agent-dispatch.queue")
-
-
-class ExclusiveKeyBusyError(TaskError):
-    """Raised when reacquiring a reservation's ``exclusive_key`` (e.g. resuming
-    a cold, steering-released reservation) collides with another reservation
-    that is currently active under the same key. Callers should treat this as
-    a legitimate "not yet safe, retry later" answer -- never a hard failure --
-    the same discipline as :data:`SpawnState.DEFERRED`."""
 
 
 def spawn_key(task_id: str, attempt: int) -> str:
@@ -170,21 +162,11 @@ class SpawnReservationMixin:
                 active = conn.execute(
                     "SELECT * FROM spawn_reservations "
                     "WHERE exclusive_key = ? AND state IN (?, ?, ?, ?) "
-                    # A DIFFERENT task's cold reservation that released its
-                    # exclusive_key (an awaiting_steer suspension -- nothing
-                    # is actually using the exclusive resource) does not
-                    # block a fresh reservation here. This task's OWN
-                    # reservation still blocks regardless, preserving the
-                    # existing per-task active-reservation dedupe.
                     "AND (exclusive_released = 0 OR task_id = ?) "
                     "ORDER BY reserved_at ASC LIMIT 1",
                     (
-                        task.exclusive_key,
-                        SpawnState.RESERVING,
-                        SpawnState.SPAWNED,
-                        SpawnState.COLD,
-                        SpawnState.RELEASING,
-                        task_id,
+                        task.exclusive_key, SpawnState.RESERVING, SpawnState.SPAWNED,
+                        SpawnState.COLD, SpawnState.RELEASING, task_id,
                     ),
                 ).fetchone()
                 if active is not None:
@@ -403,33 +385,18 @@ class SpawnReservationMixin:
                     "cleanup_claim_expires_at = CASE WHEN ? IS NOT NULL THEN 0 "
                     "ELSE cleanup_claim_expires_at END, "
                     "release_requested = CASE WHEN ? THEN 1 ELSE release_requested END, "
-                    "exclusive_released = CASE WHEN ? IS NOT NULL THEN ? ELSE exclusive_released END "
+                    "exclusive_released = COALESCE(?, exclusive_released) "
                     "WHERE key = ?",
                     (
-                        to_state,
-                        ts,
-                        session_handle,
-                        session_handle,
-                        worktree,
-                        worktree,
-                        detail,
-                        conclusion_state,
-                        conclusion_state,
-                        conclusion_detail,
-                        conclusion_detail,
-                        claim_token,
-                        1 if release_requested else 0,
-                        exclusive_released,
-                        1 if exclusive_released else 0,
-                        key,
+                        to_state, ts, session_handle, session_handle, worktree, worktree,
+                        detail, conclusion_state, conclusion_state, conclusion_detail,
+                        conclusion_detail, claim_token, 1 if release_requested else 0,
+                        None if exclusive_released is None else int(exclusive_released), key,
                     ),
                 )
             except sqlite3.IntegrityError as exc:
                 conn.execute("ROLLBACK")
-                raise ExclusiveKeyBusyError(
-                    f"reservation {key} cannot reacquire its exclusive_key: "
-                    f"another active reservation already holds it ({exc})"
-                ) from exc
+                raise ExclusiveKeyBusyError(f"{key}: exclusive_key busy: {exc}") from exc
             if to_state in SpawnState.RELEASABLE and row["state"] in SpawnState.ACTIVE:
                 latest = conn.execute(
                     "SELECT key FROM spawn_reservations WHERE task_id = ? "
@@ -458,12 +425,6 @@ class SpawnReservationMixin:
         Called right after a successful ``agent-worktrees embody`` launch. The
         handle is what lets a supervisor restart reconcile (join the reservation
         to the live session) instead of re-spawning.
-
-        Always reacquires ``exclusive_key`` (clears any steering-release from
-        :meth:`record_cold`) -- raises :class:`ExclusiveKeyBusyError` instead
-        of succeeding if a sibling reservation currently holds the same key,
-        so a resuming cold task waits its turn rather than conflicting with
-        (e.g.) a sibling's own live headed browser.
         """
         return self._update_reservation(
             key,
@@ -564,15 +525,8 @@ class SpawnReservationMixin:
     ) -> SpawnReservation:
         """Mark a spawned headless body intentionally stopped and dormant.
 
-        ``release_exclusive`` additionally drops this reservation's hold on
-        its ``exclusive_key`` while cold (used for an ``awaiting_steer``
-        suspension, where nothing is actually using the exclusive resource --
-        e.g. a headed browser -- so a sibling task sharing the same key may
-        claim a fresh reservation and proceed rather than sit queued behind a
-        task that is purely waiting on an operator). Resuming this
-        reservation (:meth:`record_spawn`) always reacquires the key,
-        deferring (via :class:`ExclusiveKeyBusyError`) if a sibling is
-        currently using it.
+        ``release_exclusive`` drops this reservation's ``exclusive_key`` hold
+        while cold, so a sibling may spawn; ``record_spawn`` reacquires it.
         """
         return self._update_reservation(
             key,

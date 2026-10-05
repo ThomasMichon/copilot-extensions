@@ -91,6 +91,7 @@ from .queue_producer_fences import (  # noqa: F401 -- re-exported for existing c
     ProducerScopeValidationError,
 )
 from .queue_records import (  # noqa: F401 -- re-exported for existing call sites/tests
+    ExclusiveKeyBusyError,
     ResourceReservation,
     ScheduleLease,
     ScheduleRecord,
@@ -104,7 +105,6 @@ from .queue_routing_assignments import RoutingAssignmentMixin
 from .queue_schedule_registry import ScheduleRegistrationMixin
 from .queue_spawn_rearm import SpawnRearmMixin
 from .queue_spawn_reservations import (  # noqa: F401 -- re-exported for existing call sites/tests
-    ExclusiveKeyBusyError,
     SpawnReservationMixin,
     spawn_key,
 )

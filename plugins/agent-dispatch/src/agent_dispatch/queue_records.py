@@ -28,6 +28,11 @@ class TaskError(RuntimeError):
     """Raised on an illegal state transition or a lease/ownership violation."""
 
 
+class ExclusiveKeyBusyError(TaskError):
+    """Reacquiring ``exclusive_key`` collided with an active sibling -- retry
+    later, not a hard failure (same discipline as ``SpawnState.DEFERRED``)."""
+
+
 class Status:
     """The nine task states (string constants, stored verbatim)."""
 
