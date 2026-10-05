@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from agent_worktrees import __main__ as cli
-from agent_worktrees import tracking
+from agent_worktrees import tracking, worktree_identity
 
 
 def _rec(wt_id, *, status="active", path="/tmp/wt", kind="session"):
@@ -361,7 +361,7 @@ def test_post_exit_sweeps_orphans_when_finalized(tmp_path, monkeypatch):
                         lambda: calls.__setitem__("sweep", calls["sweep"] + 1))
     monkeypatch.setattr(cli.cfg, "load_config", lambda *a, **k: object())
     monkeypatch.setattr(cli, "_infer_worktree_id", lambda wid, config: "wt-x")
-    monkeypatch.setattr(cli, "_resolve_worktree_id", lambda wid: "wt-x")
+    monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda wid: "wt-x")
     monkeypatch.setattr(cli.cfg, "tracking_dir", lambda: tmp_path)
     (tmp_path / "wt-x.yaml").write_text("")   # record exists
     monkeypatch.setattr(cli.tracking, "load_record",
@@ -378,7 +378,7 @@ def test_post_exit_sweeps_orphans_when_no_record(tmp_path, monkeypatch):
                         lambda: calls.__setitem__("sweep", calls["sweep"] + 1))
     monkeypatch.setattr(cli.cfg, "load_config", lambda *a, **k: object())
     monkeypatch.setattr(cli, "_infer_worktree_id", lambda wid, config: "wt-x")
-    monkeypatch.setattr(cli, "_resolve_worktree_id", lambda wid: "wt-x")
+    monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda wid: "wt-x")
     monkeypatch.setattr(cli.cfg, "tracking_dir", lambda: tmp_path)   # no yaml -> missing
 
     assert cli.cmd_post_exit(_post_exit_args()) == 0

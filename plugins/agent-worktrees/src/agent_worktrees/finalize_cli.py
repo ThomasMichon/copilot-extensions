@@ -7,7 +7,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import codename_tracking, config as cfg, finalize as fin, git_ops, output, pr_ops, tracking
+from . import codename_tracking, config as cfg, finalize as fin, git_ops, output, pr_ops, tracking, worktree_identity
 from . import context_cli
 
 
@@ -218,7 +218,7 @@ def cmd_post_exit(args: argparse.Namespace) -> int:
             "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
         )
         return 1
-    worktree_id = core._resolve_worktree_id(worktree_id)
+    worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
 
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
@@ -301,7 +301,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
                 return output._json_error(msg)
             output.err(msg)
             return 1
-        worktree_id = core._resolve_worktree_id(worktree_id)
+        worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
         abandon = getattr(args, "abandon", False)
         handoff_to = (getattr(args, "handoff_to", None) or "").strip()
         if abandon and not handoff_to:
@@ -378,7 +378,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
                 return output._json_error(msg)
             output.err(msg)
             return 1
-        worktree_id = core._resolve_worktree_id(worktree_id)
+        worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
 
         if getattr(args, "title_only", False):
             yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
@@ -478,7 +478,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 return output._json_error(msg)
             output.err(msg)
             return 1
-        worktree_id = core._resolve_worktree_id(worktree_id)
+        worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
 
         target_repo_arg = getattr(args, "repo", None)
         from_branch = getattr(args, "from_branch", None)
@@ -715,7 +715,7 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
             "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
         )
         return 1
-    worktree_id = core._resolve_worktree_id(worktree_id)
+    worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
 
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Migrate _resolve_worktree_id off the core()/_core() compat-root pattern (compatibility-root-decoupling effort, Phase 2 slice 2)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

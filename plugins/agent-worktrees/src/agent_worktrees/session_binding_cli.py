@@ -8,7 +8,7 @@ import sys
 
 import yaml
 
-from . import activity, output, profile_assignment, related_briefing, sessions, tracking
+from . import activity, output, profile_assignment, related_briefing, sessions, tracking, worktree_identity
 from . import config as cfg, session_context as session_context_mod
 from . import session_tracking_cli, status_monitor_runtime, status_updater_cli, tracking_session_registration_write as _session_register_write
 
@@ -94,10 +94,6 @@ def _spawn_status_updater(*args, **kwargs):
 
 def _maybe_emit_stage_13(*args, **kwargs):
     return _core()._maybe_emit_stage_13(*args, **kwargs)
-
-
-def _resolve_worktree_id(*args, **kwargs):
-    return _core()._resolve_worktree_id(*args, **kwargs)
 
 
 def _resolve_active_project(*args, **kwargs):
@@ -621,7 +617,7 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
                 exit_code=3,
             )
         try:
-            wt_id = _resolve_worktree_id(wt_id)
+            wt_id = worktree_identity._resolve_worktree_id(wt_id)
         except Exception as e:
             return output._json_error(f"could not resolve worktree '{wt_id}': {e}")
     else:
@@ -738,7 +734,7 @@ def cmd_note_handoff(args: argparse.Namespace) -> int:
     wt_id = getattr(args, "worktree_id", None)
     wdir = getattr(args, "worktree_dir", None) or os.getcwd()
     if wt_id:
-        wt_id = _resolve_worktree_id(wt_id)
+        wt_id = worktree_identity._resolve_worktree_id(wt_id)
     else:
         _activate_project_for_path(wdir)
         try:
@@ -921,7 +917,7 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
         if not cfg.active_project():
             _activate_project_for_worktree_id(wt_id)
         try:
-            wt_id = _resolve_worktree_id(wt_id)
+            wt_id = worktree_identity._resolve_worktree_id(wt_id)
         except Exception:
             return 0
     if not wt_id:

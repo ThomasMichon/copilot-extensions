@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import config as cfg, output
+from . import config as cfg, output, worktree_identity
 
 
 def _core():
@@ -15,14 +15,6 @@ def _core():
 
 def _infer_worktree_id(*args, **kwargs):
     return _core()._infer_worktree_id(*args, **kwargs)
-
-
-
-
-
-
-def _resolve_worktree_id(*args, **kwargs):
-    return _core()._resolve_worktree_id(*args, **kwargs)
 
 
 def add_parsers(sub) -> None:
@@ -75,7 +67,7 @@ def _git_resolve_target(rest: list[str], use_json: bool):
             return None, output._json_error(msg)
         output.err(msg)
         return None, 1
-    return config, _resolve_worktree_id(worktree_id)
+    return config, worktree_identity._resolve_worktree_id(worktree_id)
 
 
 def _git_positional(rest: list[str]) -> str | None:

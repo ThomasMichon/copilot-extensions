@@ -11,6 +11,7 @@ import pytest
 
 from agent_worktrees import __main__ as cli
 from agent_worktrees import output
+from agent_worktrees import worktree_identity
 from agent_worktrees import finalize, tracking
 
 WORKTREE_ID = "host-win-20260909-abcd"
@@ -41,7 +42,7 @@ def _configure(monkeypatch, tmp_path, outputs) -> None:
         lambda: SimpleNamespace(default_repo=repo, repos={"example": repo}),
     )
     monkeypatch.setattr(cli.cfg, "tracking_dir", lambda: tmp_path)
-    monkeypatch.setattr(cli, "_resolve_worktree_id", lambda value: value)
+    monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: value)
     monkeypatch.setattr(output, "_json_output", outputs.append)
     monkeypatch.setattr(
         output,

@@ -17,7 +17,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
-from agent_worktrees import activity, git_ops, session_projection, sessions, tracking
+from agent_worktrees import activity, git_ops, session_projection, sessions, tracking, worktree_identity
 from agent_worktrees.tracking import WorktreeRecord, load_record, save_record
 
 
@@ -1151,7 +1151,7 @@ class TestDeregisterSessionStdin:
             m, "_activate_project_for_worktree_id", activate
         )
         monkeypatch.setattr(
-            m, "_resolve_worktree_id", lambda wid: wid
+            worktree_identity, "_resolve_worktree_id", lambda wid: wid
         )
         monkeypatch.setattr(m, "_capture_session_title", lambda *_: True)
         args = argparse.Namespace(

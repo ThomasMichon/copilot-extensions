@@ -1,4 +1,4 @@
-﻿"""Tests for the live-cutover handoff mux primitives + ``handoff-cutover`` cmd.
+"""Tests for the live-cutover handoff mux primitives + ``handoff-cutover`` cmd.
 
 These cover the *pure* argv construction and the command's control flow
 (mode selection, arg validation, plan reconstruction) with the mux
@@ -23,6 +23,7 @@ import pytest
 from agent_worktrees import __main__ as m
 from agent_worktrees import activity, locks, procs, reclaim, sessions
 from agent_worktrees import sessions_pane_retire
+from agent_worktrees import worktree_identity
 
 
 # â”€â”€ build_mux_new_window_argv (pure) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -3295,7 +3296,7 @@ def test_retire_stamps_predecessor_session_state_with_successor_id(monkeypatch):
         json.dumps({"handoffId": "task-123", "sessionId": "old-sess"}),
         encoding="utf-8",
     )
-    monkeypatch.setattr(m, "_resolve_worktree_id", lambda raw: raw)
+    monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda raw: raw)
     monkeypatch.setattr(
         m.pane_lifecycle,
         "pane_terminate",
@@ -3333,7 +3334,7 @@ def test_retire_stamps_predecessor_session_state_with_successor_id(monkeypatch):
 def test_retire_result_passes_expected_mux_session_to_pane_terminate(monkeypatch):
     observed: dict[str, object] = {}
 
-    monkeypatch.setattr(m, "_resolve_worktree_id", lambda raw: raw)
+    monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda raw: raw)
     monkeypatch.setattr(m, "_conclude_retired_predecessor", lambda *args, **kwargs: None)
     monkeypatch.setattr(m, "_maybe_emit_stage_13", lambda *args, **kwargs: None)
     monkeypatch.setattr(m, "_resolve_retire_pane_mux_session", lambda pane, expected: "wt-retire")
