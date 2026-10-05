@@ -465,6 +465,21 @@ for the attributed lines just because a *different* line in the same diff
 tripped the fallback trigger. `decide()` now unions both sets; a new
 mixed-case regression test covers it directly.
 
+**Fifth round of review fixes (same PR):** fixed a real, pre-existing
+latent bug in Phase 2's own `ancestor_resolution.resolve_nearest_baseline`
+(not new code, but only now exercised by `decide()`'s own live call path):
+a malformed-but-valid-JSON pointer document (not an object at all, or a
+truthy-but-non-string `measured_commit`) wasn't skipped like a genuine
+JSON-decode failure -- `.get()` on a non-dict candidate raised
+`AttributeError`, and a non-string `measured_commit` reached
+`is_ancestor`'s own `subprocess.run` call and raised `TypeError` there,
+either of which crashed past both this function's own documented
+"raises only for a genuine plumbing failure" contract and `decide()`'s
+"never raises for an untrusted baseline" contract downstream. Both cases
+now fall through to the next (older) generation, exactly like the
+existing JSON-decode-failure handling. 2 new regression tests in
+`TestResolveNearestBaseline`.
+
 **Also noted, not caused by this work:** the operator flagged that
 `main`'s history was force-rewritten (via `git filter-repo`) to purge
 ~300MB of accumulated `.github/coverage-baselines/` blobs committed

@@ -1263,6 +1263,59 @@ class TestResolveNearestBaseline:
         resolved = ar.resolve_nearest_baseline(repo, "nope", c1, main_ref="dev")
         assert resolved is None
 
+    def test_skips_a_generation_whose_document_is_not_an_object(self, tmp_path):
+        # Regression: valid JSON that isn't a dict at all (e.g. a bare
+        # list) must be skipped like a JSON-decode failure -- `.get()` on
+        # it would otherwise raise AttributeError, crashing past this
+        # function's own "raises only for a genuine plumbing failure"
+        # contract.
+        repo = _init_repo(tmp_path)
+        (repo / "src.py").write_text("line1\n")
+        dev_c1 = _commit(repo, "dev c1")
+
+        _run_git(["checkout", "-q", "-b", "main"], cwd=repo)
+        baseline_path = repo / ".github" / "coverage-baselines" / "myplugin.json"
+        baseline_path.parent.mkdir(parents=True)
+        # Older, genuinely valid generation.
+        baseline_path.write_text(json.dumps({"measured_commit": dev_c1, "coverage": {}}))
+        _commit(repo, "valid older generation")
+        # Newest generation is malformed (a bare list, not an object).
+        baseline_path.write_text(json.dumps([dev_c1]))
+        _commit(repo, "malformed newest generation")
+
+        _run_git(["checkout", "-q", "-b", "pr", dev_c1], cwd=repo)
+        fork_commit = dev_c1
+
+        resolved = ar.resolve_nearest_baseline(repo, "myplugin", fork_commit, main_ref="main")
+
+        assert resolved is not None
+        assert resolved.baseline["measured_commit"] == dev_c1
+
+    def test_skips_a_generation_whose_measured_commit_is_not_a_string(self, tmp_path):
+        # Regression: a numeric/list-valued measured_commit is truthy, so
+        # the old `if not measured_commit: continue` check didn't catch it
+        # -- it reached `is_ancestor`'s own `subprocess.run` call and
+        # raised a raw TypeError there instead.
+        repo = _init_repo(tmp_path)
+        (repo / "src.py").write_text("line1\n")
+        dev_c1 = _commit(repo, "dev c1")
+
+        _run_git(["checkout", "-q", "-b", "main"], cwd=repo)
+        baseline_path = repo / ".github" / "coverage-baselines" / "myplugin.json"
+        baseline_path.parent.mkdir(parents=True)
+        baseline_path.write_text(json.dumps({"measured_commit": dev_c1, "coverage": {}}))
+        _commit(repo, "valid older generation")
+        baseline_path.write_text(json.dumps({"measured_commit": 12345, "coverage": {}}))
+        _commit(repo, "malformed newest generation")
+
+        _run_git(["checkout", "-q", "-b", "pr", dev_c1], cwd=repo)
+        fork_commit = dev_c1
+
+        resolved = ar.resolve_nearest_baseline(repo, "myplugin", fork_commit, main_ref="main")
+
+        assert resolved is not None
+        assert resolved.baseline["measured_commit"] == dev_c1
+
 
 class TestComputeFileRemap:
     def test_unchanged_file(self, tmp_path):
