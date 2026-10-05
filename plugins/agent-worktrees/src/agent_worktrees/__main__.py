@@ -2743,6 +2743,12 @@ def _cmd_status_write(
             },
             read_lock_data=lambda: _locks.read_lock(_monitor_lock_path()),
             ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
+            # Requires the verb's version-2 payload shape (the `paused`
+            # arg, 2026-10-05 PR review finding) -- a resident daemon
+            # still advertising only version 1 is never dialed; the
+            # in-process fallback always runs this call site's own
+            # current code instead.
+            min_version=2,
         )
     except tracking_write.AmbiguousWriteOutcome as e:
         output.err(f"Disposition write to worktree {worktree_id} is in an unknown state: {e}")

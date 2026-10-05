@@ -141,6 +141,20 @@ SUBSCRIBER_TTL_SECONDS = 30.0
 
 _VERBS: dict[str, Callable[[dict], dict]] = {}
 
+#: Per-verb schema version (2026-10-05 PR review finding, "rolling-upgrade
+#: version-skew window can silently lose a new payload field"): reusing an
+#: existing verb NAME for an enriched ``args`` shape (e.g. adding a field a
+#: pre-upgrade daemon process's still-running old code would silently
+#: ignore) is invisible to the ``tracking_write_verbs`` capability check
+#: below, which only ever looks at the verb's NAME. A verb whose payload
+#: shape changed bumps its own version here; :func:`endpoint_from_rendezvous`
+#: additionally rejects an endpoint whose advertised version for that verb
+#: is too old, so the request falls back to :func:`run_direct` -- always
+#: correct, since that runs the CALLING process's own current code -- for
+#: the rest of that rolling-upgrade window, exactly like an unknown verb
+#: name already does.
+_VERB_VERSIONS: dict[str, int] = {}
+
 #: How many :func:`compute` calls (verb executions) are currently running in
 #: this process -- the daemon process, when this module's server is live.
 #: Deliberately independent of ``CoalescingServer.subscriber_count()``: a
@@ -217,7 +231,7 @@ def _ensure_verb_modules_loaded() -> None:
         _verb_modules_loaded = True
 
 
-def register_verb(name: str, fn: Callable[[dict], dict]) -> None:
+def register_verb(name: str, fn: Callable[[dict], dict], *, version: int = 1) -> None:
     """Register a mutation verb.
 
     ``fn`` receives the request's ``args`` dict and returns a JSON-safe
@@ -232,8 +246,15 @@ def register_verb(name: str, fn: Callable[[dict], dict]) -> None:
     registered from inside a CLI command's own function body would reproduce
     the cross-process gap :data:`_VERB_MODULES` exists to close -- register
     at import time, not call time.
+
+    ``version`` defaults to 1 and only needs bumping when an existing verb's
+    ``args``/result SHAPE changes in a way an older registered ``fn`` for the
+    same name would silently mishandle (see :data:`_VERB_VERSIONS`) -- a
+    purely additive, backward-compatible change (an older ``fn`` ignores an
+    unrecognized arg key safely) does not require a bump.
     """
     _VERBS[name] = fn
+    _VERB_VERSIONS[name] = version
 
 
 def registered_verbs() -> frozenset[str]:
@@ -352,11 +373,24 @@ def rendezvous_fields(server: CoalescingServer) -> dict:
         "tracking_write_token": rv["token"],
         "tracking_write_generation": rv["generation"],
         "tracking_write_verbs": sorted(_VERBS),
+        # Only published when at least one verb actually needs it -- keeps
+        # this payload, and every existing consumer's exact-field
+        # expectations, unchanged for the overwhelming majority of verbs
+        # that never bumped past version 1.
+        **(
+            {
+                "tracking_write_verb_versions": {
+                    name: version for name, version in _VERB_VERSIONS.items() if version > 1
+                }
+            }
+            if any(version > 1 for version in _VERB_VERSIONS.values())
+            else {}
+        ),
     }
 
 
 def endpoint_from_rendezvous(
-    data: dict | None, *, verb: str | None = None,
+    data: dict | None, *, verb: str | None = None, min_version: int = 1,
 ) -> tuple[str, int, str] | None:
     """Parse this module's rendezvous fields out of an already-read lock dict.
 
@@ -379,6 +413,17 @@ def endpoint_from_rendezvous(
     endpoint that cannot demonstrate it serves ``verb`` is never dialed at
     all, so the caller's normal boot-wait/fallback path runs instead,
     exactly as if no endpoint had been found).
+
+    When ``min_version`` is above 1, ALSO rejects an endpoint whose
+    published ``tracking_write_verb_versions`` entry for ``verb`` is lower
+    (including absent, which means version 1) -- the same-name-but-
+    enriched-payload rolling-upgrade case :data:`_VERB_VERSIONS` exists for:
+    a verb a pre-upgrade daemon process already recognizes by name, but
+    whose still-running old ``fn`` would silently ignore (or otherwise
+    mishandle) a field a newer payload shape adds (2026-10-05 PR review
+    finding). Unlike the name check, this can never be confirmed from the
+    daemon's response after the fact (the old ``fn`` succeeds normally, it
+    just drops data) -- it must be caught here, before dialing.
     """
     if not isinstance(data, dict):
         return None
@@ -386,6 +431,11 @@ def endpoint_from_rendezvous(
         verbs = data.get("tracking_write_verbs")
         if not isinstance(verbs, list) or verb not in verbs:
             return None
+        if min_version > 1:
+            versions = data.get("tracking_write_verb_versions")
+            current = versions.get(verb, 1) if isinstance(versions, dict) else 1
+            if not isinstance(current, int) or current < min_version:
+                return None
     endpoint = data.get("tracking_write_endpoint")
     token = data.get("tracking_write_token")
     if not isinstance(endpoint, str) or not isinstance(token, str) or not token:
@@ -524,6 +574,7 @@ def write_with_boot(
     request_deadline_s: float = REQUEST_DEADLINE_S,
     boot_wait_s: float = BOOT_WAIT_S,
     poll_interval_s: float = 0.1,
+    min_version: int = 1,
 ) -> dict:
     """Dial, boot-and-wait if no resident monitor currently publishes a
     tracking-write endpoint, then send one request.
@@ -558,12 +609,16 @@ def write_with_boot(
     never accepts one from a caller -- so every entry point through this
     function structurally guarantees two writes can never coalesce onto one
     execution, regardless of what a caller passes.
+
+    ``min_version`` is forwarded to :func:`endpoint_from_rendezvous` --
+    see its own docstring for the same-name-but-enriched-payload skew case
+    it closes.
     """
     started = time.time()
     verb = payload.get("verb") if isinstance(payload, dict) else None
 
     def _dial() -> tuple[str, int, str] | None:
-        return endpoint_from_rendezvous(read_lock_data(), verb=verb)
+        return endpoint_from_rendezvous(read_lock_data(), verb=verb, min_version=min_version)
 
     endpoint = _dial()
     if endpoint is None and ensure_monitor is not None:
@@ -604,6 +659,7 @@ def dispatch(
     ensure_monitor: Callable[[], bool] | None,
     request_deadline_s: float = REQUEST_DEADLINE_S,
     boot_wait_s: float = BOOT_WAIT_S,
+    min_version: int = 1,
 ) -> dict:
     """The public entry point a migrated call site uses in place of calling
     its verb's function directly: try the resident daemon first (booting one
@@ -616,6 +672,14 @@ def dispatch(
     failed -- that state is never safe to auto-retry. This is a genuine
     exception a caller must handle deliberately, not a bug: it is the one
     case this module refuses to paper over with a same-code fallback.
+
+    ``min_version`` names the minimum schema version this call site's
+    ``args`` shape requires of a resident daemon's registered verb (see
+    :data:`_VERB_VERSIONS`) -- pass the verb-owning module's own bumped
+    version once it adds a field an older same-named verb would silently
+    ignore. An endpoint below that version is treated exactly like one
+    lacking the verb entirely: never dialed, same-code fallback used
+    instead.
     """
     payload = {"verb": verb, "args": args}
 
@@ -629,4 +693,5 @@ def dispatch(
         fallback=_fallback,
         request_deadline_s=request_deadline_s,
         boot_wait_s=boot_wait_s,
+        min_version=min_version,
     )

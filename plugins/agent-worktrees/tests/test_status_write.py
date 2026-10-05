@@ -114,10 +114,10 @@ def test_paused_does_not_reactivate_finalized_worktree(status_env):
 
 
 def test_unpaused_prints_an_explicit_confirmation(status_env, capsys):
-    """Copilot review finding: `--unpaused` only ever printed the unrelated
-    follow-up flag (`resolved`), never confirming the paused flag was
-    actually cleared -- indistinguishable from a write that never touched
-    `paused` at all."""
+    """`--unpaused` must print an explicit confirmation that the flag was
+    cleared, not just the unrelated follow-up flag (`resolved`) -- otherwise
+    it is indistinguishable from a write that never touched `paused` at
+    all."""
     args = argparse.Namespace(worktree_id=None)
 
     assert main._cmd_status_write(args, summary=None, paused=True) == 0

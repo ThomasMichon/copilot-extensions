@@ -32,11 +32,14 @@ def _clean_verb_registry():
     # few reach into the _VERB_MODULES/_verb_modules_loaded loader state --
     # isolate each test so one test's changes never leak into another's.
     before_verbs = dict(tracking_write._VERBS)
+    before_versions = dict(tracking_write._VERB_VERSIONS)
     before_modules = tracking_write._VERB_MODULES
     before_loaded = tracking_write._verb_modules_loaded
     yield
     tracking_write._VERBS.clear()
     tracking_write._VERBS.update(before_verbs)
+    tracking_write._VERB_VERSIONS.clear()
+    tracking_write._VERB_VERSIONS.update(before_versions)
     tracking_write._VERB_MODULES = before_modules
     tracking_write._verb_modules_loaded = before_loaded
 
@@ -46,14 +49,20 @@ def test_rendezvous_fields_are_namespaced_and_parseable():
     server.start()
     try:
         fields = _endpoint_dict(server)
+        # `rendezvous_fields` loads the real `_VERB_MODULES` (including the
+        # production `status_disposition_write` verb, registered at
+        # version 2), so `tracking_write_verb_versions` is always present
+        # here -- not test-registered, a real permanent system fact.
         assert set(fields) == {
             "tracking_write_transport",
             "tracking_write_endpoint",
             "tracking_write_token",
             "tracking_write_generation",
             "tracking_write_verbs",
+            "tracking_write_verb_versions",
         }
         assert isinstance(fields["tracking_write_verbs"], list)
+        assert isinstance(fields["tracking_write_verb_versions"], dict)
         endpoint = tracking_write.endpoint_from_rendezvous(fields)
         assert endpoint is not None
         host, port, token = endpoint
@@ -129,6 +138,67 @@ def test_endpoint_from_rendezvous_rejects_pre_capability_daemon_data():
     # Without a verb filter, old-shaped data is still a valid endpoint --
     # this check is opt-in per caller, not a blanket rejection.
     assert tracking_write.endpoint_from_rendezvous(old_shaped_fields) is not None
+
+
+def test_endpoint_from_rendezvous_rejects_an_endpoint_below_min_version():
+    """(2026-10-05 PR review finding) Reusing an existing verb NAME for an
+    enriched payload shape is invisible to the by-name capability check
+    above -- a pre-upgrade daemon process still recognizes the verb and
+    would silently ignore (or mishandle) the new field. ``min_version``
+    closes that gap: an endpoint whose published version for this verb is
+    too low (or missing, meaning version 1) is never dialed, exactly like
+    an endpoint lacking the verb's name."""
+    fields = {
+        "tracking_write_endpoint": "127.0.0.1:65535",
+        "tracking_write_token": "tok",
+        "tracking_write_verbs": ["status_disposition_write"],
+        "tracking_write_verb_versions": {"status_disposition_write": 2},
+    }
+    assert tracking_write.endpoint_from_rendezvous(
+        fields, verb="status_disposition_write", min_version=2,
+    ) is not None
+    assert tracking_write.endpoint_from_rendezvous(
+        fields, verb="status_disposition_write", min_version=3,
+    ) is None
+    # A daemon advertising the verb but no version entry at all (an older
+    # process that predates versioning, or a verb that never bumped) means
+    # version 1 -- rejected by any min_version above that.
+    unversioned_fields = {
+        "tracking_write_endpoint": "127.0.0.1:65535",
+        "tracking_write_token": "tok",
+        "tracking_write_verbs": ["status_disposition_write"],
+    }
+    assert tracking_write.endpoint_from_rendezvous(
+        unversioned_fields, verb="status_disposition_write", min_version=2,
+    ) is None
+    # min_version=1 (the default) never rejects on version grounds.
+    assert tracking_write.endpoint_from_rendezvous(
+        unversioned_fields, verb="status_disposition_write",
+    ) is not None
+
+
+def test_rendezvous_fields_only_publishes_versions_above_one():
+    """A verb registered at the default version (1) never appears in
+    ``tracking_write_verb_versions`` -- only verbs that actually bumped
+    past it are worth a client checking."""
+    before = dict(tracking_write._VERBS)
+    before_versions = dict(tracking_write._VERB_VERSIONS)
+    try:
+        server = tracking_write.start_server(lambda kind, payload: {"ok": True})
+        server.start()
+        try:
+            tracking_write.register_verb("an_unversioned_verb", lambda args: {})
+            tracking_write.register_verb("a_versioned_verb", lambda args: {}, version=2)
+            fields = _endpoint_dict(server)
+            assert "an_unversioned_verb" not in fields["tracking_write_verb_versions"]
+            assert fields["tracking_write_verb_versions"]["a_versioned_verb"] == 2
+        finally:
+            server.close()
+    finally:
+        tracking_write._VERBS.clear()
+        tracking_write._VERBS.update(before)
+        tracking_write._VERB_VERSIONS.clear()
+        tracking_write._VERB_VERSIONS.update(before_versions)
 
 
 class TestVerbRegistryAndCompute:
@@ -372,6 +442,43 @@ class TestDispatch:
                 {},
                 read_lock_data=lambda: stale_capability_lock_data,
                 ensure_monitor=None,
+            )
+        finally:
+            server.close()
+        assert result == {"via": "ran"}
+        assert observed_thread_ids == [calling_thread_id]
+
+    def test_dispatch_never_dials_an_endpoint_below_min_version(self):
+        """Same proof technique as the by-name test above, applied to
+        ``min_version``: a REAL, live server that genuinely has the verb
+        registered (so dispatch *could* succeed there) must still never be
+        dialed when its advertised version for that verb is too low --
+        proven by observing the calling thread ran the verb, not the
+        server's own handler thread."""
+        calling_thread_id = threading.get_ident()
+        observed_thread_ids = []
+        tracking_write.register_verb(
+            "test-versioned-client-side",
+            lambda args: observed_thread_ids.append(threading.get_ident())
+            or {"via": "ran"},
+            version=2,
+        )
+        server = tracking_write.start_server(tracking_write.compute)
+        server.start()
+        try:
+            real_lock_data = tracking_write.rendezvous_fields(server)
+            # Simulate a stale daemon still advertising version 1 for this
+            # verb name (a rolling-upgrade skew window).
+            stale_version_lock_data = dict(
+                real_lock_data,
+                tracking_write_verb_versions={"test-versioned-client-side": 1},
+            )
+            result = tracking_write.dispatch(
+                "test-versioned-client-side",
+                {},
+                read_lock_data=lambda: stale_version_lock_data,
+                ensure_monitor=None,
+                min_version=2,
             )
         finally:
             server.close()

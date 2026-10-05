@@ -299,10 +299,10 @@ class TestWorktreeStatusComputeIsolated:
         }
 
     def test_disposition_fact_includes_the_paused_marker(self, monkeypatch, tmp_path):
-        """Copilot review finding: `worktree-status-bundle` is documented as
-        the full status bundle, but its `disposition` fact serialized
-        `follow_up`/`summary` without `paused` -- so a fresh bundle
-        recomputation could not report whether a worktree is paused."""
+        """`worktree-status-bundle` is documented as the FULL status bundle,
+        so its `disposition` fact must carry `paused` alongside
+        `follow_up`/`summary` -- otherwise a fresh bundle recomputation
+        cannot report whether a worktree is paused."""
         from agent_worktrees import __main__ as m
 
         project = "iso-proj"
