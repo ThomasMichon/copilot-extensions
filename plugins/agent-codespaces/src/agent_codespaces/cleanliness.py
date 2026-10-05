@@ -20,8 +20,9 @@ being settled blind.
 from __future__ import annotations
 
 import re
-import shlex
 from dataclasses import dataclass
+
+from remote_login_shell import wrap_login_shell
 
 from . import config
 from ._ssh_retry import exec_with_retry
@@ -154,7 +155,7 @@ def probe_command(
         'echo "' + _MARK_AHEAD + '=$ahead"; '
         'echo "' + _MARK_UNPUSHED_BRANCHES + '=$nbr"'
     )
-    return "bash -lc " + shlex.quote(inner)
+    return wrap_login_shell(inner)
 
 
 def _int(value: str) -> int:

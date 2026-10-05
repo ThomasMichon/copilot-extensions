@@ -31,6 +31,8 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from remote_login_shell import wrap_login_shell
+
 from .connection_owner import (
     DEFAULT_TTL,
     OwnerHold,
@@ -693,7 +695,7 @@ def make_remote_bridge_probe(
         try:
             manager = await opener(codespace)
             result = await exec_with_retry(
-                manager, codespace, "bash -lc " + shlex.quote(bridge_probe_script(port)),
+                manager, codespace, wrap_login_shell(bridge_probe_script(port)),
                 timeout=30.0, attempts=2,
             )
             code = getattr(result, "exit_code", None)
@@ -737,8 +739,6 @@ def make_remote_mux_probe(
     opener = open_manager or _open_codespace
 
     async def probe(codespace: str, mux_sessions: list[str]) -> dict[str, bool | None]:
-        import shlex
-
         unknown: dict[str, bool | None] = {m: None for m in mux_sessions}
         try:
             rows = await asyncio.to_thread(lambda: list(list_codespaces()))
@@ -761,7 +761,7 @@ def make_remote_mux_probe(
                 result = await exec_with_retry(
                     manager,
                     codespace,
-                    "bash -lc " + shlex.quote(f"tmux has-session -t {shlex.quote('=' + mux)}"),
+                    wrap_login_shell(f"tmux has-session -t {shlex.quote('=' + mux)}"),
                     timeout=30.0,
                     attempts=2,
                 )

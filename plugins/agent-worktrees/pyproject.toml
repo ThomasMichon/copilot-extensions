@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-worktrees"
-version = "1.20.3-dev1"
+version = "1.20.4-dev1"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
@@ -24,6 +24,7 @@ dependencies = [
     "agent-single-instance-lease",
     "agent-work-coalescing-singleton",
     "agent-lazy-cli-dispatch",
+    "agent-remote-login-shell",
 ]
 
 [tool.uv.sources]
@@ -76,6 +77,14 @@ agent-work-coalescing-singleton = { path = "libs/work-coalescing-singleton" }
 # keep manually in sync -- only a real `main`-branch release
 # (tools/materialize_main.py) ever gets a real local copy.
 agent-lazy-cli-dispatch = { path = "libs/lazy-cli-dispatch" }
+# Shared POSIX login-shell command wrapping for remote SSH exec (module
+# ``remote_login_shell``, copilot-extensions#5207). This is a `uv`-editable
+# canonical reference (vendor-pointer-generalization effort, Phase 1): `path`
+# escapes this plugin's own root and resolves live to
+# `libs/remote-login-shell`, so this `dev`-branch checkout has nothing to
+# keep manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
+agent-remote-login-shell = { path = "libs/remote-login-shell" }
 
 [project.scripts]
 agent-worktrees = "agent_worktrees.__main__:console_entry"

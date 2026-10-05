@@ -299,6 +299,7 @@ function Resolve-SshManager { return (Resolve-VendoredLib -LibName 'ssh-manager'
 function Resolve-AgentProcutil { return (Resolve-VendoredLib -LibName 'agent-procutil') }
 function Resolve-VenueCopilot { return (Resolve-VendoredLib -LibName 'venue-copilot') }
 function Resolve-Zdd { return (Resolve-VendoredLib -LibName 'zdd') }
+function Resolve-RemoteLoginShell { return (Resolve-VendoredLib -LibName 'remote-login-shell') }
 
 $PluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $PkgSrcDir = Join-Path $PluginDir 'src\agent_ssh'
@@ -788,12 +789,18 @@ if (-not $zddDir) {
     Write-Fail 'Cannot locate zdd library'
     exit 1
 }
+$remoteLoginShellDir = Resolve-RemoteLoginShell
+if (-not $remoteLoginShellDir) {
+    Write-Fail 'Cannot locate remote-login-shell library'
+    exit 1
+}
 $vendoredDependencies = @(
     $agentProcutilDir,
     (Join-Path $PluginDir 'libs\dropin-registry'),
     $sshManagerDir,
     $venueCopilotDir,
-    $zddDir
+    $zddDir,
+    $remoteLoginShellDir
 )
 $pkgInstalled = Install-AgentSshPackage `
     -Python $VenvPython `

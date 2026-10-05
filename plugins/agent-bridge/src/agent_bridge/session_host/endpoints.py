@@ -20,6 +20,7 @@ import shlex
 from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 
+from remote_login_shell import wrap_login_shell
 from ssh_manager import (
     LocalForward,
     SSHConfig,
@@ -242,7 +243,7 @@ def endpoint_serving_probe_factory(
 
     def _for_port(relay_port: int) -> Callable[[], Awaitable[bool]]:
         probe = build_relay_ping_probe_command(relay_port)
-        argv = build_remote_exec_args(config, f"bash -lc {shlex.quote(probe)}")
+        argv = build_remote_exec_args(config, wrap_login_shell(probe))
 
         async def _probe() -> bool:
             proc = None
