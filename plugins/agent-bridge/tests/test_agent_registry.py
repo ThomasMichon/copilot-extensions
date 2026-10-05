@@ -2140,16 +2140,18 @@ class TestVenueBoundResolve:
 
     @pytest.mark.asyncio
     async def test_repo_at_machine_rebind_never_re_resolves_old_project(self):
-        # Regression (#5306 review): the old approach re-resolved the
-        # venue's default project's plugin args a SECOND time to compute a
-        # "stale suffix" to strip -- if that second resolution ever
-        # returned something different (a setting changed, a transient
-        # failure) the strip would silently fail and leave the default
-        # project's plugins attached alongside the requested repo's. The
-        # fix rebuilds copilot_args from old_config.copilot_args directly,
-        # so _own_plugin_args/_related_plugin_args must never be called
-        # with the OLD ("dotfiles") project at all during the rebind --
-        # only with the final bound ("SPO.Core") one.
+        # Rebinding must build copilot_args from the configured base
+        # (old_config.copilot_args) plus a single fresh resolution for the
+        # final bound repo -- it must never re-resolve the venue's default
+        # project's own/related plugin args a second time to compute a
+        # suffix to strip, since that result isn't guaranteed to match the
+        # one baked in during the initial venue resolution (a changed
+        # setting or a transient failure would silently leave the default
+        # project's plugins attached alongside the requested repo's).
+        # _own_plugin_args/_related_plugin_args must therefore be called
+        # with the OLD ("dotfiles") project exactly once (during the
+        # initial venue resolution), never again during the rebind -- only
+        # with the final bound ("SPO.Core") one.
         from unittest.mock import patch
         local = self.machines["host-dev6"]
         own_calls: list[str] = []
@@ -2187,7 +2189,7 @@ class TestVenueBoundResolve:
 
     @pytest.mark.asyncio
     async def test_repo_at_machine_rebind_preserves_cwd_fallback(self):
-        # Regression (#5306 review): a venue whose own project has no
+        # Regression: a venue whose own project has no
         # registry anchor resolves its own-plugin args via the cwd fallback
         # (_own_plugin_args(project, cwd)). Rebinding to the SAME project
         # via `<repo>@<venue>` must still receive that fallback -- losing
@@ -2219,7 +2221,7 @@ class TestVenueBoundResolve:
 
     @pytest.mark.asyncio
     async def test_repo_at_machine_rebind_different_project_ignores_venue_cwd(self):
-        # Regression (#5306 review): the cwd fallback above is ONLY valid
+        # Regression: the cwd fallback above is ONLY valid
         # when `repo` is the venue's own default project (genuinely the
         # same checkout) -- for any OTHER repo, `target.cwd` belongs to the
         # venue's default project, not the requested one, and must not be
@@ -2257,7 +2259,7 @@ class TestVenueBoundResolve:
 
     @pytest.mark.asyncio
     async def test_repo_at_remote_machine_leaves_ssh_copilot_args_untouched(self):
-        # Regression (#5306 review): a genuine-remote (non-loopback) venue
+        # Regression: a genuine-remote (non-loopback) venue
         # never had plugin args appended by _resolve_static in the first
         # place -- _bind_repo must not recompute a "stale suffix" for it and
         # risk stripping real, explicitly configured SSH args that happen to
@@ -2292,7 +2294,7 @@ class TestVenueBoundResolve:
 
     @pytest.mark.asyncio
     async def test_bare_venue_rebind_through_sender_repo_uses_final_project(self):
-        # The other rebinding path (#5306 review): a bare machine resolved
+        # The other rebinding path: a bare machine resolved
         # via a namespace/bare candidate, then rebound through _bind_repo.
         # Exercise it the same way the venue-bound path is exercised above --
         # a bare local agent with no `host`, rebound onto a different repo.

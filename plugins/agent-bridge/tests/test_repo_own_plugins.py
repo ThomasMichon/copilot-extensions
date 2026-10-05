@@ -360,7 +360,7 @@ def test_related_plugin_resolved_from_declaring_anchor(tmp_path, monkeypatch):
 
 
 def test_related_plugin_dir_args_passes_repo_roots_as_anchors(tmp_path, monkeypatch):
-    # Regression (#5306 review): related_plugins_for_repo must receive the
+    # Regression: related_plugins_for_repo must receive the
     # SAME repo_roots the caller passed (as `anchors=`), not just use them
     # later for per-plugin resolution -- otherwise an explicit repo_roots
     # override has no effect on WHICH related plugins are even discovered.
@@ -505,7 +505,7 @@ def test_related_plugin_remote_first_anchor_blocks_local_second_anchor(tmp_path,
 def test_related_plugin_rejects_manifest_with_mismatched_marketplace_identity(
     tmp_path, monkeypatch,
 ):
-    # Regression (#5306 review): the settings.json entry may declare a
+    # Regression: the settings.json entry may declare a
     # marketplace path whose OWN manifest self-identifies under a different
     # name (a stale/misconfigured declaration). Even if that mismatched
     # manifest happens to declare a plugin of the requested name, it must
@@ -541,7 +541,7 @@ def test_related_plugin_rejects_manifest_with_mismatched_marketplace_identity(
 def test_related_plugin_one_broken_reference_does_not_drop_the_rest(
     tmp_path, monkeypatch,
 ):
-    # Regression (#5306 review): a reference that raises while resolving
+    # Regression: a reference that raises while resolving
     # (not just one that returns None) must be recorded as unresolved and
     # must not abort resolution of the remaining references.
     good_root = tmp_path / "good"

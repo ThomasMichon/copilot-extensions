@@ -3278,7 +3278,7 @@ def test_resolve_local_binstub_falls_back_to_path_when_no_local_shim(
 def test_resolve_local_binstub_path_fallback_skips_ps1_for_cmd(
     tmp_path, monkeypatch,
 ) -> None:
-    """Regression (#5306 review): the **PATH** fallback (no local
+    """Regression: the **PATH** fallback (no local
     ``~/.local/bin/<project>`` shim at all) must apply the identical
     directly-launchable restriction as the explicit-path case -- a bare
     ``shutil.which(project)`` could itself resolve to an interpreter-
@@ -3310,7 +3310,7 @@ def test_resolve_local_binstub_path_fallback_skips_ps1_for_cmd(
 def test_resolve_local_binstub_normalizes_pathext_whitespace_and_dot(
     tmp_path, monkeypatch,
 ) -> None:
-    """Regression (#5306 review): ``PATHEXT`` entries can carry stray
+    """Regression: ``PATHEXT`` entries can carry stray
     whitespace or (rarely) omit the leading dot -- both must still match a
     direct-launch extension and build a correct candidate filename, rather
     than silently never matching or constructing an unseparated name."""
@@ -3338,7 +3338,7 @@ def test_resolve_local_binstub_normalizes_pathext_whitespace_and_dot(
 def test_resolve_local_binstub_falls_back_to_default_pathext_when_unset_or_empty(
     pathext_value, tmp_path, monkeypatch,
 ) -> None:
-    """Regression (#5306 review): an unset OR empty ``PATHEXT`` must not
+    """Regression: an unset OR empty ``PATHEXT`` must not
     silently zero every suffix candidate -- fall back to the same built-in
     default list ``shutil.which`` itself uses, or an extensionless project
     name misses an existing ``.cmd`` shim and falls through to the
@@ -3370,7 +3370,7 @@ def test_resolve_local_binstub_falls_back_to_default_pathext_when_unset_or_empty
 def test_resolve_local_binstub_skips_non_executable_explicit_path(
     tmp_path, monkeypatch,
 ) -> None:
-    """Regression (#5306 review): a non-executable file sitting at the exact
+    """Regression: a non-executable file sitting at the exact
     ``~/.local/bin/<project>`` path must not be selected -- ``shutil.which``
     itself checks ``os.access(X_OK)``, so the explicit-path fast path must
     too, or a real executable resolvable via ``PATH`` gets masked by a
@@ -3402,7 +3402,7 @@ def test_resolve_local_binstub_skips_non_executable_explicit_path(
 def test_resolve_local_binstub_extensionless_file_does_not_mask_cmd_shim(
     tmp_path, monkeypatch,
 ) -> None:
-    """Regression (#5306 review): an extensionless file at the exact
+    """Regression: an extensionless file at the exact
     ``~/.local/bin/<project>`` path (a stray text file, a POSIX-style
     script accidentally left over, etc.) is never itself launchable on
     Windows -- only a suffix ``shutil.which``/``CreateProcess`` recognizes
@@ -3431,7 +3431,7 @@ def test_resolve_local_binstub_extensionless_file_does_not_mask_cmd_shim(
 def test_resolve_local_binstub_skips_ps1_for_directly_launchable_cmd(
     tmp_path, monkeypatch,
 ) -> None:
-    """Regression (#5306 review): ``PATHEXT`` commonly lists interpreter-
+    """Regression: ``PATHEXT`` commonly lists interpreter-
     dependent extensions (``.PS1``, ``.PY``, ``.JS``, ...) alongside directly
     launchable ones -- they're there for an interactive shell's own lookup,
     not because ``create_subprocess_exec`` (no shell, no interpreter) can
