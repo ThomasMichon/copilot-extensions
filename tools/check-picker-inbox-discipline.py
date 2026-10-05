@@ -24,6 +24,16 @@ instead.
 ``call_from_thread`` is never flagged -- only a real call
 (``self.app.call_from_thread(...)``, or a call through a locally-assigned
 alias, e.g. ``marshal = self.app.call_from_thread; marshal(fn)``) counts.
+Alias tracking is scope-aware: a nested function/lambda inherits a copy of
+its enclosing scope's aliases (a real closure genuinely resolves an
+outer-scope name at runtime) while its own parameters always shadow it
+regardless of name reuse, and a reassignment inside a conditional
+(``if``/``try``/``for``/``while``/``with``) is never allowed to
+permanently clear an alias for code after it -- some other branch (or
+none) might still leave it aliased, so alias state is conservatively
+merged after such a node rather than taking whichever branch happened to
+be visited last. The inline escape hatch below is recognized even on the
+opening line of a call whose arguments span multiple lines.
 
 A genuinely-intentional low-level exception carries an inline
 ``# inbox-guard: allow <why>`` comment on the offending line and is
@@ -130,6 +140,44 @@ class _CallFinder(ast.NodeVisitor):
     def visit_Lambda(self, node: ast.Lambda) -> None:
         self._visit_new_scope(node, _param_names(node.args))
 
+    def _visit_conditionally(self, node: ast.AST) -> None:
+        """Visit a control-flow node (``if``/``try``/``for``/``while``/
+        ``with``) whose body may or may not actually execute at runtime --
+        a branch not taken must never be allowed to permanently clear an
+        alias that held before it, since some OTHER branch (or no branch
+        at all) might leave it aliased. Calls inside are still visited and
+        flagged normally; only the ALIAS STATE afterward is conservatively
+        merged: anything aliased before the node, or newly aliased by
+        ANY path through it, stays aliased after -- only a plain,
+        unconditional (outside any such node) reassignment ever actually
+        clears an alias. This errs toward flagging more, never fewer,
+        real ``call_from_thread`` calls.
+        """
+        before = set(self._aliases)
+        self.generic_visit(node)
+        self._scopes[-1] = before | self._aliases
+
+    def visit_If(self, node: ast.If) -> None:
+        self._visit_conditionally(node)
+
+    def visit_Try(self, node: ast.Try) -> None:
+        self._visit_conditionally(node)
+
+    def visit_For(self, node: ast.For) -> None:
+        self._visit_conditionally(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self._visit_conditionally(node)
+
+    def visit_While(self, node: ast.While) -> None:
+        self._visit_conditionally(node)
+
+    def visit_With(self, node: ast.With) -> None:
+        self._visit_conditionally(node)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        self._visit_conditionally(node)
+
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func
         flagged = False
@@ -156,7 +204,11 @@ class _CallFinder(ast.NodeVisitor):
         else:
             # A non-aliasing reassignment of a previously-tracked name
             # shadows it -- the name no longer refers to call_from_thread
-            # from this point on in this scope.
+            # from this point on in this scope. (If this assignment is
+            # inside an `if`/`try`/`for`/`while`/`with` body,
+            # `_visit_conditionally` conservatively restores the alias
+            # afterward anyway, since some other branch might not have
+            # reassigned it.)
             self._aliases.discard(target.id)
 
     def visit_Assign(self, node: ast.Assign) -> None:
@@ -177,14 +229,30 @@ def _find_calls(f: Path) -> tuple[str, list[int]]:
     return text, sorted(set(finder.hits))
 
 
-def _allowed(lines: list[str], lineno: int) -> bool:
-    line = lines[lineno - 1] if 0 < lineno <= len(lines) else ""
+def _comments_by_line(text: str) -> dict[int, list[str]]:
+    """Map each 1-based source line number to the comment token string(s)
+    starting on it, tokenizing the WHOLE file at once -- not one isolated
+    physical line. A multiline call (e.g. ``call_from_thread(  # inbox-guard:
+    allow <why>`` whose arguments continue on later lines) has an unmatched
+    open parenthesis on its own first line alone, which raises a
+    ``TokenError`` if tokenized in isolation -- silently defeating the
+    escape hatch for any call that isn't entirely on one line. The full
+    file is already known to parse (``ast.parse`` succeeded before this is
+    ever called), so tokenizing all of it is always well-formed.
+    """
+    by_line: dict[int, list[str]] = {}
     try:
-        tokens = tokenize.generate_tokens(io.StringIO(line).readline)
-        comments = [tok.string for tok in tokens if tok.type == tokenize.COMMENT]
+        tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+        for tok in tokens:
+            if tok.type == tokenize.COMMENT:
+                by_line.setdefault(tok.start[0], []).append(tok.string)
     except (IndentationError, tokenize.TokenError):
-        return False
-    for comment in comments:
+        return by_line
+    return by_line
+
+
+def _allowed(comments_by_line: dict[int, list[str]], lineno: int) -> bool:
+    for comment in comments_by_line.get(lineno, []):
         text = comment.removeprefix("#").strip()
         if not text.startswith(_ALLOW):
             continue
@@ -211,10 +279,11 @@ def verify() -> list[str]:
             continue
         if not hits:
             continue
+        comments_by_line = _comments_by_line(text)
         lines = text.splitlines()
         rel = f.relative_to(REPO).as_posix()
         for lineno in hits:
-            if _allowed(lines, lineno):
+            if _allowed(comments_by_line, lineno):
                 continue
             line = lines[lineno - 1] if 0 < lineno <= len(lines) else ""
             problems.append(

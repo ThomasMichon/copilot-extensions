@@ -148,6 +148,25 @@ def test_a_nested_functions_own_parameter_shadows_an_inherited_alias(repo):
     assert guard.verify() == []
 
 
+def test_conditional_reassignment_does_not_clear_an_alias_afterward(repo):
+    """A reassignment inside ONE branch of a conditional must not
+    permanently clear an alias for code that runs after it -- some other
+    branch (or neither) might actually execute at runtime, so the alias
+    could still be live. Conservative merging must keep flagging the call
+    after the conditional."""
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_maintenance_actions.py",
+        "def f(self, use_safe):\n"
+        "    marshal = self.app.call_from_thread\n"
+        "    if use_safe:\n"
+        "        marshal = some_safe_callable\n"
+        "    marshal(fn)\n",
+    )
+    assert any("call_from_thread(" in p for p in guard.verify())
+
+
 def test_alias_in_one_function_does_not_flag_an_unrelated_name_in_another(repo):
     """An alias assigned inside one function must not leak into a sibling
     function -- a parameter or local that merely happens to share the
@@ -201,6 +220,21 @@ def test_allow_comment_suppresses(repo):
         d,
         "engine_worker_actions.py",
         "self.app.call_from_thread(fn)  # inbox-guard: allow one-off legacy shim\n",
+    )
+    assert guard.verify() == []
+
+
+def test_allow_comment_suppresses_a_multiline_call(repo):
+    """The opening line of a call whose arguments continue on later lines
+    has an unmatched open parenthesis if tokenized in isolation -- the
+    escape hatch must still work there, not silently fail closed."""
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_live_screens.py",
+        "self.app.call_from_thread(  # inbox-guard: allow multiline shim\n"
+        "    fn,\n"
+        ")\n",
     )
     assert guard.verify() == []
 
