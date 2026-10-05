@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-phase worktrees
 - **Created:** 2026-09-15
-- **Status:** Active (Phase 2 landed; Phase 3 next)
+- **Status:** Active (Phase 2 + Phase 2d landed; Phase 3 next)
 - **Vision:** [`plugins/agent-worktrees/pull-requests`](../../../visions/plugins/agent-worktrees/pull-requests/README.md)
   (all three Features: `conformance-verified-mock-provider`,
   `foreign-repo-pr-operations`, `reviewer-capable-provider`)
@@ -124,28 +124,60 @@ trace; not repeated here (public-artifact rule: keep this effort generic).
       same assertions, which didn't fit this slice's scope. Left as a
       concrete next step before Phase 3 reuses this resolver.
 
-### Phase 2d — create-pr: real foreign creation from an already-pushed branch (not started)
-- [ ] Design + implement an additive code path in `pr_ops.create_pr()` (or a
+### Phase 2d — create-pr: real foreign creation from an already-pushed branch (Done 2026-10-05)
+- [x] Design + implement an additive code path in `pr_ops.create_pr()` (or a
       new sibling function) for: `--repo <foreign, registered>` +
       `--from-branch <branch>` (a branch some other process already pushed
       to that repo's remote). Must skip the entire local squash/push/
       title-derivation machinery (none of it applies -- no local checkout),
       resolve the foreign repo's own binding via
       `pr_config.resolve_repo_config_for_slug()`, and call
-      `provider.create_pull()` directly against it.
-- [ ] Decide what create-pr's fuller machinery (vs. the leaner
-      `agent-pull-requests create`) should still apply in this mode:
-      attribution/codename marker (whose codename -- the calling worktree's
-      own?), label application, and a tracking record on the CALLING
-      worktree (per `venue-and-claims.md`'s "a cross-repo PR is an
-      obligation on your worktree" framing -- should this auto-journal a
-      claim instead of requiring the manual `claims add pr` it documents
-      today?).
-- [ ] Still gated by `require_claimant_worktree()` (already in place from
+      `provider.create_pull()` directly against it. **Done**: PR #5289
+      (merged, squash, 5 review rounds). New `pr_foreign_create.py` module
+      (`pr_ops.py` is already at its grandfathered line-count ceiling)
+      implements `create_foreign_pr_from_branch()`, wired into
+      `create-pr`'s existing `--repo` foreign-refusal branch via a new
+      `--from-branch` flag. Honors the target repo's own `pr.enabled`,
+      `required_body_sections` (checked only when actually about to open a
+      PR, not on an idempotent reuse), `source_attribution` (full
+      tri-state + the `may_publish_codename` provenance gate), and label
+      config; normalizes Azure DevOps' own `"active"` status to the
+      cross-provider `"open"` literal the claim gate requires; is
+      idempotent via `provider.find_pull_by_head()` (reuses a still-open
+      PR on retry rather than duplicating, `--new` forces fresh); reloads
+      the tracking record under `_RecordLock` immediately before the claim
+      write (not a pre-network-call snapshot) to avoid clobbering a
+      concurrent update.
+- [x] **Decided (2026-10-04, operator-directed):** the CALLING worktree
+      always auto-journals a `pr`-kind claim via the existing
+      `_ensure_pr_claim`/`add_resource_claim` primitive -- never the manual
+      `claims add pr` workaround `venue-and-claims.md` documents today. The
+      motivating case is a host agent (e.g. a container/other source
+      pushed the remote branch) that wants to open and durably own a PR on
+      a repo it has no local checkout of; the whole point is a turn-key
+      "create + claim" in one call. Attribution/codename marker uses the
+      CALLING worktree's own codename (consistent with every other
+      create-pr invocation -- there is no other sensible identity to
+      stamp). Label application: apply whatever labels the TARGET repo's
+      own config declares for a normal create-pr, same as the local path.
+- [x] Give `agent-pull-requests create` the same two behaviors (it already
+      supports `--repo`/`--head` with no local checkout, per the Journal
+      entry below, but today does neither): require a resolvable claimant
+      worktree (shell `agent-worktrees get worktree-id`; refuse with a
+      `pr_cli.require_claimant_worktree`-style actionable message if empty,
+      since this plugin can't import agent-worktrees internals directly),
+      then auto-journal the same `pr`-kind claim via `agent-worktrees claims
+      add pr <url> --worktree <id> --json` (best-effort, non-fatal --
+      mirrors `context-handoff`'s own `addHandoffClaim` pattern for calling
+      across the same plugin boundary). **Done**: same PR #5289.
+- [x] Still gated by `require_claimant_worktree()` (already in place from
       the slice above).
-- [ ] Motivating case: `create-pr --repo <product-repo> --from-branch
+- [x] Motivating case: `create-pr --repo <product-repo> --from-branch
       <user>/<topic>-<worktree-suffix> --title "..." --body-file ...` run
       from a harness worktree with no local checkout of `<product-repo>`.
+      Covered by `test_pr_foreign_create.py`'s own fixture-driven tests
+      (21 tests) and the CLI-dispatch tests in
+      `test_pr_create_claimant_guard.py` (9 tests).
 
 ### Phase 3 — Reviewer-capable provider
 - [ ] Extend the `PRProvider` protocol with reviewer-side operations: read
@@ -200,6 +232,70 @@ trace; not repeated here (public-artifact rule: keep this effort generic).
 _Pending._
 
 ## Journal
+
+### 2026-10-05 — Phase 2d: foreign PR creation + auto-claim (done)
+Operator-directed: implement the `--from-branch` already-pushed-branch
+creation mode item 2 of Phase 2d's own Journal entry flagged as the next
+real slice, plus the matching behavior for `agent-pull-requests create`.
+
+Landed **PR #5289** (merged, squash) after **5 review rounds**, each
+catching a real issue:
+- **Round 1** (11 findings): `--from-branch` silently ignored outside the
+  resolved-foreign-repo branch (fixed with an upfront validation gate);
+  `--dry-run`/`--no-open` ignored (now rejected as incompatible); a blank
+  `--title` silently sent to the provider (now required, non-blank);
+  `pr_label_error` dropped in the non-JSON success path; the new path
+  bypassed `required_body_sections`; the attribution default resolved
+  `None` to an unconditional `True` instead of the target repo's own
+  `pr.source_attribution`; claim-persistence exceptions could crash after
+  the PR already existed; the docs (venue-and-claims.md, pr-workflow.md,
+  agent-pull-requests' cli-reference.md) went stale; and the
+  module-size-baseline.json edit widened an UNTOUCHED file's ceiling
+  through a feature PR (reverted; landed separately as its own small,
+  focused **PR #5291**, since the local pre-push hook runs the guard
+  unscoped unlike CI's own `--changed-since` check).
+- **Round 2**: Azure DevOps' own `create_pull()` returns its native
+  `"active"` status, never the cross-provider `"open"` literal the claim
+  gate requires -- every successful ADO foreign PR was opening unclaimed;
+  the tracking record was being saved from a pre-network-call snapshot
+  (a real TOCTOU race against a concurrent claim/settle); the target
+  repo's own `pr.enabled` policy wasn't honored; the codename provenance
+  gate (`may_publish_codename`) had been dropped entirely while fixing the
+  attribution-default bug, re-opening a custom-wordlist-codename leak risk
+  CI's own marketplace-isolation guard separately caught a bare
+  `agent-pull-requests` command reference in the docs (needed the
+  `<agent-pull-requests catalog argv[0]>` indirection every other
+  cross-plugin skill reference uses).
+- **Round 3**: the claimant-resolution helper caught only `RuntimeError`,
+  not `OSError`, from a failed `agent-worktrees` spawn; the raw
+  (non-codename) attribution marker used `config.machine`/
+  `parent_session` instead of the record's own machine + latest LIVE
+  session (the same selection the local path uses) -- a genuine
+  caller-identity bug, not just a style nit.
+- **Round 4**: `build_marker`'s `head=` parameter documents a commit SHA,
+  but the new path was passing the branch NAME; the whole path was
+  non-idempotent (a retry against the same `--from-branch` would ask the
+  forge to open a duplicate) -- added `provider.find_pull_by_head()` reuse
+  (with a `--new`-equivalent escape hatch) matching `create_pr`'s own
+  "safe to re-run" contract; `claim_history.record_pr_event()` was called
+  INSIDE the record lock, risking starving a concurrent updater since it
+  takes its own separate lock and does real I/O.
+- **Round 5**: the `required_body_sections` check ran before the new
+  reuse-lookup, so an idempotent retry could fail it even when no new PR
+  was being opened at all (deferred until genuinely about to create one);
+  a reused PR reported the caller's own `--draft` request instead of
+  `False` (no draft was actually created that call); `_ensure_pr_claim`
+  returns `None` for both a genuine failure AND an already-active
+  idempotent no-op, which had been conflated into a bogus "not claimed"
+  warning on an otherwise-correct retry.
+
+39 new/updated tests across `pr_foreign_create.py` (21),
+`test_pr_create_claimant_guard.py` (9), and `agent-pull-requests`' own
+`test_cli.py` (18, one updated). Full `agent-worktrees` suite: 6798
+passed, 28 skipped, same 2 pre-existing environment-specific failures
+throughout (`test_doctor.py`, `test_registration_home.py`).
+
+**Phase 2d is done.** Phase 3 (reviewer-capable provider) remains.
 
 ### 2026-10-03 — create-pr: claimant guard + a real --repo bug found
 - Operator caught a gap in the claimant-CWD rollout: `create-pr` didn't get

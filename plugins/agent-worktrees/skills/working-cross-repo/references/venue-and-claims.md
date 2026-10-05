@@ -18,11 +18,16 @@ interop.
 
 ## A cross-repo PR you open is an obligation on your worktree — journal it
 
-When you open a PR in *another* repo (e.g. an **example-web ADO PR** created
-with the AZ CLI / ADO REST / `gh`, on a CodeSpace or locally) it is **not**
-auto-journaled — only `<agent-worktrees catalog argv[0]> create-pr` in *this*
-repo is. So your worktree's `finalize` won't know that cross-repo work is
-still open. Record it as a claim so the gate keeps you accountable, then settle
+When you open a PR in *another* repo via `<agent-worktrees catalog argv[0]>
+create-pr --repo <foreign> --from-branch <branch>` (a branch already pushed
+there by some other process) or `<agent-pull-requests catalog argv[0]>
+create --repo <foreign> --head <branch>`, it is auto-journaled onto the
+CALLING worktree's own ledger — no manual step needed; `finalize` already
+knows that cross-repo work is still open.
+
+Only a PR opened some OTHER way (the AZ CLI / ADO REST / a bare `gh`, on a
+CodeSpace or locally, bypassing both tools above) is **not** auto-journaled.
+Record it as a claim yourself so the gate keeps you accountable, then settle
 it when the PR merges:
 
 ```
@@ -32,8 +37,7 @@ aw='<agent-worktrees catalog argv[0]>'
 "$aw" claims settle <pr-url>     # (sweep spares pr-kind — manual)
 ```
 
-See the `worktree` skill's finalize-gate section for the full model
-(example-operator/dotfiles#1351 tracks auto-journaling these).
+See the `worktree` skill's finalize-gate section for the full model.
 
 **Investigating a PR someone else already opened in the target repo** (not
 journaling your own)? Walk the claim in the other direction instead: see the

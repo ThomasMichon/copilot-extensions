@@ -56,7 +56,7 @@ DIGEST_SESSION_SUFFIX_CHARS = 6
 DIGEST_OMITTED = "- ... older entries omitted ..."
 
 #: The disposition fields a history entry snapshots / can mark as changed.
-_FIELDS = ("summary", "title", "activity", "follow_up")
+_FIELDS = ("summary", "title", "activity", "follow_up", "paused")
 
 
 def history_path(worktree_id: str, *, tracking_path: Path | None = None) -> Path:
@@ -83,6 +83,7 @@ def append(
     follow_up: bool,
     changed: list[str],
     activity: str = "",
+    paused: bool = False,
     kind: str = "status",
     session_id: str | None = None,
     tracking_path: Path | None = None,
@@ -96,7 +97,9 @@ def append(
     ``summary``'s broader recap and ``title``'s rare headline -- see
     ``tracking.set_disposition``'s own docstring for the cadence contract);
     omitted from the line when empty, same as every other neutral-default
-    field below.
+    field below. ``paused`` is a purely informational "intentionally idle
+    for now" overlay (never fed to any gate, unlike ``follow_up``); omitted
+    from the line when ``False``.
 
     ``kind`` classifies the entry -- ``"status"`` (a disposition write; the
     default so every existing caller is unchanged), ``"bind"`` (a session
@@ -124,6 +127,8 @@ def append(
         }
         if activity:
             entry["activity"] = activity
+        if paused:
+            entry["paused"] = True
         if kind and kind != "status":
             entry["kind"] = kind
         if session_id:
@@ -242,13 +247,17 @@ def digest(
             sess = _digest_session_suffix(e.get("session"))
             sess_tag = f" {sess}" if sess else ""
             flag = " !" if e.get("follow_up") else ""
+            # Same convention as `flag` above: the snapshot's CURRENT
+            # `paused` value, renders independent of which fields this
+            # particular entry's own write touched.
+            pause_mark = " \u23f8" if e.get("paused") else ""
             title = e.get("title")
             summary = _digest_label(e.get("summary"))
             label = summary or (title or "")
             if kind != "status" and not label:
                 label = f"({kind})"
             label = _digest_label(label)
-            line = f"- {at} [{kind}{sess_tag}]{flag} {label}".rstrip()
+            line = f"- {at} [{kind}{sess_tag}]{flag}{pause_mark} {label}".rstrip()
             rendered.append(line)
 
         selected: list[str] = []

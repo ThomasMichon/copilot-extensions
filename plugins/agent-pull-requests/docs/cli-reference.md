@@ -50,6 +50,17 @@ Opens a pull request via `gh pr create --repo <owner/repo> --head <branch> ...`.
 defaults to the repo's default branch when omitted. Returns the created PR's
 repo/number/url (parsed from `gh`'s printed PR URL).
 
+**Requires a claimant worktree.** Run this from the agent-worktrees worktree
+responsible for the work (the owning project is always the CWD, same
+contract `create-pr`/`pr-watch`/`pr-merge` enforce) -- refuses with an
+actionable message rather than silently opening an unowned PR when CWD
+doesn't trace to a tracked worktree. On success, auto-journals a `pr`-kind
+claim onto that worktree (`agent-worktrees claims add pr`) so `finalize`
+knows the cross-repo work is still outstanding; the result carries
+`claimed_by` (the worktree id) on success, or `claim_warning` when the
+journal step itself failed (the PR was still created -- that failure is
+never fatal to the create).
+
 ## `merge`
 
 ```text

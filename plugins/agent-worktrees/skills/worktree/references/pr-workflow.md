@@ -411,6 +411,23 @@ Use `--repo owner/name` to target a different repo than the worktree's own,
 and `--new` to force a brand-new PR even when one is already open (parallel
 PRs). `create-pr` is idempotent -- safe to re-run.
 
+**No local checkout of `--repo`?** Add `--from-branch <branch>` when that
+branch was ALREADY PUSHED to the target repo by some other process (a
+container, another host, ...) -- `create-pr` skips its entire local
+squash/push path and opens the PR directly against the target's own
+resolved provider, auto-journaling a claim on THIS (the calling) worktree
+so `finalize` still knows the work is outstanding. Requires an explicit,
+non-blank `--title` (there is no local commit history to derive one from)
+and is incompatible with `--dry-run`/`--no-open` (there is no local step to
+preview or skip). Without `--from-branch`, naming a different, registered
+`--repo` is refused outright -- there is no mechanism to push into it from
+a checkout that isn't its own. If the target repo isn't registered here at
+all (so neither `--repo` nor `--from-branch` can resolve it), use
+`<agent-pull-requests catalog argv[0]> create --repo <repo> --head
+<branch>` instead -- it needs no repo registration, but its branch must
+ALSO already be pushed to that repo; neither command creates or pushes a
+branch for you.
+
 A worktree can track **multiple PRs** over its life. When the active PR is
 already **merged or closed**, `create-pr` automatically opens a *fresh* PR
 (new branch off the current default-branch tip) instead of reusing the merged

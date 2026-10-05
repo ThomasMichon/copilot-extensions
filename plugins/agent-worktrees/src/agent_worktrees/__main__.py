@@ -1206,6 +1206,8 @@ def _worktree_to_dict(
         effort_state = effort_focus.inspect_effort(Path(rec.worktree_path), rec.active_effort)
         d["active_effort"] = effort_state.to_dict()
     d["follow_up"] = rec.follow_up or bool(effort_state and effort_state.active)
+    if rec.paused:
+        d["paused"] = True
     effective_summary = (
         effort_state.summary if effort_state is not None and effort_state.active else rec.summary
     )
@@ -2661,11 +2663,12 @@ def _cmd_status_write(
     title: str | None = None,
     activity: str | None = None,
     follow_up: bool | None = None,
+    paused: bool | None = None,
 ) -> int:
     """Write mode of `status`: annotate THIS worktree's agent-asserted
-    disposition (summary / title / activity / follow-up). Resolves the
-    worktree from CWD (or --worktree-id). Orthogonal to git/session state;
-    see the worktree-status-core effort and the agent-fabric vision
+    disposition (summary / title / activity / follow-up / paused). Resolves
+    the worktree from CWD (or --worktree-id). Orthogonal to git/session
+    state; see the worktree-status-core effort and the agent-fabric vision
     (disposition-is-asserted-pulse-is-derived).
     """
     config = cfg.load_config()
@@ -2734,11 +2737,13 @@ def _cmd_status_write(
                 "title": title,
                 "activity": activity,
                 "follow_up": follow_up,
+                "paused": paused,
                 "session_id": session_id,
                 "project": project,
             },
             read_lock_data=lambda: _locks.read_lock(_monitor_lock_path()),
             ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
+            min_version=2,  # unconditional: a v1 daemon drops paused on ANY write
         )
     except tracking_write.AmbiguousWriteOutcome as e:
         output.err(f"Disposition write to worktree {worktree_id} is in an unknown state: {e}")
@@ -2756,6 +2761,10 @@ def _cmd_status_write(
         return 1
     flag = "follow-ups pending" if result["follow_up"] else "resolved"
     msg = f"[OK] Worktree {worktree_id[-4:]} disposition: {flag}"
+    if result.get("paused"):
+        msg += " (paused)"
+    elif paused is False:
+        msg += " (unpaused)"  # explicit clear confirmation, not just silence
     if title is not None and result["title"]:
         msg += f" -- title: {result['title']}"
     if activity is not None and result.get("activity"):
@@ -2794,12 +2803,13 @@ def _cmd_status_history(args: argparse.Namespace) -> int:
         at = e.get("at") or "?"
         changed = ",".join(e.get("changed") or []) or "-"
         flag = "!" if e.get("follow_up") else " "
+        pause_flag = "\u23f8" if e.get("paused") else " "  # disambiguates (un)pausing
         kind = e.get("kind") or "status"
         sess = e.get("session")
         sess_tag = f" {sess[-6:]}" if isinstance(sess, str) and sess else ""
         title = e.get("title")
         summary = e.get("summary") or ""
-        head = f"  {at} [{flag}] {kind}{sess_tag} ({changed})"
+        head = f"  {at} [{flag}{pause_flag}] {kind}{sess_tag} ({changed})"
         if title:
             head += f" title: {title}"
         print(head)

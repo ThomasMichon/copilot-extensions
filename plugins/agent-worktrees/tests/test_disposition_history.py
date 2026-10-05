@@ -224,6 +224,20 @@ def test_digest_renders_recent_entries(_tracking_dir):
     assert "123456" in out and "987654" in out
 
 
+def test_digest_disambiguates_pausing_from_unpausing(_tracking_dir):
+    """A `paused` entry in `changed` alone cannot tell set from clear -- the
+    digest must render the resulting value, not just the field name."""
+    dh.append("wt-pause", at="2026-01-01T00:00:01", summary="pausing on purpose",
+              title=None, follow_up=False, changed=["paused"], paused=True)
+    dh.append("wt-pause", at="2026-01-01T00:00:02", summary="back at it",
+              title=None, follow_up=False, changed=["paused"], paused=False)
+    lines = dh.digest("wt-pause").splitlines()
+    paused_line = next(line for line in lines if "pausing on purpose" in line)
+    unpaused_line = next(line for line in lines if "back at it" in line)
+    assert "\u23f8" in paused_line
+    assert "\u23f8" not in unpaused_line
+
+
 def test_digest_honors_limit(_tracking_dir):
     for i in range(10):
         dh.append("wt-n", at=f"t{i}", summary=f"s{i}", title=None,
