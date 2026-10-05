@@ -198,17 +198,22 @@ def test_repo_config_sync_local_path_overrides_machine_local(
     # No config.yaml at all here -- exactly the "never configured" case this
     # field exists to fix.
 
+    # A native absolute path (not a hardcoded POSIX literal): the repo
+    # config's local_path must pass this host's own absoluteness check
+    # (see config.py's _validate_native_absolute_path), so it has to be
+    # built from tmp_path the same way the next test does.
+    native_path = str(tmp_path / "mnt" / "nas" / "Lake" / "Copilot" / "sessions")
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
     (repo / ".agent-logger.yaml").write_text(
-        "schema_version: 3\nsync:\n  local_path: /mnt/nas/Lake/Copilot/sessions\n",
+        f"schema_version: 3\nsync:\n  local_path: {native_path}\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(repo)
 
     cfg = load_config(home=home)
 
-    assert cfg.sync_path == Path("/mnt/nas/Lake/Copilot/sessions")
+    assert cfg.sync_path == Path(native_path)
     # Everything else stays machine-local/default -- only the path moved.
     assert cfg.sync_target == "local"
 
@@ -392,7 +397,13 @@ def test_repo_config_foreign_local_path_raises_when_target_is_local(
             "sync.local_path must be an absolute path",
         ),
         (
-            "schema_version: 1\nsync:\n  local_path: /\nlog: {}\n",
+            # A bare filesystem root, in THIS host's own native syntax --
+            # "/" is only a native-absolute bare root on POSIX (on Windows
+            # it isn't native-absolute at all, see the foreign-path case
+            # below); "C:\\" is Windows' own equivalent bare drive root.
+            "schema_version: 1\nsync:\n  local_path: "
+            + ("/" if _platform_system() != "Windows" else "'C:\\'")
+            + "\nlog: {}\n",
             "must not be a bare filesystem root",
         ),
         (
@@ -400,7 +411,14 @@ def test_repo_config_foreign_local_path_raises_when_target_is_local(
             "must not use '~'",
         ),
         (
-            "schema_version: 1\nsync:\n  local_path: 'C:\\nas\\sessions'\nlog: {}\n",
+            # A path absolute in the OTHER platform's syntax -- foreign to
+            # *this* host regardless of which host runs the suite (see
+            # _foreign_absolute_path() and config.py's
+            # _validate_native_absolute_path: "a foreign-platform path must
+            # never silently resolve relative").
+            "schema_version: 1\nsync:\n  local_path: '"
+            + _foreign_absolute_path()
+            + "'\nlog: {}\n",
             "sync.local_path must be an absolute path",
         ),
     ],
