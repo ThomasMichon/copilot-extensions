@@ -875,18 +875,31 @@ function New-PluginBuildSnapshot {
         [string]$Version,
         [switch]$BestEffort
     )
-    $installRoot = Resolve-Path -LiteralPath $InstallDir -ErrorAction SilentlyContinue
+    # Containment root is $InstallDir/snapshots specifically, NOT $InstallDir
+    # itself -- $InstallDir also hosts the self-stage area
+    # ($InstallDir/.install-stage/<ts>-<pid>/, see the self-stage relocation
+    # near the top of this script) that a normal marketplace stamp/install
+    # run commonly passes as $PluginDir. That stage is exactly as transient
+    # as the marketplace payload this function exists to avoid -- treating
+    # it as already-safe would skip snapshot creation entirely and leave
+    # Invoke-Stamp publishing a payload-dir marker that a later installer
+    # invocation reaps once its owner PID exits.
+    $snapshotsRoot = Join-Path $InstallDir 'snapshots'
+    $installRoot = Resolve-Path -LiteralPath $snapshotsRoot -ErrorAction SilentlyContinue
     if ($installRoot) {
         # Platform-portable, non-wildcard containment check: this script
         # also runs under pwsh on Linux/macOS, where a hardcoded '\' never
-        # matches and a case-sensitive filesystem makes OrdinalIgnoreCase
-        # wrong -- compare with the real separator and the platform's own
-        # case sensitivity, as a literal prefix (no `-like` globbing, which
-        # would mis-match a path containing '[', ']', or '*').
+        # matches and a case-sensitive filesystem makes case-insensitive
+        # comparison wrong -- compare with the real separator and the
+        # platform's own case sensitivity, as a literal prefix (no `-like`
+        # globbing, which would mis-match a path containing '[', ']', or '*').
+        # $IsWindows is undefined under Windows PowerShell 5.1 (this script
+        # is PS5+ compatible, see its own synopsis) and would throw under
+        # Set-StrictMode -- use the script's existing PS5-safe OS check.
         $sep = [IO.Path]::DirectorySeparatorChar
         $prefix = $installRoot.Path.TrimEnd('/\') + $sep
         $pluginNorm = $PluginDir.TrimEnd('/\') + $sep
-        $cmp = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+        $cmp = if ($env:OS -eq 'Windows_NT') { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
         if ($pluginNorm.StartsWith($prefix, $cmp)) {
             return $PluginDir
         }

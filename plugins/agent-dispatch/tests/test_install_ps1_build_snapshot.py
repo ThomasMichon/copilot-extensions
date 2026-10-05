@@ -195,6 +195,29 @@ Write-Output "RESULT:$result"
     assert sorted(p.name for p in (install_dir / "snapshots").iterdir()) == ["0.1.0-dev1"]
 
 
+def test_install_stage_is_not_treated_as_already_safe(tmp_path: Path) -> None:
+    """$InstallDir also hosts the self-stage area
+    ($InstallDir/.install-stage/<ts>-<pid>/), which a normal marketplace
+    stamp/install run commonly passes as $PluginDir -- that transient stage
+    must NOT be recognized as already-durable (unlike a path under
+    $InstallDir/snapshots/): a real versioned snapshot must still be
+    created, not skipped as a redundant no-op."""
+    install_dir = tmp_path / "install"
+    plugin_dir = install_dir / ".install-stage" / "20261005T120000000-1234" / "agent-dispatch"
+    _seed_plugin_dir(plugin_dir)
+
+    extra = f"""
+$result = New-PluginBuildSnapshot -PluginDir "{plugin_dir}" -InstallDir "{install_dir}" -Version "0.1.0-dev1"
+Write-Output "RESULT:$result"
+"""
+    result = _run_harness(extra)
+    snap_dir = Path(result.stdout.split("RESULT:", 1)[1].strip().splitlines()[0])
+
+    expected = install_dir / "snapshots" / "0.1.0-dev1"
+    assert snap_dir == expected
+    assert (snap_dir / "pyproject.toml").exists()
+
+
 def test_falls_back_to_the_live_payload_when_no_version_is_resolved(tmp_path: Path) -> None:
     plugin_dir = tmp_path / "payload" / "agent-dispatch"
     install_dir = tmp_path / "install"
