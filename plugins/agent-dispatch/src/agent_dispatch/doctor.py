@@ -43,15 +43,19 @@ the one existing tooling was structurally blind to.
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from .client import DispatchError
 from .procutil import agent_worktrees_launch_prefix, no_window_kwargs
-from .queue_records import Status
+from .queue_records import SpawnState, Status
 from .spawn_factories import _parse_fleet_body_handle, _parse_local_body_handle
+
+log = logging.getLogger("agent-dispatch.doctor")
 
 if TYPE_CHECKING:
     from .client import DispatchClient
@@ -97,12 +101,28 @@ GONE_STATUSES = frozenset({"finalized", "orphaned", "absent"})
 #: automatic repair.
 DEFAULT_STALE_LEASE_GRACE_SECONDS = 3600.0
 
-#: Task statuses doctor examines. ``queued``/``proposed`` have no owner or
-#: reservation to diagnose; terminal statuses are out of scope entirely.
+#: Task statuses doctor examines via the bounded repo/label sweep. ``queued``/
+#: ``proposed`` are deliberately excluded here -- a repo's queued backlog can
+#: be arbitrarily large and would consume this query's own ``limit`` before
+#: claimed/started/suspended rows are ever seen. A queued task stuck behind a
+#: failed spawn reservation is instead found via a **separate**, reservation-
+#: state-filtered query -- see :func:`find_stuck_queued_reservations`, which
+#: never competes with this sweep's own limit.
 EXAMINED_STATUSES = ("claimed", "started", "suspended")
 
 #: The one verdict :func:`repair` will act on automatically.
 REPAIRABLE_VERDICT = "orphaned_worktree_gone"
+
+#: Verdict for a ``queued`` task whose latest spawn reservation is in the
+#: terminal :data:`SpawnState.FAILED` state -- i.e. a prior attempt
+#: genuinely failed (not merely in flight: ``reserving``/``spawned``/
+#: ``cold``/``releasing`` are all legitimate active states for a task still
+#: showing as ``queued`` and must never be reported here) -- and the task
+#: landed back in ``queued`` with nothing surfacing *why*
+#: (#5209). Purely advisory: a queued task may legitimately pick up and
+#: retry on the scheduler's own next pass, so this is never auto-repaired --
+#: see :func:`repair`'s verdict check.
+QUEUED_STUCK_RESERVATION_VERDICT = "queued_with_reservation_detail"
 
 
 @dataclass(frozen=True)
@@ -112,7 +132,7 @@ class Diagnosis:
     task_id: str
     status: str
     # "healthy" | "orphaned_worktree_gone" | "stale_lease" | "unknown" |
-    # "earlier_attempt_live"
+    # "earlier_attempt_live" | "queued_with_reservation_detail"
     verdict: str
     detail: str
     worktree_id: str | None = None
@@ -337,6 +357,24 @@ def diagnose(
                 live_host=history_diagnosis.live_host,
             )
 
+    if status == "queued" and reservation.get("state") == SpawnState.FAILED:
+        attempt = reservation.get("attempt")
+        # `detail` carries the spawn failure itself; `conclusion_detail` is
+        # cleanup/conclusion metadata recorded alongside it. Report the root
+        # failure first and append conclusion metadata only when present, so
+        # cleanup bookkeeping never hides the actual error.
+        root_detail = reservation.get("detail") or "no further detail recorded"
+        failure_detail = root_detail
+        conclusion_detail = reservation.get("conclusion_detail")
+        if conclusion_detail and conclusion_detail != root_detail:
+            failure_detail = f"{root_detail} (conclusion: {conclusion_detail})"
+        return result(
+            QUEUED_STUCK_RESERVATION_VERDICT,
+            f"queued task's latest spawn reservation (attempt {attempt}) is "
+            f"FAILED -- it tried to spawn before landing back in queued and "
+            f"nothing else surfaces why: {failure_detail}",
+        )
+
     if worktree_id:
         wt = resolve(worktree_id)
         if wt is not None:
@@ -513,3 +551,81 @@ def diagnose_many(
             and (d.status in EXAMINED_STATUSES or d.status in Status.CONCLUDED)
         ]
     return payload
+
+
+def find_stuck_queued_reservations(
+    client: DispatchClient,
+    *,
+    repo: str | None = None,
+    label: str | None = None,
+    limit: int = 200,
+) -> list[Diagnosis]:
+    """Find ``queued`` tasks whose latest spawn reservation genuinely
+    ``FAILED`` -- the class of stuck task :func:`diagnose`'s bounded
+    repo/label sweep structurally cannot see, since ``EXAMINED_STATUSES``
+    deliberately excludes ``queued`` (a large backlog would otherwise
+    consume the sweep's own ``limit`` before any claimed/started/suspended
+    row is examined).
+
+    This queries
+    ``GET /spawn-reservations?state=failed&task_status=queued&latest_only=true``
+    directly -- a **separate**, reservation-state-filtered, independently-
+    limited query that never competes with the task sweep's own budget.
+    Two server-side filters keep the whole bounded ``limit`` spent on
+    actual candidates: ``latest_only`` restricts the result to each task's
+    single highest-attempt reservation row (without it, a retried task's
+    older, already-superseded failed attempts could crowd the limit), and
+    ``task_status="queued"`` excludes a non-queued task's current ``FAILED``
+    reservation (a completed/abandoned/dead-lettered task's last failed
+    attempt is not interesting here, but would otherwise consume the same
+    budget ahead of an actually-still-queued task further back in the
+    newest-first ordering). For each matching reservation it fetches the
+    owning task (``GET /tasks/{id}``, the one endpoint that actually
+    attaches ``spawn_reservation`` -- the bulk ``GET /tasks`` list endpoint
+    does not, which is why this cannot simply filter an already-fetched
+    task list) and reports it only when that task is still ``queued``
+    **and** this is still its *current* (latest) reservation -- a defense-
+    in-depth re-check in case a fresh attempt was reserved between the two
+    queries above. The fetched reservation's own ``state`` is re-checked
+    too (still required to be ``FAILED``), since an operator's
+    ``reservations rearm`` can race in the same window -- same key, same
+    queued task, but the state moved on (``failed`` -> ``rearmed``) and it
+    is no longer stuck.
+    """
+    diagnoses = []
+    reservations = client.list_reservations(
+        state=SpawnState.FAILED,
+        repo=repo,
+        label=label,
+        task_status="queued",
+        latest_only=True,
+        limit=limit,
+    )
+    for res in reservations:
+        task_id = res.get("task_id")
+        if not task_id:
+            continue
+        try:
+            task = client.get(task_id)
+        except DispatchError as exc:
+            if exc.status_code != 404:
+                raise
+            log.debug(
+                "find_stuck_queued_reservations: task %s no longer exists; "
+                "skipping",
+                task_id,
+            )
+            continue
+        if task.get("status") != "queued":
+            continue
+        current = task.get("spawn_reservation") or {}
+        if current.get("key") != res.get("key"):
+            continue  # superseded by a newer attempt -- not stuck anymore
+        if current.get("state") != SpawnState.FAILED:
+            # Same reservation key, but its state moved on since the list
+            # query above -- e.g. an operator's `reservations rearm` raced
+            # in between (failed -> rearmed), still queued, same key. No
+            # longer actually stuck.
+            continue
+        diagnoses.append(diagnose(task))
+    return diagnoses
