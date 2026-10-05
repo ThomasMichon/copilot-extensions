@@ -2384,6 +2384,10 @@ def _save_record_unlocked(
     ``save_record``, but also several already-locked direct callers (e.g.
     the execution-leg CLI). Refreshing :mod:`record_cache` HERE, not only in
     ``save_record``, reaches every one of them.
+
+    **Every revision-merge below only protects a stale-snapshot writer on
+    current code** -- a still-live OLDER-code process has no such field and
+    can drop it on an unrelated save (pre-existing/systemic, not per-field).
     """
     if path is None:
         path = record.yaml_path
@@ -2398,17 +2402,13 @@ def _save_record_unlocked(
         if current.paused_revision > record.paused_revision:
             record.paused = current.paused
             record.paused_revision = current.paused_revision
-        # A claim/restore (pending_seed.py) advances pending_seed_revision
-        # under the record lock. A stale full-record writer loaded BEFORE
-        # that transition must never resurrect an already-delivered
-        # (cleared) seed by saving its own older snapshot back over it.
+        # A claim/restore (pending_seed.py) must never resurrect an
+        # already-delivered (cleared) seed via a stale snapshot's save.
         if current.pending_seed_revision > record.pending_seed_revision:
             record.pending_seed = current.pending_seed
             record.pending_seed_revision = current.pending_seed_revision
-        # Lifecycle writers advance ``lifecycle_revision`` under the record
-        # lock. An unrelated writer may have loaded an older snapshot before
-        # that transition; never let its later save roll the append-only ledger
-        # or session activation history backward.
+        # Never let a stale snapshot's save roll the append-only session
+        # ledger/activation history backward.
         if current.lifecycle_revision > record.lifecycle_revision:
             record.sessions = current.sessions
             record.lifecycle_revision = current.lifecycle_revision

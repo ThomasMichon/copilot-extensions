@@ -303,22 +303,25 @@ agent-worktrees status --paused --summary "<why it's paused / what's still open>
    never prunes) so the worktree builds on the latest default branch before
    you report anything.
 2. **Auto-settle only what's provably safe.** `claims sweep --apply` is the
-   repo's own never-wedge reclaim sweep — it flips a claim to
-   `at-rest`/`abandoned` only when its holder is provably gone *and* its
-   resource is provably safe (a merged PR, an off-box CodeSpace, …). It never
-   guesses. Settle anything else you've independently verified via
-   `claims settle <ref>` / `claims release <ref>`.
+   repo's own never-wedge reclaim sweep — it flips a claim to `released`
+   (a provably-merged hand-back) or `abandoned` (every other case where its
+   holder is provably gone *and* its resource is provably safe, e.g. an
+   off-box CodeSpace). It never guesses. Settle anything else you've
+   independently verified via `claims settle <ref>` / `claims release <ref>`.
 3. **Report what remains — don't force it.** `claims` (no args) prints the
    full outbound ledger. Whatever is left open after the sweep is exactly
    what the operator needs to see; do not release, abandon, or force a
    disposition on a claim you can't prove is already safe.
-4. **Mark the worktree `--paused`.** This is purely informational — it never
-   affects `finalize`'s obligation gate, `cleanup`'s prune eligibility, or any
-   other gate — but it lets a human (or Picker) immediately see "this
-   worktree has work left open on purpose, not abandoned". Pair it with
-   `--summary` naming what's still open and why. Clear it later with
-   `agent-worktrees status --unpaused` once the worktree is active again (or
-   genuinely done — run `finalize` instead).
+4. **Mark the worktree `--paused`.** This never affects `finalize`'s
+   obligation gate or `cleanup`'s prune eligibility, but it lets a human (or
+   Picker) immediately see "this worktree has work left open on purpose, not
+   abandoned" -- a scannable glyph in the Picker title and the
+   `status`/`list` JSON payload (the plain-table view is unmarked, same as
+   any other JSON-only field), and it does stamp `status_note_at` like any
+   other disposition write. Pair it with `--summary` naming what's still
+   open and why. Clear it later with `agent-worktrees status --unpaused`
+   once the worktree is active again (or genuinely done — run `finalize`
+   instead).
 
 Settling a specific claim, then re-running `finalize`, is how a paused
 worktree eventually becomes finalizable — `pause` itself never settles

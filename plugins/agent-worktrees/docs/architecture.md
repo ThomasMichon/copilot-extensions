@@ -219,9 +219,13 @@ vision's *disposition-is-asserted / pulse-is-derived* behavior):
    overlay on the worktree **record** (above). High-signal, slow-moving: the
    agent *asserts* it via `agent-worktrees status
    --follow-up|--resolved|--paused|--unpaused`. It is the single-writer YAML.
-   Only `follow_up` feeds the prune verdict; `paused` is purely informational
-   (a scannable marker in status/list/Picker output) and never gates pruning
-   or any other automated behavior.
+   Only `follow_up` feeds the prune verdict; `paused` never gates pruning or
+   any other lifecycle gate. It is a scannable marker in the Picker's title
+   (a `⏸` glyph) and the `status --json`/`list --json` payload -- the plain
+   `status`/`list` **tables** still render the unmarked title, same as every
+   other JSON-only field. Setting it does stamp `status_note_at` like the
+   other two fields, so it affects nudge-freshness/glance-ordering the same
+   way a `--summary`/`--title` write would.
 2. **Live pulse (derived).** A per-session **sidecar** (`substatus.json` in the
    Copilot `session-state/{id}/` dir, beside context-handoff's `context.json`),
    written by the agent-worktrees **live-pulse extension**
