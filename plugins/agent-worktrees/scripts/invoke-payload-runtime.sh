@@ -300,7 +300,10 @@ RESOLUTION_REASON="$(json_get "$RESOLUTION" "$(json_path reason)" 2>/dev/null ||
 ACTUAL_MODE="$(json_get "$RESOLUTION" "$(json_path actualMode)" 2>/dev/null || true)"
 DESIRED_MODE="$(json_get "$RESOLUTION" "$(json_path desiredMode)" 2>/dev/null || true)"
 ACTIVATION_GENERATION="$(json_get "$RESOLUTION" "$(json_path activationGeneration)" 2>/dev/null || true)"
-NAMESPACE_GENERATION="$(json_get "$RESOLUTION" "$(json_path namespaceGeneration)" 2>/dev/null || true)"
+# NOTE: the `status` action's result schema never includes `namespaceGeneration`
+# (only `activationGeneration` and `installGeneration`). `namespaceGeneration`
+# genuinely belongs to the `validate` action's richer result instead -- see the
+# `.ps1` twin's fix for the matching crash under Set-StrictMode.
 INSTALL_GENERATION="$(json_get "$RESOLUTION" "$(json_path installGeneration)" 2>/dev/null || true)"
 SIMPLE_POLICY_LEGACY=0
 if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
@@ -396,7 +399,7 @@ fi
 installation_resolution_current() {
     local current current_status current_reason current_actual current_desired
     local current_root current_context current_activation_generation
-    local current_namespace_generation current_install_generation
+    local current_install_generation
     local current_validation current_validated_namespace current_validated_install
     current="$(bash "$MODE_RUNNER" "${STATUS_ARGS[@]}" 2>/dev/null)" || return 1
     current_status="$(json_get "$current" "$(json_path status)" 2>/dev/null || true)"
@@ -404,14 +407,12 @@ installation_resolution_current() {
     current_actual="$(json_get "$current" "$(json_path actualMode)" 2>/dev/null || true)"
     current_desired="$(json_get "$current" "$(json_path desiredMode)" 2>/dev/null || true)"
     current_activation_generation="$(json_get "$current" "$(json_path activationGeneration)" 2>/dev/null || true)"
-    current_namespace_generation="$(json_get "$current" "$(json_path namespaceGeneration)" 2>/dev/null || true)"
     current_install_generation="$(json_get "$current" "$(json_path installGeneration)" 2>/dev/null || true)"
     [[ "$current_status" == "$RESOLUTION_STATUS" &&
        "$current_reason" == "$RESOLUTION_REASON" &&
        "$current_actual" == "$ACTUAL_MODE" &&
        "$current_desired" == "$DESIRED_MODE" &&
        "$current_activation_generation" == "$ACTIVATION_GENERATION" &&
-       "$current_namespace_generation" == "$NAMESPACE_GENERATION" &&
        "$current_install_generation" == "$INSTALL_GENERATION" ]] || return 1
     if [[ "$ACTUAL_MODE" == namespaced ]]; then
         current_root="$(json_get "$current" "$(json_path runtimeRoot)" 2>/dev/null || true)"

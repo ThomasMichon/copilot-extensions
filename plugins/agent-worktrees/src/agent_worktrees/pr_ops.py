@@ -48,6 +48,7 @@ HOLD_LABEL = "do-not-merge"
 
 __all__ = [
     "HOLD_LABEL",
+    "abandon_pr",
     "audit_attribution_risk",
     "create_pr",
     "feature_branch_name",
@@ -2155,6 +2156,10 @@ def _set_pr_locked(
 
     tracking.save_record(record)
     return {**base, "success": True, **_pr_to_dict(pr)}
+
+
+#: Mechanical extraction (see pr_abandon_ops.py) -- kept out of this module to stay under its size cap.
+from .pr_abandon_ops import abandon_pr  # noqa: F401 -- re-exported for __all__/tests
 
 
 def pr_ready(

@@ -201,6 +201,29 @@ class TestMockProviderLifecycle:
         err = provider.merge_pull(scope.repo, created.number)
         assert err != ""
 
+    def test_close_pull_succeeds_once_then_reports_already_closed(
+        self, provider, scope
+    ):
+        created = provider.create_pull(scope)
+        assert provider.close_pull(
+            scope.repo, created.number, comment="superseded by #99",
+        ) == ""
+        result = provider.get_pull(scope.repo, created.number)
+        assert result.merged is False
+        assert result.state == "closed"
+
+        # Closing again is a documented error, not a silent no-op.
+        err = provider.close_pull(scope.repo, created.number)
+        assert err != ""
+
+    def test_close_pull_refuses_an_already_merged_pr(self, provider, scope):
+        created = provider.create_pull(scope)
+        provider.merge_pull(scope.repo, created.number)
+        err = provider.close_pull(scope.repo, created.number)
+        assert err != ""
+        # The merge is untouched by the refused close attempt.
+        assert provider.get_pull(scope.repo, created.number).merged is True
+
     def test_request_auto_complete_applies_label(self, provider, scope):
         created = provider.create_pull(scope)
         err = provider.request_auto_complete(

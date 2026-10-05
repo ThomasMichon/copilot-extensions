@@ -221,6 +221,21 @@ class MockPRProvider:
         pr.updated_at = _now()
         return ""
 
+    def close_pull(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        comment: str = "",
+    ) -> str:
+        pr = self._get(repo, number)
+        if pr.merged:
+            return f"mock: PR {repo}#{number} is already merged, cannot close unmerged."
+        if pr.state == "closed":
+            return f"mock: PR {repo}#{number} is already closed."
+        if comment:
+            pr.threads.append({"author": "mock-actor", "body": comment})
+        pr.state = "closed"
+        pr.updated_at = _now()
+        return ""
+
     def request_auto_complete(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
         automerge_label: str = "", squash: bool = True,
