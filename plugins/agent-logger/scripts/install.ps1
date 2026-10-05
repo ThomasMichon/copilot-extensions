@@ -683,6 +683,25 @@ function Resolve-SnapshotInstallerEngineSource {
     return Join-Path (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine') ("installer-engine.$Ext")
 }
 
+function Materialize-SnapshotLibs {
+    param([Parameter(Mandatory)][string]$SnapshotDir)
+    $libsDir = Join-Path $SnapshotDir 'libs'
+    if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
+    foreach ($lib in @('config-migrate', 'agent-procutil', 'dropin-registry', 'plugin-resolve', 'plugin-activation')) {
+        $source = Join-Path $PluginDir "libs\$lib"
+        if (-not (Test-Path (Join-Path $source 'pyproject.toml'))) {
+            $source = Join-Path $PluginDir "..\..\libs\$lib"
+        }
+        if (-not (Test-Path (Join-Path $source 'pyproject.toml'))) { continue }
+        $destination = Join-Path $libsDir $lib
+        if ([System.IO.Path]::GetFullPath($source) -eq [System.IO.Path]::GetFullPath($destination)) {
+            continue
+        }
+        Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue
+        Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
+    }
+}
+
 function Materialize-SnapshotInstallerEngine {
     param([Parameter(Mandatory)][string]$SnapshotDir)
     $scriptsDir = Join-Path $SnapshotDir 'scripts'
@@ -710,6 +729,20 @@ function Materialize-SnapshotInstallerEngine {
     }
 }
 
+function Test-SnapshotRequiresMaterializedEngine {
+    param([Parameter(Mandatory)][string]$SnapshotDir)
+    foreach ($scriptPath in @(
+        (Join-Path $SnapshotDir 'scripts\install.sh'),
+        (Join-Path $SnapshotDir 'scripts\install.ps1')
+    )) {
+        if (-not (Test-Path -LiteralPath $scriptPath)) { continue }
+        if ((Get-Content -LiteralPath $scriptPath -Raw) -like '*installer-engine*') {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Publish-PayloadSnapshot {
     <# Publish one immutable payload snapshot and atomically point payload-dir
        and stamped-version at it. Existing complete same-version snapshots are
@@ -722,9 +755,11 @@ function Publish-PayloadSnapshot {
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
     if (Test-Path $snapDir) {
         $complete = (Test-Path (Join-Path $snapDir 'plugin.json')) -and
-            (Test-Path (Join-Path $snapDir 'bin\agent-logger.ps1')) -and
-            (Test-Path (Join-Path $snapDir 'scripts\installer-engine.ps1')) -and
-            (Test-Path (Join-Path $snapDir 'scripts\installer-engine.sh'))
+            (Test-Path (Join-Path $snapDir 'bin\agent-logger.ps1'))
+        if ($complete -and (Test-SnapshotRequiresMaterializedEngine -SnapshotDir $snapDir)) {
+            $complete = (Test-Path (Join-Path $snapDir 'scripts\installer-engine.ps1')) -and
+                (Test-Path (Join-Path $snapDir 'scripts\installer-engine.sh'))
+        }
         if (-not $complete) {
             throw "Existing agent-logger snapshot is incomplete; refusing replacement: $snapDir"
         }
@@ -744,6 +779,7 @@ function Publish-PayloadSnapshot {
                 Copy-Item -LiteralPath $_.FullName `
                     -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
             }
+        Materialize-SnapshotLibs -SnapshotDir $snapTmp
         Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
         Move-Item -LiteralPath $snapTmp -Destination $snapDir
     }
@@ -1001,6 +1037,14 @@ function Install-Package {
         $ErrorActionPreference = $prevEAP
         Write-Fail "setuptools install failed"
         if ($setuptoolsOut) { Write-Host ($setuptoolsOut | Out-String) }
+        exit 1
+    }
+    $pyyamlResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -Arguments @('--python', $VenvPython, 'pyyaml>=6.0', '--quiet')
+    $pyyamlOut = $pyyamlResult.Output
+    if ($pyyamlResult.ExitCode -ne 0) {
+        $ErrorActionPreference = $prevEAP
+        Write-Fail "pyyaml install failed"
+        if ($pyyamlOut) { Write-Host ($pyyamlOut | Out-String) }
         exit 1
     }
     # Install vendored first-party dependencies from their local paths before the

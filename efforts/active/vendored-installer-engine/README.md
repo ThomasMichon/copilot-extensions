@@ -895,11 +895,11 @@ appropriately larger/riskier for one sitting):
   now inherited from one shared source instead of preserved by a second manual
   port.
 - **Line-count / corpus result:** wrapper-only installer lines shrank from
-  `install.sh` 1215 -> 1152 (-63) and `install.ps1` 1637 -> 1462 (-175), for
-  a combined wrapper drop of 2852 -> 2614 (-238). The canonical engine grew by
+  `install.sh` 1215 -> 1193 (-22) and `install.ps1` 1637 -> 1506 (-131), for
+  a combined wrapper drop of 2852 -> 2699 (-153). The canonical engine grew by
   3 lines on the POSIX side (368 -> 371) to fail closed when `uv venv` returns
   success without leaving `pyvenv.cfg`; the PowerShell engine stayed flat at
-  462 lines. Net result for this conversion leg: **235 lines removed** from the
+  462 lines. Net result for this conversion leg: **150 lines removed** from the
   combined agent-logger + shared-engine corpus, not just relocated.
 - Validation completed here:
   - `python3 tools/check-install-contract.py`
@@ -916,13 +916,13 @@ appropriately larger/riskier for one sitting):
     install --install-dir <scoped session scratch>` against the live checkout
     with the real user systemd instance, confirmed the scoped timer became
     active, `status` reported the installed runtime healthy, the versioned
-    slot's Python imported `agent_logger` successfully, and the published
-    snapshot carried payload-local `scripts/installer-engine.{sh,ps1}` copies
-    with both installer source lines rewritten to the local form before the
-    first-use installer path could consume them. Then removed the scoped timer
-    again with `uninstall --install-dir ...`. Also re-confirmed the `dev`
-    checkout keeps **no** local `plugins/agent-logger/scripts/installer-engine.*`
-    copy afterward.
+    slot's Python imported `agent_logger`, `yaml`, and `plugin_activation`
+    successfully, and the published snapshot carried payload-local
+    `scripts/installer-engine.{sh,ps1}` copies with both installer source
+    lines rewritten to the local form before the first-use installer path could
+    consume them. Then removed the scoped timer again with `uninstall --install-dir ...`.
+    Also re-confirmed the `dev` checkout keeps **no** local
+    `plugins/agent-logger/scripts/installer-engine.*` copy afterward.
 - Validation not possible in this Linux/WSL session:
   - No real Windows install lane / Task Scheduler exercise for
     `install.ps1`; instead validated that lane through the full plugin test

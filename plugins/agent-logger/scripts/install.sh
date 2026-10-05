@@ -667,14 +667,49 @@ STUBEOF
     ok "auxiliary compatibility binstubs: 5 commands on PATH"
 }
 
+_snapshot_requires_materialized_engine() {
+    local snapshot_dir="$1"
+    local script
+    for script in "$snapshot_dir/scripts/install.sh" "$snapshot_dir/scripts/install.ps1"; do
+        [[ -f "$script" ]] || continue
+        if grep -Fq 'installer-engine' "$script"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+_materialize_snapshot_libs() {
+    local snapshot_dir="$1"
+    local libs_dir="$snapshot_dir/libs"
+    local lib src
+    mkdir -p "$libs_dir"
+    for lib in config-migrate agent-procutil dropin-registry plugin-resolve plugin-activation; do
+        src="$PLUGIN_DIR/libs/$lib"
+        if [[ ! -f "$src/pyproject.toml" ]]; then
+            src="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/$lib"
+        fi
+        [[ -f "$src/pyproject.toml" ]] || continue
+        if [[ "$src" != "$libs_dir/$lib" ]]; then
+            rm -rf "$libs_dir/$lib"
+            cp -a "$src" "$libs_dir/$lib"
+        fi
+    done
+}
+
 publish_payload_snapshot() {
     mkdir -p "${INSTALL_DIR}/snapshots"
     local snapshot_dir="${INSTALL_DIR}/snapshots/${SRC_VERSION}"
     if [ -d "$snapshot_dir" ]; then
         if [ ! -f "$snapshot_dir/plugin.json" ] || \
-           [ ! -x "$snapshot_dir/bin/agent-logger" ] || \
-           [ ! -f "$snapshot_dir/scripts/installer-engine.sh" ] || \
-           [ ! -f "$snapshot_dir/scripts/installer-engine.ps1" ]; then
+           [ ! -x "$snapshot_dir/bin/agent-logger" ]; then
+            printf 'ERROR: existing agent-logger snapshot is incomplete; refusing replacement: %s\n' \
+                "$snapshot_dir" >&2
+            return 1
+        fi
+        if _snapshot_requires_materialized_engine "$snapshot_dir" && \
+           { [ ! -f "$snapshot_dir/scripts/installer-engine.sh" ] || \
+             [ ! -f "$snapshot_dir/scripts/installer-engine.ps1" ]; }; then
             printf 'ERROR: existing agent-logger snapshot is incomplete; refusing replacement: %s\n' \
                 "$snapshot_dir" >&2
             return 1
@@ -697,6 +732,7 @@ publish_payload_snapshot() {
             "$snapshot_tmp/.pytest_cache" \
             "$snapshot_tmp/.mypy_cache" \
             "$snapshot_tmp/tests"
+        _materialize_snapshot_libs "$snapshot_tmp"
         _materialize_snapshot_engine "$snapshot_tmp"
         mv "$snapshot_tmp" "$snapshot_dir"
     fi
@@ -749,6 +785,11 @@ install_package() {
   local setuptools_out
   if ! setuptools_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" 'setuptools>=83.0.0' --quiet); then
     printf '%s\n' "$setuptools_out" >&2
+    exit 1
+  fi
+  local pyyaml_out
+  if ! pyyaml_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" 'pyyaml>=6.0' --quiet); then
+    printf '%s\n' "$pyyaml_out" >&2
     exit 1
   fi
   # Install vendored first-party dependencies from their local paths before the
