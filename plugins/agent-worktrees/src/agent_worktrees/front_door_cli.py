@@ -208,17 +208,33 @@ def _git_toplevel(path: Path | None) -> Path | None:
         return override(path)
     if path is None:
         return None
-    try:
-        r = subprocess.run(
-            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            env=git_ops.repository_identity_env(),
-            stdin=subprocess.DEVNULL,
+    def _rev_parse(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(path), "rev-parse", *args],
+            capture_output=True, text=True, timeout=5,
+            env=git_ops.repository_identity_env(), stdin=subprocess.DEVNULL,
         )
+
+    try:
+        r = _rev_parse("--show-toplevel")
         if r.returncode == 0 and r.stdout.strip():
             return git_ops.resolve_to_anchor(Path(r.stdout.strip()).resolve())
+    except Exception:
+        pass
+    # ``--show-toplevel`` always fails ("must be run in a work tree") for a
+    # *bare* anchor (agent-worktrees' own pattern once worktrees are attached
+    # to it) -- mirror git_ops.py's credential-helper pin, which uses
+    # ``--git-dir`` instead for the same reason, so a bare anchor still
+    # resolves as its own project rather than "not inside an adopted repo".
+    try:
+        r = _rev_parse("--is-bare-repository", "--git-dir")
+        lines = r.stdout.strip().splitlines()
+        if r.returncode == 0 and len(lines) == 2 and lines[0].strip() == "true":
+            git_dir = Path(lines[1].strip())
+            if not git_dir.is_absolute():
+                git_dir = (path / git_dir).resolve()
+            root = git_dir.parent if git_dir.name == ".git" else git_dir
+            return git_ops.resolve_to_anchor(root)
     except Exception:
         pass
     return None

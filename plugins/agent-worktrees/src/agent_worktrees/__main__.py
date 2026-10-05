@@ -1059,8 +1059,8 @@ def _emit_plan(plan: dict) -> None:
     if plan.get("action") == "exec":
         env = plan.setdefault("env", {})
         env.setdefault("COPILOT_CUSTOM_INSTRUCTIONS_DIRS", str(cfg.project_dir()))
-    sys.__stdout__.write(json.dumps(plan) + "\n")
-    sys.__stdout__.flush()
+    payload = json.dumps(plan) + "\n"
+    output.write_real_stdout(payload)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
