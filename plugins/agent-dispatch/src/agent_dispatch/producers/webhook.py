@@ -54,6 +54,11 @@ Config (JSON), all keys optional::
       "default_repo": "example.com/acme/widget",
       "inbound_token": "shared-secret", # require this bearer on inbound hooks
       "github_secret": "webhook-secret", # verify GitHub's own X-Hub-Signature-256
+      # Both secrets also accept an env-var fallback (AGENT_DISPATCH_WEBHOOK_
+      # INBOUND_TOKEN / AGENT_DISPATCH_WEBHOOK_GITHUB_SECRET) when omitted
+      # here -- for a declarative registrar deployment, where this config is
+      # itself materialized verbatim from a committed spec and must never
+      # carry a literal secret.
       "pr": {
         "on_merged_only": true,
         "base_branches": ["main"],       # optional allowlist
@@ -287,8 +292,19 @@ def build_app(
 
     cfg = config or {}
     default_repo = cfg.get("default_repo")
-    inbound_token = cfg.get("inbound_token")
-    github_secret = cfg.get("github_secret")
+    # Env-var fallback for both secrets, mirroring coordinator_token's own
+    # AGENT_DISPATCH_TOKEN precedent just below: a committed registrar
+    # declaration (this plugin's own kind: emitter config IS the webhook
+    # config, materialized verbatim to a spec file -- see
+    # supervisor_registration.py) must never carry a literal secret, so a
+    # deployer sets these via a local, non-committed env file instead
+    # (e.g. this host's own supervisor.env) and omits the config key.
+    inbound_token = cfg.get("inbound_token") or os.environ.get(
+        "AGENT_DISPATCH_WEBHOOK_INBOUND_TOKEN"
+    )
+    github_secret = cfg.get("github_secret") or os.environ.get(
+        "AGENT_DISPATCH_WEBHOOK_GITHUB_SECRET"
+    )
     pr_cfg = cfg.get("pr") or {}
     tel_cfg = cfg.get("telemetry") or {}
     issue_rules = cfg.get("issues") or []

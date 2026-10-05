@@ -468,6 +468,48 @@ def test_webhook_issue_route_also_enforces_github_secret():
     assert len(ok.json()["created"]) == 1
 
 
+def test_github_secret_env_var_fallback(monkeypatch):
+    """A declarative registrar deployment's committed config can never
+    carry a literal secret (it's materialized verbatim from a git-tracked
+    spec) -- the real value must be settable via a local, non-committed
+    env var instead."""
+    monkeypatch.setenv("AGENT_DISPATCH_WEBHOOK_GITHUB_SECRET", "whsec")
+    tc, sink = _client({})
+    body_bytes = json.dumps(_MERGED_PR).encode("utf-8")
+    sig = _github_signature("whsec", body_bytes)
+    r = tc.post(
+        "/webhook/pr",
+        content=body_bytes,
+        headers={"X-Hub-Signature-256": sig, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 200
+    assert len(sink) == 1
+
+
+def test_inbound_token_env_var_fallback(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_WEBHOOK_INBOUND_TOKEN", "secret")
+    tc, sink = _client({})
+    ok = tc.post("/webhook/pr", json=_MERGED_PR, headers={"Authorization": "Bearer secret"})
+    assert ok.status_code == 200
+    assert len(sink) == 1
+
+
+def test_config_secret_takes_precedence_over_env_var(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_WEBHOOK_GITHUB_SECRET", "env-secret")
+    tc, sink = _client({"github_secret": "config-secret"})
+    body_bytes = json.dumps(_MERGED_PR).encode("utf-8")
+    # Signed with the env var's secret -- must be rejected since the
+    # explicit config value takes precedence.
+    wrong_sig = _github_signature("env-secret", body_bytes)
+    r = tc.post(
+        "/webhook/pr",
+        content=body_bytes,
+        headers={"X-Hub-Signature-256": wrong_sig, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 401
+    assert sink == []
+
+
 def test_malformed_json_body_is_a_400_not_a_500():
     tc, _ = _client()
     r = tc.post(

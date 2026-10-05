@@ -1148,7 +1148,13 @@ supported, and `github_secret` takes precedence when both are configured:
 `github_secret` verifies GitHub's own `X-Hub-Signature-256` HMAC header (the
 mechanism a real GitHub webhook delivery actually uses -- GitHub never sends
 a bearer header); `inbound_token` is a simple shared-secret bearer check for
-any other caller (a Gitea delivery, a manual/scripted trigger).
+any other caller (a Gitea delivery, a manual/scripted trigger). Both also
+accept an env-var fallback (`AGENT_DISPATCH_WEBHOOK_GITHUB_SECRET` /
+`AGENT_DISPATCH_WEBHOOK_INBOUND_TOKEN`) when the config key is omitted --
+for a declarative registrar deployment (`kind: emitter`, no `command` key),
+the config dict *is* the committed registrar spec, materialized verbatim to
+a file; it must never carry a literal secret, so a deployer sets the real
+value via a local, non-committed env file instead.
 
 ```bash
 agent-dispatch webhook --config webhook.json --host 127.0.0.1 --port 9331
