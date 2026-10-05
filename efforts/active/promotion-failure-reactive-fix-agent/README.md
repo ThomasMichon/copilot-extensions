@@ -33,18 +33,25 @@
   **the main-branch bootstrap gotcha is RESOLVED** (2026-09-27: a
   workflow-file-only bootstrap PR, #4338, confirmed
   `ci-failure-fix-attempt.lock.yml` live on `main` via `git show`).
-  **The mechanism is live and has had real end-to-end runs.** Two real
-  diagnosis bugs found and fixed via live dispatches: PR #5135 (the
-  agent was diagnosing GitHub's default branch, not `dev`'s actual tip --
-  5 real review rounds) and PR #5244 (widened the auth gate to also
-  trust the repo owner's own hand-filed issues, not just the watchdog
-  bot -- 2 real review rounds, then live-validated end to end: the
-  `agent` job ran, correctly diagnosed an already-resolved condition,
-  and declined via `noop` rather than opening a needless PR). See the
-  2026-10-04/2026-10-05 Journal entries for full detail. Still open: a
-  Phase-2 agent-authored *PR* (as opposed to a correct decline) has not
-  yet been observed live; see the Validation Plan's remaining unchecked
-  items.
+  **The mechanism is live and has had real end-to-end runs, including a
+  real agent-authored fix that merged.** PR #5135 (the agent was
+  diagnosing GitHub's default branch, not `dev`'s actual tip -- 5 real
+  review rounds); PR #5244 (widened the auth gate to also trust the
+  repo owner's own hand-filed issues -- 2 real review rounds, then
+  live-validated: the `agent` job ran, correctly diagnosed an
+  already-resolved condition, and declined via `noop`); and **PR #5290**
+  (2026-10-05): a genuine, naturally-occurring `dev` module-size failure
+  (issue #5287), diagnosed and fixed unattended by the agent (relocated
+  argparse registration to shrink two over-cap modules, no test/baseline
+  weakening). `create_pull_request` fell back to a review issue (the
+  patch's own changefile tripped the protected-top-level-dot-folder
+  gate, by design); this session opened the actual PR from the agent's
+  branch/commit, which then landed through the exact same review/merge
+  path as any other contributor PR. See the 2026-10-04/2026-10-05
+  Journal entries for full detail. Still open: a gh-aw-opened PR (not a
+  human-opened one from an agent commit), the cap-attempts-per-signature
+  guardrail, and explicit out-of-scope-instruction enforcement; see the
+  Validation Plan's remaining unchecked items.
 - **Vision:** [`visions/ci-failure-remediation`](../../../visions/ci-failure-remediation/README.md)
   (authored 2026-09-26 to resolve the reconciliation gate below). **Gate
   resolved:** the vision states the standing intent (detection+dedup,
@@ -819,6 +826,20 @@ was actually executed (PR #3850 probe, #3852 re-trigger, #3853 revert)
 - [ ] Confirm a Phase 2 cloud-agent-authored PR is indistinguishable, from
       `main-gate`'s and every other guard's point of view, from an ordinary
       contributor PR — no special-cased author/branch check anywhere.
+      **Partially exercised 2026-10-05, not yet fully confirmed:** PR
+      #5290's *commit* was agent-authored end to end (issue #5287 ->
+      unattended diagnosis and fix, no human drafting), and it landed
+      through the exact same `create-pr` -> Copilot review ->
+      `APPROVED` -> `pr-merge` path as any other contributor change —
+      but `create_pull_request` itself fell back to review issue #5288
+      (the `.changefiles/` protected-top-level-dot-folder gate), and a
+      human (this session) opened the actual PR object from that
+      branch/commit, so GitHub records its author as `ThomasMichon`, not
+      `github-actions[bot]`. This proves the agent-generated fix and the
+      normal review/merge path work, but not yet a PR the gh-aw
+      mechanism itself opened. Still open: observe a live run where
+      `create_pull_request` succeeds directly (no protected-file
+      fallback) and confirm *that* PR is equally indistinguishable.
 - [ ] Confirm the explicit out-of-scope instructions actually hold: seed one
       trial where the "obvious" fix would touch a version field or a
       workflow file, and confirm the agent's resulting PR does neither
@@ -2544,3 +2565,75 @@ cap-attempts-per-signature guardrail, and the explicit out-of-scope-
 instruction enforcement -- see the Validation Plan above, still open.
 Reverting to standing monitoring for a real `dev` validation failure to
 exercise the PR-authoring path next.
+
+### 2026-10-05 — First live Phase-2 agent-authored fix: a real `dev` failure, diagnosed and landed end to end
+
+A genuine, naturally-occurring `dev` validation failure arrived less
+than two hours after the owner-trust validation above:
+`tools/check-module-size.py` failed the `guards (full-tree,
+non-PR-scoped)` job (recently-merged work had pushed
+`plugins/agent-worktrees/src/agent_worktrees/__main__.py` to 7114 lines
+against its 7102 grandfathered ceiling, and `front_door_cli.py` to 1001
+against its 1000 cap). The watchdog filed issue #5287 automatically.
+
+**The full automatic chain worked with no manual dispatch needed this
+time:** the `issues: labeled` trigger fired on issue creation, gh-aw's
+own `activation` job re-dispatched the real run via `workflow_dispatch`
+under the `github-actions[bot]` identity (confirmed via the Actions API
+-- this is gh-aw's own command-workflow architecture working as
+designed, not a quirk), `verify-issue` authorized the bot-authored
+issue, and the `agent` job ran unattended (run 37273460839).
+
+**The agent's diagnosis and fix were genuinely good:** it correctly
+triaged two recently-merged, deliberate implementation changes (#5240,
+#5268) as the proximate cause, judged the module-size guard itself as a
+genuine invariant (shrink-only baseline) rather than something to loosen,
+and fixed the *implementation* by relocating the `activity`/
+`activity-log`/`activity-prune-worker` argparse registration out of
+`__main__.py`'s `build_parser()` into `activity.add_parsers(sub)` --
+the same delegation pattern every other `*_cli` module in this plugin
+already uses, a pure relocation with no behavior change. It added the
+required changefile and honestly flagged its own verification gap
+(sandbox couldn't run Python/pytest, so it relied on `wc -l` rather than
+the real guard script).
+
+**`create_pull_request` fell back to a review issue (#5288), as
+designed, not as a bug:** the patch's own changefile lives under
+`.changefiles/`, a top-level dot-folder, and `protect_top_level_dot_
+folders: true` routes any such patch to a reviewable issue with a ready
+compare link instead of auto-opening a PR -- exactly the safety behavior
+Phase 3's guardrails specify, observed live for the first time.
+
+**This session reviewed and landed it properly, not just rubber-
+stamped the agent's own self-report:** created a worktree, checked out
+the agent's branch, ran `tools/check-module-size.py` clean, and ran the
+real pytest suite the agent itself couldn't (confirmed pre-existing
+`check-changefile-presence.py` unrelated-plugin warnings by reproducing
+them identically with the agent's commit reverted, so they're not a
+regression this patch introduces) -- 201 targeted tests
+(`test_activity.py`/`test_cli_routing.py`/`test_lazy_dispatch.py`) plus
+1330+ tests across the broader suite (two files' worth before the
+bounded test-supervisor's 10-minute cap) all passed. Opened PR #5290
+from the agent's own branch and description plus this session's
+validation evidence, got a real `APPROVED` verdict, and merged. Closed
+#5287 and #5288 with the resolution.
+
+**Real review finding (PR #5294): this is not yet the full Validation
+Plan item.** `create_pull_request` fell back to the review issue above,
+and PR #5290 itself was opened by this session (`ThomasMichon`, not
+`github-actions[bot]`) from the agent's own branch/commit/description --
+GitHub records a human as the PR's author even though the diff was
+agent-authored end to end. **What this genuinely proves:** the agent's
+unattended diagnosis and fix, and the fact that once a PR exists it
+lands through the exact same review/merge path as any other
+contributor's change, no bypass. **What it does not yet prove:** a PR
+the gh-aw mechanism opened *itself* being indistinguishable -- that
+still needs a live run where `create_pull_request` succeeds directly
+(no protected-file fallback). Left the Validation Plan item above
+unchecked and reworded accordingly, rather than overclaiming it closed.
+Still open: that direct-PR case, the cap-attempts-per-signature
+guardrail, and the explicit out-of-scope-instruction enforcement
+(seeding a trial where the "obvious" fix would touch a protected path or
+version field) -- continuing standing monitoring for the next natural
+occurrence, or considering a deliberate, carefully-scoped trial for
+those specifically, per the Validation Plan above.
