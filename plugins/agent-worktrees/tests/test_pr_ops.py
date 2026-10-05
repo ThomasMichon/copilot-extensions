@@ -80,10 +80,11 @@ class TestExistingFeaturePush:
         assert result["error"] == (
             "Failed to (re)push 'feature/change' to 'origin'.\n"
             "The remote branch advanced; rebase and retry.\n"
-            "This is most likely caused by this worktree's own earlier "
-            "create-pr/push-changes rebase or squash of the PR branch, not an "
-            "external rewrite. Fetch/inspect the remote PR branch if needed, "
-            "then re-run agent-worktrees create-pr.\n"
+            "This could be caused either by this worktree's own earlier "
+            "create-pr/push-changes rewrite of the PR branch or by another actor "
+            "updating the remote branch after your last fetch/observation. "
+            "Fetch/inspect the remote PR branch if needed, then re-run "
+            "agent-worktrees create-pr.\n"
             "[rejected] non-fast-forward"
         )
 
@@ -3134,6 +3135,12 @@ class TestPRFinalizeAndPush:
         pr_ops.create_pr(wid, config, title="Add feature")
 
         before = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
+        anchor = Path(config.repos["ext"].anchor)
+        _git("checkout", "master", cwd=anchor)
+        (anchor / "upstream.txt").write_text("unrelated upstream advance\n")
+        _git("add", "-A", cwd=anchor)
+        _git("commit", "-m", "advance upstream", cwd=anchor)
+        _git("push", "origin", "master", cwd=anchor)
 
         # New feedback commit directly on the feature branch. create-pr returns
         # HEAD to the base branch (#1804), so check out the feature branch to
@@ -3147,11 +3154,14 @@ class TestPRFinalizeAndPush:
         assert ok is True
         captured = capsys.readouterr()
         combined = captured.out + captured.err
-        assert f"Rebased 'worktree/{wid}' onto origin/master" in combined
-        assert "force-with-lease pushed the rewritten head" in combined
+        assert "Preserved the published PR tip" in combined
+        assert "incremental updates" in combined
 
         after = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
         assert after != before  # remote feature branch advanced
+        assert _git(
+            "merge-base", before, "origin/feature/add-feature-aaaa", cwd=wt_path,
+        ) == before
 
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         local_head = _git("rev-parse", "HEAD", cwd=wt_path)
@@ -3951,6 +3961,12 @@ class TestPRFinalizeAndPush:
         # Refspec: HEAD stayed on the worktree branch; PR head is a remote ref.
         assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == f"worktree/{wid}"
         before = _git("rev-parse", "origin/pr/add-feature-aaaa", cwd=wt_path)
+        anchor = Path(config.repos["ext"].anchor)
+        _git("checkout", "master", cwd=anchor)
+        (anchor / "upstream.txt").write_text("unrelated upstream advance\n")
+        _git("add", "-A", cwd=anchor)
+        _git("commit", "-m", "advance upstream", cwd=anchor)
+        _git("push", "origin", "master", cwd=anchor)
 
         # A feedback commit lands directly on worktree/<id> -- no checkout needed.
         (wt_path / "c.txt").write_text("feedback\n")
@@ -3962,6 +3978,9 @@ class TestPRFinalizeAndPush:
 
         after = _git("rev-parse", "origin/pr/add-feature-aaaa", cwd=wt_path)
         assert after != before  # remote PR head advanced
+        assert _git(
+            "merge-base", before, "origin/pr/add-feature-aaaa", cwd=wt_path,
+        ) == before
         # HEAD never left the worktree branch; the head ref is its tip.
         assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == f"worktree/{wid}"
         assert _git("rev-parse", f"worktree/{wid}", cwd=wt_path) == \

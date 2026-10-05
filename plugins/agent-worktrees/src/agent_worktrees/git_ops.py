@@ -884,18 +884,18 @@ class PushResult:
 def pr_branch_non_fast_forward_hint(*, retry_command: str) -> str:
     """Likely-local attribution for a retryable PR-branch push rejection.
 
-    A retryable push failure on a PR/feature branch usually means THIS
-    worktree previously rewrote that branch itself -- create-pr's rebase/squash
-    on first publish, or create-pr/push-changes rebasing it forward before a
-    force-with-lease update -- rather than some unrelated external actor
-    rewriting the branch behind our back. Callers still phrase this as
-    "most likely" because a genuine external race remains possible.
+    A retryable push failure on a PR/feature branch often means either THIS
+    worktree previously rewrote that branch itself (for example an earlier
+    create-pr/push-changes republish) or another actor updated the remote
+    branch after our last fetch/observation. Callers should surface both
+    possibilities rather than pretending every lease mismatch is external --
+    or vice versa.
     """
     return (
-        "This is most likely caused by this worktree's own earlier "
-        "create-pr/push-changes rebase or squash of the PR branch, not an "
-        "external rewrite. Fetch/inspect the remote PR branch if needed, then "
-        f"re-run {retry_command}."
+        "This could be caused either by this worktree's own earlier "
+        "create-pr/push-changes rewrite of the PR branch or by another actor "
+        "updating the remote branch after your last fetch/observation. "
+        f"Fetch/inspect the remote PR branch if needed, then re-run {retry_command}."
     )
 
 

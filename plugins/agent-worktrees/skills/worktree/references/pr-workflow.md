@@ -749,9 +749,9 @@ then update the PR branch with:
 ```
 
 In PR mode `push-changes` updates the PR head, never the default branch. Feedback commits
-ride on `worktree/{id}` (create-pr leaves HEAD there); `push-changes` rebases
-`worktree/{id}` onto the default branch and then publishes per scheme — under **refspec**
-(default) it force-with-lease pushes `worktree/{id}` to the provider-resolved PR
+ride on `worktree/{id}` (create-pr leaves HEAD there); `push-changes` preserves
+that published PR tip and then publishes the newer commits incrementally per
+scheme — under **refspec** (default) it force-with-lease pushes `worktree/{id}` to the provider-resolved PR
 head ref (`pr/{slug}-{suffix}` for non-Azure-DevOps repos;
 `user/{username}/{slug}-{suffix}` for Azure DevOps); under **snapshot** it
 snapshots the local publish branch (`feature/{slug}-{suffix}` by default;
