@@ -66,6 +66,20 @@ def _iter_py():
         yield f
 
 
+def _param_names(args: ast.arguments) -> set[str]:
+    """Every name a function/lambda's own parameter list binds -- always a
+    fresh binding, never a continuation of some outer-scope alias of the
+    same name, regardless of what that outer scope calls it."""
+    names: set[str] = set()
+    for group in (args.posonlyargs, args.args, args.kwonlyargs):
+        names.update(a.arg for a in group)
+    if args.vararg:
+        names.add(args.vararg.arg)
+    if args.kwarg:
+        names.add(args.kwarg.arg)
+    return names
+
+
 class _CallFinder(ast.NodeVisitor):
     """Collect line numbers where ``call_from_thread`` is called (not just
     referenced -- a bound-method reference with no call is not itself a
@@ -74,13 +88,18 @@ class _CallFinder(ast.NodeVisitor):
     ``marshal = self.app.call_from_thread; marshal(fn)``).
 
     Aliases are tracked **per lexical scope** (module level, and freshly
-    for each function/method body) rather than pooled across the whole
-    module: an unrelated parameter or local named ``marshal`` in a
-    different function must never be flagged just because some other
-    function happens to alias ``call_from_thread`` under the same name.
-    Reassigning an already-tracked alias name to something else (a
-    non-``call_from_thread`` value) clears it within its own scope, so it
-    stops being flagged from that point on.
+    for each function/method/lambda body), but each nested scope starts
+    as a *copy* of its immediately enclosing scope's aliases -- so a
+    closure can still see an alias from an outer function (e.g.
+    ``marshal = app.call_from_thread`` at module/outer-function level,
+    then called from a nested ``def worker(): marshal(fn)``), exactly the
+    way a real nested-function reference would actually resolve the name
+    at runtime. A parameter of the nested function sharing that same name
+    is a fresh, unrelated binding regardless of the outer alias, so it is
+    explicitly excluded from the copied-in scope. Reassigning an
+    already-tracked alias name to something else (a non-``call_from_thread``
+    value) clears it within its own scope -- never the enclosing scope --
+    so it stops being flagged only from that point on, in that scope.
     """
 
     def __init__(self) -> None:
@@ -91,21 +110,25 @@ class _CallFinder(ast.NodeVisitor):
     def _aliases(self) -> set[str]:
         return self._scopes[-1]
 
-    def _visit_new_scope(self, node: ast.AST) -> None:
-        self._scopes.append(set())
+    def _visit_new_scope(self, node: ast.AST, shadowed: set[str]) -> None:
+        # Inherit a COPY of the enclosing scope's aliases (a real nested
+        # function/closure can reference an outer-scope name), minus any
+        # name this scope's own parameters rebind -- a parameter is always
+        # a fresh binding, never a continuation of an outer alias.
+        self._scopes.append(self._aliases - shadowed)
         try:
             self.generic_visit(node)
         finally:
             self._scopes.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._visit_new_scope(node)
+        self._visit_new_scope(node, _param_names(node.args))
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._visit_new_scope(node)
+        self._visit_new_scope(node, _param_names(node.args))
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
-        self._visit_new_scope(node)
+        self._visit_new_scope(node, _param_names(node.args))
 
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func

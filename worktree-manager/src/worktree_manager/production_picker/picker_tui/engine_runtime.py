@@ -805,6 +805,24 @@ class PickerScreenRuntimeMixin:
                 # is about to tear down itself. Discard it first so this is
                 # the only path that ever decides this epoch's outcome.
                 #
+                # But a wake failure and `_tick()`'s own periodic drain are
+                # racing each other independently: `_tick()` drains
+                # unconditionally, whether or not THIS post's wake
+                # succeeded, so a proactive tick landing between `post()`
+                # failing and this `discard()` call can already have
+                # claimed and run `_apply` itself. `discard()`'s own
+                # return value is the single source of truth for who won
+                # that race: `True` means this call genuinely removed a
+                # still-pending closure (nothing else could have run it),
+                # so the fallback below is this worker's alone to run.
+                # `False` means `_apply` already ran via the render flow --
+                # whatever outcome IT recorded (success or its own
+                # diagnosed failure) is authoritative, and disposing the
+                # payload or recording a conflicting failure here would be
+                # wrong (the payload may already be in active use, or a
+                # genuine success already recorded would be incorrectly
+                # overwritten as failed).
+                #
                 # #5220's other traced failure mode: the App's event loop
                 # not running, or already stopped/shutting down. A poller
                 # elsewhere (capture.py's `_wait_for_initial_setup`) must
@@ -814,15 +832,15 @@ class PickerScreenRuntimeMixin:
                 # off-thread-mutation exception as the "app is None" branch
                 # above, for the same reason: there is nothing else to hand
                 # this outcome to.
-                inbox.discard(f"setup-reload:{epoch}")
-                self._dispose_setup_payload(self._release_setup_payload(epoch))
-                self._apply_setup_failure(
-                    epoch,
-                    RuntimeError(
-                        "could not wake the render flow to apply this "
-                        "setup/reload payload"
-                    ),
-                )
+                if inbox.discard(f"setup-reload:{epoch}"):
+                    self._dispose_setup_payload(self._release_setup_payload(epoch))
+                    self._apply_setup_failure(
+                        epoch,
+                        RuntimeError(
+                            "could not wake the render flow to apply this "
+                            "setup/reload payload"
+                        ),
+                    )
 
         threading.Thread(
             target=_worker, name=f"picker-setup-reload:{epoch}", daemon=True

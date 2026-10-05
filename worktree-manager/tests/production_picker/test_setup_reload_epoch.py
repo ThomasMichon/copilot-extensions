@@ -391,6 +391,91 @@ def test_setup_reload_wake_failure_leaves_no_stale_closure_for_a_later_drain():
     assert screen.applied == []
 
 
+def test_setup_reload_wake_failure_fallback_defers_to_a_racing_tick_that_already_applied():
+    """A regression for a TOCTOU in the wake-failure fallback: a failed
+    wake and ``_tick()``'s own periodic, unconditional drain race
+    independently of each other -- ``_tick()`` drains whether or not THIS
+    particular post's wake succeeded, so a proactive tick landing between
+    ``post()`` failing and the fallback's own ``discard()`` call can
+    already have claimed and run ``_apply`` itself (a genuine success).
+    The fallback must defer to that outcome via ``discard()``'s own return
+    value, never double-handle it by disposing a payload already in use
+    or recording a conflicting diagnosed failure over a real success.
+    """
+    applied = threading.Event()
+    conflicting_failure_recorded = threading.Event()
+
+    class _Loader:
+        def cancel(self):
+            pass
+
+    class _Screen(PickerScreenRuntimeMixin):
+        def __init__(self):
+            self.app = object()  # resolvable but has no post_message at all
+            self._bg_cancel = threading.Event()
+            self._setup_epoch = 0
+            self._setup_applied_epoch = 0
+            self._setup_failed_epoch = 0
+            self._pending_setup_payloads = {}
+            self._setup_payloads_lock = threading.Lock()
+            self.applied = []
+            self.failures: list[tuple[int, Exception]] = []
+
+        def _prime_setup_reload(self):
+            return None
+
+        def _collect_setup_payload(self):
+            return _payload("live").__class__(
+                **{
+                    **_payload("live").__dict__,
+                    "loader": _Loader(),
+                }
+            )
+
+        def _invalidate_setup_reload_caches(self):
+            return None
+
+        def _apply_setup_payload(self, payload):
+            self.applied.append(payload)
+            applied.set()
+
+        def _apply_setup_failure(self, epoch, err):
+            self.failures.append((epoch, err))
+            conflicting_failure_recorded.set()
+
+        def refresh(self):
+            return None
+
+    from worktree_manager.production_picker.picker_tui.inbox import ensure_inbox
+
+    screen = _Screen()
+    # `_start_setup_reload_worker` resolves the Inbox on THIS (the calling)
+    # thread before spawning its worker -- resolve it the same way here so
+    # we can wrap `discard()` up front, before the race it is meant to
+    # detect can happen on the worker thread.
+    inbox = ensure_inbox(screen)
+    real_discard = inbox.discard
+
+    def _racing_discard(slot):
+        # Simulate a proactive `_tick()` winning the race: fully drain
+        # (and apply) the posted closure BEFORE the fallback's own
+        # `discard()` call below gets a chance to run.
+        inbox.drain_apply()
+        return real_discard(slot)
+
+    inbox.discard = _racing_discard
+
+    epoch = screen._start_setup_reload_worker()
+    assert applied.wait(timeout=5)
+    # The racing tick's own drain already applied the payload
+    # successfully -- the fallback must NOT also record a conflicting
+    # diagnosed failure for the same epoch.
+    assert not conflicting_failure_recorded.wait(timeout=1)
+    assert screen._setup_applied_epoch == epoch
+    assert screen.failures == []
+    assert len(screen.applied) == 1
+
+
 def test_setup_reload_records_a_diagnosed_failure_when_app_is_unresolvable():
     """#5220's other traced failure mode: ``self.app`` raising/being ``None``
     when the worker was scheduled (e.g. the screen wasn't yet mounted into

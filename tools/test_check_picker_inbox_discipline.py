@@ -101,6 +101,53 @@ def test_flags_alias_of_an_alias(repo):
     assert any("call_from_thread(" in p for p in guard.verify())
 
 
+def test_flags_a_module_level_alias_used_from_a_nested_function(repo):
+    """A nested function is a real Python closure: it genuinely resolves
+    a module-level (or enclosing-function) alias at runtime, so the guard
+    must flag it too -- starting every function with a wholly empty alias
+    set would miss this exact call."""
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_model.py",
+        "marshal = app.call_from_thread\n"
+        "def worker():\n"
+        "    marshal(fn)\n",
+    )
+    assert any("call_from_thread(" in p for p in guard.verify())
+
+
+def test_flags_an_outer_function_alias_used_from_a_nested_inner_function(repo):
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_regions.py",
+        "def outer(self):\n"
+        "    marshal = self.app.call_from_thread\n"
+        "    def inner():\n"
+        "        marshal(fn)\n"
+        "    inner()\n",
+    )
+    assert any("call_from_thread(" in p for p in guard.verify())
+
+
+def test_a_nested_functions_own_parameter_shadows_an_inherited_alias(repo):
+    """A nested function's own parameter of the same name as an outer
+    alias is a fresh, unrelated binding -- it must NOT inherit the outer
+    scope's alias meaning just because the name matches."""
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_pivots.py",
+        "def outer(self):\n"
+        "    marshal = self.app.call_from_thread\n"
+        "    def inner(marshal):\n"
+        "        marshal(fn)\n"
+        "    inner(some_safe_callable)\n",
+    )
+    assert guard.verify() == []
+
+
 def test_alias_in_one_function_does_not_flag_an_unrelated_name_in_another(repo):
     """An alias assigned inside one function must not leak into a sibling
     function -- a parameter or local that merely happens to share the
