@@ -676,6 +676,28 @@ function Get-SourceKind {
 }
 # === end install-contract:v3 source-kind ===
 
+function Materialize-SnapshotInstallerEngine {
+    param([Parameter(Mandatory)][string]$SnapshotDir)
+    $scriptsDir = Join-Path $SnapshotDir 'scripts'
+    if (-not (Test-Path $scriptsDir)) { New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    foreach ($name in @('installer-engine.ps1', 'installer-engine.sh')) {
+        Copy-Item -LiteralPath (Join-Path (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine') $name) -Destination (Join-Path $scriptsDir $name) -Force
+    }
+    $installSh = Join-Path $scriptsDir 'install.sh'
+    if (Test-Path $installSh) {
+        $shText = [System.IO.File]::ReadAllText($installSh)
+        $shText = $shText.Replace('. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"', '. "$SCRIPT_DIR/installer-engine.sh"')
+        [System.IO.File]::WriteAllText($installSh, $shText, $utf8NoBom)
+    }
+    $installPs1 = Join-Path $scriptsDir 'install.ps1'
+    if (Test-Path $installPs1) {
+        $ps1Text = [System.IO.File]::ReadAllText($installPs1)
+        $ps1Text = $ps1Text.Replace(". (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')", ". (Join-Path $PSScriptRoot 'installer-engine.ps1')")
+        [System.IO.File]::WriteAllText($installPs1, $ps1Text, $utf8NoBom)
+    }
+}
+
 function Publish-PayloadSnapshot {
     <# Publish one immutable payload snapshot and atomically point payload-dir
        and stamped-version at it. Existing complete same-version snapshots are
@@ -710,6 +732,8 @@ function Publish-PayloadSnapshot {
             }
         Move-Item -LiteralPath $snapTmp -Destination $snapDir
     }
+
+    Materialize-SnapshotInstallerEngine -SnapshotDir $snapDir
 
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     foreach ($marker in @{
@@ -945,6 +969,7 @@ function Install-Package {
     }
 
     # SAC-safe venv: prefer a signed base Python via --copies; rebuild unsigned.
+    Invoke-VersionedSlotClean
     if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true)) {
         Write-Fail "Failed to create venv at $VenvDir"
         exit 1

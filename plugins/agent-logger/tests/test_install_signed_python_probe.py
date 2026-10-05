@@ -52,6 +52,7 @@ $env:OS = 'Windows_NT'
 {path_prefix}
 {py_stub_body}
 
+{_extract_ps1_function("Invoke-NativeCapture")}
 {_extract_ps1_function("Get-SignedBasePython")}
 
 $result = Get-SignedBasePython

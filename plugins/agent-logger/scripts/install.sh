@@ -583,6 +583,22 @@ deploy_runtime_helpers() {
     done
 }
 
+_materialize_snapshot_engine() {
+    local snapshot_dir="$1"
+    local scripts_dir="$snapshot_dir/scripts"
+    mkdir -p "$scripts_dir"
+    cp -f "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh" "$scripts_dir/installer-engine.sh"
+    cp -f "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.ps1" "$scripts_dir/installer-engine.ps1"
+
+    local tmp="$scripts_dir/install.sh.tmp.$$"
+    sed 's|^\. "\$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"$|. "\$SCRIPT_DIR/installer-engine.sh"|' "$scripts_dir/install.sh" > "$tmp"
+    mv -f "$tmp" "$scripts_dir/install.sh"
+
+    tmp="$scripts_dir/install.ps1.tmp.$$"
+    sed "s|^\. (Join-Path \$PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')$|. (Join-Path \$PSScriptRoot 'installer-engine.ps1')|" "$scripts_dir/install.ps1" > "$tmp"
+    mv -f "$tmp" "$scripts_dir/install.ps1"
+}
+
 deploy_auxiliary_compatibility_binstubs() {
     mkdir -p "${LOCAL_BIN}"
     local name
@@ -643,6 +659,8 @@ publish_payload_snapshot() {
         mv "$snapshot_tmp" "$snapshot_dir"
     fi
 
+    _materialize_snapshot_engine "$snapshot_dir"
+
     local payload_tmp="${INSTALL_DIR}/payload-dir.tmp.$$"
     local version_tmp="${INSTALL_DIR}/stamped-version.tmp.$$"
     printf '%s\n' "$snapshot_dir" > "$payload_tmp"
@@ -688,7 +706,11 @@ install_package() {
     fi
     chg "created venv at ${VENV}"
   fi
-  invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" 'setuptools>=83.0.0' --quiet >/dev/null
+  local setuptools_out
+  if ! setuptools_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" 'setuptools>=83.0.0' --quiet); then
+    printf '%s\n' "$setuptools_out" >&2
+    exit 1
+  fi
   # Install vendored first-party dependencies from their local paths before the
   # main package, then install agent-logger itself with --no-deps so deep
   # staged payload paths do not force uv to rebuild the same path dependency
@@ -698,14 +720,22 @@ install_package() {
     cfg_migrate_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/config-migrate"
   fi
   if [ -f "${cfg_migrate_dir}/pyproject.toml" ]; then
-    invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-config-migrate "${cfg_migrate_dir}" --quiet >/dev/null
+    local cfg_migrate_out
+    if ! cfg_migrate_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-config-migrate "${cfg_migrate_dir}" --quiet); then
+      printf '%s\n' "$cfg_migrate_out" >&2
+      exit 1
+    fi
   fi
   local procutil_dir="${PLUGIN_DIR}/libs/agent-procutil"
   if [ ! -f "${procutil_dir}/pyproject.toml" ]; then
     procutil_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/agent-procutil"
   fi
   if [ -f "${procutil_dir}/pyproject.toml" ]; then
-    invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-procutil "${procutil_dir}" --quiet >/dev/null
+    local procutil_out
+    if ! procutil_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-procutil "${procutil_dir}" --quiet); then
+      printf '%s\n' "$procutil_out" >&2
+      exit 1
+    fi
   fi
   # plugin_activation's own transitive deps first, then plugin_activation
   # itself (schema v3's registered-project trust gate; module
@@ -716,24 +746,41 @@ install_package() {
     dropin_registry_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/dropin-registry"
   fi
   if [ -f "${dropin_registry_dir}/pyproject.toml" ]; then
-    invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-dropin-registry "${dropin_registry_dir}" --quiet >/dev/null
+    local dropin_registry_out
+    if ! dropin_registry_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-dropin-registry "${dropin_registry_dir}" --quiet); then
+      printf '%s\n' "$dropin_registry_out" >&2
+      exit 1
+    fi
   fi
   local plugin_resolve_dir="${PLUGIN_DIR}/libs/plugin-resolve"
   if [ ! -f "${plugin_resolve_dir}/pyproject.toml" ]; then
     plugin_resolve_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/plugin-resolve"
   fi
   if [ -f "${plugin_resolve_dir}/pyproject.toml" ]; then
-    invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-plugin-resolve "${plugin_resolve_dir}" --quiet >/dev/null
+    local plugin_resolve_out
+    if ! plugin_resolve_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-plugin-resolve "${plugin_resolve_dir}" --quiet); then
+      printf '%s\n' "$plugin_resolve_out" >&2
+      exit 1
+    fi
   fi
   local plugin_activation_dir="${PLUGIN_DIR}/libs/plugin-activation"
   if [ ! -f "${plugin_activation_dir}/pyproject.toml" ]; then
     plugin_activation_dir="$(cd "${PLUGIN_DIR}/../.." && pwd)/libs/plugin-activation"
   fi
   if [ -f "${plugin_activation_dir}/pyproject.toml" ]; then
-    invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-plugin-activation "${plugin_activation_dir}" --quiet >/dev/null
+    local plugin_activation_out
+    if ! plugin_activation_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --reinstall-package agent-plugin-activation "${plugin_activation_dir}" --quiet); then
+      printf '%s\n' "$plugin_activation_out" >&2
+      exit 1
+    fi
   fi
   export INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="${PLUGIN_DIR}"
-  invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --no-deps "${PLUGIN_DIR}" --quiet >/dev/null
+  local install_out
+  if ! install_out=$(invoke_uv_pip_install_resilient "${UV_CMD}" --python "${VENV}/bin/python" --no-build-isolation --no-deps "${PLUGIN_DIR}" --quiet); then
+    unset INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB
+    printf '%s\n' "$install_out" >&2
+    exit 1
+  fi
   unset INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB
   ok "installed agent-logger package"
 

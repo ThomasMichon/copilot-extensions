@@ -913,9 +913,13 @@ appropriately larger/riskier for one sitting):
     install --install-dir <scoped session scratch>` against the live checkout
     with the real user systemd instance, confirmed the scoped timer became
     active, `status` reported the installed runtime healthy, the versioned
-    slot's Python imported `agent_logger` successfully, and then removed the
-    scoped timer again with `uninstall --install-dir ...`. Also re-confirmed
-    the `dev` checkout keeps **no** local `plugins/agent-logger/scripts/installer-engine.*` copy afterward.
+    slot's Python imported `agent_logger` successfully, and the published
+    snapshot carried payload-local `scripts/installer-engine.{sh,ps1}` copies
+    with both installer source lines rewritten to the local form before the
+    first-use installer path could consume them. Then removed the scoped timer
+    again with `uninstall --install-dir ...`. Also re-confirmed the `dev`
+    checkout keeps **no** local `plugins/agent-logger/scripts/installer-engine.*`
+    copy afterward.
 - Validation not possible in this Linux/WSL session:
   - No real Windows install lane / Task Scheduler exercise for
     `install.ps1`; instead validated that lane through the full plugin test
