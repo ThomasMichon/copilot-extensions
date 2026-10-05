@@ -42,6 +42,34 @@ class TestDispositionGlyph:
         assert n["state"] == "FINAL"
 
 
+class TestPausedGlyph:
+    """`paused` is purely informational -- a title glyph + a field, never fed
+    into bucket()/the prune verdict (unlike `follow_up`)."""
+
+    def test_paused_gets_glyph_and_field(self):
+        n = derive.norm(_raw(paused=True, title="Nudge subsystem"),
+                        "anomalous-potato", "win")
+        assert n["title"].startswith("\u23f8 ")  # ⏸ prefix
+        assert n["paused"] is True
+
+    def test_unpaused_has_no_glyph(self):
+        n = derive.norm(_raw(title="Done"), "anomalous-potato", "win")
+        assert not n["title"].startswith("\u23f8")
+        assert n["paused"] is False
+
+    def test_paused_state_stays_pure_for_bucketing(self):
+        n = derive.norm(_raw(paused=True), "anomalous-potato", "win")
+        assert n["state"] == "FINAL"
+
+    def test_paused_and_follow_up_glyphs_compose(self):
+        n = derive.norm(
+            _raw(follow_up=True, paused=True, summary="x"), "anomalous-potato", "win",
+        )
+        assert n["title"].startswith("\u23f8 \u271a ")  # ⏸ outside ✚
+        assert n["follow_up"] is True
+        assert n["paused"] is True
+
+
 class TestPairMarker:
     """citadel #957: a paired -harness/-knowledge row is scannable + carries the
     pair linkage on the normalized record."""

@@ -787,6 +787,8 @@ class WorktreeRecord:
     # the prune verdict. The live "pulse" (assistant.intent) is a SEPARATE
     # sidecar, never stored on this durable record.
     follow_up: bool = False
+    paused: bool = False  # informational only; never gates finalize/cleanup
+    paused_revision: int = 0  # lets stale full-record saves merge it safely
     summary: str = ""
     status_note_at: str | None = None
     # #3307 worktrees-pivot-ux-overhaul follow-up: the agent-asserted CURRENT
@@ -2150,6 +2152,8 @@ def _load_record_uncached(path: Path) -> WorktreeRecord:
         pending_seed=(str(data["pending_seed"]) if data.get("pending_seed") else None),
         pending_seed_revision=int(data.get("pending_seed_revision", 0) or 0),
         follow_up=bool(data.get("follow_up", False)),
+        paused=bool(data.get("paused", False)),
+        paused_revision=int(data.get("paused_revision", 0) or 0),
         follow_ups=follow_ups_list,
         summary=str(data.get("summary", "") or ""),
         active_effort=active_effort_from_mapping(data.get("active_effort")),
@@ -2380,6 +2384,10 @@ def _save_record_unlocked(
     ``save_record``, but also several already-locked direct callers (e.g.
     the execution-leg CLI). Refreshing :mod:`record_cache` HERE, not only in
     ``save_record``, reaches every one of them.
+
+    **Every revision-merge below only protects a stale-snapshot writer on
+    current code** -- a still-live OLDER-code process has no such field and
+    can drop it on an unrelated save (pre-existing/systemic, not per-field).
     """
     if path is None:
         path = record.yaml_path
@@ -2391,17 +2399,18 @@ def _save_record_unlocked(
             record.follow_up = current.follow_up
             record.summary = current.summary
             record.status_note_at = current.status_note_at
-        # A claim/restore (pending_seed.py) advances pending_seed_revision
-        # under the record lock. A stale full-record writer loaded BEFORE
-        # that transition must never resurrect an already-delivered
-        # (cleared) seed by saving its own older snapshot back over it.
+        if current.paused_revision > record.paused_revision:
+            record.paused = current.paused
+            record.paused_revision = current.paused_revision
+            if (current.status_note_at or "") > (record.status_note_at or ""):
+                record.status_note_at = current.status_note_at
+        # A claim/restore (pending_seed.py) must never resurrect an
+        # already-delivered (cleared) seed via a stale snapshot's save.
         if current.pending_seed_revision > record.pending_seed_revision:
             record.pending_seed = current.pending_seed
             record.pending_seed_revision = current.pending_seed_revision
-        # Lifecycle writers advance ``lifecycle_revision`` under the record
-        # lock. An unrelated writer may have loaded an older snapshot before
-        # that transition; never let its later save roll the append-only ledger
-        # or session activation history backward.
+        # Never let a stale snapshot's save roll the append-only session
+        # ledger/activation history backward.
         if current.lifecycle_revision > record.lifecycle_revision:
             record.sessions = current.sessions
             record.lifecycle_revision = current.lifecycle_revision
@@ -2416,13 +2425,9 @@ def _save_record_unlocked(
             record.session_backend = None
             record.session_backend_opaque = True
             record.session_backend_raw = current.session_backend_raw
-        elif (
-            current_backend is not None
-            and (
-                record_backend is None
-                or current_backend.binding_revision
-                > record_backend.binding_revision
-            )
+        elif current_backend is not None and (
+            record_backend is None
+            or current_backend.binding_revision > record_backend.binding_revision
         ):
             record.session_backend = current_backend
             record.session_backend_opaque = False
@@ -2433,43 +2438,30 @@ def _save_record_unlocked(
             record.execution_leg = None
             record.execution_leg_opaque = True
             record.execution_leg_raw = current.execution_leg_raw
-        elif (
-            current_leg is not None
-            and (
-                record_leg is None
-                or current_leg.binding_revision > record_leg.binding_revision
-            )
+        elif current_leg is not None and (
+            record_leg is None
+            or current_leg.binding_revision > record_leg.binding_revision
         ):
             record.execution_leg = current_leg
             record.execution_leg_opaque = False
             record.execution_leg_raw = None
-        if (
-            current.profile_assignment_revision
-            > record.profile_assignment_revision
-        ):
-            record.profile_assignment_revision = (
-                current.profile_assignment_revision
-            )
+        if current.profile_assignment_revision > record.profile_assignment_revision:
+            record.profile_assignment_revision = current.profile_assignment_revision
             record.profile_assignments = current.profile_assignments
         if current.controller_revision > record.controller_revision:
             record.controller_revision = current.controller_revision
             record.controllers = current.controllers
-            record.controller_metadata_opaque = (
-                current.controller_metadata_opaque)
+            record.controller_metadata_opaque = current.controller_metadata_opaque
             record.controller_raw_revision = current.controller_raw_revision
             record.controller_raw_entries = current.controller_raw_entries
-            record.controller_raw_revision_present = (
-                current.controller_raw_revision_present)
-            record.controller_raw_entries_present = (
-                current.controller_raw_entries_present)
+            record.controller_raw_revision_present = current.controller_raw_revision_present
+            record.controller_raw_entries_present = current.controller_raw_entries_present
         elif current.controller_metadata_opaque:
             record.controller_metadata_opaque = True
             record.controller_raw_revision = current.controller_raw_revision
             record.controller_raw_entries = current.controller_raw_entries
-            record.controller_raw_revision_present = (
-                current.controller_raw_revision_present)
-            record.controller_raw_entries_present = (
-                current.controller_raw_entries_present)
+            record.controller_raw_revision_present = current.controller_raw_revision_present
+            record.controller_raw_entries_present = current.controller_raw_entries_present
         current_by_ref = {claim.ref: claim for claim in current.resources}
         reserved = {
             claim.ref: claim for claim in current.resources
@@ -2664,6 +2656,10 @@ def _save_record_unlocked(
     # byte-identical (no churn for the common case).
     if record.follow_up:
         content += "follow_up: true\n"
+    if record.paused:
+        content += "paused: true\n"
+    if record.paused_revision:
+        content += f"paused_revision: {record.paused_revision}\n"
     if record.summary:
         safe_summary = record.summary.replace("'", "''")
         content += f"summary: '{safe_summary}'\n"
@@ -3440,13 +3436,14 @@ def set_disposition(
     title: str | None = None,
     activity: str | None = None,
     follow_up: bool | None = None,
+    paused: bool | None = None,
     session_id: str | None = None,
     kind: str = "status",
     save: bool = True,
     tracking_path: Path | None = None,
 ) -> None:
     """Set the agent-asserted disposition overlay (summary / title / activity /
-    follow-up) and save.
+    follow-up / paused) and save.
 
     Orthogonal to git/session state -- this records what only the agent knows:
     whether the worktree is genuinely *resolved* or still has *actionable
@@ -3501,6 +3498,10 @@ def set_disposition(
         # in `add_follow_up`. Idempotent/no-op when already non-finalized.
         if follow_up and record.status == "finalized":
             reopen_finalized_owner(record, reason="follow_up flag set")
+    if paused is not None:
+        record.paused = paused
+        record.paused_revision += 1
+        changed.append("paused")  # no gate interaction -- informational only
     record.status_note_at = _now_iso()
     if changed:
         disposition_history.append(
@@ -3509,6 +3510,7 @@ def set_disposition(
             summary=record.summary,
             title=record.title,
             follow_up=record.follow_up,
+            paused=record.paused,
             changed=changed,
             activity=record.activity,
             kind=kind,

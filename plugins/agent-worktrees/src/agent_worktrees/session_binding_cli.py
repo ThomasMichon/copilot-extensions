@@ -34,6 +34,22 @@ def _json_output(*args, **kwargs):
     return _core()._json_output(*args, **kwargs)
 
 
+def _note_disposition_snapshot(wt_id: str, *, summary: str, kind: str, session_id):
+    """Shared `disposition_history.append` for the bind/handoff bookkeeping
+    entries below -- reads the record's actual `paused` (never the
+    `append` default, which would misrepresent an already-paused worktree;
+    fail-open on an unreadable record)."""
+    from . import disposition_history
+    try:
+        paused = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml").paused
+    except Exception:
+        paused = False
+    disposition_history.append(
+        wt_id, at=tracking._now_iso(), summary=summary, title=None,
+        follow_up=False, paused=paused, changed=[], kind=kind, session_id=session_id,
+    )
+
+
 def _read_hook_stdin(*args, **kwargs):
     return _core()._read_hook_stdin(*args, **kwargs)
 
@@ -670,18 +686,7 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
         launch_id=os.environ.get("WORKTREE_LAUNCH_ID"),
     )
 
-    from . import disposition_history
-
-    disposition_history.append(
-        wt_id,
-        at=tracking._now_iso(),
-        summary="",
-        title=None,
-        follow_up=False,
-        changed=[],
-        kind="bind",
-        session_id=session_id,
-    )
+    _note_disposition_snapshot(wt_id, summary="", kind="bind", session_id=session_id)
 
     try:
         rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
@@ -731,8 +736,6 @@ def _bind_nudge_should_fire(record) -> bool:
 
 def cmd_note_handoff(args: argparse.Namespace) -> int:
     """Append a session-tagged ``handoff`` entry to this worktree's history."""
-    from . import disposition_history
-
     session_id = getattr(args, "session_id", None) or (
         os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     )
@@ -781,16 +784,7 @@ def cmd_note_handoff(args: argparse.Namespace) -> int:
         except Exception:
             handoff_ordinal = None
 
-    disposition_history.append(
-        wt_id,
-        at=tracking._now_iso(),
-        summary=summary,
-        title=None,
-        follow_up=False,
-        changed=[],
-        kind="handoff",
-        session_id=session_id,
-    )
+    _note_disposition_snapshot(wt_id, summary=summary, kind="handoff", session_id=session_id)
     _json_output(
         {
             "noted": True,

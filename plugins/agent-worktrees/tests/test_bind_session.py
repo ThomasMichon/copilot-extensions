@@ -511,6 +511,30 @@ class TestNoteHandoff:
         assert record.handoffs[0].state == "pending"
         assert captured["handoff_ordinal"] == 1
 
+    def test_handoff_entry_reflects_an_already_paused_worktree(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        """The snapshot must read the record's actual `paused` disposition,
+        not silently default to False (which would misrepresent an
+        already-paused worktree in its own history)."""
+        import agent_worktrees.disposition_history as dh
+
+        _save_record(tmp_tracking_dir, "wt-hp", "/tmp/src/wt-hp")
+        record = m.tracking.load_record(tmp_tracking_dir / "wt-hp.yaml")
+        m.tracking.set_disposition(record, paused=True, tracking_path=tmp_tracking_dir)
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hp")
+        monkeypatch.setattr(m, "_json_output", lambda o: None)
+        monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "sess-pred")
+
+        rc = m.cmd_note_handoff(argparse.Namespace(
+            task="task456", title="Fix another widget",
+            worktree_dir="/tmp/src/wt-hp", worktree_id=None, session_id=None))
+        assert rc == 0
+        e = dh.read("wt-hp")[-1]
+        assert e["kind"] == "handoff"
+        assert e["paused"] is True
+
     def test_untracked_is_silent_noop(
         self, tmp_tracking_dir, monkeypatch_config, monkeypatch
     ):

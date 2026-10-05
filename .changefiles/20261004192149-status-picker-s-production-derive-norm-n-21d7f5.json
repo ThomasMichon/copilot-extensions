@@ -1,0 +1,9 @@
+{
+  "comment": "status: Picker's production derive.norm now renders the paused marker (glyph + field), mirroring agent-worktrees' own compatibility copy",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

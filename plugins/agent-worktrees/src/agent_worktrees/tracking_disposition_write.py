@@ -64,6 +64,7 @@ def apply_status_disposition(args: dict) -> dict:
     title = args.get("title")
     activity_text = args.get("activity")
     follow_up = args.get("follow_up")
+    paused = args.get("paused")
     session_id = args.get("session_id")
     project = args.get("project")
 
@@ -83,6 +84,7 @@ def apply_status_disposition(args: dict) -> dict:
             title=title,
             activity=activity_text,
             follow_up=follow_up,
+            paused=paused,
             session_id=session_id,
             save=False,
             tracking_path=yaml_path.parent,
@@ -114,10 +116,18 @@ def apply_status_disposition(args: dict) -> dict:
     return {
         "ok": True,
         "follow_up": record.follow_up,
+        "paused": record.paused,
         "title": record.title,
         "summary": record.summary,
         "activity": record.activity,
     }
 
 
-tracking_write.register_verb("status_disposition_write", apply_status_disposition)
+# version=2: `paused` is part of this verb's payload, added after this verb
+# first shipped at version 1. A pre-upgrade daemon process still running
+# the version-1 `fn` would accept a request carrying `paused` (the name
+# check alone can't see the shape change) and silently ignore it while
+# reporting success -- see `tracking_write`'s own `_VERB_VERSIONS`
+# docstring for why this requires a version bump rather than relying on
+# the pre-existing by-name capability check.
+tracking_write.register_verb("status_disposition_write", apply_status_disposition, version=2)

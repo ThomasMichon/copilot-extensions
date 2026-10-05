@@ -298,6 +298,28 @@ class TestWorktreeStatusComputeIsolated:
             "resources": [], "owner_ref": "knowledge:some-parent-worktree",
         }
 
+    def test_disposition_fact_includes_the_paused_marker(self, monkeypatch, tmp_path):
+        """`worktree-status-bundle` is documented as the FULL status bundle,
+        so its `disposition` fact must carry `paused` alongside
+        `follow_up`/`summary` -- otherwise a fresh bundle recomputation
+        cannot report whether a worktree is paused."""
+        from agent_worktrees import __main__ as m
+
+        project = "iso-proj"
+        tracking_dir = tmp_path / project / "worktrees"
+        tracking_dir.mkdir(parents=True)
+        wt_path = tmp_path / "wt1"
+        wt_path.mkdir()
+        record = _rec(wt_path)
+        record.paused = True
+        tracking.save_record(record, tracking_dir / "wt1.yaml")
+
+        monkeypatch.setattr(m.cfg, "project_dir", lambda name=None: tmp_path / (name or project))
+        _wire_common_internals(monkeypatch, m)
+
+        bundle = m._worktree_status_compute(project, "wt1")
+        assert bundle["facts"]["disposition"]["value"]["paused"] is True
+
     def test_each_fact_is_timestamped_at_its_own_observation_not_bundle_start(
         self, monkeypatch, tmp_path
     ):
