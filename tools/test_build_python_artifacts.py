@@ -1144,7 +1144,7 @@ def _assume_governed_feed_configured(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda env: ("https://example.internal/simple/", None),  # noqa: ARG005
     )
     monkeypatch.setattr(
-        btl, "_resolve_interpreter_identity", lambda python: python or ""
+        btl, "_resolve_interpreter_identity", lambda python, env: python or ""
     )
 
 
@@ -1459,40 +1459,57 @@ def test_resolve_interpreter_identity_queries_uv_python_find(
     real_interpreter = tmp_path / "real-python"
     real_interpreter.write_text("", encoding="utf-8")
     seen_cmds: list[list[str]] = []
+    seen_envs: list[dict] = []
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
         seen_cmds.append(cmd)
+        seen_envs.append(kwargs.get("env"))
         return subprocess.CompletedProcess(
             cmd, 0, stdout=str(real_interpreter) + "\n", stderr=""
         )
 
     monkeypatch.setattr(btl.subprocess, "run", fake_run)
-    identity = btl._resolve_interpreter_identity("python3.12")
+    sentinel_env = {"SENTINEL": "1"}
+    identity = btl._resolve_interpreter_identity("python3.12", sentinel_env)
 
-    assert seen_cmds == [["uv", "python", "find", "python3.12"]]
+    # Regression (round 21): must probe with `--no-config` plus the
+    # CALLER's own already-sanitized env -- the SAME config context
+    # `uv venv` itself uses -- never its own, separately-resolved one;
+    # otherwise the probe and `uv venv` could silently disagree about
+    # which interpreter is actually in play (e.g. a project `uv.toml`
+    # pinning `python`, visible to the probe but not to `uv venv
+    # --no-config`).
+    assert seen_cmds == [["uv", "python", "find", "--no-config", "python3.12"]]
+    assert seen_envs == [sentinel_env]
     assert identity == str(real_interpreter.resolve())
 
 
-def test_resolve_interpreter_identity_falls_back_on_failure(
+def test_resolve_interpreter_identity_fails_closed_on_failure(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    # Regression: a failed probe (nonzero exit, or `uv` itself missing)
-    # must never crash the caller -- it falls back to the raw selector
-    # text, which still fails closed overall (a merely-approximate
-    # identity can only cause an unnecessary rebuild, never a false
-    # match).
+    # Regression (round 21): a failed probe (nonzero exit, empty output,
+    # or `uv` itself missing) must raise, never fall back to the raw
+    # selector text. A text fallback is NOT fail-closed: if the probe
+    # fails for two calls whose selector text is identical but whose
+    # ACTUAL interpreters differ (e.g. `python3` repointed between
+    # calls), both would record the same approximate identity and
+    # falsely compare equal -- exactly the false-match hazard this
+    # function exists to prevent.
     monkeypatch.setattr(
         btl.subprocess, "run",
         lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="not found"),  # noqa: ARG005
     )
-    assert btl._resolve_interpreter_identity("python3.12") == "python3.12"
-    assert btl._resolve_interpreter_identity(None) == ""
+    with pytest.raises(bpa.ArtifactBuildError):
+        btl._resolve_interpreter_identity("python3.12", {})
+    with pytest.raises(bpa.ArtifactBuildError):
+        btl._resolve_interpreter_identity(None, {})
 
     def raise_oserror(cmd, **kwargs):  # noqa: ARG001
         raise OSError("uv not found")
 
     monkeypatch.setattr(btl.subprocess, "run", raise_oserror)
-    assert btl._resolve_interpreter_identity("python3.12") == "python3.12"
+    with pytest.raises(bpa.ArtifactBuildError):
+        btl._resolve_interpreter_identity("python3.12", {})
 
 
 def test_resolve_toolchain_lock_detects_resolved_interpreter_change_despite_same_selector_text(
@@ -1510,7 +1527,7 @@ def test_resolve_toolchain_lock_detects_resolved_interpreter_change_despite_same
     )
     resolved = {"value": "/opt/pythons/3.10/bin/python"}
     monkeypatch.setattr(
-        btl, "_resolve_interpreter_identity", lambda python: resolved["value"]  # noqa: ARG005
+        btl, "_resolve_interpreter_identity", lambda python, env: resolved["value"]  # noqa: ARG005
     )
     venv_dir = tmp_path / "toolchain-venv"
     venv_python = bpa._venv_python_path(venv_dir)
@@ -2139,6 +2156,8 @@ def test_resolve_toolchain_lock_never_publishes_venv_failing_version_query(
             staging_python.parent.mkdir(parents=True, exist_ok=True)
             staging_python.write_text("", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:1] == ["icacls"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         if cmd[:3] == ["uv", "pip", "install"]:
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         # the version query itself -- missing "packaging" on the first
@@ -2655,7 +2674,7 @@ def test_resolve_toolchain_lock_pins_install_via_sanitized_config_not_argv(
         btl, "_validated_trusted_index_url",
         lambda env: ("https://governed.example/simple/", None),  # noqa: ARG005
     )
-    monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python: python or "")
+    monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python, env: python or "")
     monkeypatch.setenv("UV_INDEX", "https://untrusted.example/simple/")
     monkeypatch.setenv("UV_EXTRA_INDEX_URL", "https://untrusted.example/extra/")
     monkeypatch.setenv("UV_FIND_LINKS", "https://untrusted.example/links/")
@@ -2721,7 +2740,7 @@ def test_resolve_toolchain_lock_pins_named_index_and_preserves_credential_env(
         btl, "_validated_trusted_index_url",
         lambda env: ("https://governed.example/simple/", "governed"),  # noqa: ARG005
     )
-    monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python: python or "")
+    monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python, env: python or "")
     monkeypatch.setenv("UV_INDEX_GOVERNED_USERNAME", "svc-account")
     monkeypatch.setenv("UV_INDEX_GOVERNED_PASSWORD", "token-value")
     venv_dir = tmp_path / "toolchain-venv"
@@ -2768,7 +2787,7 @@ def test_resolve_toolchain_lock_cleans_up_sanitized_config_on_install_failure(
         btl, "_validated_trusted_index_url",
         lambda env: ("https://governed.example/simple/", None),  # noqa: ARG005
     )
-    monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python: python or "")
+    monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python, env: python or "")
     venv_dir = tmp_path / "toolchain-venv"
     seen_config_paths: list[Path] = []
 
@@ -2805,7 +2824,7 @@ def test_resolve_toolchain_lock_strips_uv_constraint_and_override_vars(
         btl, "_validated_trusted_index_url",
         lambda env: ("https://governed.example/simple/", None),  # noqa: ARG005
     )
-    monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python: python or "")
+    monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python, env: python or "")
     monkeypatch.setenv("UV_CONSTRAINT", "https://untrusted.example/constraints.txt")
     monkeypatch.setenv("UV_OVERRIDE", "https://untrusted.example/overrides.txt")
     monkeypatch.setenv("UV_BUILD_CONSTRAINT", "https://untrusted.example/build-constraints.txt")
@@ -2848,7 +2867,7 @@ def test_resolve_toolchain_lock_strips_uv_insecure_host(
         btl, "_validated_trusted_index_url",
         lambda env: ("https://governed.example/simple/", None),  # noqa: ARG005
     )
-    monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python: python or "")
+    monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python, env: python or "")
     monkeypatch.setenv("UV_INSECURE_HOST", "governed.example")
     venv_dir = tmp_path / "toolchain-venv"
     seen_envs: list[dict] = []
@@ -2875,6 +2894,218 @@ def test_resolve_toolchain_lock_strips_uv_insecure_host(
         assert "UV_INSECURE_HOST" not in env
 
 
+# --- round 21: shared strip helper + final-build credential stripping ----
+
+
+def test_strip_package_source_env_vars_keeps_credentials_by_default():
+    env = {
+        "UV_INDEX": "x", "UV_INDEX_URL": "x", "UV_INSECURE_HOST": "x",
+        "UV_INDEX_GOVERNED_USERNAME": "svc", "UV_INDEX_GOVERNED_PASSWORD": "tok",
+        "OTHER": "keep",
+    }
+    gft.strip_package_source_env_vars(env)
+    assert "UV_INDEX" not in env
+    assert "UV_INSECURE_HOST" not in env
+    # Credentials survive unless explicitly asked to strip them too.
+    assert env["UV_INDEX_GOVERNED_USERNAME"] == "svc"
+    assert env["UV_INDEX_GOVERNED_PASSWORD"] == "tok"
+    assert env["OTHER"] == "keep"
+
+
+def test_strip_package_source_env_vars_with_strip_credentials():
+    env = {
+        "UV_INDEX_URL": "x",
+        "UV_INDEX_GOVERNED_USERNAME": "svc",
+        "UV_INDEX_GOVERNED_PASSWORD": "tok",
+        "UV_INDEX_OTHER_FEED_USERNAME": "svc2",
+        "OTHER": "keep",
+    }
+    gft.strip_package_source_env_vars(env, strip_credentials=True)
+    assert "UV_INDEX_URL" not in env
+    assert "UV_INDEX_GOVERNED_USERNAME" not in env
+    assert "UV_INDEX_GOVERNED_PASSWORD" not in env
+    assert "UV_INDEX_OTHER_FEED_USERNAME" not in env
+    assert env["OTHER"] == "keep"
+
+
+def test_build_wheel_strips_index_credentials_with_toolchain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression (round 21): `--no-build-isolation` means this build needs
+    # NO index access at all -- yet the build BACKEND executes arbitrary
+    # code from the source tree, which would otherwise still observe an
+    # ambient credentialed index URL or named-index credential env var.
+    monkeypatch.setenv("UV_INDEX_URL", "https://untrusted.example/simple/")
+    monkeypatch.setenv("UV_INDEX_GOVERNED_USERNAME", "svc-account")
+    monkeypatch.setenv("UV_INDEX_GOVERNED_PASSWORD", "token-value")
+    source_dir = tmp_path / "plugin"
+    source_dir.mkdir()
+    (source_dir / "pyproject.toml").write_text(
+        '[build-system]\nrequires = []\n', encoding="utf-8"
+    )
+    build_envs: list[dict] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[:2] == ["uv", "build"]:
+            build_envs.append(kwargs.get("env") or {})
+            out_dir = Path(cmd[cmd.index("-o") + 1])
+            (out_dir / "plugin-1.0.0-py3-none-any.whl").write_bytes(b"")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if len(cmd) > 3 and cmd[3] == btl._MARKER_ENV_QUERY_SCRIPT:
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=json.dumps({"python_version": "3.12"}), stderr=""
+            )
+        if len(cmd) > 3 and cmd[3] == btl._BUILD_REQUIRES_CHECK_SCRIPT:
+            # `requires = []` -- trivially satisfied, no need to exercise
+            # the real comparison logic for this credential-stripping test.
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=json.dumps({"ok": True}), stderr=""
+            )
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.build_wheel(source_dir, tmp_path / "out", toolchain=_FAKE_TOOLCHAIN)
+
+    assert len(build_envs) == 1
+    build_env = build_envs[0]
+    assert "UV_INDEX_URL" not in build_env
+    assert "UV_INDEX_GOVERNED_USERNAME" not in build_env
+    assert "UV_INDEX_GOVERNED_PASSWORD" not in build_env
+
+
+def test_build_wheel_keeps_index_credentials_without_toolchain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Without a locked toolchain, this falls back to uv's normal ISOLATED
+    # build, which genuinely needs index access to resolve build-system
+    # requires -- credentials must NOT be stripped in that path.
+    monkeypatch.setenv("UV_INDEX_GOVERNED_USERNAME", "svc-account")
+    source_dir = tmp_path / "plugin"
+    source_dir.mkdir()
+    (source_dir / "pyproject.toml").write_text(
+        '[build-system]\nrequires = []\n', encoding="utf-8"
+    )
+    seen_envs: list[dict] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        seen_envs.append(kwargs.get("env") or {})
+        if cmd[:2] == ["uv", "build"]:
+            out_dir = Path(cmd[cmd.index("-o") + 1])
+            (out_dir / "plugin-1.0.0-py3-none-any.whl").write_bytes(b"")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.build_wheel(source_dir, tmp_path / "out")
+
+    assert seen_envs[0].get("UV_INDEX_GOVERNED_USERNAME") == "svc-account"
+
+
+# --- round 21: Windows ACL hardening for the credential-bearing config ---
+
+
+def test_restrict_file_to_owner_is_noop_on_posix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(btl.sys, "platform", "linux")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        btl.subprocess, "run",
+        lambda cmd, **kwargs: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0),  # noqa: ARG005
+    )
+    btl._restrict_file_to_owner(tmp_path / "secret.toml")
+    assert calls == []
+
+
+def test_restrict_file_to_owner_invokes_icacls_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(btl.sys, "platform", "win32")
+    monkeypatch.setenv("USERDOMAIN", "REDMOND")
+    monkeypatch.setenv("USERNAME", "svc")
+    seen_cmds: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        seen_cmds.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(btl.subprocess, "run", fake_run)
+    target = tmp_path / "secret.toml"
+    btl._restrict_file_to_owner(target)
+
+    assert len(seen_cmds) == 1
+    cmd = seen_cmds[0]
+    assert cmd[0] == "icacls"
+    assert cmd[1] == str(target)
+    assert "/inheritance:r" in cmd
+    assert "REDMOND\\svc:F" in cmd
+    assert "SYSTEM:F" in cmd
+
+
+def test_restrict_file_to_owner_fails_closed_when_icacls_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setattr(btl.sys, "platform", "win32")
+    monkeypatch.setenv("USERDOMAIN", "REDMOND")
+    monkeypatch.setenv("USERNAME", "svc")
+    monkeypatch.setattr(
+        btl.subprocess, "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 1, stdout="", stderr="denied"),  # noqa: ARG005
+    )
+    with pytest.raises(bpa.ArtifactBuildError):
+        btl._restrict_file_to_owner(tmp_path / "secret.toml")
+
+
+def test_restrict_file_to_owner_fails_closed_when_user_unknown(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setattr(btl.sys, "platform", "win32")
+    monkeypatch.delenv("USERNAME", raising=False)
+    monkeypatch.delenv("USERDOMAIN", raising=False)
+    with pytest.raises(bpa.ArtifactBuildError):
+        btl._restrict_file_to_owner(tmp_path / "secret.toml")
+
+
+def test_resolve_toolchain_lock_hardens_index_config_acl_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression (round 21): the sanitized temp index-config file must be
+    # hardened via `_restrict_file_to_owner` BEFORE its secret-bearing
+    # content is written -- `0o600` mode bits alone are not an owner-only
+    # ACL on Windows.
+    _assume_governed_feed_configured(monkeypatch)
+    monkeypatch.setattr(btl.sys, "platform", "win32")
+    monkeypatch.setenv("USERDOMAIN", "REDMOND")
+    monkeypatch.setenv("USERNAME", "svc")
+    venv_dir = tmp_path / "toolchain-venv"
+    hardened_before_write: list[bool] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[:1] == ["icacls"]:
+            config_path = Path(cmd[1])
+            # The file must exist but still be EMPTY at hardening time --
+            # content is written only after this call succeeds.
+            hardened_before_write.append(config_path.read_text(encoding="utf-8") == "")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:2] == ["uv", "venv"]:
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.resolve_toolchain_lock(venv_dir)
+
+    assert hardened_before_write == [True]
+
+
 def test_resolve_toolchain_lock_strips_pythonpath_and_pythonhome(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -2884,6 +3115,12 @@ def test_resolve_toolchain_lock_strips_pythonpath_and_pythonhome(
     # setuptools/wheel/packaging, or PYTHONHOME could redirect the
     # interpreter's own standard-library resolution entirely.
     _assume_governed_feed_configured(monkeypatch)
+    # Pinned to a non-Windows platform so this test's own call count stays
+    # platform-independent -- `_restrict_file_to_owner` (round 21) only
+    # shells out to `icacls` on win32; see the dedicated
+    # `test_resolve_toolchain_lock_hardens_index_config_acl_on_windows`
+    # for that behavior instead.
+    monkeypatch.setattr(btl.sys, "platform", "linux")
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "shadow-modules"))
     monkeypatch.setenv("PYTHONHOME", str(tmp_path / "other-home"))
     venv_dir = tmp_path / "toolchain-venv"

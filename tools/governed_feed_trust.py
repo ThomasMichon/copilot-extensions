@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import os
+import re
 import secrets
 import sys
 import urllib.parse
@@ -42,6 +43,38 @@ _PUBLIC_PYPI_HOSTS = {"pypi.org", "pypi.python.org", "test.pypi.org"}
 #: feed-neutral (`tools/check-feed-neutrality.py`); only a machine's own
 #: local environment ever populates this.
 _TRUSTED_INDEX_HOSTS_ENV_VAR = "BUILD_PYTHON_ARTIFACTS_TRUSTED_INDEX_HOSTS"
+#: Every ambient uv variable that could supply packages from somewhere
+#: other than one explicitly validated index -- shared by
+#: `build_toolchain_lock.py`'s own install-call sanitization and
+#: `build_python_artifacts.py`'s final `--no-build-isolation` build
+#: subprocess (see `strip_package_source_env_vars`), so the two can never
+#: silently drift apart.
+_UV_PACKAGE_SOURCE_ENV_VARS = (
+    "UV_INDEX", "UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_CONFIG_FILE",
+    "UV_EXTRA_INDEX_URL", "UV_FIND_LINKS", "UV_VENV_SEED",
+    "UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE",
+    "UV_INSECURE_HOST", "UV_NO_CONFIG",
+)
+#: uv's own named-index credential env-var convention
+#: (`UV_INDEX_<NAME>_USERNAME`/`PASSWORD`), regardless of `<NAME>`.
+_UV_INDEX_CREDENTIAL_ENV_RE = re.compile(r"^UV_INDEX_[A-Za-z0-9_]+_(USERNAME|PASSWORD)$")
+
+
+def strip_package_source_env_vars(env: dict, *, strip_credentials: bool = False) -> None:
+    """In-place strips every `_UV_PACKAGE_SOURCE_ENV_VARS` entry from
+    ``env``. `UV_INDEX_<NAME>_USERNAME`/`PASSWORD`-shaped named-index
+    credential variables are left untouched UNLESS ``strip_credentials``
+    is true: `resolve_toolchain_lock`'s own install call needs them (to
+    authenticate a named governed index); `build_python_artifacts.py`'s
+    final `--no-build-isolation` build subprocess needs no index access
+    at all, so it strips credentials too -- the build BACKEND executes
+    arbitrary code from the source tree and has no legitimate need to
+    observe them."""
+    for var in _UV_PACKAGE_SOURCE_ENV_VARS:
+        env.pop(var, None)
+    if strip_credentials:
+        for key in [k for k in env if _UV_INDEX_CREDENTIAL_ENV_RE.match(k)]:
+            env.pop(key, None)
 
 
 def _credential_free_index_identity(url: str) -> str:
@@ -95,11 +128,18 @@ def _provenance_key() -> bytes:
     Generated once per machine and reused -- not per call -- so the same
     (index, python) identity keeps comparing equal across separate
     invocations, which `resolve_toolchain_lock`'s reuse/provenance-match
-    contract depends on. Created with restrictive, owner-only permissions
-    (mirroring the index-config temp file in `build_toolchain_lock.py`);
-    a race with another process creating it first is resolved by reading
-    back whatever that process wrote, never by two processes using two
-    different keys."""
+    contract depends on. Published via an atomic rename from a uniquely-
+    named temp file, never a direct `O_CREAT | O_EXCL` open on the final
+    path -- that would make the file visible (0 bytes) to a concurrent
+    reader BEFORE the 32 key bytes are actually written, and a crash in
+    that exact window would leave a permanently-malformed file every
+    later call keeps reading back via the exists-and-right-length check
+    below. A temp file is unique per attempt (no `O_EXCL` collision to
+    race on at all), and `os.replace` only ever exposes a fully-written
+    32-byte file at the final path. Restrictive, owner-only permissions
+    (mirroring the index-config temp file in `build_toolchain_lock.py`)
+    are applied at the temp file's own creation, carried through the
+    rename."""
     path = _provenance_key_dir() / "provenance-key"
     try:
         existing = path.read_bytes()
@@ -109,16 +149,15 @@ def _provenance_key() -> bytes:
         return existing
     path.parent.mkdir(parents=True, exist_ok=True)
     key = secrets.token_bytes(32)
+    tmp_path = path.with_name(f".{path.name}.tmp-{os.getpid()}-{secrets.token_hex(4)}")
+    fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
-        # Another process won the race to create it first -- trust
-        # whatever key it wrote rather than risk two processes disagreeing
-        # on the key (which would make their persisted identities
-        # incomparable).
-        return path.read_bytes()
-    with os.fdopen(fd, "wb") as key_file:
-        key_file.write(key)
+        with os.fdopen(fd, "wb") as key_file:
+            key_file.write(key)
+        os.replace(str(tmp_path), str(path))
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
     return key
 
 

@@ -95,6 +95,7 @@ from build_toolchain_lock import (  # noqa: E402
     _TRUSTED_INDEX_HOSTS_ENV_VAR,
     resolve_toolchain_lock,
     sanitize_subprocess_env,
+    strip_package_source_env_vars,
 )
 
 try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
@@ -702,8 +703,20 @@ def build_wheel(
         elif python:
             cmd += ["--python", python]
         cmd.append(str(source_dir))
+        build_env = sanitize_subprocess_env()
+        if toolchain is not None:
+            # `--no-build-isolation` means this build needs NO index
+            # access at all -- the locked toolchain venv already has
+            # everything it needs -- yet the build BACKEND executes
+            # arbitrary code from `source_dir`, which would otherwise
+            # still observe an ambient credentialed index URL or named-
+            # index credential env var. Unlike `resolve_toolchain_lock`'s
+            # own install call (which deliberately keeps named-index
+            # credential variables so it can authenticate), this build
+            # subprocess has no such need and strips them too.
+            strip_package_source_env_vars(build_env, strip_credentials=True)
         result = subprocess.run(
-            cmd, capture_output=True, text=True, env=sanitize_subprocess_env()
+            cmd, capture_output=True, text=True, env=build_env
         )
         if result.returncode != 0:
             raise ArtifactBuildError(

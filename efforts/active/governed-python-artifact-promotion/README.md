@@ -1016,6 +1016,54 @@ win grows with build complexity.
   config file or stray artifact was left behind; confirmed the
   per-machine provenance key file is created under the expected per-user
   state directory.
+- A twenty-first review round found 5 more issues plus 2 "previously
+  missed" findings in unchanged code. (1) the build BACKEND (which
+  executes arbitrary code from the source tree) still saw an ambient
+  credentialed index URL or named-index credential env var during the
+  final `uv build --no-build-isolation` call, even though that build
+  needs no index access at all; fixed by stripping the same package-
+  source variables (plus credentials this time) from that subprocess's
+  own env in `build_python_artifacts.py`. (2) `0o600` mode bits do not
+  establish an owner-only ACL on Windows -- the sanitized index-config
+  file could still inherit a broader ACL from its caller-selected parent
+  directory; fixed with a new `_restrict_file_to_owner` (strips inherited
+  permissions and grants Full Control to only the current user + SYSTEM
+  via `icacls`, applied to the file while still EMPTY, before its secret-
+  bearing content is written). (3) `_provenance_key`'s `O_CREAT|O_EXCL`
+  open made the key file visible (0 bytes) to a concurrent reader before
+  the 32 key bytes were written, and a crash in that window left a
+  permanently-malformed file every later call kept reading back; fixed
+  by writing to a uniquely-named temp file first, then publishing via
+  `os.replace` so only a fully-written 32-byte file is ever visible at
+  the final path. (4) "previously missed": `_resolve_interpreter_identity`
+  probed `uv python find` with the CALLER's own ambient config while
+  `uv venv` itself was created with `--no-config`, so the two could
+  silently resolve different interpreters; fixed by computing the
+  sanitized, `--no-config` environment ONCE (before identity resolution)
+  and reusing it for both. (5) "previously missed": a failed probe fell
+  back to the caller's raw selector text instead of failing closed --
+  exactly the false-match hazard this function exists to prevent (two
+  calls whose probe fails for genuinely different actual interpreters,
+  but share the same selector text, would silently compare equal); fixed
+  to raise instead. The shared package-source-variable strip list and
+  credential-variable pattern were ALSO factored out of both
+  `build_toolchain_lock.py` and `build_python_artifacts.py` into a new
+  `governed_feed_trust.strip_package_source_env_vars` (an opportunistic
+  dedup that also recovered headroom `build_python_artifacts.py` needed
+  after fix (1) pushed it over the module cap).
+
+  9 more unit tests (165 total, all passing). `check-module-size.py`
+  still passes (`build_toolchain_lock.py` 934 lines, `governed_feed_
+  trust.py` 409 lines, `build_python_artifacts.py` 995 lines -- the
+  latter two now razor-thin on headroom; a further substantive finding
+  touching either will very likely require another split). Smoke-tested
+  for real again: built `agent-worktrees` fresh then `agent-bridge`
+  reusing the same `--toolchain-venv` against the live governed feed --
+  identical `lock_id`, confirming the reworked interpreter-identity
+  resolution still reuses correctly; confirmed via `Get-Acl` that no
+  stray `*.index-config.toml` file was left behind and the provenance
+  marker/key files carry the expected owner-restricted ACLs on this
+  Windows machine.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 

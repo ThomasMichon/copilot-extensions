@@ -56,6 +56,7 @@ from governed_feed_trust import (  # noqa: E402
     _trusted_index_hosts,
     _url_host,
     _validated_trusted_index_url,
+    strip_package_source_env_vars,
 )
 
 #: The exact packages a locked build-toolchain venv pins -- every
@@ -346,7 +347,7 @@ class ToolchainLock:
         return "sha256:" + _hash_fields(*pairs)
 
 
-def _resolve_interpreter_identity(python: str | None) -> str:
+def _resolve_interpreter_identity(python: str | None, env: dict) -> str:
     """A canonical identity for whatever interpreter ``python`` would
     ACTUALLY resolve to right now, used for provenance persistence/
     comparison instead of the caller's selector TEXT -- a bare command
@@ -354,22 +355,43 @@ def _resolve_interpreter_identity(python: str | None) -> str:
     reordered, symlink repointed), and a marker keyed on raw text would
     silently match the stale one. Asks `uv` itself (`uv python find`,
     the same resolution `uv venv --python` uses) then resolves any
-    symlink in the result. Never raises: a failed probe falls back to the
-    raw text (or `""`), which still fails closed overall -- an
-    approximate identity can only cause an unneeded rebuild, never a
-    false match."""
-    cmd = ["uv", "python", "find"]
+    symlink in the result.
+
+    Takes ``--no-config`` plus the CALLER's own already-sanitized ``env``
+    (the same one `uv venv` itself will use) rather than resolving its
+    own -- probing with the caller's ambient config (a project `uv.toml`
+    pinning `python`, say) while the venv is then created with
+    `--no-config` could let this probe and `uv venv` silently resolve
+    DIFFERENT interpreters, making the provenance marker describe an
+    interpreter the venv was never actually built with.
+
+    Raises `ArtifactBuildError` when `uv python find` cannot resolve an
+    interpreter (a non-zero exit, empty output, or the subprocess itself
+    failing to start) -- never falls back to the caller's raw selector
+    text. A text fallback is NOT fail-closed here: if the probe fails for
+    two calls whose selector text is identical but whose ACTUAL
+    interpreters differ (e.g. `python3` repointed between calls), both
+    would record the same approximate identity and falsely compare equal,
+    silently reusing a venv built for a different interpreter -- exactly
+    the false-match hazard this function exists to prevent."""
+    cmd = ["uv", "python", "find", "--no-config"]
     if python:
         cmd.append(python)
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, env=sanitize_subprocess_env()
+        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    except OSError as exc:
+        raise ArtifactBuildError(
+            f"could not resolve interpreter identity for "
+            f"{python or '(default)'}: {exc}"
+        ) from exc
+    if result.returncode != 0 or not result.stdout.strip():
+        raise ArtifactBuildError(
+            f"uv python find could not resolve interpreter "
+            f"{python or '(default)'} -- refusing to record an "
+            f"approximate (selector-text) identity:\n"
+            f"{result.stdout}\n{result.stderr}"
         )
-        if result.returncode == 0 and result.stdout.strip():
-            return str(Path(result.stdout.strip()).resolve())
-    except OSError:
-        pass
-    return python or ""
+    return str(Path(result.stdout.strip()).resolve())
 
 
 def _query_toolchain_versions(venv_python: Path) -> dict[str, str]:
@@ -420,6 +442,53 @@ def _toml_escape(value: str) -> str:
     WRITER exists (only `tomllib`, a reader), so this is a tiny, scoped
     helper rather than a dependency."""
     return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _restrict_file_to_owner(path: Path) -> None:
+    """Best-effort hardens ``path``'s ACCESS CONTROL to the owning user
+    only, beyond the POSIX mode bits already applied at creation. `0o600`
+    does NOT establish an owner-only ACL on Windows (and may not be
+    authoritative on any ACL-backed filesystem) -- a credential-bearing
+    file created under a caller-selected directory can still inherit a
+    broader ACL from that directory, leaving it readable by other local
+    principals despite the mode bits (the same reasoning this repo
+    already applies to the Windows named-pipe transport in
+    `plugins/agent-vault/src/agent_vault/cutover.py`'s own
+    `OWNER_GATED_TRANSPORTS`: a Windows default DACL is never treated as
+    sufficient for a secret).
+
+    On Windows: strips inherited permissions and grants Full Control to
+    only the current user plus `SYSTEM` (required for normal OS
+    housekeeping, e.g. antivirus scanning) via `icacls` -- a standard
+    Windows tool, no new dependency. On POSIX: a no-op: the `0o600` mode
+    bits already applied at creation are authoritative there.
+
+    Raises `ArtifactBuildError` on any failure (the current user cannot be
+    determined, or `icacls` itself fails) -- a credential-bearing file
+    whose ACL could not be VERIFIED restrictive (via this command's own
+    exit code) must never be silently trusted as protected."""
+    if sys.platform != "win32":
+        return
+    owner = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}".strip("\\")
+    if not owner or not os.environ.get("USERNAME"):
+        raise ArtifactBuildError(
+            f"{path}: could not determine the current user to restrict "
+            "this credential-bearing file's ACL to -- refusing to "
+            "proceed with an unverified, possibly-inherited ACL"
+        )
+    result = subprocess.run(
+        [
+            "icacls", str(path),
+            "/inheritance:r",
+            "/grant:r", f"{owner}:F", "SYSTEM:F",
+        ],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise ArtifactBuildError(
+            f"{path}: could not restrict this credential-bearing file's "
+            f"ACL to the current user:\n{result.stdout}\n{result.stderr}"
+        )
 
 
 def _publish_staging_venv(
@@ -530,7 +599,22 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
         )
     validated_index_url, validated_index_name = validated
     target_dir = venv_dir
-    python_identity = _resolve_interpreter_identity(python)
+    # Strip every ambient variable that could supply packages from
+    # somewhere other than the one validated URL below (see
+    # `governed_feed_trust.strip_package_source_env_vars`'s own docstring
+    # for the full per-variable rationale), plus `PYTHONPATH`/
+    # `PYTHONHOME` (same vectors stripped everywhere a specific
+    # interpreter is invoked directly -- see `sanitize_subprocess_env`).
+    # Computed HERE, before interpreter-identity resolution, so
+    # `_resolve_interpreter_identity`'s own `uv python find` probe sees
+    # EXACTLY the same `--no-config` + sanitized config context `uv venv`
+    # itself will use below -- resolving the identity against the
+    # caller's own ambient config (e.g. a project `uv.toml` pinning
+    # `python`) while creating the venv with `--no-config` could let the
+    # two silently disagree about which interpreter is actually in play.
+    sanitized_env = sanitize_subprocess_env(env)
+    strip_package_source_env_vars(sanitized_env)
+    python_identity = _resolve_interpreter_identity(python, sanitized_env)
     if _occupied_by_other_identity(target_dir, validated_index_url, python_identity):
         # The shared slot exists but is NOT a complete, matching venv for
         # this exact (index, python) identity -- a different validated
@@ -562,32 +646,6 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             tempfile.mkdtemp(dir=target_dir.parent, prefix=f".{target_dir.name}.staging-")
         )
         index_config_path: Path | None = None
-        # Strip every ambient variable that could supply packages from
-        # somewhere other than the one validated URL below -- `--no-config`
-        # only disables config FILES, not these environment-based package
-        # sources: UV_INDEX/UV_EXTRA_INDEX_URL/UV_FIND_LINKS (supplemental/
-        # flat-file sources independent of the default-index machinery),
-        # UV_CONSTRAINT/UV_OVERRIDE/UV_BUILD_CONSTRAINT (redirect a
-        # specific requirement to a direct URL), UV_VENV_SEED (lets `uv
-        # venv` pre-install from an ambient source the later bare `uv pip
-        # install` could then leave untouched), UV_INSECURE_HOST
-        # (disables TLS verification for a named host, defeating the
-        # HTTPS-scheme requirement in `_validated_trusted_index_url`), and
-        # UV_NO_CONFIG (uv's own equivalent of `--no-config`: left ambient,
-        # it would make `uv` ignore the install call's own `UV_CONFIG_FILE`
-        # below and fall back to its implicit, ungoverned default index).
-        # Also strips `PYTHONPATH`/`PYTHONHOME` (same vectors stripped
-        # everywhere a specific interpreter is invoked directly -- see
-        # `sanitize_subprocess_env`). Used for BOTH `uv venv`/`uv pip
-        # install` below.
-        sanitized_env = sanitize_subprocess_env(env)
-        for var in (
-            "UV_INDEX", "UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_CONFIG_FILE",
-            "UV_EXTRA_INDEX_URL", "UV_FIND_LINKS", "UV_VENV_SEED",
-            "UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE",
-            "UV_INSECURE_HOST", "UV_NO_CONFIG",
-        ):
-            sanitized_env.pop(var, None)
         try:
             venv_cmd = ["uv", "venv", "--no-config", str(staging_venv_dir)]
             if python:
@@ -625,17 +683,23 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
                 index_config_lines.append(f'name = "{_toml_escape(validated_index_name)}"')
             index_config_text = "\n".join(index_config_lines) + "\n"
             # This file can hold the raw validated URL, including embedded
-            # credentials -- create it with restrictive owner-only
-            # permissions from the moment it exists (an `os.open` mode
-            # applies atomically at creation, unlike a separate
-            # `write_text()` + `os.chmod()`, which would leave a window
-            # where the file exists at the umask's default, broader
-            # permissions) rather than relying on the process umask.
+            # credentials. Create it EMPTY first with restrictive owner-
+            # only mode bits (an `os.open` mode applies atomically at
+            # creation, unlike a separate `write_text()` + `os.chmod()`,
+            # which would leave a window at the umask's default, broader
+            # permissions), harden its ACL to the current user
+            # (`_restrict_file_to_owner` -- `0o600` mode bits alone are
+            # not an owner-only ACL on Windows), and only THEN write the
+            # actual secret-bearing content -- so no content exists while
+            # the file's access could still be broader than intended, on
+            # ANY platform.
             fd = os.open(
                 str(index_config_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
             )
+            os.close(fd)
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as index_config_file:
+                _restrict_file_to_owner(index_config_path)
+                with open(index_config_path, "w", encoding="utf-8") as index_config_file:
                     index_config_file.write(index_config_text)
             except BaseException:
                 index_config_path.unlink(missing_ok=True)
