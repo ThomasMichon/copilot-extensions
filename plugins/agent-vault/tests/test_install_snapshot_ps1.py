@@ -92,6 +92,8 @@ def _extract_uv_index_block() -> str:
 
 
 def test_ensure_uv_index_bridges_pip_only_config_to_uv(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX shim harness")
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
@@ -185,6 +187,8 @@ def test_posix_stamp_wrapper_fails_when_provision_reports_success_without_runtim
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required")
 def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX snapshot-provision harness")
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")

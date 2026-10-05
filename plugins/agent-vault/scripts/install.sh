@@ -454,17 +454,19 @@ _deploy_binstub() {
         "AGENT_VAULT_NO_SELFPROVISION" \
         "$SCRIPT_DIR/resolve-runtime.ps1" \
         "$SCRIPT_DIR/resolve-runtime.sh"
-    python3 - "$STUB" <<'PY'
-from pathlib import Path
-import sys
-
-path = Path(sys.argv[1])
-text = path.read_text(encoding="utf-8")
-old = """printf '[%s] provisioning completed without a resolvable runtime.\\n' \"$_name\" >&2\nexit \"${_rc:-1}\"\n"""
-new = """printf '[%s] provisioning completed without a resolvable runtime.\\n' \"$_name\" >&2\nif [ \"${_rc:-1}\" -eq 0 ]; then\n    exit 1\nfi\nexit \"${_rc:-1}\"\n"""
-if old in text:
-    path.write_text(text.replace(old, new, 1), encoding="utf-8")
-PY
+    local tmp="${STUB}.tmp.$$"
+    : > "$tmp"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        printf '%s\n' "$line" >> "$tmp"
+        if [[ "$line" == "printf '[%s] provisioning completed without a resolvable runtime.\n' \"\$_name\" >&2" ]]; then
+            printf '%s\n' 'if [ "${_rc:-1}" -eq 0 ]; then' >> "$tmp"
+            printf '%s\n' '    exit 1' >> "$tmp"
+            printf '%s\n' 'fi' >> "$tmp"
+            IFS= read -r _discard || true
+        fi
+    done < "$STUB"
+    mv -f "$tmp" "$STUB"
+    chmod +x "$STUB"
 }
 
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):

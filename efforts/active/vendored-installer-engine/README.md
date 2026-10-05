@@ -999,10 +999,10 @@ appropriately larger/riskier for one sitting):
   payload marker flips over, so first-use provisioning from a dev-time
   canonical-reference wrapper still ships a self-contained snapshot.
 - **Line-count / corpus result:** wrapper-only installer lines shrank from
-  `install.sh` 930 -> 842 (-88) and `install.ps1` 1253 -> 1246 (-7), for a
-  combined wrapper drop of 2183 -> 2088 (**-95**). The canonical engine stayed
+  `install.sh` 930 -> 844 (-86) and `install.ps1` 1253 -> 1246 (-7), for a
+  combined wrapper drop of 2183 -> 2090 (**-93**). The canonical engine stayed
   flat at `installer-engine.sh` 376 lines and `installer-engine.ps1` 462 lines,
-  so this conversion removed 95 lines from the combined agent-vault +
+  so this conversion removed 93 lines from the combined agent-vault +
   shared-engine corpus instead of merely relocating them.
 - Validation completed here:
   - `python3 tools/sync-vendored-libs.py --check`
