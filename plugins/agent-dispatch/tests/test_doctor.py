@@ -123,7 +123,12 @@ def test_diagnose_queued_with_active_reservation_is_not_stuck():
 
 def test_diagnose_queued_with_no_reservation_is_unknown_not_stuck():
     """diagnose() itself is unaffected for an ordinary, never-yet-attempted
-    queued task -- the batch-level skip lives in diagnose_many, not here."""
+    queued task -- it falls through to "unknown" like before. An ordinary
+    queued task is kept out of the repo/label sweep entirely by
+    `_cmd_doctor`'s own `EXAMINED_STATUSES` status filter (never fetched in
+    the first place); a queued task that already failed a spawn attempt
+    reaches this verdict only via the separate
+    `find_stuck_queued_reservations()` query."""
     task = _task(status="queued", worktree_id=None, reservation_key=None)
     d = doctor.diagnose(task, resolve=lambda wt: {"status": "active"})
     assert d.verdict != doctor.QUEUED_STUCK_RESERVATION_VERDICT
@@ -525,7 +530,14 @@ def test_cli_doctor_check_live_sessions_fetches_reservations_per_task(
     fake.list_reservations_calls = []
 
     def _list_reservations(
-        *, task_id=None, state=None, repo=None, label=None, latest_only=False, limit=1000
+        *,
+        task_id=None,
+        state=None,
+        repo=None,
+        label=None,
+        task_status=None,
+        latest_only=False,
+        limit=1000,
     ):
         if task_id is None:
             # The separate stuck-queued-reservation query also calls
@@ -721,6 +733,7 @@ def test_find_stuck_queued_reservations_queries_failed_state_separately():
             "state": doctor.SpawnState.FAILED,
             "repo": "r",
             "label": "l",
+            "task_status": "queued",
             "latest_only": True,
             "limit": 50,
         }

@@ -27,6 +27,7 @@ class SpawnReservationClientMixin:
         label: str | None = None,
         conclusion_state: str | None = None,
         resume_requested: bool | None = None,
+        task_status: str | None = None,
         latest_only: bool = False,
         limit: int = 200,
     ) -> list[dict]:
@@ -40,7 +41,11 @@ class SpawnReservationClientMixin:
         fleet's bounded ``limit`` and hide an older, genuinely-still-stuck
         task further back in the newest-first ordering (the exact gap
         :func:`agent_dispatch.doctor.find_stuck_queued_reservations` needs
-        this for).
+        this for). ``task_status`` additionally filters to the owning
+        task's current status (e.g. ``"queued"``) -- even with duplicate
+        attempts collapsed, a non-queued task's current ``FAILED``
+        reservation would otherwise still consume the same bounded
+        ``limit``.
         """
         params: dict[str, Any] = {"limit": limit}
         if task_id is not None:
@@ -55,6 +60,8 @@ class SpawnReservationClientMixin:
             params["conclusion_state"] = conclusion_state
         if resume_requested is not None:
             params["resume_requested"] = resume_requested
+        if task_status is not None:
+            params["task_status"] = task_status
         if latest_only:
             params["latest_only"] = latest_only
         return self._unwrap(self._http.get("/spawn-reservations", params=params))

@@ -567,14 +567,19 @@ def find_stuck_queued_reservations(
     consume the sweep's own ``limit`` before any claimed/started/suspended
     row is examined).
 
-    This queries ``GET /spawn-reservations?state=failed&latest_only=true``
+    This queries
+    ``GET /spawn-reservations?state=failed&task_status=queued&latest_only=true``
     directly -- a **separate**, reservation-state-filtered, independently-
     limited query that never competes with the task sweep's own budget.
-    ``latest_only`` restricts the result to each task's single
-    highest-attempt reservation row -- without it, a retried task's older,
-    already-superseded failed attempts could crowd a busy fleet's bounded
-    ``limit`` and hide an older, genuinely-still-stuck task further back in
-    the newest-first ordering. For each matching reservation it fetches the
+    Two server-side filters keep the whole bounded ``limit`` spent on
+    actual candidates: ``latest_only`` restricts the result to each task's
+    single highest-attempt reservation row (without it, a retried task's
+    older, already-superseded failed attempts could crowd the limit), and
+    ``task_status="queued"`` excludes a non-queued task's current ``FAILED``
+    reservation (a completed/abandoned/dead-lettered task's last failed
+    attempt is not interesting here, but would otherwise consume the same
+    budget ahead of an actually-still-queued task further back in the
+    newest-first ordering). For each matching reservation it fetches the
     owning task (``GET /tasks/{id}``, the one endpoint that actually
     attaches ``spawn_reservation`` -- the bulk ``GET /tasks`` list endpoint
     does not, which is why this cannot simply filter an already-fetched
@@ -589,7 +594,12 @@ def find_stuck_queued_reservations(
     """
     diagnoses = []
     reservations = client.list_reservations(
-        state=SpawnState.FAILED, repo=repo, label=label, latest_only=True, limit=limit
+        state=SpawnState.FAILED,
+        repo=repo,
+        label=label,
+        task_status="queued",
+        latest_only=True,
+        limit=limit,
     )
     for res in reservations:
         task_id = res.get("task_id")

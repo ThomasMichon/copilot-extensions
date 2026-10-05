@@ -37,11 +37,18 @@ task that never gets picked up. It DOES separately query (independent of
 that sweep's own `--limit`) any `queued` task whose *current* spawn
 reservation is genuinely `FAILED` -- the "tried once, landed back in
 queued, nothing else surfaced why" shape -- and reports it with the
-`queued_with_reservation_detail` verdict (copilot-extensions#5209). That
-check is advisory only and never auto-repairs; it also won't catch a task
-still mid-max-attempts (see the dead-letter row below) or one that simply
-never got a reservation at all, and `doctor` can still report "healthy"
-while the supervised lane itself has stalled. Use
+`queued_with_reservation_detail` verdict (copilot-extensions#5209). **This
+check can fire on a task that is simply between retry attempts, not only
+one permanently stuck** -- after any failed attempt a task's current
+reservation stays `FAILED` right up until the scheduler reserves the next
+attempt, so a healthy task mid-retry can show this verdict too; it is
+advisory, not a dead/alive distinction. What DOES distinguish "exhausted
+every attempt" from "about to retry" is the dead-letter projection (see the
+row below) -- if a task keeps showing this verdict across repeated
+`doctor` runs with no new attempt ever reserved, that is the actual signal
+something is stuck, not the verdict's mere presence once. It also won't
+catch a task that simply never got a reservation at all, and `doctor` can
+still report "healthy" while the supervised lane itself has stalled. Use
 `<agent-bridge catalog argv[0]> status <session>` /
 `<agent-bridge catalog argv[0]> live-sessions` for ground truth on a
 suspected-dead body instead of trusting a task's recorded status alone.

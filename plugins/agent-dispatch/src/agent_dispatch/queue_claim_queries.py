@@ -367,6 +367,7 @@ class QueueClaimQueriesMixin:
         label: str | None = None,
         conclusion_state: str | None = None,
         resume_requested: bool | None = None,
+        task_status: str | Sequence[str] | None = None,
         latest_only: bool = False,
         limit: int = 200,
     ) -> list[SpawnReservation]:
@@ -381,6 +382,17 @@ class QueueClaimQueriesMixin:
         out an older task's single current-and-still-failed reservation out
         of a bounded ``limit`` -- exactly the latest-only semantics
         :func:`agent_dispatch.doctor.find_stuck_queued_reservations` needs.
+
+        ``task_status`` filters to the OWNING task's current status (e.g.
+        ``"queued"``) -- distinct from ``latest_only``: even with
+        duplicate attempts collapsed, a currently-``FAILED`` reservation
+        whose task has already moved on (completed, abandoned, dead-
+        lettered, or otherwise concluded) still consumes the bounded
+        ``limit`` ahead of an actually-still-``queued`` task's own failed
+        reservation. Filtering by task status at the query layer (via the
+        same ``tasks`` join already used for ``repo``/``label``) keeps the
+        limit's whole budget spent on tasks the caller actually cares
+        about.
         """
         repo = self._canonical_repo(repo)
         clauses: list[str] = []
@@ -397,7 +409,12 @@ class QueueClaimQueriesMixin:
                 "r.attempt = (SELECT MAX(r2.attempt) FROM spawn_reservations r2 "
                 "WHERE r2.task_id = r.task_id)"
             )
-        join_tasks = repo is not None or label is not None or resume_requested is not None
+        join_tasks = (
+            repo is not None
+            or label is not None
+            or resume_requested is not None
+            or task_status is not None
+        )
         if repo is not None:
             clauses.append("t.repo = ?")
             params.append(repo)
@@ -410,6 +427,10 @@ class QueueClaimQueriesMixin:
         if resume_requested is not None:
             clauses.append("t.resume_requested = ?")
             params.append(1 if resume_requested else 0)
+        if task_status is not None:
+            statuses = [task_status] if isinstance(task_status, str) else list(task_status)
+            clauses.append(f"t.status IN ({','.join('?' * len(statuses))})")
+            params.extend(statuses)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
         with self._connect() as conn:
