@@ -11,8 +11,9 @@ opt-in modules driven by declarative specs:
   cron / a systemd timer / ``manage_schedule`` (``schedule tick``) or with the
   built-in loop (``schedule serve``).
 * :mod:`agent_dispatch.producers.webhook` -- a reactive producer: a small
-  HTTP app that maps generic git-forge **PR-merge** and **telemetry/alert**
-  events onto tasks (stamping ``source`` / ``origin_ref``, deduped).
+  HTTP app that maps generic git-forge **PR-merge**, **issue**, and
+  **telemetry/alert** events onto tasks (stamping ``source`` / ``origin_ref``,
+  deduped).
 
 Both talk to the coordinator through the ordinary :class:`DispatchClient`, so
 they need no privileged access -- a producer is just any client that can POST.
