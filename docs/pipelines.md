@@ -11,7 +11,7 @@ of — link here rather than restating any of it.
 
 ## Branch model at a glance
 
-- **`dev`** is this repo's default branch and the only one an ordinary PR
+- **`dev`** is this repo's contribution branch and the only one an ordinary PR
   targets. All review, status-check, and merge-approval policy below
   applies to `dev`.
 - **`main`** is a **generated, release-only** branch. It is never a PR merge

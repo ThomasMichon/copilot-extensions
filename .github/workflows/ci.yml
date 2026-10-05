@@ -127,7 +127,7 @@ jobs:
             exit 0
           fi
           if [ "$PR_AUTHOR" != "$REPO_OWNER" ]; then
-            echo "::error::This PR targets 'main' and is not the promotion pipeline's own PR. main only ever moves via a release/promote-* PR, or (rarely) a workflow-file-only bootstrap PR by the repo owner. Please retarget this PR's base branch to 'dev' -- see docs/pipelines.md > Release & Versioning."
+            echo "::error::This PR targets 'main' and is not the promotion pipeline's own PR. main only ever moves via a release/promote-* PR, a workflow-file-only bootstrap PR, or module-size-baseline-widen.yml's own automated PR (all by the repo owner). Please retarget this PR's base branch to 'dev' -- see docs/pipelines.md > Release & Versioning."
             exit 1
           fi
           # Merge-base-relative (three-dot semantics), not a literal
