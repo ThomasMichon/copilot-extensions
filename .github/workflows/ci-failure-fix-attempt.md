@@ -246,7 +246,12 @@ jobs:
           set -euo pipefail
           ISSUE_JSON=$(gh issue view "$NUM" --repo "$REPO" --json author,body,labels)
           AUTHOR=$(printf '%s' "$ISSUE_JSON" | jq -r '.author.login')
-          BODY=$(printf '%s' "$ISSUE_JSON" | jq -r '.body')
+          # Real review finding (issue #5276): a hand-authored body can
+          # legitimately carry CRLF line endings (unlike the watchdog's own
+          # always-LF, Python-constructed bodies) -- normalize once, up
+          # front, so every anchored-regex extraction below (SIGNATURE in
+          # particular) matches regardless of the authoring client's OS.
+          BODY=$(printf '%s' "$ISSUE_JSON" | jq -r '.body' | tr -d '\r')
           # `gh issue view --json author` reports a GitHub App-authored
           # issue's login as `app/github-actions`, never `github-actions[bot]`.
           # The `[bot]` suffix shape belongs to a `GITHUB_TOKEN`-authored
@@ -264,8 +269,9 @@ jobs:
           # no-edit-since-filing check, and `reverify-signature`'s
           # independent re-derivation from the real run's own current job
           # logs (below) apply identically regardless of author, and still
-          # reject a hand-authored issue that doesn't name a real,
-          # currently-reproducible failure.
+          # reject a hand-authored issue whose claimed Signature/Run doesn't
+          # independently reproduce from that referenced run's own
+          # still-fetchable logs.
           if [ "$AUTHOR" != "app/github-actions" ] && [ "$AUTHOR" != "$OWNER_LOGIN" ]; then
             echo "::warning::Issue #$NUM was authored by '$AUTHOR', neither the watchdog's own app/github-actions token identity nor the repo owner ('$OWNER_LOGIN') -- refusing to run the agent (a hand-authored issue re-using this label is not an authenticated diagnostic)."
             echo "authorized=false" >> "$GITHUB_OUTPUT"
@@ -280,7 +286,17 @@ jobs:
             echo "authorized=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          SIGNATURE=$(printf '%s' "$BODY" | grep -oE '^Signature: [0-9a-f]+$' | head -1 | awk '{print $2}')
+          SIGNATURE=$(printf '%s' "$BODY" | grep -oE '^Signature: [0-9a-f]+$' | head -1 | awk '{print $2}') || true
+          # Real review finding (issue #5276): `grep` with no match exits 1,
+          # and under `pipefail` that propagates through the pipe to this
+          # assignment -- without the `|| true` above, `set -e` would abort
+          # the whole step right here, before this check (or ANY later
+          # diagnostic `::warning::`) ever runs. The step would then
+          # conclude `failure` (a crash) rather than a clean, legible
+          # `authorized=false` decline -- indistinguishable from a real bug
+          # in the verifier itself. `|| true` restores the intended
+          # behavior: no match is an ordinary, expected outcome here, not
+          # an error.
           if [ -z "$SIGNATURE" ]; then
             echo "::warning::Issue #$NUM has no watchdog 'Signature: <hash>' anchor line -- refusing to run the agent."
             echo "authorized=false" >> "$GITHUB_OUTPUT"
@@ -334,7 +350,11 @@ jobs:
           # binds the ENTIRE body (including its commit-SHA claim) to an
           # unaltered, bot-authored record; a real run genuinely failing is
           # additional evidence, not the sole guarantee.
-          RUN_ID=$(printf '%s' "$BODY" | grep -oE 'actions/runs/[0-9]+' | head -1 | grep -oE '[0-9]+$')
+          RUN_ID=$(printf '%s' "$BODY" | grep -oE 'actions/runs/[0-9]+' | head -1 | grep -oE '[0-9]+$') || true
+          # Same crash-vs-decline distinction as the SIGNATURE extraction
+          # above (issue #5276): `|| true` ensures a missing/unparseable
+          # run link produces the clean `authorized=false` decline below,
+          # not a step crash indistinguishable from a verifier bug.
           if [ -z "$RUN_ID" ]; then
             echo "::warning::Issue #$NUM's body has no parseable run link -- refusing to run the agent."
             echo "authorized=false" >> "$GITHUB_OUTPUT"

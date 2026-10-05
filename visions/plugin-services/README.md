@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-09-09
+- **Last revised:** 2026-10-04
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -328,7 +328,18 @@ correctness**. The suite is correct **while** skewed.
 ### uniform-deploy-contract
 All service-bearing plugins share one deploy/update/version footprint (the
 install contract), so a user — or an automated fleet — reasons about, audits, and
-upgrades every plugin service the same way.
+upgrades every plugin service the same way. That uniformity is guaranteed **by
+construction, not by convention**: a single shared, vendored template realizes
+the install/update entrypoint's actual mechanics identically for every adopting
+plugin, rather than each plugin hand-maintaining its own copy that merely
+resembles its siblings. A plugin expresses its own install/update behavior only
+through the template's defined configuration points — what runtime to
+provision, what to check, what to register — never by forking the template's
+control flow or re-deriving its mechanics in a bespoke script. A fix or
+hardening to the shared mechanics (an atomicity guarantee, a concurrency-safety
+fix, a new validation step) reaches every adopter the same way the template
+itself is kept in sync, rather than depending on each plugin separately
+noticing and re-deriving it.
 
 ### install-adopt-boundary
 Two lifecycle verbs, two scopes, never crossed. **Install/update** touches only

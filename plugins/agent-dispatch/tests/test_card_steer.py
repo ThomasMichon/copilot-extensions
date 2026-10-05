@@ -59,6 +59,7 @@ def test_parse_choice_with_internal_commas():
             "name": "decision",
             "type": "choice",
             "options": ["revise", "post-approved", "hold-all"],
+            "allow_other": True,
         },
     ]
 
@@ -84,11 +85,15 @@ def test_parse_rejects_empty_choice():
 
 
 def test_parse_multichoice_and_allow_other():
+    # Every choice/multichoice field carries allow_other by default now (not
+    # just the one with an explicit trailing ``*``) -- confirms the ``*``
+    # sentinel is a harmless no-op, not the only way to get it.
     fields = steering.parse_request_input(
         "tags:multichoice[perf,api,ux],severity:choice[low,high,*]"
     )
     assert fields == [
-        {"name": "tags", "type": "multichoice", "options": ["perf", "api", "ux"]},
+        {"name": "tags", "type": "multichoice", "options": ["perf", "api", "ux"],
+         "allow_other": True},
         {"name": "severity", "type": "choice", "options": ["low", "high"],
          "allow_other": True},
     ]
@@ -108,7 +113,8 @@ def test_parse_choice_gated_followup():
         "verdict:choice[Approve,Waiting for author,Reject]?comments=Accept"
     )
     assert fields == [
-        {"name": "comments", "type": "choice", "options": ["Accept", "Reject"]},
+        {"name": "comments", "type": "choice", "options": ["Accept", "Reject"],
+         "allow_other": True},
         {
             "name": "reason",
             "type": "textarea",
@@ -118,6 +124,7 @@ def test_parse_choice_gated_followup():
             "name": "verdict",
             "type": "choice",
             "options": ["Approve", "Waiting for author", "Reject"],
+            "allow_other": True,
             "show_when": {"field": "comments", "equals": "Accept"},
         },
     ]
@@ -154,6 +161,7 @@ def test_parse_question_mark_inside_choice_option():
             "name": "decision",
             "type": "choice",
             "options": ["Proceed", "Needs another look?"],
+            "allow_other": True,
         }
     ]
 
@@ -169,8 +177,12 @@ def test_build_card_omits_empty_and_clips_title():
     assert len(card["title"]) == steering.CARD_TITLE_MAX
 
 
-def test_validate_steer_rejects_bad_choice():
-    form = steering.parse_request_input("decision:choice[a,b]")
+def test_validate_steer_strict_field_without_allow_other_rejects_bad_value():
+    # parse_request_input() always sets allow_other now, so build the strict
+    # form directly to keep covering validate_steer_fields' own defensive
+    # code path for a field explicitly constructed without it (e.g. a
+    # hand-built card from a surface that predates/opts out of the default).
+    form = [{"name": "decision", "type": "choice", "options": ["a", "b"]}]
     steering.validate_steer_fields({"decision": "a"}, form)  # ok
     steering.validate_steer_fields({"other": "z"}, form)  # unknown passes
     with pytest.raises(steering.SteeringError):
@@ -183,13 +195,27 @@ def test_validate_steer_allow_other_accepts_free_text():
     steering.validate_steer_fields({"severity": "somewhere in between"}, form)
 
 
+def test_parse_choice_allows_other_without_star_sentinel():
+    # The * sentinel is no longer required to get a free-text "Other…" answer
+    # -- every choice/multichoice field allows one by default.
+    form = steering.parse_request_input("decision:choice[a,b]")
+    steering.validate_steer_fields({"decision": "nope, something else entirely"}, form)
+
+
 def test_validate_steer_multichoice_members():
     import json as _json
 
-    form = steering.parse_request_input("tags:multichoice[perf,api]")
+    # Same rationale as the strict-choice test above: construct the form
+    # directly to keep covering the explicitly-strict code path.
+    form = [{"name": "tags", "type": "multichoice", "options": ["perf", "api"]}]
     steering.validate_steer_fields({"tags": _json.dumps(["perf", "api"])}, form)  # ok
     with pytest.raises(steering.SteeringError):
         steering.validate_steer_fields({"tags": _json.dumps(["perf", "nope"])}, form)
+
+
+def test_parse_multichoice_allows_other_without_star_sentinel():
+    form = steering.parse_request_input("tags:multichoice[perf,api]")
+    steering.validate_steer_fields({"tags": '["perf", "nope"]'}, form)
 
 
 def test_validate_steer_multichoice_allow_other_free_member():
