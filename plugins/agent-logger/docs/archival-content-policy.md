@@ -73,7 +73,7 @@ shape (a cheap, root-directory-local check, never a full-tree scan).
 ## Reconciling two copies of the same corpus
 
 Comparing an old sync destination against a current one (e.g. while
-migrating targets, or auditing retention) has three sharp edges worth
+migrating targets, or auditing retention) has four sharp edges worth
 knowing about up front:
 
 1. **Don't compare non-session bookkeeping directories as if they were
@@ -93,6 +93,27 @@ knowing about up front:
    reference fixture (e.g. an incomplete transfer, unrelated to detritus
    exclusion) looks identical to correctly-excluded detritus until you
    actually check file counts on both sides.
+4. **A whole-subtree-missing heuristic is itself a blind spot.** Applying
+   rule 3's own reasoning automatically — "this whole top-level child is
+   gone from the new copy, so it must have been excluded detritus" — can
+   silently mark a session "clean" even when it is missing tens of
+   thousands of genuinely unaccounted files, as long as the gap happens to
+   be shaped like a plausible detritus exclusion. A coarse pass's "clean"
+   verdict is a hypothesis, not proof: any tool actually acting on the
+   reconciliation (a dedup, a migration, a deletion) should surface its own
+   "present in old copy, unmatched in new copy, not independently
+   classified as detritus/junk" list for direct inspection — grouped by
+   session — rather than trusting a prior pass's verdict at face value.
+
+A reconciliation can also turn up a **structurally different legacy
+archival format**, not just missing files from the current one — e.g. a
+predecessor archival convention that stored a condensed digest rather than
+raw session content. That is not a duplicate of anything in the current
+corpus, so a dedup tool doesn't apply to it; confirm the content *shape*
+matches before assuming any two trees are comparable at all, and prefer
+preserving a structurally distinct legacy artifact (as its own clearly-
+labeled sibling) over deleting or forcing it through dedup logic it wasn't
+designed for.
 
 ## See Also
 
