@@ -3600,6 +3600,22 @@ def test_bucket_fallback_no_classify_finalized_is_clean_not_wip():
     assert derive.BUCKET_DISPO[w2["cleanup_bucket"]] == ""   # no chip
 
 
+def test_held_claims_buckets_have_disposition_chips():
+    # The held-claims/held-claims-cross-machine cleanup buckets emitted by
+    # agent-worktrees' prune.cleanup_disposition must each have their own
+    # disposition-chip entry here -- a held-claims-blocked worktree must
+    # never render with no chip at all, and the cross-machine variant needs
+    # its own reason naming the claim's target as remote.
+    assert derive.BUCKET_DISPO["held-claims"] == "REVIEW"
+    assert derive.BUCKET_DISPO["held-claims-cross-machine"] == "REVIEW"
+    assert derive.BUCKET_REASON["held-claims-cross-machine"] != (
+        derive.BUCKET_REASON["held-claims"])
+    w = derive.norm(
+        {"id": "wt-xm", "status": "finalized", "cleanup_bucket": "held-claims-cross-machine",
+         "started_at": "2026-06-25T10:00:00"}, "machine", "WSL")
+    assert w["cleanup_bucket"] == "held-claims-cross-machine"
+
+
 def test_tui_renders_local_worktrees():
     src = _fixture_source()
 

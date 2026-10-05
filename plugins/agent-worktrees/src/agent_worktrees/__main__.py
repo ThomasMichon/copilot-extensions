@@ -1322,8 +1322,8 @@ def _worktree_to_dict(
             held_claims=sum(1 for c in rec.resources if c.is_live),
             open_follow_ups=tracking.effective_open_follow_up_count(rec),
             evidence_mode="refreshed" if _fetch_fresh else "cached",
-            turn_count=_turns,
-            repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
+            turn_count=_turns, repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
+            cross_machine_claims=prune.cross_machine_claim_count(rec),
         ).to_dict()
         d["ff_eligible"] = (
             git_ops.can_fast_forward(state_info)

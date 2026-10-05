@@ -48,6 +48,28 @@ def test_closure_reports_merged_when_held_claim_present():
     assert {"code": "held-claims", "count": 1} in row["closure"]["blockers"]
 
 
+def test_closure_wires_cross_machine_claims_through_production_call_site():
+    # The production list --json --classify path (_worktree_to_dict) must
+    # carry the cross-machine claim count into the engine <-> Picker
+    # contract, not just assemble_closure_descriptor's own unit coverage --
+    # otherwise facts.open_claims.cross_machine_held/XM<N> never reach real
+    # output.
+    rec = _rec()
+    rec.resources = [
+        tracking.ResourceClaim(
+            kind="worktree",
+            ref=tracking.format_claim_ref("other-machine", "proj", "wt-child"),
+            state="active"),
+    ]
+    info = git_ops.WorktreeStateInfo(
+        state=git_ops.WorktreeState.COMPLETED, fetch_requested=True,
+    )
+    row = cli._worktree_to_dict(rec, state_info=info)
+    assert row["cleanup_bucket"] == "held-claims-cross-machine"
+    assert row["closure"]["facts"]["open_claims"]["cross_machine_held"] == 1
+    assert "XM1" in row["closure"]["compact"]
+
+
 def test_closure_absent_without_state_info():
     rec = _rec()
     row = cli._worktree_to_dict(rec)

@@ -475,6 +475,7 @@ def _render_status_segment(
             evidence_mode="refreshed" if _fetch_fresh else "cached",
             turn_count=turns,
             repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
+            cross_machine_claims=prune.cross_machine_claim_count(rec),
         )
         bg = _DESCRIPTOR_STYLE_BG.get(descriptor.style, "colour238")
         block_label = descriptor.compact
@@ -605,6 +606,7 @@ def _status_segment_json(path: str | None = None, fetch: bool = False) -> dict |
             evidence_mode="refreshed" if _fetch_fresh else "cached",
             turn_count=turns,
             repo_fetch_fresh=tracking.is_repo_fetch_fresh(rec.repo),
+            cross_machine_claims=prune.cross_machine_claim_count(rec),
         )
         closure = descriptor.to_dict()
 

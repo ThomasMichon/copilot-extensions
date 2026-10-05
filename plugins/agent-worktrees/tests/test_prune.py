@@ -347,6 +347,81 @@ class TestCleanupDisposition:
         d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
         assert d.cleanable is False and d.bucket == "held-claims"
 
+    def test_cross_machine_worktree_claim_gets_its_own_bucket(self):
+        # worktree-claims-transitive-finalization (effort), Phase 4: a held
+        # claim that's purely a cross-machine "worktree"-kind claim is NOT a
+        # LOCAL blocker -- surface it distinctly so an operator can tell
+        # "this isn't stuck on anything here" apart from a genuinely held
+        # resource. NOT claimed to self-clear: nothing today actually
+        # sweeps/settles a cross-machine worktree-kind claim (sweep.py's
+        # gone_of/safe_of both spare it, and worktree isn't a leaseable
+        # kind) -- this only tells an operator WHERE to look.
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(
+                kind="worktree",
+                ref=tracking.format_claim_ref("other-machine", "proj", "wt-child"),
+                state="active"),
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.cleanable is False
+        assert d.bucket == "held-claims-cross-machine"
+        assert "cross-machine" in d.reason
+
+    def test_mixed_cross_machine_and_same_machine_claims_stays_generic(self):
+        # A single same-machine (or non-worktree-kind) claim in the mix means
+        # something here genuinely needs attention -- never collapsed into
+        # the cross-machine-only bucket just because ONE claim qualifies.
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(
+                kind="worktree",
+                ref=tracking.format_claim_ref("other-machine", "proj", "wt-child"),
+                state="active"),
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active"),
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.bucket == "held-claims"
+
+    def test_same_machine_worktree_claim_stays_generic(self):
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(
+                kind="worktree",
+                ref=tracking.format_claim_ref(rec.machine, "proj", "wt-child"),
+                state="active"),
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.bucket == "held-claims"
+
+    def test_unqualified_worktree_claim_ref_stays_generic(self):
+        # A bare/unqualified ref (no machine/project) can't be proven
+        # cross-machine -- never guess; fall back to the safe generic
+        # bucket rather than assuming it self-clears.
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(kind="worktree", ref="bare-wt-id", state="active"),
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.bucket == "held-claims"
+
+    def test_unknown_owning_machine_identity_stays_generic(self):
+        # A legacy record with an empty machine identity (tracking.py) can
+        # never be proven cross-machine either way -- comparing a qualified
+        # ref's machine against "" would make every qualified worktree
+        # claim compare unequal and misclassify as cross-machine. Fall back
+        # to the generic bucket rather than guessing.
+        rec = _rec(status="finalized")
+        rec.machine = ""
+        rec.resources = [
+            tracking.ResourceClaim(
+                kind="worktree",
+                ref=tracking.format_claim_ref("other-machine", "proj", "wt-child"),
+                state="active"),
+        ]
+        d = prune.cleanup_disposition(rec, _info(S.COMPLETED))
+        assert d.bucket == "held-claims"
+
     def test_released_claim_does_not_block_cleanup(self):
         rec = _rec(status="finalized")
         rec.resources = [
@@ -731,6 +806,45 @@ class TestClosureDescriptor:
         assert d.compact == "MERGED C1"
         assert d.action_disposition == "blocked"
         assert {"code": "held-claims", "count": 1} in d.blockers
+
+    def test_cross_machine_claim_gets_its_own_compact_marker(self):
+        # worktree-claims-transitive-finalization (effort), Phase 4: the
+        # cross-machine distinction is purely informational -- it still
+        # downgrades to MERGED/blocked exactly like any held claim (never
+        # FINAL/safe), but renders its own "XM<n>" compact marker (alongside
+        # the ordinary "C<n>") and the wire-safe "held-claims" blocker code
+        # unchanged, so an older consumer degrades gracefully.
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(
+                kind="worktree",
+                ref=tracking.format_claim_ref("other-machine", "proj", "wt-child"),
+                state="active"),
+        ]
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        assert disposition.bucket == "held-claims-cross-machine"
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=1, open_follow_ups=0,
+            cross_machine_claims=prune.cross_machine_claim_count(rec))
+        assert d.final is False
+        assert d.label == "MERGED"
+        assert d.compact == "MERGED C1 XM1"
+        assert d.action_disposition == "blocked"
+        assert {"code": "held-claims", "count": 1} in d.blockers
+        assert d.facts["open_claims"]["cross_machine_held"] == 1
+
+    def test_cross_machine_claims_default_to_zero(self):
+        rec = _rec(status="finalized")
+        rec.resources = [
+            tracking.ResourceClaim(kind="codespace", ref="cs-1", state="active")
+        ]
+        info = _info(S.COMPLETED)
+        disposition = prune.cleanup_disposition(rec, info)
+        d = prune.assemble_closure_descriptor(
+            rec, info, disposition, held_claims=1, open_follow_ups=0)
+        assert "XM" not in d.compact
+        assert d.facts["open_claims"]["cross_machine_held"] == 0
 
     def test_open_follow_up_downgrades_completed_to_merged(self):
         rec = _rec(status="finalized")
