@@ -92,17 +92,18 @@ Full detail: [cli-reference.md § Status bar segment](cli-reference.md#status-ba
 
 If every `wt-<id>` session on a host disappeared together — not one worktree,
 **all of them**, with no `finalize`/`cleanup` run and no scheduled task that
-owns their lifecycle — the multiplexer itself almost certainly didn't fail;
-its **backing shell process did**, and every pane sharing that host lost its
-process at the same time. Check the host's crash/application event log for
-the actual shell binary (`pwsh.exe` on Windows, the Application log, Event ID
-1000) **and** for `psmux.exe`/`conhost.exe` themselves before assuming a mux
-or agent-worktrees defect: a `tmux`/`psmux` server only reports a session as
-gone once the process it was holding onto exits, so a cluster of simultaneous
-session deaths reads as a mux problem but is really a shell-runtime problem
-underneath it — though which layer (the shell, or the console host process
-hosting it) is the true root cause isn't always obvious from a single crash
-signature alone, since one can present as a symptom of the other.
+owns their lifecycle — treat the initial triage as **layer-neutral**: each
+`wt-*` session launches its own independent pane command/shell, so
+simultaneous loss across unrelated panes points at a **shared** component
+failing (the mux server itself, or the console-host layer underneath it),
+not necessarily every pane's backing shell crashing independently. Check the
+host's crash/application event log for the shell binary (`pwsh.exe` on
+Windows, the Application log, Event ID 1000) **and** for `psmux.exe`/
+`conhost.exe` themselves before concluding which layer actually failed first
+— a `tmux`/`psmux` server only reports a session as gone once the process it
+was holding onto exits, so a cluster of simultaneous session deaths is
+consistent with either the shared mux process exiting, or a shared
+console-host defect taking down every shell it hosts.
 
 **An observed compatibility signature:** PowerShell 7.6.6 (ARM64)'s
 `Console Host` (`Microsoft.PowerShell.ConsoleHost.dll`) has been seen
@@ -120,15 +121,18 @@ unrelated pane. Inspect `psmux.exe`/`conhost.exe` events alongside `pwsh.exe`
 before concluding which layer actually failed first.
 
 **Mitigation, if this signature matches:** pin the host's PowerShell install
-to the 7.4 LTS line instead of latest-stable 7.6.x as a low-cost compatibility
-workaround (7.4.20 is supported through 2026-11-10 at time of writing). If you
-manage the host through `agent-machines`, express this as a declarative
-`package` resource (`manager: winget`, `id: Microsoft.PowerShell`, an explicit
-`version`, and `pin: true`, optionally a `process_guard` on `pwsh.exe` so a
-live session defers the downgrade rather than racing it) rather than a
-one-off manual `winget` command, so the pin survives machine
-re-provisioning. See `docs/resources.md` in the `agent-machines` plugin for
-the resource schema.
+to the 7.4 LTS line instead of latest-stable 7.6.x as a **time-boxed**
+compatibility workaround, not a permanent fix — 7.4 reaches end of support on
+**2026-11-10**. Before that date, reassess whether a fixed 7.6.x (or later)
+build resolves the crash and migrate off the pin; do not let a declarative
+pin silently carry a host onto an unsupported PowerShell release past its
+support window. If you manage the host through `agent-machines`, express the
+pin as a declarative `package` resource (`manager: winget`, `id:
+Microsoft.PowerShell`, an explicit `version`, and `pin: true`, optionally a
+`process_guard` on `pwsh.exe` so a live session defers the downgrade rather
+than racing it) rather than a one-off manual `winget` command, so the pin
+survives machine re-provisioning **until you deliberately remove it**. See
+`docs/resources.md` in the `agent-machines` plugin for the resource schema.
 
 ## See also
 
