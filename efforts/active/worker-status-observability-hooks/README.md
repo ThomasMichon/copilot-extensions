@@ -13,7 +13,7 @@
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| `tmichon-cloud2` (operator machine) | Sole implementer; drives all five phases | copilot-extensions worktree `tmichon-cloud2-win-20261002-150732-9532`, per-phase PRs off `dev` |
+| Operator workstation | Sole implementer; drives all five phases | a copilot-extensions worktree, per-phase PRs off `dev` |
 
 ## Coordination
 
@@ -50,13 +50,12 @@ ones.
 
 ## Context
 
-Surfaced during a live, multi-hour session operating the odsp-web-harness
-`file-picker-repro` ADO repro loop on `agent-dispatch` (this session also
-root-caused and fixed the #4990 spawn-starvation bug, drove a dev→main
-promotion, and fixed a real steering-card policy gap in the repro worker's
-own prompt — see that session's transcript for the full narrative; this
-effort is the tooling fallout from doing all of that by hand). Concretely hit
-and worked around, repeatedly, across that session:
+Surfaced during a live, multi-hour session operating a downstream harness's
+ADO-backed repro-queue fleet on `agent-dispatch` (this session also
+root-caused and fixed the #4990 spawn-starvation bug and a steering-card
+policy gap in that downstream fleet's own worker prompt; this effort is the
+tooling fallout from diagnosing all of that by hand without the hooks
+below). Concretely hit and worked around, repeatedly, across that session:
 
 - `agent-bridge peek <session_id>` refused every `local-body:*` session
   (`has no acp_session_id yet -- copilot has not written a transcript`) —
@@ -69,17 +68,16 @@ and worked around, repeatedly, across that session:
   `agent-dispatch reservations list --task <id>` for the `worktree`, then
   `agent-worktrees worktree-status-bundle --worktree <id> --json` for
   `facts.lineage.value.head_session` — a 3-command chain before the
-  transcript could even be located. **Correction from review:** agent-bridge
-  already owns exactly this resolution server-side as
-  `GET /api/v1/dispatch-tasks/{task_id}/session`; the gap is that no CLI
-  command wires a caller to it — not that the resolution logic is missing.
+  transcript could even be located. agent-bridge already owns exactly this
+  resolution server-side as `GET /api/v1/dispatch-tasks/{task_id}/session`;
+  the gap is that no CLI command wires a caller to it, not that the
+  resolution logic is missing.
 - Three tasks sat **silently** dead-ended for days: self-excluded from the
-  only machine running the fleet (`excludes: ["machine:tmichon-cloud2"]`),
-  left over from a misdiagnosed "permanent" ACP host limitation that the
-  session later proved has a working fallback. `agent-dispatch doctor`'s
-  sweep (no `--task`) reported `examined: 0` the whole time — it does not
-  appear to examine a bare `queued` task with no active/failed reservation
-  at all.
+  only machine running the fleet (a stale `excludes` entry), left over from
+  a misdiagnosed "permanent" ACP host limitation that the session later
+  proved has a working fallback. `agent-dispatch doctor`'s sweep (no
+  `--task`) reported `examined: 0` the whole time — it does not appear to
+  examine a bare `queued` task with no active/failed reservation at all.
 - Finding "what needs my attention right now" (an `awaiting_steer` task; a
   task carrying `excludes`) required pulling the **full** `list` output and
   filtering client-side every check-in — no server-side filter for either
@@ -133,10 +131,9 @@ capture policy; read as "beats" / "want" / "chosen.")
       know which kind it got).
 
 ### Phase 2 — task_id → transcript resolution, one command
-- [ ] **Correction from review (PR #5264):** do NOT reconstruct the
-      show→reservations→worktree-status-bundle resolution chain in the CLI.
-      agent-bridge already owns this exact resolution as
-      `GET /api/v1/dispatch-tasks/{task_id}/session`
+- [ ] Do not reconstruct the show→reservations→worktree-status-bundle
+      resolution chain in the CLI. agent-bridge already owns this exact
+      resolution as `GET /api/v1/dispatch-tasks/{task_id}/session`
       (`plugins/agent-bridge/src/agent_bridge/routes/dispatch_tasks.py`) —
       it ranks the task's current owner then attachment history
       newest-first, tries live/cold-store/live-registration resolution for
@@ -149,14 +146,22 @@ capture policy; read as "beats" / "want" / "chosen.")
       Phase 1 fixes for local-body sessions. No new resolution logic.
 - [ ] Depends on Phase 1 (the resolved session is usually local-body).
 
-### Phase 3 — `doctor` flags queued-with-excludes
-- [ ] Add a diagnosis (e.g. `excluded_from_target_machine`) for a plain
-      `queued` task carrying a non-empty `excludes` array, so a default
-      sweep (no `--task`) surfaces it instead of reporting `examined: 0`.
+### Phase 3 — shared queued-task filter seam + `doctor` excludes diagnosis
+- [ ] Build a server-side filter/query seam for "which queued tasks carry a
+      non-empty `excludes` array" (and, while there, `awaiting_steer`) —
+      the existing sweep deliberately excludes bare `queued` tasks from its
+      bounded `--task`-less pass (`plugins/agent-dispatch/src/agent_dispatch/doctor.py:104-110`),
+      so an unbounded scan of the whole backlog isn't the answer; this
+      needs a real filtered query, not a client-side list-then-filter.
+- [ ] Add a `doctor` diagnosis (e.g. `excluded_from_target_machine`) built
+      on that seam, so a default sweep (no `--task`) surfaces a
+      stale-excluded `queued` task instead of reporting `examined: 0`.
+- [ ] This phase and Phase 4 share one filter implementation — build it
+      once here, consume it from both `doctor` and `list`.
 
 ### Phase 4 — `list` filters for "what needs me"
-- [ ] Add `--awaiting-steer` and `--has-excludes` boolean filters to
-      `agent-dispatch list`.
+- [ ] Expose Phase 3's filter seam as `--awaiting-steer` and
+      `--has-excludes` boolean filters on `agent-dispatch list`.
 
 ### Phase 5 — liveness signal on `show`
 - [ ] Surface a cheap liveness signal (session's own last-event timestamp,
@@ -167,25 +172,30 @@ capture policy; read as "beats" / "want" / "chosen.")
 
 ## Validation Plan
 
-- [ ] **Phase 1:** `agent-bridge peek <session_id>` against a real
-      `local-body:*` session spawned by the live `file-picker-repro` queue
-      (this effort's own grounding context) returns a rendered transcript,
-      not the `has no acp_session_id yet` error. Also re-run against an
-      existing ACP-registered session to confirm no regression.
-- [ ] **Phase 2:** `peek <task_id>` against a live `file-picker-repro` task
-      resolves through `GET /api/v1/dispatch-tasks/{task_id}/session`
-      (confirm via the route's own logs/tests, not a reimplemented chain)
-      and renders the same transcript Phase 1 validates directly.
-- [ ] **Phase 3:** a task manually given a stale `excludes` entry is
-      reported by a default (`--repo`/`--label`, no `--task`) `doctor` sweep.
-- [ ] **Phase 4:** `agent-dispatch list --awaiting-steer` /
-      `--has-excludes` against the live queue returns exactly the tasks a
-      manual full-list-and-filter pass would have found.
-- [ ] **Phase 5:** `show` on a task whose session is actively emitting
-      events (confirmed via raw JSONL) reports it live, not stale.
-- [ ] Dogfood each landed phase against the still-running
-      odsp-web-harness `file-picker-repro` queue during this same session,
-      per the operator's explicit ask to use it as live grounding context.
+Each phase requires **automated regression coverage** in the repo's existing
+focused suites, with live dogfooding against a real downstream repro-queue
+fleet (when one is available during implementation) as supplemental
+evidence only — never a substitute for an automated test.
+
+- [ ] **Phase 1:** automated test in `test_peek_snapshot.py` covering a
+      `local-body:*` session (no `acp_session_id`) resolving to a rendered
+      transcript, plus a regression test confirming the existing
+      ACP-session path is unchanged. Supplemental: `agent-bridge peek
+      <session_id>` against a real local-body session from a live
+      downstream repro-queue fleet, if one is running during this phase.
+- [ ] **Phase 2:** automated test in `test_dispatch_task_session_route.py`
+      (or a new CLI-level test) confirming `peek <task_id>` resolves through
+      `GET /api/v1/dispatch-tasks/{task_id}/session` rather than
+      reimplementing the chain. Supplemental: dogfood against a live task.
+- [ ] **Phase 3:** automated test in `test_doctor.py` confirming a task
+      manually given a stale `excludes` entry is reported by a default
+      (`--repo`/`--label`, no `--task`) sweep.
+- [ ] **Phase 4:** automated test confirming `agent-dispatch list
+      --awaiting-steer` / `--has-excludes` returns exactly the expected
+      filtered set against a fixture queue.
+- [ ] **Phase 5:** automated test confirming `show` reports a task live
+      when its session's own last-event timestamp is recent, even if
+      `last_seen_at` itself is stale.
 
 ## Proposal
 
@@ -211,4 +221,28 @@ _Pending — begin with Phase 1 implementation exploration._
 - Low: added the required Documentation impact statement to the PR
   description itself (not the effort file — confirmed via
   `CONTRIBUTING.md`'s own requirement that it lives in the PR body).
+
+### 2026-10-05 — Plan PR #5264 second review round (COMMENTED, 4 Medium + 2 Low)
+- Medium: Participants table named a personal machine alias and a raw
+  worktree identifier — replaced with role-based/generic identities per
+  this repo's public-effort policy.
+- Medium: Context named a downstream harness and its internal repro-queue
+  by name, plus referenced a private session transcript — generalized to
+  "a downstream harness's ADO-backed repro-queue fleet," dropped the
+  transcript reference. Scrubbed the same alias from the PR description.
+- Medium: Phase 3/4 restructured so Phase 3 builds the shared filter/query
+  seam (doctor's bounded sweep can't just scan the whole queued backlog)
+  and Phase 4 reuses it for `list`'s CLI flags, instead of each phase
+  building its own filtering.
+- Medium: Validation Plan rewritten to commit each phase to automated
+  regression coverage in the repo's existing focused suites
+  (`test_peek_snapshot.py`, `test_dispatch_task_session_route.py`,
+  `test_doctor.py`), with live dogfooding demoted to supplemental evidence
+  only.
+- Low: removed review-history wording ("Correction from review...") from
+  Context/Phase 2 — stated the current facts directly; review history
+  belongs only in this Journal.
+- Low: Documentation impact statement finding was stale (already present
+  in the PR body from the first round) — no action needed beyond the
+  repro-queue alias scrub already covered above.
 
