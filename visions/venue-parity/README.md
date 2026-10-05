@@ -107,9 +107,14 @@ the trust model and both postures are owned by the
   reached over SSH and carries the full remote-venue transport/relay
   requirements above, not the loopback exemption; loopback exists to skip a
   redundant hop to the dispatcher's own account, never to skip an account
-  boundary. Every other static target is **genuine remote SSH**, reached
-  over the same SSH transport this vision already mandates, whichever
-  concrete launch shape the coordination layer composes for it.
+  boundary. Every other **SSH-backed** static target (one resolved to a
+  machine/environment pair, as opposed to a bare command-backed launch with
+  no host at all) is **genuine remote SSH**, reached over the same SSH
+  transport this vision already mandates, whichever concrete launch shape
+  the coordination layer composes for it. A command-backed static target
+  carries none of these SSH/relay requirements — it is its own launch shape,
+  covered separately by the elevated/privileged-relay staging guarantee
+  below where applicable.
 
   Both sub-shapes are owed the same venue-agnostic-launch guarantee as
   `codespace:`/`container:` targets: a dispatched agent carries the same
@@ -152,10 +157,12 @@ auth, or coordination code.
 
 ### plugin-dir-parity-for-static-targets
 A dispatched agent's resolved `--plugin-dir` set — its target repo's own
-enabled `.ai`/`.claude` plugins, **and** any control-repo-declared related
-plugin — is the same regardless of whether the target was addressed as
-`codespace:<name>`, `container:<name>`, a bare static-registry agent name
-resolving to local loopback, or one resolving to genuine remote SSH:
+enabled `.ai`/`.claude` plugins, **and** any *eligible* control-repo-declared
+related plugin (subject to the same propagation boundary that already
+excludes a central-harness-only plugin from ever reaching a venue) — is the
+same regardless of whether the target was addressed as `codespace:<name>`,
+`container:<name>`, a bare static-registry agent name resolving to local
+loopback, or one resolving to genuine remote SSH:
 - **Local loopback** resolves both plugin kinds directly against the
   dispatching machine's own filesystem — the same machine a loopback target
   shares, so no staging is required.
