@@ -80,6 +80,38 @@ class PickerScreenRuntimeMixin:
                 self.manager_update_state = state
 
         self._run_bg("manager-update-check", _work, _done, quiet=True)
+    #: Re-check the local claims-orphanage at most this often (seconds) --
+    #: an ``--abandon`` finalize re-homing an obligation is rare, so this is
+    #: a background courtesy poll, not a hot path.
+    _ORPHAN_POLL_SECS = 120.0
+    def _poll_orphan_state(self, *, force=False):
+        """Refresh ``self._orphans`` -- the local claims-orphanage summary
+        (worktree-claims-transitive-finalization Phase 4 item 2) -- off the
+        render thread. An orphaned obligation (re-homed by an ``--abandon``
+        finalize, awaiting ``claims cleanup``) has no live worktree row of
+        its own to surface on, so this is tracked as independent screen
+        state rather than folded into ``self.data`` -- read by
+        ``status_text()`` (the count chip) and the 'o' Orphanage screen.
+        Cached; ``force=True`` (the 'r' full-reload key) bypasses the cache."""
+        now = time.monotonic()
+        if not force and now - self._orphans_checked_at < self._ORPHAN_POLL_SECS:
+            return
+        self._orphans_checked_at = now
+        fetch = getattr(self.src, "orphans", None)
+        if not callable(fetch):
+            return
+
+        def _work():
+            try:
+                return fetch()
+            except Exception:
+                return None
+
+        def _done(rows):
+            if rows is not None:
+                self._orphans = rows
+
+        self._run_bg("orphan-check", _work, _done, quiet=True)
     def _maybe_repoll(self):
         """Fire a bounded, in-place background refresh of machine state (#1421).
 

@@ -5285,6 +5285,127 @@ def test_update_indicator_focus_glyph_and_refresh():
     assert captured == {"action": "refresh"}
 
 
+def test_orphan_chip_appears_in_status_text_when_orphans_present():
+    """worktree-claims-transitive-finalization Phase 4 item 2: a re-homed
+    obligation awaiting ``claims cleanup`` has no worktree row of its own,
+    so it surfaces as a status-line chip instead -- labeled "(local, 'o')"
+    so it is never mistaken for a fleet-wide/cross-machine count (the
+    orphanage registry is per-machine local state)."""
+    s = PickerScreen(_fixture_source(), live=False)
+    s.setup_sync_for_tests()
+    s.htab = 0
+    assert s._orphans == []
+    assert "orphaned" not in s.status_text(False).plain
+
+    s._orphans = [{"kind": "codespace", "ref": "cs-1"}]
+    text = s.status_text(False).plain
+    assert "1 orphaned (local, 'o')" in text
+    assert "\u26a0" in text   # ⚠
+    assert "1 orphaned" in s.status_text(True).plain or "\u26a01" in s.status_text(True).plain
+
+
+def test_poll_orphan_state_fetches_from_source_orphans(monkeypatch):
+    """``_poll_orphan_state`` reads the data source's optional ``orphans()``
+    hook off the render thread (via ``_run_bg``) and caches the result."""
+    s = PickerScreen(_fixture_source(), live=False)
+    s.setup_sync_for_tests()
+
+    def _sync_run_bg(_label, work, done=None, **_kwargs):
+        result = work()
+        if done is not None:
+            done(result)
+
+    monkeypatch.setattr(s, "_run_bg", _sync_run_bg)
+    s.src.orphans = lambda: [{"kind": "codespace", "ref": "cs-9"}]
+
+    s._poll_orphan_state(force=True)
+    assert s._orphans == [{"kind": "codespace", "ref": "cs-9"}]
+
+
+def test_poll_orphan_state_is_a_noop_when_source_lacks_orphans_hook(monkeypatch):
+    """A fixture/provider source with no ``orphans()`` attribute at all (the
+    common case -- most tests' ``_fixture_source()`` has none) must never
+    raise; the chip simply never appears."""
+    s = PickerScreen(_fixture_source(), live=False)
+    s.setup_sync_for_tests()
+    assert not hasattr(s.src, "orphans")
+
+    def _sync_run_bg(_label, work, done=None, **_kwargs):
+        result = work()
+        if done is not None:
+            done(result)
+
+    monkeypatch.setattr(s, "_run_bg", _sync_run_bg)
+    s._poll_orphan_state(force=True)
+    assert s._orphans == []
+
+
+def test_poll_orphan_state_respects_the_cache_ttl_unless_forced(monkeypatch):
+    s = PickerScreen(_fixture_source(), live=False)
+    s.setup_sync_for_tests()
+    calls = []
+    s.src.orphans = lambda: (calls.append(1), [])[1]
+
+    def _sync_run_bg(_label, work, done=None, **_kwargs):
+        result = work()
+        if done is not None:
+            done(result)
+
+    monkeypatch.setattr(s, "_run_bg", _sync_run_bg)
+    s._poll_orphan_state()
+    s._poll_orphan_state()   # within the TTL -- no second fetch
+    assert len(calls) == 1
+    s._poll_orphan_state(force=True)
+    assert len(calls) == 2
+
+
+def test_o_key_opens_orphanage_screen_listing_the_cached_entries():
+    from worktree_manager.production_picker.picker_tui.orphanage import OrphanageScreen
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            scr._orphans = [
+                {"kind": "codespace", "ref": "cs-1", "source_worktree": "wt-old"},
+            ]
+            scr.sel = ("L", 0)
+            scr._dispatch_key("o")
+            await pilot.pause()
+            screens = [s for s in scr.app.screen_stack if isinstance(s, OrphanageScreen)]
+            assert screens
+            body = screens[0]._body().plain
+            assert "cs-1" in body
+            assert "wt-old" in body
+
+    asyncio.run(run())
+
+
+def test_o_key_is_a_noop_when_nothing_is_orphaned():
+    """Never opens an empty/pointless modal -- matches the chip's own
+    conditional appearance (``if self._orphans``)."""
+    from worktree_manager.production_picker.picker_tui.orphanage import OrphanageScreen
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+            assert scr._orphans == []
+            scr.sel = ("L", 0)
+            scr._dispatch_key("o")
+            await pilot.pause()
+            assert not any(
+                isinstance(s, OrphanageScreen) for s in scr.app.screen_stack)
+
+    asyncio.run(run())
+
+
 def test_manager_update_seg_is_distinct_from_the_engine_update_seg(monkeypatch):
     """The Manager's own update-availability state (manager_update_state)
     renders via a SEPARATE segment from the engine/marketplace one

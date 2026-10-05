@@ -433,6 +433,16 @@ class PickerScreenRenderingMixin:
                 t.append(f"  {self.spin()}{loading}", style=C_LOAD)
                 if not compact:
                     t.append(" loading", style=C_LOAD)
+        if self._kind() == "worktrees" and self._orphans:
+            # worktree-claims-transitive-finalization Phase 4 item 2: a
+            # re-homed obligation awaiting ``claims cleanup`` has no
+            # worktree row of its own, so it is surfaced here instead --
+            # local-machine-only (never fleet-aggregated, see
+            # ``_poll_orphan_state``), hence the explicit "local" qualifier
+            # so this is never mistaken for a cross-machine count.
+            n = len(self._orphans)
+            t.append(f"  ⚠{n}" if compact else f"  ⚠ {n} orphaned (local, 'o')",
+                      style=C_WARN)
         return t
     def _top_pad(self, W, more_above, scrolled):
         left = f"▲ {scrolled} more above" if more_above else "▲"

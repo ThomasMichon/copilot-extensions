@@ -241,6 +241,14 @@ class PickerScreen(
         self._setup_failed_epoch = 0
         self._pending_setup_payloads: dict[int, object] = {}
         self._setup_payloads_lock = threading.Lock()
+        # worktree-claims-transitive-finalization Phase 4 item 2: the local
+        # claims-orphanage cache (see ``_poll_orphan_state``). Initialized
+        # here, not just ``_setup_skeleton``, so a headless unit test that
+        # constructs a ``PickerScreen`` + ``setup_sync_for_tests()`` without
+        # ever mounting (no ``on_mount`` -> ``_setup_skeleton`` run) still
+        # finds a well-formed value in ``status_text()``/the 'o' key.
+        self._orphans: list[dict] = []
+        self._orphans_checked_at = 0.0
         # Per-refresh render caches (#169): in the NF compose tree every segment
         # widget (title / pivots / chrome / machine / buttons / footer) renders
         # from this one screen's derived frame in the SAME paint pass. Without a
