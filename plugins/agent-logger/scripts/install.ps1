@@ -319,84 +319,7 @@ function Write-Step    { param([string]$m) Write-Host "  ...    $m" }
 function Write-Warn    { param([string]$m) Write-Host "  [WARN] $m" -ForegroundColor Yellow }
 function Write-Fail    { param([string]$m) Write-Host "  [FAIL] $m" -ForegroundColor Red }
 
-function Test-IsSreModuleMismatch {
-    <# Detects `AssertionError: SRE module mismatch` -- a transient race on a
-       shared uv-managed Python interpreter (cpython-3.11-windows-x86_64-none)
-       that surfaces when several installers hit it in quick succession during
-       one big `agent-worktrees update --force` sweep (#6785, mirrored from
-       agent-bridge's install.ps1/install.sh). The interpreter reliably heals
-       within seconds once the sweep's other uv invocations finish touching
-       it, so a short-delay retry recovers cleanly. #>
-    param([string]$Output)
-    return $Output -match 'SRE module mismatch'
-}
-
-function Test-IsVenvCorruption {
-    <# Detects the `pyvenv.cfg` variant of the shared uv-managed-interpreter
-       race first seen in #6785 (see Test-IsSreModuleMismatch): a concurrent
-       `uv venv` from another installer landing on the same slot can leave
-       python.exe present but pyvenv.cfg missing/incomplete, so `uv venv
-       --allow-existing` (or any later uv Python-interpreter probe against
-       that slot) fails immediately with uv exit code 106 / "failed to locate
-       pyvenv.cfg" (#6852, mirrored from agent-bridge). The slot self-heals
-       once the other install finishes writing it, so a short-delay retry
-       recovers cleanly. #>
-    param([string]$Output)
-    return ($Output -match 'failed to locate pyvenv\.cfg') -or ($Output -match 'exit code:\s*106')
-}
-
-function Invoke-UvPipInstallResilient {
-    <# Runs `uv pip install` with the given arguments, capturing combined
-       output and exit code. On the transient SRE-module-mismatch signature
-       (see Test-IsSreModuleMismatch), retries with backoff (up to 3 extra
-       attempts: 3s/6s/10s); any other failure, or a mismatch persisting after
-       all retries, is returned as-is for the caller to handle/fail on as
-       before. #>
-    param([Parameter(Mandatory)][string[]]$Arguments)
-    $delays = @(3, 6, 10)
-    $out = & uv pip install @Arguments 2>&1
-    $exit = $LASTEXITCODE
-    foreach ($delay in $delays) {
-        if ($exit -eq 0 -or -not (Test-IsSreModuleMismatch ($out | Out-String))) { break }
-        Write-Warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
-        Start-Sleep -Seconds $delay
-        $out = & uv pip install @Arguments 2>&1
-        $exit = $LASTEXITCODE
-    }
-    return [pscustomobject]@{ Output = $out; ExitCode = $exit }
-}
-
-function Invoke-UvVenvResilient {
-    <# Runs `uv venv $VenvDir @Arguments`, capturing combined output and exit
-       code. Retries with backoff (3s/6s/10s) on the transient
-       SRE-module-mismatch (#6785) or pyvenv.cfg-corruption (#6852)
-       signatures. Also treats a zero-exit run that didn't actually leave a
-       pyvenv.cfg behind at $VenvDir\pyvenv.cfg as a failure worth retrying --
-       uv can exit 0 while still racing another concurrent writer touching
-       the same slot. #>
-    param([Parameter(Mandatory)][string]$VenvDir, [Parameter(Mandatory)][string[]]$Arguments)
-    $cfgPath = Join-Path $VenvDir 'pyvenv.cfg'
-    $delays = @(3, 6, 10)
-    $out = & uv venv $VenvDir @Arguments 2>&1
-    $exit = $LASTEXITCODE
-    foreach ($delay in $delays) {
-        if ($exit -eq 0 -and (Test-Path $cfgPath)) { break }
-        $text = ($out | Out-String)
-        if ($exit -eq 0) {
-            Write-Warn "uv venv reported success but pyvenv.cfg is missing at $cfgPath (shared interpreter race, #6852) -- retrying in ${delay}s"
-        } elseif (Test-IsSreModuleMismatch $text) {
-            Write-Warn "uv venv hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
-        } elseif (Test-IsVenvCorruption $text) {
-            Write-Warn "uv venv hit a transient pyvenv.cfg corruption (shared Python cache race, #6852) -- retrying in ${delay}s"
-        } else {
-            break
-        }
-        Start-Sleep -Seconds $delay
-        $out = & uv venv $VenvDir @Arguments 2>&1
-        $exit = $LASTEXITCODE
-    }
-    return [pscustomobject]@{ Output = $out; ExitCode = $exit }
-}
+. (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')
 
 function Test-UvConfiguredIndex {
     $configPaths = if ($env:UV_CONFIG_FILE) {
@@ -647,83 +570,6 @@ function Remove-LoggerTrampolines {
         ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
 }
 
-function Get-SignedBasePython {
-    <# Return a SAC-trusted (Authenticode-signed) base Python (>=3.10), or $null.
-       Smart App Control blocks the unsigned uv-managed Python and console-script
-       trampoline; a venv built from a signed base with `--copies` has a signed
-       python.exe that SAC allows. #>
-    if ($env:OS -ne 'Windows_NT') { return $null }
-    $cands = @()
-    if (Get-Command py -ErrorAction SilentlyContinue) {
-        # The `py` launcher writes "No suitable Python runtime found" to stderr
-        # for any version it doesn't have installed; under the script-wide
-        # $ErrorActionPreference='Stop' that becomes a terminating error even
-        # with a 2>$null redirect (same gotcha as Ensure-UvIndex above), so
-        # relax it for the duration of these probes -- otherwise the first
-        # missing minor version (commonly 3.13, rarely pre-installed) aborts
-        # the whole provisioning run instead of just skipping that candidate.
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        try {
-            foreach ($v in '3.13', '3.12', '3.11', '3.10') {
-                $p = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
-                if ($LASTEXITCODE -eq 0 -and $p) { $cands += $p }
-            }
-        } finally {
-            $ErrorActionPreference = $prevEAP
-        }
-    }
-    foreach ($c in ($cands | Select-Object -Unique)) {
-        if (Test-Path $c) {
-            try { if ((Get-AuthenticodeSignature $c).Status -eq 'Valid') { return $c } } catch {}
-        }
-    }
-    return $null
-}
-
-function New-SignedVenv {
-    <# Create or rebuild $VenvDir so its python.exe is SAC-trusted. Prefers a
-       signed base Python via `--copies`; rebuilds an existing unsigned venv;
-       falls back to uv (unsigned) when no signed Python exists. Returns $true
-       if $VenvPython AND $VenvDir\pyvenv.cfg are both present afterward --
-       checking python.exe alone would treat a #6852-corrupted slot
-       (python.exe present, pyvenv.cfg missing) as already healthy and never
-       rebuild it. #>
-    # #935: toss an INCOMPLETE prior slot first so we never build over a corpse.
-    Invoke-VersionedSlotClean
-    $cfgPath = Join-Path $VenvDir 'pyvenv.cfg'
-    if (Test-Path $VenvPython) {
-        $sig = if ($env:OS -eq 'Windows_NT') { try { (Get-AuthenticodeSignature $VenvPython).Status } catch { 'Unknown' } } else { 'Valid' }
-        if ($sig -ne 'Valid' -and (Get-SignedBasePython)) {
-            Write-Step 'Existing venv python is unsigned (Smart App Control-incompatible) -- rebuilding from signed Python'
-            try { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop }
-            catch { Write-Warn "Could not remove existing venv (in use?): $_" }
-        } elseif (-not (Test-Path $cfgPath)) {
-            Write-Warn "Existing venv python.exe present but pyvenv.cfg is missing at $cfgPath (shared interpreter race, #6852) -- rebuilding"
-            try { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop }
-            catch { Write-Warn "Could not remove corrupted venv (in use?): $_" }
-        }
-    }
-    if ((Test-Path $VenvPython) -and (Test-Path $cfgPath)) { return $true }
-
-    $signedBase = Get-SignedBasePython
-    if ($signedBase) {
-        & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
-        if ((Test-Path $VenvPython) -and (Test-Path $cfgPath)) {
-            Write-Ok "Venv created from signed Python ($signedBase)"
-            return $true
-        }
-        Write-Warn 'Signed-Python venv creation failed -- falling back to uv'
-    } elseif ($env:OS -eq 'Windows_NT') {
-        Write-Warn 'No signed system Python found -- using uv (unsigned). On Smart App Control machines, install python.org Python 3.10+ and re-run.'
-    }
-    $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments @('--python', '3.10', '--allow-existing')
-    if ($result.ExitCode -ne 0 -or -not (Test-Path $cfgPath)) {
-        $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments @('--allow-existing')
-    }
-    return ((Test-Path $VenvPython) -and (Test-Path $cfgPath))
-}
-
 function Get-GitInfo {
     param([string]$Path)
     try {
@@ -829,65 +675,6 @@ function Get-SourceKind {
     return 'local'
 }
 # === end install-contract:v3 source-kind ===
-
-# Unified schema_version 3 manifest writer. Self-contained per plugin (no shared
-# module -- plugins are pulled independently from the marketplace). Records the
-# source footprint (local vs marketplace) and is written atomically (temp+move).
-function Write-DeployManifestFor {
-    param(
-        [string]$Service,
-        [string]$Plugin,
-        [string]$InstallPath,
-        [string]$PluginPath,
-        [string]$VenvPath
-    )
-    $manifestPath = Join-Path $InstallPath 'deploy-manifest.json'
-    $kind = Get-SourceKind -PluginPath $PluginPath
-
-    $ver = '0.0.0'
-    $pyproj = Join-Path $PluginPath 'pyproject.toml'
-    if (Test-Path $pyproj) {
-        $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
-        if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*','$1') }
-    }
-
-    # Git provenance only applies to a local checkout -- the marketplace vendor
-    # copy is not a git repo.
-    $commit = $null; $branch = $null; $dirty = $false
-    if ($kind -eq 'local') {
-        $gitInfo = Get-GitInfo -Path (Split-Path $PluginPath)
-        $commit = $gitInfo.commit; $branch = $gitInfo.branch; $dirty = $gitInfo.dirty
-    }
-
-    $manifest = [ordered]@{
-        schema_version = 3
-        service        = $Service
-        deployed_at    = (Get-Date -Format 'o')
-        deployed_by    = "$($env:COMPUTERNAME.ToLower())-windows"
-        source         = [ordered]@{
-            kind    = $kind
-            path    = ($PluginPath -replace '\\', '/')
-            repo    = 'copilot-extensions'
-            plugin  = $Plugin
-            version = $ver
-            commit  = $commit
-            branch  = $branch
-            dirty   = $dirty
-        }
-        venv           = ($VenvPath -replace '\\', '/')
-        runtime        = 'python'
-    }
-
-    $tmp = "$manifestPath.tmp"
-    $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
-    Move-Item -Force -Path $tmp -Destination $manifestPath
-    Write-Ok "Deploy manifest written (source: $kind)"
-}
-
-function Write-DeployManifest {
-    Write-DeployManifestFor -Service 'agent-logger' -Plugin 'agent-logger' `
-        -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir
-}
 
 function Publish-PayloadSnapshot {
     <# Publish one immutable payload snapshot and atomically point payload-dir
@@ -1150,15 +937,15 @@ function Install-Package {
     if (-not (Test-Path $LocalBin))   { New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null }
 
     # Prerequisite: uv (venv + package management per the install contract).
-    try { uv --version 2>&1 | Out-Null } catch {
-        Write-Fail 'uv not found on PATH (required for venv + package management)'
-        Write-Fail 'Install: https://docs.astral.sh/uv/getting-started/installation/'
+    Ensure-UvIndex
+    $uvPath = Ensure-Uv -InstallRoot $InstallDir
+    if (-not $uvPath) {
+        Write-Fail 'uv is required but could not be resolved or acquired'
         exit 1
     }
-    Ensure-UvIndex
 
     # SAC-safe venv: prefer a signed base Python via --copies; rebuild unsigned.
-    if (-not (New-SignedVenv)) {
+    if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true)) {
         Write-Fail "Failed to create venv at $VenvDir"
         exit 1
     }
@@ -1170,7 +957,7 @@ function Install-Package {
 
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $setuptoolsResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, 'setuptools>=83.0.0', '--quiet')
+    $setuptoolsResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -Arguments @('--python', $VenvPython, 'setuptools>=83.0.0', '--quiet')
     $setuptoolsOut = $setuptoolsResult.Output
     if ($setuptoolsResult.ExitCode -ne 0) {
         $ErrorActionPreference = $prevEAP
@@ -1221,7 +1008,7 @@ function Install-Package {
             }
         }
         if (-not (Test-Path (Join-Path $libPath 'pyproject.toml'))) { continue }
-        $libResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--no-build-isolation', '--reinstall-package', $lib.Package, $libPath, '--quiet')
+        $libResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -Arguments @('--python', $VenvPython, '--no-build-isolation', '--reinstall-package', $lib.Package, $libPath, '--quiet')
         $libOut = $libResult.Output
         if ($libResult.ExitCode -ne 0) {
             $ErrorActionPreference = $prevEAP
@@ -1230,7 +1017,7 @@ function Install-Package {
             exit 1
         }
     }
-    $installResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--no-build-isolation', '--no-deps', "$PluginDir", '--quiet')
+    $installResult = Invoke-UvPipInstallResilient -UvCommand $uvPath -PayloadDirToScrub $PluginDir -Arguments @('--python', $VenvPython, '--no-build-isolation', '--no-deps', "$PluginDir", '--quiet')
     $out = $installResult.Output
     $result = $installResult.ExitCode
     $ErrorActionPreference = $prevEAP
@@ -1275,7 +1062,7 @@ function Install-Package {
     }
 
     # Record the deploy footprint (source: local vs marketplace).
-    Write-DeployManifest
+    Write-DeployManifest -Service 'agent-logger' -Plugin 'agent-logger' -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir -GetSourceKind ${function:Get-SourceKind} -GetGitInfo ${function:Get-GitInfo} -PayloadHash (Get-PayloadHash)
 }
 
 function New-SyncTaskAction {

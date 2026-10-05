@@ -1,5 +1,5 @@
 """Regression coverage for the transient venv-corruption retry wrapper
-(#6852) in agent-logger's install.ps1 -- mirrored from agent-bridge's fix for
+(#6852) in the shared installer engine -- mirrored from agent-bridge's fix for
 the same shared uv-managed-interpreter race. A concurrent `uv venv` from
 another installer landing on the same slot can leave `python.exe` present
 but `pyvenv.cfg` missing/incomplete, so `uv venv --allow-existing` fails
@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
-_INSTALL_PS1 = PLUGIN / "scripts" / "install.ps1"
+_INSTALL_PS1 = PLUGIN.parents[1] / "libs" / "installer-engine" / "installer-engine.ps1"
 
 
 def _extract_ps1_functions(*names: str) -> str:
@@ -44,7 +44,7 @@ def _run_harness(
     harness = tmp_path / f"harness-{shell.replace('.exe', '')}.ps1"
     harness.write_text(
         _extract_ps1_functions(
-            "Test-IsSreModuleMismatch", "Test-IsVenvCorruption", "Invoke-UvVenvResilient"
+            "Invoke-NativeCapture", "Test-IsSreModuleMismatch", "Test-IsVenvCorruption", "Invoke-UvVenvResilient"
         )
         + f"""
 

@@ -392,7 +392,7 @@ adopting. `budget-guidance` is also not part of this set (see Context: not
 an `agent-*` persistent-service plugin) and is never expected to adopt the
 engine under this effort.
 
-- [ ] `agent-logger` (already has the pyvenv.cfg fix hand-applied today —
+- [x] `agent-logger` (already has the pyvenv.cfg fix hand-applied today —
       good second-mover to prove the engine covers a second plugin's needs).
 - [ ] `agent-vault`, `agent-ssh` (smaller installers, low risk).
 - [ ] `agent-codespaces`, `agent-index` (each carries genuine per-service
@@ -866,3 +866,59 @@ appropriately larger/riskier for one sitting):
   fresh byte-vendored dev copy. This does **not** redesign the effort into a
   runtime/install-time shared module, and it does **not** reverse the
   documented rejection of git-fetch / shared install-time resolution.
+
+### 2026-10-05 — `agent-logger` adopted the shared installer engine as the second mover
+
+- Converted `plugins/agent-logger/scripts/install.sh` and
+  `plugins/agent-logger/scripts/install.ps1` to the same canonical-reference
+  wrapper shape `agent-pull-requests` already uses: both now source
+  `libs/installer-engine/installer-engine.{sh,ps1}` directly on `dev`, keep
+  their own contract seams (`install-contract:v3 versioned-venv`,
+  source-kind/self-stage/smoke-seam blocks) in the wrapper, and retain only
+  the genuinely per-service logic that Phase 0 classified as non-engine
+  (`Ensure-UvIndex`, agent-logger's extra trampoline cleanup, payload snapshot
+  publication, config-repo discovery, systemd/Scheduled Task wiring,
+  self-provisioning wrapper publication, and the install-lock/stale-payload
+  guards). `tools/installer_engine_ref.py` now registers `agent-logger` as an
+  adopter so `tools/sync-installer-engine.py --check` enforces the wrapper form.
+- **Fix-once / fixed-everywhere proof:** before this conversion,
+  `agent-logger` still carried its own hand-maintained copies of the
+  pyvenv.cfg / uv-exit-106 retry logic from copilot-extensions#2482 in both
+  `install.sh` and `install.ps1` (`_is_venv_corruption` /
+  `_uv_venv_resilient`, `Test-IsVenvCorruption` / `Invoke-UvVenvResilient`).
+  After conversion those duplicate functions are gone from the wrapper
+  entirely; the wrapper now sources the canonical engine and the relevant
+  regression tests (`test_install_sre_retry.py`,
+  `test_install_venv_corruption_retry.py`,
+  `test_install_signed_python_probe.py`) extract their helper bodies from
+  `libs/installer-engine/installer-engine.ps1` / `.sh`, proving the bug fix is
+  now inherited from one shared source instead of preserved by a second manual
+  port.
+- **Line-count / corpus result:** wrapper-only installer lines shrank from
+  `install.sh` 1215 -> 1065 (-150) and `install.ps1` 1637 -> 1424 (-213), for
+  a combined wrapper drop of 2852 -> 2489 (-363). The canonical engine itself
+  remained unchanged at 368 lines (`.sh`) + 462 lines (`.ps1`) before and after
+  this PR, so this conversion added **zero** new shared-engine corpus while
+  deleting 363 plugin-local duplicate lines.
+- Validation completed here:
+  - `python3 tools/check-install-contract.py`
+  - `python3 tools/sync-installer-engine.py --check`
+  - `python3 tools/check-docs-consistency.py`
+  - `python3 tools/check-version-consistency.py`
+  - `python3 tools/check-module-size.py`
+  - `python3 tools/check-changefile-presence.py --base origin/dev`
+  - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-logger --reinstall --admission-wait 540`
+    -> PASS (`493 passed, 17 skipped`; wrapper runner summary `247 passed, 7 skipped`)
+  - Real POSIX install proof: ran `plugins/agent-logger/scripts/install.sh
+    install --install-dir <scoped session scratch>` against the live checkout
+    with the real user systemd instance, confirmed the scoped timer became
+    active, `status` reported the installed runtime healthy, the versioned
+    slot's Python imported `agent_logger` successfully, and then removed the
+    scoped timer again with `uninstall --install-dir ...`. Also re-confirmed
+    the `dev` checkout keeps **no** local `plugins/agent-logger/scripts/installer-engine.*` copy afterward.
+- Validation not possible in this Linux/WSL session:
+  - No real Windows install lane / Task Scheduler exercise for
+    `install.ps1`; instead validated that lane through the full plugin test
+    suite plus a `pwsh` parse check of `plugins/agent-logger/scripts/install.ps1`.
+  - No broader multi-machine production deployment beyond the scoped local
+    timer proof above.

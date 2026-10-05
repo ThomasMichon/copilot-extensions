@@ -23,6 +23,27 @@ _COMMANDS = (
 )
 
 
+def _stage_payload(tmp_path: Path) -> Path:
+    payload = tmp_path / "plugins" / "agent-logger"
+    payload.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        _PLUGIN_ROOT,
+        payload,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            "__pycache__",
+            ".pytest_cache",
+            "tests",
+        ),
+    )
+    engine_dir = _PLUGIN_ROOT.parents[1] / "libs" / "installer-engine"
+    staged_engine = tmp_path / "libs" / "installer-engine"
+    staged_engine.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(engine_dir, staged_engine)
+    return payload
+
+
 def _host_pip_index_url() -> str | None:
     """Read a configured pip index-url straight from the well-known SYSTEM
     config path, bypassing any per-process env-var sandboxing (this test's
@@ -49,18 +70,7 @@ def _host_pip_index_url() -> str | None:
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer behavior")
 def test_stamp_replaces_dangling_legacy_binstub(tmp_path: Path) -> None:
-    payload = tmp_path / "payload"
-    shutil.copytree(
-        _PLUGIN_ROOT,
-        payload,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            "__pycache__",
-            ".pytest_cache",
-            "tests",
-        ),
-    )
+    payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
     local_bin = home / ".local" / "bin"
     local_bin.mkdir(parents=True)
@@ -125,18 +135,7 @@ def test_stamp_replaces_dangling_legacy_binstub(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows installer behavior")
 def test_windows_stamp_publishes_complete_command_family(tmp_path: Path) -> None:
-    payload = tmp_path / "payload"
-    shutil.copytree(
-        _PLUGIN_ROOT,
-        payload,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            "__pycache__",
-            ".pytest_cache",
-            "tests",
-        ),
-    )
+    payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
     home.mkdir()
     env = os.environ.copy()
@@ -339,18 +338,7 @@ def test_posix_snapshot_uses_self_staged_payload_not_original() -> None:
 def test_provision_publishes_durable_compatibility_wrappers(
     tmp_path: Path,
 ) -> None:
-    payload = tmp_path / "payload"
-    shutil.copytree(
-        _PLUGIN_ROOT,
-        payload,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            "__pycache__",
-            ".pytest_cache",
-            "tests",
-        ),
-    )
+    payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
     home.mkdir()
     env = os.environ.copy()
@@ -471,18 +459,7 @@ def test_provision_publishes_durable_compatibility_wrappers(
 
 
 def test_scoped_stamp_avoids_global_compatibility_wrappers(tmp_path: Path) -> None:
-    payload = tmp_path / "payload"
-    shutil.copytree(
-        _PLUGIN_ROOT,
-        payload,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            "__pycache__",
-            ".pytest_cache",
-            "tests",
-        ),
-    )
+    payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
     home.mkdir()
     install_dir = (
