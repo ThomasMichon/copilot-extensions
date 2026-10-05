@@ -669,13 +669,20 @@ STUBEOF
 
 _snapshot_requires_materialized_engine() {
     local snapshot_dir="$1"
-    local script
-    for script in "$snapshot_dir/scripts/install.sh" "$snapshot_dir/scripts/install.ps1"; do
-        [[ -f "$script" ]] || continue
-        if grep -Fq 'installer-engine' "$script"; then
-            return 0
-        fi
-    done
+    local sh="$snapshot_dir/scripts/install.sh"
+    local ps1="$snapshot_dir/scripts/install.ps1"
+    {
+        [[ -f "$sh" ]] && (
+            grep -Fq '. "$SCRIPT_DIR/installer-engine.sh"' "$sh" ||
+            grep -Fq '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"' "$sh"
+        )
+    } && return 0
+    {
+        [[ -f "$ps1" ]] && (
+            grep -Fq ". (Join-Path \$PSScriptRoot 'installer-engine.ps1')" "$ps1" ||
+            grep -Fq ". (Join-Path \$PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')" "$ps1"
+        )
+    } && return 0
     return 1
 }
 

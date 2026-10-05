@@ -731,12 +731,23 @@ function Materialize-SnapshotInstallerEngine {
 
 function Test-SnapshotRequiresMaterializedEngine {
     param([Parameter(Mandatory)][string]$SnapshotDir)
-    foreach ($scriptPath in @(
-        (Join-Path $SnapshotDir 'scripts\install.sh'),
-        (Join-Path $SnapshotDir 'scripts\install.ps1')
-    )) {
-        if (-not (Test-Path -LiteralPath $scriptPath)) { continue }
-        if ((Get-Content -LiteralPath $scriptPath -Raw) -like '*installer-engine*') {
+    $installSh = Join-Path $SnapshotDir 'scripts\install.sh'
+    if (Test-Path -LiteralPath $installSh) {
+        $shText = Get-Content -LiteralPath $installSh -Raw
+        if (
+            $shText.Contains('. "$SCRIPT_DIR/installer-engine.sh"') -or
+            $shText.Contains('. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"')
+        ) {
+            return $true
+        }
+    }
+    $installPs1 = Join-Path $SnapshotDir 'scripts\install.ps1'
+    if (Test-Path -LiteralPath $installPs1) {
+        $ps1Text = Get-Content -LiteralPath $installPs1 -Raw
+        if (
+            $ps1Text.Contains(". (Join-Path $PSScriptRoot 'installer-engine.ps1')") -or
+            $ps1Text.Contains(". (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')")
+        ) {
             return $true
         }
     }
