@@ -203,6 +203,21 @@ def test_issue_default_prompt_frames_event_fields_as_untrusted():
     assert "untrusted subject data" in sink[0]["prompt"]
 
 
+def test_issue_custom_prompt_template_still_frames_body_as_untrusted():
+    """A rule-configured prompt_template must not bypass the guardrail --
+    the issue's own title/body is still attacker-influenceable content."""
+    tc, sink = _client({
+        "issues": [{
+            **_ISSUE_RULES_CONFIG["issues"][0],
+            "prompt_template": "Custom: {title}",
+        }]
+    })
+    tc.post("/webhook/issue", json=_CI_FAILURE_ISSUE)
+    prompt = sink[0]["prompt"]
+    assert prompt.startswith("Custom: CI failure: guards (full-tree, non-PR-scoped)")
+    assert "untrusted subject data" in prompt
+
+
 def test_issue_label_filter_not_satisfied_is_skipped():
     tc, sink = _client(_ISSUE_RULES_CONFIG)
     body = {
@@ -240,6 +255,42 @@ def test_issue_non_issue_body_skipped():
     tc, _ = _client(_ISSUE_RULES_CONFIG)
     r = tc.post("/webhook/issue", json={"hello": "world"})
     assert r.json()["skipped"] == "not an issue event"
+
+
+def test_issue_malformed_repository_is_not_a_500():
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {**_CI_FAILURE_ISSUE, "repository": "not-an-object"}
+    r = tc.post("/webhook/issue", json=body)
+    assert r.status_code == 200
+    assert r.json()["created"] == []
+    assert sink == []
+
+
+def test_issue_malformed_labels_is_not_a_500():
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {
+        **_CI_FAILURE_ISSUE,
+        "issue": {**_CI_FAILURE_ISSUE["issue"], "labels": "not-a-list"},
+    }
+    r = tc.post("/webhook/issue", json=body)
+    assert r.status_code == 200
+    assert r.json()["created"] == []
+    assert sink == []
+
+
+def test_issue_unnamed_rules_in_same_lane_each_get_a_task():
+    """Two unnamed rules matching the same issue in the same lane must not
+    collide on the same default dedup_key (both previously fell back to
+    the literal "issue-rule" name/task_label)."""
+    tc, sink = _client({
+        "issues": [
+            {"match_labels": ["ci-failure-signature"], "repo": "lane-a"},
+            {"match_labels": ["ci-failure-signature"], "repo": "lane-a"},
+        ]
+    })
+    r = tc.post("/webhook/issue", json=_CI_FAILURE_ISSUE)
+    assert len(r.json()["created"]) == 2
+    assert sink[0]["dedup_key"] != sink[1]["dedup_key"]
 
 
 def test_issue_multiple_rules_each_independently_matched():

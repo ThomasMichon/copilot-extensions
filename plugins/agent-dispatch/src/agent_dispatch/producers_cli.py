@@ -426,8 +426,8 @@ def register_producer_commands(subparsers: Any) -> None:
 def register_webhook_command(subparsers: Any) -> None:
     p = subparsers.add_parser(
         "webhook",
-        help="reactive producer: serve an HTTP app mapping git-forge PR-merge "
-        "and telemetry events onto tasks",
+        help="reactive producer: serve an HTTP app mapping git-forge PR-merge, "
+        "issue, and telemetry events onto tasks",
     )
     p.add_argument("--config", help="path to the JSON webhook config (optional)")
     p.add_argument("--host", default="127.0.0.1", help="bind host (default: 127.0.0.1)")

@@ -142,9 +142,13 @@ def extract_issue(payload: dict[str, Any]) -> dict[str, Any] | None:
     number = issue.get("number")
     if number is None:
         return None
-    repo = payload.get("repository") or {}
+    repo = payload.get("repository")
+    if not isinstance(repo, dict):
+        repo = {}
     remote = repo.get("clone_url") or repo.get("html_url") or repo.get("ssh_url")
-    raw_labels = issue.get("labels") or []
+    raw_labels = issue.get("labels")
+    if not isinstance(raw_labels, list):
+        raw_labels = []
     labels = [
         label.get("name")
         for label in raw_labels
@@ -341,8 +345,15 @@ def build_app(
         skipped: list[dict] = []
         issue_labels = set(issue["labels"])
         with client_factory() as client:
-            for rule in issue_rules:
-                name = rule.get("name", "issue-rule")
+            for index, rule in enumerate(issue_rules):
+                # Each rule needs a stable, unique identity: it seeds the
+                # default dedup-key prefix, and two unnamed rules sharing
+                # the fallback "issue-rule" would otherwise derive the same
+                # dedup_key when they match the same issue in the same
+                # lane -- the coordinator's dedup index then returns the
+                # first rule's task for both, silently dropping the second
+                # rule's "independent" create.
+                name = rule.get("name") or f"issue-rule-{index}"
                 match_actions = rule.get("match_actions") or ["opened", "labeled"]
                 if issue["action"] not in match_actions:
                     skipped.append({

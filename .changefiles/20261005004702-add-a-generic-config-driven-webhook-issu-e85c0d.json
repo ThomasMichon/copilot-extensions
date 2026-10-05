@@ -1,9 +1,0 @@
-{
-  "comment": "Add a generic, config-driven /webhook/issue route to the reactive webhook producer, letting a forge issue event (e.g. a new ci-failure-signature or needs-decomposition issue) create a dispatch task immediately, with the existing periodic poller as a backstop.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "minor"
-    }
-  ]
-}
