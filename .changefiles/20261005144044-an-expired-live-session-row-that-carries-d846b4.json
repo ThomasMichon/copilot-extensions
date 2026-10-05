@@ -1,0 +1,9 @@
+{
+  "comment": "An expired live-session row that carries a remote venue is kept a week before purging, so a session that reconnects after a long transport loss revives with its venue",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

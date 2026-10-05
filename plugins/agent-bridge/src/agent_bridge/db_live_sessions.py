@@ -9,6 +9,7 @@ from typing import Any
 from .db_core import (
     LIVE_SESSION_PURGE_SECONDS,
     LIVE_SESSION_STALE_SECONDS,
+    LIVE_SESSION_VENUE_PURGE_SECONDS,
     live_session_is_fresh,
     local_pid_alive,
 )
@@ -298,6 +299,7 @@ class _LiveSessionsMixin:
         now: float,
         stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
         purge_seconds: float = LIVE_SESSION_PURGE_SECONDS,
+        venue_purge_seconds: float = LIVE_SESSION_VENUE_PURGE_SECONDS,
         pid_alive: Callable[[Any], bool | None] = local_pid_alive,
     ) -> int:
         """Reconcile lapsed live-session leases against real process liveness,
@@ -331,7 +333,11 @@ class _LiveSessionsMixin:
            ``updated_at`` is older than the purge grace window are DELETEd (with
            any leftover inbox messages), so the registry self-cleans instead of
            accumulating a graveyard that ``list`` and consumers surface (#3144).
-           ``wedged`` rows are never purged -- their process is alive.
+           ``wedged`` rows are never purged -- their process is alive. An
+           ``expired`` row that carries a remote ``venue`` waits
+           ``venue_purge_seconds`` instead: its venue came from a launch
+           reservation, and a session reconnecting after a purge comes back
+           without one, unattributable to where it runs.
 
         Returns the number of registrations demoted *out of* ``live`` this sweep
         (expired + wedged). Idempotent: a re-run with nothing lapsed does no
@@ -412,8 +418,9 @@ class _LiveSessionsMixin:
         purge_cutoff = now - purge_seconds
         dead = self.execute_read(
             "SELECT session_id FROM live_sessions "
-            "WHERE status IN ('expired', 'taken-over') AND updated_at < ?",
-            (purge_cutoff,),
+            "WHERE status IN ('expired', 'taken-over') AND updated_at < ? "
+            "AND NOT (status='expired' AND venue IS NOT NULL AND updated_at >= ?)",
+            (purge_cutoff, now - venue_purge_seconds),
         )
         if dead:
             dead_ids = [r["session_id"] for r in dead]

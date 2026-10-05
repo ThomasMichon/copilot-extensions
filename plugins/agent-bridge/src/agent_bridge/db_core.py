@@ -51,6 +51,13 @@ LIVE_SESSION_STALE_SECONDS = 120.0
 #: dead rows). ``wedged`` rows are never purged -- their process is alive.
 LIVE_SESSION_PURGE_SECONDS = 3600.0
 
+#: The purge grace for an ``expired`` row that carries a remote ``venue``. A
+#: venue is only ever trusted from the launch reservation a session claimed, so
+#: once its row is purged the same session reconnecting (its process outlived a
+#: long transport loss) registers back with no venue, and nothing can tell where
+#: it runs any more. Kept a week: a venue session per worktree, so still bounded.
+LIVE_SESSION_VENUE_PURGE_SECONDS = 7 * 24 * 3600.0
+
 
 def local_pid_alive(pid: Any) -> bool | None:
     """Best-effort *local* liveness probe for a live-session's CLI ``pid``.

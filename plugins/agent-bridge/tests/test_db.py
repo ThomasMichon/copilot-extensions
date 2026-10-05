@@ -420,6 +420,38 @@ class TestLiveSessionLease:
         )
         assert tmp_db.get_live_session("cli-w")["status"] == "wedged"
 
+    def test_reap_keeps_an_expired_venue_session_longer_so_it_reconnects_as_itself(
+        self, tmp_db: Database
+    ) -> None:
+        """A remote venue's session whose transport was down past the purge grace
+        keeps its row (and venue) for the longer venue grace, so its returning
+        heartbeat revives it attributable; past that it goes like any dead row. A
+        taken-over row with a venue is purged on the ordinary grace."""
+        now = 10_000.0
+        venue = '{"kind":"codespace","target":"cs-1","mux_session_name":"wt-a"}'
+        for sid, wt in (("cli-venue", "wt-a"), ("cli-taken", "wt-b"), ("cli-local", "wt-c")):
+            self._register(tmp_db, sid, wt, now - 5000)
+        tmp_db.execute_write("UPDATE live_sessions SET venue=? WHERE session_id IN (?, ?)",
+                             (venue, "cli-venue", "cli-taken"))
+        tmp_db.execute_write("UPDATE live_sessions SET status='taken-over' WHERE session_id=?",
+                             ("cli-taken",))
+        tmp_db.reap_stale_live_sessions(
+            now=now, pid_alive=lambda _p: None, purge_seconds=900.0, venue_purge_seconds=86_400.0)
+        assert tmp_db.get_live_session("cli-venue")["status"] == "expired"
+        assert tmp_db.get_live_session("cli-taken") is None
+        assert tmp_db.get_live_session("cli-local") is None
+        # Its process comes back (an id-only heartbeat): live again, still placed.
+        tmp_db.register_live_session(
+            "cli-venue", machine=None, cwd=None, worktree_id=None, repo=None,
+            branch=None, pid=None, role=None, now=now + 60)
+        row = tmp_db.get_live_session("cli-venue")
+        assert (row["status"], row["venue"]) == ("live", venue)
+        # Dead past the venue grace: purged after all.
+        tmp_db.reap_stale_live_sessions(
+            now=now + 60 + 86_400 + 200, pid_alive=lambda _p: None, purge_seconds=900.0,
+            venue_purge_seconds=86_400.0)
+        assert tmp_db.get_live_session("cli-venue") is None
+
     def test_list_hides_dead_shows_live_and_wedged(self, tmp_db: Database) -> None:
         """``list_live_sessions`` hides expired/taken-over by default but shows
         live + wedged; ``include_dead`` reveals everything."""
