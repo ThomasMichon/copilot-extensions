@@ -24,7 +24,8 @@ description: >
 # Contributing to copilot-extensions
 
 The authoritative, versioned rules live in the repo's own **`CONTRIBUTING.md`**,
-**`AGENTS.md`**, **`TESTING.md`**, **`docs/install-contract.md`**, and
+**`docs/pipelines.md`**, **`AGENTS.md`**, **`TESTING.md`**,
+**`docs/install-contract.md`**, and
 **`docs/architecture.md`** — read and respect them for the current detail (they
 are the repo's own root docs, not carried by this plugin). This skill is the
 operator's map: what to touch, in what order, and the gotchas that bite.
@@ -175,7 +176,7 @@ installer. Know which kind you are changing.
    `[project].version`, or `.github/plugin/marketplace.json` by hand — the
    next promotion consumes your changefile and writes all three in lockstep.
    The exact changefile schema and edge cases (renamed/split plugins, shared
-   libs) are in `CONTRIBUTING.md` § Release & Versioning — follow it; entries
+   libs) are in `docs/pipelines.md` § Release & Versioning — follow it; entries
    drift, so trust the repo over this summary.
 6. **Open/update the PR.** Use `copilot-extensions create-pr` to squash the
    worktree, push `pr/<slug>`, and open the GitHub PR (the repo config has
@@ -433,7 +434,8 @@ contributor — because to a reader, you are.
 
 ## Reference
 
-`CONTRIBUTING.md` (versioning + release), `AGENTS.md` (dev guide),
+`CONTRIBUTING.md` (contributor process), `docs/pipelines.md` (CI/CD gating,
+versioning + release), `AGENTS.md` (dev guide),
 `TESTING.md` (running the suites), `docs/install-contract.md` (the runtime-plugin
 contract), `docs/architecture.md` (payload/runtime split, ports), `docs/patterns/`
 (how we build — shapes, principles, invariants, focused patterns), `visions/` (the

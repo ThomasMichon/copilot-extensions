@@ -1142,9 +1142,9 @@ manifest, and service restart (see "What NOT to Do" and "Deploying: one command
 > **every** enabled runtime plugin, not just agent-worktrees and the
 > `modules.json` services, so a runtime like agent-codespaces can no longer have
 > its payload refreshed while its venv silently keeps serving stale code
-> (dotfiles #1025). The per-PR **version-bump guard** (`check-version-bump.py`)
-> makes the same-version-drift case rare in the first place, so `--force` stays a
-> last resort.
+> (dotfiles #1025). The per-PR **changefile-presence guard**
+> (`check-changefile-presence.py`) makes the same-version-drift case rare in
+> the first place, so `--force` stays a last resort.
 
 ### What the marketplace vendors (copied vs loaded)
 

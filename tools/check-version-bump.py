@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
-"""Require a version bump whenever a plugin's content changes (CONTRIBUTING.md
+"""Require a version bump whenever a plugin's content changes (docs/pipelines.md
 § Release & Versioning).
+
+**Retired as the per-PR enforcement guard** in favor of
+`check-changefile-presence.py` (which requires a pending changefile instead
+of a hand-applied bump); this module now serves two roles: (1) the shared
+diff engine `check-changefile-presence.py` and `accumulate_bumps.py` both
+import for "which consumer(s) does this diff touch", and (2) a standalone
+release/recovery check for directly verifying or enforcing an actual version
+bump outside the ordinary changefile-driven PR flow (its own CLI below still
+reports a real version-mismatch, it just no longer gates an ordinary PR).
 
 The marketplace only redeploys a plugin's runtime when its declared version
 **advances**: `<repo> update` refreshes the payload but the versioned-runtime
@@ -22,7 +31,7 @@ What requires a bump, for a push/PR diff (`<base>..HEAD`):
 
 What does **not** require a bump: repo-root files that are not vendored into any
 plugin -- `tools/`, `.github/`, the repo-root `docs/`, `CONTRIBUTING.md`,
-`README.md`, etc. (CONTRIBUTING.md § Version scheme). Also exempt, even under
+`README.md`, etc. (docs/pipelines.md § Version scheme). Also exempt, even under
 `plugins/<p>/`: build/venv/cache artifacts (`build/`, `dist/`, `.venv*/`,
 `.test-venvs/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`, `*.pyc`) and
 dev-hygiene files that never ship (`.gitignore`) -- none change the runtime
@@ -35,7 +44,7 @@ compare).
 
 Usage::
 
-    python tools/check-version-bump.py                 # diff vs origin/main (pre-push/CI)
+    python tools/check-version-bump.py                 # diff vs origin/main (release/recovery check)
     python tools/check-version-bump.py --base <sha>     # diff vs an explicit base
     python tools/check-version-bump.py --list           # show the plugin<->vendored-lib map
 
@@ -322,13 +331,37 @@ def check(base_ref: str, head_ref: str) -> tuple[int, list[str]]:
             continue
         if head_ver == base_ver:
             reasons = ", ".join(sorted(needing[plugin]))
+            # This standalone tool only compares base/head versions -- it
+            # never reads .changefiles, so a changefile alone does not clear
+            # ITS OWN failure; check-changefile-presence.py is what actually
+            # gates an ordinary PR today (see docs/pipelines.md § Release &
+            # Versioning). Naming both keeps this diagnostic honest about
+            # what each check requires without prescribing a fix the other
+            # branch can't follow (plugin.json/marketplace.json don't exist
+            # for a standalone consumer -- PR #4514 review).
             if (PLUGINS_DIR / plugin).is_dir():
-                fix = "bump it (plugin.json + pyproject.toml + marketplace.json, per CONTRIBUTING.md)"
+                has_pyproject = (PLUGINS_DIR / plugin / "pyproject.toml").is_file()
+                direct_fix = (
+                    "plugin.json + pyproject.toml + marketplace.json"
+                    if has_pyproject
+                    # A payload-only plugin (e.g. copilot-extensions-harness)
+                    # has no pyproject.toml at all -- naming it here would
+                    # prescribe a file that doesn't exist (docs/pipelines.md's
+                    # payload-only/runtime plugin distinction).
+                    else "plugin.json + marketplace.json"
+                )
+                fix = (
+                    "for ordinary PR compliance, add a changefile for it "
+                    "(python tools/changefile.py add --plugin <name> --type patch "
+                    f"--comment '...'); to clear THIS check directly, bump {direct_fix}"
+                )
             else:
-                # A standalone, out-of-plugin consumer (e.g. worktree-manager)
-                # has neither a plugin.json nor a marketplace entry -- naming
-                # them here would prescribe an impossible fix (PR #4514 review).
-                fix = "bump its own pyproject.toml [project].version (+ source __version__ fallback)"
+                fix = (
+                    "for ordinary PR compliance, add a changefile naming it "
+                    "(python tools/changefile.py add --plugin <name> --type patch "
+                    "--comment '...'); to clear THIS check directly, bump its own "
+                    "pyproject.toml [project].version (+ source __version__ fallback)"
+                )
             violations.append(f"{plugin}: content changed ({reasons}) but version is still {head_ver} -- {fix}.")
     return (1 if violations else 0), violations
 
@@ -362,11 +395,15 @@ def main(argv: list[str] | None = None) -> int:
         for v in violations:
             print(f"  - {v}", file=sys.stderr)
         print(
-            "\nEvery plugin whose content changes must bump its version so the "
-            "marketplace redeploys it (an un-bumped change serves stale, "
-            "dotfiles #1025). Use a patch `-devN` bump (CONTRIBUTING.md § "
-            "'Default: bump patch with -devN'). A shared `libs/<lib>` change "
-            "must bump every plugin that vendors it.",
+            "\nThis standalone tool's own CI-enforcement role is retired in favor "
+            "of tools/check-changefile-presence.py -- for ordinary PR compliance, "
+            "a touched plugin needs a pending changefile, not a hand-applied "
+            "version bump: python tools/changefile.py add --plugin <name> --type "
+            "patch --comment '...' (see docs/pipelines.md § Release & "
+            "Versioning). To clear THIS script's own exit code directly (e.g. "
+            "release/recovery tooling), apply the actual version bump each "
+            "violation above names instead. A shared `libs/<lib>` change needs "
+            "one for every plugin that vendors it.",
             file=sys.stderr,
         )
         return 1

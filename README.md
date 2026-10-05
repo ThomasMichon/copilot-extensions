@@ -8,8 +8,8 @@
 > Pre-rewrite tip: `b8e83826124674f16ecb200d4c2709c77b87dc0b`.
 > Post-rewrite tip: `3a9b9f90b7e02de4da49376323294b3474d483f6` (2026-10-04). If your
 > local clone tracks `main` directly, see
-> [`CONTRIBUTING.md`'s "If main's history is force-rewritten"
-> section](CONTRIBUTING.md) for recovery. **`dev` was never affected.** Full
+> [`docs/pipelines.md`'s "If `main`'s history is force-rewritten"
+> section](docs/pipelines.md#if-mains-history-is-force-rewritten) for recovery. **`dev` was never affected.** Full
 > procedure and status: [`efforts/done/main-history-rewrite`](efforts/done/main-history-rewrite/README.md).
 
 <p align="center">
@@ -413,6 +413,7 @@ Your source repos and their `.worktrees` content are never touched.
 | [Control-Harness Runbook](docs/harness-runbook.md) | Opinionated, phase-by-phase procedure for building/extending/auditing an agent harness with these plugins |
 | [Plugin consolidation](docs/plans/plugin-consolidation.md) | Discussion: whether to collapse the multi-plugin suite into fewer plugins, with decision criteria |
 | [Architecture overview](docs/architecture.md) | How the plugins fit together: install topology, runtimes, ports, credential relay |
+| [CI/CD Pipelines](docs/pipelines.md) | PR gating layers, the full `.github/workflows/` reference, and the `dev` → `main` promotion pipeline |
 | [Rollout plan](docs/plans/rollout-readiness.md) | Onboarding-readiness plan and fixes |
 | [Fresh dev box validation](docs/plans/fresh-devbox-validation.md) | Step-by-step validation on a clean machine |
 
@@ -533,7 +534,7 @@ Your source repos and their `.worktrees` content are never touched.
 
 | Document | Description |
 |----------|-------------|
-| [CONTRIBUTING](CONTRIBUTING.md) | Versioning, release workflow, deployment pipeline |
+| [CONTRIBUTING](CONTRIBUTING.md) | PR flow, review-verdict waiting loop, code style, deployment |
 | [AGENTS](AGENTS.md) | Repo development guide |
 
 ## License
