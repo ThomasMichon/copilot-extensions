@@ -351,10 +351,12 @@ risk wedging everything").
       `agent-logger` tests whose own real subprocess work legitimately
       exceeds the runner's blanket 30s-per-test default. **Landed
       2026-10-05**, PR #5325 -- see Journal.
-- [ ] Root-cause and fix (or file) the remaining real, reproducible
-      findings from the full-matrix pass: `agent-dispatch`'s
+- [x] `agent-dispatch`'s
       `test_liveness_gc_publishes_a_bus_event_for_auto_suspend_with_zero_requeued`
-      (HTTP 409 in liveness-GC/board-relay interaction); `agent-logger`'s
+      (HTTP 409 in liveness-GC/board-relay interaction). **Landed
+      2026-10-05**, PR #5355 -- see Journal.
+- [ ] Root-cause and fix (or file) the remaining real, reproducible
+      findings from the full-matrix pass: `agent-logger`'s
       Windows `MAX_PATH` (260-char) `bdist_wheel`/`install_egg_info` build
       failure during cold snapshot provisioning (confirmed with TWO
       different vendored libs -- `agent-config-migrate` and
@@ -364,7 +366,16 @@ risk wedging everything").
       `test_chronicle.py`/`test_rescue_sync.py`/`test_scaffold.py`
       (one -- `test_repo_config_validation_errors[...'C:\nas\sessions'...]`
       -- looks like a genuine Windows-absolute-path validation bug, not a
-      flake). Complete a full `--all` run once the Phase 3.5 items above
+      flake).
+- [ ] `tools/run-plugin-tests.py`'s default 300s per-sub-suite wall-clock
+      budget is too tight for `agent-dispatch`'s own 3rd 25-file sub-suite
+      under real full-matrix host load (observed hitting `[LIMIT]
+      wall-clock limit exceeded (300s)` once sub-suites 1-2 started
+      passing cleanly after the fix above -- previously masked because an
+      earlier sub-suite's failure always short-circuited the run before
+      reaching it). Needs its own root-cause pass: a genuinely slow
+      sub-suite vs. a budget too tight for this host's current load.
+- [ ] Complete a full `--all` run once the Phase 3.5 items above
       are addressed, to reach the ~13 plugins never attempted across either
       prior attempt (`agent-machines`, `agent-mcp`,
       `agent-pull-requests`, `agent-ssh`, `agent-vault`, `agent-worktrees`,
@@ -456,6 +467,44 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-05 — Phase 3.5: agent-dispatch liveness-GC race fixed
+Continuing the full-matrix de-risking pass. Reproduced
+`agent-dispatch`'s `test_liveness_gc_publishes_a_bus_event_for_auto_suspend_with_zero_requeued`
+reliably via `python tools/run-plugin-tests.py agent-dispatch` -- it passed
+every time in isolation (`pytest tests/test_coordinator.py::...` and even
+the full `test_coordinator.py` file), but failed under the real full-matrix
+load every time. Root cause: the test's `sweep_interval=1.0` assumed the
+HTTP create/claim/start setup sequence would always finish before the
+liveness-GC loop's first pass; under heavy host load that assumption broke,
+so the GC loop requeued the task (still CLAIMED) before `start()`
+completed -- a 409, and on a second attempt with the same race, enough
+requeues to exceed `max_attempts` and dead-letter the task (so a
+claim()-retry workaround alone still failed with `claim() -> None`).
+
+**Fix (not a retry/bigger-interval band-aid):** the GC loop's
+`reconcile_liveness` is a no-op for any verdict other than `"gone"`. Kept
+the mocked `liveness_verdict` at `"unknown"` during setup and flipped it to
+`"gone"` only after `start()` succeeded, removing the wall-clock race
+entirely regardless of host load. **Landed PR #5355** (merged into `dev`
+as commit `fbce10176`). Confirmed: failed reliably pre-fix via
+`run-plugin-tests.py agent-dispatch` (both as a 409 and, after an
+interim retry-based attempt, as a `None`-claim dead-letter); the final
+fix passed cleanly through `agent-dispatch`'s sub-suite 1 (844
+passed/5 skipped, up from 843 passed + 1 failed).
+
+**New finding surfaced by the fix:** with sub-suite 1 passing, the run for
+the first time reached sub-suite 3 (previously always short-circuited by
+the earlier failure) and hit `[LIMIT] wall-clock limit exceeded (300s)` --
+a different, likely pre-existing issue (the 300s per-sub-suite budget vs.
+this host's current load), tracked as a new Phase 3.5 Plan item rather than
+investigated further this leg.
+
+**CI note (unrelated to the fix itself):** PR #5355's CI hit a string of
+"The job was not acquired by Runner of type hosted even after multiple
+attempts" failures (a GitHub Actions runner-capacity outage, not a real
+test/build failure) across three separate reruns before every required
+check passed clean; merged via `pr-merge --now` once clean.
 
 ### 2026-10-05 — Phase 3.5: full-matrix local validation, two fixes landed
 De-risking prep for Phase 4 slice 2 (the eventual `--collect-only` -> real-
