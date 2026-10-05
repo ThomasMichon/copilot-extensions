@@ -7,13 +7,8 @@ Prototype for ThomasMichon/copilot-extensions#3296 -- see
 from __future__ import annotations
 
 from . import config as cfg
-from . import copilot_identity, output
-
-
-def _core():
-    from . import __main__ as core
-
-    return core
+from . import output
+from . import copilot_identity
 
 
 def add_parsers(sub) -> None:
@@ -95,7 +90,7 @@ def cmd_copilot_identity_dispatch(argv: list[str]) -> int:
         target = copilot_identity.intended_account(repo)
         matches = bool(target) and current == target
         if json_out:
-            _core()._json_output(
+            output._json_output(
                 {
                     "current": current,
                     "target": target,
@@ -134,7 +129,7 @@ def cmd_copilot_identity_dispatch(argv: list[str]) -> int:
         else:
             result = copilot_identity.ensure_login(account, dry_run=dry_run, force=force)
         if json_out:
-            _core()._json_output(
+            output._json_output(
                 {
                     "status": result.status,
                     "previous": result.previous,

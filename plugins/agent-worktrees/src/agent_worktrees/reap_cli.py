@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from . import activity, disposition_history, finalize as fin, git_ops, handoff_trace, locks, prune, procs, sessions, tracking
+from . import output
 from . import claimant as claimant_mod
 from . import config as cfg
 from . import managed_worktree_guard
@@ -32,7 +33,6 @@ def _enumerate_launcher_shells(): return _core()._enumerate_launcher_shells()
 def _apply_tracking_override(*args, **kwargs): return _core()._apply_tracking_override(*args, **kwargs)
 def _build_active_paths(*args, **kwargs): return _core()._build_active_paths(*args, **kwargs)
 def _iso_epoch(*args, **kwargs): return _core()._iso_epoch(*args, **kwargs)
-def _json_output(*args, **kwargs): return _core()._json_output(*args, **kwargs)
 def _normalize_path(*args, **kwargs): return _core()._normalize_path(*args, **kwargs)
 def _reap_worktree(*args, **kwargs): return _core()._reap_worktree(*args, **kwargs)
 def _revalidate_cleanup_safety(*args, **kwargs):
@@ -199,7 +199,7 @@ def cmd_reap_shells(args: argparse.Namespace) -> int:
         kwargs["idle_grace_secs"] = float(grace_hours) * 3600
     payload = _core_helper("reap_orphan_launcher_shells", reap_orphan_launcher_shells)(**kwargs)
     if getattr(args, "json", False):
-        _json_output(payload)
+        output._json_output(payload)
         return 0
     if not payload["available"]:
         print("Process enumeration unavailable -- nothing to reap.")
@@ -886,7 +886,7 @@ def cmd_reap_sessions(args: argparse.Namespace) -> int:
         kwargs["idle_grace_secs"] = float(grace_hours) * 3600
     payload = reap_orphan_mux_sessions(**kwargs)
     if getattr(args, "json", False):
-        _json_output(payload)
+        output._json_output(payload)
         return 0
     if not payload["available"]:
         print("No multiplexer available -- nothing to reap.")

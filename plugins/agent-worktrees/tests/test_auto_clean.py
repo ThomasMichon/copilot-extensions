@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 from agent_worktrees import __main__ as cli
 from agent_worktrees import cleanup_gc_cli
+from agent_worktrees import output
 from agent_worktrees import tracking
 
 
@@ -279,7 +280,7 @@ def test_cmd_sweep_managed_json(monkeypatch):
         lambda **_kwargs: {"removed": [{"id": "svc"}], "skipped": []},
     )
     monkeypatch.setattr(
-        cleanup_gc_cli,
+        output,
         "_json_output",
         lambda payload: seen.setdefault("payload", payload),
     )
@@ -299,7 +300,7 @@ def test_cmd_sweep_finished_sessions_json(monkeypatch):
         lambda **_kwargs: {"removed": [{"id": "done"}], "skipped": []},
     )
     monkeypatch.setattr(
-        cleanup_gc_cli,
+        output,
         "_json_output",
         lambda payload: seen.setdefault("payload", payload),
     )

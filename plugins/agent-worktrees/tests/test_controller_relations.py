@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_worktrees import __main__ as cli
+from agent_worktrees import output
 from agent_worktrees import controller_lineage
 from agent_worktrees import session_projection, sessions, tracking
 from agent_worktrees.picker_support import derive
@@ -925,7 +926,7 @@ def test_controller_metadata_is_additive_to_json_surfaces(
     captured: dict = {}
     monkeypatch.setattr(cli, "_all_tracking_dirs", lambda: [tmp_tracking_dir])
     monkeypatch.setattr(
-        cli, "_json_output", lambda data: captured.clear() or captured.update(data)
+        output, "_json_output", lambda data: captured.clear() or captured.update(data)
     )
     assert cli.cmd_head_session(
         argparse.Namespace(worktree_id="child", json=True)

@@ -28,12 +28,7 @@ import argparse
 from pathlib import Path
 
 from . import sessions, tracking
-
-
-def _core():
-    from . import __main__ as core
-
-    return core
+from . import output
 
 
 def add_parsers(sub) -> None:
@@ -79,36 +74,36 @@ def cmd_resolve_handoff_successor(args: argparse.Namespace) -> int:
     raw = args.worktree_id
     yaml_path = stc._find_tracking_file(raw)
     if yaml_path is None:
-        return _core()._json_error(f"Worktree not found: {raw}")
+        return output._json_error(f"Worktree not found: {raw}")
     record = tracking.load_record(yaml_path)
     if not record.worktree_path:
-        return _core()._json_error(
+        return output._json_error(
             f"resolve-handoff-successor: {raw} has no recorded worktree_path "
             "to verify the successor's cwd against"
         )
     valid_successor = sessions.validate_session_id(args.successor)
     if valid_successor is None:
-        return _core()._json_error(
+        return output._json_error(
             f"resolve-handoff-successor: {args.successor!r} is not a real, "
             "path-safe local session id with on-disk conversation data -- "
             "refusing to register a session with no on-disk evidence"
         )
     meta = sessions._session_meta(sessions._session_state_dir(), valid_successor)
     if meta is None:
-        return _core()._json_error(
+        return output._json_error(
             f"resolve-handoff-successor: no real session transcript found for "
             f"{valid_successor!r} (missing, detached, or no conversation data) "
             "-- refusing to register a session with no on-disk evidence"
         )
     if meta.get("live"):
-        return _core()._json_error(
+        return output._json_error(
             f"resolve-handoff-successor: session {valid_successor!r} is still "
             "live -- refusing to retroactively conclude a session that is "
             "still running; wait for it to end, or use its own conclude path"
         )
     recorded_cwd = str(meta.get("cwd") or "").strip()
     if not recorded_cwd:
-        return _core()._json_error(
+        return output._json_error(
             f"resolve-handoff-successor: session {valid_successor!r} has no "
             "recorded cwd -- cannot verify it ran against this worktree"
         )
@@ -119,7 +114,7 @@ def cmd_resolve_handoff_successor(args: argparse.Namespace) -> int:
     except OSError:
         matches = False
     if not matches:
-        return _core()._json_error(
+        return output._json_error(
             f"resolve-handoff-successor: session {valid_successor!r}'s recorded "
             f"cwd ({recorded_cwd!r}) does not match {raw}'s worktree_path "
             f"({record.worktree_path!r}) -- refusing"
@@ -127,7 +122,7 @@ def cmd_resolve_handoff_successor(args: argparse.Namespace) -> int:
     events = sessions.read_session_transcript(valid_successor)
     user_turns = [ev for ev in events if ev.get("type") == "user.message"]
     if not user_turns:
-        return _core()._json_error(
+        return output._json_error(
             f"resolve-handoff-successor: session {valid_successor!r} has no "
             "user turns in its transcript -- cannot verify it is a real "
             "handoff successor rather than an unrelated session sharing this cwd"
@@ -137,7 +132,7 @@ def cmd_resolve_handoff_successor(args: argparse.Namespace) -> int:
         "/consume-handoff" in first_turn_text and "context-handoff" in first_turn_text
     )
     if not has_seed_markers:
-        return _core()._json_error(
+        return output._json_error(
             f"resolve-handoff-successor: session {valid_successor!r}'s first "
             "turn is not the canonical handoff-seed prompt (missing both the "
             "'/consume-handoff' and 'context-handoff' markers) -- refusing to "
@@ -145,7 +140,7 @@ def cmd_resolve_handoff_successor(args: argparse.Namespace) -> int:
             "worktrees skill's class-G check)"
         )
     if len(user_turns) < 2:
-        return _core()._json_error(
+        return output._json_error(
             f"resolve-handoff-successor: session {valid_successor!r} only "
             "received the handoff seed and never progressed -- not a "
             "legitimate successor (repairing-worktrees skill's class-G check)"
@@ -165,10 +160,10 @@ def cmd_resolve_handoff_successor(args: argparse.Namespace) -> int:
             },
         )
     except tracking_write.AmbiguousWriteOutcome as exc:
-        return _core()._json_error(
+        return output._json_error(
             f"resolve-handoff-successor: write to {raw} is in an unknown state: {exc}"
         )
     if result.get("error") == "lifecycle":
-        return _core()._json_error(result["message"])
-    _core()._json_output(result)
+        return output._json_error(result["message"])
+    output._json_output(result)
     return 0

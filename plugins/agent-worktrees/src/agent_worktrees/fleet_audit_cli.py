@@ -8,6 +8,7 @@ import argparse
 from pathlib import Path
 
 from . import config as cfg
+from . import output
 from . import git_ops, obligations, prune, tracking
 
 
@@ -17,8 +18,6 @@ def _core():
     return core
 
 
-def _json_output(*args, **kwargs):
-    return _core()._json_output(*args, **kwargs)
 
 
 def cmd_fleet_audit(args: argparse.Namespace) -> int:
@@ -105,7 +104,7 @@ def cmd_fleet_audit(args: argparse.Namespace) -> int:
         "stale_finalized": stale_finalized,
     }
     if args.json:
-        _json_output(report)
+        output._json_output(report)
         return 0
 
     print("Fleet audit (worktree-finality-and-obligations Phase 6, read-only):")

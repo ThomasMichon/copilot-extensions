@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import output
 from agent_worktrees import effort_focus as ef
 from agent_worktrees import session_metadata_cli
 from agent_worktrees import tracking
@@ -445,7 +446,7 @@ def test_bind_show_and_transfer_release(cli_env, capsys, monkeypatch):
 
     capsys.readouterr()
     shown = {}
-    monkeypatch.setattr(m, "_json_output", lambda payload: shown.update(payload))
+    monkeypatch.setattr(output, "_json_output", lambda payload: shown.update(payload))
     assert m.cmd_effort_focus(_args("show", json=True)) == 0
     assert shown["active_effort"]["active"] is True
     assert shown["follow_up"] is True
@@ -754,7 +755,7 @@ def test_transfer_and_show_work_when_checkout_is_unavailable(
         ),
     )
     shown = {}
-    monkeypatch.setattr(m, "_json_output", lambda payload: shown.update(payload))
+    monkeypatch.setattr(output, "_json_output", lambda payload: shown.update(payload))
 
     assert m.cmd_effort_focus(_args("show", json=True)) == 0
     assert shown["active_effort"]["state"] == "stale"

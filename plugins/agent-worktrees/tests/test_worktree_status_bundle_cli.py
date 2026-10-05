@@ -9,6 +9,7 @@ import argparse
 from pathlib import Path
 
 from agent_worktrees import __main__ as cli
+from agent_worktrees import output
 from agent_worktrees import session_tracking_cli
 from agent_worktrees import tracking
 from agent_worktrees import worktree_status_daemon
@@ -39,7 +40,7 @@ def _wire_record_resolution(monkeypatch, tmp_path: Path, *, project="proj"):
 
 def test_worktree_not_found_reports_json_error(monkeypatch):
     errors = []
-    monkeypatch.setattr(cli, "_json_error", lambda msg: errors.append(msg) or 1)
+    monkeypatch.setattr(output, "_json_error", lambda msg: errors.append(msg) or 1)
     monkeypatch.setattr(
         session_tracking_cli, "_find_tracking_file", lambda _worktree_id: None
     )
@@ -53,7 +54,7 @@ def test_worktree_not_found_reports_json_error(monkeypatch):
 
 def test_unresolvable_project_reports_json_error(monkeypatch, tmp_path):
     errors = []
-    monkeypatch.setattr(cli, "_json_error", lambda msg: errors.append(msg) or 1)
+    monkeypatch.setattr(output, "_json_error", lambda msg: errors.append(msg) or 1)
     monkeypatch.setattr(
         session_tracking_cli, "_find_tracking_file", lambda _worktree_id: tmp_path / "wt1.yaml"
     )
@@ -83,7 +84,7 @@ def test_uses_daemon_when_reachable(monkeypatch, tmp_path):
     monkeypatch.setattr(worktree_status_daemon, "status_with_boot", fake_status_with_boot)
 
     outputs = []
-    monkeypatch.setattr(cli, "_json_output", outputs.append)
+    monkeypatch.setattr(output, "_json_output", outputs.append)
 
     rc = cli.cmd_worktree_status_bundle(
         argparse.Namespace(worktree_id="wt1", force_refresh=False, json=True)
@@ -106,7 +107,7 @@ def test_force_refresh_flag_propagates_to_payload(monkeypatch, tmp_path):
         return {"ok": True}
 
     monkeypatch.setattr(worktree_status_daemon, "status_with_boot", fake_status_with_boot)
-    monkeypatch.setattr(cli, "_json_output", lambda _v: None)
+    monkeypatch.setattr(output, "_json_output", lambda _v: None)
 
     cli.cmd_worktree_status_bundle(
         argparse.Namespace(worktree_id="wt1", force_refresh=True, json=True)
@@ -128,7 +129,7 @@ def test_falls_back_to_direct_compute_when_daemon_unreachable(monkeypatch, tmp_p
         cli, "_worktree_status_compute", lambda project, worktree_id: {"from": "direct-compute"}
     )
     outputs = []
-    monkeypatch.setattr(cli, "_json_output", outputs.append)
+    monkeypatch.setattr(output, "_json_output", outputs.append)
 
     rc = cli.cmd_worktree_status_bundle(
         argparse.Namespace(worktree_id="wt1", force_refresh=False, json=True)
@@ -183,9 +184,9 @@ def test_rejects_a_tampered_record_worktree_id_before_any_substitution(monkeypat
     monkeypatch.setattr(worktree_status_daemon, "status_with_boot", fake_status_with_boot)
 
     errors = []
-    monkeypatch.setattr(cli, "_json_error", lambda msg: errors.append(msg) or 1)
+    monkeypatch.setattr(output, "_json_error", lambda msg: errors.append(msg) or 1)
     outputs = []
-    monkeypatch.setattr(cli, "_json_output", outputs.append)
+    monkeypatch.setattr(output, "_json_output", outputs.append)
 
     rc = cli.cmd_worktree_status_bundle(
         argparse.Namespace(worktree_id="wt1", force_refresh=False, json=True)
@@ -239,9 +240,9 @@ def test_rejects_a_record_declaring_a_different_real_worktrees_identity(
     monkeypatch.setattr(worktree_status_daemon, "status_with_boot", fake_status_with_boot)
 
     errors = []
-    monkeypatch.setattr(cli, "_json_error", lambda msg: errors.append(msg) or 1)
+    monkeypatch.setattr(output, "_json_error", lambda msg: errors.append(msg) or 1)
     outputs = []
-    monkeypatch.setattr(cli, "_json_output", outputs.append)
+    monkeypatch.setattr(output, "_json_output", outputs.append)
 
     rc = cli.cmd_worktree_status_bundle(
         argparse.Namespace(worktree_id="wt1", force_refresh=False, json=True)

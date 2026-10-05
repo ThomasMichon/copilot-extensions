@@ -67,9 +67,9 @@ def test_remove_system_retains_record_when_worktree_removal_fails(
              return_value=[record.worktree_path],
          ), \
          patch("agent_worktrees.git_ops.remove_worktree", return_value=False), \
-         patch("agent_worktrees.__main__._json_output") as json_output, \
+         patch("agent_worktrees.output._json_output") as json_output, \
          patch(
-             "agent_worktrees.__main__._json_error",
+             "agent_worktrees.output._json_error",
              side_effect=lambda message, exit_code=1: (
                  json_output({"version": 1, "error": message}),
                  exit_code,
@@ -99,7 +99,7 @@ def test_remove_system_deletes_record_after_worktree_removal_succeeds(
          patch("agent_worktrees.git_ops.git") as git, \
          patch("agent_worktrees.disposition_history.remove"), \
          patch("agent_worktrees.activity.log_event"), \
-         patch("agent_worktrees.__main__._json_output") as json_output:
+         patch("agent_worktrees.output._json_output") as json_output:
         git.return_value.returncode = 0
         git.return_value.stdout = "0"
         result = cli.cmd_remove_system(args)
@@ -126,7 +126,7 @@ def test_remove_system_deletes_unregistered_leftover_and_record(
          patch("agent_worktrees.git_ops.git") as git, \
          patch("agent_worktrees.disposition_history.remove"), \
          patch("agent_worktrees.activity.log_event"), \
-         patch("agent_worktrees.__main__._json_output"):
+         patch("agent_worktrees.output._json_output"):
         git.return_value.returncode = 0
         git.return_value.stdout = "0"
         result = cli.cmd_remove_system(args)
@@ -153,7 +153,7 @@ def test_remove_system_preserves_unregistered_nonempty_path(
          patch("agent_worktrees.sessions.kill_tmux_session"), \
          patch("agent_worktrees.git_ops.remove_worktree", return_value=False), \
          patch("agent_worktrees.git_ops.list_worktree_paths", return_value=[]), \
-         patch("agent_worktrees.__main__._json_output"):
+         patch("agent_worktrees.output._json_output"):
         result = cli.cmd_remove_system(args)
 
     assert result == 1
@@ -211,7 +211,7 @@ def test_remove_system_retains_record_when_registration_probe_fails(
              "agent_worktrees.git_ops.list_worktree_paths",
              side_effect=RuntimeError("registration probe failed"),
          ), \
-         patch("agent_worktrees.__main__._json_output"):
+         patch("agent_worktrees.output._json_output"):
         result = cli.cmd_remove_system(args)
 
     assert result == 1
@@ -234,7 +234,7 @@ def test_remove_system_retains_missing_path_when_still_registered(
              "agent_worktrees.git_ops.list_worktree_paths",
              return_value=[record.worktree_path],
          ), \
-         patch("agent_worktrees.__main__._json_output"):
+         patch("agent_worktrees.output._json_output"):
         result = cli.cmd_remove_system(args)
 
     assert result == 1
@@ -300,7 +300,7 @@ def test_remove_system_refuses_dirty_worktree_by_default(tmp_path):
 
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
@@ -320,7 +320,7 @@ def test_remove_system_refuses_open_pr_by_default(tmp_path):
 
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
@@ -341,7 +341,7 @@ def test_remove_system_refuses_live_resource_claim_by_default(tmp_path):
 
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
@@ -362,7 +362,7 @@ def test_remove_system_bridge_kind_blocker_mentions_owning_service(tmp_path):
 
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         cli.cmd_remove_system(args)
 
@@ -388,7 +388,7 @@ def test_remove_system_force_bypasses_all_guards(tmp_path):
          patch("agent_worktrees.git_ops.git") as git, \
          patch("agent_worktrees.disposition_history.remove"), \
          patch("agent_worktrees.activity.log_event"), \
-         patch("agent_worktrees.__main__._json_output") as json_output:
+         patch("agent_worktrees.output._json_output") as json_output:
         git.return_value.returncode = 0
         result = cli.cmd_remove_system(args)
 
@@ -460,7 +460,7 @@ def test_remove_system_refuses_when_checkout_gone_but_branch_unpushed(tmp_path):
 
     with patch("agent_worktrees.config.load_config", return_value=config), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
@@ -482,7 +482,7 @@ def test_remove_system_treats_unknown_classification_as_blocker(tmp_path):
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
          patch("agent_worktrees.git_ops.classify_worktree", return_value=unknown_info), \
          patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
@@ -502,7 +502,7 @@ def test_remove_system_refuses_creating_pr_by_default(tmp_path):
 
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
@@ -529,7 +529,7 @@ def test_remove_system_allows_squash_merged_branch(tmp_path):
          patch("agent_worktrees.git_ops.git") as git, \
          patch("agent_worktrees.disposition_history.remove"), \
          patch("agent_worktrees.activity.log_event"), \
-         patch("agent_worktrees.__main__._json_output") as json_output:
+         patch("agent_worktrees.output._json_output") as json_output:
         git.return_value.returncode = 0
         git.return_value.stdout = "0"
         result = cli.cmd_remove_system(args)
@@ -556,7 +556,7 @@ def test_remove_system_rechecks_immediately_before_removal(tmp_path):
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
          patch("agent_worktrees.managed_worktree_guard.blockers_for", side_effect=_blockers), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
@@ -583,7 +583,7 @@ def test_remove_system_force_skips_the_immediate_recheck(tmp_path):
          patch("agent_worktrees.disposition_history.remove"), \
          patch("agent_worktrees.activity.log_event"), \
          patch("agent_worktrees.managed_worktree_guard.blockers_for") as blockers, \
-         patch("agent_worktrees.__main__._json_output") as json_output:
+         patch("agent_worktrees.output._json_output") as json_output:
         git.return_value.returncode = 0
         git.return_value.stdout = "0"
         result = cli.cmd_remove_system(args)
@@ -608,7 +608,7 @@ def test_remove_system_refuses_checkout_branch_drift(tmp_path):
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
          patch("agent_worktrees.git_ops.classify_worktree", return_value=drifted_info), \
          patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
@@ -629,7 +629,7 @@ def test_remove_system_refuses_empty_state_pr_record(tmp_path):
 
     with patch("agent_worktrees.config.load_config", return_value=_config(tmp_path)), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
@@ -670,7 +670,7 @@ def test_remove_system_resolves_record_repo_not_default(tmp_path):
          patch("agent_worktrees.git_ops.git") as git, \
          patch("agent_worktrees.disposition_history.remove"), \
          patch("agent_worktrees.activity.log_event"), \
-         patch("agent_worktrees.__main__._json_output") as json_output:
+         patch("agent_worktrees.output._json_output") as json_output:
         git.return_value.returncode = 0
         git.return_value.stdout = "0"
         result = cli.cmd_remove_system(args)
@@ -694,7 +694,7 @@ def test_remove_system_refuses_gone_zombie_checkout(tmp_path):
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
          patch("agent_worktrees.git_ops.classify_worktree", return_value=gone_info), \
          patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
@@ -716,7 +716,7 @@ def test_remove_system_refuses_orphan_checkout(tmp_path):
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
          patch("agent_worktrees.git_ops.classify_worktree", return_value=orphan_info), \
          patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
@@ -743,7 +743,7 @@ def test_remove_system_refuses_when_inbound_owner_claimant_alive(tmp_path):
          patch("agent_worktrees.git_ops.classify_worktree", return_value=clean_info), \
          patch("agent_worktrees.git_ops.is_branch_merged", return_value=False), \
          patch("agent_worktrees.claimant.resolve_claimant_alive", return_value=True), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
@@ -768,7 +768,7 @@ def test_remove_system_refuses_when_inbound_owner_claimant_unconfirmed(tmp_path)
          patch("agent_worktrees.git_ops.classify_worktree", return_value=clean_info), \
          patch("agent_worktrees.git_ops.is_branch_merged", return_value=False), \
          patch("agent_worktrees.claimant.resolve_claimant_alive", return_value=None), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
@@ -793,7 +793,7 @@ def test_remove_system_allows_inbound_owner_claimant_confirmed_gone(tmp_path):
          patch("agent_worktrees.claimant.resolve_claimant_alive", return_value=False), \
          patch("agent_worktrees.git_ops.classify_worktree", return_value=clean_info), \
          patch("agent_worktrees.git_ops.is_branch_merged", return_value=False), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
@@ -825,7 +825,7 @@ def test_remove_system_allows_finalized_resource_despite_owner_ref(tmp_path):
          patch("agent_worktrees.git_ops.git") as git, \
          patch("agent_worktrees.disposition_history.remove"), \
          patch("agent_worktrees.activity.log_event"), \
-         patch("agent_worktrees.__main__._json_output") as json_output:
+         patch("agent_worktrees.output._json_output") as json_output:
         git.return_value.returncode = 0
         git.return_value.stdout = "0"
         result = cli.cmd_remove_system(args)
@@ -849,7 +849,7 @@ def test_remove_system_refuses_detached_head_checkout(tmp_path):
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
          patch("agent_worktrees.git_ops.classify_worktree", return_value=detached_info), \
          patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
@@ -872,7 +872,7 @@ def test_remove_system_fails_closed_on_unknown_record_repo(tmp_path):
     config.repo_name = "demo"
     with patch("agent_worktrees.config.load_config", return_value=config), \
          patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 
@@ -903,7 +903,7 @@ def test_remove_system_refuses_empty_scaffold_owner_claim_despite_trivial_merge(
          patch("agent_worktrees.git_ops.classify_worktree", return_value=empty_info), \
          patch("agent_worktrees.git_ops.is_branch_merged", return_value=True), \
          patch("agent_worktrees.claimant.resolve_claimant_alive", return_value=True), \
-         patch("agent_worktrees.__main__._json_error") as json_error:
+         patch("agent_worktrees.output._json_error") as json_error:
         json_error.return_value = 1
         result = cli.cmd_remove_system(args)
 

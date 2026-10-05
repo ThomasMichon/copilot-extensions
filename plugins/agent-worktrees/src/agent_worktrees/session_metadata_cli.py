@@ -8,8 +8,9 @@ import sys
 from pathlib import Path, PurePosixPath
 
 from . import claimant as claimant_mod
+from . import output
 from . import config as cfg
-from . import disposition_history, effort_focus, output, tracking
+from . import disposition_history, effort_focus, tracking
 from . import state_root as state_root_mod
 from . import status_updater_cli
 
@@ -28,12 +29,8 @@ def _infer_worktree_id(*args, **kwargs):
     return _core()._infer_worktree_id(*args, **kwargs)
 
 
-def _json_error(*args, **kwargs):
-    return _core()._json_error(*args, **kwargs)
 
 
-def _json_output(*args, **kwargs):
-    return _core()._json_output(*args, **kwargs)
 
 
 def _resolve_worktree_id(*args, **kwargs):
@@ -297,17 +294,17 @@ def cmd_session_role(args) -> int:
         session_id,
     )
     if not wt_id:
-        _json_output({"role": "untracked", "worktree_id": None, "session": session_id})
+        output._json_output({"role": "untracked", "worktree_id": None, "session": session_id})
         return 0
     try:
         record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
     except Exception:
-        _json_output({"role": "untracked", "worktree_id": wt_id, "session": session_id})
+        output._json_output({"role": "untracked", "worktree_id": wt_id, "session": session_id})
         return 0
     result = _session_role(record, session_id)
     result["worktree_id"] = wt_id
     result["session"] = session_id
-    _json_output(result)
+    output._json_output(result)
     return 0
 
 
@@ -395,7 +392,7 @@ def _cmd_effort_focus_lint(args) -> int:
     if not args.path:
         message = "lint requires a repository-relative effort README path"
         if args.json:
-            return _json_error(message)
+            return output._json_error(message)
         output.err(message)
         return 1
     repo_root = Path(args.repo_root) if getattr(args, "repo_root", None) else Path.cwd()
@@ -403,7 +400,7 @@ def _cmd_effort_focus_lint(args) -> int:
         relative_path = effort_focus.normalize_relative_path(args.path)
     except effort_focus.EffortFocusError as exc:
         if args.json:
-            return _json_error(str(exc))
+            return output._json_error(str(exc))
         output.err(str(exc))
         return 1
     findings = effort_focus.lint_effort(
@@ -413,7 +410,7 @@ def _cmd_effort_focus_lint(args) -> int:
         slice_name=getattr(args, "effort_slice", None),
     )
     if args.json:
-        _json_output({"path": relative_path, "ok": not findings, "findings": findings})
+        output._json_output({"path": relative_path, "ok": not findings, "findings": findings})
         return 0 if not findings else 1
     if not findings:
         print(f"{relative_path}: OK")
@@ -433,7 +430,7 @@ def cmd_effort_focus(args) -> int:
     if not worktree_id:
         message = "Could not determine worktree ID. Run inside a worktree or pass --worktree-id."
         if args.json:
-            return _json_error(message)
+            return output._json_error(message)
         output.err(message)
         return 1
     worktree_id = _resolve_worktree_id(worktree_id)
@@ -441,7 +438,7 @@ def cmd_effort_focus(args) -> int:
     if not yaml_path.exists():
         message = f"Tracking file not found at {yaml_path}."
         if args.json:
-            return _json_error(message)
+            return output._json_error(message)
         output.err(message)
         return 1
 
@@ -457,7 +454,7 @@ def cmd_effort_focus(args) -> int:
             repo_error = str(exc)
             if action != "show":
                 if args.json:
-                    return _json_error(repo_error)
+                    return output._json_error(repo_error)
                 output.err(repo_error)
                 return 1
 
@@ -477,7 +474,7 @@ def cmd_effort_focus(args) -> int:
         )
         payload = _effort_focus_output(record, inspection)
         if args.json:
-            _json_output(payload)
+            output._json_output(payload)
         elif inspection is None:
             print(f"No active effort is bound to {record.worktree_id}.")
         else:
@@ -495,7 +492,7 @@ def cmd_effort_focus(args) -> int:
         if not args.path:
             message = "bind requires a repository-relative effort README path"
             if args.json:
-                return _json_error(message)
+                return output._json_error(message)
             output.err(message)
             return 1
         try:
@@ -505,7 +502,7 @@ def cmd_effort_focus(args) -> int:
             inspection = effort_focus.validate_binding(repo_root, ref)
         except effort_focus.EffortFocusError as exc:
             if args.json:
-                return _json_error(str(exc))
+                return output._json_error(str(exc))
             output.err(str(exc))
             return 1
 
@@ -516,7 +513,7 @@ def cmd_effort_focus(args) -> int:
             if conflict:
                 message = f"that effort participant/slice is already bound to worktree {conflict}"
                 if args.json:
-                    return _json_error(message)
+                    return output._json_error(message)
                 output.err(message)
                 return 1
             with tracking._RecordLock(yaml_path):
@@ -525,7 +522,7 @@ def cmd_effort_focus(args) -> int:
                 if record.active_effort == ref:
                     payload = _effort_focus_output(record, inspection)
                     if args.json:
-                        _json_output(payload)
+                        output._json_output(payload)
                     else:
                         print(f"[OK] Effort focus already bound: {ref.path}")
                     return 0
@@ -535,7 +532,7 @@ def cmd_effort_focus(args) -> int:
                         "explicit replacement"
                     )
                     if args.json:
-                        return _json_error(message)
+                        return output._json_error(message)
                     output.err(message)
                     return 1
                 replacing = record.active_effort is not None
@@ -552,7 +549,7 @@ def cmd_effort_focus(args) -> int:
                 tracking.save_record(record)
         payload = _effort_focus_output(record, inspection)
         if args.json:
-            _json_output(payload)
+            output._json_output(payload)
         else:
             verb = "replaced" if replacing else "bound"
             print(f"[OK] Effort focus {verb}: {ref.path}")
@@ -561,7 +558,7 @@ def cmd_effort_focus(args) -> int:
     if action == "release":
         if record.active_effort is None:
             if args.json:
-                _json_output(_effort_focus_output(record, None))
+                output._json_output(_effort_focus_output(record, None))
             else:
                 print(f"No active effort is bound to {record.worktree_id}.")
             return 0
@@ -570,7 +567,7 @@ def cmd_effort_focus(args) -> int:
         if completed == bool(transfer):
             message = "release requires exactly one of --completed or --transfer TARGET"
             if args.json:
-                return _json_error(message)
+                return output._json_error(message)
             output.err(message)
             return 1
         bound_ref = record.active_effort
@@ -582,7 +579,7 @@ def cmd_effort_focus(args) -> int:
                 "archived; use --transfer for a named responsibility transfer"
             )
             if args.json:
-                return _json_error(message)
+                return output._json_error(message)
             output.err(message)
             return 1
         if transfer:
@@ -590,7 +587,7 @@ def cmd_effort_focus(args) -> int:
                 transfer = effort_focus.normalize_label(transfer, "transfer target")
             except effort_focus.EffortFocusError as exc:
                 if args.json:
-                    return _json_error(str(exc))
+                    return output._json_error(str(exc))
                 output.err(str(exc))
                 return 1
 
@@ -599,7 +596,7 @@ def cmd_effort_focus(args) -> int:
             if record.active_effort != bound_ref:
                 message = "effort focus changed while release was being prepared; retry"
                 if args.json:
-                    return _json_error(message)
+                    return output._json_error(message)
                 output.err(message)
                 return 1
             if completed and (
@@ -610,7 +607,7 @@ def cmd_effort_focus(args) -> int:
                     "completion gate; retry after resolving it"
                 )
                 if args.json:
-                    return _json_error(message)
+                    return output._json_error(message)
                 output.err(message)
                 return 1
             record.active_effort = None
@@ -632,14 +629,14 @@ def cmd_effort_focus(args) -> int:
             tracking.save_record(record)
         payload = _effort_focus_output(record, None)
         if args.json:
-            _json_output(payload)
+            output._json_output(payload)
         else:
             print(f"[OK] Effort focus released: {summary}")
         return 0
 
     message = f"unknown effort-focus action: {action}"
     if args.json:
-        return _json_error(message)
+        return output._json_error(message)
     output.err(message)
     return 1
 
@@ -648,7 +645,7 @@ def cmd_claimant_liveness(args) -> int:
     """Report SAME-MACHINE claimant liveness for an owner_ref."""
     alive = claimant_mod.local_claimant_alive(args.owner_ref)
     if getattr(args, "json", False):
-        _json_output({"owner_ref": args.owner_ref, "alive": alive})
+        output._json_output({"owner_ref": args.owner_ref, "alive": alive})
         return 0
     label = {True: "alive", False: "gone", None: "unknown"}[alive]
     print(f"{args.owner_ref}: {label}")
@@ -659,7 +656,7 @@ def cmd_codename_lookup(args) -> int:
     """Report whether THIS machine's active project has a matching codename."""
     worktree_id = resolve_worktree_id_by_codename(args.codename)
     if getattr(args, "json", False):
-        _json_output(
+        output._json_output(
             {
                 "codename": args.codename,
                 "found": worktree_id is not None,
