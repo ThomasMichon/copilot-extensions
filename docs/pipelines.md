@@ -256,7 +256,7 @@ output, and `stale-branch-sweep.yml` acts on already-merged PRs' branches):
 |----------|---------|---------|
 | `module-size-baseline-widen.yml` | `push` → `main` | Post-merge, main-only companion to the module-size guard: widens the shrink-only baseline when a legitimate growth landed, via its own reviewable PR — never inside a PR branch's own CI run against its own diff. |
 | `module-size-baseline-widen-verify.yml` | `workflow_dispatch` | Manual verification harness for the above. |
-| `module-health-watchdog.yml` | `schedule` (daily), `workflow_dispatch` | Scans for module-size drift and other structural health signals; files tracking issues. |
+| `module-health-watchdog.yml` | `schedule` (daily), `workflow_dispatch` | Proactively finds the single worst module-size-ceiling offender (organic drift no PR-time gate catches) and files/updates one tracking issue for it. |
 | `stale-branch-sweep.yml` | `schedule` (weekly), `workflow_dispatch` | Deletes merged-PR branches still lingering on `origin` — the automated form of the one-time 3000+-branch cleanup. |
 | `installation-context-full.yml` | `schedule` (daily), `workflow_dispatch` | Full-sweep variant of the installation-context contract smoke check `ci.yml` runs per-PR. |
 | `context-handoff-exhaustive.yml` | `schedule` (weekly), `workflow_dispatch` | The real-git/child-process/lock-race exhaustive suite for `context-handoff`'s exhaustive test tree — deliberately its own workflow so its `schedule` trigger doesn't apply to the rest of `ci.yml`'s matrix. |

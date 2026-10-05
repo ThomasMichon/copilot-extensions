@@ -8,8 +8,8 @@
 > Pre-rewrite tip: `b8e83826124674f16ecb200d4c2709c77b87dc0b`.
 > Post-rewrite tip: `3a9b9f90b7e02de4da49376323294b3474d483f6` (2026-10-04). If your
 > local clone tracks `main` directly, see
-> [`CONTRIBUTING.md`'s "If main's history is force-rewritten"
-> section](CONTRIBUTING.md) for recovery. **`dev` was never affected.** Full
+> [`docs/pipelines.md`'s "If `main`'s history is force-rewritten"
+> section](docs/pipelines.md#if-mains-history-is-force-rewritten) for recovery. **`dev` was never affected.** Full
 > procedure and status: [`efforts/done/main-history-rewrite`](efforts/done/main-history-rewrite/README.md).
 
 <p align="center">
