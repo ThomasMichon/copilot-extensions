@@ -163,7 +163,10 @@ def resolve_nearest_baseline(
     Concept exists to catch -- this function raises for a genuine git
     plumbing failure, never for "nothing found".
     """
-    from . import correlation
+    try:
+        import correlation
+    except ModuleNotFoundError:
+        from tools.coverage_guided_selection import correlation
 
     path = correlation.baseline_path_on_main(plugin)
     # --diff-filter=d excludes revisions where this commit's own change to

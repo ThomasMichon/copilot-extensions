@@ -374,6 +374,50 @@ class TestNoStdlibModuleNameCollisions:
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
 
+    def test_cli_runs_as_a_plain_script_and_actually_resolves_a_baseline(
+        self, tmp_path,
+    ) -> None:
+        # Regression test for a real failure this effort's Phase 4
+        # shadow-mode rollout surfaced live, on a real PR's CI run (see
+        # this effort's own Journal): `cli.py`'s *primary* plain-script
+        # import succeeds (unlike the ModuleNotFoundError case the dual
+        # try/except pattern above exists for), so execution reaches
+        # `decide()` -> `ancestor_resolution.resolve_nearest_baseline`,
+        # whose own internal `from . import correlation` assumed it was
+        # always loaded as a package submodule. It wasn't, in exactly this
+        # plain-script path -- `ImportError: attempted relative import
+        # with no known parent package`, silently reported as `cli.py`'s
+        # own (correctly non-crashing) `mode: "error"` rather than a real
+        # decision. `--help` alone (the test above) never calls
+        # `resolve_nearest_baseline` and so never caught this -- this test
+        # drives the CLI far enough to actually reach it, against a real
+        # throwaway repo, and asserts the result is NOT `mode: "error"`.
+        repo = _init_repo(tmp_path)
+        (repo / "src").mkdir()
+        (repo / "src" / "a.py").write_text("1\n")
+        c1 = _commit(repo, "first")
+        _run_git(["branch", "main"], cwd=repo)  # no pointer file -- fine,
+        # resolve_nearest_baseline must still run (and return None) rather
+        # than crash on the import alone.
+
+        cli_script = _REPO_ROOT / "tools" / "coverage_guided_selection" / "cli.py"
+        proc = subprocess.run(
+            [
+                sys.executable, str(cli_script),
+                "--repo-root", str(repo), "--repo", "owner/repo",
+                "--plugin", "demo", "--cov-source", "src",
+                "--base-ref", c1, "--head-ref", "HEAD", "--main-ref", "main",
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        payload = json.loads(proc.stdout)
+        assert payload["mode"] != "error", (
+            f"expected a real fallback decision (no baseline -- never an "
+            f"import crash reported as mode='error'), got: {payload!r}"
+        )
+        assert payload["reason"] == decide_mod.NO_BASELINE_AVAILABLE
+
 
 class TestCorrelation:
     def test_baseline_path_on_main_is_one_file_per_plugin(self) -> None:
