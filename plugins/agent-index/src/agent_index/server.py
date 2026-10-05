@@ -38,7 +38,16 @@ class DrainAdmissionClosed(RuntimeError):
 
 
 class ReindexRequest(BaseModel):
-    """Request body for kicking a best-effort reindex."""
+    """Request body for kicking a best-effort reindex.
+
+    Set ``source`` to target one configured source, or omit it (or pass
+    ``"all"``) for everything, everywhere, all at once -- every configured
+    source reindexed in one task. ``full=True`` forces a full crawl +
+    re-embed of the targeted scope instead of only changed content, and
+    takes priority over -- and cancels any now-redundant queued
+    ``full=False`` request within -- that same scope (see
+    ``TaskStore.enqueue``).
+    """
 
     full: bool = False
     source: str | None = None

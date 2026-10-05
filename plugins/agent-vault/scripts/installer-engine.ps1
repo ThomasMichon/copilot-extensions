@@ -298,24 +298,29 @@ function Write-DeployManifest {
         [Parameter(Mandatory)][string]$VenvPath,
         [Parameter(Mandatory)][scriptblock]$GetSourceKind,
         [Parameter(Mandatory)][scriptblock]$GetGitInfo,
+        [string]$SourcePathOverride = '',
+        [string]$VersionOverride = '',
         [string]$PayloadHash = '',
         [hashtable]$AdditionalFields = @{}
     )
 
     $manifestPath = Join-Path $InstallPath 'deploy-manifest.json'
-    $kind = & $GetSourceKind $PluginPath
-    $ver = '0.0.0'
-    $pyproj = Join-Path $PluginPath 'pyproject.toml'
-    if (Test-Path $pyproj) {
-        $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
-        if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*','$1') }
+    $provenancePath = if ($SourcePathOverride) { $SourcePathOverride } else { $PluginPath }
+    $kind = & $GetSourceKind $provenancePath
+    $ver = if ($VersionOverride) { $VersionOverride } else { '0.0.0' }
+    if (-not $VersionOverride) {
+        $pyproj = Join-Path $PluginPath 'pyproject.toml'
+        if (Test-Path $pyproj) {
+            $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
+            if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*','$1') }
+        }
     }
 
     $commit = $null
     $branch = $null
     $dirty = $false
     if ($kind -eq 'local') {
-        $gitInfo = & $GetGitInfo (Split-Path $PluginPath)
+        $gitInfo = & $GetGitInfo (Split-Path $provenancePath)
         $commit = $gitInfo.commit
         $branch = $gitInfo.branch
         $dirty = $gitInfo.dirty
@@ -323,7 +328,7 @@ function Write-DeployManifest {
 
     $source = [ordered]@{
         kind    = $kind
-        path    = ($PluginPath -replace '\\', '/')
+        path    = ($provenancePath -replace '\\', '/')
         repo    = 'copilot-extensions'
         plugin  = $Plugin
         version = $ver
@@ -335,11 +340,17 @@ function Write-DeployManifest {
         $source['content_hash'] = $PayloadHash
     }
 
+    $deployedByHost = if ($env:COMPUTERNAME) {
+        $env:COMPUTERNAME.ToLowerInvariant()
+    } else {
+        ([System.Net.Dns]::GetHostName()).ToLowerInvariant()
+    }
+
     $manifest = [ordered]@{
         schema_version = 3
         service        = $Service
         deployed_at    = (Get-Date -Format 'o')
-        deployed_by    = "$($env:COMPUTERNAME.ToLower())-windows"
+        deployed_by    = "$deployedByHost-windows"
         source         = $source
         venv           = ($VenvPath -replace '\\', '/')
         runtime        = 'python'
