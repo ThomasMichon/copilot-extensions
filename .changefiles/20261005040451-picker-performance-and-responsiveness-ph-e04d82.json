@@ -1,0 +1,9 @@
+{
+  "comment": "picker-performance-and-responsiveness Phase 3: add tests/bench_phase3_record_cache.py measuring the record_cache copy_result=False fast path's before/after sweep-time reduction at a 120-record fleet scale (~66-71% faster)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
