@@ -143,6 +143,251 @@ def test_telemetry_severity_allowlist():
     assert r.json()["created"] == []
 
 
+_CI_FAILURE_ISSUE = {
+    "action": "opened",
+    "issue": {
+        "number": 5287,
+        "title": "CI failure: guards (full-tree, non-PR-scoped)",
+        "body": "## Summary\n\nmodule-size guard failed.",
+        "html_url": "https://github.com/acme/widget/issues/5287",
+        "labels": [{"name": "ci-failure-signature"}, {"name": "bug"}],
+    },
+    "repository": {
+        "full_name": "acme/widget",
+        "clone_url": "https://github.com/acme/widget.git",
+    },
+}
+
+_ISSUE_RULES_CONFIG = {
+    "issues": [
+        {
+            "name": "ci-failure-fix-worker",
+            "match_labels": ["ci-failure-signature"],
+            "repo_allowlist": ["acme/widget"],
+            "repo": "example.com/acme/widget",
+            "task_label": "ci-failure-fix-worker",
+            "labels": ["ci-failure-fix-worker"],
+        }
+    ]
+}
+
+
+def test_issue_matching_rule_creates_task():
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    r = tc.post("/webhook/issue", json=_CI_FAILURE_ISSUE)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["skipped"] == []
+    task = body["created"][0]
+    assert task["source"] == "issue-webhook"
+    assert task["origin_ref"] == "issue/5287"
+    assert task["repo"] == "example.com/acme/widget"
+    assert task["labels"] == ["ci-failure-fix-worker"]
+    assert task["dedup_key"] == "ci-failure-fix-worker:acme/widget#5287"
+    assert len(sink) == 1
+
+
+def test_issue_dedup_key_matches_poller_format():
+    """The webhook path's default dedup key must collide with whatever the
+    periodic poller (e.g. tools/ci-failure-fix-worker-trigger.py's own
+    ``build_dedup_key``) would derive for the same issue, so either path
+    creating the task first is idempotent against the other."""
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    tc.post("/webhook/issue", json=_CI_FAILURE_ISSUE)
+    assert sink[0]["dedup_key"] == "ci-failure-fix-worker:acme/widget#5287"
+
+
+def test_issue_default_prompt_frames_event_fields_as_untrusted():
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    tc.post("/webhook/issue", json=_CI_FAILURE_ISSUE)
+    assert "untrusted subject data" in sink[0]["prompt"]
+
+
+def test_issue_custom_prompt_template_still_frames_body_as_untrusted():
+    """A rule-configured prompt_template must not bypass the guardrail --
+    the issue's own title/body is still attacker-influenceable content."""
+    tc, sink = _client({
+        "issues": [{
+            **_ISSUE_RULES_CONFIG["issues"][0],
+            "prompt_template": "Custom: {title}",
+        }]
+    })
+    tc.post("/webhook/issue", json=_CI_FAILURE_ISSUE)
+    prompt = sink[0]["prompt"]
+    assert prompt.startswith("Custom: CI failure: guards (full-tree, non-PR-scoped)")
+    assert "untrusted subject data" in prompt
+
+
+def test_issue_label_filter_not_satisfied_is_skipped():
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {
+        **_CI_FAILURE_ISSUE,
+        "issue": {**_CI_FAILURE_ISSUE["issue"], "labels": [{"name": "bug"}]},
+    }
+    r = tc.post("/webhook/issue", json=body)
+    assert r.json()["created"] == []
+    assert "label filter" in r.json()["skipped"][0]["reason"]
+    assert sink == []
+
+
+def test_issue_action_not_matched_is_skipped():
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {**_CI_FAILURE_ISSUE, "action": "closed"}
+    r = tc.post("/webhook/issue", json=body)
+    assert r.json()["created"] == []
+    assert "action" in r.json()["skipped"][0]["reason"]
+    assert sink == []
+
+
+def test_issue_gitea_label_updated_action_matches_default_rule():
+    """Gitea's own label webhook action is 'label_updated' (GitHub's is
+    'labeled') -- the default match_actions must cover both so an adopter
+    doesn't have to know to override it just to run on Gitea. Modeled with
+    a realistic changes.added_labels payload, since label_updated alone
+    doesn't distinguish an addition from a removal."""
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {
+        **_CI_FAILURE_ISSUE,
+        "action": "label_updated",
+        "changes": {"added_labels": [{"name": "ci-failure-signature"}]},
+    }
+    r = tc.post("/webhook/issue", json=body)
+    assert len(r.json()["created"]) == 1
+    assert len(sink) == 1
+
+
+def test_issue_gitea_label_updated_pure_removal_does_not_enqueue():
+    """Gitea's label_updated also fires for a pure label removal. Even
+    though the issue's current label set may still satisfy match_labels,
+    removing an unrelated label is not new-work and must not enqueue a
+    (potentially duplicate, once an earlier task goes terminal) task."""
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {
+        **_CI_FAILURE_ISSUE,
+        "action": "label_updated",
+        "changes": {"removed_labels": [{"name": "bug"}]},
+    }
+    r = tc.post("/webhook/issue", json=body)
+    assert r.json()["created"] == []
+    assert "removal-only" in r.json()["skipped"][0]["reason"]
+    assert sink == []
+
+
+def test_issue_repo_allowlist_rejects_other_repo():
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {
+        **_CI_FAILURE_ISSUE,
+        "repository": {**_CI_FAILURE_ISSUE["repository"], "full_name": "someone/else"},
+    }
+    r = tc.post("/webhook/issue", json=body)
+    assert r.json()["created"] == []
+    assert "not in allowlist" in r.json()["skipped"][0]["reason"]
+    assert sink == []
+
+
+def test_issue_non_issue_body_skipped():
+    tc, _ = _client(_ISSUE_RULES_CONFIG)
+    r = tc.post("/webhook/issue", json={"hello": "world"})
+    assert r.json()["skipped"] == "not an issue event"
+
+
+@pytest.mark.parametrize("malformed_number", ["", False, True, 0, -1, {"n": 1}])
+def test_issue_malformed_number_is_not_a_500(malformed_number):
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {
+        **_CI_FAILURE_ISSUE,
+        "issue": {**_CI_FAILURE_ISSUE["issue"], "number": malformed_number},
+    }
+    r = tc.post("/webhook/issue", json=body)
+    assert r.status_code == 200
+    assert r.json()["skipped"] == "not an issue event"
+    assert sink == []
+
+
+def test_issue_malformed_repository_is_not_a_500():
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {**_CI_FAILURE_ISSUE, "repository": "not-an-object"}
+    r = tc.post("/webhook/issue", json=body)
+    assert r.status_code == 200
+    assert r.json()["skipped"] == "not an issue event"
+    assert sink == []
+
+
+def test_issue_empty_full_name_is_skipped_not_collided():
+    """An empty/missing repository.full_name must not fall through to a
+    shared, ambiguous dedup-key/repo identity that distinct repositories'
+    malformed events could collide on."""
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {
+        **_CI_FAILURE_ISSUE,
+        "repository": {**_CI_FAILURE_ISSUE["repository"], "full_name": ""},
+    }
+    r = tc.post("/webhook/issue", json=body)
+    assert r.status_code == 200
+    assert r.json()["skipped"] == "not an issue event"
+    assert sink == []
+
+
+def test_issue_malformed_labels_is_not_a_500():
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {
+        **_CI_FAILURE_ISSUE,
+        "issue": {**_CI_FAILURE_ISSUE["issue"], "labels": "not-a-list"},
+    }
+    r = tc.post("/webhook/issue", json=body)
+    assert r.status_code == 200
+    assert r.json()["skipped"] == "not an issue event"
+    assert sink == []
+
+
+def test_issue_non_string_label_name_is_not_a_500():
+    """A truthy non-string label name (e.g. a nested object) must not reach
+    set(issue['labels']) and raise -- it's filtered out instead."""
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {
+        **_CI_FAILURE_ISSUE,
+        "issue": {
+            **_CI_FAILURE_ISSUE["issue"],
+            "labels": [{"name": ["not", "a", "string"]}, {"name": "ci-failure-signature"}],
+        },
+    }
+    r = tc.post("/webhook/issue", json=body)
+    assert r.status_code == 200
+    assert len(r.json()["created"]) == 1
+    assert len(sink) == 1
+
+
+def test_issue_unnamed_rules_in_same_lane_each_get_a_task():
+    """Two unnamed rules matching the same issue in the same lane must not
+    collide on the same default dedup_key: an identical fallback identity
+    for both (e.g. a shared literal "issue-rule" name/task_label) would
+    collapse their two independent creates into one."""
+    tc, sink = _client({
+        "issues": [
+            {"match_labels": ["ci-failure-signature"], "repo": "lane-a"},
+            {"match_labels": ["ci-failure-signature"], "repo": "lane-a"},
+        ]
+    })
+    r = tc.post("/webhook/issue", json=_CI_FAILURE_ISSUE)
+    assert len(r.json()["created"]) == 2
+    assert sink[0]["dedup_key"] != sink[1]["dedup_key"]
+
+
+def test_issue_multiple_rules_each_independently_matched():
+    tc, sink = _client({
+        "issues": [
+            {"name": "a", "match_labels": ["ci-failure-signature"], "repo": "lane-a",
+             "task_label": "a-worker"},
+            {"name": "b", "match_labels": ["needs-decomposition"], "repo": "lane-b",
+             "task_label": "b-worker"},
+        ]
+    })
+    r = tc.post("/webhook/issue", json=_CI_FAILURE_ISSUE)
+    assert len(r.json()["created"]) == 1
+    assert len(r.json()["skipped"]) == 1
+    assert sink[0]["repo"] == "lane-a"
+
+
 def test_inbound_token_guard():
     tc, sink = _client({"inbound_token": "secret"})
     assert tc.post("/webhook/pr", json=_MERGED_PR).status_code == 401
