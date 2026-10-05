@@ -69,6 +69,15 @@ class Inbox:
         self._slots: dict[str, Any] = {}
         self._pending: set[str] = set()
         self._wake_queued = False
+        # Reentrant: a test double's (or any other same-thread, inline)
+        # ``post_message`` may synchronously call back into
+        # ``drain()``/``drain_apply()`` -- which also needs this lock to
+        # reset ``_wake_queued`` -- from within ``post()``'s own
+        # wake-attempt critical section, on the SAME thread. A plain
+        # ``Lock`` would deadlock there; cross-thread callers still block
+        # normally, since reentrancy only ever applies to the thread
+        # already holding it.
+        self._wake_lock = threading.RLock()
         self._home_thread_id = threading.get_ident()
 
     def post(self, slot: str, value: Any) -> bool:
@@ -108,39 +117,49 @@ class Inbox:
         with self._lock:
             self._slots[slot] = value
             self._pending.add(slot)
-            need_wake = not self._wake_queued
-            self._wake_queued = True
         if threading.get_ident() == self._home_thread_id:
             self.drain_apply()
             return True
-        if not need_wake:
-            return True
-        delivered = False
-        log_exc_info = False
-        try:
-            # MessagePump.post_message's own contract: it returns ``False``
-            # (not a raise) when the pump is already closing/closed -- an
-            # undeliverable wake that looks identical to success unless the
-            # return value itself is checked, not just "did it raise".
-            delivered = self._owner.post_message(InboxUpdated())
-        except Exception:
-            log_exc_info = True
-        if delivered:
-            return True
-        with self._lock:
-            # Only reset if this post's own wake is still the one on
-            # record -- a concurrent post() that queued (and is about to
-            # successfully deliver) its own wake after this one failed must
-            # never have its claim clobbered back to "needs a wake" by this
-            # stale failure, letting a later setup epoch wrongly believe its
-            # own wake already succeeded.
+        # ``_wake_lock`` is held across the WHOLE check-attempt-reset
+        # sequence below (not just the flag read/write), so it fully
+        # serializes concurrent wake attempts: a second post() can never
+        # observe "a wake is already queued" while a first attempt is
+        # actually in flight and about to fail -- it either sees a
+        # genuinely still-queued (and so far undelivered-but-not-yet-
+        # failed) wake, or it blocks until that attempt resolves and then
+        # sees the true post-resolution state. Without this, a narrow
+        # window existed between "mark queued" and "attempt delivery"
+        # where a concurrent post() could wrongly believe some other
+        # thread's wake would cover it, even though that wake was about to
+        # fail.
+        with self._wake_lock:
             if self._wake_queued:
-                self._wake_queued = False
+                return True
+            self._wake_queued = True
+            delivered = False
+            wake_exc: Exception | None = None
+            try:
+                # MessagePump.post_message's own contract: it returns
+                # ``False`` (not a raise) when the pump is already
+                # closing/closed -- an undeliverable wake that looks
+                # identical to success unless the return value itself is
+                # checked, not just "did it raise".
+                delivered = self._owner.post_message(InboxUpdated())
+            except Exception as exc:
+                wake_exc = exc
+            if delivered:
+                return True
+            self._wake_queued = False
         log.warning(
             "Inbox.post(%r): failed to wake the owning render flow "
             "(posted value is still recorded and will be picked up "
             "by the next proactive drain, if any)", slot,
-            exc_info=log_exc_info,
+            # Pass the captured exception object itself (or ``None``) --
+            # by the time this runs, we're well past the `except` block
+            # that caught it, so `exc_info=True` here would find no
+            # active exception and log a useless "NoneType: None" instead
+            # of the real cause.
+            exc_info=wake_exc,
         )
         return False
 
@@ -154,8 +173,9 @@ class Inbox:
         with self._lock:
             changed = {name: self._slots.pop(name) for name in self._pending}
             self._pending.clear()
+        with self._wake_lock:
             self._wake_queued = False
-            return changed
+        return changed
 
     def drain_apply(self) -> int:
         """Drain, then call every value that is callable (zero-argument).

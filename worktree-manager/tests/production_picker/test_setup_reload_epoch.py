@@ -523,45 +523,42 @@ def test_setup_reload_unmount_disposes_payload_if_marshalled_callback_never_runs
 
 
 def test_setup_reload_disposes_payload_when_apply_raises():
+    """When ``_apply_setup_payload`` itself raises, the closure must record
+    a diagnosed failure (so a poller sees the real cause instead of
+    spinning) and dispose the payload -- and the exception must NOT escape
+    the closure: it runs inside ``Inbox.drain_apply()`` on the render flow
+    itself (via ``_tick()``/``on_inbox_updated``), so letting it propagate
+    would terminate rendering entirely, with no `_setup_failed_epoch` ever
+    recorded for a poller to see -- the exact #5220 failure mode, just
+    triggered by `_apply_setup_payload` instead of a wake failure."""
     disposed = threading.Event()
-    raised = threading.Event()
+    failed = threading.Event()
 
     class _Loader:
         def cancel(self):
             disposed.set()
 
-    class _App:
-        def call_from_thread(self, fn):
-            try:
-                fn()
-            except RuntimeError:
-                raised.set()
-
     class _Screen(PickerScreenRuntimeMixin):
         def __init__(self):
-            self.app = _App()
+            self.app = _ImmediateApp()
             self._bg_cancel = threading.Event()
             self._setup_epoch = 0
             self._setup_applied_epoch = 0
             self._setup_failed_epoch = 0
             self._pending_setup_payloads = {}
             self._setup_payloads_lock = threading.Lock()
+            self.failures: list[tuple[int, Exception]] = []
 
         def post_message(self, message):
             """Mirrors the old fake ``_App.call_from_thread``: drains and
-            applies immediately, swallowing the ``RuntimeError`` ``_apply``
-            itself re-raises after disposing the payload -- this is NOT a
-            wake failure (so it must never trip the new "could not wake"
-            fallback in ``_start_setup_reload_worker``), it's the
-            already-handled "apply itself raised" path."""
+            applies immediately. The closure must no longer raise at all
+            (it records its own failure instead), so nothing here needs to
+            catch anything."""
             from worktree_manager.production_picker.picker_tui.inbox import (
                 ensure_inbox,
             )
 
-            try:
-                ensure_inbox(self).drain_apply()
-            except RuntimeError:
-                raised.set()
+            ensure_inbox(self).drain_apply()
             return True
 
         def _prime_setup_reload(self):
@@ -577,15 +574,20 @@ def test_setup_reload_disposes_payload_when_apply_raises():
             raise RuntimeError("apply blew up")
 
         def _apply_setup_failure(self, epoch, err):
-            raise AssertionError(f"unexpected failure path: {epoch} {err}")
+            self.failures.append((epoch, err))
+            failed.set()
 
         def refresh(self):
             return None
 
     screen = _Screen()
-    screen._start_setup_reload_worker()
-    assert raised.wait(timeout=5)
+    epoch = screen._start_setup_reload_worker()
     assert disposed.wait(timeout=5)
+    assert failed.wait(timeout=5)
+    assert len(screen.failures) == 1
+    failed_epoch, err = screen.failures[0]
+    assert failed_epoch == epoch
+    assert "apply blew up" in str(err)
 
 
 def test_sync_setup_disposes_payload_when_apply_raises():

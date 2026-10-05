@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 
 import pytest
 
@@ -19,6 +20,9 @@ from worktree_manager.production_picker.picker_tui.inbox import (
     Inbox,
     InboxUpdated,
     ensure_inbox,
+)
+from worktree_manager.production_picker.picker_tui.engine_runtime import (
+    PickerScreenRuntimeMixin,
 )
 
 
@@ -286,6 +290,62 @@ def test_wake_failure_resets_wake_state_so_a_later_post_retries_the_wake():
     assert inbox.drain() == {"slot-a": "a", "slot-b": "b"}
 
 
+def test_a_post_racing_a_failing_wake_still_gets_its_own_retry():
+    """The narrower race the reset above exists for: a second post()
+    arriving WHILE the first attempt is still in flight (not after it has
+    already failed) must not observe a stale "wake already queued" and
+    skip its own attempt -- it must either genuinely share a wake that
+    goes on to succeed, or (this case) block until the first attempt
+    resolves and then see the correct, failed state and retry for real."""
+    release_first_attempt = threading.Event()
+    second_about_to_post = threading.Event()
+
+    # A thin owner whose post_message blocks until released -- so the
+    # second post() below has a real window to try to observe the first
+    # attempt's in-progress (not-yet-resolved) state.
+    class _StallingOwner:
+        def __init__(self):
+            self.messages = []
+
+        def post_message(self, message):
+            self.messages.append(message)
+            second_about_to_post.set()
+            release_first_attempt.wait(timeout=5)
+            return False  # fails once released, like a closing pump
+
+    owner = _StallingOwner()
+    inbox = Inbox(owner)
+    results = {}
+
+    def _first():
+        results["first"] = _post_from_other_thread(inbox, "slot-a", "a")
+
+    t_first = threading.Thread(target=_first)
+    t_first.start()
+    assert second_about_to_post.wait(timeout=5)
+
+    def _second():
+        results["second"] = _post_from_other_thread(inbox, "slot-b", "b")
+
+    t_second = threading.Thread(target=_second)
+    t_second.start()
+    # Give the second post a real chance to run concurrently before
+    # releasing the first -- it must block on the wake lock, not race past
+    # it believing a wake is already safely in flight.
+    time.sleep(0.05)
+    release_first_attempt.set()
+    t_first.join(timeout=5)
+    t_second.join(timeout=5)
+    assert not t_first.is_alive() and not t_second.is_alive()
+    assert results["first"] is False
+    # The real point of this test: the second post must have made its OWN
+    # delivery attempt (a second post_message call), not silently folded
+    # into the first (failing) one.
+    assert len(owner.messages) == 2
+    assert results["second"] is False
+    assert inbox.drain() == {"slot-a": "a", "slot-b": "b"}
+
+
 def test_discard_removes_a_pending_slot_without_applying_it():
     inbox, _ = _inbox_with_foreign_home()
     calls = []
@@ -355,6 +415,43 @@ def test_ensure_inbox_returns_an_already_constructed_inbox_untouched():
     owner = _Owner()
     owner.inbox = Inbox(owner)
     assert ensure_inbox(owner) is owner.inbox
+
+
+def test_drain_inbox_swallows_a_raising_closure_instead_of_crashing_the_render_flow(caplog):
+    """``PickerScreenRuntimeMixin._drain_inbox`` is called from ``_tick()``
+    and the ``InboxUpdated`` message handler -- squarely on the render
+    flow. ``Inbox.drain_apply()`` deliberately re-raises a closure's own
+    exception, but letting that escape ``_drain_inbox`` itself would
+    terminate rendering entirely over one producer's bug. This is the
+    last-resort net: a raising closure is logged, not left to crash the
+    screen, and `_drain_inbox` itself never raises."""
+
+    class _Screen(PickerScreenRuntimeMixin):
+        def post_message(self, message):
+            return True
+
+    screen = _Screen()
+    # Post directly via ``drain()``'s underlying storage (bypassing the
+    # home-thread immediate-apply shortcut, which would otherwise invoke
+    # the closure synchronously inside ``post()`` itself, not inside
+    # ``_drain_inbox``) -- construct the Inbox on a foreign thread so this
+    # test's own thread is an ordinary, non-home poster.
+    inbox, _ = _inbox_with_foreign_home(screen)
+    screen.inbox = inbox
+    ran = []
+
+    def _boom():
+        ran.append("boom")
+        raise RuntimeError("producer bug")
+
+    screen.inbox.post("broken", _boom)
+    with caplog.at_level(logging.WARNING, logger="agent-worktrees.picker"):
+        result = screen._drain_inbox()
+    assert ran == ["boom"]
+    assert result == 0
+    assert any(
+        "a posted closure raised" in r.message for r in caplog.records
+    )
 
 
 def test_inbox_updated_message_carries_no_payload_and_names_its_handler():

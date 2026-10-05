@@ -2,6 +2,7 @@
 """PickerScreen mixin extracted from ``engine.py``."""
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -11,6 +12,9 @@ from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_load
 from .inbox import ensure_inbox
 from .selection import ListSelection
 from .. import update_stage
+
+log = logging.getLogger("agent-worktrees.picker")
+
 
 #: Minimum time between real ``update_stage.indicator_state()`` polls
 #: (picker-performance-and-responsiveness Phase A). That call is a full
@@ -301,8 +305,30 @@ class PickerScreenRuntimeMixin:
     def _drain_inbox(self) -> int:
         """Apply every closure posted to ``self.inbox`` since the last
         drain. The sole place that turns a background producer's posted
-        outcome into actual widget/state mutation -- see inbox.py."""
-        return self.inbox.drain_apply()
+        outcome into actual widget/state mutation -- see inbox.py.
+
+        ``Inbox.drain_apply()`` deliberately re-raises a closure's own
+        exception (so it's never silently swallowed) -- but this method is
+        invoked from ``_tick()`` and the ``InboxUpdated`` message handler,
+        both squarely on the render flow: letting an uncaught producer bug
+        escape here would terminate rendering entirely, for every producer
+        sharing this one inbox, not just the one that actually failed. Each
+        producer's closure is expected to record its own diagnosed failure
+        before it could ever raise (see the setup-reload worker's `_apply`
+        for the pattern) -- this is the last-resort net for one that
+        doesn't, logged so it's at least diagnosable rather than silently
+        lost along with the render flow.
+        """
+        try:
+            return self.inbox.drain_apply()
+        except Exception:
+            log.warning(
+                "_drain_inbox: a posted closure raised -- the render flow "
+                "continues, but this producer's own outcome was not fully "
+                "applied and recorded no diagnosed failure of its own",
+                exc_info=True,
+            )
+            return 0
     def _tick(self):
         self._drain_inbox()
         self.frame += 1
@@ -727,9 +753,20 @@ class PickerScreenRuntimeMixin:
                 try:
                     self._invalidate_setup_reload_caches()
                     self._apply_setup_payload(payload_to_apply)
-                except Exception:
+                except Exception as apply_exc:
+                    # Record a diagnosed failure instead of letting this
+                    # escape -- this closure runs inside
+                    # ``Inbox.drain_apply()`` on the render flow itself
+                    # (via ``_tick()``/``on_inbox_updated``), so a bare
+                    # re-raise here would propagate into Textual's render
+                    # loop and could terminate it, with no
+                    # `_setup_failed_epoch` ever recorded for a poller to
+                    # see (the exact #5220 failure mode, just triggered by
+                    # `_apply_setup_payload` instead of a wake failure).
                     self._dispose_setup_payload(payload_to_apply)
-                    raise
+                    self._apply_setup_failure(epoch, apply_exc)
+                    self.refresh()
+                    return
                 self._setup_applied_epoch = epoch
                 self.refresh()
 
