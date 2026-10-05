@@ -412,11 +412,13 @@ class AgentResolver:
         ``copilot_args`` (its explicitly configured values) completely
         untouched: recomputing "stale" args for a project that was never
         actually appended risks matching a real, user-configured suffix by
-        coincidence and silently deleting it. The final ``repo``'s own-
-        plugin resolution still receives ``target.cwd`` as its anchor
-        fallback, so a project with no registry anchor (resolved only via
-        ``cwd``, e.g. when ``repo`` equals the venue's own default project)
-        keeps that same fallback through the rebind rather than losing it.
+        coincidence and silently deleting it. ``target.cwd`` is the venue's
+        own checkout, not the bound repo's -- it is only a valid anchor
+        fallback for the final resolution when ``repo`` IS that same
+        default project (no actual project change, just re-confirming the
+        same one); for any other ``repo`` it must not be passed at all, or
+        a different, unrelated project would silently resolve the venue's
+        own checkout's plugins as if they belonged to it.
         """
         if target.type == "local":
             import dataclasses
@@ -431,9 +433,14 @@ class AgentResolver:
                 )
                 if stale and copilot_args[-len(stale):] == stale:
                     copilot_args = copilot_args[: -len(stale)]
+            cwd_fallback = (
+                target.cwd
+                if old_config is not None and repo == old_config.project
+                else None
+            )
             copilot_args = (
                 copilot_args
-                + self._own_plugin_args(repo, target.cwd)
+                + self._own_plugin_args(repo, cwd_fallback)
                 + self._related_plugin_args(repo)
             )
             return dataclasses.replace(

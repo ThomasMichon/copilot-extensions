@@ -2171,6 +2171,44 @@ class TestVenueBoundResolve:
         assert "/from-cwd/demo" in target.copilot_args
 
     @pytest.mark.asyncio
+    async def test_repo_at_machine_rebind_different_project_ignores_venue_cwd(self):
+        # Regression (#5306 review): the cwd fallback above is ONLY valid
+        # when `repo` is the venue's own default project (genuinely the
+        # same checkout) -- for any OTHER repo, `target.cwd` belongs to the
+        # venue's default project, not the requested one, and must not be
+        # passed at all, or the requested (different, unrelated) project
+        # would silently resolve the venue's own checkout's plugins.
+        from unittest.mock import patch
+        local = self.machines["host-dev6"]
+        agents = {
+            "box": AgentConfig(
+                name="box", project="demo", cwd="/checkout/demo", derived=True,
+            ),
+        }
+
+        def _own(project, cwd=None):
+            if project == "demo" and cwd == "/checkout/demo":
+                return ["--plugin-dir", "/from-cwd/demo"]
+            if project == "other-repo" and cwd is None:
+                return ["--plugin-dir", "/own/other-repo"]
+            # Anything else (e.g. other-repo incorrectly given demo's cwd)
+            # is the bug this test guards against.
+            return ["--plugin-dir", "/WRONG"]
+
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local, "windows"),
+        ):
+            resolver = AgentResolver(agents, self.machines)
+            with patch.object(resolver, "_own_plugin_args", side_effect=_own):
+                target = await resolver.resolve_async("other-repo@box")
+
+        assert target.project == "other-repo"
+        assert "/WRONG" not in target.copilot_args
+        assert "/from-cwd/demo" not in target.copilot_args
+        assert "/own/other-repo" in target.copilot_args
+
+    @pytest.mark.asyncio
     async def test_repo_at_remote_machine_leaves_ssh_copilot_args_untouched(self):
         # Regression (#5306 review): a genuine-remote (non-loopback) venue
         # never had plugin args appended by _resolve_static in the first

@@ -3325,6 +3325,38 @@ def test_resolve_local_binstub_extensionless_file_does_not_mask_cmd_shim(
     assert os.path.normcase(resolved) == os.path.normcase(str(shim))
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="PATHEXT-based extension recognition is a Windows-only concern.",
+)
+def test_resolve_local_binstub_skips_ps1_for_directly_launchable_cmd(
+    tmp_path, monkeypatch,
+) -> None:
+    """Regression (#5306 review): ``PATHEXT`` commonly lists interpreter-
+    dependent extensions (``.PS1``, ``.PY``, ``.JS``, ...) alongside directly
+    launchable ones -- they're there for an interactive shell's own lookup,
+    not because ``create_subprocess_exec`` (no shell, no interpreter) can
+    spawn them. With a ``.ps1`` shim present (even one PATHEXT lists ahead
+    of ``.cmd``), the directly-launchable ``.cmd`` shim must still be
+    selected, never the ``.ps1`` -- picking it would fail with Windows error
+    193 (not a valid Win32 application)."""
+    import os
+    from pathlib import Path
+
+    from agent_bridge.routes.worktrees import _resolve_local_binstub
+
+    bin_dir = tmp_path / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    (bin_dir / "private-downstream-repo.ps1").write_text("# not directly launchable\n")
+    cmd_shim = bin_dir / "private-downstream-repo.cmd"
+    cmd_shim.write_text("@echo off\n")
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("PATHEXT", ".PS1;.CMD;.EXE")
+    resolved = _resolve_local_binstub("private-downstream-repo")
+    assert os.path.normcase(resolved) == os.path.normcase(str(cmd_shim))
+
+
 def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
     """agent-bridge-worktree-native-agents (Phase 3): a worktree's bound
     charter borrows its own launch shape (copilot_path/mcp_servers/env, and

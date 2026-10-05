@@ -521,23 +521,35 @@ def _resolve_local_binstub(project: str) -> str:
     all -- so it silently misses the installed ``.cmd``/``.ps1`` shim sitting
     right next to it. Try the exact name first -- accepted only when it is
     genuinely launchable (POSIX: executable via ``os.access(X_OK)``;
-    Windows: its own suffix is a recognized ``PATHEXT`` extension, the same
-    thing that makes ``shutil.which`` accept a bare name without a suffix
-    search -- a plain extensionless file is *never* launchable on Windows,
-    so it must fall through exactly like a non-executable POSIX file does)
-    -- then each ``PATHEXT`` suffix directly against that same directory on
-    Windows, before falling back to a bare ``shutil.which(project)`` PATH
-    search.
+    Windows: restricted to an extension ``CreateProcess`` can launch
+    *directly*, with no interpreter -- ``PATHEXT`` itself is broader than
+    that (it also lists interpreter-dependent extensions like ``.PS1``/
+    ``.PY``/``.JS``, present on this machine purely so an interactive shell
+    knows to look them up, not because they're directly spawnable the way
+    ``create_subprocess_exec`` needs), so picking an arbitrary ``PATHEXT``
+    match by position risks selecting a ``.ps1`` ahead of an equally-present
+    ``.cmd`` and failing to launch at all -- a plain extensionless file is
+    *never* launchable on Windows this way, so it must fall through exactly
+    like a non-executable POSIX file does) -- then each directly-launchable
+    suffix against that same directory on Windows, before falling back to a
+    bare ``shutil.which(project)`` PATH search.
     """
     import shutil
     from pathlib import Path
 
+    # Extensions CreateProcess can exec with no interpreter in front of it.
+    # Deliberately narrower than PATHEXT (which also lists .PS1/.PY/.JS/...
+    # for an interactive shell's own lookup, not direct process creation).
+    direct_launch_exts = {".COM", ".EXE", ".BAT", ".CMD"}
+
     explicit = Path.home() / ".local" / "bin" / project
     if os.name == "nt":
         pathext = [e for e in os.environ.get("PATHEXT", "").split(os.pathsep) if e]
-        if explicit.suffix.upper() in {e.upper() for e in pathext} and explicit.is_file():
+        if explicit.suffix.upper() in direct_launch_exts and explicit.is_file():
             return str(explicit)
         for ext in pathext:
+            if ext.upper() not in direct_launch_exts:
+                continue
             candidate = explicit.with_name(explicit.name + ext)
             if candidate.is_file():
                 return str(candidate)
