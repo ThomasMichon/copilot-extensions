@@ -51,6 +51,84 @@ _fail() { printf '  [FAIL] %s\n' "$1" >&2; }
 _warn() { printf '  [WARN] %s\n' "$1" >&2; }
 _step() { printf '  ...    %s\n' "$1"; }
 
+# Stable, documented contract (ThomasMichon/copilot-extensions#5066): a file
+# containing a single epoch-seconds expiry, present for the duration of a
+# live-service update/start lifecycle (do_update/do_start) -- any downstream
+# consumer (a local liveness watchdog, a diagnostic tool) can check
+# `[[ -f "$INSTALL_DIR/update-in-progress" ]] && (( $(cat ...) > $(date +%s) ))`
+# without needing any plugin-specific caller-side wrapping. UPDATE_MARKER
+# itself is set once INSTALL_DIR is finalized below; these two helpers only
+# reference it at call time, so defining them here (alongside the other
+# early helpers) is safe.
+#
+# Process-local: true once THIS invocation holds a refcount slot.
+_UPDATE_MARKER_HELD=false
+#
+# Reference-counted, not single-owner: do_update holding the marker for a
+# long cutover and a separate, brief do_start both legitimately want it
+# live at once, and a single-owner/last-writer-wins scheme would let the
+# SHORT invocation's own exit delete the marker while the LONG one is
+# still mid-transition -- the marker must stay present until every
+# concurrent holder has released its own slot, not just the most recent
+# one. The refcount file + its own dedicated flock (fd 9, separate from
+# the main install lock so a brief do_start never needs to contend for --
+# or risk reentering -- that longer-held lock) make increment/decrement
+# atomic across processes.
+#
+# `mkdir -p` first: on a fresh or deleted install root, $INSTALL_DIR itself
+# may not exist yet at the point either live-service lifecycle starts (its
+# own provisioning step is what would normally create it) -- the marker
+# must not fail BEFORE that provisioning ever gets a chance to run.
+_write_update_marker() {
+    if [[ "$_UPDATE_MARKER_HELD" == true ]]; then
+        return 0
+    fi
+    local ttl="${1:-${UPDATE_MARKER_TTL_DEFAULT}}"
+    mkdir -p "$(dirname "${UPDATE_MARKER}")"
+    exec 9>"${UPDATE_MARKER_REFCOUNT_LOCK}"
+    flock -w 10 9 || true   # best-effort: proceed even if briefly uncontended-but-slow
+    local count tmp
+    count="$(cat "${UPDATE_MARKER_REFCOUNT}" 2>/dev/null || echo 0)"
+    [[ "$count" =~ ^[0-9]+$ ]] || count=0
+    if (( count == 0 )); then
+        # First holder: stamp a fresh marker. A later joiner deliberately
+        # does NOT refresh the expiry -- the TTL is a safety-net backstop,
+        # not a per-holder renewal lease.
+        tmp="$(mktemp "${UPDATE_MARKER}.XXXXXX")"
+        echo "$(( $(date +%s) + ttl ))" > "${tmp}"
+        mv -f "${tmp}" "${UPDATE_MARKER}"
+    fi
+    tmp="$(mktemp "${UPDATE_MARKER_REFCOUNT}.XXXXXX")"
+    echo "$(( count + 1 ))" > "${tmp}"
+    mv -f "${tmp}" "${UPDATE_MARKER_REFCOUNT}"
+    exec 9>&-
+    _UPDATE_MARKER_HELD=true
+}
+# Releases this invocation's own refcount slot; only the holder that takes
+# the count to zero actually removes the marker file, so it stays present
+# for the full duration of whichever concurrent transition runs longest.
+# Best-effort: a read/write race here is never fatal to the caller's own
+# exit (the TTL remains the backstop if the refcount file itself is ever
+# lost or corrupted).
+_clear_update_marker() {
+    [[ "$_UPDATE_MARKER_HELD" == true ]] || return 0
+    _UPDATE_MARKER_HELD=false
+    exec 9>"${UPDATE_MARKER_REFCOUNT_LOCK}" 2>/dev/null || return 0
+    flock -w 10 9 || true
+    local count tmp
+    count="$(cat "${UPDATE_MARKER_REFCOUNT}" 2>/dev/null || echo 0)"
+    [[ "$count" =~ ^[0-9]+$ ]] || count=0
+    (( count > 0 )) && (( count-- ))
+    if (( count <= 0 )); then
+        rm -f "${UPDATE_MARKER}" "${UPDATE_MARKER_REFCOUNT}"
+    else
+        tmp="$(mktemp "${UPDATE_MARKER_REFCOUNT}.XXXXXX")"
+        echo "${count}" > "${tmp}"
+        mv -f "${tmp}" "${UPDATE_MARKER_REFCOUNT}"
+    fi
+    exec 9>&-
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -232,6 +310,10 @@ else
     fi
 fi
 VENV_DIR="$INSTALL_DIR/.venv"
+UPDATE_MARKER="${INSTALL_DIR}/update-in-progress"
+UPDATE_MARKER_TTL_DEFAULT=1200  # 20 min -- generous past any observed real cutover
+UPDATE_MARKER_REFCOUNT="${UPDATE_MARKER}.refcount"
+UPDATE_MARKER_REFCOUNT_LOCK="${UPDATE_MARKER}.refcount.lock"
 LOCAL_BIN="$HOME/.local/bin"
 VENV_PYTHON="$VENV_DIR/bin/python"
 STUB="$LOCAL_BIN/agent-dispatch"
@@ -1580,6 +1662,12 @@ do_install() {
 
 do_update() {
     echo ''; echo '=== agent-dispatch update ==='; echo ''
+    # Mark the live-service update lifecycle as in-progress (ce#5066) so a
+    # local liveness watchdog never force-restarts a daemon that is
+    # legitimately, briefly mid-cutover. The EXIT trap covers every path
+    # below uniformly, including an unhandled error under `set -euo pipefail`.
+    _write_update_marker
+    trap _clear_update_marker EXIT
     _downgrade_guard
     _ensure_runtime
     # Thread B (parity with install.ps1): a version update must never kill an
@@ -1600,6 +1688,12 @@ do_update() {
 }
 
 do_start() {
+    # Mark the live-service start lifecycle as in-progress (ce#5066) --
+    # unlike agent-bridge's do_start, this one has no "already healthy,
+    # nothing to do" early return, so the marker covers the whole function.
+    _write_update_marker
+    trap _clear_update_marker EXIT
+
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
         systemctl --user start "$SYSTEMD_UNIT"
         if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
