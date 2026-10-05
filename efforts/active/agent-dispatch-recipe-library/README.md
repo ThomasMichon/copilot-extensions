@@ -1356,4 +1356,23 @@ suite green (3743 passed, 23 skipped, the one known flake above).
   explicit selector requirement for `global:effort-driver`.
 - Focused validation after the fix:
   - `python tools/run-plugin-tests.py agent-dispatch -k effort_driver --timeout 600 --plugin-timeout 2400`
-    → **10 passed**
+    → **14 passed**
+
+### 2026-10-04 (same day) — Review feedback, round 7
+- Automated review's remaining real gaps were the *other* eager-validation path
+  and the effort record's own coverage claim:
+  1. `registrations.py` still only routed `command` and
+     `repository_issue_loop` emitter specs through eager `validate_spec()`,
+     so an inline `effort_driver_loop` registration could still bypass that
+     validation even though the supervisor launcher path was fixed in round 5.
+     Fixed by teaching `validate_registration(RegistrationKind.EMITTER, ...)`
+     the new builtin, with a dedicated regression test.
+  2. The Phase 8 checklist/journal claimed end-to-end lifecycle coverage more
+     strongly than the tests actually demonstrated. Added a lifecycle test that
+     starts from a real active effort README, runs `effort_driver_loop.run_tick`
+     to author the task payload, then moves that same effort into the archive
+     with merged-PR / closed-issue evidence and confirms the queued submitted
+     task through the trusted `effort-driver` evaluator.
+- Focused validation after the fix:
+  - `python tools/run-plugin-tests.py agent-dispatch -k "effort_driver or effort_driver_loop_expansion_builds_periodic_emitter_command or builtin_effort_driver_loop" --timeout 600 --plugin-timeout 2400`
+    → **14 passed**

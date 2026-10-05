@@ -9,6 +9,7 @@ import time
 import pytest
 
 from agent_dispatch import handoff_claim_release, remote_dispatch
+from agent_dispatch.effort_driver_loops import run_tick as run_effort_driver_tick
 from agent_dispatch.github_provider_adapter import PRObservation
 from agent_dispatch.pr_observation_store import PRObservationStore
 from agent_dispatch.provider_state_machine import ApprovalStatus, Mergeability, Revision
@@ -1090,6 +1091,118 @@ def test_effort_driver_verification_requires_archive_state_with_pr_and_issue_evi
     assert queue.get(active_id).status == Status.SUBMITTED
     assert weak_evidence_result["applied"][0]["decision"] == "noop"
     assert queue.get(weak_evidence_id).status == Status.SUBMITTED
+
+
+def test_effort_driver_lifecycle_discovers_active_effort_then_confirms_archive_transition(
+    tmp_path,
+):
+    state_root = tmp_path / "state-root"
+    active_readme = (
+        state_root / "efforts" / "active" / "recipe-library" / "README.md"
+    )
+    active_readme.parent.mkdir(parents=True, exist_ok=True)
+    active_readme.write_text(
+        "# recipe library\n\n"
+        "- **Status:** Active\n\n"
+        "Open issues: #4691, #5200\n",
+        encoding="utf-8",
+    )
+
+    class _CreateClient:
+        def __init__(self):
+            self.created = []
+
+        def list(self, **_kwargs):
+            return []
+
+        def create(self, title, **fields):
+            task = {"id": "task-1", "title": title, **fields}
+            self.created.append(task)
+            return task
+
+    config = {
+        "name": "effort-driver",
+        "kind": "effort-driver-loop",
+        "repo": "example/project",
+        "source": "effort-driver",
+        "cadence_seconds": 3600,
+        "tick_interval_seconds": 60,
+        "effort_slugs": ["recipe-library"],
+        "state_root": str(state_root),
+        "task_label": "effort-work",
+        "require_verification": True,
+        "evaluator_ref": "effort-driver",
+        "pool": {
+            "max_active_processes": 1,
+            "body": {"type": "headless", "agent": "effort-worker"},
+        },
+    }
+    created = run_effort_driver_tick(
+        _CreateClient(), config, clock=lambda: 10_000, cwd=tmp_path
+    )["created"][0]
+
+    archived = (
+        state_root / "efforts" / "2026" / "10" / "04 recipe-library" / "README.md"
+    )
+    archived.parent.mkdir(parents=True, exist_ok=True)
+    active_readme.unlink()
+    archived.write_text(
+        "# recipe library\n\n"
+        "- **Status:** Done (archived 2026-10-04)\n\n"
+        "Merged PRs: #5201, #5202\n"
+        "Closed issues: #4691, #5200\n",
+        encoding="utf-8",
+    )
+
+    queue = TaskQueue(tmp_path / "tasks.db")
+    script = tmp_path / "eval.py"
+    script.write_text(
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        f"root = Path({str(state_root)!r})\n"
+        "task = json.load(sys.stdin)['task']\n"
+        "payload = json.loads(task['payload_inline'])['effort_driver_loop']\n"
+        "active_path = root / payload['effort_readme']\n"
+        "slug = payload['effort_slug']\n"
+        "if active_path.exists():\n"
+        "    json.dump({'decision': 'noop', 'reason': 'effort still active'}, sys.stdout)\n"
+        "    raise SystemExit\n"
+        "matches = sorted(root.glob(f'efforts/*/*/* {slug}/README.md'))\n"
+        "if not matches:\n"
+        "    json.dump({'decision': 'noop', 'reason': 'archive missing'}, sys.stdout)\n"
+        "    raise SystemExit\n"
+        "text = matches[-1].read_text(encoding='utf-8')\n"
+        "if 'Merged PRs:' not in text or 'Closed issues:' not in text:\n"
+        "    json.dump(\n"
+        "        {\n"
+        "            'decision': 'noop',\n"
+        "            'reason': 'archive missing durable PR/issue evidence',\n"
+        "        },\n"
+        "        sys.stdout,\n"
+        "    )\n"
+        "    raise SystemExit\n"
+        "json.dump(\n"
+        "    {\n"
+        "        'decision': 'confirm',\n"
+        "        'reason': 'effort archived with PR and issue evidence',\n"
+        "    },\n"
+        "    sys.stdout,\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    _register_script(queue, str(script), evaluator_ref="effort-driver")
+    task_id = _submitted_task(
+        queue,
+        created["title"],
+        require_verification=True,
+        evaluator_ref="effort-driver",
+        payload_inline=created["payload_inline"],
+    )
+
+    result = evaluate_submitted_task(queue, task_id, trigger="submitted")
+
+    assert result["applied"][0]["decision"] == "complete"
+    assert queue.get(task_id).status == Status.COMPLETED
 
 
 def test_future_scheduled_verification_uses_idle_interval_not_retry_interval(tmp_path):
