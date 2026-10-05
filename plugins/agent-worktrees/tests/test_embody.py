@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import embody_resume, sessions
+from agent_worktrees import embody_resume, sessions, worktree_identity
 
 
 # -- build_mux_new_session_argv (pure) --------------------------------------
@@ -171,7 +171,7 @@ class TestCmdEmbody:
 
     def test_existing_worktree_not_found(self, monkeypatch, capfd, tmp_path):
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtX")
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtX")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         rc = m.cmd_embody(_ns(worktree_id="wtX"))
         assert rc == 1
@@ -179,7 +179,7 @@ class TestCmdEmbody:
 
     def test_resume_when_mux_session_exists(self, monkeypatch, capfd, tmp_path):
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtY")
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtY")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtY.yaml").write_text("x")
         monkeypatch.setattr(
@@ -206,7 +206,7 @@ class TestCmdEmbody:
         delivers a pending_seed for that flow, via the resume branch, not
         the create branch."""
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtE")
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtE")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtE.yaml").write_text("x")
         record = type(
@@ -241,7 +241,7 @@ class TestCmdEmbody:
         self, monkeypatch, capfd, tmp_path,
     ):
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtF")
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtF")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtF.yaml").write_text("x")
         state = {"worktree_path": "/w/wtF", "pending_seed": "not yet delivered"}
@@ -273,7 +273,7 @@ class TestCmdEmbody:
 
     def test_create_detached_session_and_seed(self, monkeypatch, capfd, tmp_path):
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtZ")
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtZ")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtZ.yaml").write_text("x")
         monkeypatch.setattr(
@@ -315,7 +315,7 @@ class TestCmdEmbody:
         delivered on the first real attach even with no explicit --seed, and
         the record is updated to clear it once confirmed submitted."""
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtP")
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtP")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtP.yaml").write_text("x")
         record = type(
@@ -357,7 +357,7 @@ class TestCmdEmbody:
         restores it on an unconfirmed delivery, so the net final state is
         unchanged even though save_record is invoked twice."""
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtQ")
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtQ")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtQ.yaml").write_text("x")
         state = {"worktree_path": "/w/wtQ", "pending_seed": "still queued"}
@@ -404,7 +404,7 @@ class TestCmdEmbody:
         pending seed claimed, on a fresh launch and on a live-pane resume alike:
         the next attach would otherwise type a second copy after the draft."""
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtA")
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtA")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtA.yaml").write_text("x")
         state = {"worktree_path": "/w/wtA", "pending_seed": "queued"}
@@ -443,7 +443,7 @@ class TestCmdEmbody:
         prompt into an already-active conversation as an unwanted
         later-turn injection."""
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtR")
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtR")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtR.yaml").write_text("x")
         state = {"worktree_path": "/w/wtR", "pending_seed": "persisted"}
@@ -479,7 +479,7 @@ class TestCmdEmbody:
         # opt-in-not-ambient-default: a bare embody must never install tmux
         # underneath an operator running their own terminal/session manager.
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtY")
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtY")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtY.yaml").write_text("x")
         monkeypatch.setattr(
@@ -505,7 +505,7 @@ class TestCmdEmbody:
         # `cli-mode launch` (agent-bridge) is the deliberate per-request case
         # that IS fine defaulting tmux on -- it passes --ensure-mux.
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtX")
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtX")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtX.yaml").write_text("x")
         monkeypatch.setattr(
@@ -534,7 +534,7 @@ class TestCmdEmbody:
         tmp_path,
     ):
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wt-terminal")
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wt-terminal")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wt-terminal.yaml").write_text("x")
         record = type(
@@ -561,7 +561,7 @@ class TestCmdEmbody:
 
     def test_seed_ready_timeout_is_forwarded(self, monkeypatch, capfd, tmp_path):
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtT")
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtT")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtT.yaml").write_text("x")
         monkeypatch.setattr(
@@ -592,7 +592,7 @@ class TestCmdEmbody:
         # D4: --driver injects AGENT_BRIDGE_DRIVEN_BY into the session env and is
         # reported in the JSON (the "driven by <agent>" banner source).
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtDr")
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtDr")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtDr.yaml").write_text("x")
         monkeypatch.setattr(
@@ -705,7 +705,7 @@ class TestCmdEmbody:
 
     def test_spawn_failure_exits_4(self, monkeypatch, capfd, tmp_path):
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtE")
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtE")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtE.yaml").write_text("x")
         monkeypatch.setattr(
@@ -724,7 +724,7 @@ class TestCmdEmbody:
 
     def test_dry_run_reports_plan(self, monkeypatch, capfd, tmp_path):
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtD")
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtD")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtD.yaml").write_text("x")
         monkeypatch.setattr(
@@ -742,7 +742,7 @@ class TestCmdEmbody:
 
     def _stub_existing(self, monkeypatch, tmp_path, wt="wtR"):
         _stub_config(monkeypatch)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: wt)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: wt)
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / f"{wt}.yaml").write_text("x")
         monkeypatch.setattr(
@@ -1060,7 +1060,7 @@ class TestEmbodyLaunchPassthrough:
         wt_root.mkdir()
         (wt_root / "wt1.yaml").write_text("x")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: wt_root)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: r)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: r)
 
         class _Rec:
             worktree_id = "wt1"

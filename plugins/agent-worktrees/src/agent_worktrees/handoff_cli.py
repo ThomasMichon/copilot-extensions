@@ -6,7 +6,7 @@ import argparse
 import time
 from pathlib import Path
 
-from . import config as cfg, finalize as fin, output, profile_assignment, sessions, tracking
+from . import config as cfg, finalize as fin, output, profile_assignment, sessions, tracking, worktree_identity
 from . import pending_seed as pending_seed_mod, embody_resume
 from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
 
@@ -36,7 +36,6 @@ def _preflight_launch(*args, **kwargs): return _core()._preflight_launch(*args, 
 def _reflect_assignment(*args, **kwargs): return _core_helper("_reflect_assignment", resolve_launch_cli._reflect_assignment)(*args, **kwargs)
 def _repo_for_record(*args, **kwargs): return _core_helper("_repo_for_record", tracking._repo_for_record)(*args, **kwargs)
 def _repo_session_env(*args, **kwargs): return _core()._repo_session_env(*args, **kwargs)
-def _resolve_worktree_id(*args, **kwargs): return _core()._resolve_worktree_id(*args, **kwargs)
 def _unsupported_hosted_launch(*args, **kwargs): return _core()._unsupported_hosted_launch(*args, **kwargs)
 def _pending_handoff_retire_requests(*args, **kwargs): return _core()._pending_handoff_retire_requests(*args, **kwargs)
 def _monitor_retire_handoff_predecessor(*args, **kwargs): return _core()._monitor_retire_handoff_predecessor(*args, **kwargs)
@@ -313,7 +312,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         wt_id = created["worktree"]["id"]
         work_dir = created["worktree"]["path"]
     else:
-        wt_id = _resolve_worktree_id(raw_id)
+        wt_id = worktree_identity._resolve_worktree_id(raw_id)
         yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
         if not yaml_path.exists():
             return output._json_error(f"Worktree not found: {wt_id}")
@@ -819,7 +818,7 @@ def cmd_handoffs_check(args: argparse.Namespace) -> int:
     if check_all:
         records = tracking.list_records(cfg.tracking_dir())
     else:
-        resolved = _resolve_worktree_id(worktree_id)
+        resolved = worktree_identity._resolve_worktree_id(worktree_id)
         record_path = cfg.tracking_dir() / f"{resolved}.yaml"
         if not record_path.exists():
             return output._json_error(f"Worktree not found: {resolved}")
@@ -959,7 +958,7 @@ def cmd_handoff_cutover_trigger(args: argparse.Namespace) -> int:
     without needing its own copy of the daemon's internal checks (which
     cannot safely be called twice -- the claim step is one-shot)."""
     worktree_id = getattr(args, "worktree_id", None)
-    resolved = _resolve_worktree_id(worktree_id)
+    resolved = worktree_identity._resolve_worktree_id(worktree_id)
     record_path = cfg.tracking_dir() / f"{resolved}.yaml"
     if not record_path.exists():
         return output._json_error(f"Worktree not found: {resolved}")

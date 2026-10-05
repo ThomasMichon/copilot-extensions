@@ -11,6 +11,7 @@ import pytest
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
 from agent_worktrees import state_root
+from agent_worktrees import worktree_identity
 
 
 def _config(tmp_path) -> cfg.Config:
@@ -331,7 +332,7 @@ def test_resolve_json_resume_preflight_failure_precedes_tracking_mutation(
     record = SimpleNamespace(worktree_path=str(tmp_path / "worktrees" / "wt-1"))
     monkeypatch.setattr(m.cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tracking_dir)
-    monkeypatch.setattr(m, "_resolve_worktree_id", lambda _value: "wt-1")
+    monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda _value: "wt-1")
     monkeypatch.setattr(m.tracking, "load_record", lambda _path: record)
     monkeypatch.setattr(m.state_root_mod, "resolve_config_root", _unsafe_root)
     monkeypatch.setattr(

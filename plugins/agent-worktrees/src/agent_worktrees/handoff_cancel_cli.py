@@ -15,6 +15,7 @@ from . import output
 from . import tracking_lifecycle
 from . import config as cfg
 from . import status_updater_cli
+from . import worktree_identity
 
 
 def _core():
@@ -41,10 +42,6 @@ def _activate_project_for_worktree_id(*args, **kwargs):
     return _core_helper(
         "_activate_project_for_worktree_id", status_updater_cli._activate_project_for_worktree_id
     )(*args, **kwargs)
-
-
-def _resolve_worktree_id(*args, **kwargs):
-    return _core()._resolve_worktree_id(*args, **kwargs)
 
 
 def add_parsers(sub) -> None:
@@ -111,7 +108,7 @@ def cmd_cancel_handoff(args: argparse.Namespace) -> int:
             })
             return 1
         try:
-            wt_id = _resolve_worktree_id(wt_id)
+            wt_id = worktree_identity._resolve_worktree_id(wt_id)
         except Exception as exc:
             output._json_output({"cancelled": False, "reason": f"could not resolve worktree '{wt_id}': {exc}"})
             return 1

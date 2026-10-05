@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from agent_worktrees import __main__ as cli
-from agent_worktrees import git_ops, sessions, tracking
+from agent_worktrees import git_ops, sessions, tracking, worktree_identity
 
 S = git_ops.WorktreeState
 _REAL_BUILD_ACTIVE_PATHS = cli._build_active_paths
@@ -141,7 +141,7 @@ class CleanupHarness:
         self.monkeypatch.setattr(cli.git_ops, "has_remote", lambda *_a, **_k: False)
         self.monkeypatch.setattr(cli.git_ops, "fetch", lambda *_a, **_k: None)
         self.monkeypatch.setattr(cli.git_ops, "prune_worktrees", lambda *_a, **_k: None)
-        self.monkeypatch.setattr(cli, "_resolve_worktree_id", lambda value: value)
+        self.monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: value)
         self.monkeypatch.setattr(cli, "_hosted_session_blocks_cleanup", lambda rec: False)
         self.monkeypatch.setattr(cli.sessions, "_list_mux_sessions", lambda: {})
         self.monkeypatch.setattr(cli.sessions, "_mux_session_activity", lambda: {})

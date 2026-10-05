@@ -33,6 +33,7 @@ from pathlib import Path
 
 from . import (
     activity,
+    config as cfg,
     locks,
     obligations,
     pane_lifecycle,
@@ -42,9 +43,8 @@ from . import (
     sessions,
     sessions_pane_retire,
     tracking,
+    worktree_identity,
 )
-from . import config as cfg
-
 
 def _core():
     from . import __main__ as core
@@ -93,7 +93,7 @@ def _resolve_handoff_cutover_target(
 
     config = None
     if raw_id:
-        wt_id = core._resolve_worktree_id(raw_id)
+        wt_id = worktree_identity._resolve_worktree_id(raw_id)
     else:
         wt_id = core._infer_worktree_id_from_cwd()
         # Bare-resume authoritative fallback (#4098): under a two-step "Bare
@@ -855,7 +855,7 @@ def _handoff_cutover_retire_result(
     core = _core()
     retire_pane = getattr(args, "retire_pane", None)
     raw_id = getattr(args, "worktree_id", None)
-    wt_id = core._resolve_worktree_id(raw_id) if raw_id else None
+    wt_id = worktree_identity._resolve_worktree_id(raw_id) if raw_id else None
     session_id = getattr(args, "session_id", None)
     expected_mux = getattr(args, "mux_session", None)
     require_mux_identity = bool(getattr(args, "require_mux_identity", False))

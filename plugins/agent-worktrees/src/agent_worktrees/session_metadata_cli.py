@@ -13,6 +13,7 @@ from . import config as cfg
 from . import disposition_history, effort_focus, tracking
 from . import state_root as state_root_mod
 from . import status_updater_cli
+from . import worktree_identity
 
 
 def _core():
@@ -31,10 +32,6 @@ def _infer_worktree_id(*args, **kwargs):
 
 
 
-
-
-def _resolve_worktree_id(*args, **kwargs):
-    return _core()._resolve_worktree_id(*args, **kwargs)
 
 
 def resolve_worktree_id_by_codename(*args, **kwargs):
@@ -185,16 +182,16 @@ def _resolve_worktree_for_read(worktree_id, worktree_dir=None, session_id=None):
     """
     try:
         if worktree_id:
-            return _resolve_worktree_id(worktree_id)
+            return worktree_identity._resolve_worktree_id(worktree_id)
         wdir = worktree_dir or os.getcwd()
         _activate_project_for_path(wdir)
         wid = _infer_worktree_id(None)
         if wid:
-            return _resolve_worktree_id(wid)
+            return worktree_identity._resolve_worktree_id(wid)
         if session_id:
             wid = tracking.find_worktree_id_by_session(session_id)
             if wid:
-                return _resolve_worktree_id(wid)
+                return worktree_identity._resolve_worktree_id(wid)
     except Exception:
         return None
     return None
@@ -433,7 +430,7 @@ def cmd_effort_focus(args) -> int:
             return output._json_error(message)
         output.err(message)
         return 1
-    worktree_id = _resolve_worktree_id(worktree_id)
+    worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
         message = f"Tracking file not found at {yaml_path}."

@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import locks, procs, process_table_cache, reclaim
+from agent_worktrees import locks, procs, process_table_cache, reclaim, worktree_identity
 
 
 # ── homing_of / descendants_of (pure) ──────────────────────────────────────
@@ -519,7 +519,7 @@ class TestCmdReclaim:
 
     def test_worktree_target_includes_bridge_bound_process(
             self, monkeypatch, capfd):
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda value: value)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: value)
         seen = {}
         monkeypatch.setattr(
             m, "reclaim_one",
@@ -568,7 +568,7 @@ class TestCmdReclaim:
             "homing": "bare",
         }]
         self._stub_resolution(monkeypatch, rows)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda value: value)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: value)
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: Path("/missing"))
         monkeypatch.setattr(
             m, "reclaim_one",
