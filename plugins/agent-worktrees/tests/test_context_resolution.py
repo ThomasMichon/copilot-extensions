@@ -150,6 +150,26 @@ def test_resolve_from_anchor_cwd(adopted_repo, monkeypatch):
     assert assumed is None  # assumed CWD stays the real CWD
 
 
+def test_resolve_from_bare_anchor_cwd(adopted_repo, monkeypatch):
+    """A ``core.bare=true`` anchor (agent-worktrees' own pattern once worktrees
+    are attached) must still resolve from its own directory.
+
+    ``git rev-parse --show-toplevel`` always fails in a bare repo ("this
+    operation must be run in a work tree"), even when that directory IS the
+    registered project anchor -- reproduced live resuming a worktree whose
+    anchor had been converted to bare. ``_git_toplevel``/``_resolve_active_project``
+    must recognize this case via ``--is-bare-repository``/``--git-dir``
+    instead of reporting "not inside an adopted repo".
+    """
+    anchor, _wt_root, _wt_path, _wt_id, _conf = adopted_repo
+    _git("config", "core.bare", "true", cwd=anchor)
+    monkeypatch.chdir(anchor)
+    assert m._git_toplevel(anchor) == anchor.resolve()
+    project, assumed = m._resolve_active_project(None)
+    assert project == "myproj"
+    assert assumed is None
+
+
 def test_resolve_from_worktree_cwd(adopted_repo, monkeypatch):
     _anchor, _wt_root, wt_path, _wt_id, _conf = adopted_repo
     monkeypatch.chdir(wt_path)
