@@ -298,7 +298,7 @@ def render(
     # tell. Say so where an agent reads the argv.
     windows_catalog_note_ps = (
         "    ''\n"
-        "    'This `argv` is a `.cmd` shim: `cmd.exe` ends the command at a newline, "
+        "    'Each `argv` here is a `.cmd` shim: `cmd.exe` ends the command at a newline, "
         "so a multi-line argument is silently cut off. Pass multi-line or quote-heavy "
         "input through stdin or a file option instead.'\n"
         if data["windowsCatalogShim"] == "cmd" else ""
