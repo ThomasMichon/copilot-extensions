@@ -1,0 +1,9 @@
+{
+  "comment": "Fail loud on any embed/upsert exception during indexing, not just EngineUnavailableError, so content is never silently stored without its vector (permanently invisible to semantic search while the task still reports success)",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
