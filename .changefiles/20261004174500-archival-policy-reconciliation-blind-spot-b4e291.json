@@ -1,9 +1,0 @@
-{
-  "comment": "Document a fourth reconciliation sharp edge (whole-subtree-missing is itself a blind spot that can silently mark a session clean despite large unaccounted content) and note that a reconciliation may surface a structurally different legacy archival format that preservation, not dedup, is the right response to.",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

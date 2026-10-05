@@ -1,9 +1,0 @@
-{
-  "comment": "Add reviewer-capable PRProvider operations (get_diff/post_comment/submit_review) across github/gitea/azure-devops/mock, plus pr-diff/pr-comment/pr-review CLI verbs",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

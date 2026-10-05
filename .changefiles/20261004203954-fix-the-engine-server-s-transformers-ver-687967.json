@@ -1,9 +1,0 @@
-{
-  "comment": "Fix the engine server's transformers version ceiling: comment said 'pin below 5' but the constraint said '<6', still permitting the exact broken 5.x line that silently breaks jina-v2-base-code's trust_remote_code model loading on every fresh engine cold-start",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

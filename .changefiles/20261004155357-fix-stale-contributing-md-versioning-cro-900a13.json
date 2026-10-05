@@ -1,9 +1,0 @@
-{
-  "comment": "Fix stale CONTRIBUTING.md versioning cross-reference to point at docs/pipelines.md",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

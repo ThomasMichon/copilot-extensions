@@ -1,9 +1,0 @@
-{
-  "comment": "Add the effort-driver named recipe",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

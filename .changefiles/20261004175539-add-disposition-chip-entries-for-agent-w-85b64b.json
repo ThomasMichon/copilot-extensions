@@ -1,9 +1,0 @@
-{
-  "comment": "Add disposition-chip entries for agent-worktrees' held-claims/held-claims-cross-machine cleanup buckets -- both previously rendered with no chip at all (worktree-claims-transitive-finalization effort, Phase 4).",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

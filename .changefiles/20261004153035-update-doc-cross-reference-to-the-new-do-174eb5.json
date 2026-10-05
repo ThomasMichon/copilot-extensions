@@ -1,9 +1,0 @@
-{
-  "comment": "Update doc cross-reference to the new docs/pipelines.md location",
-  "changes": [
-    {
-      "plugin": "copilot-extensions-harness",
-      "type": "patch"
-    }
-  ]
-}

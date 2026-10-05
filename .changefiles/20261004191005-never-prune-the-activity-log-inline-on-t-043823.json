@@ -1,9 +1,0 @@
-{
-  "comment": "Never prune the activity log inline on the log_event()/boot-trace path: dispatch a debounced, detached activity-prune-worker instead so a large log never blocks a launch or a picker action mid-interaction (between keypresses).",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

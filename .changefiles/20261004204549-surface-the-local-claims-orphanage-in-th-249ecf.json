@@ -1,9 +1,0 @@
-{
-  "comment": "Surface the local claims-orphanage in the Picker's Worktrees status line (a status chip + read-only 'o' screen), worktree-claims-transitive-finalization Phase 4 item 2 -- a re-homed obligation awaiting 'claims cleanup' had no worktree row of its own to surface on before this",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

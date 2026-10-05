@@ -1,9 +1,0 @@
-{
-  "comment": "Fix render-thread-blocking update-indicator poll (picker-performance-and-responsiveness Phase 0): throttle _poll_update_state and run it off the render thread via _run_bg, matching the sibling _poll_manager_update_state pattern.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}
