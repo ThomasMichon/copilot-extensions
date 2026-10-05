@@ -5,7 +5,7 @@ How to run the plugin test suites, the fast gates to run before a push, and the
 
 > This is the canonical testing guide. [`AGENTS.md`](AGENTS.md) links here and
 > keeps only a short inline summary; the per-plugin release/versioning rules live
-> in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+> in [`docs/pipelines.md`](docs/pipelines.md).
 
 ## The turn-key runner
 

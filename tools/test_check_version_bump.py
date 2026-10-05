@@ -182,6 +182,19 @@ def test_shared_lib_change_passes_when_all_consumers_bump(repo: Path):
 def test_installer_engine_change_charges_registered_adopters(repo: Path):
     """A canonical installer-engine change must charge every registered adopter
     even when the diff touches only `libs/installer-engine/*`."""
+    # The registered adopter (installer_engine_ref.ADOPTERS) must actually
+    # exist as a plugin in this diff's base, or check-version-bump.py's
+    # `(PLUGINS_DIR / plugin).is_dir()` filter correctly treats it as
+    # nonexistent and silently excludes it -- it does not get created by
+    # the shared `repo` fixture, which only knows about alpha/beta.
+    _plugin(repo, "agent-pull-requests", "1.0.0-dev1")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add agent-pull-requests, the registered installer-engine adopter")
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", base_sha)
+
     _write(repo, "libs/installer-engine/installer-engine.sh", "echo shared\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "installer engine change, no adopter bumps")
@@ -390,7 +403,35 @@ def test_violation_message_for_standalone_consumer_omits_impossible_fix(repo: Pa
     assert len(wtm_lines) == 1, result.stderr
     assert "plugin.json" not in wtm_lines[0]
     assert "marketplace.json" not in wtm_lines[0]
+    assert "changefile" in wtm_lines[0]
     assert "pyproject.toml" in wtm_lines[0]
+
+
+def test_violation_message_for_payload_only_plugin_omits_nonexistent_pyproject(repo: Path):
+    """A payload-only plugin (e.g. copilot-extensions-harness: no root
+    `pyproject.toml` at all) must not be told to bump a file it doesn't
+    have -- the direct-fix guidance must name only plugin.json +
+    marketplace.json for this class of plugin."""
+    _write(repo, "plugins/gamma/plugin.json",
+           json.dumps({"name": "gamma", "version": "3.0.0-dev1"}) + "\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add payload-only gamma, no pyproject.toml")
+    gamma_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", gamma_sha)
+
+    _write(repo, "plugins/gamma/skills/example/SKILL.md", "# Example\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "gamma content change, no bump")
+    result = _run(repo)
+    assert result.returncode == 1
+    gamma_lines = [ln for ln in result.stderr.splitlines() if "gamma:" in ln]
+    assert len(gamma_lines) == 1, result.stderr
+    assert "changefile" in gamma_lines[0]
+    assert "pyproject.toml" not in gamma_lines[0]
+    assert "plugin.json" in gamma_lines[0]
+    assert "marketplace.json" in gamma_lines[0]
 
 
 def test_symlinked_pyproject_fails_closed_instead_of_dropping_consumer(repo: Path):

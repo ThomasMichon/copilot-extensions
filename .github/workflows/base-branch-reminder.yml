@@ -1,6 +1,6 @@
 # Posts a one-time, read-only-safe reminder comment on a PR that targets
 # `main` directly, asking the author to retarget to `dev` -- `main` only
-# ever receives automated releases (see CONTRIBUTING.md > Release &
+# ever receives automated releases (see docs/pipelines.md > Release &
 # Versioning, and this is the same policy `ci.yml`'s `main-gate` job
 # actually ENFORCES).
 #
@@ -183,7 +183,7 @@ jobs:
               marker,
               "Thanks for opening this pull request! This repository's `main` branch only " +
                 "ever receives automated releases -- regular contributions target `dev` " +
-                "instead (see CONTRIBUTING.md > Release & Versioning for the full policy, " +
+                "instead (see docs/pipelines.md > Release & Versioning for the full policy, " +
                 "and why).",
               "",
               "Could you retarget this PR's base branch to `dev`? Click \"Edit\" next to the " +

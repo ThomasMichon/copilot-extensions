@@ -263,16 +263,35 @@ order.
       once saturated — and recompute it whenever the baseline changes
       meaningfully. Validate that curated set carries real assurance
       (per `test-portfolio`'s own evidence-bearing-family bar), not just that
-      it exists.
-- [ ] Wire the smoke-fallback trigger: missing baseline, stale baseline,
+      it exists. **Partially done**: `fallback.compute_fallback_set` (Phase 0
+      pilot) already implements the greedy algorithm and accepts
+      `eligible_tests`; still open -- wiring `eligible_tests` to
+      `test-portfolio`'s real tier markers (today it defaults to the full
+      baseline, a documented, explicit non-safety-claim) and the curated
+      set's own evidenced-assurance validation.
+- [x] Wire the smoke-fallback trigger: missing baseline, stale baseline,
       unresolvable/invalidated attribution for a touched file, a changed
       line or module with **no attribution even where its own file has
       other baseline entries** (the common new-code/previously-uncovered-code
       case — a partially-attributed file is not the same as a fully-covered
       one), or debt past threshold — any one trips the fallback for the
-      affected scope, never a silently smaller subset.
-- [ ] Make the selection auditable: which baseline generation was used, and
+      affected scope, never a silently smaller subset. **Done**
+      (`tools/coverage_guided_selection/decide.py`, 2026-10-04): `decide()`
+      is the one orchestrating entry point -- no resolvable baseline, a
+      failed Release-asset fetch, exceeded coverage-debt, or any
+      per-file/per-line selection trigger each independently route to the
+      curated fallback tier (or, for the three zero-evidence paths -- no
+      baseline at all, a resolved pointer's own plugin not matching the
+      one requested, or a failed asset fetch -- an explicit zero-evidence
+      fallback with no curated set to draw from).
+- [x] Make the selection auditable: which baseline generation was used, and
       why (fresh subset vs. fallback + trigger), discoverable per CI run.
+      **Done**: `decide()`'s `SelectionDecision` records `mode`
+      (`"selected"`/`"fallback"`), a human-readable `reason`, the resolved
+      `baseline_generation`/`baseline_commit_on_main`, the full debt
+      assessment, and (on a selection-level fallback) exactly which
+      file/line triggered it -- `as_dict()` is JSON-serializable for a CI
+      run to emit directly.
 
 ### Phase 4 — Rollout: replace `agent-worktrees`' collect-only tier
 - [ ] Wire `ci.yml`'s `worktrees-smoke` job to use diff-scoped selection
@@ -351,6 +370,136 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-04 — Phase 3 slice: Release-asset fetch + orchestrating decide()
+Closes the two biggest gaps the 2026-10-03 debt-accounting slice left open.
+
+**`correlation.fetch_baseline_asset`** (new): the actual network-I/O step
+`correlation.py`'s own module docstring had explicitly flagged as "not yet
+implemented here" since the Phase 0 pilot -- downloads and parses a
+pointer's referenced full baseline via `gh release download`, raising a
+distinct `BaselineFetchError` (never a silently-empty baseline) on a
+missing release/asset or malformed JSON.
+
+**`decide.py`** (new): the orchestrating entry point the previous
+Journal entry named as still missing. `decide()` ties resolution (Phase 2)
++ the new fetch + debt (2026-10-03) + selection + fallback curation
+(Phase 0 pilot) into one `SelectionDecision`: which tests to run, `mode`
+(`"selected"`/`"fallback"`), a human-readable `reason`, which baseline
+generation was used, and the full debt assessment -- closing out both the
+"wire the smoke-fallback trigger" and "make the selection auditable"
+checklist items. Every fallback path routes through it: no resolvable
+baseline at all, a failed asset fetch, exceeded coverage-debt, or any
+per-file/per-line selection trigger (`no_baseline_entry`/
+`line_not_attributed`).
+
+27 new tests (`TestFetchBaselineAsset`, `TestDecide`) -- `decide()`'s own
+tests monkeypatch its collaborators directly (each already has its own
+dedicated test class) rather than re-exercising them through real git/
+network I/O.
+
+**Review fixes (same PR):** `fetch_baseline_asset` now requires and
+validates the pointer's own `plugin`/`measured_commit` (previously
+optional, which skipped the correlation check entirely when absent),
+validates the downloaded document is a dict with a parseable-ISO8601
+`generated_at` and dict-typed `coverage`/`tests` (not just present),
+converts a subprocess-launch `OSError` (`gh` missing from `PATH`) and a
+non-UTF-8 payload (`UnicodeDecodeError`) into `BaselineFetchError` rather
+than letting either bypass the documented fetch-failure contract, and its
+own class docstring no longer references a now-resolved prior
+implementation state. `SelectionDecision.selected_tests` is `None`
+(never `()`) for the two "no curated evidence at all" cases (no baseline
+resolved, fetch failed) -- a caller must run its own full/default suite
+there, not interpret an empty tuple as "run nothing"; a real tuple
+(including a genuinely curated, budget-exhausted `()`) only ever comes
+from an actual curation step. Fallback curation in both remaining
+fallback paths (debt-exceeded, selection-triggered) now draws from the
+**full, un-remapped** baseline, not the fork-commit-remapped one --
+remapping drops coverage for exactly the files a diff touches, which
+would have shrunk the fallback universe precisely on the riskiest files.
+`decide.py`'s own module docstring numbered steps now match its actual
+control flow (debt is assessed before remap/selection, and a debt-
+exceeded decision skips remap entirely).
+
+**Second round of review fixes (same PR):** `decide()` now also validates
+a resolved pointer's own `plugin` field matches the plugin it was resolved
+for -- `fetch_baseline_asset` can only prove its downloaded asset agrees
+with the *pointer*, never that the pointer itself was the one the caller
+actually asked about, so a misplaced/corrupt pointer whose own asset is
+internally self-consistent could otherwise still select the wrong
+plugin's tests. `fetch_baseline_asset` also now: requires every pointer
+field to be a non-empty *string* (not just truthy, closing a path where a
+numeric/list-valued field reached `subprocess`/`Path` and raised a raw
+`TypeError` instead of `BaselineFetchError`); bounds its `gh release
+download` call with a `timeout_s` (default 300s, matching
+`baseline.collect_baseline`'s own convention) and converts
+`subprocess.TimeoutExpired` to `BaselineFetchError`; and requires
+`generated_at` to be *timezone-aware*, not just ISO8601-parseable (a naive
+timestamp would be interpreted in whichever timezone the consuming host
+happens to run in, making coverage age environment-dependent).
+`SelectionDecision.debt`'s own docstring now documents both pre-assessment
+fallback paths (no baseline resolved, pointer mismatch, or fetch failed)
+that leave it `None`, not only the first.
+
+**Third round of review fixes (same PR):** `fetch_baseline_asset` now
+validates the baseline's *nested* shape too, not just its two top-level
+mappings -- a shallow-valid-but-corrupt payload (e.g. a per-file coverage
+entry that's a list instead of a line->test-list mapping, a per-line
+value that isn't a list of test-id strings, or a non-mapping test record)
+previously passed validation here and only failed later with an unrelated
+raw exception (`.items()` inside
+`ancestor_resolution.remap_or_invalidate_baseline`, or `.get()` inside
+`fallback.compute_fallback_set`), bypassing `decide()`'s documented
+fetch-failure fallback path entirely. Also fixed two remaining doc-
+accuracy gaps the review caught: `SelectionDecision.selected_tests`'s own
+docstring and this README's own Phase 3 checklist entry both omitted the
+pointer-plugin-mismatch path from the list of zero-evidence-fallback
+cases.
+
+**Fourth round of review fixes (same PR):** fixed a real orchestration
+bug -- the selection-level fallback branch replaced `select_tests`' own
+real, attributed `selected_tests` with the curated fallback set entirely,
+instead of union-ing them. A mixed diff (some changed lines genuinely
+attributed, others not) would silently lose known-good coverage evidence
+for the attributed lines just because a *different* line in the same diff
+tripped the fallback trigger. `decide()` now unions both sets; a new
+mixed-case regression test covers it directly.
+
+**Fifth round of review fixes (same PR):** fixed a real, pre-existing
+latent bug in Phase 2's own `ancestor_resolution.resolve_nearest_baseline`
+(not new code, but only now exercised by `decide()`'s own live call path):
+a malformed-but-valid-JSON pointer document (not an object at all, or a
+truthy-but-non-string `measured_commit`) wasn't skipped like a genuine
+JSON-decode failure -- `.get()` on a non-dict candidate raised
+`AttributeError`, and a non-string `measured_commit` reached
+`is_ancestor`'s own `subprocess.run` call and raised `TypeError` there,
+either of which crashed past both this function's own documented
+"raises only for a genuine plumbing failure" contract and `decide()`'s
+"never raises for an untrusted baseline" contract downstream. Both cases
+now fall through to the next (older) generation, exactly like the
+existing JSON-decode-failure handling. 2 new regression tests in
+`TestResolveNearestBaseline`.
+
+**Also noted, not caused by this work:** the operator flagged that
+`main`'s history was force-rewritten (via `git filter-repo`) to purge
+~300MB of accumulated `.github/coverage-baselines/` blobs committed
+before the hybrid pointer+Release-asset design below replaced that
+pattern -- see the (now-closed) `efforts/active/main-history-rewrite`
+mini-effort (PRs #5182/#5189/#5192/#5193/#5195) and
+`CONTRIBUTING.md`'s new "If `main`'s history is force-rewritten" section
+(PR #5110) for the full account and recovery procedure. Confirmed this
+doesn't affect anything in this effort: `dev` was never touched, the
+pointer files' own git history and the GitHub Releases they reference
+(both keyed on `dev` SHAs, not `main` SHAs) remain fully intact and
+resolvable post-rewrite.
+
+**Remaining Phase 3 scope, not yet done:** wiring `fallback.py`'s own
+documented `eligible_tests` restriction to `test-portfolio`'s real tier
+markers (today it defaults to the full baseline, a documented, explicit
+non-safety-claim); the curated fallback set's own evidenced-assurance
+validation; and the Phase 3 Validation Plan's three fallback-path tests.
+Phase 4 (CI wiring into `agent-worktrees`' `worktrees-smoke` job) remains
+untouched, correctly -- it depends on this phase finishing first.
 
 ### 2026-10-03 — Phase 3 slice: coverage-debt accounting
 Phase 3's selector (`selection.select_tests`) and fallback curation

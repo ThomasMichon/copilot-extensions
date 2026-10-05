@@ -17,8 +17,9 @@ Unlike [`.github/copilot-instructions.md`](.github/copilot-instructions.md)
 review-only.
 
 The full guides remain [`AGENTS.md`](AGENTS.md) (development guide),
-[`CONTRIBUTING.md`](CONTRIBUTING.md) (contribution boundary, versioning &
-release), and [`docs/patterns/README.md`](docs/patterns/README.md) (the
+[`CONTRIBUTING.md`](CONTRIBUTING.md) (contribution boundary & contributor
+process), [`docs/pipelines.md`](docs/pipelines.md) (CI/CD gating &
+versioning), and [`docs/patterns/README.md`](docs/patterns/README.md) (the
 numbered design principles and binding design invariants) -- those are the
 standing review authority; this file is a lens for applying them
 specifically when reviewing a pull request, not a replacement for them.
@@ -32,14 +33,18 @@ specifically when reviewing a pull request, not a replacement for them.
   `main`, head branch matching `release/promote-<run id>`, authored via the
   `APERTURE_RELEASE_TOKEN` fine-grained PAT (a personal token minted under
   the maintainer's own account -- this repo has no separate bot identity --
-  so the PR's author is `ThomasMichon`, not a bot login). The **only other**
-  legitimate shape is a workflow-file-ONLY bootstrap PR by the repo owner
+  so the PR's author is `ThomasMichon`, not a bot login). The other two
+  legitimate shapes are a workflow-file-ONLY bootstrap PR by the repo owner
   (workflow_run-triggered workflows resolve their own YAML from `main`, so a
-  fix to `.github/workflows/*.yml` occasionally must land there directly) --
+  fix to `.github/workflows/*.yml` occasionally must land there directly),
+  and `module-size-baseline-widen.yml`'s own automated PR (a fixed branch
+  name, authored under the same PAT, whose diff is never anything but the
+  one generated baseline JSON file) --
   `main-gate` (ci.yml) enforces this by diff content, not by admin bypass;
   see ThomasMichon/copilot-extensions#3622-erratum for the incident that
   prompted the hardening. Contributors always target `dev` — a PR whose
-  base is `main` and that matches NEITHER shape is not a legitimate use of
+  base is `main` and that matches none of these three shapes is not a
+  legitimate use of
   this repo's PR flow (the repo's own CI has a hard guard checking exactly
   this, but that only fails the build; this comment is the visible signal
   on the PR itself, since Copilot review is disabled on `main`'s ruleset --
@@ -49,8 +54,9 @@ specifically when reviewing a pull request, not a replacement for them.
   > This PR targets `main` directly. `main` only ever moves via this
   > repo's own CI promotion pipeline (dev-branch-release-pipeline effort,
   > `.github/workflows/validate-and-promote.yml`) from a `release/promote-*`
-  > branch, or a workflow-file-ONLY bootstrap PR. Please retarget this PR's
-  > base branch to `dev` — see `CONTRIBUTING.md` § Release & Versioning.
+  > branch, a workflow-file-ONLY bootstrap PR, or
+  > `module-size-baseline-widen.yml`'s own automated PR. Please retarget
+  > this PR's base branch to `dev` — see `docs/pipelines.md` § Release & Versioning.
 - **Scope to the diff.** Review the code the PR actually changes. The repo
   carries pre-existing style debt — do **not** demand repo-wide cleanup or
   flag untouched code.

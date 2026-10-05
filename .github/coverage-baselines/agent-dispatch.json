@@ -1,7 +1,7 @@
 {
   "asset": "agent-dispatch.json",
-  "measured_commit": "4f6a2572dd99de7375446748a5cd46d038afa5f0",
+  "measured_commit": "c8a68e8276da356f8829f5d092b452b3a370abe8",
   "plugin": "agent-dispatch",
-  "release_tag": "coverage-baselines-4f6a2572dd99de7375446748a5cd46d038afa5f0",
+  "release_tag": "coverage-baselines-c8a68e8276da356f8829f5d092b452b3a370abe8",
   "schema": "copilot-extensions.coverage-baseline-pointer"
 }

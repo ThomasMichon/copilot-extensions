@@ -187,8 +187,21 @@ def resolve_nearest_baseline(
             candidate = json.loads(content)
         except json.JSONDecodeError:
             continue
+        # A malformed-but-valid-JSON document (not an object at all, or a
+        # measured_commit that isn't a plain non-empty string) must be
+        # skipped exactly like a JSON-decode failure -- continuing to an
+        # older generation -- never crash here. `.get()` on a non-dict
+        # candidate raises AttributeError; a non-string measured_commit
+        # (a number, a list, ...) reaches `is_ancestor`'s own
+        # `subprocess.run` call below and raises TypeError there instead,
+        # either of which would otherwise propagate past this function's
+        # own documented "raises only for a genuine plumbing failure"
+        # contract and past `decide()`'s own "never raises for an
+        # untrusted baseline" contract in turn.
+        if not isinstance(candidate, dict):
+            continue
         measured_commit = candidate.get("measured_commit")
-        if not measured_commit:
+        if not isinstance(measured_commit, str) or not measured_commit:
             continue
         if is_ancestor(repo_root, measured_commit, fork_commit):
             return ResolvedBaseline(baseline=candidate, baseline_commit=rev)
