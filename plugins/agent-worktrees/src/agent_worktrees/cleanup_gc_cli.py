@@ -119,7 +119,7 @@ def _cleanup_one(args: argparse.Namespace) -> int:
 #: from `cleanup`'s report entirely -- neither listed as skipped nor counted.
 _CLEANUP_PER_ITEM_BUCKETS = frozenset({
     "claimed", "open-pr", "closed-unmerged", "paired-pending",
-    "held-claims", "follow-up",
+    "held-claims", "held-claims-cross-machine", "follow-up",
 })
 
 

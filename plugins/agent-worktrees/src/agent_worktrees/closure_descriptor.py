@@ -220,9 +220,13 @@ def assemble_closure_descriptor(
       safely landed.
 
     ``cross_machine_claims`` is a sub-count of ``held_claims``: how many are
-    ``worktree``-kind claims naming a different machine (the lease-mirror/
-    sweep resolves them, not this worktree). Purely informational -- rides
-    in the ``open_claims`` fact as ``cross_machine_held`` and renders as an
+    ``worktree``-kind claims naming a different machine -- not a LOCAL
+    blocker, but **not known to self-resolve** either: ``sweep.py``'s
+    ``worktree``-kind ``gone_of``/``safe_of`` both spare (return ``None``
+    for) an unjudgeable cross-machine ref, and ``worktree`` isn't in
+    ``sweep._LEASEABLE_KINDS`` (the lease-mirror-settled path), so nothing
+    today actually sweeps one of these. Purely informational -- rides in
+    the ``open_claims`` fact as ``cross_machine_held`` and renders as an
     ``XM<n>`` ``compact`` marker; never changes ``final``/
     ``action_disposition`` (still blocks like any held claim).
 
@@ -337,8 +341,8 @@ def assemble_closure_descriptor(
         compact_parts.append(f"C{held_claims}")
     if open_follow_ups:
         compact_parts.append(f"F{open_follow_ups}")
-    # A purely cross-machine held claim settles on its own (always a subset
-    # of held_claims) -- its own marker alongside "C<n>".
+    # A purely cross-machine held claim isn't a local blocker (always a
+    # subset of held_claims) -- its own marker alongside "C<n>".
     if cross_machine_claims:
         compact_parts.append(f"XM{cross_machine_claims}")
     # worktree-finality-and-obligations Phase 9: render the marker on the

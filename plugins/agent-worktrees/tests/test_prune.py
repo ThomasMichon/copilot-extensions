@@ -349,11 +349,13 @@ class TestCleanupDisposition:
 
     def test_cross_machine_worktree_claim_gets_its_own_bucket(self):
         # worktree-claims-transitive-finalization (effort), Phase 4: a held
-        # claim that's purely a cross-machine "worktree"-kind claim (the one
-        # case finalize._settle_parent_obligation explicitly defers to the
-        # lease-mirror/sweep, per its own docstring) is NOT stuck on anything
-        # local -- surface it distinctly so an operator can tell "this will
-        # clear on its own" apart from a genuinely held resource.
+        # claim that's purely a cross-machine "worktree"-kind claim is NOT a
+        # LOCAL blocker -- surface it distinctly so an operator can tell
+        # "this isn't stuck on anything here" apart from a genuinely held
+        # resource. NOT claimed to self-clear: nothing today actually
+        # sweeps/settles a cross-machine worktree-kind claim (sweep.py's
+        # gone_of/safe_of both spare it, and worktree isn't a leaseable
+        # kind) -- this only tells an operator WHERE to look.
         rec = _rec(status="finalized")
         rec.resources = [
             tracking.ResourceClaim(

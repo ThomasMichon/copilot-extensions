@@ -308,11 +308,12 @@ BUCKET_REASON = {
     # worktree-claims-transitive-finalization (effort), Phase 4: a worktree
     # whose own git/PR state is otherwise clean can still be held open by a
     # resource claim it holds elsewhere (a codespace, a container, another
-    # worktree...). The cross-machine variant below is a narrower case --
-    # purely a lease-mirror sync lag, not something needing attention -- so it
-    # gets its own, calmer reason text rather than sharing this generic one.
+    # worktree...). The cross-machine variant below names WHERE the claim is
+    # held (not a local problem) -- it is NOT claimed to self-clear: nothing
+    # today actually sweeps/settles a cross-machine worktree-kind claim (see
+    # prune._count_cross_machine_worktree_claims's docstring).
     "held-claims": "resource claim(s) still held",
-    "held-claims-cross-machine": "cross-machine claim settling (self-clears)",
+    "held-claims-cross-machine": "claim(s) held by another machine",
     "closed-unmerged": "PR closed unmerged",
     "gone": "dir missing",
     "dirty": "uncommitted work",
