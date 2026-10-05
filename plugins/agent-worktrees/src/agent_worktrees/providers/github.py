@@ -630,6 +630,46 @@ class GitHubProvider:
             )
         return ""
 
+    def close_pull(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        comment: str = "",
+    ) -> str:
+        """Close PR ``number`` without merging via ``gh pr close``.
+
+        The ``pr-abandon --confirm`` primitive. ``comment``, when given, is
+        posted first via ``gh pr comment`` (best-effort: a comment failure
+        is folded into the returned message as a warning suffix, but the
+        close itself still proceeds and its own success/failure is what the
+        return value reports -- a caller must not treat a comment-post
+        failure alone as reason to skip closing an already-confirmed
+        abandon). Rejects a ``comment`` containing a genuine ``@copilot``
+        mention via :func:`reject_copilot_mention`, same as every other
+        agent-authored-text path.
+        """
+        host = self.authority_endpoint(api_base)
+        warning = ""
+        if comment:
+            reject_copilot_mention(comment, what="pr-abandon comment")
+            comment_proc = run_cli(
+                ["gh", "pr", "comment", str(number), "--repo", repo, "--body", comment],
+                env=self._env(token, host=host),
+            )
+            if comment_proc.returncode != 0:
+                warning = (
+                    " (comment post failed: "
+                    f"{(comment_proc.stderr.strip() or comment_proc.stdout.strip())})"
+                )
+        proc = run_cli(
+            ["gh", "pr", "close", str(number), "--repo", repo],
+            env=self._env(token, host=host),
+        )
+        if proc.returncode != 0:
+            return (
+                f"gh pr close failed for {repo}#{number}: "
+                f"{proc.stderr.strip() or proc.stdout.strip()}" + warning
+            )
+        return warning.strip()
+
     def enable_auto_merge(
         self, repo: str, number: int, *, squash: bool = True,
         api_base: str = "", token: str | None = None,

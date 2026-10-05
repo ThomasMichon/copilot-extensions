@@ -60,6 +60,36 @@ def add_parsers(sub) -> None:
     p.add_argument("--config", default=None)
 
     p = sub.add_parser(
+        "pr-abandon",
+        help="Close a tracked PR WITHOUT merging -- a rare, deliberate action "
+        "for a genuinely superseded PR. The first call always refuses with "
+        "a warning naming the alternatives (rebase+force-push; whittle down "
+        "to a smaller useful contribution); only a second, explicit "
+        "--confirm call (after real sign-off) actually closes it.",
+    )
+    p.add_argument("worktree_id", nargs="?", default=None)
+    p.add_argument(
+        "--repo", default=None, help="Target repo 'owner/name' for the PR (default: tracked repo)"
+    )
+    p.add_argument(
+        "--pr", type=int, default=None, help="Select which tracked PR to abandon by number"
+    )
+    p.add_argument(
+        "--reason", default=None, required=True,
+        help="Why this PR is being abandoned (required on every call, not "
+        "just the confirmed one -- e.g. 'superseded by #1234, no remaining "
+        "unique content')",
+    )
+    p.add_argument(
+        "--confirm", action="store_true",
+        help="Proceed past the warning. Only pass this after explicit, "
+        "real sign-off for THIS PR -- never on your own judgment the "
+        "first time you see the warning.",
+    )
+    p.add_argument("--json", action="store_true", help="JSON output mode")
+    p.add_argument("--config", default=None)
+
+    p = sub.add_parser(
         "pr-status",
         help="Show tracked PR metadata + live verdict/conflict/merge state "
         "(reconciles against the provider; recommends pull-forward when "
@@ -178,6 +208,56 @@ def cmd_set_pr(args: argparse.Namespace) -> int:
             )
     else:
         output.err(result.get("error", "set-pr failed."))
+    return 0 if result.get("success") else 1
+
+
+def cmd_pr_abandon(args: argparse.Namespace) -> int:
+    """Close a tracked PR without merging -- the ``pr-abandon`` CLI verb.
+
+    See :func:`pr_ops.abandon_pr` for the full two-step confirmation
+    contract: the first (no ``--confirm``) call always refuses with a
+    stern, alternatives-first warning and mutates nothing; only a second,
+    explicit ``--confirm`` call (after real operator sign-off) proceeds.
+    """
+    core = _core()
+    use_json = getattr(args, "json", False)
+    try:
+        config = cfg.load_config(Path(args.config) if args.config else None)
+    except Exception as e:
+        if use_json:
+            return core._json_error(str(e))
+        raise
+    worktree_id = core._infer_worktree_id(args.worktree_id, config)
+    if not worktree_id:
+        msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
+        return core._json_error(msg) if use_json else (output.err(msg) or 1)
+    worktree_id = core._resolve_worktree_id(worktree_id)
+
+    result = pr_ops.abandon_pr(
+        worktree_id,
+        config,
+        target_repo=getattr(args, "repo", None),
+        pr_number=getattr(args, "pr", None),
+        reason=getattr(args, "reason", None) or "",
+        confirm=getattr(args, "confirm", False),
+    )
+    if use_json:
+        core._json_output(result)
+    elif result.get("success"):
+        n = result.get("number")
+        repo = result.get("repo")
+        verb = "was already closed" if result.get("already_closed") else "closed (not merged)"
+        output.ok(
+            f"PR #{n} ({repo}) {verb}; its claim is now settled as abandoned. "
+            + (f"Warning: {result['warning']}" if result.get("warning") else "")
+        )
+    elif result.get("needs_confirm"):
+        # The stern warning IS the primary output here, not an incidental
+        # error -- print it directly rather than through output.err's
+        # single-line framing.
+        print(result.get("error", ""), file=sys.stderr)
+    else:
+        output.err(result.get("error", "pr-abandon failed."))
     return 0 if result.get("success") else 1
 
 

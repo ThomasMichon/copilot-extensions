@@ -1552,6 +1552,73 @@ class TestGitHubProvider:
         assert "not mergeable" in err
         assert "o/r#7" in err
 
+    def test_close_pull_builds_gh_close_args(self, monkeypatch):
+        from agent_worktrees.providers import github
+        captured = {}
+
+        def fake(args, **kw):
+            captured["args"] = args
+            return _proc(returncode=0)
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        err = github.GitHubProvider().close_pull("o/r", 7)
+        assert err == ""
+        assert captured["args"] == ["gh", "pr", "close", "7", "--repo", "o/r"]
+
+    def test_close_pull_posts_comment_before_closing(self, monkeypatch):
+        from agent_worktrees.providers import github
+        calls = []
+
+        def fake(args, **kw):
+            calls.append(args)
+            return _proc(returncode=0)
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        err = github.GitHubProvider().close_pull(
+            "o/r", 7, comment="superseded by #99",
+        )
+        assert err == ""
+        assert calls[0] == [
+            "gh", "pr", "comment", "7", "--repo", "o/r", "--body", "superseded by #99",
+        ]
+        assert calls[1] == ["gh", "pr", "close", "7", "--repo", "o/r"]
+
+    def test_close_pull_rejects_a_copilot_mention_in_comment(self, monkeypatch):
+        from agent_worktrees.providers import github
+        from agent_worktrees.providers.base import ProviderError
+
+        monkeypatch.setattr(
+            github, "run_cli", lambda *a, **kw: (_ for _ in ()).throw(
+                AssertionError("must not reach run_cli")),
+        )
+        with pytest.raises(ProviderError):
+            github.GitHubProvider().close_pull("o/r", 7, comment="hey @copilot")
+
+    def test_close_pull_comment_failure_is_a_warning_close_still_proceeds(
+        self, monkeypatch,
+    ):
+        from agent_worktrees.providers import github
+
+        def fake(args, **kw):
+            if args[2] == "comment":
+                return _proc(returncode=1, stderr="comment forbidden")
+            return _proc(returncode=0)
+
+        monkeypatch.setattr(github, "run_cli", fake)
+        result = github.GitHubProvider().close_pull("o/r", 7, comment="superseded")
+        assert "comment post failed" in result
+        assert "comment forbidden" in result
+
+    def test_close_pull_surfaces_close_failure(self, monkeypatch):
+        from agent_worktrees.providers import github
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: _proc(returncode=1, stderr="already closed"),
+        )
+        err = github.GitHubProvider().close_pull("o/r", 7)
+        assert "already closed" in err
+        assert "o/r#7" in err
+
     def test_enable_auto_merge_builds_auto_squash_no_admin(self, monkeypatch):
         # #225: native auto-merge is `--auto --squash`, never `--admin` (it must
         # wait on required checks, not bypass them); deletes the branch by
@@ -2019,6 +2086,16 @@ class TestGitHubProvider:
         from agent_worktrees.providers import gitea
         for prov in (gitea.GiteaProvider(), azure.AzureDevOpsProvider()):
             err = prov.merge_pull("o/r", 7)
+            assert err and "does not support" in err
+
+    def test_close_pull_unsupported_on_gitea_and_azure(self):
+        # pr-abandon is GitHub-only today; the other providers return a
+        # non-empty "unsupported" message, never "" (a caller must never
+        # read an empty string as a successful close).
+        from agent_worktrees.providers import azure_devops as azure
+        from agent_worktrees.providers import gitea
+        for prov in (gitea.GiteaProvider(), azure.AzureDevOpsProvider()):
+            err = prov.close_pull("o/r", 7, comment="superseded")
             assert err and "does not support" in err
 
     # -- get_snapshot (the #277 fix: pr-watch/pr-status/pr-ready on GitHub) --

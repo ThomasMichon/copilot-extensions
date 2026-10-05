@@ -239,7 +239,16 @@ $resolutionReason = [string]$resolution.reason
 $actualMode = [string]$resolution.actualMode
 $desiredMode = [string]$resolution.desiredMode
 $activationGeneration = [string]$resolution.activationGeneration
-$namespaceGeneration = [string]$resolution.namespaceGeneration
+# NOTE: the `status` action's result schema never includes `namespaceGeneration`
+# (only `activationGeneration` and `installGeneration` -- see
+# installation-context.ps1's status/probe-legacy $result construction). A prior
+# version of this script read it anyway; property access on a PSCustomObject
+# missing a key is normally a silent $null under PowerShell's non-strict
+# default, so the always-false comparisons below went unnoticed until some
+# invocation paths run with Set-StrictMode active, which throws instead.
+# Removed rather than worked around: `namespaceGeneration` genuinely belongs
+# to the `validate` action's richer result (see `$validatedNamespaceGeneration`
+# below), not `status`.
 $installGeneration = [string]$resolution.installGeneration
 $simplePolicyLegacy = $false
 if (
@@ -383,7 +392,6 @@ function Test-InstallationResolutionCurrent {
         [string]$current.actualMode -cne $actualMode -or
         [string]$current.desiredMode -cne $desiredMode -or
         [string]$current.activationGeneration -cne $activationGeneration -or
-        [string]$current.namespaceGeneration -cne $namespaceGeneration -or
         [string]$current.installGeneration -cne $installGeneration
     ) {
         return $false

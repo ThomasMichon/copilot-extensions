@@ -249,6 +249,24 @@ class PRProvider(Protocol):
         ...
 
 
+    def close_pull(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        comment: str = "",
+    ) -> str:
+        """Close PR ``number`` WITHOUT merging -- the ``pr-abandon`` primitive.
+
+        Distinct from :meth:`merge_pull`: this is the explicit, attributed
+        "this PR is genuinely superseded/abandoned, close it unmerged" action
+        behind ``pr-abandon --confirm`` (see the `pr-abandon-flow` effort,
+        #4411's pragmatic follow-up). ``comment``, when given, is posted on
+        the PR before closing (best-effort: a comment failure must never
+        block the close itself -- callers should treat a non-empty
+        ``comment`` post failure as a warning, not a reason to skip closing).
+
+        Returns "" on success, or a human-readable error string.
+        """
+        ...
+
     def request_auto_complete(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
         automerge_label: str = "", squash: bool = True,
@@ -480,6 +498,14 @@ def _unsupported_merge(name: str) -> str:
     return (
         f"Provider '{name}' does not support a direct merge (pr-merge --now is "
         "GitHub-only today; gitea/azure-devops merge via their own flow)."
+    )
+
+
+def _unsupported_close(name: str) -> str:
+    """The default ``close_pull`` result for a provider without a close primitive yet."""
+    return (
+        f"Provider '{name}' does not support closing a PR here yet (pr-abandon "
+        "is GitHub-only today; close the PR through its own hosting UI/CLI)."
     )
 
 
