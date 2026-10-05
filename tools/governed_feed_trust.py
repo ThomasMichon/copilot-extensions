@@ -51,6 +51,37 @@ class ArtifactBuildError(Exception):
     re-imports/re-exports it exactly like every other name moved here."""
 
 
+def _trusted_system32_tool(name: str) -> str:
+    """Absolute, OS-rooted path to a well-known Windows system tool
+    (``whoami``/``icacls``) -- NEVER a bare name resolved through the
+    current directory/`PATH` executable search. Invoking one of these by
+    bare name does not authenticate the executable: Windows resolves an
+    unqualified command through that search order, where a substituted
+    `whoami.exe`/`icacls.exe` placed earlier in it could return an
+    attacker-chosen account/SID (which the ACL code would then grant and
+    accept as "expected"), or silently no-op an ACL operation entirely.
+
+    `%SystemRoot%\\System32` (falling back to the fixed, well-known
+    `C:\\Windows\\System32` only if `SystemRoot` is somehow unset -- never
+    to a bare name) is the OS's own fixed installation location for both
+    tools on every real Windows system -- unlike `PATH`, it is not an
+    ordered, caller-extendable search list a planted executable could
+    sit earlier in.
+
+    Raises `ArtifactBuildError` if the resolved path does not actually
+    exist -- refusing to silently fall back to an unqualified, PATH/CWD-
+    resolved name even then."""
+    system_root = os.environ.get("SystemRoot") or r"C:\Windows"
+    tool_path = Path(system_root) / "System32" / f"{name}.exe"
+    if not tool_path.is_file():
+        raise ArtifactBuildError(
+            f"{tool_path}: trusted system tool not found at its expected "
+            "absolute path -- refusing to fall back to invoking it by a "
+            "PATH/current-directory-resolved bare name"
+        )
+    return str(tool_path)
+
+
 def _current_token_identity() -> tuple[str, str]:
     """The CURRENT PROCESS TOKEN's own authenticated account name and SID,
     resolved via the OS itself (``whoami /user``) -- NEVER via the
@@ -75,7 +106,7 @@ def _current_token_identity() -> tuple[str, str]:
     file must never be ACL'd against an identity this process could not
     itself confirm."""
     result = subprocess.run(
-        ["whoami", "/user", "/fo", "csv", "/nh"],
+        [_trusted_system32_tool("whoami"), "/user", "/fo", "csv", "/nh"],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
@@ -132,11 +163,22 @@ def _restrict_file_to_owner(path: Path) -> None:
     if sys.platform != "win32":
         return
     account_name, sid = _current_token_identity()
+    icacls = _trusted_system32_tool("icacls")
     result = subprocess.run(
         [
-            "icacls", str(path),
+            icacls, str(path),
             "/inheritance:r",
-            "/grant:r", f"*{sid}:F", "SYSTEM:F",
+            # `(OI)(CI)` (object-inherit, container-inherit) are applied
+            # explicitly -- round 25 found that combining `/inheritance:r`
+            # and `/grant:r` in a SINGLE `icacls` invocation (as here,
+            # rather than as two separate calls) does not reliably add an
+            # inheritable ACE for the explicitly granted principal on a
+            # DIRECTORY target: a file later created inside it (e.g. `uv
+            # venv` populating a hardened staging directory) could then
+            # be denied access despite the directory's own grant. Both
+            # flags are harmless no-ops on a FILE target (nothing to
+            # inherit to).
+            "/grant:r", f"*{sid}:(OI)(CI)F", "SYSTEM:(OI)(CI)F",
         ],
         capture_output=True, text=True,
     )
@@ -156,7 +198,7 @@ def _restrict_file_to_owner(path: Path) -> None:
     # unlike group display names) so only the owner and SYSTEM remain.
     remove_result = subprocess.run(
         [
-            "icacls", str(path), "/remove:g",
+            icacls, str(path), "/remove:g",
             *_BROAD_WINDOWS_PRINCIPAL_SIDS,
         ],
         capture_output=True, text=True,
@@ -183,7 +225,7 @@ def _restrict_file_to_owner(path: Path) -> None:
     # exist from a prior, more targeted grant) rather than wiping the ACL
     # down to nothing first.
     query = subprocess.run(
-        ["icacls", str(path)], capture_output=True, text=True
+        [icacls, str(path)], capture_output=True, text=True
     )
     if query.returncode != 0:
         raise ArtifactBuildError(
@@ -214,11 +256,20 @@ def _restrict_file_to_owner(path: Path) -> None:
 #: Well-known, locale-independent Windows SIDs for broad built-in
 #: principals that `icacls /grant:r` does not implicitly strip when
 #: granting a DIFFERENT principal -- see `_restrict_file_to_owner`.
+#: `OWNER RIGHTS` (round 25) is a NEWLY-observed member of this set --
+#: directories (hardened starting round 25, previously only files were)
+#: inherit it by default on this repo's own machines; it is a dynamic
+#: placeholder that always resolves to whoever currently owns the object
+#: rather than a fixed other principal, but is still stripped here for
+#: the same reason as the others: this function's own contract is an
+#: EXPLICIT, minimal allowlist of exactly two static grantees, not
+#: "nothing unexpectedly broad".
 _BROAD_WINDOWS_PRINCIPAL_SIDS = (
     "*S-1-1-0",       # Everyone
     "*S-1-5-11",      # NT AUTHORITY\Authenticated Users
     "*S-1-5-32-545",  # BUILTIN\Users
     "*S-1-5-32-544",  # BUILTIN\Administrators
+    "*S-1-3-4",       # OWNER RIGHTS
 )
 
 _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS = ("UV_DEFAULT_INDEX", "UV_INDEX_URL")
@@ -459,20 +510,28 @@ def _trusted_index_hosts(env: dict) -> set[str]:
     return {_normalize_hostname(h.strip()) for h in raw.split(",") if h.strip()}
 
 
-def _pyproject_declares_tool_uv(path: Path) -> bool:
+def _pyproject_declares_tool_uv(path: Path) -> bool | None:
     """Whether ``path`` (a `pyproject.toml`) carries a `[tool.uv]` table.
     `uv` itself treats a `pyproject.toml` with no `[tool.uv]` table as if
     it were not there at all for project-config-discovery purposes,
     continuing to search parent directories rather than stopping at it
-    -- see `_project_uv_toml_candidates`. An unparseable file is treated
-    the same way (not a candidate) rather than raising here: a definitive
-    parse failure is surfaced later, when `_effective_default_index_url`
-    re-reads and re-parses whatever candidate this function actually
-    allows through."""
+    -- see `_project_uv_toml_candidates`.
+
+    Returns ``None`` -- rather than ``False`` -- when ``path`` cannot be
+    read/parsed at all: `uv` itself ERRORS on a malformed/unreadable
+    project config, it does not silently treat it the same as a valid
+    file with no `[tool.uv]` table and keep searching upward. Returning
+    ``False`` for this case would make `_project_uv_toml_candidates`
+    skip it and accept a DIFFERENT (parent) project's index instead --
+    `_effective_default_index_url` would then certify an index that is
+    not actually the effective configuration `uv` itself would use, since
+    `uv` would have failed outright right here instead. The caller must
+    treat ``None`` as a stop, returning this candidate anyway so its own
+    later re-parse attempt fails closed instead."""
     try:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
-        return False
+        return None
     tool = data.get("tool") if isinstance(data, dict) else None
     return isinstance(tool, dict) and isinstance(tool.get("uv"), dict)
 
@@ -488,16 +547,21 @@ def _project_uv_toml_candidates() -> list[tuple[Path, bool]]:
     directories (see `_pyproject_declares_tool_uv`), so a child/leaf
     package's own plain `pyproject.toml` must not shadow a REAL parent
     project's `uv.toml`/`[tool.uv]`-bearing `pyproject.toml` further up.
-    Returns ``(path, is_pyproject)`` pairs so the caller parses each
-    according to its own shape."""
+    A MALFORMED/unreadable `pyproject.toml`, in contrast, DOES stop the
+    walk (returned as a candidate anyway) -- `uv` itself errors on one
+    rather than silently continuing past it. Returns ``(path,
+    is_pyproject)`` pairs so the caller parses each according to its own
+    shape."""
     cwd = Path.cwd()
     for directory in (cwd, *cwd.parents):
         uv_toml = directory / "uv.toml"
         if uv_toml.is_file():
             return [(uv_toml, False)]
         pyproject = directory / "pyproject.toml"
-        if pyproject.is_file() and _pyproject_declares_tool_uv(pyproject):
-            return [(pyproject, True)]
+        if pyproject.is_file():
+            has_tool_uv = _pyproject_declares_tool_uv(pyproject)
+            if has_tool_uv or has_tool_uv is None:
+                return [(pyproject, True)]
     return []
 
 

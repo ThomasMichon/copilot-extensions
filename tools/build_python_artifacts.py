@@ -89,10 +89,10 @@ from build_toolchain_lock import (  # noqa: E402
     ToolchainLock,
     _assert_toolchain_satisfies_build_requires,
     _hash_fields,
-    _query_marker_environment,
-    _governed_feed_configured,
-    _venv_python_path,
-    _TRUSTED_INDEX_HOSTS_ENV_VAR,
+    _query_marker_environment,  # noqa: F401 -- re-exported for test/caller use
+    _governed_feed_configured,  # noqa: F401 -- re-exported for test/caller use
+    _venv_python_path,  # noqa: F401 -- re-exported for test/caller use
+    _TRUSTED_INDEX_HOSTS_ENV_VAR,  # noqa: F401 -- re-exported for test/caller use
     resolve_toolchain_lock,
     sanitize_subprocess_env,
     strip_package_source_env_vars,

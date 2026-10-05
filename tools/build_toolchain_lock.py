@@ -212,6 +212,49 @@ def _occupied_by_other_identity(
     )
 
 
+def _target_dir_for_identity(
+    venv_dir: Path, validated_index_url: str, python: str | None
+) -> Path:
+    """The directory `resolve_toolchain_lock` should actually build into
+    or reuse for this (index, python) identity: ``venv_dir`` itself if it
+    is absent or already matches, otherwise its deterministic
+    `_alternate_toolchain_dir` sibling.
+
+    MUST be called as the LAST thing before the reuse-vs-build decision
+    itself -- calling it any earlier (then holding onto its result across
+    other work, e.g. interpreter-identity resolution) reopens the exact
+    race this exists to close: a concurrent, different-identity publisher
+    can populate ``venv_dir`` between an earlier check and the eventual
+    reuse, and a caller trusting a stale `target_dir` would then read back
+    and return that mismatched venv instead of noticing the occupation."""
+    if _occupied_by_other_identity(venv_dir, validated_index_url, python):
+        # The shared slot exists but is NOT a complete, matching venv for
+        # this exact (index, python) identity -- a different validated
+        # index, a different requested --python, or an empty/partially-
+        # built directory (which the eventual publish rename below could
+        # never land on anyway; Windows rejects renaming onto an already-
+        # existing destination). It may also be actively in use by a
+        # concurrent build RIGHT NOW. Never rename or delete it: resolve
+        # this call's own, differently-identified toolchain into its own
+        # deterministic sibling path instead, entirely independent of
+        # whatever currently lives at venv_dir.
+        target_dir = _alternate_toolchain_dir(venv_dir, validated_index_url, python)
+        if _occupied_by_other_identity(target_dir, validated_index_url, python):
+            # This alternate path is itself keyed on this exact identity,
+            # so finding it occupied by something else here is a genuine
+            # anomaly (e.g. a hash collision, or manual tampering), never
+            # an expected race -- fail closed rather than silently
+            # rebuilding over it or reusing an unverified venv.
+            raise ArtifactBuildError(
+                f"{target_dir}: toolchain venv exists at this identity-"
+                "keyed path but its provenance does not match the index/"
+                "interpreter it should exclusively hold -- refusing to "
+                "reuse or rebuild over it"
+            )
+        return target_dir
+    return venv_dir
+
+
 def _hash_fields(*fields: str) -> str:
     """Hashes an ordered sequence of string fields unambiguously: each
     field is length-prefixed before its UTF-8 bytes, so no delimiter choice
@@ -545,7 +588,6 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             "an unverified index"
         )
     validated_index_url, validated_index_name = validated
-    target_dir = venv_dir
     # Strip every ambient variable that could supply packages from
     # somewhere other than the one validated URL below (see
     # `governed_feed_trust.strip_package_source_env_vars`'s own docstring
@@ -562,36 +604,36 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
     sanitized_env = sanitize_subprocess_env(env)
     strip_package_source_env_vars(sanitized_env)
     python_identity = _resolve_interpreter_identity(python, sanitized_env)
-    if _occupied_by_other_identity(target_dir, validated_index_url, python_identity):
-        # The shared slot exists but is NOT a complete, matching venv for
-        # this exact (index, python) identity -- a different validated
-        # index, a different requested --python, or an empty/partially-
-        # built directory (which the eventual publish rename below could
-        # never land on anyway; Windows rejects renaming onto an already-
-        # existing destination). It may also be actively in use by a
-        # concurrent build RIGHT NOW. Never rename or delete it: resolve
-        # this call's own, differently-identified toolchain into its own
-        # deterministic sibling path instead, entirely independent of
-        # whatever currently lives at venv_dir.
-        target_dir = _alternate_toolchain_dir(venv_dir, validated_index_url, python_identity)
-        if _occupied_by_other_identity(target_dir, validated_index_url, python_identity):
-            # This alternate path is itself keyed on this exact identity,
-            # so finding it occupied by something else here is a genuine
-            # anomaly (e.g. a hash collision, or manual tampering), never
-            # an expected race -- fail closed rather than silently
-            # rebuilding over it or reusing an unverified venv.
-            raise ArtifactBuildError(
-                f"{target_dir}: toolchain venv exists at this identity-"
-                "keyed path but its provenance does not match the index/"
-                "interpreter it should exclusively hold -- refusing to "
-                "reuse or rebuild over it"
-            )
+    # Resolved as the LAST thing before the reuse/build decision itself
+    # (immediately below), not any earlier -- a check performed earlier
+    # (e.g. right after `python_identity` is known) would leave a window
+    # where a concurrent, different-identity publisher populates
+    # `target_dir` between that check and its actual use, letting this
+    # call trust now-stale provenance and return a mismatched venv.
+    target_dir = _target_dir_for_identity(venv_dir, validated_index_url, python_identity)
     venv_python = _venv_python_path(target_dir)
     if not venv_python.is_file():
         target_dir.parent.mkdir(parents=True, exist_ok=True)
         staging_venv_dir = Path(
             tempfile.mkdtemp(dir=target_dir.parent, prefix=f".{target_dir.name}.staging-")
         )
+        # Hardened to owner-only access IMMEDIATELY, before anything is
+        # written inside it: `tempfile.mkdtemp` already creates with
+        # restrictive (0o700) mode bits on POSIX, but -- the same gap
+        # `_restrict_file_to_owner` exists to close for files -- those
+        # mode bits are not an owner-only ACL on Windows. The index-
+        # config file below lives INSIDE this directory specifically so
+        # that hardening protects its own containing directory, not just
+        # itself: `target_dir.parent` (this directory's own parent) is
+        # caller-selected and may be writable by another local principal,
+        # who could otherwise rename/replace/symlink the config file's
+        # OWN path between this hardening, its write, and `uv` later
+        # opening it via `UV_CONFIG_FILE` -- disclosing the raw
+        # credentialed URL or feeding `uv` attacker-controlled config.
+        # Once this directory itself is owner-only, no such principal can
+        # touch anything inside it at all, regardless of the parent's own
+        # permissions.
+        _restrict_file_to_owner(staging_venv_dir)
         index_config_path: Path | None = None
         try:
             venv_cmd = ["uv", "venv", "--no-config", str(staging_venv_dir)]
@@ -620,7 +662,7 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             # `UV_INDEX_<NAME>_USERNAME`/`PASSWORD`-authenticated index
             # keeps authenticating -- `--no-config --index-url` discarded
             # the name entirely, supplying only an anonymous URL.
-            index_config_path = target_dir.parent / f"{staging_venv_dir.name}.index-config.toml"
+            index_config_path = staging_venv_dir / "index-config.toml"
             index_config_lines = [
                 "[[index]]",
                 f'url = "{_toml_escape(validated_index_url)}"',
@@ -634,23 +676,18 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             # only mode bits (an `os.open` mode applies atomically at
             # creation, unlike a separate `write_text()` + `os.chmod()`,
             # which would leave a window at the umask's default, broader
-            # permissions), harden its ACL to the current user
-            # (`_restrict_file_to_owner` -- `0o600` mode bits alone are
-            # not an owner-only ACL on Windows), and only THEN write the
-            # actual secret-bearing content -- so no content exists while
-            # the file's access could still be broader than intended, on
-            # ANY platform.
+            # permissions), then write its actual secret-bearing content
+            # -- its OWN containing directory (`staging_venv_dir`, above)
+            # is already owner-only, so no other principal can replace
+            # this path out from under us between creation and `uv`
+            # opening it later via `UV_CONFIG_FILE`.
             fd = os.open(
                 str(index_config_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
             )
-            os.close(fd)
             try:
-                _restrict_file_to_owner(index_config_path)
-                with open(index_config_path, "w", encoding="utf-8") as index_config_file:
-                    index_config_file.write(index_config_text)
-            except BaseException:
-                index_config_path.unlink(missing_ok=True)
-                raise
+                os.write(fd, index_config_text.encode("utf-8"))
+            finally:
+                os.close(fd)
             install_env = dict(sanitized_env)
             install_env["UV_CONFIG_FILE"] = str(index_config_path)
             install = subprocess.run(
@@ -673,6 +710,13 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             # shared slot forever (every retry trusting the same broken
             # venv and failing again, rather than rebuilding).
             packages = _query_toolchain_versions(staging_venv_python)
+            # Remove the credential-bearing index-config file NOW, before
+            # `_publish_staging_venv` renames `staging_venv_dir` itself --
+            # it lives INSIDE that directory (see above), so an unremoved
+            # copy would otherwise be renamed right along with it and end
+            # up permanently inside the published venv.
+            index_config_path.unlink()
+            index_config_path = None
             # Publish via a single rename -- a retry after any earlier
             # failure never finds a partially built target_dir, since it
             # never existed until now. The marker is written BEFORE the
@@ -696,10 +740,12 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
                 # longer exists at this path; re-query the actual winner.
                 packages = _query_toolchain_versions(venv_python)
         finally:
+            # `index_config_path` (when still set -- the success path
+            # above already removed and cleared it before publishing)
+            # lives INSIDE `staging_venv_dir`, so removing that directory
+            # removes it too; no separate unlink is needed here.
             if staging_venv_dir.exists():
                 shutil.rmtree(staging_venv_dir, ignore_errors=True)
-            if index_config_path is not None and index_config_path.exists():
-                index_config_path.unlink(missing_ok=True)
     else:
         packages = _query_toolchain_versions(venv_python)
 

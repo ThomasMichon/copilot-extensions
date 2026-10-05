@@ -27,7 +27,7 @@ def _fake_whoami_run(cmd: list[str]) -> subprocess.CompletedProcess | None:
     ``None`` if ``cmd`` isn't a `whoami` invocation at all -- callers chain
     this before their own `icacls`-specific handling in a shared
     `fake_run`."""
-    if cmd[:1] == ["whoami"]:
+    if cmd[:1] == [_WHOAMI_PATH]:
         return subprocess.CompletedProcess(cmd, 0, stdout=_whoami_user_stdout(), stderr="")
     return None
 
@@ -68,6 +68,15 @@ gft = sys.modules["governed_feed_trust"]
 #: (same "capture the real one before any monkeypatching" reasoning as
 #: `_REAL_SUBPROCESS_RUN` above).
 _REAL_CURRENT_TOKEN_IDENTITY = gft._current_token_identity
+#: The REAL, trusted absolute paths `_restrict_file_to_owner`/
+#: `_current_token_identity` actually invoke (round 25) -- never a bare
+#: "icacls"/"whoami" name, which an executable-search-order substitution
+#: could silently hijack. Every test asserting a command's own argv[0], or
+#: matching on it to decide how to answer, uses these same resolved
+#: paths rather than a literal bare name, so they track the production
+#: code's own resolution instead of re-implementing or second-guessing it.
+_ICACLS_PATH = gft._trusted_system32_tool("icacls")
+_WHOAMI_PATH = gft._trusted_system32_tool("whoami")
 
 
 @pytest.fixture(autouse=True)
@@ -1844,9 +1853,9 @@ def test_provenance_key_hardens_acl_on_windows(
 
     assert len(seen_cmds) == 3
     grant_cmd = seen_cmds[0]
-    assert grant_cmd[0] == "icacls"
+    assert grant_cmd[0] == _ICACLS_PATH
     assert "/inheritance:r" in grant_cmd
-    assert f"*{_FAKE_TOKEN_SID}:F" in grant_cmd
+    assert f"*{_FAKE_TOKEN_SID}:(OI)(CI)F" in grant_cmd
 
 
 def test_provenance_key_concurrent_callers_converge_on_one_key(
@@ -2132,11 +2141,17 @@ def test_effective_uv_toml_candidates_windows_includes_programdata(
     # Regression: a system-level uv.toml (%PROGRAMDATA%) must also be
     # discovered -- matching this repo's own install.ps1 precedent
     # (Test-UvConfiguredIndex) -- not just the user-level %APPDATA% path.
+    # Built via the same `Path(...) / "uv" / "uv.toml"` join the
+    # production code itself uses (never a raw backslash-joined literal)
+    # -- on a POSIX CI runner, `Path` never splits on backslashes, so a
+    # literal `Path(r"C:\ProgramData\uv\uv.toml")` and the `/`-joined
+    # result the function actually returns are NOT the same PosixPath,
+    # even though both "look like" the same Windows path.
     monkeypatch.setattr(btl.sys, "platform", "win32")
     candidates = btl._effective_uv_toml_candidates(
         {"APPDATA": r"C:\Users\x\AppData\Roaming", "PROGRAMDATA": r"C:\ProgramData"}
     )
-    assert Path(r"C:\ProgramData\uv\uv.toml") in candidates
+    assert Path(r"C:\ProgramData") / "uv" / "uv.toml" in candidates
 
 
 def test_governed_feed_configured_via_programdata_uv_toml(
@@ -2352,7 +2367,7 @@ def test_resolve_toolchain_lock_never_publishes_venv_failing_version_query(
             staging_python.parent.mkdir(parents=True, exist_ok=True)
             staging_python.write_text("", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        if cmd[:1] == ["icacls"]:
+        if cmd[:1] == [_ICACLS_PATH]:
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         if cmd[:3] == ["uv", "pip", "install"]:
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -2567,21 +2582,40 @@ def test_project_uv_toml_candidates_continues_past_pyproject_without_tool_uv(
     assert gft._project_uv_toml_candidates() == [(parent_dir / "uv.toml", False)]
 
 
-def test_project_uv_toml_candidates_treats_malformed_pyproject_as_absent(
+def test_project_uv_toml_candidates_stops_at_malformed_pyproject(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # A pyproject.toml that fails to parse is treated the same as one
-    # with no [tool.uv] table -- not a candidate, walk continues upward.
-    # (A HIGHER-precedence candidate that IS selected and THEN fails to
-    # parse is a different, separately-tested case --
-    # `_effective_default_index_url` fails closed on that instead.)
+    # Regression (round 25): a malformed/unreadable `pyproject.toml`
+    # must STOP the walk (returned as a candidate anyway), never be
+    # skipped the way a validly-parsed-but-`[tool.uv]`-less one is --
+    # `uv` itself ERRORS on a malformed project config rather than
+    # silently continuing to search upward and accepting a DIFFERENT
+    # (parent) project's index instead.
     parent_dir = tmp_path / "parent"
     child_dir = parent_dir / "child"
     child_dir.mkdir(parents=True)
     (parent_dir / "uv.toml").write_text("", encoding="utf-8")
+    malformed = child_dir / "pyproject.toml"
+    malformed.write_text("not = [valid toml", encoding="utf-8")
+    monkeypatch.chdir(child_dir)
+    assert gft._project_uv_toml_candidates() == [(malformed, True)]
+
+
+def test_governed_feed_malformed_pyproject_fails_closed_not_parent_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Same regression, exercised end-to-end: `_effective_default_index_url`
+    # must fail closed (None) rather than silently certifying the PARENT
+    # directory's own, otherwise-valid index.
+    parent_dir = tmp_path / "parent"
+    child_dir = parent_dir / "child"
+    child_dir.mkdir(parents=True)
+    (parent_dir / "uv.toml").write_text(
+        'index-url = "https://parent.internal/simple/"\n', encoding="utf-8"
+    )
     (child_dir / "pyproject.toml").write_text("not = [valid toml", encoding="utf-8")
     monkeypatch.chdir(child_dir)
-    assert gft._project_uv_toml_candidates() == [(parent_dir / "uv.toml", False)]
+    assert btl._effective_default_index_url({}) is None
 
 
 def test_governed_feed_project_discovery_skips_nested_pyproject_without_tool_uv(
@@ -2843,6 +2877,93 @@ def test_resolve_toolchain_lock_fails_closed_on_mismatch_at_alternate_slot(
     with pytest.raises(bpa.ArtifactBuildError):
         bpa.resolve_toolchain_lock(venv_dir)
 
+
+def test_resolve_toolchain_lock_rechecks_occupancy_after_interpreter_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression (round 25): the occupied-by-other-identity check must
+    # happen as the LAST thing before the reuse/build decision -- AFTER
+    # interpreter-identity resolution (which can itself take real time,
+    # e.g. shelling out to `uv python find`), never before it. A
+    # different-identity publisher that completes WHILE this call is
+    # still resolving the interpreter identity must still be caught and
+    # redirected to the alternate slot, not silently trusted and reused
+    # because an earlier check already passed before that publisher
+    # existed. Simulated by having the interpreter-identity resolution
+    # step itself populate `venv_dir` with a mismatched venv as a side
+    # effect, standing in for "something else finished during the gap".
+    _assume_governed_feed_configured(monkeypatch)
+    venv_dir = tmp_path / "toolchain-venv"
+
+    def fake_resolve_interpreter_identity(python, env):  # noqa: ARG001
+        winner_python = bpa._venv_python_path(venv_dir)
+        winner_python.parent.mkdir(parents=True, exist_ok=True)
+        winner_python.write_text("", encoding="utf-8")
+        btl._write_provenance_marker(venv_dir, "https://different.example/simple/", "")
+        return ""
+
+    monkeypatch.setattr(btl, "_resolve_interpreter_identity", fake_resolve_interpreter_identity)
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[:2] == ["uv", "venv"]:
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    lock = bpa.resolve_toolchain_lock(venv_dir)
+
+    expected_alt = btl._alternate_toolchain_dir(
+        venv_dir, "https://example.internal/simple/", ""
+    )
+    assert lock.venv_python == bpa._venv_python_path(expected_alt)
+    # The late-arriving winner at the shared slot must be left untouched.
+    assert btl._provenance_matches(venv_dir, "https://different.example/simple/", "")
+
+
+def test_target_dir_for_identity_returns_venv_dir_when_absent(tmp_path: Path):
+    venv_dir = tmp_path / "toolchain-venv"
+    assert btl._target_dir_for_identity(venv_dir, "https://example.internal/simple/", "") == venv_dir
+
+
+def test_target_dir_for_identity_returns_venv_dir_when_matching(tmp_path: Path):
+    venv_dir = tmp_path / "toolchain-venv"
+    bpa._venv_python_path(venv_dir).parent.mkdir(parents=True, exist_ok=True)
+    bpa._venv_python_path(venv_dir).write_text("", encoding="utf-8")
+    btl._write_provenance_marker(venv_dir, "https://example.internal/simple/", "")
+    assert btl._target_dir_for_identity(venv_dir, "https://example.internal/simple/", "") == venv_dir
+
+
+def test_target_dir_for_identity_redirects_when_occupied_by_other_identity(tmp_path: Path):
+    venv_dir = tmp_path / "toolchain-venv"
+    bpa._venv_python_path(venv_dir).parent.mkdir(parents=True, exist_ok=True)
+    bpa._venv_python_path(venv_dir).write_text("", encoding="utf-8")
+    btl._write_provenance_marker(venv_dir, "https://different.example/simple/", "")
+    expected_alt = btl._alternate_toolchain_dir(venv_dir, "https://example.internal/simple/", "")
+    assert btl._target_dir_for_identity(
+        venv_dir, "https://example.internal/simple/", ""
+    ) == expected_alt
+
+
+def test_target_dir_for_identity_fails_closed_on_mismatch_at_alternate_slot(tmp_path: Path):
+    venv_dir = tmp_path / "toolchain-venv"
+    bpa._venv_python_path(venv_dir).parent.mkdir(parents=True, exist_ok=True)
+    bpa._venv_python_path(venv_dir).write_text("", encoding="utf-8")
+    btl._write_provenance_marker(venv_dir, "https://different.example/simple/", "")
+    alt_dir = btl._alternate_toolchain_dir(venv_dir, "https://example.internal/simple/", "")
+    bpa._venv_python_path(alt_dir).parent.mkdir(parents=True, exist_ok=True)
+    bpa._venv_python_path(alt_dir).write_text("", encoding="utf-8")
+    btl._write_provenance_marker(alt_dir, "https://yet-another.example/simple/", "")
+    with pytest.raises(bpa.ArtifactBuildError):
+        btl._target_dir_for_identity(venv_dir, "https://example.internal/simple/", "")
 
 
 def test_resolve_toolchain_lock_raises_on_genuine_rename_failure(
@@ -3294,13 +3415,17 @@ def test_restrict_file_to_owner_invokes_icacls_on_windows(
     # principals by well-known SID, then a final verify query.
     assert len(seen_cmds) == 3
     grant_cmd, remove_cmd, verify_cmd = seen_cmds
-    assert grant_cmd[0] == "icacls"
+    assert grant_cmd[0] == _ICACLS_PATH
     assert grant_cmd[1] == str(target)
     assert "/inheritance:r" in grant_cmd
-    assert f"*{_FAKE_TOKEN_SID}:F" in grant_cmd
-    assert "SYSTEM:F" in grant_cmd
-    assert remove_cmd[:3] == ["icacls", str(target), "/remove:g"]
-    assert verify_cmd == ["icacls", str(target)]
+    assert f"*{_FAKE_TOKEN_SID}:(OI)(CI)F" in grant_cmd
+    assert "SYSTEM:(OI)(CI)F" in grant_cmd
+    assert remove_cmd[:3] == [_ICACLS_PATH, str(target), "/remove:g"]
+    # Regression (round 25): a directory (e.g. the staging venv dir)
+    # inherits `OWNER RIGHTS` by default on this repo's own machines --
+    # must be stripped alongside the other broad, well-known principals.
+    assert "*S-1-3-4" in remove_cmd
+    assert verify_cmd == [_ICACLS_PATH, str(target)]
 
 
 def test_restrict_file_to_owner_ignores_forged_environment_variables(
@@ -3326,7 +3451,7 @@ def test_restrict_file_to_owner_ignores_forged_environment_variables(
     btl._restrict_file_to_owner(target)
 
     grant_cmd = seen_cmds[0]
-    assert f"*{_FAKE_TOKEN_SID}:F" in grant_cmd
+    assert f"*{_FAKE_TOKEN_SID}:(OI)(CI)F" in grant_cmd
     assert not any("attacker" in str(arg).lower() for arg in grant_cmd)
 
 
@@ -3471,26 +3596,70 @@ def test_current_token_identity_fails_closed_on_implausible_sid(
         gft._current_token_identity()
 
 
-def test_resolve_toolchain_lock_hardens_index_config_acl_on_windows(
+def test_current_token_identity_invokes_whoami_by_trusted_absolute_path(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Regression (round 25): invoking `whoami` by a bare name does not
+    # authenticate the executable -- Windows resolves it through the
+    # current directory/`PATH`, where a substituted `whoami.exe` could
+    # return an attacker-chosen identity. Must always invoke the trusted
+    # `%SystemRoot%\System32\whoami.exe` absolute path instead.
+    monkeypatch.setattr(gft, "_current_token_identity", _REAL_CURRENT_TOKEN_IDENTITY)
+    seen_cmds: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        seen_cmds.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout=_whoami_user_stdout(), stderr="")
+
+    monkeypatch.setattr(gft.subprocess, "run", fake_run)
+    gft._current_token_identity()
+    assert seen_cmds[0][0] == _WHOAMI_PATH
+
+
+def test_trusted_system32_tool_resolves_absolute_path():
+    icacls = gft._trusted_system32_tool("icacls")
+    assert Path(icacls).is_absolute()
+    assert Path(icacls).name.lower() == "icacls.exe"
+    assert Path(icacls).is_file()
+
+
+def test_trusted_system32_tool_fails_closed_when_missing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    # A `SystemRoot` that does not actually contain the requested tool
+    # must fail closed rather than fall back to a bare, PATH-resolved
+    # name.
+    monkeypatch.setenv("SystemRoot", str(tmp_path))
+    with pytest.raises(bpa.ArtifactBuildError):
+        gft._trusted_system32_tool("whoami")
+
+
+def test_resolve_toolchain_lock_hardens_staging_dir_before_index_config_exists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 21): the sanitized temp index-config file must be
-    # hardened via `_restrict_file_to_owner` BEFORE its secret-bearing
-    # content is written -- `0o600` mode bits alone are not an owner-only
-    # ACL on Windows.
+    # Regression (round 21, restructured round 25): the sanitized temp
+    # index-config file must be protected from the moment it exists.
+    # Round 25 moved it INSIDE the staging venv directory and instead
+    # hardens THAT DIRECTORY's own ACL immediately after creation (before
+    # `uv venv` even runs) -- its own parent (`target_dir.parent`) is
+    # caller-selected and may be writable by another local principal, who
+    # could otherwise replace/symlink the config file's own path between
+    # creation and `uv` later opening it via `UV_CONFIG_FILE`.
     _assume_governed_feed_configured(monkeypatch)
     monkeypatch.setattr(btl.sys, "platform", "win32")
     venv_dir = tmp_path / "toolchain-venv"
-    hardened_before_write: list[bool] = []
+    hardened_dirs: list[Path] = []
+    config_existed_at_harden_time: list[bool] = []
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
-        if cmd[:1] == ["icacls"] and str(cmd[1]).endswith(".index-config.toml"):
-            config_path = Path(cmd[1])
-            # The file must exist but still be EMPTY at hardening time --
-            # content is written only after this call succeeds.
-            hardened_before_write.append(config_path.read_text(encoding="utf-8") == "")
+        if cmd[:1] == [_ICACLS_PATH] and len(cmd) >= 2 and Path(cmd[1]).is_dir():
+            staging_dir = Path(cmd[1])
+            hardened_dirs.append(staging_dir)
+            config_existed_at_harden_time.append(
+                (staging_dir / "index-config.toml").exists()
+            )
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-        if cmd[:1] == ["icacls"]:
+        if cmd[:1] == [_ICACLS_PATH]:
             # The provenance-key file's OWN icacls hardening (round 22) --
             # not this test's concern; just let it succeed.
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -3510,9 +3679,41 @@ def test_resolve_toolchain_lock_hardens_index_config_acl_on_windows(
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     bpa.resolve_toolchain_lock(venv_dir)
 
-    # Several icacls sub-invocations now touch the index-config file
-    # (grant, strip-broad-principals, verify) -- all must see it EMPTY.
-    assert hardened_before_write and all(hardened_before_write)
+    assert hardened_dirs, "the staging directory was never hardened"
+    # The directory was hardened BEFORE the index-config file existed
+    # inside it.
+    assert config_existed_at_harden_time == [False] * len(config_existed_at_harden_time)
+
+
+def test_resolve_toolchain_lock_index_config_removed_before_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression (round 25): the index-config file lives INSIDE the
+    # staging venv directory, which is renamed wholesale to publish it --
+    # it must be removed before that rename, or it would end up
+    # permanently inside the published toolchain venv.
+    _assume_governed_feed_configured(monkeypatch)
+    venv_dir = tmp_path / "toolchain-venv"
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[:2] == ["uv", "venv"]:
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.resolve_toolchain_lock(venv_dir)
+
+    assert not (venv_dir / "index-config.toml").exists()
+    assert list(venv_dir.parent.glob("*index-config*")) == []
 
 
 def test_resolve_toolchain_lock_strips_pythonpath_and_pythonhome(
