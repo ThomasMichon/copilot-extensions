@@ -356,24 +356,22 @@ class TestCorrelation:
 
 
 class TestFetchBaselineAsset:
+    _POINTER = {
+        "release_tag": "coverage-baselines-abc", "asset": "agent-x.json",
+        "plugin": "agent-x", "measured_commit": "abc",
+    }
+    _VALID_PAYLOAD = {
+        "plugin": "agent-x", "measured_commit": "abc",
+        "generated_at": "2026-01-01T00:00:00+00:00",
+        "coverage": {}, "tests": {},
+    }
+
     def _write_asset(self, args, payload) -> None:
         dest_dir = Path(args[args.index("--dir") + 1])
         (dest_dir / "agent-x.json").write_text(json.dumps(payload))
 
-    def test_rejects_a_pointer_missing_release_tag_or_asset(self) -> None:
-        with pytest.raises(correlation.BaselineFetchError):
-            correlation.fetch_baseline_asset("owner/repo", {"plugin": "x"})
-
-    def test_downloads_and_parses_the_asset(self, tmp_path, monkeypatch) -> None:
-        pointer = {"release_tag": "coverage-baselines-abc", "asset": "agent-x.json"}
-        payload = {
-            "measured_commit": "abc", "generated_at": "2026-01-01T00:00:00+00:00",
-            "coverage": {}, "tests": {},
-        }
-
-        def _fake_run(args, **kwargs):
-            # Locate the --dir argument and write the asset there, exactly
-            # as `gh release download` would.
+    def _fake_run_writing(self, payload):
+        def _fake_run(args, **_kwargs):
             self._write_asset(args, payload)
 
             class _Result:
@@ -381,16 +379,29 @@ class TestFetchBaselineAsset:
                 stdout = ""
                 stderr = ""
             return _Result()
+        return _fake_run
 
-        monkeypatch.setattr(correlation.subprocess, "run", _fake_run)
+    def test_rejects_a_pointer_missing_release_tag_or_asset(self) -> None:
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", {"plugin": "x", "measured_commit": "abc"})
 
-        result = correlation.fetch_baseline_asset("owner/repo", pointer)
+    def test_rejects_a_pointer_missing_plugin_or_measured_commit(self) -> None:
+        # Regression: a pointer that omits its own identity fields must be
+        # rejected outright, not silently skip the later
+        # plugin/measured_commit correlation check.
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset(
+                "owner/repo", {"release_tag": "coverage-baselines-abc", "asset": "agent-x.json"}
+            )
 
-        assert result == payload
+    def test_downloads_and_parses_the_asset(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(self._VALID_PAYLOAD))
+
+        result = correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+        assert result == self._VALID_PAYLOAD
 
     def test_raises_on_a_failed_download(self, monkeypatch) -> None:
-        pointer = {"release_tag": "coverage-baselines-abc", "asset": "agent-x.json"}
-
         class _Failed:
             returncode = 1
             stdout = ""
@@ -399,28 +410,24 @@ class TestFetchBaselineAsset:
         monkeypatch.setattr(correlation.subprocess, "run", lambda *a, **k: _Failed())
 
         with pytest.raises(correlation.BaselineFetchError):
-            correlation.fetch_baseline_asset("owner/repo", pointer)
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
 
     def test_raises_when_gh_is_not_launchable(self, monkeypatch) -> None:
-        # Regression (Copilot review on PR #5213): `subprocess.run` itself
-        # raises OSError (e.g. FileNotFoundError) when `gh` isn't on PATH
-        # at all -- this must not bypass BaselineFetchError.
-        pointer = {"release_tag": "coverage-baselines-abc", "asset": "agent-x.json"}
-
+        # Regression: `subprocess.run` itself raises OSError (e.g.
+        # FileNotFoundError) when `gh` isn't on PATH at all -- this must
+        # not bypass BaselineFetchError.
         def _raise_oserror(*_a, **_k):
             raise FileNotFoundError("gh not found")
 
         monkeypatch.setattr(correlation.subprocess, "run", _raise_oserror)
 
         with pytest.raises(correlation.BaselineFetchError):
-            correlation.fetch_baseline_asset("owner/repo", pointer)
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
 
     def test_raises_on_malformed_json(self, tmp_path, monkeypatch) -> None:
-        pointer = {"release_tag": "coverage-baselines-abc", "asset": "agent-x.json"}
-
         def _fake_run(args, **kwargs):
             dest_dir = Path(args[args.index("--dir") + 1])
-            (dest_dir / pointer["asset"]).write_text("not valid json {{{")
+            (dest_dir / "agent-x.json").write_text("not valid json {{{")
 
             class _Result:
                 returncode = 0
@@ -431,14 +438,30 @@ class TestFetchBaselineAsset:
         monkeypatch.setattr(correlation.subprocess, "run", _fake_run)
 
         with pytest.raises(correlation.BaselineFetchError):
-            correlation.fetch_baseline_asset("owner/repo", pointer)
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_on_non_utf8_content(self, tmp_path, monkeypatch) -> None:
+        # Regression: invalid UTF-8 raises UnicodeDecodeError, which must
+        # also be converted to BaselineFetchError, not bypass it.
+        def _fake_run(args, **kwargs):
+            dest_dir = Path(args[args.index("--dir") + 1])
+            (dest_dir / "agent-x.json").write_bytes(b"\xff\xfe\x00\x01invalid-utf8")
+
+            class _Result:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return _Result()
+
+        monkeypatch.setattr(correlation.subprocess, "run", _fake_run)
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
 
     def test_raises_when_downloaded_json_is_not_an_object(self, monkeypatch) -> None:
-        pointer = {"release_tag": "coverage-baselines-abc", "asset": "agent-x.json"}
-
         def _fake_run(args, **kwargs):
             dest_dir = Path(args[args.index("--dir") + 1])
-            (dest_dir / pointer["asset"]).write_text("[1, 2, 3]")
+            (dest_dir / "agent-x.json").write_text("[1, 2, 3]")
 
             class _Result:
                 returncode = 0
@@ -449,79 +472,53 @@ class TestFetchBaselineAsset:
         monkeypatch.setattr(correlation.subprocess, "run", _fake_run)
 
         with pytest.raises(correlation.BaselineFetchError):
-            correlation.fetch_baseline_asset("owner/repo", pointer)
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
 
     def test_raises_when_generated_at_is_missing(self, monkeypatch) -> None:
-        pointer = {"release_tag": "coverage-baselines-abc", "asset": "agent-x.json"}
-        payload = {"measured_commit": "abc", "coverage": {}, "tests": {}}  # no generated_at
-
-        def _fake_run(args, **kwargs):
-            self._write_asset(args, payload)
-
-            class _Result:
-                returncode = 0
-                stdout = ""
-                stderr = ""
-            return _Result()
-
-        monkeypatch.setattr(correlation.subprocess, "run", _fake_run)
+        payload = {**self._VALID_PAYLOAD}
+        del payload["generated_at"]
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
 
         with pytest.raises(correlation.BaselineFetchError):
-            correlation.fetch_baseline_asset("owner/repo", pointer)
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_when_generated_at_is_not_a_parseable_timestamp(self, monkeypatch) -> None:
+        # Regression: a syntactically-present but non-ISO8601 (or
+        # non-string) generated_at must be rejected here, not crash
+        # downstream in debt.assess_debt with a confusing error.
+        payload = {**self._VALID_PAYLOAD, "generated_at": "not-a-timestamp"}
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_when_coverage_or_tests_is_not_a_mapping(self, monkeypatch) -> None:
+        # Regression: a missing/non-dict coverage map must be rejected
+        # here -- not silently curated downstream as "empty, nothing
+        # covered" (a fundamentally different, evidenced outcome).
+        payload = {**self._VALID_PAYLOAD, "coverage": []}
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
 
     def test_raises_when_downloaded_plugin_does_not_match_the_pointer(self, monkeypatch) -> None:
-        # Regression (Copilot review on PR #5213): a syntactically valid
-        # baseline document whose OWN plugin/measured_commit disagree with
-        # the pointer that named it must never be trusted -- that would
-        # silently select against the wrong generation.
-        pointer = {
-            "release_tag": "coverage-baselines-abc", "asset": "agent-x.json",
-            "plugin": "agent-x",
-        }
-        payload = {
-            "plugin": "agent-y",  # mismatch
-            "measured_commit": "abc", "generated_at": "2026-01-01T00:00:00+00:00",
-            "coverage": {}, "tests": {},
-        }
-
-        def _fake_run(args, **kwargs):
-            self._write_asset(args, payload)
-
-            class _Result:
-                returncode = 0
-                stdout = ""
-                stderr = ""
-            return _Result()
-
-        monkeypatch.setattr(correlation.subprocess, "run", _fake_run)
+        # Regression: a syntactically valid baseline document whose OWN
+        # plugin/measured_commit disagree with the pointer that named it
+        # must never be trusted -- that would silently select against the
+        # wrong generation.
+        payload = {**self._VALID_PAYLOAD, "plugin": "agent-y"}  # mismatch
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
 
         with pytest.raises(correlation.BaselineFetchError):
-            correlation.fetch_baseline_asset("owner/repo", pointer)
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
 
     def test_raises_when_downloaded_measured_commit_does_not_match_the_pointer(self, monkeypatch) -> None:
-        pointer = {
-            "release_tag": "coverage-baselines-abc", "asset": "agent-x.json",
-            "measured_commit": "abc",
-        }
-        payload = {
-            "measured_commit": "different-sha",  # mismatch
-            "generated_at": "2026-01-01T00:00:00+00:00",
-            "coverage": {}, "tests": {},
-        }
-
-        def _fake_run(args, **kwargs):
-            self._write_asset(args, payload)
-
-            class _Result:
-                returncode = 0
-                stdout = ""
-                stderr = ""
-            return _Result()
-
-        monkeypatch.setattr(correlation.subprocess, "run", _fake_run)
+        payload = {**self._VALID_PAYLOAD, "measured_commit": "different-sha"}  # mismatch
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
 
         with pytest.raises(correlation.BaselineFetchError):
-            correlation.fetch_baseline_asset("owner/repo", pointer)
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
 
 
 class TestPlanChunks:
@@ -1489,13 +1486,12 @@ class TestAssessDebt:
         assert "age_seconds" in over.reasons[0]
 
     def test_age_is_anchored_to_generated_at_not_the_commits_own_timestamp(self, tmp_path):
-        # Regression (Copilot review on PR #5146): a commit can sit for
-        # days before CI finally collects coverage against it. Age must
-        # reflect when the baseline was EARNED (`generated_at`), not the
-        # commit's own, potentially much older or newer, commit time --
-        # otherwise a freshly-collected baseline would report a stale (or
-        # falsely fresh) age driven by the commit's timestamp instead of
-        # when collection actually ran.
+        # Regression: a commit can sit for days before CI finally collects
+        # coverage against it. Age must reflect when the baseline was
+        # EARNED (`generated_at`), not the commit's own, potentially much
+        # older or newer, commit time -- otherwise a freshly-collected
+        # baseline would report a stale (or falsely fresh) age driven by
+        # the commit's timestamp instead of when collection actually ran.
         repo = _init_repo(tmp_path)
         (repo / "a.txt").write_text("1\n")
         c1 = _commit(repo, "first")
@@ -1513,9 +1509,8 @@ class TestAssessDebt:
         assert abs(result.age_seconds - 5) < 1e-3
 
     def test_recollecting_against_the_same_old_commit_resets_age(self, tmp_path):
-        # Regression (Copilot review on PR #5146): re-running coverage
-        # collection against the SAME commit must reset reported age to
-        # near-zero -- a stale baseline for an unchanged commit must become
+        # Regression: re-running coverage collection against the SAME
+        # commit must reset reported age to near-zero -- a stale baseline for an unchanged commit must become
         # fresh again once re-collected, which anchoring age to the
         # commit's own timestamp could never allow.
         repo = _init_repo(tmp_path)
@@ -1612,7 +1607,7 @@ class TestDecide:
         assert result.baseline_generation is None
         # None (not ()): no curated evidence exists at all -- the caller
         # must run its own full/default suite, never interpret this as
-        # "run nothing" (Copilot review on PR #5213).
+        # "run nothing".
         assert result.selected_tests is None
 
     def test_fetch_failure_falls_back_with_the_error_recorded(self, tmp_path, monkeypatch):
@@ -1666,8 +1661,8 @@ class TestDecide:
         assert result.selected_tests == ("test_smoke",)
         assert result.debt == over_debt.as_dict()
         assert result.fallback_set == curated.as_dict()
-        # Curated from the FULL earned baseline, never a remapped one
-        # (Copilot review on PR #5213) -- remap wasn't even called here.
+        # Curated from the FULL earned baseline, never a remapped one --
+        # remap wasn't even called here.
         assert captured_baseline["value"] is self._FULL_BASELINE
 
     def test_selection_fallback_trigger_curates_from_the_full_baseline(self, tmp_path, monkeypatch):
@@ -1708,8 +1703,7 @@ class TestDecide:
         assert result.selection_fallback_reasons == ({"file": "f.py", "line": 3, "reason": "no_baseline_entry"},)
         assert result.selected_tests == ("test_smoke",)
         # Curated from the FULL earned baseline, never the remapped one
-        # that just dropped this diff's own touched-file coverage
-        # (Copilot review on PR #5213).
+        # that just dropped this diff's own touched-file coverage.
         assert captured_baseline["value"] is self._FULL_BASELINE
 
     def test_clean_selection_returns_the_selected_tests(self, tmp_path, monkeypatch):

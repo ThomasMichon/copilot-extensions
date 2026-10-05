@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 # `.github/` already hosts `release-pipeline-state.json` -- this directory
@@ -142,9 +143,8 @@ def require_measured_commit(baseline: dict) -> str:
 
 
 class BaselineFetchError(RuntimeError):
-    """Raised when a baseline's Release asset cannot be downloaded or
-    parsed -- the Phase 3 network-I/O step this module's own docstring
-    named as "not yet implemented here"."""
+    """Raised when a baseline's Release asset cannot be downloaded, read,
+    or validated as a genuine, correctly-correlated baseline document."""
 
 
 def fetch_baseline_asset(repo: str, pointer: dict) -> dict:
@@ -159,10 +159,11 @@ def fetch_baseline_asset(repo: str, pointer: dict) -> dict:
 
     Performs real network I/O via ``gh release download``; raises
     `BaselineFetchError` on any failure -- a missing `gh` executable (an
-    `OSError` subprocess itself would raise), a missing release/asset, a
-    malformed JSON payload, or a syntactically-valid-but-wrong document
-    (not a dict, missing `generated_at`, or whose own `plugin`/
-    `measured_commit` don't match the pointer that named it -- the
+    `OSError` `subprocess` itself would raise), a missing release/asset, a
+    non-UTF-8 or malformed-JSON payload, or a syntactically-valid-but-wrong
+    document (not a dict, a non-mapping/absent `coverage`/`tests`, a
+    `generated_at` that isn't a parseable ISO8601 timestamp, or whose own
+    `plugin`/`measured_commit` don't match the pointer that named it -- the
     correlation invariant a pointer and its asset must agree on) -- rather
     than returning a partial/empty/mismatched baseline a caller could
     mistake for "nothing covered" or silently select against the wrong
@@ -170,8 +171,13 @@ def fetch_baseline_asset(repo: str, pointer: dict) -> dict:
     """
     release_tag = pointer.get("release_tag")
     asset = pointer.get("asset")
-    if not release_tag or not asset:
-        raise BaselineFetchError(f"pointer is missing release_tag/asset: {pointer!r}")
+    pointer_plugin = pointer.get("plugin")
+    pointer_measured_commit = pointer.get("measured_commit")
+    if not release_tag or not asset or not pointer_plugin or not pointer_measured_commit:
+        raise BaselineFetchError(
+            "pointer is missing one or more required fields "
+            f"(release_tag/asset/plugin/measured_commit): {pointer!r}"
+        )
     try:
         with tempfile.TemporaryDirectory() as tmp:
             out = subprocess.run(
@@ -189,9 +195,9 @@ def fetch_baseline_asset(repo: str, pointer: dict) -> dict:
             asset_path = Path(tmp) / asset
             try:
                 content = asset_path.read_text(encoding="utf-8")
-            except OSError as error:
+            except (OSError, UnicodeDecodeError) as error:
                 raise BaselineFetchError(
-                    f"downloaded asset not found at {asset_path}: {error}"
+                    f"downloaded asset at {asset_path} could not be read as UTF-8 text: {error}"
                 ) from error
     except OSError as error:
         # subprocess.run itself raises OSError (e.g. FileNotFoundError) when
@@ -210,19 +216,38 @@ def fetch_baseline_asset(repo: str, pointer: dict) -> dict:
         raise BaselineFetchError(
             f"downloaded asset {asset} is not a JSON object (got {type(baseline).__name__})"
         )
-    if not baseline.get("generated_at"):
-        raise BaselineFetchError(f"downloaded asset {asset} is missing generated_at")
-    pointer_plugin = pointer.get("plugin")
-    if pointer_plugin is not None and baseline.get("plugin") != pointer_plugin:
+
+    generated_at = baseline.get("generated_at")
+    if not isinstance(generated_at, str):
+        raise BaselineFetchError(
+            f"downloaded asset {asset}'s generated_at is missing or not a string: {generated_at!r}"
+        )
+    try:
+        datetime.fromisoformat(generated_at)
+    except ValueError as error:
+        raise BaselineFetchError(
+            f"downloaded asset {asset}'s generated_at is not a valid ISO8601 timestamp: "
+            f"{generated_at!r} ({error})"
+        ) from error
+
+    for field_name in ("coverage", "tests"):
+        value = baseline.get(field_name)
+        if not isinstance(value, dict):
+            raise BaselineFetchError(
+                f"downloaded asset {asset}'s {field_name!r} is missing or not a mapping "
+                f"(got {type(value).__name__})"
+            )
+
+    if baseline.get("plugin") != pointer_plugin:
         raise BaselineFetchError(
             f"downloaded asset's plugin {baseline.get('plugin')!r} does not match "
             f"pointer's plugin {pointer_plugin!r} -- correlation invariant violated"
         )
-    pointer_measured_commit = pointer.get("measured_commit")
-    if pointer_measured_commit is not None and baseline.get("measured_commit") != pointer_measured_commit:
+    if baseline.get("measured_commit") != pointer_measured_commit:
         raise BaselineFetchError(
             f"downloaded asset's measured_commit {baseline.get('measured_commit')!r} does not "
             f"match pointer's measured_commit {pointer_measured_commit!r} -- correlation "
             "invariant violated"
         )
     return baseline
+

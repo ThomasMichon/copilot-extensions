@@ -391,18 +391,21 @@ baseline at all, a failed asset fetch, exceeded coverage-debt, or any
 per-file/per-line selection trigger (`no_baseline_entry`/
 `line_not_attributed`).
 
-15 new tests (`TestFetchBaselineAsset`, `TestDecide`) -- `decide()`'s own
+19 new tests (`TestFetchBaselineAsset`, `TestDecide`) -- `decide()`'s own
 tests monkeypatch its collaborators directly (each already has its own
 dedicated test class) rather than re-exercising them through real git/
 network I/O.
 
-**Review fixes (same PR, #5213):** `fetch_baseline_asset` now validates
-the downloaded document is a dict with a `generated_at` and a
-`plugin`/`measured_commit` agreeing with the pointer that named it (never
-trusting a syntactically-valid-but-wrong payload), and converts a
-subprocess-launch `OSError` (e.g. `gh` missing from `PATH`) into
-`BaselineFetchError` rather than letting it bypass the documented
-fetch-failure contract. `SelectionDecision.selected_tests` is `None`
+**Review fixes (same PR):** `fetch_baseline_asset` now requires and
+validates the pointer's own `plugin`/`measured_commit` (previously
+optional, which skipped the correlation check entirely when absent),
+validates the downloaded document is a dict with a parseable-ISO8601
+`generated_at` and dict-typed `coverage`/`tests` (not just present),
+converts a subprocess-launch `OSError` (`gh` missing from `PATH`) and a
+non-UTF-8 payload (`UnicodeDecodeError`) into `BaselineFetchError` rather
+than letting either bypass the documented fetch-failure contract, and its
+own class docstring no longer references a now-resolved prior
+implementation state. `SelectionDecision.selected_tests` is `None`
 (never `()`) for the two "no curated evidence at all" cases (no baseline
 resolved, fetch failed) -- a caller must run its own full/default suite
 there, not interpret an empty tuple as "run nothing"; a real tuple
@@ -412,6 +415,9 @@ fallback paths (debt-exceeded, selection-triggered) now draws from the
 **full, un-remapped** baseline, not the fork-commit-remapped one --
 remapping drops coverage for exactly the files a diff touches, which
 would have shrunk the fallback universe precisely on the riskiest files.
+`decide.py`'s own module docstring numbered steps now match its actual
+control flow (debt is assessed before remap/selection, and a debt-
+exceeded decision skips remap entirely).
 
 **Also noted, not caused by this work:** the operator flagged that
 `main`'s history was force-rewritten (via `git filter-repo`) to purge

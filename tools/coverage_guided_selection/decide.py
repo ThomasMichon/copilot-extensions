@@ -8,13 +8,19 @@ lines, which tests should run, and why?*
    qualifying baseline pointer on `main` (no network I/O).
 2. `correlation.fetch_baseline_asset` -- download that generation's full
    coverage map from its Release asset (network I/O).
-3. `ancestor_resolution.remap_or_invalidate_baseline` -- carry its
-   attribution forward to the fork commit.
-4. `debt.assess_debt` -- is this resolved generation too stale to trust.
+3. `debt.assess_debt` -- is this resolved generation too stale to trust.
+   If so, curate the fallback tier from the full baseline directly
+   (step 6) and skip straight past remap/selection below -- there is no
+   point remapping attribution this run has already decided not to trust.
+4. `ancestor_resolution.remap_or_invalidate_baseline` -- otherwise, carry
+   its attribution forward to the fork commit.
 5. `selection.select_tests` -- diff-scoped selection against the changed
-   lines, once attribution is confirmed current enough.
-6. `fallback.compute_fallback_set` -- the safety-net tier, whenever any of
-   the above trips it.
+   lines, using the remapped attribution.
+6. `fallback.compute_fallback_set` -- the safety-net tier, whenever step 3
+   or step 5 trips it. Always curated from the **full**, un-remapped
+   baseline -- remapping (step 4) drops coverage for exactly the files
+   this diff touches, which would shrink the fallback universe precisely
+   on the riskiest files.
 
 Every path returns one `SelectionDecision`: which tests to run, which mode
 produced them (`"selected"` or `"fallback"`), why, and which baseline
