@@ -42,6 +42,7 @@ async def cmd_check(args: argparse.Namespace) -> int:
         )
     finally:
         await manager.disconnect(args.name)
+    readiness.agent_bridge_host_version = venue_check.host_bridge_version()
 
     if args.json_output:
         print(json.dumps(readiness.to_dict(), indent=2, sort_keys=True))
@@ -63,16 +64,21 @@ async def cmd_doctor_venue(args: argparse.Namespace) -> int:
         readiness = await venue_check.check_remote_venue(
             manager.exec_command, args.name, timeout=args.timeout,
         )
+        # A plugin older than the host bridge is a gap too, before and after --fix.
+        host_version = venue_check.host_bridge_version()
+        readiness.agent_bridge_host_version = host_version
         remediation = None
         if args.fix and readiness.gaps:
             remediation = await venue_check.remediate_remote_venue(
                 manager.exec_command, args.name, readiness, timeout=args.timeout,
+                bridge_version=host_version,
             )
             # Re-probe so the report reflects what remediation actually
             # achieved, not the pre-fix snapshot.
             readiness = await venue_check.check_remote_venue(
                 manager.exec_command, args.name, timeout=args.timeout,
             )
+            readiness.agent_bridge_host_version = host_version
     finally:
         await manager.disconnect(args.name)
 

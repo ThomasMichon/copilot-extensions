@@ -1,0 +1,9 @@
+{
+  "comment": "CLI-mode preflight and doctor --fix update a venue's agent-bridge plugin that is older than the host bridge, not only install a missing one",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
