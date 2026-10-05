@@ -66,8 +66,10 @@ base branch.
 > waiting for a real promotion.
 
 **Every change lands through a pull request against `dev` — direct pushes
-are blocked, and `main` accepts pushes only from the promotion pipeline (or
-explicit admin escalation).** This is enforced by four independent,
+are blocked, and `main` accepts no direct push from anyone (including the
+promotion pipeline itself); it only ever lands through that pipeline's own
+generated PR, or explicit admin escalation.** This is enforced by four
+independent,
 agreeing layers (tooling, branch policy, review automation, and
 workflow/CODEOWNERS lockdown), plus a stricter automatic-nothing default
 for anyone not an invited collaborator. See

@@ -427,11 +427,18 @@ add ThomasMichon/copilot-extensions`. The marketplace catalog lives at
 `.github/plugin/marketplace.json` and lists every plugin with its current
 version. The Copilot CLI reads this file to determine available updates.
 
-> **Deploy with `<repo> update` — never hand-run `copilot plugin update`.**
-> `copilot plugin update` on its own refreshes only a plugin's *payload*
-> (cached source + skills) — it does **not** rebuild a runtime
+> **Deploy with `<repo> update` for any runtime plugin — never hand-run
+> `copilot plugin update` there.** `copilot plugin update` on its own
+> refreshes only a plugin's *payload* (cached source + skills) — it does
+> **not** rebuild a runtime
 > (venv/binstubs/service), and if the version wasn't bumped it silently
-> no-ops ("already at latest"). Use the one unified flow: **`<repo>
+> no-ops ("already at latest"). A payload-only plugin (skills/hooks/agents
+> only, no venv/binstub/service) has no runtime to miss, so
+> `copilot plugin update` genuinely does fully deploy that class on its
+> own (see
+> [docs/install-contract.md § What the marketplace vendors](install-contract.md#what-the-marketplace-vendors-copied-vs-loaded)).
+> For a runtime plugin, or for a repo-wide update across every plugin
+> regardless of class, use the one unified flow: **`<repo>
 > update`** (`agent-worktrees update`, or any repo binstub such as
 > `dotfiles update`). It refreshes **every** registered plugin's payload,
 > rebuilds **every** runtime, and fast-forwards the anchor checkouts — in a

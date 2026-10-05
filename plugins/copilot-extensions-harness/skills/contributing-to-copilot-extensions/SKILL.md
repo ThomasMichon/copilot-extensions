@@ -24,7 +24,8 @@ description: >
 # Contributing to copilot-extensions
 
 The authoritative, versioned rules live in the repo's own **`CONTRIBUTING.md`**,
-**`AGENTS.md`**, **`TESTING.md`**, **`docs/install-contract.md`**, and
+**`docs/pipelines.md`**, **`AGENTS.md`**, **`TESTING.md`**,
+**`docs/install-contract.md`**, and
 **`docs/architecture.md`** — read and respect them for the current detail (they
 are the repo's own root docs, not carried by this plugin). This skill is the
 operator's map: what to touch, in what order, and the gotchas that bite.

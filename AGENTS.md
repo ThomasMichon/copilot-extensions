@@ -226,9 +226,11 @@ This repo is **PR-required** and uses the `pr-self-merge` profile. Work in an
 isolated worktree, publish with `copilot-extensions create-pr`, then follow
 the wait-for-a-verdict loop below before merging with
 `copilot-extensions pr-merge <PR> --now` and finalizing. Direct pushes to
-`dev` are blocked by tooling and repository policy; `main` accepts pushes
-only from the CI promotion pipeline (or explicit admin escalation) -- see
-`docs/pipelines.md` for the full gating and promotion mechanics.
+`dev` are blocked by tooling and repository policy; `main` accepts no direct
+pushes from anyone (including the CI promotion pipeline itself) -- it only
+ever lands through that pipeline's own generated PR, or explicit admin
+escalation -- see `docs/pipelines.md` for the full gating and promotion
+mechanics.
 
 **Wait for a real verdict before merging -- contributor and maintainer PRs
 alike.** Copilot code review can only ever render `Approve` or `Comment`

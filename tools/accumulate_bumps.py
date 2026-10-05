@@ -3,7 +3,7 @@
 real per-plugin version bump -- the mechanical replacement for a contributor
 hand-picking a ``-devN`` (the collision hazard in
 ThomasMichon/copilot-extensions#182) and hand-editing three files
-(CONTRIBUTING.md's current three-file version contract).
+(docs/pipelines.md's current three-file version contract).
 
 Version scheme: ``MAJOR.MINOR.PATCH-devN`` (matches this repo's existing
 convention). A ``major``/``minor``/``patch`` changefile resets the lower
@@ -60,7 +60,7 @@ _TOML_TABLE_HEADER_RE = re.compile(r'^[ \t]*\[', re.MULTILINE)
 BUMP_ORDER = ("dev", "patch", "minor", "major")
 
 # Plugins whose bump also advances the marketplace catalog's own
-# metadata.version, per CONTRIBUTING.md's "agent-worktrees additionally bumps
+# metadata.version, per docs/pipelines.md's "agent-worktrees additionally bumps
 # metadata.version" rule.
 CATALOG_METADATA_PLUGINS = frozenset({"agent-worktrees"})
 

@@ -139,7 +139,7 @@ core of the principles above; a reviewer checks a change against these.
   (Serves *Vision plugin-services §Behaviors/immutable-versioned-runtime*; tracked
   in dotfiles #581.)
 - **A version bump ships the change.** Every plugin change bumps its version in the
-  same commit (see `CONTRIBUTING.md`); an un-bumped push is silently ignored.
+  same commit (see `docs/pipelines.md`); an un-bumped push is silently ignored.
 - **Enabling a runtime provisions it.** A runtime plugin that a repo/session
   **enables** is installed, started, and kept **version-matched to its enabled
   payload automatically at session start** — idempotent, version-keyed, throttled,
