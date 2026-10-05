@@ -1139,10 +1139,10 @@ does **not** quietly undo it.
   authors tasks via `task_output=json` already computes the created-task
   list (dedup_key -> real task id) every tick, but it was never durably
   delivered back to the domain command on a later invocation. Surfaced by a
-  cross-repo motivating consumer (aperture-labs' Permanent Record,
-  migrating off a bespoke push+poll dispatch mechanism onto this layer's
-  emitter/evaluator primitives) that needs to link a discovered work item to
-  the dispatch task it caused to exist. Tracked by
+  cross-repo motivating consumer (a private downstream repository's own
+  durable-record workflow, migrating off a bespoke push+poll dispatch
+  mechanism onto this layer's emitter/evaluator primitives) that needs to
+  link a discovered work item to the dispatch task it caused to exist. Tracked by
   `efforts/active/agent-dispatch-emitter-receipts`; implementation not yet
   landed by this revision.
 - **2026-09-26** — Added *status-through-tool-calls-not-prose*,
