@@ -20,7 +20,9 @@ validates.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
+import secrets
 import sys
 import urllib.parse
 from pathlib import Path
@@ -65,8 +67,63 @@ def _credential_free_index_identity(url: str) -> str:
     return urllib.parse.urlunsplit(parts._replace(netloc=netloc, query="", fragment=""))
 
 
+def _provenance_key_dir() -> Path:
+    """Per-user, host-wide directory for `_opaque_index_identity`'s keyed-
+    hash material -- mirrors `tools/_admission_protocol.py`'s own
+    `admission_dir()` convention (the established per-machine, per-user
+    state location for this repo's tooling) rather than inventing a new
+    one."""
+    if os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    else:
+        base = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
+    return base / "copilot-extensions" / "build-python-artifacts"
+
+
+def _provenance_key() -> bytes:
+    """A stable, per-machine random key used to compute
+    `_opaque_index_identity` as a KEYED digest (HMAC) rather than a bare
+    hash of the raw URL. A bare `sha256(url)` is not credential-safe: most
+    of a governed-feed URL is predictable (scheme, host, path), so the
+    digest becomes an OFFLINE verifier an attacker can use to brute-force
+    a low-entropy embedded password/token without ever needing network
+    access to the real feed. Keying the hash with machine-local secret
+    material (never committed, never derived from the URL itself) closes
+    that offline-verification path -- an attacker without this file can no
+    longer test guesses against the persisted digest at all.
+
+    Generated once per machine and reused -- not per call -- so the same
+    (index, python) identity keeps comparing equal across separate
+    invocations, which `resolve_toolchain_lock`'s reuse/provenance-match
+    contract depends on. Created with restrictive, owner-only permissions
+    (mirroring the index-config temp file in `build_toolchain_lock.py`);
+    a race with another process creating it first is resolved by reading
+    back whatever that process wrote, never by two processes using two
+    different keys."""
+    path = _provenance_key_dir() / "provenance-key"
+    try:
+        existing = path.read_bytes()
+    except OSError:
+        existing = b""
+    if len(existing) == 32:
+        return existing
+    path.parent.mkdir(parents=True, exist_ok=True)
+    key = secrets.token_bytes(32)
+    try:
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        # Another process won the race to create it first -- trust
+        # whatever key it wrote rather than risk two processes disagreeing
+        # on the key (which would make their persisted identities
+        # incomparable).
+        return path.read_bytes()
+    with os.fdopen(fd, "wb") as key_file:
+        key_file.write(key)
+    return key
+
+
 def _opaque_index_identity(url: str) -> str:
-    """A secret-safe, ONE-WAY digest of the FULL validated index URL --
+    """A secret-safe, KEYED digest of the FULL validated index URL --
     including any embedded userinfo, query string, and fragment -- used
     to persist to disk (a provenance marker) and to compare whether two
     calls share EXACTLY the same effective index. A query parameter can
@@ -75,15 +132,18 @@ def _opaque_index_identity(url: str) -> str:
     does for display -- would wrongly treat two distinct feeds sharing a
     host/path as identical and silently reuse a venv across them. Hashing
     the full, unredacted value instead preserves its full distinguishing
-    power while remaining safe to persist or display: a one-way digest
-    cannot be reversed to recover the original secret.
+    power.
 
-    Hashes ``url`` directly (not via `build_toolchain_lock.py`'s own
-    multi-field `_hash_fields`) -- a single field has no delimiter-
-    collision ambiguity to guard against, and importing `_hash_fields`
-    from `build_toolchain_lock.py` would create a circular import (that
-    module imports THIS module's names back into its own namespace)."""
-    return hashlib.sha256(url.encode("utf-8")).hexdigest()
+    Uses `hmac`, keyed with a per-machine secret (`_provenance_key`),
+    rather than a bare `hashlib.sha256(url)`: most of a governed-feed URL
+    is predictable, so a bare hash of it would be an offline-crackable
+    verifier for a low-entropy embedded password/token, even though the
+    digest itself cannot be reversed. Keying with machine-local secret
+    material closes that offline-verification path while preserving every
+    other property a bare hash had (one-way, stable, and still sensitive
+    to a credential rotation -- routing it to a fresh alternate slot, the
+    correct, more conservative direction for a fail-closed contract)."""
+    return hmac.new(_provenance_key(), url.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def _normalize_hostname(host: str) -> str:

@@ -965,6 +965,57 @@ win grows with build complexity.
   `lock_id` on reuse, confirming the `UV_CONFIG_FILE`-based install
   still resolves the exact same governed index as before, and no temp
   config file was left behind in either the venv or the working tree.
+- A twentieth review round found 5 more issues. (1) `UV_NO_CONFIG` was
+  left ambient -- `uv` treats it as an equivalent of `--no-config`, so it
+  ignores round 19's own `UV_CONFIG_FILE` and falls back to its implicit,
+  ungoverned default index; added to the install call's stripped-variable
+  set. (2) the sanitized temp index-config file could carry the raw
+  validated URL (including embedded credentials) at the process umask's
+  default, broader permissions -- `Path.write_text()` creates then writes
+  as two separate steps, leaving a window at non-restrictive permissions;
+  fixed with a single atomic `os.open(..., 0o600)` + `os.fdopen()` so
+  restrictive owner-only permissions apply from the moment the file
+  exists. (3) a rename failure caused by a DIFFERENT identity winning the
+  publish race (between this call's own occupancy check and its own
+  publish attempt) was treated as a hard failure instead of what it
+  actually is: a normal race this call's own already-validated staging
+  venv can resolve by publishing to its OWN deterministic alternate slot
+  instead -- fixed with a new `_publish_staging_venv` helper that
+  redirects exactly once (a SECOND mismatch, found at the alternate slot
+  itself, remains a genuine anomaly and still fails closed). (4) the
+  opaque index-identity hash (`_opaque_index_identity`, since round 5)
+  was a BARE `sha256(url)` -- most of a governed-feed URL is predictable,
+  so the persisted digest was an offline-crackable verifier for a
+  low-entropy embedded password/token even though it could not be
+  reversed. Fixed with a new per-machine keyed digest (`hmac` keyed by
+  `_provenance_key()`, a random 32-byte key generated once and persisted
+  with restrictive permissions under the same per-user state directory
+  convention as `tools/_admission_protocol.py`'s own `admission_dir()`)
+  -- an attacker without that key file can no longer test credential
+  guesses against the persisted digest at all. (5) the new test suite's
+  always-on CI step was not path-gated, violating `TESTING.md`'s own
+  "gate specialized suites by changed paths" invariant; fixed by adding a
+  `git diff --name-only`-based detection step (mirroring this workflow's
+  own existing `installation-context` pattern) that gates the step on
+  changes to the builder/toolchain-lock/trust modules and their test
+  file.
+
+  3 more unit tests (156 total, all passing): a race against a different
+  identity redirecting to the alternate slot (replacing the old test that
+  asserted the now-superseded fail-closed behavior for that exact
+  scenario), a second mismatch AT the alternate slot still failing
+  closed, the keyed digest differing by key and never equaling the bare
+  hash, and the per-machine key persisting/reusing across calls with
+  restrictive permissions (POSIX). An autouse fixture now isolates every
+  test in the file from this machine's own real, persisted key material.
+  `check-module-size.py` still passes (`build_toolchain_lock.py` 870
+  lines, `governed_feed_trust.py` 370 lines). Smoke-tested for real
+  again: built `agent-vault` fresh against the live governed feed WITH
+  `UV_NO_CONFIG=1` set ambiently in the environment, confirming the
+  governed index is still used (not silently bypassed) and no temp
+  config file or stray artifact was left behind; confirmed the
+  per-machine provenance key file is created under the expected per-user
+  state directory.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 

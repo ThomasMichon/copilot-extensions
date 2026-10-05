@@ -26,6 +26,21 @@ uer = bpa.uer  # the real uv_editable_ref module build_python_artifacts imports
 # own internal call to it, since that call resolves via THIS module's own
 # globals, not bpa's.
 btl = sys.modules["build_toolchain_lock"]
+# The real governed_feed_trust module -- same reasoning as `btl` above:
+# `_opaque_index_identity`'s own internal call to `_provenance_key_dir`
+# resolves via THIS module's globals, not `btl`'s re-exported binding.
+gft = sys.modules["governed_feed_trust"]
+
+
+@pytest.fixture(autouse=True)
+def _isolated_provenance_key_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """`_opaque_index_identity`'s keyed-hash machinery persists a per-
+    machine key under the real LOCALAPPDATA/XDG_STATE_HOME -- no test in
+    this file may read or write that real, shared location. Isolated to
+    this test's own `tmp_path` for every test, automatically."""
+    monkeypatch.setattr(gft, "_provenance_key_dir", lambda: tmp_path / "provenance-key-dir")
+
+
 
 # A fake, already-resolved toolchain lock shared by every end-to-end test
 # below -- passed explicitly to `build_plugin_artifacts`/`build_wheel` so
@@ -1682,6 +1697,51 @@ def test_opaque_index_identity_is_not_reversible_to_the_raw_url():
     )
 
 
+def test_opaque_index_identity_is_keyed_not_a_bare_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression (round 20): a bare `hashlib.sha256(url)` digest is an
+    # offline-crackable verifier for a low-entropy embedded credential --
+    # most of a governed-feed URL is predictable, so an attacker holding
+    # only the persisted digest could brute-force a guessable password
+    # against it with no network access at all. The digest must instead
+    # depend on machine-local secret key material: the SAME url must
+    # produce a DIFFERENT digest under a different key, and must never
+    # equal the bare (unkeyed) hash.
+    url = _credentialed_url("example.internal/simple/")
+    monkeypatch.setattr(gft, "_provenance_key_dir", lambda: tmp_path / "key-a")
+    digest_a = btl._opaque_index_identity(url)
+    monkeypatch.setattr(gft, "_provenance_key_dir", lambda: tmp_path / "key-b")
+    digest_b = btl._opaque_index_identity(url)
+    assert digest_a != digest_b
+    import hashlib as _hashlib  # local import: avoid a module-level alias collision
+
+    assert digest_a != _hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+
+def test_provenance_key_persists_and_is_reused_across_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # The key must be generated once per machine and REUSED, not re-rolled
+    # per call -- otherwise the same (index, python) identity would never
+    # compare equal across separate invocations, breaking
+    # `resolve_toolchain_lock`'s own reuse/provenance-match contract.
+    key_dir = tmp_path / "provenance-key-dir"
+    monkeypatch.setattr(gft, "_provenance_key_dir", lambda: key_dir)
+
+    key1 = gft._provenance_key()
+    key2 = gft._provenance_key()
+    assert key1 == key2
+    assert len(key1) == 32
+    key_path = key_dir / "provenance-key"
+    assert key_path.is_file()
+    if sys.platform != "win32":
+        import stat
+
+        mode = stat.S_IMODE(key_path.stat().st_mode)
+        assert mode == 0o600
+
+
 def test_credential_free_index_identity_strips_userinfo_only():
     assert (
         btl._credential_free_index_identity(
@@ -2408,16 +2468,18 @@ def test_resolve_toolchain_lock_defers_to_winner(
     assert sentinel.is_file()
 
 
-def test_resolve_toolchain_lock_rejects_race_winner_with_mismatched_provenance(
+def test_resolve_toolchain_lock_different_identity_race_redirects_to_alternate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression: a rename failure must NOT be treated as a benign lost
-    # race just because an interpreter now exists at the destination --
-    # two concurrent callers validating DIFFERENT indexes can both
-    # observe an absent destination before either publishes. If the
-    # "winner" here was actually sourced from a different index (no
-    # matching provenance marker), this caller must fail closed rather
-    # than silently trust a venv it never validated.
+    # Regression (round 20): a rename failure caused by a DIFFERENT
+    # identity winning the race must NOT fail closed -- two concurrent
+    # callers validating DIFFERENT indexes can both observe an absent
+    # destination before either publishes. This call's own already-
+    # validated staging venv must instead be redirected to its own
+    # deterministic alternate slot (exactly as if the pre-staging
+    # occupancy check had caught the occupation before staging began),
+    # leaving the winner's own venv at the shared slot completely
+    # untouched.
     _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
 
@@ -2429,11 +2491,67 @@ def test_resolve_toolchain_lock_rejects_race_winner_with_mismatched_provenance(
             staging_python.write_text("", encoding="utf-8")
             # Simulate a concurrent publisher winning the race, but from a
             # DIFFERENT validated index -- its provenance marker does not
-            # match what THIS call validated.
+            # match what THIS call validated. This must happen AFTER this
+            # call's own pre-staging occupancy check already passed (that
+            # check runs before any `uv` subprocess at all), so it only
+            # exercises the later, rename-time race.
             winner_python = bpa._venv_python_path(venv_dir)
             winner_python.parent.mkdir(parents=True, exist_ok=True)
             winner_python.write_text("", encoding="utf-8")
             btl._write_provenance_marker(venv_dir, "https://different.example/simple/")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    lock = bpa.resolve_toolchain_lock(venv_dir)
+
+    expected_alt = btl._alternate_toolchain_dir(
+        venv_dir, "https://example.internal/simple/", ""
+    )
+    assert lock.venv_python == bpa._venv_python_path(expected_alt)
+    assert btl._provenance_matches(expected_alt, "https://example.internal/simple/", "")
+    # The winner's own venv at the shared slot must be left completely
+    # untouched -- never renamed, deleted, or overwritten.
+    assert btl._provenance_matches(venv_dir, "https://different.example/simple/", "")
+
+
+def test_resolve_toolchain_lock_fails_closed_on_mismatch_at_alternate_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: a mismatch found AT an identity-keyed alternate path
+    # (never the original shared slot) is a genuine anomaly, not an
+    # expected race -- this must still fail closed, exactly like the
+    # pre-staging `_occupied_by_other_identity` check does for the same
+    # scenario.
+    _assume_governed_feed_configured(monkeypatch)
+    venv_dir = tmp_path / "toolchain-venv"
+    # Pre-occupy the SHARED slot with a different identity so this call's
+    # own pre-staging check routes it to the alternate slot from the
+    # start (allow_redirect=False once there).
+    bpa._venv_python_path(venv_dir).parent.mkdir(parents=True, exist_ok=True)
+    bpa._venv_python_path(venv_dir).write_text("", encoding="utf-8")
+    btl._write_provenance_marker(venv_dir, "https://different.example/simple/", "")
+    alt_dir = btl._alternate_toolchain_dir(venv_dir, "https://example.internal/simple/", "")
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[:2] == ["uv", "venv"]:
+            staging_dir = Path(cmd[3])
+            staging_python = bpa._venv_python_path(staging_dir)
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
+            # Simulate a THIRD, anomalous occupant appearing at the
+            # identity-keyed alternate path itself, between this call's
+            # own pre-staging check and its own publish attempt.
+            alt_python = bpa._venv_python_path(alt_dir)
+            alt_python.parent.mkdir(parents=True, exist_ok=True)
+            alt_python.write_text("", encoding="utf-8")
+            btl._write_provenance_marker(alt_dir, "https://yet-another.example/simple/")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         if cmd[:3] == ["uv", "pip", "install"]:
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")

@@ -422,6 +422,64 @@ def _toml_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def _publish_staging_venv(
+    staging_venv_dir: Path,
+    target_dir: Path,
+    validated_index_url: str,
+    python_identity: str,
+    *,
+    venv_dir: Path,
+    allow_redirect: bool,
+) -> tuple[Path, Path, bool]:
+    """Publishes ``staging_venv_dir`` (an already-built, already-validated
+    staging venv for THIS call's own (index, python) identity) to
+    ``target_dir`` via an atomic rename, returning ``(published_dir,
+    published_venv_python, fresh)`` -- ``fresh`` is ``False`` when this
+    call lost a race and the CALLER must re-query the winning venv's own
+    installed versions instead of trusting the (discarded) staging copy's.
+
+    Handles two DISTINCT races that can land between an earlier
+    `_occupied_by_other_identity(target_dir, ...)` check and this publish
+    attempt, both WITHOUT ever touching whatever another process
+    published:
+
+    - A race against another caller validating the EXACT SAME identity:
+      the rename fails because that caller published first, but
+      `_provenance_matches` confirms it is this call's own identity -- a
+      benign lost race.
+    - A race against a caller validating a DIFFERENT identity (only
+      possible when ``allow_redirect`` is true, i.e. ``target_dir`` is
+      still the ORIGINAL shared slot, never yet redirected): the rename
+      fails and the destination's provenance does NOT match. Rather than
+      failing closed, this call's own already-validated staging venv is
+      published to ITS OWN deterministic alternate slot
+      (`_alternate_toolchain_dir`) instead -- exactly as if
+      `_occupied_by_other_identity` had caught the occupation before
+      staging ever began. A mismatch found AT that identity-keyed
+      alternate path (``allow_redirect=False``) is a genuine anomaly, not
+      an expected race, and fails closed, same as the pre-staging
+      check."""
+    venv_python = _venv_python_path(target_dir)
+    try:
+        staging_venv_dir.rename(target_dir)
+        return target_dir, venv_python, True
+    except OSError as exc:
+        if venv_python.is_file() and _provenance_matches(
+            target_dir, validated_index_url, python_identity
+        ):
+            return target_dir, venv_python, False
+        if allow_redirect:
+            alt_dir = _alternate_toolchain_dir(venv_dir, validated_index_url, python_identity)
+            return _publish_staging_venv(
+                staging_venv_dir, alt_dir, validated_index_url, python_identity,
+                venv_dir=venv_dir, allow_redirect=False,
+            )
+        raise ArtifactBuildError(
+            f"could not publish toolchain venv {staging_venv_dir} "
+            f"to {target_dir}: {exc}"
+        ) from exc
+
+
 def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> ToolchainLock:
     """Resolves one pinned build-toolchain venv and returns its exact
     installed ``setuptools``/``wheel``/``packaging`` versions.
@@ -512,9 +570,12 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
         # UV_CONSTRAINT/UV_OVERRIDE/UV_BUILD_CONSTRAINT (redirect a
         # specific requirement to a direct URL), UV_VENV_SEED (lets `uv
         # venv` pre-install from an ambient source the later bare `uv pip
-        # install` could then leave untouched), and UV_INSECURE_HOST
+        # install` could then leave untouched), UV_INSECURE_HOST
         # (disables TLS verification for a named host, defeating the
-        # HTTPS-scheme requirement in `_validated_trusted_index_url`).
+        # HTTPS-scheme requirement in `_validated_trusted_index_url`), and
+        # UV_NO_CONFIG (uv's own equivalent of `--no-config`: left ambient,
+        # it would make `uv` ignore the install call's own `UV_CONFIG_FILE`
+        # below and fall back to its implicit, ungoverned default index).
         # Also strips `PYTHONPATH`/`PYTHONHOME` (same vectors stripped
         # everywhere a specific interpreter is invoked directly -- see
         # `sanitize_subprocess_env`). Used for BOTH `uv venv`/`uv pip
@@ -524,7 +585,7 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             "UV_INDEX", "UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_CONFIG_FILE",
             "UV_EXTRA_INDEX_URL", "UV_FIND_LINKS", "UV_VENV_SEED",
             "UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE",
-            "UV_INSECURE_HOST",
+            "UV_INSECURE_HOST", "UV_NO_CONFIG",
         ):
             sanitized_env.pop(var, None)
         try:
@@ -562,9 +623,23 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             ]
             if validated_index_name:
                 index_config_lines.append(f'name = "{_toml_escape(validated_index_name)}"')
-            index_config_path.write_text(
-                "\n".join(index_config_lines) + "\n", encoding="utf-8"
+            index_config_text = "\n".join(index_config_lines) + "\n"
+            # This file can hold the raw validated URL, including embedded
+            # credentials -- create it with restrictive owner-only
+            # permissions from the moment it exists (an `os.open` mode
+            # applies atomically at creation, unlike a separate
+            # `write_text()` + `os.chmod()`, which would leave a window
+            # where the file exists at the umask's default, broader
+            # permissions) rather than relying on the process umask.
+            fd = os.open(
+                str(index_config_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
             )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as index_config_file:
+                    index_config_file.write(index_config_text)
+            except BaseException:
+                index_config_path.unlink(missing_ok=True)
+                raise
             install_env = dict(sanitized_env)
             install_env["UV_CONFIG_FILE"] = str(index_config_path)
             install = subprocess.run(
@@ -593,24 +668,21 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             # rename so it publishes atomically with the venv it
             # describes. Never pre-delete an existing target_dir: a
             # concurrent caller may already have published its OWN
-            # complete venv (maybe already building against it). If the
-            # rename fails, confirm a winner's venv is genuinely present
-            # AND carries matching provenance before treating it as a
-            # benign lost race; if so, re-query THAT (winning) venv --
-            # our own staging `packages` describes a venv that no longer
-            # exists at this path.
+            # complete venv (maybe already building against it) --
+            # `_publish_staging_venv` handles both a benign lost race
+            # against our OWN identity (re-query the winning venv below)
+            # and a raced DIFFERENT identity (redirect our own staging
+            # venv to our deterministic alternate slot instead of failing,
+            # only when `target_dir` is still the original shared slot).
             _write_provenance_marker(staging_venv_dir, validated_index_url, python_identity)
-            try:
-                staging_venv_dir.rename(target_dir)
-            except OSError as exc:
-                if not (
-                    venv_python.is_file()
-                    and _provenance_matches(target_dir, validated_index_url, python_identity)
-                ):
-                    raise ArtifactBuildError(
-                        f"could not publish toolchain venv {staging_venv_dir} "
-                        f"to {target_dir}: {exc}"
-                    ) from exc
+            target_dir, venv_python, fresh = _publish_staging_venv(
+                staging_venv_dir, target_dir, validated_index_url, python_identity,
+                venv_dir=venv_dir, allow_redirect=(target_dir == venv_dir),
+            )
+            if not fresh:
+                # Lost the race to a venv matching OUR OWN identity --
+                # our own staging `packages` describes a venv that no
+                # longer exists at this path; re-query the actual winner.
                 packages = _query_toolchain_versions(venv_python)
         finally:
             if staging_venv_dir.exists():
