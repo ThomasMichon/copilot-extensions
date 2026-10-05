@@ -98,6 +98,117 @@ def _param_names(args: ast.arguments) -> set[str]:
     return names
 
 
+def _iter_direct_statements(stmts: list[ast.stmt]):
+    """Yield every statement directly belonging to this scope -- recursing
+    into control-flow bodies (``if``/``try``/``for``/``while``/``with``,
+    which share the SAME scope as their surrounding code) but never into a
+    nested ``def``/``async def``/``lambda`` (a separate scope with its own
+    analysis)."""
+    for stmt in stmts:
+        yield stmt
+        if isinstance(stmt, ast.If):
+            yield from _iter_direct_statements(stmt.body)
+            yield from _iter_direct_statements(stmt.orelse)
+        elif isinstance(stmt, ast.Try):
+            yield from _iter_direct_statements(stmt.body)
+            for handler in stmt.handlers:
+                yield from _iter_direct_statements(handler.body)
+            yield from _iter_direct_statements(stmt.orelse)
+            yield from _iter_direct_statements(stmt.finalbody)
+        elif isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
+            yield from _iter_direct_statements(stmt.body)
+            yield from _iter_direct_statements(stmt.orelse)
+        elif isinstance(stmt, (ast.With, ast.AsyncWith)):
+            yield from _iter_direct_statements(stmt.body)
+
+
+def _direct_assign_targets_and_values(stmt: ast.stmt):
+    """``(target, value)`` pairs for every ``Name`` an ``Assign``/
+    ``AnnAssign`` in *this exact statement* binds -- tuple/list-unpacking
+    targets are expanded element-wise (mirroring ``_record_alias``'s own
+    literal-pairing rule; an opaque unpacking yields nothing, the same
+    conservative choice made there)."""
+    if isinstance(stmt, ast.Assign):
+        targets, value = stmt.targets, stmt.value
+    elif isinstance(stmt, ast.AnnAssign):
+        targets, value = [stmt.target], stmt.value
+    else:
+        return
+    if value is None:
+        return
+    for target in targets:
+        if isinstance(target, (ast.Tuple, ast.List)):
+            if (
+                isinstance(value, (ast.Tuple, ast.List))
+                and len(target.elts) == len(value.elts)
+                and not any(isinstance(e, ast.Starred) for e in target.elts)
+            ):
+                for sub_target, sub_value in zip(target.elts, value.elts):
+                    if isinstance(sub_target, ast.Name):
+                        yield sub_target.id, sub_value
+            continue
+        if isinstance(target, ast.Name):
+            yield target.id, value
+
+
+def _direct_aliases_in_body(body: list[ast.stmt]) -> set[str]:
+    """Every name that will EVENTUALLY be a ``call_from_thread`` alias
+    somewhere directly in *body* (never inside a nested function/lambda's
+    own body), regardless of textual order or control flow.
+
+    A nested function is a real Python closure: it resolves a free
+    variable from the enclosing scope at CALL time, not at its own
+    *definition* time. So a closure defined BEFORE a same-scope alias
+    assignment can still observe that alias perfectly well, as long as it
+    is actually called after the assignment runs -- which the guard has
+    no way to rule out. Pre-scanning the whole body up front (a fixed
+    point over possibly-chained aliases, e.g. ``also = marshal``) lets a
+    nested scope see every alias its enclosing scope will EVER hold,
+    regardless of where in the source it happens to be assigned relative
+    to the nested ``def``.
+    """
+    found: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for stmt in _iter_direct_statements(body):
+            for name, value in _direct_assign_targets_and_values(stmt):
+                if name in found:
+                    continue
+                is_alias = (
+                    isinstance(value, ast.Attribute) and value.attr == _FLAGGED_ATTR
+                ) or (
+                    isinstance(value, ast.Name)
+                    and (value.id == _FLAGGED_ATTR or value.id in found)
+                )
+                if is_alias:
+                    found.add(name)
+                    changed = True
+            # A walrus binding can appear anywhere *within* a statement's
+            # own expressions (a condition, a call argument, ...), not
+            # only as a statement of its own -- `ast.walk` over the whole
+            # statement finds it regardless of position. This can also
+            # walk into a nested lambda's own body (a separate scope) in
+            # rare cases; erring toward finding one extra alias there is
+            # the same safe direction this guard takes everywhere else.
+            for sub in ast.walk(stmt):
+                if isinstance(sub, ast.NamedExpr) and isinstance(
+                    sub.target, ast.Name
+                ):
+                    value = sub.value
+                    is_alias = (
+                        isinstance(value, ast.Attribute)
+                        and value.attr == _FLAGGED_ATTR
+                    ) or (
+                        isinstance(value, ast.Name)
+                        and (value.id == _FLAGGED_ATTR or value.id in found)
+                    )
+                    if is_alias and sub.target.id not in found:
+                        found.add(sub.target.id)
+                        changed = True
+    return found
+
+
 class _CallFinder(ast.NodeVisitor):
     """Collect line numbers where ``call_from_thread`` is called (not just
     referenced -- a bound-method reference with no call is not itself a
@@ -112,12 +223,18 @@ class _CallFinder(ast.NodeVisitor):
     ``marshal = app.call_from_thread`` at module/outer-function level,
     then called from a nested ``def worker(): marshal(fn)``), exactly the
     way a real nested-function reference would actually resolve the name
-    at runtime. A parameter of the nested function sharing that same name
-    is a fresh, unrelated binding regardless of the outer alias, so it is
-    explicitly excluded from the copied-in scope. Reassigning an
-    already-tracked alias name to something else (a non-``call_from_thread``
-    value) clears it within its own scope -- never the enclosing scope --
-    so it stops being flagged only from that point on, in that scope.
+    at runtime. This holds even when the alias is assigned LATER in the
+    enclosing scope's source than the nested ``def`` -- a real closure
+    resolves a free variable at CALL time, not at its own definition
+    time, so each scope is pre-scanned (``_direct_aliases_in_body``) for
+    every alias it will EVENTUALLY hold before any nested scope is ever
+    constructed from it. A parameter of the nested function sharing that
+    same name is a fresh, unrelated binding regardless of the outer
+    alias, so it is explicitly excluded from the copied-in scope.
+    Reassigning an already-tracked alias name to something else (a
+    non-``call_from_thread`` value) clears it within its own scope --
+    never the enclosing scope -- so it stops being flagged only from
+    that point on, in that scope.
     """
 
     def __init__(self) -> None:
@@ -128,25 +245,43 @@ class _CallFinder(ast.NodeVisitor):
     def _aliases(self) -> set[str]:
         return self._scopes[-1]
 
-    def _visit_new_scope(self, node: ast.AST, shadowed: set[str]) -> None:
+    def _visit_new_scope(
+        self, node: ast.AST, shadowed: set[str], body: list[ast.stmt] | None = None
+    ) -> None:
         # Inherit a COPY of the enclosing scope's aliases (a real nested
         # function/closure can reference an outer-scope name), minus any
         # name this scope's own parameters rebind -- a parameter is always
-        # a fresh binding, never a continuation of an outer alias.
-        self._scopes.append(self._aliases - shadowed)
+        # a fresh binding, never a continuation of an outer alias. Also
+        # pre-scan THIS scope's own body (if it has one -- a lambda's
+        # "body" is a single expression, never an assignment) for every
+        # alias it will eventually hold, so a nested function defined
+        # BEFORE a same-scope alias assignment can still see it -- a real
+        # closure resolves a free variable at CALL time, not at its own
+        # definition time.
+        seed = self._aliases - shadowed
+        if body is not None:
+            seed = seed | (_direct_aliases_in_body(body) - shadowed)
+        self._scopes.append(seed)
         try:
             self.generic_visit(node)
         finally:
             self._scopes.pop()
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._visit_new_scope(node, _param_names(node.args))
+        self._visit_new_scope(node, _param_names(node.args), node.body)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._visit_new_scope(node, _param_names(node.args))
+        self._visit_new_scope(node, _param_names(node.args), node.body)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
         self._visit_new_scope(node, _param_names(node.args))
+
+    def visit_Module(self, node: ast.Module) -> None:
+        # Seed the module-level scope the same way: a module-level alias
+        # assigned AFTER a nested function's own definition is still
+        # visible to it at call time.
+        self._scopes[0] |= _direct_aliases_in_body(node.body)
+        self.generic_visit(node)
 
     def _visit_conditionally(self, node: ast.AST) -> None:
         """Visit a control-flow node with a single body (``with``) whose

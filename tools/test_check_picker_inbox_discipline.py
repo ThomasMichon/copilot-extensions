@@ -129,6 +129,24 @@ def test_flags_a_module_level_alias_used_from_a_nested_function(repo):
     assert any("call_from_thread(" in p for p in guard.verify())
 
 
+def test_flags_a_module_level_alias_assigned_after_the_nested_function_that_uses_it(repo):
+    """A real Python closure resolves a free variable at CALL time, not at
+    its own definition time -- a nested function defined BEFORE a
+    same-scope alias assignment can still observe it perfectly well, as
+    long as it's actually invoked afterward (which the guard has no way
+    to rule out). Visiting purely in source order would miss this."""
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_live_screens.py",
+        "def worker():\n"
+        "    marshal(fn)\n"
+        "marshal = self.app.call_from_thread\n"
+        "worker()\n",
+    )
+    assert any("call_from_thread(" in p for p in guard.verify())
+
+
 def test_flags_an_outer_function_alias_used_from_a_nested_inner_function(repo):
     d = _picker_tui_dir(repo)
     _write(

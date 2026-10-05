@@ -578,6 +578,89 @@ def test_setup_reload_wake_failure_fallback_does_not_downgrade_a_newer_failure()
     assert screen._setup_failed_epoch != first_epoch
 
 
+def test_setup_reload_app_unresolvable_fallback_does_not_downgrade_a_newer_failure():
+    """The same stale-epoch race as the wake-failure fallback above, but
+    for the OTHER off-thread failure-publication path: ``self.app`` being
+    unresolvable (``app is None``) when the worker was scheduled. Both
+    paths must route through the same shared, lock-protected helper --
+    this proves the "app is None" branch is covered too, not just the
+    wake-failure one.
+    """
+
+    class _Screen(PickerScreenRuntimeMixin):
+        def __init__(self):
+            self._bg_cancel = threading.Event()
+            self._setup_epoch = 0
+            self._setup_applied_epoch = 0
+            self._setup_failed_epoch = 0
+            self._pending_setup_payloads = {}
+            self._setup_payloads_lock = threading.Lock()
+            self.failures: list[tuple[int, Exception]] = []
+
+        @property
+        def app(self):
+            raise RuntimeError("no active app for this screen")
+
+        def _prime_setup_reload(self):
+            return None
+
+        def _collect_setup_payload(self):
+            return _payload("live")
+
+        def _invalidate_setup_reload_caches(self):
+            return None
+
+        def _apply_setup_payload(self, payload):
+            pass
+
+        def _apply_setup_failure(self, epoch, err):
+            self.failures.append((epoch, err))
+            self._setup_failed_epoch = epoch
+
+        def refresh(self):
+            return None
+
+    screen = _Screen()
+    real_release = screen._release_setup_payload
+    triggered = {"done": False}
+    result: dict[str, int] = {}
+
+    def _racy_release(epoch):
+        if not triggered["done"]:
+            triggered["done"] = True
+            # A newer reload starts and runs all the way to its own
+            # failure publication (it also hits the "app is None" branch,
+            # since this screen's `app` property always raises) BEFORE
+            # this (the first worker's) own publication proceeds.
+            result["second_epoch"] = screen._start_setup_reload_worker()
+            deadline = time.monotonic() + 5
+            while (
+                screen._setup_failed_epoch != result["second_epoch"]
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.01)
+        return real_release(epoch)
+
+    screen._release_setup_payload = _racy_release
+    first_epoch = screen._start_setup_reload_worker()
+
+    deadline = time.monotonic() + 5
+    while "second_epoch" not in result and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert "second_epoch" in result
+    second_epoch = result["second_epoch"]
+    assert second_epoch != first_epoch
+
+    # Give the first (older, superseded) worker's own publication a real
+    # chance to run (and, pre-fix, wrongly downgrade) before asserting.
+    time.sleep(0.2)
+
+    assert screen._setup_failed_epoch == second_epoch
+    recorded_epochs = [epoch for epoch, _ in screen.failures]
+    assert second_epoch in recorded_epochs
+    assert screen._setup_failed_epoch != first_epoch
+
+
 def test_setup_reload_epoch_allocation_blocks_while_the_fallback_holds_its_lock():
     """A regression for the narrower bytecode-level race: re-checking
     epoch currency immediately before publishing is not, by itself,
