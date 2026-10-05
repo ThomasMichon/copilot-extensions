@@ -134,3 +134,42 @@ def test_records_under_an_unsafe_directory_are_never_trusted(tmp_path):
     assert lm.apply("cs-2", TENANT, ["--resume=s1"], None) == (["--resume=s1"], D, [])
     lm.remember("cs-2", TENANT, ["--x"], "o", "s1")
     assert json.loads((elsewhere / lm._path("cs-2", TENANT).name).read_text())["copilot_args"] == ["--allow-all", "--experimental"]
+
+
+def test_forward_ports_come_back_only_for_a_resume_of_the_recorded_session():
+    lm.remember("cs-1", TENANT, ["--no-ask-user"], "o", "s1", local_forwards=["4322:4322", "0:4397"])
+    assert lm.recall_forwards("cs-1", TENANT, ["--resume=s1"], []) == (["4322:4322", "0:4397"], True)
+    assert lm.recall_forwards("cs-1", TENANT, ["--resume=s1", "--model=m2"], [])[1] is True
+    assert lm.recall_forwards("cs-1", TENANT, ["--resume=s1"], ["5000"]) == (["5000"], False)
+    for sel in (["--resume=s0"], ["--continue"], [], ["--resume=s0", "--resume=s1"]):
+        assert lm.recall_forwards("cs-1", TENANT, sel, []) == ([], False), sel
+    assert lm.recall_forwards("cs-2", TENANT, ["--resume=s1"], []) == ([], False)
+
+
+def test_a_rejoin_updates_only_its_own_sessions_forwards():
+    lm.remember("cs-1", TENANT, ["--no-ask-user"], "o", "s1", local_forwards=["4322:4322"])
+    lm.remember_forwards("cs-1", TENANT, "s-other", ["9999:9999"])
+    assert lm.recall_forwards("cs-1", TENANT, ["--resume=s1"], [])[0] == ["4322:4322"]
+    lm.remember_forwards("cs-1", TENANT, "s1", ["4331:4331"])
+    assert lm.recall_forwards("cs-1", TENANT, ["--resume=s1"], [])[0] == ["4331:4331"]
+    assert lm.apply("cs-1", TENANT, ["--resume=s1"], None)[0] == ["--no-ask-user", "--resume=s1"]
+
+
+def test_a_record_from_before_forwards_were_kept_still_recalls_its_flags():
+    path = lm._path("cs-1", TENANT)
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"tenant": TENANT, "session_id": "s1", "copilot_args": ["--x"], "driver": "o"}),
+                    encoding="utf-8")
+    assert lm.apply("cs-1", TENANT, ["--resume=s1"], None)[2] == ["copilot_args", "driver"]
+    assert lm.recall_forwards("cs-1", TENANT, ["--resume=s1"], []) == ([], False)
+
+
+def test_malformed_recorded_forwards_void_the_whole_record():
+    path = lm._path("cs-1", TENANT)
+    base = {"tenant": TENANT, "session_id": "s1", "copilot_args": ["--x"], "driver": "o"}
+    for bad in (["4322"], ["a:b"], "4322:4322", [4322], ["4322:4322;rm"],
+                ["70000:1"], ["1:0"], ["1:70000"], ["4322:1", "4322:2"]):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({**base, "local_forwards": bad}), encoding="utf-8")
+        assert lm.apply("cs-1", TENANT, ["--resume=s1"], None)[2] == [], bad
+        assert lm.recall_forwards("cs-1", TENANT, ["--resume=s1"], []) == ([], False), bad

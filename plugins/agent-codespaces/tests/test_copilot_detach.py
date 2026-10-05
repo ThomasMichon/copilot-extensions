@@ -1245,6 +1245,43 @@ def test_a_recalled_session_gains_no_host_model_it_did_not_run_with(seams, monke
         "--resume=sid-99", "--model=host-today", "--reasoning-effort=high"]
 
 
+def test_a_bare_resume_gets_the_sessions_forward_ports_back(seams, monkeypatch, capsys):
+    # The Owner releases a stopped CodeSpace's forwards with its session, so a
+    # wake that names only the session re-adds the --forward ports it ran with
+    # (never its reverse forwards: their host end can move).
+    monkeypatch.setattr(detach, "_host_ports_listening", lambda ports: {p: True for p in ports})
+    first = _args(local_forwards=["4322", "0:4397"], reverse_forwards=["9222:24836"])
+    assert detach.cmd_detach(first, ssh_session=_ssh(seams, stdout=_CREATED)) == 0
+    capsys.readouterr()
+    wake = _args(copilot_args=["--resume=sid-42"], driver=None, seed=None, dry_run=True)
+    assert detach.cmd_detach(wake, ssh_session=_ssh(seams)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["local_forwards"] == {"4322": 4322, "0": 4397} and out["reverse_forwards"] == {}
+    assert "local_forwards" in out["recalled"]
+    # Explicit --forward replaces them; another model keeps them (ports are independent of flags).
+    explicit = _args(copilot_args=["--resume=sid-42"], local_forwards=["5000"], driver=None, seed=None,
+                     dry_run=True)
+    assert detach.cmd_detach(explicit, ssh_session=_ssh(seams)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["local_forwards"] == {"5000": 5000} and "local_forwards" not in out.get("recalled", [])
+    remodel = _args(copilot_args=["--resume=sid-42", "--model=m2"], driver=None, seed=None, dry_run=True)
+    assert detach.cmd_detach(remodel, ssh_session=_ssh(seams)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["local_forwards"] == {"4322": 4322, "0": 4397} and out["recalled"] == ["local_forwards"]
+
+
+def test_a_rejoin_that_sets_forwards_records_them_and_keeps_the_flags(seams, monkeypatch, capsys):
+    from agent_codespaces import launch_memory
+
+    monkeypatch.setattr(detach, "_host_ports_listening", lambda ports: {p: True for p in ports})
+    tenant = "cli:anchor-example-web@cs-1"
+    launch_memory.remember("cs-1", tenant, ["--no-ask-user"], "orchestrator", "sid-42", local_forwards=["4322:4322"])
+    rejoined = json.dumps({"ok": True, "created": False, "resumed": True})
+    rejoin = _args(copilot_args=["--model=other"], local_forwards=["4331"], driver=None, seed=None)
+    assert detach.cmd_detach(rejoin, ssh_session=_ssh(seams, stdout=rejoined)) == 0
+    record = json.loads(launch_memory._path("cs-1", tenant).read_text())
+    assert record["local_forwards"] == ["4331:4331"] and record["copilot_args"] == ["--no-ask-user"]
+
 def test_a_rejoin_of_a_running_session_leaves_the_record_alone(seams, capsys):
     from agent_codespaces import launch_memory
 
