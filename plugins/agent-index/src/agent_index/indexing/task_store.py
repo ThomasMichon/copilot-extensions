@@ -239,11 +239,19 @@ class TaskStore:
           keeps a *still-queued* full task from running after an
           incremental queued earlier for the same scope.
         - Enqueuing a ``full=False`` task that's already covered by an
-          existing ``queued`` or ``processing`` ``full=True`` task (exact
+          existing **queued** (not yet started) ``full=True`` task (exact
           source match, or a covering ``source='all'`` full) is itself
           redundant -- this returns that covering full task instead of
           inserting a new row, so incremental requests never pile up
-          uselessly behind a full reindex already in flight.
+          uselessly behind a full reindex that hasn't started yet. A
+          *processing* full task does NOT count as covering: a full-``all``
+          run crawls sources sequentially, so by the time a fresh
+          incremental request arrives the processing task may have already
+          crawled this source -- coalescing into it would silently drop any
+          change that lands afterward, since nothing would be left queued to
+          pick it up. Let the incremental enqueue normally in that case; the
+          full-first priority in ``dequeue_next`` still won't delay it behind
+          any *other* queued full.
 
         ``trigger_source`` records what initiated this task (e.g.
         'api:agent_index_reindex', 'webhook:forge:push', 'cli', 'mcp').
@@ -292,13 +300,16 @@ class TaskStore:
                         sup_row["id"], source,
                     )
             else:
-                # Redundant-incremental check: an in-flight or queued full
-                # reindex that already covers this source makes a fresh
+                # Redundant-incremental check: a full reindex that hasn't
+                # started yet and already covers this source makes a fresh
                 # incremental request a no-op once it runs -- defer to it
-                # instead of enqueuing a doomed duplicate.
+                # instead of enqueuing a doomed duplicate. Deliberately
+                # excludes 'processing': its crawl may have already passed
+                # this source, so only a still-queued full is a safe match
+                # (see the enqueue() docstring).
                 covering = conn.execute(
                     """SELECT * FROM tasks
-                       WHERE full = 1 AND status IN ('queued', 'processing')
+                       WHERE full = 1 AND status = 'queued'
                          AND (source = 'all' OR source = ?)
                        ORDER BY created_at LIMIT 1""",
                     (source,),

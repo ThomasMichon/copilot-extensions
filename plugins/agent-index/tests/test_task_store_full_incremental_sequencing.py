@@ -1,20 +1,18 @@
 """A full reindex must never race or trail a now-redundant incremental one.
 
-Before this test, ``TaskStore`` treated ``full`` and incremental (``full=False``)
-requests as entirely independent FIFO entries: a queued incremental for a
-source sat in the queue exactly where it was created, even after a full
-reindex covering that same source was requested moments later -- the two
-would simply run in creation order, wasting a dequeue slot re-doing work the
-full run was about to redo anyway (and, worse, leaving an operator unsure
-which of the two actually "won" for a given source). This file locks in the
-intended contract end to end:
+This file locks in the intended ``TaskStore`` sequencing contract end to end:
 
 - ``enqueue(full=True, ...)`` cancels any *covered*, still-``queued``
   incremental task(s) -- ``source='all'`` covers every source; a specific
-  source only covers its own exact match.
-- ``enqueue(full=False, ...)`` for a source already covered by a ``queued``
-  or ``processing`` full task is itself redundant: it returns that covering
-  full task instead of inserting a new row.
+  source only covers its own exact match. An already-``processing``
+  incremental is left to finish (there is no safe way to interrupt an
+  in-flight worker process).
+- ``enqueue(full=False, ...)`` for a source already covered by a
+  still-``queued`` full task is itself redundant: it returns that covering
+  full task instead of inserting a new row. A *processing* full task does
+  NOT count as covering -- its crawl may have already passed this source, so
+  coalescing into it could silently drop a change that lands afterward; the
+  incremental must enqueue normally in that case.
 - ``dequeue_next()`` serves queued full tasks ahead of incremental ones
   (FIFO within each tier), so a full queued *after* an incremental for the
   same scope still runs first rather than racing/trailing it.
@@ -85,15 +83,21 @@ def test_incremental_covered_by_queued_full_all_is_redundant(tmp_path) -> None:
     assert result.id == full_task.id
 
 
-def test_incremental_covered_by_processing_full_is_redundant(tmp_path) -> None:
+def test_incremental_not_coalesced_behind_processing_full(tmp_path) -> None:
+    """A *processing* full task must NOT be treated as covering: a full-'all'
+    run crawls sources sequentially, so by the time this request arrives the
+    processing task may have already crawled this source. Coalescing into it
+    would silently drop a change that lands afterward -- nothing would be
+    left queued to pick it up. The incremental must enqueue as a real row."""
     store = _store(tmp_path)
     full_task = store.enqueue(source="git:a", full=True)
     store.dequeue_next()  # queued -> processing
 
     result = store.enqueue(source="git:a", full=False)
 
-    assert result.id == full_task.id
-    assert store.get_task(full_task.id).status == TaskStatus.PROCESSING.value
+    assert result.id != full_task.id
+    assert result.full is False
+    assert result.status == TaskStatus.QUEUED.value
 
 
 def test_incremental_for_uncovered_source_still_enqueues_normally(tmp_path) -> None:
