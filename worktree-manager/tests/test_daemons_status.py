@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 from pathlib import Path
 
 from zdd import routing
@@ -59,6 +61,7 @@ def test_daemon_statuses_marks_a_pre_upgrade_daemons_telemetry_unsupported(
     monkeypatch.setattr(
         daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9555 ..."
     )
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid: True)
     monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
     _FakeControlClient.responses = {9555: {"status": "ready"}}
     monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", _FakeControlClient)
@@ -102,6 +105,7 @@ def test_daemon_statuses_reports_active_reachable_and_unreachable(tmp_path: Path
     monkeypatch.setattr(
         routing, "read_table", lambda config_dir: _active_table(pid=101, port=9101)
     )
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid: True)
     _FakeControlClient.responses = {
         9101: {
             "status": "ready",
@@ -158,6 +162,7 @@ def test_daemon_statuses_marks_a_failed_health_request_unreachable(tmp_path: Pat
     monkeypatch.setattr(
         daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9404 ..."
     )
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid: True)
     monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
     _FakeControlClient.responses = {}
     monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", _FakeControlClient)
@@ -190,6 +195,7 @@ def test_daemon_statuses_requires_port_match_not_just_pid_for_active(
     monkeypatch.setattr(
         daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9999 ..."
     )
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid: True)
     # Routing table's active row still names pid 101, but on the OLD port
     # (9101) -- not the port this pid is actually listening on now (9999).
     monkeypatch.setattr(
@@ -201,6 +207,48 @@ def test_daemon_statuses_requires_port_match_not_just_pid_for_active(
     statuses = daemons_status.daemon_statuses(root)
 
     assert statuses[0]["active"] is False
+
+
+def test_daemon_statuses_never_connects_to_a_candidate_with_unverified_owner(
+    tmp_path: Path, monkeypatch
+):
+    """Another local account could run a lookalike process reporting the
+    same ``--root=`` value in its own command line and listening on a port
+    -- without an OS-owner check, a blind probe here would hand that
+    process our bearer token. A candidate whose owner cannot be confirmed
+    to be the current user must be reported without ever constructing a
+    ``ControlClient`` (and therefore never sending the token) at all."""
+    root = tmp_path / "root"
+    root.mkdir()
+
+    monkeypatch.setattr(
+        daemons_status.mux_daemon_cutover, "_iter_mux_daemon_pids", lambda: {666}
+    )
+    monkeypatch.setattr(
+        daemons_status.mux_daemon_cutover,
+        "_pid_matches_root",
+        lambda pid, *, root: True,
+    )
+    monkeypatch.setattr(
+        daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9666 ..."
+    )
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid: False)
+    monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
+
+    connected = []
+
+    class _NeverCall:
+        def __init__(self, *a, **k):
+            connected.append(True)
+
+    monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", _NeverCall)
+
+    statuses = daemons_status.daemon_statuses(root)
+
+    assert not connected
+    assert statuses == [
+        {"pid": 666, "port": 9666, "active": False, "status": "unverified-owner"}
+    ]
 
 
 def test_daemon_statuses_scopes_to_requested_root(tmp_path: Path, monkeypatch):
@@ -233,3 +281,50 @@ def test_parse_listen_port_handles_missing_and_present_flag():
     assert daemons_status._parse_listen_port("--listen-port=1234") == 1234
     assert daemons_status._parse_listen_port("nothing here") is None
     assert daemons_status._parse_listen_port("--listen-port=notanumber") is None
+
+
+def test_pid_owned_by_current_user_windows_matches_and_mismatches(monkeypatch):
+    monkeypatch.setattr(os, "name", "nt")
+    monkeypatch.setenv("USERDOMAIN", "WORKGROUP")
+    monkeypatch.setenv("USERNAME", "alice")
+
+    def _fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout="WORKGROUP\\alice\n")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    assert daemons_status._pid_owned_by_current_user(123) is True
+
+    def _fake_run_other(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout="WORKGROUP\\mallory\n")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run_other)
+    assert daemons_status._pid_owned_by_current_user(123) is False
+
+    def _fake_run_empty(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run_empty)
+    assert daemons_status._pid_owned_by_current_user(123) is False
+
+
+def test_pid_owned_by_current_user_posix_ps_fallback_matches_and_mismatches(monkeypatch):
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(os, "getuid", lambda: 501, raising=False)
+
+    def _fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout="501\n")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    assert daemons_status._pid_owned_by_current_user(123) is True
+
+    def _fake_run_other(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout="999\n")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run_other)
+    assert daemons_status._pid_owned_by_current_user(123) is False
+
+    def _fake_run_garbage(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout="not-a-uid\n")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run_garbage)
+    assert daemons_status._pid_owned_by_current_user(123) is False

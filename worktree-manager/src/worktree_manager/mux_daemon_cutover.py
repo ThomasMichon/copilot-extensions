@@ -214,7 +214,15 @@ class ControlClient:
             )
 
     def health(self) -> dict[str, Any]:
-        return self._request(_HEALTH_KIND)
+        # A request-unique key (never the shared "control" default) so
+        # concurrent health probes are never coalesced into a single
+        # `_compute` execution: `daemons status`'s concurrent-load
+        # accounting increments once per real wire request, and
+        # coalescing two overlapping probes into one computation would
+        # hide the second one from that accounting entirely. Health is
+        # cheap and idempotent, so there is no benefit to coalescing it
+        # the way drain/undrain/shutdown/adopt still are.
+        return self._request(_HEALTH_KIND, key=f"{_HEALTH_KIND}:{secrets.token_hex(8)}")
 
     def drain(self, *, timeout: float, poll: float, force: bool) -> dict[str, Any]:
         result = self._request(

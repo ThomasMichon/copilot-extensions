@@ -1,0 +1,9 @@
+{
+  "comment": "daemons status: fix a token-leak to an unverified-owner process, an alias exposing the full mux-daemon command group, and a coalescing bug undercounting concurrent health probes (#5001 Phase 1 follow-up)",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

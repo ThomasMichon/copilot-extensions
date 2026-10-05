@@ -76,6 +76,52 @@ def _parse_listen_port(cmdline: str) -> int | None:
     return None
 
 
+def _pid_owned_by_current_user(pid: int) -> bool:
+    """Whether ``pid`` is owned by the OS account running this process.
+
+    Required before sending the cutover control token to a recovered port:
+    without this check, another local account could run a lookalike
+    process that reports the same ``--root=`` value in its own command
+    line and listens on a port, and a blind probe here would hand it our
+    bearer token. Only a verified same-owner process is ever probed; a
+    candidate whose ownership can't be confirmed is reported without a
+    connection attempt.
+    """
+    if os.name == "nt":
+        argv = [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$p = Get-CimInstance Win32_Process -Filter \"ProcessId=%d\"; "
+            "if ($p) { $o = Invoke-CimMethod -InputObject $p -MethodName GetOwner; "
+            "Write-Output \"$($o.Domain)\\$($o.User)\" }" % pid,
+        ]
+        out = subprocess.run(argv, capture_output=True, text=True, timeout=10, check=False)  # noqa: S603
+        owner = (out.stdout or "").strip()
+        if not owner:
+            return False
+        current = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}"
+        return owner.lower() == current.lower()
+    proc_dir = Path(f"/proc/{pid}")
+    if proc_dir.is_dir():
+        try:
+            return proc_dir.stat().st_uid == os.getuid()
+        except OSError:
+            return False
+    out = subprocess.run(  # noqa: S603
+        ["ps", "-p", str(pid), "-o", "uid="],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    try:
+        return int((out.stdout or "").strip()) == os.getuid()
+    except ValueError:
+        return False
+
+
 def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
     """Enumerate every resident mux-daemon matched to ``root``.
 
@@ -85,7 +131,9 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
     and a reachable control endpoint are both available, the entry is
     enriched with the daemon's own self-reported ``status``/``version``/
     ``attached_clients``/``busy``; otherwise ``status`` is ``"unreachable"``
-    (a live health request failed) or ``"unknown"`` (no port could be
+    (a live health request failed), ``"unverified-owner"`` (the candidate's
+    OS process owner could not be confirmed to be the current user, so the
+    control token was never sent to it), or ``"unknown"`` (no port could be
     recovered at all).
     """
     resolved_root = root if root is not None else default_root()
@@ -118,6 +166,10 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
         }
         if port is None:
             entry["status"] = "unknown"
+            results.append(entry)
+            continue
+        if not _pid_owned_by_current_user(pid):
+            entry["status"] = "unverified-owner"
             results.append(entry)
             continue
         try:
