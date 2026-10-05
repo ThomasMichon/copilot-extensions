@@ -215,6 +215,24 @@ jobs:
         # every test with an import error) with nothing to catch it
         # (PR #4942 review).
         run: python -m pytest -q tools/test_check_changefile_presence.py
+      - id: version-bump-engine
+        name: Detect version-bump diff-engine changes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            base="${{ github.event.before }}"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$base"...HEAD | grep -Eq \
+            '^tools/(check-version-bump\.py|test_check_version_bump\.py|installer_engine_ref\.py|uv_editable_ref\.py|check-changefile-presence\.py|accumulate_bumps\.py)$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Version-bump diff engine guard tests
         # check-version-bump.py no longer gates an ordinary PR directly (see
         # the step above), but check-changefile-presence.py and
@@ -223,6 +241,12 @@ jobs:
         # release/recovery check (docs/pipelines.md § Release & Versioning)
         # -- so its own regression suite still needs to run somewhere, not
         # just when a dependent guard's tests happen to exercise it.
+        # Path-gated (23 tests, each launching the real script as a
+        # subprocess inside a throwaway git repo): too heavy to run
+        # unconditionally on every PR per this repo's change-scoped CI
+        # policy, so it only runs when a file it actually exercises changed
+        # (or unconditionally on a non-PR/push trigger, e.g. workflow_dispatch).
+        if: steps.version-bump-engine.outputs.run == 'true'
         run: python -m pytest -q tools/test_check_version_bump.py
       - name: Module size (hard cap + shrink-only baseline, PR diff only)
         # Scoped to files THIS PR's own commits touch (like the changefile-
