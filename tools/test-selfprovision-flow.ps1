@@ -101,14 +101,14 @@ try {
     Write-Host "`n=== STEP 1: stamp (fast, no venv) ===" -ForegroundColor Yellow
     & $pwshExe -NoProfile -ExecutionPolicy Bypass -File $inst stamp | Out-Host
     $payloadMarker = Join-Path $root 'payload-dir'
-    $snap = if (Test-Path $payloadMarker) {
-        (Get-Content $payloadMarker -Raw).Trim()
-    } else {
-        ''
+    $snap = $null
+    if (Test-Path -LiteralPath $payloadMarker) {
+        $snap = (Get-Content -LiteralPath $payloadMarker -Raw).Trim()
+        if (-not $snap) { $snap = $null }
     }
-    Check 'snapshot dir'          (Test-Path $snap)
-    Check 'snapshot entry'        (Test-Path (Join-Path $snap "scripts\$Entry"))
-    Check 'payload-dir marker'    (Test-Path $payloadMarker)
+    Check 'payload-dir marker'    (Test-Path -LiteralPath $payloadMarker)
+    Check 'snapshot dir'          ($null -ne $snap -and (Test-Path -LiteralPath $snap))
+    Check 'snapshot entry'        ($null -ne $snap -and (Test-Path -LiteralPath (Join-Path $snap "scripts\$Entry")))
     Check 'stamped-version'       (Test-Path (Join-Path $root 'stamped-version'))
     Check 'binstub present'       ((Test-Path (Join-Path $localbin "$Plugin.cmd")) -or (Test-Path (Join-Path $localbin "$Plugin.ps1")))
     Check 'NO venv yet'           (-not (Test-Path (Join-Path $root "versions\$ver\Scripts\python.exe")))
