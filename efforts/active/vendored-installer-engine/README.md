@@ -1081,7 +1081,7 @@ appropriately larger/riskier for one sitting):
   `Write-DeployManifest` now falls back to the host name when
   `$env:COMPUTERNAME` is absent, so Linux/WSL `pwsh` validation can exercise
   the shared manifest writer without a null dereference.
-- **Line-count / corpus result:** wrapper-only installer lines shrank from
+- **Line-count / corpus result:** wrapper-only installer lines grew from
   `install.sh` 701 -> 817 (+116) and `install.ps1` 899 -> 990 (+91), for a
   combined wrapper change of 1600 -> 1807 (**+207**). The canonical engine grew by
   11 POSIX lines (`installer-engine.sh` 379 -> 390) for shell-literal quoting,
