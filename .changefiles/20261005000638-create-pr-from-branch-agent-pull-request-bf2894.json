@@ -1,0 +1,13 @@
+{
+  "comment": "create-pr --from-branch + agent-pull-requests create now auto-claim a cross-repo PR onto the calling worktree, so an agent with no local checkout of the target repo (a container or other process already pushed the branch) can open and durably own a PR in one call -- pull-request-capability effort Phase 2d",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

@@ -97,6 +97,16 @@ def add_parsers(sub) -> None:
         help="Target repo 'owner/name' for the PR (default: the worktree repo)",
     )
     p.add_argument(
+        "--from-branch",
+        default=None,
+        dest="from_branch",
+        help="Open the PR on --repo from a branch ALREADY PUSHED there by "
+        "some other process (a container, another host, ...) -- skips the "
+        "local squash/push machinery entirely (no local checkout of --repo "
+        "needed). Auto-journals a pr-kind claim on THIS worktree. Only valid "
+        "with --repo naming a different, registered repo.",
+    )
+    p.add_argument(
         "--new",
         action="store_true",
         help="Force a brand-new PR (fresh branch) even if a live PR is open",
@@ -471,28 +481,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
         worktree_id = core._resolve_worktree_id(worktree_id)
 
         target_repo_arg = getattr(args, "repo", None)
-        if target_repo_arg:
-            from . import pr_config as _pr_config
-
-            resolution = _pr_config.resolve_repo_config_for_slug(config, target_repo_arg)
-            if resolution.resolved and not resolution.same_as_active:
-                msg = (
-                    f"create-pr: --repo {target_repo_arg!r} names a different, "
-                    f"also-registered repo than this worktree's own "
-                    f"({config.repo_name!r}) -- create-pr pushes commits from "
-                    "THIS worktree's own local checkout, which is not a "
-                    f"checkout of {target_repo_arg!r}. There is no "
-                    "already-pushed-branch mode yet. Options: (1) create a "
-                    f"worktree of {target_repo_arg!r} itself and run create-pr "
-                    "from there, or (2) if the branch already exists and is "
-                    f"already pushed to {target_repo_arg!r}, use "
-                    f"`agent-pull-requests create --repo {target_repo_arg} "
-                    "--head <branch> --title ...` instead -- that plugin is "
-                    "built for exactly this (no local checkout required). "
-                    "Do not fall back to gh/az repos/git directly."
-                )
-                return core._json_error(msg) if use_json else (output.err(msg) or 2)
-
+        from_branch = getattr(args, "from_branch", None)
         body = getattr(args, "body", None)
         body_file = getattr(args, "body_file", None)
         if body_file:
@@ -501,6 +490,56 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             except OSError as e:
                 msg = f"Could not read --body-file '{body_file}': {e}"
                 return core._json_error(msg) if use_json else (output.err(msg) or 1)
+
+        if target_repo_arg:
+            from . import pr_config as _pr_config
+
+            resolution = _pr_config.resolve_repo_config_for_slug(config, target_repo_arg)
+            if resolution.resolved and not resolution.same_as_active:
+                if from_branch:
+                    from . import pr_foreign_create
+
+                    result = pr_foreign_create.create_foreign_pr_from_branch(
+                        worktree_id, config,
+                        target_repo=target_repo_arg, from_branch=from_branch,
+                        title=args.title or "", body=body or "",
+                        draft=getattr(args, "draft", False) or getattr(args, "hold", False),
+                        attribution=(False if getattr(args, "no_attribution", False) else None),
+                    )
+                    if result.get("error"):
+                        return core._json_error(result["error"]) if use_json else (
+                            output.err(result["error"]) or 2
+                        )
+                    if use_json:
+                        core._json_output(result)
+                    else:
+                        output.ok(
+                            f"Opened PR #{result.get('number')} via foreign-repo "
+                            f"create: {result.get('url', '')}"
+                        )
+                        print(
+                            f"  head/base: {result.get('head')} -> {result.get('base')}"
+                        )
+                        if not result.get("claimed"):
+                            output.warn(result.get("claim_warning", "PR not claimed."))
+                    return 0
+                msg = (
+                    f"create-pr: --repo {target_repo_arg!r} names a different, "
+                    f"also-registered repo than this worktree's own "
+                    f"({config.repo_name!r}) -- create-pr pushes commits from "
+                    "THIS worktree's own local checkout, which is not a "
+                    f"checkout of {target_repo_arg!r}. Options: (1) pass "
+                    f"--from-branch <branch> if that branch is ALREADY PUSHED "
+                    f"to {target_repo_arg!r} by some other process (skips the "
+                    "local checkout entirely, auto-claims the PR onto THIS "
+                    f"worktree), (2) create a worktree of {target_repo_arg!r} "
+                    "itself and run create-pr from there, or (3) use "
+                    f"`agent-pull-requests create --repo {target_repo_arg} "
+                    "--head <branch> --title ...` instead -- that plugin is "
+                    "built for exactly this (no local checkout required). "
+                    "Do not fall back to gh/az repos/git directly."
+                )
+                return core._json_error(msg) if use_json else (output.err(msg) or 2)
 
         try:
             result = pr_ops.create_pr(
