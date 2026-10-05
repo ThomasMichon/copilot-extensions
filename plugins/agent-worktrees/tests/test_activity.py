@@ -10,6 +10,12 @@ import pytest
 from agent_worktrees import activity, handoff_trace
 
 
+def _claim_prune_marker_in_subprocess(marker_str: str) -> bool:
+    """Module-level (picklable) target for a real multi-process race test --
+    see test_claim_prune_marker_atomic_under_real_multiprocess_race."""
+    return activity._claim_prune_marker(Path(marker_str), refresh_stale=False)
+
+
 @pytest.fixture
 def patch_install_dir(monkeypatch, tmp_path: Path) -> Path:
     """Redirect the activity log into a tmp install dir."""
@@ -337,6 +343,24 @@ def test_claim_prune_marker_is_atomic_for_concurrent_first_claim(patch_install_d
 
     assert first is True
     assert second is False
+
+
+def test_claim_prune_marker_atomic_under_real_multiprocess_race(tmp_path: Path):
+    """Reproduces the exact scenario Copilot review flagged on the original
+    (non-atomic) implementation: a synchronized 8-process reproduction there
+    produced 8 claims -- the storm this debounce exists to prevent. Uses
+    real OS processes (not threads/in-process calls) racing on the same
+    never-before-seen marker; only one may win."""
+    import concurrent.futures
+
+    marker = tmp_path / "activity.jsonl.prune-marker"
+    n = 12
+    with concurrent.futures.ProcessPoolExecutor(max_workers=n) as pool:
+        results = list(
+            pool.map(_claim_prune_marker_in_subprocess, [str(marker)] * n)
+        )
+
+    assert results.count(True) == 1, f"expected exactly one winner, got {results}"
 
 
 def test_claim_prune_marker_refresh_stale_best_effort(patch_install_dir: Path):
