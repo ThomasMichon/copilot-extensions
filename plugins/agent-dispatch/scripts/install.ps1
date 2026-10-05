@@ -275,6 +275,24 @@ function Write-Fail    { param([string]$Msg) Write-Host "  [FAIL] $Msg" -Foregro
 function Write-Warn    { param([string]$Msg) Write-Host "  [WARN] $Msg" -ForegroundColor Yellow }
 function Write-Step    { param([string]$Msg) Write-Host "  ...    $Msg" -ForegroundColor DarkGray }
 
+# Stable, documented contract (ThomasMichon/copilot-extensions#5066): a file
+# containing a single epoch-seconds expiry, present for the duration of a
+# live-service update/start lifecycle -- any downstream consumer (a local
+# liveness watchdog, a diagnostic tool) can check its content without needing
+# any plugin-specific caller-side wrapping. $UpdateMarker itself is set once
+# $InstallDir is finalized below; these two functions only reference it at
+# call time, so defining them here is safe.
+function Write-UpdateMarker {
+    param([int]$TtlSeconds = $UpdateMarkerTtlDefault)
+    $expiry = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + $TtlSeconds
+    $tmp = "$UpdateMarker.$([Guid]::NewGuid().ToString('N'))"
+    Set-Content -Path $tmp -Value $expiry -NoNewline
+    Move-Item -Path $tmp -Destination $UpdateMarker -Force
+}
+function Clear-UpdateMarker {
+    Remove-Item -Path $UpdateMarker -Force -ErrorAction SilentlyContinue
+}
+
 # -- Paths --------------------------------------------------------------
 
 $PluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -284,6 +302,8 @@ if (-not $InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-dispatch'
 }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+$UpdateMarker = Join-Path $InstallDir 'update-in-progress'
+$UpdateMarkerTtlDefault = 1200  # 20 min -- generous past any observed real cutover
 $legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-dispatch'))
 $publishLegacyNames = [StringComparer]::OrdinalIgnoreCase.Equals($InstallDir, $legacyInstallDir)
 $serviceSuffix = if ($publishLegacyNames) {
@@ -2908,6 +2928,12 @@ function Invoke-CoordinatorCutover {
 
 function Invoke-Update {
     Write-Host ''; Write-Host '=== agent-dispatch update ===' -ForegroundColor Cyan; Write-Host ''
+    # Mark the live-service update lifecycle as in-progress (ce#5066) so a
+    # local liveness watchdog never force-restarts a daemon that is
+    # legitimately, briefly mid-cutover. try/finally (not a trap, which
+    # PowerShell only fires for terminating errors) covers every exit path.
+    Write-UpdateMarker
+    try {
     Invoke-DowngradeGuard
     Install-Runtime
     # Thread B (graceful daemon cutover): a version update must NEVER kill
@@ -2948,9 +2974,15 @@ function Invoke-Update {
         Install-SupervisorTask
     }
     Write-Host ''; Write-Host '=== agent-dispatch update complete ===' -ForegroundColor Cyan
+    } finally {
+        Clear-UpdateMarker
+    }
 }
 
 function Invoke-Start {
+    # Mark the live-service start lifecycle as in-progress (ce#5066).
+    Write-UpdateMarker
+    try {
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($task) {
         Start-ScheduledTask -TaskName $TaskName
@@ -2970,6 +3002,9 @@ function Invoke-Start {
     # primary/profile supervisors are left alone.
     Invoke-SupervisorsStart
     Confirm-CoordinatorRunning
+    } finally {
+        Clear-UpdateMarker
+    }
 }
 
 function Invoke-Stop {

@@ -310,6 +310,15 @@ fi
 LINK_DIR="$INSTALL_DIR/venv"
 VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 
+# Stable, documented contract (ThomasMichon/copilot-extensions#5066): a file
+# containing a single epoch-seconds expiry, present for the duration of a
+# live-service update/cutover lifecycle (do_update/do_start) -- any downstream
+# consumer (a local liveness watchdog, a diagnostic tool) can check
+# `[[ -f "$INSTALL_DIR/update-in-progress" ]] && (( $(cat ...) > $(date +%s) ))`
+# without needing any plugin-specific caller-side wrapping.
+UPDATE_MARKER="${INSTALL_DIR}/update-in-progress"
+UPDATE_MARKER_TTL_DEFAULT=1200  # 20 min -- generous past any observed real cutover
+
 # -- Helpers -----------------------------------------------------------------
 
 _ok()   { echo "  [OK]   $*"; }
@@ -317,6 +326,21 @@ _skip() { echo "  [SKIP] $*"; }
 _fail() { echo "  [FAIL] $*" >&2; }
 _step() { echo "  ...    $*"; }
 _warn() { echo "  [WARN] $*" >&2; }
+
+# Atomic write (temp-file + `mv -f`) so a reader never sees a truncated/
+# partial file mid-write. Call once, then `trap _clear_update_marker EXIT`
+# immediately after -- a global EXIT trap (never a function-local RETURN
+# trap) is the only one guaranteed to still fire when `set -euo pipefail`
+# terminates the whole script on an unexpected command failure rather than
+# returning normally from the caller.
+_write_update_marker() {
+    local ttl="${1:-${UPDATE_MARKER_TTL_DEFAULT}}"
+    local tmp
+    tmp="$(mktemp "${UPDATE_MARKER}.XXXXXX")"
+    echo "$(( $(date +%s) + ttl ))" > "${tmp}"
+    mv -f "${tmp}" "${UPDATE_MARKER}"
+}
+_clear_update_marker() { rm -f "${UPDATE_MARKER}"; }
 
 # Detects `AssertionError: SRE module mismatch` -- a transient race on a
 # shared uv-managed Python interpreter that surfaces when several installers
@@ -1703,6 +1727,13 @@ do_start() {
         exit 1
     fi
 
+    # Mark the live-service start lifecycle as in-progress (ce#5066), past
+    # every "nothing to do" early return above -- a local liveness watchdog
+    # should only ever see this during an actual start attempt, never while
+    # an already-healthy daemon or a forward route is correctly left alone.
+    _write_update_marker
+    trap _clear_update_marker EXIT
+
     _step "Starting agent-bridge..."
 
     # Prefer systemd if available
@@ -2107,6 +2138,15 @@ do_update() {
         _warn "Another agent-bridge install/update is in progress -- deferring. No-op."
         return 0
     fi
+
+    # Mark the live-service update lifecycle as in-progress (ce#5066) so a
+    # local liveness watchdog never force-restarts a daemon that is
+    # legitimately, briefly down for drain/stop/stage/start or a zero-downtime
+    # cutover. The EXIT trap covers every path below uniformly -- success,
+    # a cutover-then-fallback, a failed update's rollback, or an unhandled
+    # error under `set -euo pipefail`.
+    _write_update_marker
+    trap _clear_update_marker EXIT
 
     local active_forward=false
     if _active_is_forward; then

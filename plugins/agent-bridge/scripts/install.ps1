@@ -249,6 +249,24 @@ function Write-Fail { param([string]$Msg) Write-Host "  [FAIL] $Msg" -Foreground
 function Write-Step { param([string]$Msg) Write-Host "  ...    $Msg" -ForegroundColor DarkGray }
 function Write-Warn { param([string]$Msg) Write-Host "  [WARN] $Msg" -ForegroundColor Yellow }
 
+# Stable, documented contract (ThomasMichon/copilot-extensions#5066): a file
+# containing a single epoch-seconds expiry, present for the duration of a
+# live-service update/start lifecycle -- any downstream consumer (a local
+# liveness watchdog, a diagnostic tool) can check its mtime/content without
+# needing any plugin-specific caller-side wrapping. $UpdateMarker itself is
+# set once $InstallDir is finalized below; these two functions only
+# reference it at call time, so defining them here is safe.
+function Write-UpdateMarker {
+    param([int]$TtlSeconds = $UpdateMarkerTtlDefault)
+    $expiry = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + $TtlSeconds
+    $tmp = "$UpdateMarker.$([Guid]::NewGuid().ToString('N'))"
+    Set-Content -Path $tmp -Value $expiry -NoNewline
+    Move-Item -Path $tmp -Destination $UpdateMarker -Force
+}
+function Clear-UpdateMarker {
+    Remove-Item -Path $UpdateMarker -Force -ErrorAction SilentlyContinue
+}
+
 # -- Paths -------------------------------------------------------------------
 
 # #935: bound uv's per-request network wait so a hung index/download degrades to
@@ -261,6 +279,8 @@ $PluginDir  = (Resolve-Path (Join-Path $ScriptDir '..')).Path
 $legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-bridge'))
 $InstallDir = if ($InstallDir) { $InstallDir } else { $legacyInstallDir }
 $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+$UpdateMarker = Join-Path $InstallDir 'update-in-progress'
+$UpdateMarkerTtlDefault = 1200  # 20 min -- generous past any observed real cutover
 $publishGlobalBinstubs = [StringComparer]::OrdinalIgnoreCase.Equals(
     $InstallDir,
     $legacyInstallDir
@@ -2436,6 +2456,15 @@ function Invoke-Start {
     $logFile = Join-Path $InstallDir 'agent-bridge.log'
     $errFile = Join-Path $InstallDir 'agent-bridge-err.log'
 
+    # Mark the live-service start lifecycle as in-progress (ce#5066), past
+    # every "nothing to do" early return above -- a local liveness watchdog
+    # should only ever see this during an actual start attempt, never while
+    # an already-healthy daemon is correctly left alone. try/finally (not a
+    # trap, which PowerShell only fires for terminating errors, not a clean
+    # `return`) covers every remaining exit path uniformly.
+    Write-UpdateMarker
+    try {
+
     # Prefer the scheduled task to start the daemon whenever one is registered
     # -- for BOTH headless (S4U/Password, session 0) and at-logon (interactive)
     # tasks. The Task Scheduler owns the resulting process, so it is NOT parented
@@ -2539,6 +2568,9 @@ Set-Content -Path '$($PidFile -replace "'", "''")' -Value `$p.Id
 
     Write-Fail 'agent-bridge failed to start -- check agent-bridge.log / agent-bridge-err.log'
     exit 1
+    } finally {
+        Clear-UpdateMarker
+    }
 }
 
 function Invoke-Stop {
@@ -2732,6 +2764,17 @@ function Invoke-Update {
         Exit-InstallLock
         return
     }
+
+    # Mark the live-service update lifecycle as in-progress (ce#5066) so a
+    # local liveness watchdog never force-restarts a daemon that is
+    # legitimately, briefly down for drain/stop/stage/start or a zero-downtime
+    # cutover. Cleared in the existing try/finally below alongside
+    # Exit-InstallLock, so every exit path (success, a cutover-then-fallback,
+    # a failed update's rollback, or an unhandled terminating error) covers
+    # it uniformly -- PowerShell's `finally` runs even on `exit` within the
+    # same call stack, exactly like this codebase already relies on for the
+    # install lock.
+    Write-UpdateMarker
 
     $activeForward = Test-ActiveIsForward
     if ($activeForward) {
@@ -3073,4 +3116,5 @@ try {
     # Release the install lock on any exit path (the OS also drops it on process
     # death, so an `exit`/crash never strands it).
     Exit-InstallLock
+    Clear-UpdateMarker
 }

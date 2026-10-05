@@ -51,6 +51,31 @@ _fail() { printf '  [FAIL] %s\n' "$1" >&2; }
 _warn() { printf '  [WARN] %s\n' "$1" >&2; }
 _step() { printf '  ...    %s\n' "$1"; }
 
+# Stable, documented contract (ThomasMichon/copilot-extensions#5066): a file
+# containing a single epoch-seconds expiry, present for the duration of a
+# live-service update/start lifecycle (do_update/do_start) -- any downstream
+# consumer (a local liveness watchdog, a diagnostic tool) can check
+# `[[ -f "$INSTALL_DIR/update-in-progress" ]] && (( $(cat ...) > $(date +%s) ))`
+# without needing any plugin-specific caller-side wrapping. UPDATE_MARKER
+# itself is set once INSTALL_DIR is finalized below; these two helpers only
+# reference it at call time, so defining them here (alongside the other
+# early helpers) is safe.
+#
+# Atomic write (temp-file + `mv -f`) so a reader never sees a truncated/
+# partial file mid-write. Call once, then `trap _clear_update_marker EXIT`
+# immediately after -- a global EXIT trap (never a function-local RETURN
+# trap) is the only one guaranteed to still fire when `set -euo pipefail`
+# terminates the whole script on an unexpected command failure rather than
+# returning normally from the caller.
+_write_update_marker() {
+    local ttl="${1:-${UPDATE_MARKER_TTL_DEFAULT}}"
+    local tmp
+    tmp="$(mktemp "${UPDATE_MARKER}.XXXXXX")"
+    echo "$(( $(date +%s) + ttl ))" > "${tmp}"
+    mv -f "${tmp}" "${UPDATE_MARKER}"
+}
+_clear_update_marker() { rm -f "${UPDATE_MARKER}"; }
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -232,6 +257,8 @@ else
     fi
 fi
 VENV_DIR="$INSTALL_DIR/.venv"
+UPDATE_MARKER="${INSTALL_DIR}/update-in-progress"
+UPDATE_MARKER_TTL_DEFAULT=1200  # 20 min -- generous past any observed real cutover
 LOCAL_BIN="$HOME/.local/bin"
 VENV_PYTHON="$VENV_DIR/bin/python"
 STUB="$LOCAL_BIN/agent-dispatch"
@@ -1580,6 +1607,12 @@ do_install() {
 
 do_update() {
     echo ''; echo '=== agent-dispatch update ==='; echo ''
+    # Mark the live-service update lifecycle as in-progress (ce#5066) so a
+    # local liveness watchdog never force-restarts a daemon that is
+    # legitimately, briefly mid-cutover. The EXIT trap covers every path
+    # below uniformly, including an unhandled error under `set -euo pipefail`.
+    _write_update_marker
+    trap _clear_update_marker EXIT
     _downgrade_guard
     _ensure_runtime
     # Thread B (parity with install.ps1): a version update must never kill an
@@ -1600,6 +1633,12 @@ do_update() {
 }
 
 do_start() {
+    # Mark the live-service start lifecycle as in-progress (ce#5066) --
+    # unlike agent-bridge's do_start, this one has no "already healthy,
+    # nothing to do" early return, so the marker covers the whole function.
+    _write_update_marker
+    trap _clear_update_marker EXIT
+
     if command -v systemctl >/dev/null 2>&1 && [[ -f "$UNIT_DIR/$SYSTEMD_UNIT" ]]; then
         systemctl --user start "$SYSTEMD_UNIT"
         if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
