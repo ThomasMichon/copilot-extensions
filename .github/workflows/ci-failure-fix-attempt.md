@@ -245,8 +245,19 @@ jobs:
           # own git commits), not to `gh issue view`'s own JSON for an
           # issue/PR/comment created via the same token -- those
           # consistently use the `app/<slug>` login shape instead.
-          if [ "$AUTHOR" != "app/github-actions" ]; then
-            echo "::warning::Issue #$NUM was authored by '$AUTHOR', not the watchdog's own app/github-actions token identity -- refusing to run the agent (a hand-authored issue re-using this label is not an authenticated diagnostic)."
+          # The repo owner's own account is trusted alongside the watchdog
+          # bot (operator decision): the owner may hand-file a trigger
+          # issue for a real failure they observed directly, formatted the
+          # same way the watchdog would (Signature:/Run: lines matching a
+          # real run). This widens WHO may file the record, never WHAT
+          # gets trusted without verification -- the label match, the
+          # no-edit-since-filing check, and `reverify-signature`'s
+          # independent re-derivation from the real run's own current job
+          # logs (below) apply identically regardless of author, and still
+          # reject a hand-authored issue that doesn't name a real,
+          # currently-reproducible failure.
+          if [ "$AUTHOR" != "app/github-actions" ] && [ "$AUTHOR" != "ThomasMichon" ]; then
+            echo "::warning::Issue #$NUM was authored by '$AUTHOR', neither the watchdog's own app/github-actions token identity nor the repo owner -- refusing to run the agent (a hand-authored issue re-using this label is not an authenticated diagnostic)."
             echo "authorized=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -694,11 +705,16 @@ safe-outputs:
   2. LABEL ALONE IS NOT AN AUTHENTICATED SIGNAL -- RESOLVED via the `verify-issue`
      custom job below (gh-aw's documented `jobs.<id>` + `jobs.agent.needs`/
      `jobs.agent.if` gating mechanism). It resolves the target issue number from
-     either trigger shape, then verifies, in order: (a) the issue's author is the
-     watchdog's own `app/github-actions` token identity (the login shape `gh
-     issue view` reports for any issue created via `GITHUB_TOKEN` -- distinct
-     from the `[bot]`-suffixed shape a `GITHUB_TOKEN`-authored git commit's own
-     author/committer identity uses); (b) the `ci-failure-signature` label is
+     either trigger shape, then verifies, in order: (a) the issue's author is
+     either the watchdog's own `app/github-actions` token identity (the login
+     shape `gh issue view` reports for any issue created via `GITHUB_TOKEN` --
+     distinct from the `[bot]`-suffixed shape a `GITHUB_TOKEN`-authored git
+     commit's own author/committer identity uses) or the repo owner's own
+     account (operator decision: the owner may hand-file a trigger issue for a
+     real failure they observed directly, formatted the same way the watchdog
+     would -- every later check still applies identically and still rejects a
+     hand-authored issue that doesn't name a real, currently-reproducible
+     failure); (b) the `ci-failure-signature` label is
      actually present (the `workflow_dispatch` path can name ANY issue number
      regardless of label); (c) the body carries a `Signature: <hash>` anchor;
      (d) the issue's body was NEVER edited since creation (GraphQL
@@ -1074,8 +1090,9 @@ repository. The body waiting for you at `.verify-issue/body.txt` in your
 checked-out workspace is NOT that issue's own text -- it is built entirely
 from this workflow's own `verify-issue` job independently re-fetching the
 referenced run's real job logs just now and confirming they reproduce the
-issue's claimed failure signature, after also confirming genuine
-`app/github-actions` authorship, the tracking label, an intact `Signature:`
+issue's claimed failure signature, after also confirming the issue was filed
+by either the watchdog's own `app/github-actions` identity or the repo
+owner's account, the tracking label, an intact `Signature:`
 anchor, and zero edits since filing. What follows is provably the real,
 current output of a real job, not a live, re-editable fetch of the issue's
 own prose.
