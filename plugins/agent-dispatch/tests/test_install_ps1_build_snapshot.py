@@ -125,6 +125,56 @@ Write-Output "RESULT:$result"
     assert not (snap_dir / "build").exists()
 
 
+def test_reuses_an_already_valid_snapshot_for_the_same_version(tmp_path: Path) -> None:
+    """A snapshot for the exact requested version that already looks valid
+    (has a pyproject.toml) is reused as-is rather than deleted and rebuilt
+    byte-identical -- the fast, idempotent path, and the one that makes the
+    replacement race below moot for the common re-run case."""
+    plugin_dir = tmp_path / "payload" / "agent-dispatch"
+    install_dir = tmp_path / "install"
+    _seed_plugin_dir(plugin_dir)
+    snap_dir = install_dir / "snapshots" / "0.1.0-dev1"
+    snap_dir.mkdir(parents=True)
+    (snap_dir / "pyproject.toml").write_text("[project]\nmarker = 'original'\n", encoding="utf-8")
+
+    extra = f"""
+$result = New-PluginBuildSnapshot -PluginDir "{plugin_dir}" -InstallDir "{install_dir}" -Version "0.1.0-dev1"
+Write-Output "RESULT:$result"
+"""
+    result = _run_harness(extra)
+    returned = Path(result.stdout.split("RESULT:", 1)[1].strip().splitlines()[0])
+
+    assert returned == snap_dir
+    # Untouched -- not rebuilt from $plugin_dir's own (different) pyproject.toml.
+    assert "marker = 'original'" in (snap_dir / "pyproject.toml").read_text(encoding="utf-8")
+    assert not (snap_dir / "src").exists()
+
+
+def test_replaces_an_invalid_existing_snapshot_via_rename_aside(tmp_path: Path) -> None:
+    """An existing $snapDir that does NOT look valid (no pyproject.toml --
+    e.g. a torn previous write) must still be replaced by a fresh, valid
+    snapshot, and the stale copy must not linger afterward."""
+    plugin_dir = tmp_path / "payload" / "agent-dispatch"
+    install_dir = tmp_path / "install"
+    _seed_plugin_dir(plugin_dir)
+    snap_dir = install_dir / "snapshots" / "0.1.0-dev1"
+    (snap_dir / "junk").mkdir(parents=True)
+    (snap_dir / "junk" / "torn.txt").write_text("incomplete\n", encoding="utf-8")
+
+    extra = f"""
+$result = New-PluginBuildSnapshot -PluginDir "{plugin_dir}" -InstallDir "{install_dir}" -Version "0.1.0-dev1"
+Write-Output "RESULT:$result"
+"""
+    result = _run_harness(extra)
+    returned = Path(result.stdout.split("RESULT:", 1)[1].strip().splitlines()[0])
+
+    assert returned == snap_dir
+    assert (snap_dir / "pyproject.toml").exists()
+    assert not (snap_dir / "junk").exists()
+    # No leftover .stale-<pid> sibling directory.
+    assert sorted(p.name for p in (install_dir / "snapshots").iterdir()) == ["0.1.0-dev1"]
+
+
 def test_is_a_noop_when_plugin_dir_is_already_under_install_dir(tmp_path: Path) -> None:
     """Re-running from an already-made snapshot (the self-provisioning
     binstub's first-use `provision` dispatch runs install.ps1 FROM the
@@ -162,13 +212,13 @@ Write-Output "RESULT:$result"
 
 
 def test_without_best_effort_a_copy_failure_rethrows(tmp_path: Path) -> None:
-    """Regression (review finding): Invoke-Stamp persists whatever this
-    function returns as the self-provisioning binstub's durable
-    `payload-dir` marker. Without -BestEffort (Invoke-Stamp's call site), a
-    real copy failure must THROW -- matching the script's own top-level
-    `$ErrorActionPreference = 'Stop'` -- rather than silently returning
-    $PluginDir and letting Invoke-Stamp publish a marker pointing at the
-    wrong (transient) directory while reporting success."""
+    """Invoke-Stamp persists whatever this function returns as the
+    self-provisioning binstub's durable `payload-dir` marker. Without
+    -BestEffort (Invoke-Stamp's call site), a real copy failure must THROW
+    -- matching the script's own top-level `$ErrorActionPreference =
+    'Stop'` -- rather than silently returning $PluginDir and letting
+    Invoke-Stamp publish a marker pointing at the wrong (transient)
+    directory while reporting success."""
     plugin_dir = tmp_path / "payload" / "agent-dispatch"
     install_dir = tmp_path / "install"
     # A nonexistent $PluginDir makes Get-ChildItem -LiteralPath throw inside
@@ -207,10 +257,10 @@ try {{
 
 
 def test_containment_check_is_a_literal_prefix_not_a_wildcard_match(tmp_path: Path) -> None:
-    """Regression (review finding): the no-op containment check must use a
-    literal prefix comparison, not `-like` globbing -- a path containing a
-    literal `[` (a valid, if unusual, directory-name character) must not be
-    mis-matched as a wildcard character class."""
+    """The no-op containment check must use a literal prefix comparison,
+    not `-like` globbing -- a path containing a literal `[` (a valid, if
+    unusual, directory-name character) must not be mis-matched as a
+    wildcard character class."""
     install_dir = tmp_path / "inst[all]"
     plugin_dir = install_dir / "snapshots" / "0.1.0-dev1"
     _seed_plugin_dir(plugin_dir)

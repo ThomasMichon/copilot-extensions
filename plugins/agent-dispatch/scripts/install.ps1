@@ -858,17 +858,16 @@ function New-PluginBuildSnapshot {
 
        -BestEffort (Install-Runtime's own call site): on ANY copy failure
        (disk full, permissions) logs a warning and returns $PluginDir
-       unchanged, degrading to the pre-existing (lock-vulnerable, but
-       previously the ONLY) behavior rather than aborting the whole
-       install. Without -BestEffort (Invoke-Stamp's call site, matching its
-       pre-existing behavior under the script's own
-       `$ErrorActionPreference = 'Stop'`): a copy failure THROWS rather
-       than silently publishing a `payload-dir`/`stamped-version` marker
-       that points at the wrong (transient, or merely unchanged) directory
-       -- Invoke-Stamp persists whatever this returns as the self-
-       provisioning binstub's durable source of truth, so a swallowed
-       failure there would silently break first-use provisioning instead
-       of failing the stamp outright. A missing source version always
+       unchanged -- an acceptable degraded outcome, since the only
+       consequence is building from the live payload again rather than
+       aborting the whole install. Without -BestEffort (Invoke-Stamp's call
+       site): a copy failure THROWS instead. Invoke-Stamp persists this
+       function's return value as the self-provisioning binstub's durable
+       `payload-dir`/`stamped-version` marker and reports success
+       regardless of what it received back -- a swallowed failure there
+       would silently publish a marker pointing at the wrong (transient,
+       or merely unchanged) directory while claiming the stamp succeeded,
+       instead of failing it outright. A missing source version always
        degrades (no version to snapshot under), regardless of -BestEffort. #>
     param(
         [Parameter(Mandatory)][string]$PluginDir,
@@ -899,6 +898,16 @@ function New-PluginBuildSnapshot {
     try {
         if (-not (Test-Path $InstallDir)) { New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null }
         $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $Version
+        # Same-version idempotent fast path (mirrors agent-machines'
+        # scripts/init.ps1 stamp mutex): a snapshot for this EXACT version
+        # that already looks valid would be rebuilt byte-identical anyway,
+        # so skip the whole copy -- also closes the replacement race below
+        # for the common case (nothing to publish means nothing to race).
+        $snapValid = Test-Path (Join-Path $snapDir 'pyproject.toml')
+        if ($snapValid) {
+            Write-Ok "Reusing existing build snapshot: $snapDir"
+            return $snapDir
+        }
         $snapTmp = "$snapDir.tmp-$PID"
         if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
         New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
@@ -909,8 +918,23 @@ function New-PluginBuildSnapshot {
         Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
         }
-        if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
+        # A published snapshot is immutable: Invoke-Stamp's payload-dir
+        # marker, and this function's own return value, can be read by a
+        # CONCURRENT first-use binstub invocation outside any mutex this
+        # function holds. Deleting $snapDir before moving the replacement in
+        # would leave NO snapshot at all for the entire remainder of this
+        # copy -- a race reading that window sees a missing directory, not
+        # merely a stale one. Rename the old copy aside first (a directory
+        # rename is metadata-only, so the window where $snapDir doesn't
+        # exist shrinks to the Move-Item's own atomic rename) rather than
+        # deleting the still-advertised snapshot outright.
+        if (Test-Path $snapDir) {
+            $snapStale = "$snapDir.stale-$PID"
+            Rename-Item -LiteralPath $snapDir -NewName (Split-Path -Leaf $snapStale) -ErrorAction SilentlyContinue
+        }
         Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+        Get-ChildItem -LiteralPath (Split-Path -Parent $snapDir) -Directory -Filter "$(Split-Path -Leaf $snapDir).stale-*" -ErrorAction SilentlyContinue |
+            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
         Write-Ok "Building from durable snapshot: $snapDir (never locks the marketplace payload)"
         return $snapDir
     } catch {
