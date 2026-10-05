@@ -1142,8 +1142,13 @@ A small HTTP app that maps three generic, forge-neutral event shapes onto tasks:
 Every task carries a deterministic `dedup_key`, so a redelivered webhook
 doesn't double-enqueue **as long as the original task is still in flight** --
 see the caveat above for what happens after it reaches a terminal status.
-Behavior (templates, base-branch/severity/label allowlists, an optional
-inbound bearer token, the coordinator URL) is set in an optional JSON config:
+Behavior (templates, base-branch/severity/label allowlists, the coordinator
+URL) is set in an optional JSON config. Two authentication mechanisms are
+supported, and `github_secret` takes precedence when both are configured:
+`github_secret` verifies GitHub's own `X-Hub-Signature-256` HMAC header (the
+mechanism a real GitHub webhook delivery actually uses -- GitHub never sends
+a bearer header); `inbound_token` is a simple shared-secret bearer check for
+any other caller (a Gitea delivery, a manual/scripted trigger).
 
 ```bash
 agent-dispatch webhook --config webhook.json --host 127.0.0.1 --port 9331

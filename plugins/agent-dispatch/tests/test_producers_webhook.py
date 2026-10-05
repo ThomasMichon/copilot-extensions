@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from agent_dispatch.producers import webhook
@@ -394,6 +396,90 @@ def test_inbound_token_guard():
     ok = tc.post("/webhook/pr", json=_MERGED_PR, headers={"Authorization": "Bearer secret"})
     assert ok.status_code == 200
     assert len(sink) == 1
+
+
+def _github_signature(secret, body_bytes):
+    import hashlib
+    import hmac as hmac_module
+
+    digest = hmac_module.new(secret.encode("utf-8"), body_bytes, hashlib.sha256).hexdigest()
+    return f"sha256={digest}"
+
+
+def test_github_secret_rejects_missing_signature():
+    tc, sink = _client({"github_secret": "whsec"})
+    r = tc.post("/webhook/pr", json=_MERGED_PR)
+    assert r.status_code == 401
+    assert sink == []
+
+
+def test_github_secret_rejects_wrong_signature():
+    tc, sink = _client({"github_secret": "whsec"})
+    r = tc.post(
+        "/webhook/pr", json=_MERGED_PR, headers={"X-Hub-Signature-256": "sha256=deadbeef"}
+    )
+    assert r.status_code == 401
+    assert sink == []
+
+
+def test_github_secret_accepts_valid_signature():
+    tc, sink = _client({"github_secret": "whsec"})
+    body_bytes = json.dumps(_MERGED_PR).encode("utf-8")
+    sig = _github_signature("whsec", body_bytes)
+    r = tc.post(
+        "/webhook/pr",
+        content=body_bytes,
+        headers={"X-Hub-Signature-256": sig, "Content-Type": "application/json"},
+    )
+    assert r.status_code == 200
+    assert len(sink) == 1
+
+
+def test_github_secret_takes_precedence_over_inbound_token():
+    """When both are configured, GitHub's own signature mechanism is
+    checked -- a bare inbound_token bearer header alone must not
+    substitute for it (GitHub itself never sends a bearer header, so
+    accepting one here would create a bypass for a non-GitHub caller
+    that merely knows the bearer secret)."""
+    tc, sink = _client({"github_secret": "whsec", "inbound_token": "secret"})
+    body_bytes = json.dumps(_MERGED_PR).encode("utf-8")
+    r = tc.post(
+        "/webhook/pr",
+        content=body_bytes,
+        headers={"Authorization": "Bearer secret", "Content-Type": "application/json"},
+    )
+    assert r.status_code == 401
+    assert sink == []
+
+
+def test_webhook_issue_route_also_enforces_github_secret():
+    tc, sink = _client({**_ISSUE_RULES_CONFIG, "github_secret": "whsec"})
+    r = tc.post("/webhook/issue", json=_CI_FAILURE_ISSUE)
+    assert r.status_code == 401
+    assert sink == []
+    body_bytes = json.dumps(_CI_FAILURE_ISSUE).encode("utf-8")
+    sig = _github_signature("whsec", body_bytes)
+    ok = tc.post(
+        "/webhook/issue",
+        content=body_bytes,
+        headers={"X-Hub-Signature-256": sig, "Content-Type": "application/json"},
+    )
+    assert ok.status_code == 200
+    assert len(ok.json()["created"]) == 1
+
+
+def test_malformed_json_body_is_a_400_not_a_500():
+    tc, _ = _client()
+    r = tc.post(
+        "/webhook/pr", content=b"not json", headers={"Content-Type": "application/json"}
+    )
+    assert r.status_code == 400
+
+
+def test_non_object_json_body_is_a_400():
+    tc, _ = _client()
+    r = tc.post("/webhook/pr", json=["not", "an", "object"])
+    assert r.status_code == 400
 
 
 def test_health():

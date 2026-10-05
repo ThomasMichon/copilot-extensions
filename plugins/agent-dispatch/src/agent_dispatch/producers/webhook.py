@@ -53,6 +53,7 @@ Config (JSON), all keys optional::
       "url": "http://127.0.0.1:9847",   # coordinator (else AGENT_DISPATCH_URL)
       "default_repo": "example.com/acme/widget",
       "inbound_token": "shared-secret", # require this bearer on inbound hooks
+      "github_secret": "webhook-secret", # verify GitHub's own X-Hub-Signature-256
       "pr": {
         "on_merged_only": true,
         "base_branches": ["main"],       # optional allowlist
@@ -85,17 +86,33 @@ Config (JSON), all keys optional::
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from fastapi import FastAPI, Header, HTTPException, Request
+
 from ..client import DispatchClient
 from ..identity import canonicalize_remote
 from . import UNTRUSTED_EXTERNAL_CONTENT_NOTE
 
 ClientFactory = Callable[[], DispatchClient]
+
+
+def _verify_github_signature(secret: str, body: bytes, signature_header: str | None) -> bool:
+    """Verify GitHub's own ``X-Hub-Signature-256`` HMAC header -- GitHub's
+    webhook-authenticity mechanism, distinct from the bearer-token
+    ``inbound_token`` above (GitHub never sends a bearer header; it only
+    ever signs the raw body with a shared secret). Mirrors
+    ``github_pr_review_webhook.py``'s own ``_verify_signature``."""
+    if not signature_header or not signature_header.startswith("sha256="):
+        return False
+    expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(f"sha256={expected}", signature_header)
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
@@ -267,11 +284,11 @@ def build_app(
     ``AGENT_DISPATCH_URL`` and ``config['coordinator_token']`` /
     ``AGENT_DISPATCH_TOKEN``.
     """
-    from fastapi import Body, FastAPI, Header, HTTPException
 
     cfg = config or {}
     default_repo = cfg.get("default_repo")
     inbound_token = cfg.get("inbound_token")
+    github_secret = cfg.get("github_secret")
     pr_cfg = cfg.get("pr") or {}
     tel_cfg = cfg.get("telemetry") or {}
     issue_rules = cfg.get("issues") or []
@@ -286,22 +303,49 @@ def build_app(
 
     app = FastAPI(title="agent-dispatch webhook producer")
 
-    def _guard(authorization: str | None) -> None:
-        if inbound_token:
+    async def _guard_and_parse(
+        request: Request,
+        authorization: str | None,
+        x_hub_signature_256: str | None,
+    ) -> dict:
+        """Authenticate the request, then parse and return its JSON body.
+
+        Checks ``github_secret``'s HMAC signature first when configured
+        (GitHub's own mechanism -- it never sends a bearer header), then
+        falls back to the forge-neutral ``inbound_token`` bearer check.
+        Reading the raw body here (rather than via FastAPI's ``Body(...)``
+        injection) is what makes signature verification possible at all --
+        a pydantic-parsed body no longer has the exact bytes GitHub signed.
+        """
+        body = await request.body()
+        if github_secret:
+            if not _verify_github_signature(github_secret, body, x_hub_signature_256):
+                raise HTTPException(status_code=401, detail="invalid webhook signature")
+        elif inbound_token:
             expected = f"Bearer {inbound_token}"
             if authorization != expected:
                 raise HTTPException(status_code=401, detail="invalid inbound token")
+        if not body:
+            return {}
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError as error:
+            raise HTTPException(status_code=400, detail="invalid JSON body") from error
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="JSON body must be an object")
+        return payload
 
     @app.get("/health")
     def health() -> dict:
         return {"status": "ok", "producer": "webhook"}
 
     @app.post("/webhook/pr")
-    def pr_hook(
-        payload: dict = Body(...),  # noqa: B008 (FastAPI dependency-injection idiom)
+    async def pr_hook(
+        request: Request,
         authorization: str | None = Header(default=None),
+        x_hub_signature_256: str | None = Header(default=None),
     ) -> dict:
-        _guard(authorization)
+        payload = await _guard_and_parse(request, authorization, x_hub_signature_256)
         pr = extract_pr(payload)
         if pr is None:
             return {"skipped": "not a pull-request event"}
@@ -333,11 +377,12 @@ def build_app(
         return {"created": task}
 
     @app.post("/webhook/telemetry")
-    def telemetry_hook(
-        payload: dict = Body(...),  # noqa: B008 (FastAPI dependency-injection idiom)
+    async def telemetry_hook(
+        request: Request,
         authorization: str | None = Header(default=None),
+        x_hub_signature_256: str | None = Header(default=None),
     ) -> dict:
-        _guard(authorization)
+        payload = await _guard_and_parse(request, authorization, x_hub_signature_256)
         on_status = tel_cfg.get("on_status", ["firing"])
         severities = tel_cfg.get("severities")
         created: list[dict] = []
@@ -378,11 +423,12 @@ def build_app(
         return {"created": created, "skipped": skipped}
 
     @app.post("/webhook/issue")
-    def issue_hook(
-        payload: dict = Body(...),  # noqa: B008 (FastAPI dependency-injection idiom)
+    async def issue_hook(
+        request: Request,
         authorization: str | None = Header(default=None),
+        x_hub_signature_256: str | None = Header(default=None),
     ) -> dict:
-        _guard(authorization)
+        payload = await _guard_and_parse(request, authorization, x_hub_signature_256)
         issue = extract_issue(payload)
         if issue is None:
             return {"skipped": "not an issue event"}
