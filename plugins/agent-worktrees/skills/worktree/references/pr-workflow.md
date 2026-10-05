@@ -421,9 +421,9 @@ non-blank `--title` (there is no local commit history to derive one from)
 and is incompatible with `--dry-run`/`--no-open` (there is no local step to
 preview or skip). Without `--from-branch`, naming a different, registered
 `--repo` is refused outright -- there is no mechanism to push into it from
-a checkout that isn't its own; use `agent-pull-requests create --repo
-<repo> --head <branch>` instead if the branch isn't pushed yet, or isn't on
-a repo registered here.
+a checkout that isn't its own; use `<agent-pull-requests catalog argv[0]>
+create --repo <repo> --head <branch>` instead if the branch isn't pushed
+yet, or isn't on a repo registered here.
 
 A worktree can track **multiple PRs** over its life. When the active PR is
 already **merged or closed**, `create-pr` automatically opens a *fresh* PR

@@ -20,10 +20,10 @@ interop.
 
 When you open a PR in *another* repo via `<agent-worktrees catalog argv[0]>
 create-pr --repo <foreign> --from-branch <branch>` (a branch already pushed
-there by some other process) or `agent-pull-requests create --repo <foreign>
---head <branch>`, it is auto-journaled onto the CALLING worktree's own
-ledger — no manual step needed; `finalize` already knows that cross-repo
-work is still open.
+there by some other process) or `<agent-pull-requests catalog argv[0]>
+create --repo <foreign> --head <branch>`, it is auto-journaled onto the
+CALLING worktree's own ledger — no manual step needed; `finalize` already
+knows that cross-repo work is still open.
 
 Only a PR opened some OTHER way (the AZ CLI / ADO REST / a bare `gh`, on a
 CodeSpace or locally, bypassing both tools above) is **not** auto-journaled.
