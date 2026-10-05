@@ -1,0 +1,9 @@
+{
+  "comment": "Split front_door_cli.py (over its 1000-line cap) into front_door_cli.py (project/context resolution + sibling routing) and a new manager_launch_cli.py (Worktree Manager/control-plane-provider resolution, direct-launch fallback, bare-invocation dispatch), re-exported from front_door_cli so every existing caller is unaffected.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
