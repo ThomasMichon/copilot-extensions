@@ -1,0 +1,9 @@
+{
+  "comment": "doctor surfaces a queued task stuck behind a failed spawn reservation (#5209)",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
