@@ -132,8 +132,18 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
             results.append(entry)
             continue
         entry["status"] = health.get("status", "unknown")
-        entry["version"] = health.get("version")
-        entry["attached_clients"] = health.get("attached_clients")
-        entry["busy"] = health.get("busy")
+        # A reachable daemon running code older than this feature (exactly
+        # the long-resident stale daemons #5001 is about) answers with the
+        # old, smaller health shape -- no "version" key at all. Representing
+        # that as null version/attached_clients/busy would misleadingly look
+        # like "live, measured, and idle" rather than "can't be measured";
+        # mark it explicitly unsupported instead so a caller (and the text
+        # renderer) can tell the two apart.
+        if "version" in health:
+            entry["version"] = health.get("version")
+            entry["attached_clients"] = health.get("attached_clients")
+            entry["busy"] = health.get("busy")
+        else:
+            entry["telemetry"] = "unsupported"
         results.append(entry)
     return results

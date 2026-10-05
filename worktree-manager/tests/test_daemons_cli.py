@@ -57,6 +57,21 @@ def test_cmd_daemons_status_text_mode_renders_active_marker_and_fields(monkeypat
     assert "pid 2" in out and "port ?" in out
 
 
+def test_cmd_daemons_status_text_mode_flags_pre_upgrade_daemon_telemetry(monkeypatch, capsys):
+    report = [
+        {"pid": 1, "port": 9000, "active": False, "status": "ready", "telemetry": "unsupported"},
+    ]
+    monkeypatch.setattr(
+        "worktree_manager.daemons_status.daemon_statuses", lambda: report
+    )
+
+    rc = daemons_cli.cmd_daemons(["status"])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "telemetry unavailable (pre-upgrade daemon)" in out
+
+
 def test_cmd_daemons_rejects_unknown_action():
     assert daemons_cli.cmd_daemons(["bogus"]) == 2
 

@@ -1511,6 +1511,38 @@ def test_health_over_the_real_wire_excludes_its_own_probe_from_load(tmp_path):
         runtime.shutdown()
 
 
+def test_health_excludes_every_concurrently_in_flight_control_request(tmp_path):
+    """Two concurrently in-flight cutover-control requests (e.g. two
+    overlapping ``daemons status`` health probes, or a probe racing an
+    in-flight drain) must each be excluded from reported load -- not just a
+    flat "one" contribution, which would double-count the other request
+    whenever more than one control request happens to be in flight at
+    once."""
+    runtime = mux_daemon.MuxDaemonRuntime(mux_daemon.registry_path(tmp_path))
+    runtime.start()
+    try:
+        assert runtime.server is not None
+        runtime.server.subscribe("persistent-session")
+        # Simulate two concurrently in-flight control requests directly:
+        # each is an accepted handler plus a touched subscriber for its own
+        # duration, exactly like a real one.
+        runtime.server.subscribe("probe-1")
+        runtime.server.subscribe("probe-2")
+        runtime.server._on_request_accepted()
+        runtime.server._on_request_accepted()
+        runtime._begin_control_request()
+        runtime._begin_control_request()
+
+        health = runtime.health(exclude_current_request=True)
+
+        assert health["attached_clients"] == 1
+        assert health["busy"] is False
+    finally:
+        runtime.server._on_request_finished()
+        runtime.server._on_request_finished()
+        runtime.shutdown()
+
+
 def test_scrub_session_credentials_is_case_insensitive():
     """Copilot review finding on PR #3839: Windows environment-variable
     names are case-insensitive, so a parent carrying `gh_token`,

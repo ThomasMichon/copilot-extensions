@@ -35,6 +35,47 @@ def _active_table(pid: int, port: int) -> dict:
     }
 
 
+def test_daemon_statuses_marks_a_pre_upgrade_daemons_telemetry_unsupported(
+    tmp_path: Path, monkeypatch
+):
+    """A reachable daemon running code older than this feature answers with
+    the old, smaller health shape (just ``{"status": ...}``, no "version"
+    key at all) -- exactly the long-resident stale daemons copilot-
+    extensions#5001 is about. Representing that as null version/
+    attached_clients/busy would misleadingly look like "live, measured, and
+    idle" rather than "can't be measured"; it must be marked explicitly
+    unsupported instead."""
+    root = tmp_path / "root"
+    root.mkdir()
+
+    monkeypatch.setattr(
+        daemons_status.mux_daemon_cutover, "_iter_mux_daemon_pids", lambda: {555}
+    )
+    monkeypatch.setattr(
+        daemons_status.mux_daemon_cutover,
+        "_pid_matches_root",
+        lambda pid, *, root: True,
+    )
+    monkeypatch.setattr(
+        daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9555 ..."
+    )
+    monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
+    _FakeControlClient.responses = {9555: {"status": "ready"}}
+    monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", _FakeControlClient)
+
+    statuses = daemons_status.daemon_statuses(root)
+
+    assert statuses == [
+        {
+            "pid": 555,
+            "port": 9555,
+            "active": False,
+            "status": "ready",
+            "telemetry": "unsupported",
+        }
+    ]
+
+
 def test_daemon_statuses_reports_active_reachable_and_unreachable(tmp_path: Path, monkeypatch):
     root = tmp_path / "root"
     root.mkdir()

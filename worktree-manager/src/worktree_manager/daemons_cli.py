@@ -37,6 +37,8 @@ def cmd_daemons(rest: list[str]) -> int:
                 bits.append(f"attached {attached}")
             if entry.get("busy"):
                 bits.append("busy")
+            if entry.get("telemetry") == "unsupported":
+                bits.append("telemetry unavailable (pre-upgrade daemon)")
             print(f"    {marker} " + " · ".join(bits))
         print()
         print("  (* = routing table's current active endpoint)")
