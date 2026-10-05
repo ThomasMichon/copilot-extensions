@@ -1107,6 +1107,40 @@ win grows with build complexity.
   only `NT AUTHORITY\SYSTEM` and the owning user have access to the
   provenance key file, with no `BUILTIN\Administrators`/`Authenticated
   Users`/`Users` entries surviving.
+- A twenty-third review round found 1 more new issue, plus re-flagged
+  round 22's key-publish-race fix as still insufficient. (1) the final
+  ACL verification used SUBSTRING matching, so an inherited explicit ACE
+  like `DOMAIN\svc-backup` was wrongly accepted when the real owner was
+  `DOMAIN\svc` (a substring of it), and any principal merely containing
+  the word "system" was accepted as `NT AUTHORITY\SYSTEM` -- silently
+  certifying a credential-bearing file as owner-only while another
+  principal could still read it. Fixed by parsing the EXACT principal
+  name from each `icacls` ACE line (everything before `:(`) and
+  comparing it, normalized, against the owner and the literal
+  `"nt authority\system"` -- never a substring check. (2) round 22's
+  "re-read the final persisted value" fix for the key-publish race was
+  judged insufficient: two callers could still each generate and publish
+  a genuinely DIFFERENT key, with whichever `os.replace` landed last
+  silently becoming the real one -- the other caller had already
+  returned (and could already be persisting provenance keyed on) a value
+  no longer on disk by the time it would have re-read. Replaced with a
+  real lockfile (`<key-path>.lock`, `O_CREAT | O_EXCL`) that serializes
+  first-run creation: a caller re-checks for an existing key AFTER
+  acquiring the lock (another caller may have published while this one
+  waited), so AT MOST ONE caller per machine ever actually creates the
+  key -- every other caller, racing or not, reads back that exact same
+  one. Bounded by a generous, now test-overridable timeout so a crashed
+  lock-holder cannot wedge every future caller forever.
+
+  4 more unit tests (170 total, all passing): two tests proving the
+  substring-match ACL-verification bug is closed (a similarly-named
+  principal, and a principal merely containing the word "system"), a
+  REAL-THREAD test with 4 concurrent callers converging on one identical
+  key via the actual lockfile (not a mocked race), and a bounded-timeout
+  test for a crashed/abandoned lock. `check-module-size.py` still passes
+  (`governed_feed_trust.py` 591 lines). Smoke-tested for real again with
+  a freshly-generated key: `icacls` still confirms only `NT
+  AUTHORITY\SYSTEM` and the owning user have access.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 

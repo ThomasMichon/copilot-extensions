@@ -1813,29 +1813,55 @@ def test_provenance_key_hardens_acl_on_windows(
     assert "REDMOND\\svc:F" in grant_cmd
 
 
-def test_provenance_key_returns_final_persisted_value_on_publish_race(
+def test_provenance_key_concurrent_callers_converge_on_one_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 22): two concurrent first-run callers can both
-    # observe a missing key and each publish their own -- whichever
-    # `os.replace` lands LAST silently becomes the real machine key. A
-    # caller must return whatever is ACTUALLY persisted afterward, never
-    # trust the in-memory key it itself generated, or its own later
-    # provenance computations would key on a value no longer on disk.
+    # Regression (round 22/23): two concurrent first-run callers must
+    # both end up with the EXACT SAME key, never each publishing their
+    # own and silently disagreeing. A real-thread test (not a mocked
+    # race) exercises the actual lockfile serialization: at most one
+    # caller ever generates+publishes the key; every other caller --
+    # racing or not -- reads back that exact same one.
+    import threading
+
     monkeypatch.setattr(gft, "_provenance_key_dir", lambda: tmp_path / "key-dir")
-    real_replace = gft.os.replace
+    results: list[bytes] = []
+    results_lock = threading.Lock()
+    barrier = threading.Barrier(4)
 
-    def racing_replace(src, dst):  # noqa: ARG001
-        # Simulate a concurrent winner publishing a DIFFERENT key
-        # immediately after this call's own os.replace, but before it
-        # re-reads -- by publishing the winner's key INSTEAD of this
-        # call's own.
-        Path(dst).write_bytes(b"\xaa" * 32)
+    def worker():
+        barrier.wait()  # maximize actual contention on the lockfile
+        key = gft._provenance_key()
+        with results_lock:
+            results.append(key)
 
-    monkeypatch.setattr(gft.os, "replace", racing_replace)
-    key = gft._provenance_key()
-    assert key == b"\xaa" * 32  # the winner's key, not whatever we generated
-    monkeypatch.setattr(gft.os, "replace", real_replace)
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=15)
+
+    assert len(results) == 4
+    assert len({key for key in results}) == 1  # every caller agrees
+    assert len(results[0]) == 32
+
+
+def test_provenance_key_times_out_if_lock_held_by_crashed_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: a crashed lock-holder (lockfile left behind, never
+    # released) must not wedge every future caller forever -- it should
+    # fail loud (this effort's own fail-closed contract) after a bounded
+    # wait, never hang indefinitely.
+    key_dir = tmp_path / "key-dir"
+    monkeypatch.setattr(gft, "_provenance_key_dir", lambda: key_dir)
+    monkeypatch.setattr(gft, "_PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(gft.time, "sleep", lambda _seconds: None)  # fast retry loop
+    key_dir.mkdir(parents=True)
+    (key_dir / "provenance-key.lock").write_bytes(b"")  # simulate a held lock
+
+    with pytest.raises(bpa.ArtifactBuildError, match="timed out"):
+        gft._provenance_key()
 
 
 def test_credential_free_index_identity_strips_userinfo_only():
@@ -3147,6 +3173,65 @@ def test_restrict_file_to_owner_fails_closed_when_user_unknown(
     monkeypatch.delenv("USERDOMAIN", raising=False)
     with pytest.raises(bpa.ArtifactBuildError):
         btl._restrict_file_to_owner(tmp_path / "secret.toml")
+
+
+def test_restrict_file_to_owner_rejects_similarly_named_principal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    # Regression (round 23): the final verification must compare the
+    # EXACT, normalized principal name, never a substring -- an icacls
+    # query listing `REDMOND\svc-backup` must NOT be accepted just
+    # because it CONTAINS the real owner `REDMOND\svc` as a substring.
+    monkeypatch.setattr(btl.sys, "platform", "win32")
+    monkeypatch.setenv("USERDOMAIN", "REDMOND")
+    monkeypatch.setenv("USERNAME", "svc")
+    target = tmp_path / "secret.toml"
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[-1] == str(target) and len(cmd) == 2:
+            # the final bare verify query
+            return subprocess.CompletedProcess(
+                cmd, 0,
+                stdout=(
+                    f"{target} REDMOND\\svc:(F)\n"
+                    "                REDMOND\\svc-backup:(F)\n"
+                    "                NT AUTHORITY\\SYSTEM:(F)\n"
+                ),
+                stderr="",
+            )
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(btl.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError, match="svc-backup"):
+        btl._restrict_file_to_owner(target)
+
+
+def test_restrict_file_to_owner_rejects_principal_containing_word_system(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    # Regression (round 23): a principal merely CONTAINING the substring
+    # "system" (e.g. a local account literally named that) must not be
+    # mistaken for `NT AUTHORITY\SYSTEM` by a loose substring check.
+    monkeypatch.setattr(btl.sys, "platform", "win32")
+    monkeypatch.setenv("USERDOMAIN", "REDMOND")
+    monkeypatch.setenv("USERNAME", "svc")
+    target = tmp_path / "secret.toml"
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[-1] == str(target) and len(cmd) == 2:
+            return subprocess.CompletedProcess(
+                cmd, 0,
+                stdout=(
+                    f"{target} REDMOND\\svc:(F)\n"
+                    "                REDMOND\\notsystem:(F)\n"
+                ),
+                stderr="",
+            )
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(btl.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError, match="notsystem"):
+        btl._restrict_file_to_owner(target)
 
 
 def test_resolve_toolchain_lock_hardens_index_config_acl_on_windows(
