@@ -43,7 +43,6 @@ _KNOWN_KEYS = frozenset(
         "task_label",
         "pool",
         "filters",
-        "worker_filters",
         "owner",
         "description",
         "worker_guidance",

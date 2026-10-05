@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`)
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-09-30
-- **Status:** In Progress (Phases 1, 3-8 done; Phase 2 reviewer adapters and Phase 9 docs remain)
+- **Status:** Active (Phases 1, 3-8 done; Phase 2 reviewer adapters and Phase 9 docs remain)
 - **Vision:** `visions/plugins/agent-dispatch/README.md` (§*The recipe*)
   advances *loop-recipes* from "four fixed archetypes, hand-declared per
   consumer" to "named, extendable templates a consumer instantiates with a
@@ -1307,3 +1307,21 @@ suite green (3743 passed, 23 skipped, the one known flake above).
   or persistent keys, and updated the focused effort-driver tests to assert the
   canonical forward-slash form explicitly.
 - Focused Phase 8 tests after the fix: **123 passed**.
+
+### 2026-10-04 (same day) — Review feedback, rounds 3-4
+- Automated review then found two more correctness/polish gaps, both fixed:
+  1. **Medium**: the first version persisted the producer machine's absolute
+     `state_root` into emitted tasks. A worker or trusted evaluator running on
+     another eligible machine could not rely on that host-local path. Fixed by
+     carrying only the repo-relative effort README path (`efforts/active/...`)
+     plus the effort slug in task payloads/prompts; resolving the actual bound
+     state root is left to the consumer's own execution context (the same place
+     the repo-scoped trusted evaluator already owns).
+  2. **Medium/Low**: `worker_filters` had been temporarily accepted as an input
+     declaration key even though it is a derived/internal field, and this
+     effort's status surfaces were out of sync (`README.md` said
+     `In Progress`, `efforts/README.md` still said `Draft`). Fixed by
+     rejecting `worker_filters` from authored declarations again (matching the
+     repository-issue-loop pattern), changing this effort's canonical status to
+     `Active (...)`, and synchronizing the active-effort index row.
+- Focused Phase 8 tests after the fixes: **123 passed**.

@@ -7,7 +7,6 @@ import json
 from agent_dispatch.effort_driver_loops import (
     expand_effort_driver_loop,
     run_tick,
-    validate_config,
 )
 from agent_dispatch.registrar_discovery import read_declaration_file_set
 
@@ -173,12 +172,12 @@ def test_explicit_effort_slugs_require_every_named_effort_to_exist(tmp_path):
         title="agent-dispatch recipe library",
         status="In Progress",
     )
-    config = validate_config(
+    result = run_tick(
+        FakeClient(),
         _config(tmp_path, effort_slugs=["recipe-library", "missing-effort"]),
+        clock=lambda: 10_000,
         cwd=tmp_path,
     )
-
-    result = run_tick(FakeClient(), config, clock=lambda: 10_000, cwd=tmp_path)
 
     assert result["created"] == []
     assert result["missing_effort_slugs"] == ["missing-effort"]
@@ -190,10 +189,6 @@ def test_submitted_effort_task_suppresses_duplicate_creation_on_later_cadence(tm
         "recipe-library",
         title="agent-dispatch recipe library",
         status="In Progress",
-    )
-    config = validate_config(
-        _config(tmp_path, effort_slugs=["recipe-library"]),
-        cwd=tmp_path,
     )
     client = FakeClient(
         [
@@ -211,7 +206,12 @@ def test_submitted_effort_task_suppresses_duplicate_creation_on_later_cadence(tm
         ]
     )
 
-    result = run_tick(client, config, clock=lambda: 20_000, cwd=tmp_path)
+    result = run_tick(
+        client,
+        _config(tmp_path, effort_slugs=["recipe-library"]),
+        clock=lambda: 20_000,
+        cwd=tmp_path,
+    )
 
     assert result["created"] == []
     assert result["suppressed_efforts"] == ["recipe-library"]
@@ -225,12 +225,12 @@ def test_plan_looks_up_only_per_effort_keys_not_the_entire_task_corpus(tmp_path)
         status="In Progress",
     )
     client = FakeClient()
-    config = validate_config(
+    run_tick(
+        client,
         _config(tmp_path, effort_slugs=["recipe-library"]),
+        clock=lambda: 10_000,
         cwd=tmp_path,
     )
-
-    run_tick(client, config, clock=lambda: 10_000, cwd=tmp_path)
 
     assert client.list_calls == [
         {
