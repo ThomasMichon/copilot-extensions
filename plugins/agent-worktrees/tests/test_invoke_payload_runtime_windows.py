@@ -53,13 +53,18 @@ def _build_stub_exe(tmp_path: Path, csc: str) -> Path:
     ``STUB_PRUNE_MARKER`` environment variable, ignoring argv entirely (the
     production dispatch's argv shape -- ``-I -m agent_worktrees
     activity-prune-worker <path> 7`` -- is irrelevant to what this test is
-    proving)."""
+    proving). Lingers briefly before exiting so the observer loop below
+    (sampling every 20ms) has many chances to actually see it alive --
+    without that, a near-instant exit could let the whole test pass having
+    never genuinely observed the dispatched process at all."""
     source = tmp_path / "stub.cs"
     source.write_text(
         "using System;\n"
         "using System.IO;\n"
+        "using System.Threading;\n"
         "class Stub {\n"
         "    static void Main() {\n"
+        "        Thread.Sleep(400);\n"
         "        var marker = Environment.GetEnvironmentVariable(\"STUB_PRUNE_MARKER\");\n"
         "        if (!string.IsNullOrEmpty(marker)) { File.AppendAllText(marker, \"ran\\n\"); }\n"
         "    }\n"
@@ -127,11 +132,21 @@ def test_background_prune_dispatch_launches_no_visible_window(tmp_path: Path):
 
     visible_terminal_windows: set[tuple[int, int, str, str, str]] = set()
     foreground_transitions: set[tuple[int, int, str, str, str]] = set()
+    # Proves the test actually watched the dispatched children while they
+    # were alive, not just their eventual side effect: the stub lingers
+    # (see _build_stub_exe) specifically so this set should pick up a
+    # distinct pid per cycle. Without this, a near-instant child could slip
+    # entirely between two 20ms samples and let the test pass having never
+    # genuinely observed a single dispatch.
+    observed_stub_pids: set[int] = set()
     try:
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline and process.poll() is None:
             processes = _process_snapshot()
             descendants = _descendants(process.pid, processes)
+            for pid in descendants:
+                if processes.get(pid, ("", 0))[0].lower() == "stub.exe":
+                    observed_stub_pids.add(pid)
             for hwnd, window in _window_snapshot(processes).items():
                 state = (hwnd, *window)
                 if (
@@ -154,13 +169,22 @@ def test_background_prune_dispatch_launches_no_visible_window(tmp_path: Path):
             process.kill()
             process.wait(timeout=5)
 
+    assert len(observed_stub_pids) == 2, (
+        f"expected to observe both dispatched stub.exe processes while alive, "
+        f"saw {len(observed_stub_pids)} -- the window/foreground assertions below "
+        f"would be meaningless if the dispatch was never actually watched"
+    )
     assert visible_terminal_windows == set()
     assert foreground_transitions == set()
 
+    def _ran_count() -> int:
+        if not stub_marker.exists():
+            return 0
+        return stub_marker.read_text(encoding="utf-8").count("ran")
+
     deadline = time.monotonic() + 5
-    while time.monotonic() < deadline and not stub_marker.exists():
+    while time.monotonic() < deadline and _ran_count() < 2:
         time.sleep(0.05)
-    assert stub_marker.exists(), "neither dispatch cycle launched the stub worker"
-    assert stub_marker.read_text(encoding="utf-8").count("ran") == 2, (
+    assert _ran_count() == 2, (
         "both dispatch cycles (two debounce windows) should have launched the worker"
     )

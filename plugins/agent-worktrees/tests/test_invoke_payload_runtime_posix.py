@@ -115,7 +115,7 @@ def test_posix_maybe_prune_dispatches_detached_and_does_not_block(tmp_path: Path
     stub_marker = tmp_path / "worker-ran"
     stub_py = tmp_path / "stub-python"
     stub_py.write_text(
-        '#!/usr/bin/env bash\nsleep 2\necho ran >> "$STUB_PRUNE_MARKER"\n',
+        '#!/usr/bin/env bash\nsleep 5\necho ran >> "$STUB_PRUNE_MARKER"\n',
         encoding="utf-8",
     )
     stub_py.chmod(0o755)
@@ -129,13 +129,13 @@ def test_posix_maybe_prune_dispatches_detached_and_does_not_block(tmp_path: Path
     result = _run(bash, script)
     elapsed = time.monotonic() - start
     assert result.returncode == 0, result.stderr
-    assert elapsed < 1.5, (
+    assert elapsed < 3, (
         f"boot_trace_maybe_prune blocked for {elapsed:.2f}s -- dispatch must be detached"
     )
     markers = list(tmp_path.glob("activity.jsonl.prune-marker.*"))
     assert len(markers) == 1
 
-    deadline = time.monotonic() + 5
+    deadline = time.monotonic() + 10
     while time.monotonic() < deadline and not stub_marker.exists():
         time.sleep(0.05)
     assert stub_marker.exists(), "the dispatched child never actually launched"
