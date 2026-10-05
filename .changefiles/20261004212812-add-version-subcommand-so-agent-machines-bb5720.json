@@ -1,0 +1,13 @@
+{
+  "comment": "Add version subcommand so agent-machines runtime spot-check exits 0 (fixes #5259)",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "dev"
+    },
+    {
+      "plugin": "budget-guidance",
+      "type": "dev"
+    }
+  ]
+}

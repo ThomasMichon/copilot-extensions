@@ -303,6 +303,11 @@ def _cmd_wait(args: argparse.Namespace) -> int:
     return 0 if status["state"] == "MERGED" else 1
 
 
+def _cmd_version(_args: argparse.Namespace) -> int:
+    print(f"agent-pull-requests {__version__}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-pull-requests",
@@ -363,6 +368,9 @@ def build_parser() -> argparse.ArgumentParser:
     wait.add_argument("--timeout", type=float, default=600.0, help="give up after this many seconds")
     wait.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     wait.set_defaults(handler=_cmd_wait)
+
+    version = subparsers.add_parser("version", help="print the agent-pull-requests version and exit")
+    version.set_defaults(handler=_cmd_version)
 
     return parser
 
