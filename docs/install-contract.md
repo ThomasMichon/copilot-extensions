@@ -1380,8 +1380,9 @@ write deploy-manifest.json  (schema_version 3, source block, atomic temp+move)
     `copilot plugin update` triggers must be **fast** and must never hold the
     singleton marketplace payload open long enough to wedge a concurrent update:
     - **`stamp`** — snapshot the payload SOURCE into the versioned slot area
-      (Windows: `~/.<name>/snapshots/<ver>/` + a `payload-dir`/`stamped-version`
-      marker; POSIX records a `payload-dir` pointer) and deploy the
+      (Windows: `~/.<name>/snapshots/<ver>-<unique>/` + a `payload-dir`/
+      `stamped-version` marker; POSIX records the same `payload-dir` pointer)
+      and deploy the
       **self-provisioning binstub** — **no inline venv build**. Fits a hook grace
       window; frees the payload immediately (it copies from the already
       self-staged `$PluginDir`).

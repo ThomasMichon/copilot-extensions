@@ -1,0 +1,17 @@
+{
+  "comment": "Pick up the shared installer-engine manifest fallback fix",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

@@ -208,31 +208,39 @@ if (-not $env:UV_HTTP_TIMEOUT) { $env:UV_HTTP_TIMEOUT = '60' }
 function Write-Ok      { param([string]$Msg) Write-Host "  [OK]   $Msg" -ForegroundColor Green }
 function Write-Skip    { param([string]$Msg) Write-Host "  [SKIP] $Msg" -ForegroundColor Cyan }
 function Write-Fail    { param([string]$Msg) Write-Host "  [FAIL] $Msg" -ForegroundColor Red }
+function Write-Warn    { param([string]$Msg) Write-Host "  [WARN] $Msg" -ForegroundColor Yellow }
 function Write-Step    { param([string]$Msg) Write-Host "  ...    $Msg" -ForegroundColor DarkGray }
+
+. (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')
 
 function Install-AgentSshPackage {
     param(
         [Parameter(Mandatory = $true)][string]$Python,
         [Parameter(Mandatory = $true)][string]$Source,
         [string[]]$Dependencies = @(),
-        [switch]$SkipUv
+        [string]$UvCommand
     )
 
-    $uvCommand = $null
-    if (-not $SkipUv) {
-        $uvCommand = Get-Command uv -ErrorAction SilentlyContinue
-    }
-    if ($uvCommand) {
-        $uvResult = 1
-        try {
-            & $uvCommand.Source pip install --python $Python $Source --quiet 2>&1 | Out-Null
-            $uvResult = $LASTEXITCODE
-        } catch {
-            Write-Step 'uv package install could not start -- falling back to python -m pip'
+    if ($UvCommand) {
+        $resolvedVenueCopilot = Resolve-VenueCopilot
+        foreach ($dependency in @('pyyaml>=6.0.3') + $Dependencies) {
+            if ($resolvedVenueCopilot -and $dependency -eq $resolvedVenueCopilot) {
+                $depResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -Arguments @('--python', $Python, '--reinstall-package', 'agent-venue-copilot', $dependency, '--quiet')
+            } else {
+                $depResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -Arguments @('--python', $Python, $dependency, '--quiet')
+            }
+            if ($depResult.ExitCode -ne 0) {
+                if ($depResult.Output) { Write-Host ($depResult.Output | Out-String) }
+                Write-Step 'uv package install failed -- falling back to python -m pip'
+                $UvCommand = $null
+                break
+            }
         }
-        if ($uvResult -eq 0) { return $true }
-        if ($uvResult -ne 1) {
-            Write-Step "uv package install exited $uvResult -- falling back to python -m pip"
+        if ($UvCommand) {
+            $pkgResult = Invoke-UvPipInstallResilient -UvCommand $UvCommand -PayloadDirToScrub $Source -Arguments @('--python', $Python, '--no-deps', $Source, '--quiet')
+            if ($pkgResult.ExitCode -eq 0) { return $true }
+            if ($pkgResult.Output) { Write-Host ($pkgResult.Output | Out-String) }
+            Write-Step "uv package install exited $($pkgResult.ExitCode) -- falling back to python -m pip"
         }
     }
 
@@ -300,6 +308,55 @@ function Resolve-AgentProcutil { return (Resolve-VendoredLib -LibName 'agent-pro
 function Resolve-VenueCopilot { return (Resolve-VendoredLib -LibName 'venue-copilot') }
 function Resolve-Zdd { return (Resolve-VendoredLib -LibName 'zdd') }
 function Resolve-RemoteLoginShell { return (Resolve-VendoredLib -LibName 'remote-login-shell') }
+
+function Ensure-UvIndex {
+    if ($env:UV_INDEX_URL -or $env:UV_DEFAULT_INDEX) { return }
+    $idx = ''
+    foreach ($candidate in @('pip', 'pip3')) {
+        $pipCommand = Get-Command $candidate -ErrorAction SilentlyContinue
+        if (-not $pipCommand) { continue }
+        $result = Invoke-NativeCapture { & $pipCommand.Source config get global.index-url }
+        if ($result.ExitCode -eq 0 -and $result.Output) {
+            $idx = ('' + $result.Output).Trim()
+            if ($idx) { break }
+        }
+    }
+    if (-not $idx) {
+        foreach ($path in @(
+            [string]$env:PIP_CONFIG_FILE,
+            (Join-Path $env:USERPROFILE '.config\pip\pip.conf'),
+            (Join-Path $env:USERPROFILE '.pip\pip.conf'),
+            'C:\ProgramData\pip\pip.ini'
+        )) {
+            if (-not $path -or -not (Test-Path $path)) { continue }
+            $line = Select-String -Path $path -Pattern '^\s*index-url\s*=' | Select-Object -First 1
+            if ($line) {
+                $idx = ($line.Line -replace '^\s*index-url\s*=\s*', '').Trim()
+                if ($idx) { break }
+            }
+        }
+    }
+    if ($idx) {
+        $env:UV_DEFAULT_INDEX = $idx
+        Write-Step 'uv index derived from pip config (governed-feed bridge)'
+    }
+}
+
+function Resolve-PythonCommand {
+    foreach ($candidate in @('python', 'python3', 'py')) {
+        $found = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($found) {
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                $testOut = & $found.Source --version 2>&1
+                if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') { return $found.Source }
+            } catch { }
+            $ErrorActionPreference = $prevEAP
+        }
+    }
+    return $null
+}
 
 $PluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $PkgSrcDir = Join-Path $PluginDir 'src\agent_ssh'
@@ -509,85 +566,145 @@ function Get-GitInfo {
     }
 }
 
-function Deploy-SelfProvisioningBinstub {
-    # Windows tool binstub (.ps1 primary + .cmd fallback), SELF-PROVISIONING
-    # (#1393): resolve the interpreter the ONE uniform way -- the deployed
-    # canonical resolve-runtime.ps1 marker chain (uniform-runtime-resolution,
-    # #765): current-version -> last-known-good -> newest complete slot, never a
-    # `.venv` junction, never a PATH python. If no slot is built yet (a `stamp`
-    # deferred the venv), provision on first use by running the slot-local
-    # snapshot's `scripts/install.ps1 provision`, then dispatch. Opt out with
-    # AGENT_SSH_NO_SELFPROVISION=1. POSIX gets its sh shim from install.sh.
-    # Co-deploy the canonical resolvers so every launcher resolves identically.
-    $binDir = Join-Path $InstallDir 'bin'
-    if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir -Force | Out-Null }
-    foreach ($r in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
-        $rSrc = Join-Path $PSScriptRoot $r
-        if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
-    }
+function Write-Binstubs {
+    Write-SimpleBinstub `
+        -CommandName 'agent-ssh' `
+        -ModuleName 'agent_ssh' `
+        -RuntimeRoot $InstallDir `
+        -LocalBin $LocalBin `
+        -InstallBinDir (Join-Path $InstallDir 'bin') `
+        -SnapshotInstallerPath 'scripts\install.ps1' `
+        -NoSelfProvisionEnv 'AGENT_SSH_NO_SELFPROVISION' `
+        -ResolverPs1Source (Join-Path $PSScriptRoot 'resolve-runtime.ps1') `
+        -ResolverShSource (Join-Path $PSScriptRoot 'resolve-runtime.sh')
     if ($env:OS -ne 'Windows_NT') {
         $stubPath = Join-Path $LocalBin 'agent-ssh'
+        $singleQuote = [string][char]39
+        $installDirShellLiteral = $singleQuote + $InstallDir.Replace($singleQuote, $singleQuote + '\' + $singleQuote + $singleQuote) + $singleQuote
         $stubContent = @(
             '#!/usr/bin/env bash',
             'export PYTHONUTF8=1',
-            '_root="$HOME/.agent-ssh"',
+            "_root=$installDirShellLiteral",
             'AGENT_RT_PY=""',
             'if [ -f "$_root/bin/resolve-runtime.sh" ]; then AGENT_RT_ROOT="$_root"; . "$_root/bin/resolve-runtime.sh"; fi',
             '[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_ssh "$@"',
             'echo "[agent-ssh] runtime not provisioned; run scripts/install.sh" >&2; exit 1'
         ) -join "`n"
         [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
-        Write-Ok "Binstub: $stubPath"
-        return
+        if (-not $IsWindows) { & chmod +x $stubPath 2>$null | Out-Null }
     }
-    $ps1Path = Join-Path $LocalBin 'agent-ssh.ps1'
-    $ps1Content = @'
-$env:PYTHONUTF8 = '1'
-$_root = Join-Path $env:USERPROFILE '.agent-ssh'
-$_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
-function _Resolve-Py {
-    $AgentRtPy = $null
-    if (Test-Path -LiteralPath $_resolver) { $env:AGENT_RT_ROOT = $_root; . $_resolver }
-    return $AgentRtPy
 }
-$_py = _Resolve-Py
-if ($_py) { & $_py -m agent_ssh @args; exit $LASTEXITCODE }
-if ($env:AGENT_SSH_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-ssh] runtime not provisioned (AGENT_SSH_NO_SELFPROVISION set).'); exit 1 }
-$_snap = ''
-try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
-$_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
-if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-ssh] cannot self-provision: snapshot installer not found. Re-enable the plugin, then retry.'); exit 127 }
-[Console]::Error.WriteLine('[agent-ssh] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
-[Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-ssh eta_seconds=120 reason=first-use')
-$_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
-$_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
-& $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-$_py = _Resolve-Py
-if ($_py) { & $_py -m agent_ssh @args; exit $LASTEXITCODE }
-[Console]::Error.WriteLine('[agent-ssh] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
-exit 1
-'@
-    [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
 
-    $cmdPath = Join-Path $LocalBin 'agent-ssh.cmd'
-    # cmd fallback: delegate entirely to the .ps1 binstub so resolution stays
-    # uniform with the canonical resolve-runtime.ps1 chain (current-version ->
-    # last-known-good -> newest complete slot) and self-provisioning is shared.
-    # Pure-batch version-sorting can't match the resolver without reintroducing a
-    # lexicographic bug, and PowerShell is always present on Windows (this cmd
-    # already shells to it to provision), so one delegation is the correct parity.
-    $cmdContent = @'
-@echo off
-setlocal
-set "PYTHONUTF8=1"
-set "_PS1=%USERPROFILE%\.local\bin\agent-ssh.ps1"
-if not exist "%_PS1%" (echo [agent-ssh] binstub not found: %_PS1%>&2 & exit /b 127)
-where pwsh >nul 2>&1
-if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*) else (powershell -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*)
-exit /b %ERRORLEVEL%
-'@
-    [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
-    Write-Ok "Binstub: $ps1Path (+ .cmd fallback, self-provisioning)"
+function Resolve-SnapshotInstallerEngineSource {
+    param([Parameter(Mandatory)][ValidateSet('ps1', 'sh')][string]$Ext)
+    $localEngine = Join-Path $PSScriptRoot ("installer-engine.$Ext")
+    if (Test-Path -LiteralPath $localEngine) { return $localEngine }
+    return Join-Path (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine') ("installer-engine.$Ext")
+}
+
+function Materialize-SnapshotLibs {
+    param([Parameter(Mandatory)][string]$SnapshotDir)
+    $libsDir = Join-Path $SnapshotDir 'libs'
+    if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
+    foreach ($lib in @('agent-procutil', 'ssh-manager', 'venue-copilot', 'zdd', 'remote-login-shell')) {
+        $source = Resolve-VendoredLib -LibName $lib
+        if (-not $source) { throw "Cannot locate required snapshot library: $lib" }
+        $destination = Join-Path $libsDir $lib
+        if ([System.IO.Path]::GetFullPath($source) -eq [System.IO.Path]::GetFullPath($destination)) {
+            continue
+        }
+        Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue
+        Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
+    }
+}
+
+function Materialize-SnapshotInstallerEngine {
+    param([Parameter(Mandatory)][string]$SnapshotDir)
+    $scriptsDir = Join-Path $SnapshotDir 'scripts'
+    if (-not (Test-Path $scriptsDir)) { New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null }
+    foreach ($name in @('installer-engine.ps1', 'installer-engine.sh')) {
+        $ext = [System.IO.Path]::GetExtension($name).TrimStart('.')
+        $source = Resolve-SnapshotInstallerEngineSource -Ext $ext
+        $destination = Join-Path $scriptsDir $name
+        if ([System.IO.Path]::GetFullPath($source) -ne [System.IO.Path]::GetFullPath($destination)) {
+            Copy-Item -LiteralPath $source -Destination $destination -Force
+        }
+    }
+    $installSh = Join-Path $scriptsDir 'install.sh'
+    if (Test-Path $installSh) {
+        $shText = [System.IO.File]::ReadAllText($installSh)
+        $shText = $shText.Replace('. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"', '. "$SCRIPT_DIR/installer-engine.sh"')
+        [System.IO.File]::WriteAllText($installSh, $shText, $utf8NoBom)
+    }
+    $installPs1 = Join-Path $scriptsDir 'install.ps1'
+    if (Test-Path $installPs1) {
+        $ps1Text = [System.IO.File]::ReadAllText($installPs1)
+        $ps1Text = $ps1Text.Replace('. (Join-Path $PSScriptRoot ''..\..\..\libs\installer-engine\installer-engine.ps1'')', '. (Join-Path $PSScriptRoot ''installer-engine.ps1'')')
+        [System.IO.File]::WriteAllText($installPs1, $ps1Text, $utf8NoBom)
+    }
+}
+
+function Get-SnapshotSourceMarkerPath {
+    param([Parameter(Mandatory)][string]$SnapshotDir)
+    return Join-Path $SnapshotDir '.source-payload-path'
+}
+
+function Get-SnapshotVersionMarkerPath {
+    param([Parameter(Mandatory)][string]$SnapshotDir)
+    return Join-Path $SnapshotDir '.snapshot-version'
+}
+
+function ConvertTo-AgentSshVersionKey {
+    param([string]$Value)
+    if ($Value -notmatch '^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?$') { return "1:$Value" }
+    $build = if ($Matches[4]) { [int]$Matches[4] } else { [int]::MaxValue }
+    return ('0:{0:D20}.{1:D20}.{2:D20}.{3}.{4:D20}' -f [int]$Matches[1], [int]$Matches[2], [int]$Matches[3], $(if ($Matches[4]) { 0 } else { 1 }), $build)
+}
+
+function Test-AgentSshVersionGreater {
+    param([string]$Left, [string]$Right)
+    return [string]::CompareOrdinal((ConvertTo-AgentSshVersionKey $Left), (ConvertTo-AgentSshVersionKey $Right)) -gt 0
+}
+
+function Test-PublishedSnapshotIsNewer {
+    param(
+        [string]$SnapshotDir,
+        [string]$SourcePath,
+        [string]$SourceVersion
+    )
+    if (-not $SnapshotDir -or -not (Test-Path $SnapshotDir)) { return $false }
+    $sourceMarker = Get-SnapshotSourceMarkerPath -SnapshotDir $SnapshotDir
+    $versionMarker = Get-SnapshotVersionMarkerPath -SnapshotDir $SnapshotDir
+    if (-not (Test-Path $sourceMarker) -or -not (Test-Path $versionMarker)) { return $false }
+    $publishedSource = (Get-Content -LiteralPath $sourceMarker -Raw).Trim()
+    $publishedVersion = (Get-Content -LiteralPath $versionMarker -Raw).Trim()
+    if (-not $publishedSource -or -not $publishedVersion) { return $false }
+    if ($publishedSource -ne $SourcePath) { return $false }
+    return Test-AgentSshVersionGreater $publishedVersion $SourceVersion
+}
+
+function Get-CurrentSnapshotPath {
+    $payloadPath = Join-Path $InstallDir 'payload-dir'
+    if (-not (Test-Path $payloadPath)) { return '' }
+    try { return ([System.IO.File]::ReadAllText($payloadPath)).Trim() } catch { return '' }
+}
+
+function Acquire-StampPublicationLock {
+    $lockPath = Join-Path $InstallDir '.stamp-publication.lock'
+    $deadline = (Get-Date).AddSeconds(30)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            return [System.IO.File]::Open(
+                $lockPath,
+                [System.IO.FileMode]::OpenOrCreate,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None
+            )
+        } catch [System.IO.IOException] {
+            Start-Sleep -Milliseconds 200
+        }
+    }
+    throw "Timed out acquiring stamp publication lock: $lockPath"
 }
 
 function Invoke-Stamp {
@@ -603,23 +720,74 @@ function Invoke-Stamp {
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
-    $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
-    $snapTmp = "$snapDir.tmp-$PID"
-    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-    # Copy everything needed to `uv pip install .` from the slot (src, libs,
-    # scripts, pyproject, plugin.json, hooks, README); skip VCS/build/test junk.
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
-    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+    $stampPublicationLock = Acquire-StampPublicationLock
+    try {
+        $sourcePath = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
+        $sourceKind = Get-SourceKind -PluginPath $sourcePath
+        $currentSnapshot = Get-CurrentSnapshotPath
+        if (Test-PublishedSnapshotIsNewer -SnapshotDir $currentSnapshot -SourcePath $sourcePath -SourceVersion $SrcVersion) {
+            Write-Skip "Published snapshot $currentSnapshot is newer than $SrcVersion; leaving payload-dir unchanged"
+            Write-Binstubs
+            return
+        }
+        if (
+            $sourceKind -ne 'local' -and
+            $currentSnapshot -and
+            (Test-Path $currentSnapshot) -and
+            (Test-Path (Join-Path $currentSnapshot 'scripts\installer-engine.sh')) -and
+            (Test-Path (Join-Path $currentSnapshot 'scripts\installer-engine.ps1')) -and
+            (Test-Path (Join-Path $currentSnapshot 'libs\agent-procutil\pyproject.toml')) -and
+            (Test-Path (Join-Path $currentSnapshot 'libs\ssh-manager\pyproject.toml')) -and
+            (Test-Path (Join-Path $currentSnapshot 'libs\venue-copilot\pyproject.toml')) -and
+            (Test-Path (Join-Path $currentSnapshot 'libs\zdd\pyproject.toml')) -and
+            (Test-Path (Join-Path $currentSnapshot 'libs\remote-login-shell\pyproject.toml')) -and
+            (Test-Path (Get-SnapshotVersionMarkerPath -SnapshotDir $currentSnapshot)) -and
+            (((Get-Content -LiteralPath (Get-SnapshotVersionMarkerPath -SnapshotDir $currentSnapshot) -Raw).Trim()) -eq $SrcVersion) -and
+            (Test-Path (Get-SnapshotSourceMarkerPath -SnapshotDir $currentSnapshot)) -and
+            (((Get-Content -LiteralPath (Get-SnapshotSourceMarkerPath -SnapshotDir $currentSnapshot) -Raw).Trim()) -eq $sourcePath)
+        ) {
+            $payloadTmp = Join-Path $InstallDir ("payload-dir.$PID.tmp")
+            [System.IO.File]::WriteAllText($payloadTmp, $currentSnapshot, $utf8NoBom)
+            Move-Item -LiteralPath $payloadTmp -Destination (Join-Path $InstallDir 'payload-dir') -Force
+            Write-Binstubs
+            Write-Ok "Stamped: reused snapshot $currentSnapshot"
+            return
+        }
+
+        $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') ($SrcVersion + '-' + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssfff') + "-$PID")
+        $snapTmp = "$snapDir.tmp-$PID"
+        if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+        New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+        # Copy everything needed to `uv pip install .` from the slot (src, libs,
+        # scripts, pyproject, plugin.json, hooks, README); skip VCS/build/test junk.
+        $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+        Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+        }
+        Materialize-SnapshotLibs -SnapshotDir $snapTmp
+        Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
+        $currentSnapshot = Get-CurrentSnapshotPath
+        if (Test-PublishedSnapshotIsNewer -SnapshotDir $currentSnapshot -SourcePath $sourcePath -SourceVersion $SrcVersion) {
+            Remove-Item -LiteralPath $snapTmp -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Skip "Published snapshot $currentSnapshot is newer than $SrcVersion; skipping older snapshot publication"
+            Write-Binstubs
+            return
+        }
+        Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+        [System.IO.File]::WriteAllText((Get-SnapshotSourceMarkerPath -SnapshotDir $snapDir), $sourcePath, $utf8NoBom)
+        [System.IO.File]::WriteAllText((Get-SnapshotVersionMarkerPath -SnapshotDir $snapDir), $SrcVersion, $utf8NoBom)
+        $payloadTmp = Join-Path $InstallDir ("payload-dir.$PID.tmp")
+        [System.IO.File]::WriteAllText($payloadTmp, $snapDir, $utf8NoBom)
+        Move-Item -LiteralPath $payloadTmp -Destination (Join-Path $InstallDir 'payload-dir') -Force
+        $versionTmp = Join-Path $InstallDir ("stamped-version.$PID.tmp")
+        [System.IO.File]::WriteAllText($versionTmp, $SrcVersion, $utf8NoBom)
+        Move-Item -LiteralPath $versionTmp -Destination (Join-Path $InstallDir 'stamped-version') -Force
+        Write-Ok "Snapshot: $snapDir"
+        Write-Binstubs
+        Write-Ok 'Stamped: agent-ssh binstub on PATH; runtime provisions on first use.'
+    } finally {
+        if ($stampPublicationLock) { $stampPublicationLock.Dispose() }
     }
-    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
-    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
-    Write-Ok "Snapshot: $snapDir"
-    Deploy-SelfProvisioningBinstub
-    Write-Ok 'Stamped: agent-ssh binstub on PATH; runtime provisions on first use.'
 }
 
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
@@ -661,42 +829,15 @@ if (-not (Test-Path $PkgSrcDir)) {
     exit 1
 }
 
-$hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
-$pythonCmd = $null
-foreach ($candidate in @('python', 'python3', 'py')) {
-    $found = Get-Command $candidate -ErrorAction SilentlyContinue
-    if ($found) {
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        try {
-            $testOut = & $found.Source --version 2>&1
-            if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') {
-                $pythonCmd = $found.Source
-            }
-        } catch { }
-        $ErrorActionPreference = $prevEAP
-        if ($pythonCmd) { break }
-    }
-}
+$pythonCmd = Resolve-PythonCommand
 if (-not $pythonCmd) {
     Write-Fail 'Python not found on PATH (need 3.10+)'
-    Write-Host '  Install Python from https://python.org or via winget:' -ForegroundColor DarkGray
-    Write-Host '    winget install Python.Python.3.13' -ForegroundColor DarkGray
     exit 1
 }
 Write-Ok "Python: $pythonCmd"
 
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    if ($hasWinget) {
-        Write-Step 'uv not found -- installing via winget...'
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        & winget install --id astral-sh.uv --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
-        $ErrorActionPreference = $prevEAP
-        $env:PATH = (Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'Machine') + ';' + (Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'User')
-        if (Get-Command uv -ErrorAction SilentlyContinue) { Write-Ok 'uv installed' }
-    }
-}
+Ensure-UvIndex
+$uvPath = Ensure-Uv -InstallRoot $InstallDir
 
 foreach ($dir in @($InstallDir, $LocalBin)) {
     if (-not (Test-Path $dir)) {
@@ -717,38 +858,26 @@ foreach ($h in @('bootstrap-check.ps1', 'bootstrap-check.sh', 'bootstrap-killswi
 Write-Ok "Session-start hook: $BinHookDir\bootstrap-check.ps1"
 
 if ($Force -or -not (Test-Path $VenvPython)) {
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $signedBase = $null
-    if ($env:OS -eq 'Windows_NT' -and (Get-Command py -ErrorAction SilentlyContinue)) {
-        foreach ($v in '3.13', '3.12', '3.11') {
-            $cand = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
-            if ($LASTEXITCODE -eq 0 -and $cand -and (Test-Path $cand)) {
-                try { if ((Get-AuthenticodeSignature $cand).Status -eq 'Valid') { $signedBase = $cand; break } } catch {}
+    Invoke-VersionedSlotClean
+    if ($uvPath) {
+        if (-not (New-SignedVenv -VenvDir $VenvDir -VenvPython $VenvPython -PythonVersion '3.10' -UvCommand $uvPath -RequireSignedBase ($env:OS -eq 'Windows_NT') -AllowExisting $true)) {
+            Write-Step 'uv/signed-Python venv creation failed -- falling back to system python -m venv'
+            $fallback = Invoke-NativeCapture { & $pythonCmd -m venv $VenvDir }
+            if ($fallback.ExitCode -ne 0) {
+                if ($fallback.Output) { Write-Host ($fallback.Output | Out-String) }
+                Write-Fail "Failed to create venv at $VenvDir"
+                exit 1
             }
         }
-    }
-    if ($signedBase -and (Test-Path $VenvPython)) {
-        try { if ((Get-AuthenticodeSignature $VenvPython).Status -ne 'Valid') { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop } } catch {}
-    }
-    if ($signedBase -and -not (Test-Path $VenvPython)) {
-        & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
-    }
-    if (-not (Test-Path $VenvPython)) {
-        if (Get-Command uv -ErrorAction SilentlyContinue) {
-            Write-Step 'Creating venv via uv...'
-            Invoke-VersionedSlotClean
-            & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                Write-Step 'uv venv failed -- falling back to python -m venv'
-                & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
-            }
+    } else {
+        Write-Step 'uv unavailable -- falling back to python -m venv'
+        $signedBase = Get-SignedBasePython
+        if ($signedBase) {
+            & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
         } else {
-            Write-Step 'Creating venv via python -m venv...'
             & $pythonCmd -m venv $VenvDir 2>&1 | Out-Null
         }
     }
-    $ErrorActionPreference = $prevEAP
     if (-not (Test-Path $VenvPython)) {
         Write-Fail "Venv creation failed -- $VenvPython not found"
         exit 1
@@ -776,14 +905,6 @@ if (-not $venueCopilotDir) {
     Write-Fail 'Cannot locate venue-copilot library'
     exit 1
 }
-$skipUv = $false
-if (Get-Command uv -ErrorAction SilentlyContinue) {
-    & uv pip install --python $VenvPython --reinstall-package agent-venue-copilot "$venueCopilotDir" --quiet 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warn 'venue-copilot uv preinstall failed -- falling back to python -m pip'
-        $skipUv = $true
-    }
-}
 $zddDir = Resolve-Zdd
 if (-not $zddDir) {
     Write-Fail 'Cannot locate zdd library'
@@ -806,7 +927,7 @@ $pkgInstalled = Install-AgentSshPackage `
     -Python $VenvPython `
     -Source $PluginDir `
     -Dependencies $vendoredDependencies `
-    -SkipUv:$skipUv
+    -UvCommand $uvPath
 $ErrorActionPreference = $prevEAP
 if (-not $pkgInstalled) {
     Write-Fail 'Failed to install agent-ssh package into venv'
@@ -818,51 +939,24 @@ Write-Ok 'Package installed: agent-ssh'
 # Versioned layout (#581): health-gate the slot + swap the `.venv` junction.
 if (-not (Invoke-VersionedActivate)) { exit 1 }
 
-Deploy-SelfProvisioningBinstub
+Write-Binstubs
 
-$kind = Get-SourceKind -PluginPath $PluginDir
-$ver = '0.0.0'
-$pyproj = Join-Path $PluginDir 'pyproject.toml'
-if (Test-Path $pyproj) {
-    $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
-    if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*', '$1') }
-}
-$commit = $null; $branch = $null; $dirty = $false
-if ($kind -eq 'local') {
-    $repoRoot = Split-Path -Parent (Split-Path -Parent $PluginDir)
-    $git = Get-GitInfo -Path $repoRoot
-    $commit = $git.commit; $branch = $git.branch; $dirty = $git.dirty
-}
-# #935/#4874: when self-staged, $PluginDir is a throwaway per-invocation copy
-# under .install-stage/<ts>-<pid>/ that is eventually reaped -- persisting it as
-# source.path permanently freezes future version-drift detection against that
-# one-time snapshot (bootstrap-check.* reads THIS path's pyproject.toml to
-# decide whether a reconcile is needed). Get-SourceKind already resolves the
-# ORIGINAL marketplace payload path via COPILOT_PLUGIN_STAGED_FROM for the same
-# reason; record that same stable path here too, not the ephemeral stage dir.
 $sourcePath = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
-$manifest = [ordered]@{
-    schema_version = 3
-    service        = 'agent-ssh'
-    deployed_at    = (Get-Date -Format 'o')
-    deployed_by    = "$($env:COMPUTERNAME.ToLower())-windows"
-    source         = [ordered]@{
-        kind    = $kind
-        path    = ($sourcePath -replace '\\', '/')
-        repo    = 'copilot-extensions'
-        plugin  = 'agent-ssh'
-        version = $ver
-        commit  = $commit
-        branch  = $branch
-        dirty   = $dirty
-    }
-    venv           = ($LinkDir -replace '\\', '/')
-    runtime        = 'python'
+$snapshotSourceMarker = Get-SnapshotSourceMarkerPath -SnapshotDir $PluginDir
+if (Test-Path $snapshotSourceMarker) {
+    $sourcePath = (Get-Content -LiteralPath $snapshotSourceMarker -Raw).Trim()
 }
-$tmp = "$ManifestPath.tmp"
-$manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
-Move-Item -Force -Path $tmp -Destination $ManifestPath
-Write-Ok "Deploy manifest written (source: $kind)"
+Write-DeployManifest `
+    -Service 'agent-ssh' `
+    -Plugin 'agent-ssh' `
+    -InstallPath $InstallDir `
+    -PluginPath $PluginDir `
+    -VenvPath $LinkDir `
+    -GetSourceKind ${function:Get-SourceKind} `
+    -GetGitInfo ${function:Get-GitInfo} `
+    -SourcePathOverride $sourcePath `
+    -VersionOverride $SrcVersion `
+    -PayloadHash (Get-PayloadHash)
 
 Write-Host ''
 $prevEAP = $ErrorActionPreference

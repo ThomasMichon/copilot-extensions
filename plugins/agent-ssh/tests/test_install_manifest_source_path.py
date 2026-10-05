@@ -41,22 +41,18 @@ def test_install_scripts_exist():
 
 def test_ps1_manifest_source_path_prefers_staged_from():
     text = _PS1.read_text(encoding="utf-8")
-    # The manifest's `source.path` must be built from a variable that itself
-    # was resolved via `$env:COPILOT_PLUGIN_STAGED_FROM` -- not directly from
-    # `$PluginDir`, which is the ephemeral stage copy when self-staged.
+    # The manifest call's `-PluginPath` must be built from a variable that
+    # itself was resolved via `$env:COPILOT_PLUGIN_STAGED_FROM` -- not directly
+    # from `$PluginDir`, which is the ephemeral stage copy when self-staged.
     assert re.search(
         r'\$sourcePath\s*=\s*if\s*\(\$env:COPILOT_PLUGIN_STAGED_FROM\)',
         text,
-    ), "install.ps1 must resolve source.path via COPILOT_PLUGIN_STAGED_FROM"
-    assert re.search(r"path\s*=\s*\(\$sourcePath\s*-replace", text), (
-        "install.ps1's manifest must write source.path from $sourcePath, "
-        "not directly from $PluginDir (the ephemeral stage copy)"
+    ), "install.ps1 must seed source.path from COPILOT_PLUGIN_STAGED_FROM"
+    assert "Get-SnapshotSourceMarkerPath" in text
+    assert re.search(r"Write-DeployManifest[\s\S]*-PluginPath \$PluginDir", text), (
+        "install.ps1 must still derive the installed version from the snapshot/current plugin path"
     )
-    # Guard the regression directly: the manifest block must not read path
-    # straight off $PluginDir.
-    manifest_block_start = text.index("$manifest = [ordered]@{")
-    manifest_block = text[manifest_block_start : manifest_block_start + 400]
-    assert "path    = ($PluginDir" not in manifest_block
+    assert "-SourcePathOverride $sourcePath" in text
 
 
 def test_sh_manifest_source_path_prefers_staged_from():
@@ -65,10 +61,11 @@ def test_sh_manifest_source_path_prefers_staged_from():
         r'SOURCE_PATH="\$\{COPILOT_PLUGIN_STAGED_FROM:-\$PLUGIN_DIR\}"',
         text,
     ), "install.sh must resolve SOURCE_PATH via COPILOT_PLUGIN_STAGED_FROM"
-    heredoc_start = text.index('cat > "$TMP" << EOF')
-    heredoc = text[heredoc_start : heredoc_start + 400]
-    assert '"path": "$SOURCE_PATH"' in heredoc
-    assert '"path": "$PLUGIN_DIR"' not in heredoc
+    assert re.search(
+        r'write_deploy_manifest "agent-ssh" "agent-ssh" "\$INSTALL_DIR" "\$PLUGIN_DIR" "\$VENV_DIR" "" "\$SOURCE_PATH" "\$SRC_VERSION"',
+        text,
+    ), "install.sh must pass SOURCE_PATH as the manifest provenance override"
+    assert "_snapshot_source_marker" in text
 
 
 if __name__ == "__main__":

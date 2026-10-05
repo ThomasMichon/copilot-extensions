@@ -7,7 +7,11 @@ set -euo pipefail
 _ok()   { printf '  [OK]   %s\n' "$1"; }
 _skip() { printf '  [SKIP] %s\n' "$1"; }
 _fail() { printf '  [FAIL] %s\n' "$1" >&2; }
+_warn() { printf '  [WARN] %s\n' "$1" >&2; }
 _step() { printf '  ...    %s\n' "$1"; }
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Resolve a vendored library path (libs/<name>) across multiple layouts.
 # Prints the resolved directory path to stdout (nothing else).
@@ -75,19 +79,6 @@ _resolve_zdd() { _resolve_vendored_lib zdd; }
 _resolve_remote_login_shell() { _resolve_vendored_lib remote-login-shell; }
 
 _install_agent_ssh_package() {
-    if [[ "$HAVE_UV" -eq 1 ]]; then
-        local venue_copilot_dir
-        venue_copilot_dir="$(_resolve_venue_copilot)" || {
-            _fail 'Cannot locate venue-copilot library'
-            return 1
-        }
-        if uv pip install --python "$VENV_PYTHON" --reinstall-package agent-venue-copilot "$venue_copilot_dir" --quiet 2>/dev/null \
-            && uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
-            return 0
-        fi
-        _step 'uv package install failed -- falling back to python -m pip'
-    fi
-
     local agent_procutil_dir ssh_manager_dir venue_copilot_dir zdd_dir remote_login_shell_dir
     agent_procutil_dir="$(_resolve_agent_procutil)" || {
         _fail 'Cannot locate agent-procutil library'
@@ -109,6 +100,41 @@ _install_agent_ssh_package() {
         _fail 'Cannot locate remote-login-shell library'
         return 1
     }
+    if [[ -n "${UV_CMD:-}" ]]; then
+        local install_target lib_out pkg_out uv_ok=1
+        for install_target in \
+            "pyyaml>=6.0.3" \
+            "$agent_procutil_dir" \
+            "$PLUGIN_DIR/libs/dropin-registry" \
+            "$ssh_manager_dir" \
+            "$venue_copilot_dir" \
+            "$zdd_dir" \
+            "$remote_login_shell_dir"
+        do
+            if [[ "$install_target" == "$venue_copilot_dir" ]]; then
+                lib_out="$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" --reinstall-package agent-venue-copilot "$install_target" --quiet)" || {
+                    [[ -n "$lib_out" ]] && printf '%s\n' "$lib_out" >&2
+                    _step 'uv package install failed -- falling back to python -m pip'
+                    uv_ok=0
+                    break
+                }
+                continue
+            fi
+            if ! lib_out=$(invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" "$install_target" --quiet); then
+                [[ -n "$lib_out" ]] && printf '%s\n' "$lib_out" >&2
+                _step 'uv package install failed -- falling back to python -m pip'
+                uv_ok=0
+                break
+            fi
+        done
+        if [[ "$uv_ok" -eq 1 ]]; then
+            if pkg_out=$(INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="$PLUGIN_DIR" invoke_uv_pip_install_resilient "$UV_CMD" --python "$VENV_PYTHON" --no-deps "$PLUGIN_DIR" --quiet); then
+                return 0
+            fi
+            [[ -n "$pkg_out" ]] && printf '%s\n' "$pkg_out" >&2
+            _step 'uv package install failed -- falling back to python -m pip'
+        fi
+    fi
     "$VENV_PYTHON" -m pip install --quiet \
         "$agent_procutil_dir" \
         "$PLUGIN_DIR/libs/dropin-registry" \
@@ -137,9 +163,6 @@ done
 # positional action (or --dry-run) would be lost. Carry them through via env.
 export AGENT_SSH_ACTION="$ACTION"
 export AGENT_SSH_DRY_RUN="$DRY_RUN"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
@@ -269,6 +292,9 @@ if [[ -n "${COPILOT_PLUGIN_INSTALL_SMOKE:-}" ]]; then
     exit 0
 fi
 # === end install-contract:v4 smoke seam ===
+
+# shellcheck source=/dev/null
+. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"
 
 # #935: bound uv's per-request network wait so a hung index/download degrades to
 # "failed + retryable" rather than wedging the install; the self-stage watchdog
@@ -423,30 +449,6 @@ _git_info() {
     echo "$commit $branch $dirty"
 }
 
-# --- self-provisioning (runtime-self-provisioning pattern) -------------------
-# Vendor a standalone uv when absent (pristine box has neither uv nor pip/venv).
-_ensure_uv() {
-    command -v uv >/dev/null 2>&1 && return 0
-    local tooldir="$INSTALL_DIR/tool"
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; return 0; fi
-    _step "uv not found -- vendoring a standalone uv into $tooldir"
-    mkdir -p "$tooldir"
-    local url="https://astral.sh/uv/install.sh" script="$tooldir/uv-install.sh" got=""
-    if command -v curl >/dev/null 2>&1; then curl -LsSf "$url" -o "$script" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v wget >/dev/null 2>&1; then wget -qO "$script" "$url" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v python3 >/dev/null 2>&1; then
-        python3 - "$url" "$script" <<'PY' 2>/dev/null && got=1
-import sys, urllib.request
-urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
-PY
-    fi
-    if [[ -n "$got" && -s "$script" ]]; then
-        env UV_INSTALL_DIR="$tooldir" UV_UNMANAGED_INSTALL="$tooldir" INSTALLER_NO_MODIFY_PATH=1 sh "$script" >/dev/null 2>&1 || true
-    fi
-    [[ -x "$tooldir/bin/uv" && ! -x "$tooldir/uv" ]] && ln -sf "$tooldir/bin/uv" "$tooldir/uv" 2>/dev/null || true
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; _ok "Vendored uv into $tooldir"; return 0; fi
-    return 1
-}
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked).
 _ensure_uv_index() {
     [[ -n "${UV_INDEX_URL:-}${UV_DEFAULT_INDEX:-}" ]] && return 0
@@ -463,85 +465,265 @@ _ensure_uv_index() {
     fi
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }
-# Deploy the self-provisioning binstub (install-on-first-use). Fast path execs the
-# venv's `python -m agent_ssh`; otherwise it provisions on first use -- announcing
-# (a human line + a machine-readable ::agent-provisioning:: signal so a caller can
-# extend its timeout), lock-serialized, fail-fast.
-# Co-deploy the canonical marker-only resolver so the binstub (and any launcher)
-# resolves the interpreter the ONE uniform way (uniform-runtime-resolution, #765).
-deploy_resolver() {
-    mkdir -p "$INSTALL_DIR/bin"
-    for r in resolve-runtime.sh resolve-runtime.ps1; do
-        [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
+_resolve_snapshot_installer_engine_source() {
+    local ext="$1"
+    local local_engine="$SCRIPT_DIR/installer-engine.$ext"
+    if [[ -f "$local_engine" ]]; then
+        printf '%s\n' "$local_engine"
+    else
+        printf '%s\n' "$PLUGIN_DIR/../../libs/installer-engine/installer-engine.$ext"
+    fi
+}
+
+_materialize_snapshot_vendored_libs() {
+    local snapshot_dir="$1"
+    mkdir -p "$snapshot_dir/libs"
+    local lib source destination
+    for lib in agent-procutil ssh-manager venue-copilot zdd remote-login-shell; do
+        source="$(_resolve_vendored_lib "$lib")" || {
+            _fail "Cannot locate required snapshot library: $lib"
+            return 1
+        }
+        destination="$snapshot_dir/libs/$lib"
+        if [[ "$(cd "$source" && pwd)" == "$(cd "$destination" 2>/dev/null && pwd || printf '%s\n' '')" ]]; then
+            continue
+        fi
+        if ! rm -rf "$destination"; then
+            _fail "Failed to remove stale snapshot library path: $destination"
+            return 1
+        fi
+        if ! cp -a "$source" "$destination"; then
+            _fail "Failed to copy required snapshot library: $lib"
+            return 1
+        fi
     done
 }
 
-deploy_binstub() {
-    mkdir -p "$LOCAL_BIN"
-    deploy_resolver
-    cat > "$STUB" << 'STUBEOF'
-#!/usr/bin/env bash
-# agent-ssh binstub -- self-provisioning (install-on-first-use).
-# Resolves the interpreter SOLELY via the junction-free versioned-runtime marker
-# (the deployed resolve-runtime.sh; uniform-runtime-resolution, #765): current-
-# version -> last-known-good -> newest complete slot. NEVER a `.venv` link, NEVER
-# a PATH python -- when no slot is installed AGENT_RT_PY is empty and we self-
-# provision on first use rather than silently binding the system interpreter.
-export PYTHONUTF8=1
-_name="agent-ssh"
-_root="$HOME/.$_name"
-_resolver="$_root/bin/resolve-runtime.sh"
-_resolve() {
-    AGENT_RT_PY=""
-    if [ -f "$_resolver" ]; then
-        AGENT_RT_ROOT="$_root"
-        . "$_resolver"
+_materialize_snapshot_installer_engine() {
+    local snapshot_dir="$1"
+    mkdir -p "$snapshot_dir/scripts"
+    local ext source destination
+    for ext in ps1 sh; do
+        source="$(_resolve_snapshot_installer_engine_source "$ext")"
+        destination="$snapshot_dir/scripts/installer-engine.$ext"
+        if [[ "$(cd "$(dirname "$source")" && pwd)/$(basename "$source")" != "$(cd "$(dirname "$destination")" && pwd)/$(basename "$destination")" ]]; then
+            cp -f "$source" "$destination"
+        fi
+    done
+    local install_sh="$snapshot_dir/scripts/install.sh"
+    if [[ -f "$install_sh" ]]; then
+        sed 's|\. "\$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"|. "$SCRIPT_DIR/installer-engine.sh"|g' "$install_sh" > "$install_sh.tmp"
+        mv -f "$install_sh.tmp" "$install_sh"
+    fi
+    local install_ps1="$snapshot_dir/scripts/install.ps1"
+    if [[ -f "$install_ps1" ]]; then
+        sed "s|\. (Join-Path \$PSScriptRoot '..\\\\..\\\\..\\\\libs\\\\installer-engine\\\\installer-engine.ps1')|. (Join-Path \$PSScriptRoot 'installer-engine.ps1')|g" "$install_ps1" > "$install_ps1.tmp"
+        mv -f "$install_ps1.tmp" "$install_ps1"
     fi
 }
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_ssh "$@"
-mkdir -p "$_root"
-_status="$_root/.provision-status"
-printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
-_install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
-[ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
-if [ ! -f "$_install" ]; then
-    printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
-    exit 127
-fi
-_lock="$_root/.provision.lock"
-exec 9>"$_lock"
-command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_ssh "$@"
-printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-bash "$_install" provision >&2
-_rc=$?
-_resolve
-if [ "$_rc" -eq 0 ] && [ -n "$AGENT_RT_PY" ]; then
-    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-    exec "$AGENT_RT_PY" -m agent_ssh "$@"
-fi
-printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-if [ "$_rc" -eq 0 ]; then
-    printf '%s\n' "[$_name] provisioning reported success but no runtime slot resolved." >&2
-    _rc=1
-else
-    printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2
-fi
-exit "$_rc"
-STUBEOF
-    chmod +x "$STUB"
-    _ok "Binstub: $STUB (self-provisioning)"
+
+_snapshot_source_marker() {
+    printf '%s\n' "$1/.source-payload-path"
+}
+
+_snapshot_version_marker() {
+    printf '%s\n' "$1/.snapshot-version"
+}
+
+_current_snapshot() {
+    cat "$INSTALL_DIR/payload-dir" 2>/dev/null || true
+}
+
+_write_stamped_version_marker() {
+    printf '%s\n' "$SRC_VERSION" > "$INSTALL_DIR/stamped-version.$$.tmp"
+    mv -f "$INSTALL_DIR/stamped-version.$$.tmp" "$INSTALL_DIR/stamped-version"
+}
+
+_acquire_stamp_publication_lock() {
+    local lock_base="$INSTALL_DIR/.stamp-publication.lock"
+    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != "1" ]]; then
+        exec 8>"$lock_base"
+        flock 8
+        STAMP_PUBLICATION_LOCK_MODE="flock"
+        return 0
+    fi
+    local lock_dir="${lock_base}.d" owner_file
+    owner_file="$lock_dir/owner"
+    if mkdir "$lock_dir" 2>/dev/null; then
+        if ! printf '%s\n' "$$" > "$owner_file"; then
+            rm -rf "$lock_dir" 2>/dev/null || true
+            _fail "Failed to initialize stamp-publication lock owner: $owner_file"
+            return 1
+        fi
+        STAMP_PUBLICATION_LOCK_MODE="directory"
+        STAMP_PUBLICATION_LOCK_PATH="$lock_dir"
+        return 0
+    fi
+    local owner
+    owner="$(cat "$owner_file" 2>/dev/null || true)"
+    if [[ -z "$owner" ]]; then
+        _fail "stamp-publication lock exists without an owner file; refusing unsafe no-flock recovery: $lock_dir"
+        return 1
+    fi
+    if kill -0 "$owner" 2>/dev/null; then
+        _fail "stamp-publication lock already held by pid $owner (no-flock fallback cannot wait safely): $lock_dir"
+    else
+        _fail "stale stamp-publication lock belongs to dead pid $owner; refusing unsafe no-flock recovery: $lock_dir"
+    fi
+    return 1
+}
+
+_release_stamp_publication_lock() {
+    if [[ "${STAMP_PUBLICATION_LOCK_MODE:-}" == "directory" ]]; then
+        local owner
+        owner="$(cat "${STAMP_PUBLICATION_LOCK_PATH:-}/owner" 2>/dev/null || true)"
+        if [[ "$owner" == "$$" ]]; then
+            rm -rf "${STAMP_PUBLICATION_LOCK_PATH:-}"
+        else
+            unset STAMP_PUBLICATION_LOCK_PATH
+            unset STAMP_PUBLICATION_LOCK_MODE
+            return 0
+        fi
+        unset STAMP_PUBLICATION_LOCK_PATH
+    elif [[ "${STAMP_PUBLICATION_LOCK_MODE:-}" == "flock" ]]; then
+        flock -u 8 2>/dev/null || true
+        exec 8>&-
+    fi
+    unset STAMP_PUBLICATION_LOCK_MODE
+}
+
+_version_sort_key() {
+    awk '
+      {
+        original = $0
+        if (original ~ /^[0-9]+\.[0-9]+\.[0-9]+(-dev[0-9]+)?$/) {
+          count = split(original, part, /[.-]/)
+          phase = (count == 4) ? 0 : 1
+          dev = (count == 4) ? part[4] : "dev0"
+          sub(/^dev/, "", dev)
+          printf "0:%020d.%020d.%020d.%d.%020d\n", part[1] + 0, part[2] + 0, part[3] + 0, phase, dev + 0
+          next
+        }
+        print "1:" original
+      }
+    ' <<<"$1"
+}
+
+_version_gt() {
+    local left right
+    left="$(_version_sort_key "$1")"
+    right="$(_version_sort_key "$2")"
+    [[ "$left" > "$right" ]]
+}
+
+_published_snapshot_is_newer() {
+    local current_snapshot="$1" source_path="$2" source_version="$3"
+    [[ -n "$current_snapshot" && -d "$current_snapshot" ]] || return 1
+    [[ -f "$(_snapshot_source_marker "$current_snapshot")" ]] || return 1
+    [[ -f "$(_snapshot_version_marker "$current_snapshot")" ]] || return 1
+    local current_source current_version
+    current_source="$(cat "$(_snapshot_source_marker "$current_snapshot")" 2>/dev/null || true)"
+    current_version="$(cat "$(_snapshot_version_marker "$current_snapshot")" 2>/dev/null || true)"
+    [[ -n "$current_source" && -n "$current_version" ]] || return 1
+    [[ "$current_source" == "$source_path" ]] || return 1
+    _version_gt "$current_version" "$source_version"
+}
+
+_snapshot_is_reusable() {
+    local current_snapshot="$1" source_kind="$2" source_path="$3" source_version="$4"
+    [[ "$source_kind" != "local" ]] || return 1
+    [[ -n "$current_snapshot" && -d "$current_snapshot" ]] || return 1
+    local rel
+    for rel in \
+        "scripts/installer-engine.sh" \
+        "scripts/installer-engine.ps1" \
+        "libs/agent-procutil/pyproject.toml" \
+        "libs/ssh-manager/pyproject.toml" \
+        "libs/venue-copilot/pyproject.toml" \
+        "libs/zdd/pyproject.toml" \
+        "libs/remote-login-shell/pyproject.toml"
+    do
+        [[ -f "$current_snapshot/$rel" ]] || return 1
+    done
+    [[ -f "$(_snapshot_version_marker "$current_snapshot")" ]] || return 1
+    [[ "$(cat "$(_snapshot_version_marker "$current_snapshot")" 2>/dev/null || true)" == "$source_version" ]] || return 1
+    [[ -f "$(_snapshot_source_marker "$current_snapshot")" ]] || return 1
+    [[ "$(cat "$(_snapshot_source_marker "$current_snapshot")" 2>/dev/null || true)" == "$source_path" ]] || return 1
+}
+
+_deploy_binstub() {
+    write_simple_binstub \
+        "agent-ssh" \
+        "agent_ssh" \
+        "$INSTALL_DIR" \
+        "$LOCAL_BIN" \
+        "$INSTALL_DIR/bin" \
+        "scripts/install.sh" \
+        "AGENT_SSH_NO_SELFPROVISION" \
+        "$SCRIPT_DIR/resolve-runtime.ps1" \
+        "$SCRIPT_DIR/resolve-runtime.sh"
 }
 
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
 # use (fits a sessionStart hook's grace window). No venv, no uv.
 if [[ "$ACTION" == "stamp" ]]; then
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
-    deploy_binstub
+    SOURCE_PATH="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    SOURCE_KIND="$(_source_kind "$SOURCE_PATH")"
+    _acquire_stamp_publication_lock || exit 1
+    trap '_release_stamp_publication_lock' EXIT
+    CURRENT_SNAPSHOT="$(_current_snapshot)"
+    if _published_snapshot_is_newer "$CURRENT_SNAPSHOT" "$SOURCE_PATH" "$SRC_VERSION"; then
+        _skip "Published snapshot $CURRENT_SNAPSHOT is newer than $SRC_VERSION; leaving payload-dir unchanged"
+        _write_stamped_version_marker
+        _deploy_binstub
+        exit 0
+    fi
+    if _snapshot_is_reusable "$CURRENT_SNAPSHOT" "$SOURCE_KIND" "$SOURCE_PATH" "$SRC_VERSION"; then
+        printf '%s\n' "$CURRENT_SNAPSHOT" > "$INSTALL_DIR/payload-dir.$$.tmp"
+        mv -f "$INSTALL_DIR/payload-dir.$$.tmp" "$INSTALL_DIR/payload-dir"
+        _write_stamped_version_marker
+        _deploy_binstub
+        _ok "Stamped: reused snapshot $CURRENT_SNAPSHOT"
+        exit 0
+    fi
+    SNAPSHOT_DIR="$INSTALL_DIR/snapshots/$SRC_VERSION-$(date -u +%Y%m%dT%H%M%S)-$$"
+    SNAPSHOT_TMP="$SNAPSHOT_DIR.tmp-$$"
+    rm -rf "$SNAPSHOT_TMP"
+    mkdir -p "$SNAPSHOT_TMP"
+    shopt -s dotglob nullglob
+    for entry in "$PLUGIN_DIR"/*; do
+        case "${entry##*/}" in
+            .git|__pycache__|.pytest_cache|.venv|tests) continue ;;
+        esac
+        if ! cp -a "$entry" "$SNAPSHOT_TMP/"; then
+            shopt -u dotglob nullglob
+            rm -rf "$SNAPSHOT_TMP"
+            _fail "Failed to copy snapshot payload entry: ${entry##*/}"
+            exit 1
+        fi
+    done
+    shopt -u dotglob nullglob
+    _materialize_snapshot_vendored_libs "$SNAPSHOT_TMP" || {
+        rm -rf "$SNAPSHOT_TMP"
+        exit 1
+    }
+    _materialize_snapshot_installer_engine "$SNAPSHOT_TMP"
+    printf '%s\n' "$SOURCE_PATH" > "$(_snapshot_source_marker "$SNAPSHOT_TMP")"
+    printf '%s\n' "$SRC_VERSION" > "$(_snapshot_version_marker "$SNAPSHOT_TMP")"
+    CURRENT_SNAPSHOT="$(_current_snapshot)"
+    if _published_snapshot_is_newer "$CURRENT_SNAPSHOT" "$SOURCE_PATH" "$SRC_VERSION"; then
+        rm -rf "$SNAPSHOT_TMP"
+        _skip "Published snapshot $CURRENT_SNAPSHOT is newer than $SRC_VERSION; skipping older snapshot publication"
+        _write_stamped_version_marker
+        _deploy_binstub
+        exit 0
+    fi
+    mv -f "$SNAPSHOT_TMP" "$SNAPSHOT_DIR"
+    printf '%s\n' "$SNAPSHOT_DIR" > "$INSTALL_DIR/payload-dir.$$.tmp"
+    mv -f "$INSTALL_DIR/payload-dir.$$.tmp" "$INSTALL_DIR/payload-dir"
+    _write_stamped_version_marker
+    _deploy_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
     exit 0
 fi
@@ -593,8 +775,7 @@ fi
 _ok "Python: $PYTHON_CMD"
 
 _ensure_uv_index
-HAVE_UV=0
-if _ensure_uv; then HAVE_UV=1; fi
+UV_CMD="$(ensure_uv "$INSTALL_DIR" tool 1 || true)"
 
 mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
 _ok "Directories: $INSTALL_DIR"
@@ -610,16 +791,21 @@ done
 _ok "Session-start hook: $BIN_HOOK_DIR/bootstrap-check.sh"
 
 if [[ "$FORCE" -eq 1 || ! -x "$VENV_PYTHON" ]]; then
-    if [[ "$HAVE_UV" -eq 1 ]]; then
-        _step 'Creating venv via uv...'
-        _versioned_slot_clean
-        uv venv "$VENV_DIR" --allow-existing >/dev/null 2>&1 || {
-            _step 'uv venv failed -- falling back to python -m venv'
-            "$PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
-        }
+    _versioned_slot_clean
+    if [[ -n "$UV_CMD" ]]; then
+        if ! new_signed_venv "$UV_CMD" "$VENV_DIR" "3.10"; then
+            _step 'uv venv creation failed -- falling back to python -m venv'
+            "$PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1 || {
+                _fail "Failed to create venv at $VENV_DIR"
+                exit 1
+            }
+        fi
     else
-        _step 'Creating venv via python -m venv...'
-        "$PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1
+        _step 'uv unavailable -- falling back to python -m venv'
+        "$PYTHON_CMD" -m venv "$VENV_DIR" >/dev/null 2>&1 || {
+            _fail "Failed to create venv at $VENV_DIR"
+            exit 1
+        }
     fi
     if [[ ! -x "$VENV_PYTHON" ]]; then
         _fail "Venv creation failed -- $VENV_PYTHON not found"
@@ -639,48 +825,13 @@ _ok 'Package installed: agent-ssh'
 # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
 _versioned_activate || exit 1
 
-deploy_binstub
+_deploy_binstub
 
-KIND="$(_source_kind "$PLUGIN_DIR")"
-VER="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
-COMMIT="null"; BRANCH="null"; DIRTY="false"
-if [[ "$KIND" == "local" ]]; then
-    REPO_ROOT="$(cd "$PLUGIN_DIR/../.." && pwd)"
-    read -r _c _b _d <<< "$(_git_info "$REPO_ROOT")"
-    COMMIT="\"$_c\""; BRANCH="\"$_b\""; DIRTY="$_d"
-fi
-# #935/#4874: when self-staged, $PLUGIN_DIR is a throwaway per-invocation
-# copy under .install-stage/<ts>-<pid>/ that is eventually reaped -- persisting
-# it as source.path permanently freezes future version-drift detection against
-# that one-time snapshot (bootstrap-check.* reads THIS path's pyproject.toml to
-# decide whether a reconcile is needed). _source_kind and the payload-dir
-# marker above already resolve the ORIGINAL marketplace payload path via
-# COPILOT_PLUGIN_STAGED_FROM for the same reason; record that same stable path
-# in the manifest too, not the ephemeral stage dir.
 SOURCE_PATH="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
-TMP="$MANIFEST_PATH.tmp"
-cat > "$TMP" << EOF
-{
-  "schema_version": 3,
-  "service": "agent-ssh",
-  "deployed_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
-  "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
-  "source": {
-    "kind": "$KIND",
-    "path": "$SOURCE_PATH",
-    "repo": "copilot-extensions",
-    "plugin": "agent-ssh",
-    "version": "$VER",
-    "commit": $COMMIT,
-    "branch": $BRANCH,
-    "dirty": $DIRTY
-  },
-  "venv": "$VENV_DIR",
-  "runtime": "python"
-}
-EOF
-mv -f "$TMP" "$MANIFEST_PATH"
-_ok "Deploy manifest written (source: $KIND)"
+if [[ -f "$(_snapshot_source_marker "$PLUGIN_DIR")" ]]; then
+    SOURCE_PATH="$(cat "$(_snapshot_source_marker "$PLUGIN_DIR")" 2>/dev/null || printf '%s\n' "$SOURCE_PATH")"
+fi
+write_deploy_manifest "agent-ssh" "agent-ssh" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "" "$SOURCE_PATH" "$SRC_VERSION"
 
 echo ''
 if "$LINK_PYTHON" -c 'import agent_ssh' 2>/dev/null; then
