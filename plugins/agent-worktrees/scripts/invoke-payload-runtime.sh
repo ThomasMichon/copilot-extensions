@@ -116,8 +116,24 @@ boot_trace_maybe_prune() {
     (( size >= 524288 )) || return 0
     [[ -n "${AGENT_RT_PY:-}" ]] || return 0  # no runtime yet to dispatch the worker with
     boot_trace_claim_prune_marker "$log_path" || return 0
-    ( PYTHONPATH="" "$AGENT_RT_PY" -I -m agent_worktrees activity-prune-worker \
-        "$log_path" 7 >/dev/null 2>&1 & ) || true
+    # `( cmd & )` alone only backgrounds the worker -- it stays in this
+    # shell's own session/process group, so a terminal teardown, SSH
+    # disconnect, or process-group signal can still kill it after the
+    # marker above has already claimed the hour's dispatch slot (losing
+    # that window's prune until the next bucket). `setsid` gives it its
+    # own session, the same real detachment agent_procutil.detached_kwargs()
+    # provides on the Python path (start_new_session=True); `nohup` is the
+    # fallback where `setsid` isn't installed (e.g. stock macOS) -- it
+    # won't survive a process-group-wide signal, but does survive the
+    # common SIGHUP-on-hangup case this review was raised against.
+    local detach=()
+    if command -v setsid >/dev/null 2>&1; then
+        detach=(setsid)
+    elif command -v nohup >/dev/null 2>&1; then
+        detach=(nohup)
+    fi
+    ( PYTHONPATH="" "${detach[@]}" "$AGENT_RT_PY" -I -m agent_worktrees activity-prune-worker \
+        "$log_path" 7 </dev/null >/dev/null 2>&1 & ) || true
 }
 
 # Atomically claims *this debounce window's* dispatch slot for $log_path, so

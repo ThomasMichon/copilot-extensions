@@ -143,6 +143,53 @@ def test_posix_maybe_prune_dispatches_detached_and_does_not_block(tmp_path: Path
 
 
 @pytest.mark.skipif(_bash() is None, reason="a conformant Bash is unavailable")
+def test_posix_maybe_prune_detaches_via_setsid_when_available(tmp_path: Path):
+    """The dispatched worker must get a real new session (surviving
+    terminal teardown / SSH disconnect / process-group signals), not just a
+    backgrounded `( cmd & )` that stays in the caller's own session --
+    proven here by a fake `setsid` on PATH that records it was invoked
+    before exec-ing through to the real stub."""
+    bash = _bash()
+    assert bash is not None
+    log = tmp_path / "activity.jsonl"
+    log.write_text("x" * 600_000, encoding="utf-8")
+    stub_marker = tmp_path / "worker-ran"
+    stub_py = tmp_path / "stub-python"
+    stub_py.write_text(
+        '#!/usr/bin/env bash\necho ran >> "$STUB_PRUNE_MARKER"\n', encoding="utf-8",
+    )
+    stub_py.chmod(0o755)
+
+    setsid_marker = tmp_path / "setsid-invoked"
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_setsid = fake_bin / "setsid"
+    fake_setsid.write_text(
+        '#!/usr/bin/env bash\n'
+        f'echo invoked >> "{_bash_path(bash, setsid_marker)}"\n'
+        'exec "$@"\n',
+        encoding="utf-8",
+    )
+    fake_setsid.chmod(0o755)
+
+    script = (
+        f"{_prune_functions_source()}\n"
+        f'export PATH="{_bash_path(bash, fake_bin)}:$PATH"\n'
+        f'export STUB_PRUNE_MARKER="{_bash_path(bash, stub_marker)}"\n'
+        f'AGENT_RT_PY="{_bash_path(bash, stub_py)}"\n'
+        f'boot_trace_maybe_prune "{_bash_path(bash, log)}"\n'
+    )
+    result = _run(bash, script)
+    assert result.returncode == 0, result.stderr
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and not (setsid_marker.exists() and stub_marker.exists()):
+        time.sleep(0.05)
+    assert setsid_marker.exists(), "dispatch must prefer setsid when it's on PATH"
+    assert stub_marker.exists(), "the real worker must still run through setsid's exec"
+
+
+@pytest.mark.skipif(_bash() is None, reason="a conformant Bash is unavailable")
 def test_posix_claim_prune_marker_exclusive_per_window(tmp_path: Path):
     bash = _bash()
     assert bash is not None
