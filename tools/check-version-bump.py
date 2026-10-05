@@ -44,8 +44,8 @@ compare).
 
 Usage::
 
-    python tools/check-version-bump.py                 # diff vs origin/main (release/recovery check)
-    python tools/check-version-bump.py --base <sha>     # diff vs an explicit base
+    python tools/check-version-bump.py                 # diff vs origin/dev (this repo's real trunk)
+    python tools/check-version-bump.py --base <sha>     # diff vs an explicit base (e.g. origin/main for a release/recovery check)
     python tools/check-version-bump.py --list           # show the plugin<->vendored-lib map
 
 Exit code 0 = conformant (or nothing to check), 1 = a touched plugin didn't bump.
@@ -302,14 +302,36 @@ def check(base_ref: str, head_ref: str) -> tuple[int, list[str]]:
         return 0, []
     base = _rev_parse(base_ref)
     if base is None:
-        # The base (default origin/main) is unavailable -- a fresh clone or a
+        # The base (default origin/dev) is unavailable -- a fresh clone or a
         # detached state. Degrade to a no-op rather than wedge the push.
         print(
             f"check-version-bump: base '{base_ref}' unavailable; skipping "
             "(fetch it to enable the guard).",
         )
         return 0, []
-    mbase = _merge_base(base, head) or base
+    mbase = _merge_base(base, head)
+    if mbase is None:
+        # `base` resolves but shares no common ancestor with `head`: `main`
+        # is a generated/promoted artifact (see `tools/promote_release.py`'s
+        # own docstring), never a fork point, so a branch's only shared
+        # ancestor with `main` was always just the repo's original root --
+        # and a `main` history rewrite (docs/pipelines.md's "If main's
+        # history is force-rewritten") changes every commit's SHA on
+        # `main`'s own line, severing even that. Silently falling back to a
+        # literal two-dot diff against the raw base's CURRENT snapshot
+        # would produce a large, misleading "changed" set spanning every
+        # plugin that happens to differ between that snapshot and this
+        # branch, not this branch's own actual changes -- degrade instead
+        # the same way an unresolvable base already does just below (this
+        # tool's own established "never wedge the push over an
+        # infra/topology hiccup" stance).
+        print(
+            f"check-version-bump: base '{base_ref}' shares no common history with "
+            f"HEAD (e.g. after a main history rewrite, or because this base is "
+            f"unrelated to this branch's real trunk) -- skipping. For a release/"
+            f"recovery check against a specific target, pass an explicit --base.",
+        )
+        return 0, []
 
     changed = _changed_files(mbase, head)
     if not changed:
@@ -378,8 +400,10 @@ def _print_list() -> None:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--base", default="origin/main",
-                    help="base ref to diff against (default: origin/main)")
+    ap.add_argument("--base", default="origin/dev",
+                    help="base ref to diff against (default: origin/dev -- "
+                         "this repo's real contribution trunk; pass "
+                         "origin/main explicitly for a release/recovery check)")
     ap.add_argument("--head", default="HEAD", help="head ref (default: HEAD)")
     ap.add_argument("--list", action="store_true",
                     help="print the plugin<->vendored-lib map and exit")

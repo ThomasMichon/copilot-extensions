@@ -106,6 +106,31 @@ def test_all_flag_still_audits_whole_tree(repo: Path):
     assert LEAK in result.stdout
 
 
+def test_base_sharing_no_merge_base_falls_back_to_full_tree_scan(repo: Path):
+    """A base that RESOLVES but shares no common ancestor with HEAD at all
+    (the confirmed fallout of a deliberate `main` history rewrite -- see
+    docs/pipelines.md's "If main's history is force-rewritten") used to
+    crash this guard outright with an unhandled ``CalledProcessError`` from
+    the three-dot diff's "no merge base" failure. It must instead degrade
+    to the same full-tree-scan fallback an unresolvable base ref already
+    gets -- which, as a side effect, means the pre-existing leak this
+    fixture seeds IS now caught (full-tree scope), not a false negative."""
+    _git(repo, "checkout", "-q", "--orphan", "rewritten-main")
+    _write(repo, "unrelated.txt", "rewritten history\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "unrelated root (simulates a rewritten main)")
+    rewritten_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", rewritten_sha)
+    _git(repo, "checkout", "-q", "main")
+
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert LEAK in result.stdout
+    assert "shares no history" in result.stdout + result.stderr
+
+
 def test_diff_scope_still_catches_introduced_leak(repo: Path):
     # A leak in a file the push actually changes is still caught in diff scope.
     _write(repo, "plugins/new/clean.txt", f"oops {LEAK} sneaked in\n")

@@ -117,6 +117,15 @@ def repo(tmp_path: Path) -> Path:
         ["git", "rev-parse", "HEAD"], cwd=r, capture_output=True, text=True, check=True
     ).stdout.strip()
     _git(r, "update-ref", "refs/remotes/origin/main", base_sha)
+    # `check-version-bump.py`'s own CLI default base is now `origin/dev`
+    # (this repo's real contribution trunk; see docs/pipelines.md's
+    # rewrite-boundary section for why `origin/main` is no longer a safe
+    # default), so a bare `_run(repo)` with no explicit `--base` needs this
+    # ref to resolve. Many tests below advance `origin/main` mid-test to
+    # represent a later base point -- a SYMBOLIC ref (not a second
+    # `update-ref`) means `origin/dev` always tracks wherever `origin/main`
+    # currently points, with nothing to keep in sync by hand.
+    _git(r, "symbolic-ref", "refs/remotes/origin/dev", "refs/remotes/origin/main")
     return r
 
 
@@ -128,6 +137,30 @@ def test_plugin_src_change_without_bump_fails(repo: Path):
     assert result.returncode == 1, result.stdout + result.stderr
     assert "alpha" in result.stderr
     assert "beta" not in result.stderr  # untouched plugin is not charged
+
+
+def test_base_sharing_no_merge_base_degrades_to_soft_skip(repo: Path):
+    """A `base` that RESOLVES (to some commit) but shares no common
+    ancestor with HEAD at all -- the confirmed, concrete fallout of a
+    deliberate `main` history rewrite (docs/pipelines.md's "If main's
+    history is force-rewritten") -- must degrade to the same soft
+    "skipping" no-op as an unresolvable base, never silently diff raw
+    `base` directly (which previously produced a misleading false-positive
+    "alpha needs a bump" even though this branch never touched alpha)."""
+    _git(repo, "checkout", "-q", "--orphan", "rewritten-main")
+    _write(repo, "unrelated.txt", "rewritten history\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "unrelated root (simulates a rewritten main)")
+    rewritten_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", rewritten_sha)
+    _git(repo, "checkout", "-q", "main")
+
+    result = _run(repo, "--base", "origin/main")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "alpha" not in result.stdout + result.stderr
+    assert "shares no common history" in result.stdout + result.stderr
 
 
 def test_plugin_change_with_bump_passes(repo: Path):
