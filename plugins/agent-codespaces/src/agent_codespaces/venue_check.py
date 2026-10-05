@@ -46,7 +46,7 @@ ExecCommand = Callable[[str, str], Awaitable[Any]]
 # plain ``KEY=value`` lines (never hand-rolled JSON): the one field genuinely
 # free-form -- ``agent-worktrees --version``'s output -- could otherwise
 # break naive JSON quoting.
-_PROBE_SCRIPT = r"""bash -lc '
+_PROBE_SCRIPT = wrap_login_shell(r"""
 echo "COPILOT=$(command -v copilot || true)"
 echo "TMUX=$(command -v tmux >/dev/null 2>&1 && echo yes || echo no)"
 echo "NODE=$(command -v node >/dev/null 2>&1 && echo yes || echo no)"
@@ -67,7 +67,7 @@ else
     echo "AGENT_WORKTREES_STATE=lean"
   fi
 fi
-'"""
+""")
 
 
 @dataclass
