@@ -1,0 +1,9 @@
+{
+  "comment": "Document the PowerShell 7.6.6 ARM64 ConsoleHost crash-loop that can kill every muxed session at once, and the 7.4 LTS pin mitigation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
