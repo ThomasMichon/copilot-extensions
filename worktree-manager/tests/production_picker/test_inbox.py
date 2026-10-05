@@ -487,6 +487,30 @@ def test_drain_apply_propagates_the_exception_in_deterministic_posting_order():
         inbox.drain_apply()
 
 
+def test_coalescing_an_existing_slot_moves_it_to_the_end_of_posting_order():
+    """A re-post to an already-pending slot is a COALESCE, not a no-op --
+    its effective posting time is the latest post, not the first. Without
+    moving it, a plain dict reassignment leaves it at its original
+    position, silently breaking the documented posting-order guarantee:
+    post a, then b, then re-post (coalesce) a -- a's effective post is now
+    AFTER b's, so if both still-pending closures raise, b's exception must
+    win, not a's stale original-position one."""
+    inbox, _ = _inbox_with_foreign_home()
+
+    def _raise(msg):
+        def _inner():
+            raise ValueError(msg)
+        return _inner
+
+    inbox.post("a", _raise("a failure (first version)"))
+    inbox.post("b", _raise("b failure"))
+    # Coalesce "a" -- a new value for an already-pending slot, posted
+    # after "b".
+    inbox.post("a", _raise("a failure (coalesced, now last)"))
+    with pytest.raises(ValueError, match="b failure"):
+        inbox.drain_apply()
+
+
 def test_drain_apply_does_not_catch_keyboard_interrupt_or_system_exit():
     """A closure raising a process-control exception must propagate
     immediately, like it would anywhere else -- never get captured,

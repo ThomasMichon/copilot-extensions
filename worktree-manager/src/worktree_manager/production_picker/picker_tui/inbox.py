@@ -125,6 +125,14 @@ class Inbox:
         """
         with self._lock:
             self._slots[slot] = value
+            # Reassigning an existing dict key does NOT move it -- a plain
+            # `self._pending[slot] = None` would leave a coalesced
+            # (re-posted) slot at its ORIGINAL position, silently breaking
+            # the "posting order" guarantee `drain_apply()` documents: the
+            # slot's effective post time is this one, the latest, not its
+            # first. Pop first (a no-op if not yet pending) so every post
+            # -- new or coalesced -- always moves the slot to the end.
+            self._pending.pop(slot, None)
             self._pending[slot] = None
         if threading.get_ident() == self._home_thread_id:
             # ``drain_apply()`` deliberately re-raises an ordinary closure
