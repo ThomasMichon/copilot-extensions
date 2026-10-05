@@ -410,7 +410,6 @@ def _task_contract_fields(config: Mapping[str, Any], effort: ActiveEffort) -> di
         config,
         effort_title=effort.title,
         effort_slug=effort.slug,
-        state_root=effort.state_root,
         effort_readme=effort.readme_relative,
         effort_status=effort.status,
         coordination_refs=refs,
@@ -485,7 +484,6 @@ def run_tick(
         contract = _task_contract_fields(config, effort)
         payload = {
             "effort_driver_loop": {
-                "state_root": effort.state_root,
                 "effort_slug": effort.slug,
                 "effort_title": effort.title,
                 "effort_readme": effort.readme_relative,

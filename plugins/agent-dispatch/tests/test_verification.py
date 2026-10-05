@@ -1003,9 +1003,9 @@ def test_effort_driver_verification_requires_archive_state_with_pr_and_issue_evi
     script.write_text(
         "import json, sys\n"
         "from pathlib import Path\n"
+        f"root = Path({str(state_root)!r})\n"
         "task = json.load(sys.stdin)['task']\n"
         "payload = json.loads(task['payload_inline'])['effort_driver_loop']\n"
-        "root = Path(payload['state_root'])\n"
         "active_path = root / payload['effort_readme']\n"
         "slug = payload['effort_slug']\n"
         "if active_path.exists():\n"
@@ -1043,7 +1043,6 @@ def test_effort_driver_verification_requires_archive_state_with_pr_and_issue_evi
         payload_inline=json.dumps(
             {
                 "effort_driver_loop": {
-                    "state_root": str(state_root),
                     "effort_slug": "recipe-library",
                     "effort_readme": "efforts/active/recipe-library/README.md",
                 }
@@ -1058,7 +1057,6 @@ def test_effort_driver_verification_requires_archive_state_with_pr_and_issue_evi
         payload_inline=json.dumps(
             {
                 "effort_driver_loop": {
-                    "state_root": str(state_root),
                     "effort_slug": "still-active",
                     "effort_readme": "efforts/active/still-active/README.md",
                 }
@@ -1073,7 +1071,6 @@ def test_effort_driver_verification_requires_archive_state_with_pr_and_issue_evi
         payload_inline=json.dumps(
             {
                 "effort_driver_loop": {
-                    "state_root": str(state_root),
                     "effort_slug": "weak-evidence",
                     "effort_readme": "efforts/active/weak-evidence/README.md",
                 }

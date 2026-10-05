@@ -65,8 +65,7 @@ _DEFAULT_TASK_CONTRACT = {
     "prompt": """Drive this tracked effort to archive state:
 - Effort title: {effort_title}
 - Effort slug: {effort_slug}
-- State root: {state_root}
-- Active effort README: {effort_readme}
+- Active effort README (relative to the repository's bound state root): {effort_readme}
 - Current recorded status: {effort_status}
 - Coordination refs already noted: {coordination_refs}
 
@@ -105,7 +104,6 @@ def build_task_contract(
     *,
     effort_title: str,
     effort_slug: str,
-    state_root: str,
     effort_readme: str,
     effort_status: str,
     coordination_refs: str,
@@ -115,7 +113,6 @@ def build_task_contract(
     values = {
         "effort_title": effort_title,
         "effort_slug": effort_slug,
-        "state_root": state_root,
         "effort_readme": effort_readme,
         "effort_status": effort_status,
         "coordination_refs": coordination_refs,

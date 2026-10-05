@@ -154,7 +154,10 @@ def test_global_effort_driver_discovers_active_effort_and_authors_goal_driven_ta
     assert task["evaluator_ref"] == "effort-driver"
     assert task["title"] == "Drive effort agent-dispatch recipe library to archive state"
     assert task["goal"] == "Drive tracked effort agent-dispatch recipe library to archive state"
-    assert "Active effort README: efforts/active/recipe-library/README.md" in task["prompt"]
+    assert (
+        "Active effort README (relative to the repository's bound state root): "
+        "efforts/active/recipe-library/README.md"
+    ) in task["prompt"]
     assert "Current recorded status: In Progress" in task["prompt"]
     assert "Coordination refs already noted: #4691, #5200" in task["prompt"]
     assert "execution half only" in task["prompt"]
