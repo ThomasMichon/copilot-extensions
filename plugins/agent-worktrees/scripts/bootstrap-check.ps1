@@ -13,7 +13,7 @@ if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
   $_bksGuardDir = Split-Path -Parent $MyInvocation.MyCommand.Path
   $_bksGuard = Join-Path $_bksGuardDir "bootstrap-killswitch-guard.ps1"
   if (Test-Path -LiteralPath $_bksGuard) {
-    & $_bksGuard check *>&2
+    & $_bksGuard check
     if ($LASTEXITCODE -eq 0) { [Console]::Out.Write('{}'); exit 0 }
   }
 }
