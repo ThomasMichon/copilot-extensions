@@ -278,8 +278,9 @@ def test_selected_current_manifest_is_a_read_only_noop(
     runner,
 ) -> None:
     # Agent Index is excluded (see BEHAVIOR_PLUGINS): its compatibility hook
-    # is an unconditional no-op that always emits "{}", so the "else" branch
-    # this test used to run for it (asserting empty stdout) could never pass.
+    # is an unconditional no-op that always emits "{}", regardless of manifest
+    # state, so this test's "requested installation context is not active"
+    # behavior assertion does not apply to it.
     home, context, version = _stamp_context(tmp_path, plugin)
     plugin_root = context.parent
     (plugin_root / "deploy-manifest.json").write_text(

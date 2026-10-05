@@ -586,9 +586,11 @@ def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
         if path.parents[1].name == "agent-index":
             code = [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
             if "bootstrap-check" in path.name:
-                # bootstrap-check is a hooks.json session-start hook, so its
-                # no-op still owes the caller a valid JSON reply ("{}") --
-                # unlike ensure-service, which isn't a session-start hook.
+                # agent-index's bootstrap-check is a compatibility entry
+                # point, not a currently-wired hooks.json session-start hook
+                # (see the hooks.json assertions below) -- but its no-op
+                # still owes a valid JSON reply ("{}") in case anything still
+                # invokes it directly, unlike ensure-service.
                 emit = (
                     "[Console]::Out.Write('{}')"
                     if path.suffix == ".ps1"
@@ -624,13 +626,13 @@ def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
         assert "COPILOT_PLUGIN_STAGED_FROM" in text
         assert "Threading.Mutex" in text
         if atomic:
-            # agent-machines (round 7/9 review findings, see its own inline
-            # comments): deliberately never pre-clears the markers --
+            # agent-machines deliberately never pre-clears the markers --
             # Publish-FileAtomically replaces each one in place only once
             # its fresh snapshot is ready, so a reader never observes a
             # missing marker during the stamp window. Pre-clearing (as
-            # agent-index below still does) was found to be the exact
-            # regression this atomic rewrite exists to prevent.
+            # agent-index below still does) would reopen that same window:
+            # a reader could see a missing marker, not merely a stale one,
+            # for the whole copy duration.
             assert "Remove-Item $payloadDirMarker, $payloadOriginMarker" not in text
             assert text.rindex("Publish-FileAtomically -Path $payloadOriginMarker") < text.rindex(
                 "Publish-FileAtomically -Path $payloadDirMarker"
@@ -685,8 +687,7 @@ def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
         if plugin == "agent-index":
             assert "bootstrap-check" not in json.dumps(hooks)
             assert "ensure-service" not in json.dumps(hooks)
-            # agent-index's sessionStart wiring has since consolidated onto
-            # these two scripts (register-dispatch-companion is gone).
+            # agent-index's sessionStart wiring is exactly these two scripts.
             assert "write-session-guidance" in json.dumps(hooks)
             assert "install.ps1" in json.dumps(hooks)
             assert "install.sh" in json.dumps(hooks)
