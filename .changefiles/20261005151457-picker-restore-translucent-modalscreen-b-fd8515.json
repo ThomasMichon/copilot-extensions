@@ -1,5 +1,5 @@
 {
-  "comment": "Picker: restore translucent ModalScreen backdrops (background: \\ 55%) across all 18 modals, now that picker-performance-and-responsiveness's Phase 0/4 fixes address the render-thread-block and boot-time costs separately from the per-keystroke recompositing trade-off PR #5074 made for a different reason",
+  "comment": "Picker: restore translucent ModalScreen backdrops (background: $background 55%) across all 18 modals, now that picker-performance-and-responsiveness's Phase 0/4 fixes address the render-thread-block and boot-time costs separately from the per-keystroke recompositing trade-off PR #5074 made for a different reason",
   "changes": [
     {
       "plugin": "worktree-manager",
