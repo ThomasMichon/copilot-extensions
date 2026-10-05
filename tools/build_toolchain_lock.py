@@ -42,21 +42,21 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from governed_feed_trust import (  # noqa: E402
-    _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS,
-    _PUBLIC_PYPI_HOSTS,
+    _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS,  # noqa: F401 -- re-exported for test/caller use
+    _PUBLIC_PYPI_HOSTS,  # noqa: F401 -- re-exported for test/caller use
     _TRUSTED_INDEX_HOSTS_ENV_VAR,
     ArtifactBuildError,
-    _credential_free_index_identity,
-    _effective_default_index_url,
-    _effective_uv_toml_candidates,
-    _governed_feed_configured,
-    _is_public_pypi_url,
-    _normalize_hostname,
+    _credential_free_index_identity,  # noqa: F401 -- re-exported for test/caller use
+    _effective_default_index_url,  # noqa: F401 -- re-exported for test/caller use
+    _effective_uv_toml_candidates,  # noqa: F401 -- re-exported for test/caller use
+    _governed_feed_configured,  # noqa: F401 -- re-exported for test/caller use
+    _is_public_pypi_url,  # noqa: F401 -- re-exported for test/caller use
+    _normalize_hostname,  # noqa: F401 -- re-exported for test/caller use
     _opaque_index_identity,
-    _project_uv_toml_candidates,
+    _project_uv_toml_candidates,  # noqa: F401 -- re-exported for test/caller use
     _restrict_file_to_owner,
-    _trusted_index_hosts,
-    _url_host,
+    _trusted_index_hosts,  # noqa: F401 -- re-exported for test/caller use
+    _url_host,  # noqa: F401 -- re-exported for test/caller use
     _validated_trusted_index_url,
     strip_package_source_env_vars,
 )

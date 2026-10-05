@@ -209,21 +209,36 @@ def _restrict_file_to_owner(path: Path) -> None:
             f"credential-bearing file's ACL:\n"
             f"{remove_result.stdout}\n{remove_result.stderr}"
         )
-    # VERIFY the final result rather than trusting exit codes alone: a
-    # credential-bearing file whose ACL cannot be confirmed restrictive
-    # must never be silently trusted as protected. Parses the exact
-    # PRINCIPAL name from each ACE line (everything before `:(`) and
-    # compares it EXACTLY (normalized lowercase) against the resolved
-    # token's own account name and the literal "NT AUTHORITY\SYSTEM" --
-    # `icacls` resolves the granted `*<sid>` back to this same display
-    # name when it can, so comparing names here (rather than re-parsing
-    # SIDs out of the query output) still works. A prior SUBSTRING check
-    # here wrongly accepted e.g. `DOMAIN\svc-backup` when the owner was
-    # `DOMAIN\svc`, or any principal merely containing the word "system",
-    # since the preceding `/remove:g` step intentionally leaves any
-    # OTHER, non-broad explicit ACE in place (one could legitimately
-    # exist from a prior, more targeted grant) rather than wiping the ACL
-    # down to nothing first.
+    _verify_restricted_acl(path, icacls, account_name)
+
+
+def _verify_restricted_acl(path: Path, icacls: str, account_name: str) -> None:
+    """VERIFIES the final result of `_restrict_file_to_owner`'s hardening
+    rather than trusting exit codes alone: a credential-bearing file
+    whose ACL cannot be confirmed restrictive must never be silently
+    trusted as protected. Parses the exact PRINCIPAL name from each ACE
+    line (everything before `:(`) and compares it EXACTLY (normalized
+    lowercase) against the resolved token's own account name and the
+    literal "NT AUTHORITY\\SYSTEM" -- `icacls` resolves the granted
+    `*<sid>` back to this same display name when it can, so comparing
+    names here (rather than re-parsing SIDs out of the query output)
+    still works. A prior SUBSTRING check here wrongly accepted e.g.
+    `DOMAIN\\svc-backup` when the owner was `DOMAIN\\svc`, or any
+    principal merely containing the word "system", since the preceding
+    `/remove:g` step intentionally leaves any OTHER, non-broad explicit
+    ACE in place (one could legitimately exist from a prior, more
+    targeted grant) rather than wiping the ACL down to nothing first.
+
+    Requires BOTH expected principals to actually be OBSERVED, not merely
+    "nothing unexpected is" -- empty or unrecognized `icacls` output
+    (e.g. a parse miss, or a locale this parser doesn't handle) would
+    otherwise vacuously pass this check (an empty `unexpected` list)
+    while proving nothing about who can actually access the file.
+
+    Factored out of `_restrict_file_to_owner` as its own function so a
+    caller/test can replace just this final verification step without
+    needing to fabricate a believable full `icacls` transcript for every
+    other call `_restrict_file_to_owner` makes."""
     query = subprocess.run(
         [icacls, str(path)], capture_output=True, text=True
     )
@@ -244,12 +259,16 @@ def _restrict_file_to_owner(path: Path) -> None:
         if principal:
             principals.append(principal)
     expected = {account_name.lower(), "nt authority\\system"}
+    observed = {p.lower() for p in principals}
     unexpected = [p for p in principals if p.lower() not in expected]
-    if unexpected:
+    missing = expected - observed
+    if unexpected or missing:
         raise ArtifactBuildError(
-            f"{path}: this credential-bearing file's ACL still grants "
-            f"unexpected principal(s) after hardening: {unexpected!r} -- "
-            "refusing to trust it as owner-only"
+            f"{path}: this credential-bearing file's ACL does not grant "
+            f"exactly the expected principals after hardening -- "
+            f"observed={principals!r}, missing={sorted(missing)!r}, "
+            f"unexpected={unexpected!r} -- refusing to trust it as "
+            "owner-only"
         )
 
 
@@ -431,18 +450,25 @@ def _provenance_key() -> bytes:
         # right-length check above. `_restrict_file_to_owner` (0o600
         # mode bits alone are not an owner-only ACL on Windows -- this
         # key is just as credential-bearing as the index-config temp
-        # file it protects) is applied to the temp file BEFORE the
-        # rename, so the final path never exists at a broader ACL even
-        # momentarily. Holding the lock means this is now the ONLY
-        # writer -- no reread-the-final-value step is needed afterward.
+        # file it protects) hardens the temp file's ACL BEFORE any key
+        # bytes are written to it (same ordering as the index-config
+        # file: create EMPTY, harden, then write) -- hardening only
+        # AFTER the write, as a prior revision of this function did,
+        # leaves a real window where the file already holds the actual
+        # secret key but still carries only the broader, non-owner-only
+        # permissions the surrounding code elsewhere treats as
+        # insufficient for a credential-bearing file on Windows. Holding
+        # the lock means this is now the ONLY writer -- no reread-the-
+        # final-value step is needed afterward.
         tmp_path = path.with_name(
             f".{path.name}.tmp-{os.getpid()}-{secrets.token_hex(4)}"
         )
         fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.close(fd)
         try:
-            with os.fdopen(fd, "wb") as key_file:
-                key_file.write(key)
             _restrict_file_to_owner(tmp_path)
+            with open(tmp_path, "wb") as key_file:
+                key_file.write(key)
             os.replace(str(tmp_path), str(path))
         except BaseException:
             tmp_path.unlink(missing_ok=True)
@@ -598,25 +624,41 @@ def _effective_uv_toml_candidates(env: dict) -> list[Path]:
         candidates.append(Path(xdg) / "uv" / "uv.toml")
     elif home:
         candidates.append(Path(home) / ".config" / "uv" / "uv.toml")
-    # System-level: `uv` itself first checks every directory listed in
-    # `XDG_CONFIG_DIRS` (colon-separated, in listed order; defaulting to
-    # the single directory `/etc/xdg` when unset/empty), using the FIRST
-    # one with an actual `uv/uv.toml` and consulting no others. Only when
-    # NONE of those exist does it fall back to `/etc/uv/uv.toml` (see
-    # `locate_system_config_xdg`/`system_config_file` in uv's own
-    # `crates/uv-dirs/src/lib.rs`). The caller below already stops at the
-    # first EXISTING candidate in this returned list, so appending these
-    # in uv's own order reproduces "first found wins" without any
-    # special-casing here -- the PRIOR version of this function checked
-    # `/etc/uv/uv.toml` before `/etc/xdg/uv/uv.toml` unconditionally and
-    # never consulted `XDG_CONFIG_DIRS` at all, which could pin a
-    # different index than uv's own effective configuration.
+    system_candidate = _system_uv_toml_candidate(env)
+    if system_candidate is not None:
+        candidates.append(system_candidate)
+    return candidates
+
+
+def _system_uv_toml_candidate(env: dict) -> Path | None:
+    """uv's own system-level config resolution (POSIX) picks AT MOST ONE
+    file -- unlike every other tier `_effective_uv_toml_candidates`
+    returns, it is never a list of further fallbacks for the caller to
+    try if the chosen one simply lacks a particular setting. `uv` itself
+    (`system_config_file`/`locate_system_config_xdg`,
+    `crates/uv-dirs/src/lib.rs`) checks every directory listed in
+    `XDG_CONFIG_DIRS` (colon-separated, in listed order; defaulting to
+    the single directory `/etc/xdg` when unset/empty) for an EXISTING
+    `uv/uv.toml`, using the first one found; only when NONE of those
+    exist does it fall back to `/etc/uv/uv.toml`.
+
+    Returning every theoretical candidate instead (as a prior version of
+    this function did, relying on the caller's own generic per-candidate
+    loop to skip anything that merely fails to parse an index out of it)
+    would let that loop silently continue past the chosen system file to
+    a DIFFERENT, lower-priority one merely because the chosen file has no
+    index configured -- `uv` itself never does this: the chosen system
+    file lacking a setting means the system tier contributes nothing at
+    that tier, full stop, not "keep trying more system files."""
     xdg_config_dirs = env.get("XDG_CONFIG_DIRS") or "/etc/xdg"
     for config_dir in xdg_config_dirs.split(":"):
-        if config_dir:
-            candidates.append(Path(config_dir) / "uv" / "uv.toml")
-    candidates.append(Path("/etc/uv/uv.toml"))
-    return candidates
+        if not config_dir:
+            continue
+        candidate = Path(config_dir) / "uv" / "uv.toml"
+        if candidate.is_file():
+            return candidate
+    fallback = Path("/etc/uv/uv.toml")
+    return fallback if fallback.is_file() else None
 
 
 def _effective_default_index_url(env: dict) -> tuple[str, str | None] | None:

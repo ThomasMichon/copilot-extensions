@@ -68,15 +68,30 @@ gft = sys.modules["governed_feed_trust"]
 #: (same "capture the real one before any monkeypatching" reasoning as
 #: `_REAL_SUBPROCESS_RUN` above).
 _REAL_CURRENT_TOKEN_IDENTITY = gft._current_token_identity
-#: The REAL, trusted absolute paths `_restrict_file_to_owner`/
-#: `_current_token_identity` actually invoke (round 25) -- never a bare
-#: "icacls"/"whoami" name, which an executable-search-order substitution
-#: could silently hijack. Every test asserting a command's own argv[0], or
-#: matching on it to decide how to answer, uses these same resolved
-#: paths rather than a literal bare name, so they track the production
-#: code's own resolution instead of re-implementing or second-guessing it.
-_ICACLS_PATH = gft._trusted_system32_tool("icacls")
-_WHOAMI_PATH = gft._trusted_system32_tool("whoami")
+#: Captured at import time -- the one genuine `_trusted_system32_tool`,
+#: for the dedicated test that exercises its own real resolution/
+#: existence-check logic (Windows-only; see that test's own skip guard).
+_REAL_TRUSTED_SYSTEM32_TOOL = gft._trusted_system32_tool
+#: Captured at import time, BEFORE the autouse fixture below patches it
+#: to a no-op on every test -- the one genuine `_verify_restricted_acl`
+#: (round 26), for the dedicated ACL-verification tests that construct
+#: their own believable `icacls` transcript and need the REAL parsing/
+#: comparison logic exercised against it.
+_REAL_VERIFY_RESTRICTED_ACL = gft._verify_restricted_acl
+#: INERT fake stand-ins for the trusted absolute paths
+#: `_restrict_file_to_owner`/`_current_token_identity` resolve via
+#: `_trusted_system32_tool` (round 25) -- used only as comparison/match
+#: literals in `fake_run`s below, NEVER by calling the real resolver at
+#: import time (round 26: that real call raised on a non-Windows CI
+#: runner -- `C:\Windows\System32` does not exist there -- which broke
+#: COLLECTING this entire test module on the required Ubuntu CI job, not
+#: merely failing a Windows-specific test). The autouse fixture below
+#: patches `_trusted_system32_tool` itself to return these same literals
+#: on every platform, so production code never touches the real
+#: filesystem either, except in the one test that explicitly restores
+#: `_REAL_TRUSTED_SYSTEM32_TOOL` and is skipped on non-Windows.
+_ICACLS_PATH = r"C:\Windows\System32\icacls.exe"
+_WHOAMI_PATH = r"C:\Windows\System32\whoami.exe"
 
 
 @pytest.fixture(autouse=True)
@@ -87,12 +102,16 @@ def _isolated_provenance_key_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     this test's own `tmp_path` for every test, automatically.
 
     Also stubs `subprocess.run` to a trivial always-succeeding no-op by
-    default, AND stubs `_current_token_identity` to a canned identity
-    (`_FAKE_TOKEN_ACCOUNT`/`_FAKE_TOKEN_SID`) so `_restrict_file_to_owner`
-    never needs a real `whoami` either: on this machine (genuinely
-    Windows), `_provenance_key`'s own call to `_restrict_file_to_owner`
-    would otherwise shell out to REAL `icacls`/`whoami` against a path
-    inside pytest's own tmp tree for every test that merely touches
+    default, stubs `_current_token_identity` to a canned identity
+    (`_FAKE_TOKEN_ACCOUNT`/`_FAKE_TOKEN_SID`), AND stubs
+    `_trusted_system32_tool` to the inert `_ICACLS_PATH`/`_WHOAMI_PATH`
+    literals above (never touching the real filesystem, which may not
+    even be Windows -- this file's own required CI job collects and runs
+    it on `ubuntu-latest` too) so `_restrict_file_to_owner` never needs a
+    real `whoami`/`icacls` either: on a genuinely Windows machine,
+    `_provenance_key`'s own call to `_restrict_file_to_owner` would
+    otherwise shell out to REAL `icacls`/`whoami` against a path inside
+    pytest's own tmp tree for every test that merely touches
     `_opaque_index_identity`/`_provenance_key` -- those paths carry the
     SAME untrusted-mount-point quirk documented elsewhere in this file's
     own pytest-teardown workarounds, and `icacls` behaves unreliably
@@ -113,6 +132,19 @@ def _isolated_provenance_key_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         gft, "_current_token_identity",
         lambda: (_FAKE_TOKEN_ACCOUNT, _FAKE_TOKEN_SID),
     )
+    monkeypatch.setattr(
+        gft, "_trusted_system32_tool",
+        lambda name: {"icacls": _ICACLS_PATH, "whoami": _WHOAMI_PATH}[name],
+    )
+    # `_verify_restricted_acl` (round 26) is stubbed to a no-op success by
+    # default too: requiring it to parse a BELIEVABLE `icacls` transcript
+    # (now that round 26 closed the vacuous-empty-output pass) would
+    # otherwise force every test that merely exercises
+    # `_restrict_file_to_owner`/`_provenance_key`/`resolve_toolchain_lock`
+    # for real -- not just the handful of tests actually ABOUT ACL
+    # verification -- to fabricate one. The dedicated verification tests
+    # below restore the real function via `_REAL_VERIFY_RESTRICTED_ACL`.
+    monkeypatch.setattr(gft, "_verify_restricted_acl", lambda path, icacls, account_name: None)  # noqa: ARG005
 
 
 
@@ -1851,7 +1883,11 @@ def test_provenance_key_hardens_acl_on_windows(
     monkeypatch.setattr(gft.subprocess, "run", fake_run)
     gft._provenance_key()
 
-    assert len(seen_cmds) == 3
+    # Two icacls invocations: grant owner+SYSTEM, then strip broad
+    # built-in principals -- the final verify query is stubbed to a
+    # no-op by the autouse fixture (`_verify_restricted_acl` has its own
+    # dedicated tests).
+    assert len(seen_cmds) == 2
     grant_cmd = seen_cmds[0]
     assert grant_cmd[0] == _ICACLS_PATH
     assert "/inheritance:r" in grant_cmd
@@ -2167,50 +2203,73 @@ def test_governed_feed_configured_via_programdata_uv_toml(
 
 
 def test_effective_uv_toml_candidates_posix_includes_system_paths(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
-    # Regression: /etc/uv/uv.toml and /etc/xdg/uv/uv.toml (system-level)
-    # must also be discovered -- matching this repo's own install.sh
-    # precedent (_ensure_uv_index), not just the user-level path. uv's
-    # own precedence (round 24) checks `XDG_CONFIG_DIRS` (default
-    # `/etc/xdg` when unset) BEFORE falling back to `/etc/uv/uv.toml`.
+    # Regression: a system-level uv.toml must also be discovered --
+    # matching this repo's own install.sh precedent (_ensure_uv_index),
+    # not just the user-level path. `uv` itself resolves system config to
+    # AT MOST ONE file (round 26: its own first-EXISTING XDG entry, else
+    # `/etc/uv/uv.toml`), never every theoretical candidate.
+    #
+    # Compared via `.resolve()` below (not plain `==`/`in`): on THIS
+    # (Windows) test machine, `XDG_CONFIG_DIRS` is built by joining real
+    # `tmp_path`-derived absolute paths with `:` -- the POSIX separator
+    # this env var uses -- but a Windows path's own drive letter (`C:`)
+    # ALSO contains a literal `:`, so splitting on it drops the drive
+    # prefix from the reconstructed candidate (still resolving to the
+    # SAME file via the current drive, just not `==`-comparable to the
+    # fully-qualified original). This collision cannot happen in this
+    # function's own real POSIX runtime use -- a genuine POSIX path never
+    # contains a colon -- so `.resolve()` here works around a test-
+    # environment-only artifact, not a production concern.
     monkeypatch.setattr(btl.sys, "platform", "linux")
-    candidates = btl._effective_uv_toml_candidates({"HOME": "/home/x"})
-    assert Path("/etc/xdg/uv/uv.toml") in candidates
-    assert Path("/etc/uv/uv.toml") in candidates
-    assert candidates.index(Path("/etc/xdg/uv/uv.toml")) < candidates.index(Path("/etc/uv/uv.toml"))
+    xdg_dir = tmp_path / "xdg"
+    (xdg_dir / "uv").mkdir(parents=True)
+    (xdg_dir / "uv" / "uv.toml").write_text("", encoding="utf-8")
+    candidates = btl._effective_uv_toml_candidates(
+        {"HOME": "/home/x", "XDG_CONFIG_DIRS": str(xdg_dir)}
+    )
+    expected = (xdg_dir / "uv" / "uv.toml").resolve()
+    assert any(c.resolve() == expected for c in candidates)
 
 
 def test_effective_uv_toml_candidates_posix_honors_xdg_config_dirs(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
-    # Regression (round 24): a SET `XDG_CONFIG_DIRS` (colon-separated, in
-    # listed order) must be consulted instead of the hardcoded `/etc/xdg`
-    # default, with `/etc/uv/uv.toml` only as a final fallback -- matching
-    # uv's own `locate_system_config_xdg`/`system_config_file`
+    # Regression (round 24, refined round 26): a SET `XDG_CONFIG_DIRS`
+    # (colon-separated, in listed order) must be consulted instead of the
+    # hardcoded `/etc/xdg` default -- matching uv's own
+    # `locate_system_config_xdg`/`system_config_file`
     # (`crates/uv-dirs/src/lib.rs`), which previously went unconsulted
-    # entirely here.
+    # entirely here. Only the FIRST EXISTING entry is ever returned --
+    # uv's own system-config resolution picks at most one file, never a
+    # list of further fallbacks to try. See the `.resolve()` note on
+    # `test_effective_uv_toml_candidates_posix_includes_system_paths`
+    # above for why comparison goes through it here too.
     monkeypatch.setattr(btl.sys, "platform", "linux")
+    first_dir = tmp_path / "first"  # left non-existent
+    second_dir = tmp_path / "second"
+    (second_dir / "uv").mkdir(parents=True)
+    (second_dir / "uv" / "uv.toml").write_text("", encoding="utf-8")
     candidates = btl._effective_uv_toml_candidates(
-        {"HOME": "/home/x", "XDG_CONFIG_DIRS": "/opt/first:/opt/second"}
+        {"XDG_CONFIG_DIRS": f"{first_dir}:{second_dir}"}
     )
-    assert candidates == [
-        Path("/home/x/.config/uv/uv.toml"),
-        Path("/opt/first/uv/uv.toml"),
-        Path("/opt/second/uv/uv.toml"),
-        Path("/etc/uv/uv.toml"),
-    ]
+    assert len(candidates) == 1
+    assert candidates[0].resolve() == (second_dir / "uv" / "uv.toml").resolve()
 
 
 def test_effective_uv_toml_candidates_posix_xdg_config_dirs_ignores_empty_entries(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(btl.sys, "platform", "linux")
+    only_dir = tmp_path / "only"
+    (only_dir / "uv").mkdir(parents=True)
+    (only_dir / "uv" / "uv.toml").write_text("", encoding="utf-8")
     candidates = btl._effective_uv_toml_candidates(
-        {"XDG_CONFIG_DIRS": ":/opt/only::"}
+        {"XDG_CONFIG_DIRS": f":{only_dir}::"}
     )
-    assert Path("/opt/only/uv/uv.toml") in candidates
-    assert not any(str(c).startswith("//") for c in candidates)
+    assert len(candidates) == 1
+    assert candidates[0].resolve() == (only_dir / "uv" / "uv.toml").resolve()
 
 
 def test_effective_default_index_url_honors_first_existing_xdg_config_dir(
@@ -2231,6 +2290,28 @@ def test_effective_default_index_url_honors_first_existing_xdg_config_dir(
     assert btl._effective_default_index_url(env) == (
         "https://second.internal/simple/", None,
     )
+
+
+def test_effective_default_index_url_does_not_fall_through_past_chosen_system_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression (round 26): once the system tier's first EXISTING file
+    # is chosen, a DIFFERENT (lower-priority) system file must never be
+    # consulted even if the chosen one simply has no index configured --
+    # `uv` itself never falls through within the system tier this way;
+    # the chosen file lacking a setting means the system tier contributes
+    # nothing, period.
+    monkeypatch.setattr(btl.sys, "platform", "linux")
+    chosen_dir = tmp_path / "chosen"
+    (chosen_dir / "uv").mkdir(parents=True)
+    (chosen_dir / "uv" / "uv.toml").write_text("# no index here\n", encoding="utf-8")
+    fallback_dir = tmp_path / "fallback"
+    (fallback_dir / "uv").mkdir(parents=True)
+    (fallback_dir / "uv" / "uv.toml").write_text(
+        'index-url = "https://fallback.internal/simple/"\n', encoding="utf-8"
+    )
+    env = {"XDG_CONFIG_DIRS": f"{chosen_dir}:{fallback_dir}"}
+    assert btl._effective_default_index_url(env) is None
 
 
 def test_governed_feed_not_configured_via_supplemental_index_table_only(
@@ -3401,14 +3482,24 @@ def test_restrict_file_to_owner_invokes_icacls_on_windows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr(btl.sys, "platform", "win32")
+    monkeypatch.setattr(gft, "_verify_restricted_acl", _REAL_VERIFY_RESTRICTED_ACL)
+    target = tmp_path / "secret.toml"
     seen_cmds: list[list[str]] = []
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
         seen_cmds.append(cmd)
+        if cmd == [_ICACLS_PATH, str(target)]:
+            return subprocess.CompletedProcess(
+                cmd, 0,
+                stdout=(
+                    f"{target} {_FAKE_TOKEN_ACCOUNT}:(F)\n"
+                    "                NT AUTHORITY\\SYSTEM:(F)\n"
+                ),
+                stderr="",
+            )
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(btl.subprocess, "run", fake_run)
-    target = tmp_path / "secret.toml"
     btl._restrict_file_to_owner(target)
 
     # Three icacls invocations: grant owner+SYSTEM, strip broad built-in
@@ -3492,6 +3583,7 @@ def test_restrict_file_to_owner_rejects_similarly_named_principal(
     # query listing `REDMOND\svc-backup` must NOT be accepted just
     # because it CONTAINS the real owner `REDMOND\svc` as a substring.
     monkeypatch.setattr(btl.sys, "platform", "win32")
+    monkeypatch.setattr(gft, "_verify_restricted_acl", _REAL_VERIFY_RESTRICTED_ACL)
     target = tmp_path / "secret.toml"
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
@@ -3520,6 +3612,7 @@ def test_restrict_file_to_owner_rejects_principal_containing_word_system(
     # "system" (e.g. a local account literally named that) must not be
     # mistaken for `NT AUTHORITY\SYSTEM` by a loose substring check.
     monkeypatch.setattr(btl.sys, "platform", "win32")
+    monkeypatch.setattr(gft, "_verify_restricted_acl", _REAL_VERIFY_RESTRICTED_ACL)
     target = tmp_path / "secret.toml"
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
@@ -3537,6 +3630,55 @@ def test_restrict_file_to_owner_rejects_principal_containing_word_system(
     monkeypatch.setattr(btl.subprocess, "run", fake_run)
     with pytest.raises(bpa.ArtifactBuildError, match="notsystem"):
         btl._restrict_file_to_owner(target)
+
+
+def test_verify_restricted_acl_fails_closed_on_empty_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    # Regression (round 26): empty or unparseable `icacls` output must
+    # NOT vacuously pass verification just because nothing UNEXPECTED was
+    # found in it -- both expected principals must actually be OBSERVED.
+    target = tmp_path / "secret.toml"
+    monkeypatch.setattr(
+        gft.subprocess, "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""),  # noqa: ARG005
+    )
+    with pytest.raises(bpa.ArtifactBuildError, match="missing"):
+        _REAL_VERIFY_RESTRICTED_ACL(target, _ICACLS_PATH, _FAKE_TOKEN_ACCOUNT)
+
+
+def test_verify_restricted_acl_fails_closed_when_only_one_expected_principal_present(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    # A transcript naming ONLY the owner (SYSTEM genuinely absent) must
+    # also fail closed -- not just the "zero principals" case above.
+    target = tmp_path / "secret.toml"
+    monkeypatch.setattr(
+        gft.subprocess, "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(  # noqa: ARG005
+            cmd, 0, stdout=f"{target} {_FAKE_TOKEN_ACCOUNT}:(F)\n", stderr="",
+        ),
+    )
+    with pytest.raises(bpa.ArtifactBuildError, match="missing"):
+        _REAL_VERIFY_RESTRICTED_ACL(target, _ICACLS_PATH, _FAKE_TOKEN_ACCOUNT)
+
+
+def test_verify_restricted_acl_passes_with_both_expected_principals(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    target = tmp_path / "secret.toml"
+    monkeypatch.setattr(
+        gft.subprocess, "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(  # noqa: ARG005
+            cmd, 0,
+            stdout=(
+                f"{target} {_FAKE_TOKEN_ACCOUNT}:(F)\n"
+                "                NT AUTHORITY\\SYSTEM:(F)\n"
+            ),
+            stderr="",
+        ),
+    )
+    _REAL_VERIFY_RESTRICTED_ACL(target, _ICACLS_PATH, _FAKE_TOKEN_ACCOUNT)
 
 
 def test_current_token_identity_parses_whoami_output(
@@ -3616,8 +3758,12 @@ def test_current_token_identity_invokes_whoami_by_trusted_absolute_path(
     assert seen_cmds[0][0] == _WHOAMI_PATH
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="requires a real Windows System32")
 def test_trusted_system32_tool_resolves_absolute_path():
-    icacls = gft._trusted_system32_tool("icacls")
+    # Exercises the REAL resolver (the autouse fixture fakes it for every
+    # other test) -- only meaningful, and only safe to assert
+    # `.is_file()` for, on an actual Windows machine.
+    icacls = _REAL_TRUSTED_SYSTEM32_TOOL("icacls")
     assert Path(icacls).is_absolute()
     assert Path(icacls).name.lower() == "icacls.exe"
     assert Path(icacls).is_file()
@@ -3628,10 +3774,11 @@ def test_trusted_system32_tool_fails_closed_when_missing(
 ):
     # A `SystemRoot` that does not actually contain the requested tool
     # must fail closed rather than fall back to a bare, PATH-resolved
-    # name.
+    # name. Exercises the REAL resolver; this fails identically on any
+    # platform (a nonexistent path is a nonexistent path).
     monkeypatch.setenv("SystemRoot", str(tmp_path))
     with pytest.raises(bpa.ArtifactBuildError):
-        gft._trusted_system32_tool("whoami")
+        _REAL_TRUSTED_SYSTEM32_TOOL("whoami")
 
 
 def test_resolve_toolchain_lock_hardens_staging_dir_before_index_config_exists(
