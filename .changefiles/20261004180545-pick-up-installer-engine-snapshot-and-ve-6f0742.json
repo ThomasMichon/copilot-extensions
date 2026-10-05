@@ -1,0 +1,9 @@
+{
+  "comment": "pick up installer-engine snapshot and venv retry fixes",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

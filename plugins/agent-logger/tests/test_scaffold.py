@@ -80,7 +80,7 @@ def test_runtime_is_reconciled_on_every_machine() -> None:
     )
     assert 'VENV="$INSTALL_DIR/versions/$__current"' in install_sh
     assert (
-        'if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then _write_deploy_manifest; fi'
+        'if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then write_deploy_manifest "agent-logger" "agent-logger" "${INSTALL_DIR}" "${PLUGIN_DIR}" "${VENV}"; fi'
         in install_sh
     )
     assert ".install-complete.json" in install_sh
