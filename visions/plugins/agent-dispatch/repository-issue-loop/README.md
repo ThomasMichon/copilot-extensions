@@ -26,9 +26,8 @@ Adoption should be as easy for a colleague on an unfamiliar team as it is for
 its original author: declaring a new loop over a new backlog is authoring one
 small declaration, not learning or forking the engine. The same declarative
 engine should work equally over any backlog whose items can be listed,
-reserved, and settled through a provider adapter — GitHub issues, Azure DevOps
-work items, Gitea issues, and any later adopter of the same surface — without
-a backlog-specific rewrite of the engine itself.
+reserved, and settled through a provider adapter, without a backlog-specific
+rewrite of the engine itself.
 
 ## Concepts & Components
 
@@ -46,9 +45,8 @@ orchestration logic.
 Backlog capabilities are exposed through one coherent, provider-neutral
 surface: list open items, reserve one, claim it under a task, and release it.
 Loop policy composes this surface instead of embedding provider-specific
-listing, reservation-marker, and mutation code per backlog kind. GitHub issues,
-Azure DevOps work-item backlogs, Gitea issues, and other adopted backlogs are
-all, to the loop, just a `backlog provider`.
+listing, reservation-marker, and mutation code per backlog kind. Any adopted
+backlog is, to the loop, just a `backlog provider`.
 
 ### The worker identity
 
@@ -82,9 +80,8 @@ loop.
 
 The reusable backlog-provider surface covers the common list/reserve/claim/
 release operations across supported backlog kinds. Provider differences stay
-behind adapters. GitHub issues, Azure DevOps work items, Gitea issues, and
-other adopted backlogs share that same contract; loop policy, eligibility, and
-batching never reimplement provider-specific listing or mutation.
+behind adapters; loop policy, eligibility, and batching never reimplement
+provider-specific listing or mutation.
 
 ### declarative-worker-identity
 
