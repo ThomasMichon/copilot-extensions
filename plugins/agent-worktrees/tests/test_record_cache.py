@@ -70,6 +70,39 @@ class TestCachedLoadDirect:
         record_cache.cached_load(path, _loader)
         assert len(calls) == 2, "the raw external rewrite's stat change must force a re-parse"
 
+    def test_copy_result_false_returns_the_cache_s_own_object(self, tmp_path: Path):
+        """picker-performance-and-responsiveness Phase 3: ``copy_result=False``
+        is the explicit opt-out of the per-hit ``copy.deepcopy`` -- a cache
+        HIT must hand back the identical cached object (``is``, not just
+        ``==``), both across repeated calls and against the object a
+        concurrent ``copy_result=True`` caller would otherwise independently
+        copy from. The miss path must also skip the copy (the object just
+        placed in the cache is returned directly), since a caller requesting
+        ``copy_result=False`` makes the same no-mutate promise on a miss as
+        on a hit."""
+        path = tmp_path / "wt-A.yaml"
+        create_new_record(
+            "wt-A", "worktree/wt-A", str(tmp_path / "wt-A"), "test-chamber",
+            "anomalous-potato", "wsl", tmp_path,
+        )
+        record_cache.clear()
+
+        # Miss path: no copy.
+        first = record_cache.cached_load(
+            path, tracking._load_record_uncached, copy_result=False,
+        )
+        # Hit path: same object as the miss path cached, still no copy.
+        second = record_cache.cached_load(
+            path, tracking._load_record_uncached, copy_result=False,
+        )
+        assert first is second
+
+        # The default (copy_result=True) path is untouched by the opt-out:
+        # still an independent copy, every call.
+        third = record_cache.cached_load(path, tracking._load_record_uncached)
+        assert third is not first
+        assert third.worktree_id == first.worktree_id
+
 
 class TestStoreStampsLoadedFrom:
     def test_store_sets_loaded_from_to_the_given_path_not_the_records_own(

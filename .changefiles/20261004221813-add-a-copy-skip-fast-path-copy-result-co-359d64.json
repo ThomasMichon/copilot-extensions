@@ -1,0 +1,9 @@
+{
+  "comment": "Add a copy-skip fast path (copy_result/copy_records=False) to record_cache.cached_load/tracking.load_record/list_records, and have the resident status-monitor's hot path (find_worktree_id_by_cwd) opt in -- removes a measured, sustained CPU cost (live py-spy caught the daemon inside copy.deepcopy at scale) from an O(tracked records x live sessions) per-sweep scan (picker-performance-and-responsiveness Phase 3).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

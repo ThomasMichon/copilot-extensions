@@ -1536,11 +1536,11 @@ def _yaml_safe_load(raw: str) -> object:
     return yaml.load(raw, Loader=_FastSafeLoader)
 
 
-def load_record(path: Path) -> WorktreeRecord:
-    """Load a worktree tracking record from a YAML file.
-    Routed through :mod:`record_cache` (2026-09-27) -- self-invalidating on
-    the file's own ``(mtime_ns, size)``."""
-    return record_cache.cached_load(path, _load_record_uncached)
+def load_record(path: Path, *, copy_result: bool = True) -> WorktreeRecord:
+    """Load a worktree tracking record from a YAML file. Routed through
+    :mod:`record_cache` (2026-09-27) -- self-invalidating on the file's own
+    ``(mtime_ns, size)``. ``copy_result=False``: narrow read-only opt-in."""
+    return record_cache.cached_load(path, _load_record_uncached, copy_result=copy_result)
 
 
 def _load_record_uncached(path: Path) -> WorktreeRecord:
@@ -3081,15 +3081,16 @@ def list_records(
     platform_filter: str | None = None,
     repo_filter: str | None = None,
     kind_filter: WorktreeKind | None = None,
+    copy_records: bool = True,
 ) -> list[WorktreeRecord]:
-    """List all worktree records, optionally filtered by status/platform/repo/kind."""
+    """List records (optional status/platform/repo/kind filters). ``copy_records=False``: read-only fast path, see :func:`load_record`."""
     records: list[WorktreeRecord] = []
     if not tracking_path.exists():
         return records
 
     for yaml_file in sorted(tracking_path.glob("*.yaml")):
         try:
-            rec = load_record(yaml_file)
+            rec = load_record(yaml_file, copy_result=copy_records)
         except Exception:
             continue
         if status_filter and rec.status != status_filter:
@@ -3107,7 +3108,6 @@ def list_records(
 
 def find_worktree_id_by_cwd(cwd: str, *, project: str | None = None) -> str | None:
     """Resolve a worktree_id from a session cwd.
-
     Matches *cwd* (or any worktree root that is an ancestor of it) against
     the tracked ``worktree_path`` values.  Used by the sessionStart hook to
     associate a session with its worktree when the ``WORKTREE_ID`` env var
@@ -3115,8 +3115,8 @@ def find_worktree_id_by_cwd(cwd: str, *, project: str | None = None) -> str | No
     cwd via the hook's stdin payload instead. ``project`` scopes the lookup
     to a given project (an out-of-context caller, e.g. a sync process)
     instead of the ambient one. Deepest (longest) match wins on overlap;
-    None if no worktree contains *cwd*.
-    """
+    None if no worktree contains *cwd*. Also the status-monitor's hot path:
+    ``copy_records=False`` skips the deep copy (read-only; safe here)."""
     if not cwd:
         return None
     tracking_path = cfg.project_dir(project) / "worktrees" if project else cfg.tracking_dir()
@@ -3126,7 +3126,7 @@ def find_worktree_id_by_cwd(cwd: str, *, project: str | None = None) -> str | No
     norm = os.path.normcase(os.path.normpath(cwd)).rstrip("/\\")
     best_id: str | None = None
     best_len = -1
-    for rec in list_records(tracking_path):
+    for rec in list_records(tracking_path, copy_records=False):
         wp = rec.worktree_path
         if not wp:
             continue
