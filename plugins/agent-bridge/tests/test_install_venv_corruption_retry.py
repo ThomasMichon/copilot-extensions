@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
-_INSTALL_PS1 = PLUGIN / "scripts" / "install.ps1"
+_INSTALL_PS1 = PLUGIN.parents[1] / "libs" / "installer-engine" / "installer-engine.ps1"
 
 
 def _extract_ps1_functions(*names: str) -> str:

@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
-_INSTALL_PS1 = PLUGIN / "scripts" / "install.ps1"
+_INSTALL_PS1 = PLUGIN.parents[1] / "libs" / "installer-engine" / "installer-engine.ps1"
 
 
 def _extract_ps1_functions(*names: str) -> str:
@@ -40,7 +40,7 @@ def _run_harness(
     delays_file_ps = str(delays_file).replace("\\", "\\\\")
     harness = tmp_path / f"harness-{shell.replace('.exe', '')}.ps1"
     harness.write_text(
-        _extract_ps1_functions("Test-IsSreModuleMismatch", "Invoke-UvPipInstallResilient")
+        _extract_ps1_functions("Invoke-NativeCapture", "Test-IsSreModuleMismatch", "Invoke-UvPipInstallResilient")
         + f"""
 
 function Write-Warn {{ param([string]$m) Write-Host "WARN: $m" }}

@@ -33,6 +33,7 @@ import pytest
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _INSTALL_SH = _PLUGIN_ROOT / "scripts" / "install.sh"
+_ENGINE_SH = _PLUGIN_ROOT.parents[1] / "libs" / "installer-engine" / "installer-engine.sh"
 # A bare shutil.which("bash") can resolve to a Windows App Execution Alias
 # stub or the classic `C:\Windows\System32\bash.exe` WSL launcher (both
 # invoke an actual WSL distro rather than running this script in the
@@ -60,8 +61,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _extract_sh_functions(*names: str) -> str:
-    text = _INSTALL_SH.read_text(encoding="utf-8")
+def _extract_sh_functions(source: Path, *names: str) -> str:
+    text = source.read_text(encoding="utf-8")
     chunks = []
     for name in names:
         start = text.index(f"{name}()")
@@ -78,7 +79,12 @@ def _run_harness(
         "#!/bin/sh\nset -eu\n"
         f'PLUGIN_DIR="{plugin_dir}"\n'
         + _extract_sh_functions(
-            "_is_sre_module_mismatch",
+            _ENGINE_SH,
+            "test_is_sre_module_mismatch",
+        )
+        + "\n\n"
+        + _extract_sh_functions(
+            _INSTALL_SH,
             "_scrub_payload_build_artifacts",
             "_uv_pip_install_resilient",
         )

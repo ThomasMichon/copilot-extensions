@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-_INSTALL_SH = _PLUGIN_ROOT / "scripts" / "install.sh"
+_INSTALL_SH = _PLUGIN_ROOT.parents[1] / "libs" / "installer-engine" / "installer-engine.sh"
 # A bare shutil.which("bash") can resolve to a Windows App Execution Alias
 # stub or the classic `C:\Windows\System32\bash.exe` WSL launcher (both
 # invoke an actual WSL distro rather than running this script in the
@@ -75,7 +75,7 @@ def _run_harness(
     harness.write_text(
         "#!/bin/sh\nset -eu\n"
         + _extract_sh_functions(
-            "_is_sre_module_mismatch", "_is_venv_corruption", "_uv_venv_resilient"
+            "test_is_sre_module_mismatch", "test_is_venv_corruption", "invoke_uv_venv_resilient"
         )
         # Matches the real `_warn() { echo "  [WARN] $*" >&2; }` -- routed to
         # stderr so it never pollutes the wrapper's captured stdout payload.
@@ -135,7 +135,7 @@ uv() {{
 }}
 """
     extra = f"""
-if out=$(_uv_venv_resilient '{venv_dir}' --python 3.10 --allow-existing); then
+if out=$(invoke_uv_venv_resilient uv '{venv_dir}' --python 3.10 --allow-existing); then
     echo "EXIT:0"
 else
     echo "EXIT:1"
@@ -174,7 +174,7 @@ uv() {{
 }}
 """
     extra = f"""
-if out=$(_uv_venv_resilient '{venv_dir}' --allow-existing); then
+if out=$(invoke_uv_venv_resilient uv '{venv_dir}' --allow-existing); then
     echo "EXIT:0"
 else
     echo "EXIT:1"
@@ -204,18 +204,18 @@ uv() {{
 }}
 """
     extra = f"""
-if out=$(_uv_venv_resilient '{venv_dir}' --allow-existing); then
+if out=$(invoke_uv_venv_resilient uv '{venv_dir}' --allow-existing); then
     echo "EXIT:0"
 else
     echo "EXIT:1"
 fi
+echo "OUT:$out"
 """
     result = _run_harness(tmp_path, uv_stub, extra, delays_file)
     assert "uv venv hit a transient" not in result.stderr
     assert "pyvenv.cfg is missing" not in result.stderr
     assert "EXIT:1" in result.stdout
-    # The wrapper's final (unretried) failure payload goes to stderr.
-    assert "error: network unreachable" in result.stderr
+    assert "OUT:error: network unreachable" in result.stdout
     # Only one attempt -- an unrelated failure must not trigger the retry.
     assert counter_file.read_text(encoding="utf-8").strip() == "1"
     assert _delays(delays_file) == []
@@ -237,7 +237,7 @@ uv() {{
 }}
 """
     extra = f"""
-if out=$(_uv_venv_resilient '{venv_dir}' --allow-existing); then
+if out=$(invoke_uv_venv_resilient uv '{venv_dir}' --allow-existing); then
     echo "EXIT:0"
 else
     echo "EXIT:1"

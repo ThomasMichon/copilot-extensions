@@ -10,6 +10,7 @@ import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
 INSTALLER = PLUGIN / "scripts" / "install.ps1"
+ENGINE = PLUGIN.parents[1] / "libs" / "installer-engine" / "installer-engine.ps1"
 
 pytestmark = pytest.mark.guard
 
@@ -27,22 +28,26 @@ def _function_source(source: str, name: str, next_marker: str) -> str:
 
 def test_first_use_installer_captures_python_probes_and_bootstraps_uv():
     installer = INSTALLER.read_text(encoding="utf-8")
+    engine = ENGINE.read_text(encoding="utf-8")
 
     native_capture = _function_source(
-        installer, "Invoke-NativeCapture", "\nfunction Ensure-Uv {"
+        engine, "Invoke-NativeCapture", "\nfunction Test-IsSreModuleMismatch {"
     )
-    ensure_uv = _function_source(installer, "Ensure-Uv", "\nfunction Get-PayloadHash {")
+    ensure_uv = _function_source(engine, "Ensure-Uv", "\nfunction Get-SignedBasePython {")
+    bridge_ensure_uv = _function_source(installer, "Ensure-Uv", "\nfunction New-SignedVenv {")
     signed_venv = _function_source(
-        installer, "New-SignedVenv", "\nfunction Install-SiblingPlugins {"
+        engine, "New-SignedVenv", "\nfunction Write-DeployManifest {"
     )
     update = _function_source(installer, "Invoke-Update", "\n# -- Dispatch")
 
+    assert ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')" in installer
     assert "$exitCode = 1" in native_capture
     assert "} catch {" in native_capture
-    assert "$env:AGENT_BRIDGE_UV_BOOTSTRAP_URL" in ensure_uv
-    assert "$env:AGENT_BRIDGE_UV_BOOTSTRAP_SHA256" in ensure_uv
-    assert "$uvVersion = '0.12.6'" in ensure_uv
-    assert "/releases/download/$uvVersion/{asset}" in ensure_uv
+    assert "$env:AGENT_BRIDGE_UV_BOOTSTRAP_URL" in bridge_ensure_uv
+    assert "$env:AGENT_BRIDGE_UV_BOOTSTRAP_SHA256" in bridge_ensure_uv
+    assert "Ensure-UvShared -InstallRoot $InstallDir" in bridge_ensure_uv
+    assert "[string]$BootstrapVersion = '0.12.6'" in ensure_uv
+    assert '/releases/download/$BootstrapVersion/$asset' in ensure_uv
     assert "/releases/latest/" not in ensure_uv
     assert "[Security.Cryptography.SHA256]::Create()" in ensure_uv
     assert "$sha256.ComputeHash($archiveStream)" in ensure_uv
@@ -52,8 +57,9 @@ def test_first_use_installer_captures_python_probes_and_bootstraps_uv():
     assert "'uv.exe'" in ensure_uv
     assert "'uvx.exe'" in ensure_uv
     assert "Invoke-UvVenvResilient" in signed_venv
-    assert "-Arguments @('--python', '3.10', '--allow-existing')" in signed_venv
-    assert "-Arguments @('--allow-existing')" in signed_venv
+    assert "$arguments = @('--python', $PythonVersion)" in signed_venv
+    assert "if ($AllowExisting) { $arguments += '--allow-existing' }" in signed_venv
+    assert "if ($AllowExisting) { $fallbackArgs += '--allow-existing' }" in signed_venv
     assert "if (-not (Ensure-Uv)) { exit 1 }" in update
 
 
@@ -74,8 +80,9 @@ def test_powershell_51_corrupt_cached_uv_fails_cleanly(tmp_path: Path):
         pytest.skip("Windows PowerShell 5.1 is unavailable")
 
     installer = INSTALLER.read_text(encoding="utf-8")
+    engine = ENGINE.read_text(encoding="utf-8")
     native_capture = _function_source(
-        installer, "Invoke-NativeCapture", "\nfunction Ensure-Uv {"
+        engine, "Invoke-NativeCapture", "\nfunction Test-IsSreModuleMismatch {"
     )
     ensure_uv = _function_source(installer, "Ensure-Uv", "\nfunction Get-PayloadHash {")
 
@@ -143,8 +150,9 @@ def test_powershell_51_rejects_uv_archive_with_wrong_digest(tmp_path: Path):
         pytest.skip("Windows PowerShell 5.1 is unavailable")
 
     installer = INSTALLER.read_text(encoding="utf-8")
+    engine = ENGINE.read_text(encoding="utf-8")
     native_capture = _function_source(
-        installer, "Invoke-NativeCapture", "\nfunction Ensure-Uv {"
+        engine, "Invoke-NativeCapture", "\nfunction Test-IsSreModuleMismatch {"
     )
     ensure_uv = _function_source(installer, "Ensure-Uv", "\nfunction Get-PayloadHash {")
 
@@ -241,5 +249,17 @@ def test_powershell_51_stamp_succeeds(tmp_path: Path):
     )
 
     assert proc.returncode == 0, proc.stderr
-    assert (home / ".agent-bridge" / "payload-dir").is_file()
+    payload_dir = home / ".agent-bridge" / "payload-dir"
+    assert payload_dir.is_file()
     assert (home / ".local" / "bin" / "agent-bridge.cmd").is_file()
+    snapshot = Path(payload_dir.read_text(encoding="utf-8").strip())
+    assert (snapshot / "scripts" / "installer-engine.ps1").is_file()
+    assert (snapshot / "scripts" / "installer-engine.sh").is_file()
+    assert (snapshot / "scripts" / "install.ps1").is_file()
+    assert (snapshot / "scripts" / "install.sh").is_file()
+    assert ". (Join-Path $PSScriptRoot 'installer-engine.ps1')" in (
+        snapshot / "scripts" / "install.ps1"
+    ).read_text(encoding="utf-8")
+    assert '. "$SCRIPT_DIR/installer-engine.sh"' in (
+        snapshot / "scripts" / "install.sh"
+    ).read_text(encoding="utf-8")
