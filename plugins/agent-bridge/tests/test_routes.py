@@ -1118,6 +1118,22 @@ class TestAgentRoutes:
         assert resp.json()["topology_errors"] == []
         assert resp.json()["topology_warnings"] == []
 
+    def test_list_agents_no_resolver_returns_pre_3b_bare_shape(self, client, app) -> None:
+        """A resolver-absent daemon must return the exact pre-3b
+        ``{"agents": []}`` payload -- never the 4-key shape (that one is
+        reserved for a resolver that *exists* but whose topology/cache
+        isn't ready yet) -- so an old client's assumptions about this
+        degenerate shape keep holding byte-for-byte."""
+        app.state.resolver = None
+        resp = client.get("/api/v1/agents")
+        assert resp.status_code == 200
+        assert resp.json() == {"agents": []}
+
+    def test_list_agents_no_resolver_require_complete_503s(self, client, app) -> None:
+        app.state.resolver = None
+        resp = client.get("/api/v1/agents?require_complete=true")
+        assert resp.status_code == 503
+
     def test_list_agents_reports_incomplete_namespaces(self, client, app) -> None:
         """The route must actually serialize `incomplete_namespaces` through
         to the wire -- a resolver-level unit test alone can't catch a typo'd
@@ -1143,6 +1159,199 @@ class TestAgentRoutes:
         resp = client.get("/api/v1/agents")
         assert resp.status_code == 200
         assert resp.json()["incomplete_namespaces"] == ["broken"]
+
+    def test_list_agents_uses_roster_cache_when_present(self, client, app) -> None:
+        """When ``app.state.agent_roster_cache`` is wired up, the route must
+        read through it (an O(1) cache hit) rather than re-scanning the
+        resolver directly on every request."""
+        from agent_bridge.agent_registry_cache import AgentRosterSnapshot
+
+        resolver = AgentResolver({}, {})
+        app.state.resolver = resolver
+
+        class _FakeCache:
+            def __init__(self, resolver):
+                self.resolver = resolver
+                self.calls = []
+
+            async def get_snapshot(self, *, force_refresh=False):
+                self.calls.append(force_refresh)
+                return AgentRosterSnapshot(
+                    rows=[{"name": "codespace:cs-1"}],
+                    incomplete_namespaces=["other"],
+                    complete=False,
+                )
+
+            async def stop(self):
+                pass
+
+        fake_cache = _FakeCache(resolver)
+        app.state.agent_roster_cache = fake_cache
+
+        resp = client.get("/api/v1/agents")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["agents"] == [{"name": "codespace:cs-1"}]
+        assert body["incomplete_namespaces"] == ["other"]
+        assert fake_cache.calls == [False]
+
+    def test_list_agents_force_refresh_param_passed_through_to_cache(
+        self, client, app,
+    ) -> None:
+        from agent_bridge.agent_registry_cache import AgentRosterSnapshot
+
+        resolver = AgentResolver({}, {})
+        app.state.resolver = resolver
+
+        class _FakeCache:
+            def __init__(self, resolver):
+                self.resolver = resolver
+                self.calls = []
+
+            async def get_snapshot(self, *, force_refresh=False):
+                self.calls.append(force_refresh)
+                return AgentRosterSnapshot(rows=[], incomplete_namespaces=[], complete=True)
+
+            async def stop(self):
+                pass
+
+        fake_cache = _FakeCache(resolver)
+        app.state.agent_roster_cache = fake_cache
+
+        resp = client.get("/api/v1/agents?force_refresh=true")
+        assert resp.status_code == 200
+        assert fake_cache.calls == [True]
+
+    def test_list_agents_require_complete_raises_503_when_cache_incomplete(
+        self, client, app,
+    ) -> None:
+        from agent_bridge.agent_registry_cache import AgentRosterSnapshot
+
+        resolver = AgentResolver({}, {})
+        app.state.resolver = resolver
+
+        class _IncompleteCache:
+            def __init__(self, resolver):
+                self.resolver = resolver
+
+            async def get_snapshot(self, *, force_refresh=False):
+                return AgentRosterSnapshot(
+                    rows=[], incomplete_namespaces=["codespace"], complete=False,
+                )
+
+            async def stop(self):
+                pass
+
+        app.state.agent_roster_cache = _IncompleteCache(resolver)
+
+        resp = client.get("/api/v1/agents?require_complete=true")
+        assert resp.status_code == 503
+
+        # Without require_complete, the exact same incomplete cache state
+        # still returns a plain 200 -- the fail-closed contract is strictly
+        # opt-in, never the default.
+        resp = client.get("/api/v1/agents")
+        assert resp.status_code == 200
+        assert resp.json()["incomplete_namespaces"] == ["codespace"]
+
+    def test_list_agents_require_complete_200_when_cache_complete(
+        self, client, app,
+    ) -> None:
+        from agent_bridge.agent_registry_cache import AgentRosterSnapshot
+
+        resolver = AgentResolver({}, {})
+        app.state.resolver = resolver
+
+        class _CompleteCache:
+            def __init__(self, resolver):
+                self.resolver = resolver
+
+            async def get_snapshot(self, *, force_refresh=False):
+                return AgentRosterSnapshot(rows=[], incomplete_namespaces=[], complete=True)
+
+            async def stop(self):
+                pass
+
+        app.state.agent_roster_cache = _CompleteCache(resolver)
+
+        resp = client.get("/api/v1/agents?require_complete=true")
+        assert resp.status_code == 200
+
+    def test_list_agents_require_complete_503_before_topology_ready(
+        self, client, app,
+    ) -> None:
+        """Daemon startup before any discovery has ever completed: a
+        `require_complete` caller gets `503`, never a `200` with an empty
+        body that looks like a clean, authoritative roster."""
+        app.state.topology_ready = False
+
+        resp = client.get("/api/v1/agents?require_complete=true")
+        assert resp.status_code == 503
+
+        # The default (no require_complete) caller is completely unaffected --
+        # this is the exact same pre-3b placeholder behavior.
+        resp = client.get("/api/v1/agents")
+        assert resp.status_code == 200
+        assert resp.json()["agents"] == []
+
+    def test_list_agents_require_complete_503_when_cache_missing_or_mismatched(
+        self, client, app,
+    ) -> None:
+        """A `require_complete` caller against a topology-ready daemon with
+        no usable cache (e.g. a transient resolver/cache mismatch mid
+        background-readiness retry) must still fail closed -- the daemon
+        genuinely advertises the capability, so this must never silently
+        degrade to the same plain response an old, non-advertising daemon
+        would give."""
+        resolver = AgentResolver({}, {})
+        app.state.resolver = resolver
+        app.state.agent_roster_cache = None
+
+        resp = client.get("/api/v1/agents?require_complete=true")
+        assert resp.status_code == 503
+
+        # Without require_complete, the same missing-cache state still
+        # degrades to the pre-3b per-call scan, unaffected.
+        resp = client.get("/api/v1/agents")
+        assert resp.status_code == 200
+
+    def test_list_agents_stale_cache_bound_to_different_resolver_falls_back(
+        self, client, app,
+    ) -> None:
+        """A cache left bound to a resolver this request's
+        ``app.state.resolver`` no longer is (e.g. a resolver hot-swap the
+        cache wasn't part of) must be treated as unusable -- the identity
+        check (``cache.resolver is resolver``), not merely "a cache
+        object exists" -- falling back to the pre-3b per-call scan rather
+        than silently serving a different resolver's cached rows."""
+        from agent_bridge.agent_registry_cache import AgentRosterSnapshot
+
+        old_resolver = AgentResolver({}, {})
+        new_resolver = AgentResolver({}, {})
+        app.state.resolver = new_resolver
+
+        class _StaleCache:
+            def __init__(self, resolver):
+                self.resolver = resolver
+                self.called = False
+
+            async def get_snapshot(self, *, force_refresh=False):
+                self.called = True  # pragma: no cover - must never be called
+                return AgentRosterSnapshot(rows=[], incomplete_namespaces=[], complete=True)
+
+            async def stop(self):
+                pass
+
+        stale_cache = _StaleCache(old_resolver)
+        app.state.agent_roster_cache = stale_cache
+
+        resp = client.get("/api/v1/agents?require_complete=true")
+        assert resp.status_code == 503
+        assert stale_cache.called is False
+
+        resp = client.get("/api/v1/agents")
+        assert resp.status_code == 200
+        assert stale_cache.called is False
 
     def test_machine_routes_include_static_metadata(self, client, app) -> None:
         machine = MachineConfig(

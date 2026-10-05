@@ -1,0 +1,9 @@
+{
+  "comment": "pivot-streaming-transport Phase 3b: agent-bridge daemon-side agent-roster background cache fronting GET /api/v1/agents",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

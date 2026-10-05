@@ -39,7 +39,7 @@ def _args(**kwargs) -> SimpleNamespace:
 def test_stream_emits_begin_row_done_envelope(monkeypatch):
     monkeypatch.setattr(
         ic, "_fetch_agent_rows",
-        lambda args: (
+        lambda args, **_kwargs: (
             [{"name": "a", "target_type": "ssh"}, {"name": "b", "target_type": "local"}],
             [], True,
         ),
@@ -55,7 +55,7 @@ def test_stream_emits_begin_row_done_envelope(monkeypatch):
 def test_stream_without_subscribe_fetches_once(monkeypatch):
     calls = {"n": 0}
 
-    def fetch(args):
+    def fetch(args, force_refresh=False, require_complete=False):
         calls["n"] += 1
         return [], [], True
 
@@ -66,7 +66,7 @@ def test_stream_without_subscribe_fetches_once(monkeypatch):
 
 
 def test_stream_error_frame_on_initial_fetch_failure(monkeypatch):
-    def fetch(args):
+    def fetch(args, force_refresh=False, require_complete=False):
         raise RuntimeError("bridge unavailable")
 
     monkeypatch.setattr(ic, "_fetch_agent_rows", fetch)
@@ -88,7 +88,7 @@ def test_initial_scan_retries_past_incomplete_namespace(monkeypatch):
     ]
     calls = {"n": 0}
 
-    def fetch(args):
+    def fetch(args, force_refresh=False, require_complete=False):
         row = attempts[min(calls["n"], len(attempts) - 1)]
         calls["n"] += 1
         return row
@@ -108,7 +108,7 @@ def test_initial_scan_publishes_after_exhausting_retries(monkeypatch):
     bounded means bounded."""
     calls = {"n": 0}
 
-    def fetch(args):
+    def fetch(args, force_refresh=False, require_complete=False):
         calls["n"] += 1
         return [{"name": "local-agent"}], ["codespace"], True
 
@@ -125,7 +125,7 @@ def test_initial_scan_never_retries_capability_unknown(monkeypatch):
     there is no signal to wait for -- so it publishes on the first fetch."""
     calls = {"n": 0}
 
-    def fetch(args):
+    def fetch(args, force_refresh=False, require_complete=False):
         calls["n"] += 1
         return [{"name": "local-agent"}], [], False
 
@@ -136,12 +136,62 @@ def test_initial_scan_never_retries_capability_unknown(monkeypatch):
     assert calls["n"] == 1
 
 
+def test_initial_scan_503_on_intermediate_attempt_keeps_retrying(monkeypatch):
+    """A `require_complete=True` `503` on a non-final attempt must be
+    treated the same as "still incomplete" -- retried, not raised -- so a
+    transient blip during the bounded retry window doesn't abort the whole
+    initial scan early."""
+    from agent_bridge.client import BridgeClientError
+
+    attempts = [
+        BridgeClientError(503, "nothing authoritative to serve"),
+        ([{"name": "codespace:x"}, {"name": "local-agent"}], [], True),
+    ]
+    calls = {"n": 0}
+
+    def fetch(args, force_refresh=False, require_complete=False):
+        outcome = attempts[min(calls["n"], len(attempts) - 1)]
+        calls["n"] += 1
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(ic, "_fetch_agent_rows", fetch)
+    monkeypatch.setattr(ic.time, "sleep", lambda _secs: None)
+    rc, frames = _run_stream_capture(_args())
+    assert rc == 0
+    assert calls["n"] == 2
+    names = {f["entry"]["name"] for f in frames if f["type"] == "row"}
+    assert names == {"codespace:x", "local-agent"}
+
+
+def test_initial_scan_503_exhausted_surfaces_as_error(monkeypatch):
+    """A `require_complete=True` daemon that never has anything
+    authoritative to serve, across every bounded retry, must surface that
+    `503` as this initial scan's own visible failure -- never silently
+    publish a stale/partial roster as if it were complete."""
+    from agent_bridge.client import BridgeClientError
+
+    calls = {"n": 0}
+
+    def fetch(args, force_refresh=False, require_complete=False):
+        calls["n"] += 1
+        raise BridgeClientError(503, "nothing authoritative to serve")
+
+    monkeypatch.setattr(ic, "_fetch_agent_rows", fetch)
+    monkeypatch.setattr(ic.time, "sleep", lambda _secs: None)
+    rc, frames = _run_stream_capture(_args())
+    assert rc == 1
+    assert calls["n"] == ic.INITIAL_SCAN_MAX_RETRIES + 1
+    assert frames[0]["type"] == "error"
+
+
 def test_fetch_agent_rows_raises_on_topology_errors(monkeypatch):
     """A topology-profile error must not silently vanish under --stream --
     it's framed as the initial-fetch failure (same contract as a connection
     error), never swallowed."""
     class Client:
-        def list_agents_with_incomplete(self):
+        def list_agents_with_incomplete(self, *, force_refresh=False, require_complete=False):
             return [{"name": "a", "project": None}], ["broken: machines.yaml"], [], True
 
     monkeypatch.setattr(ic._core(), "_get_client", lambda: Client())
@@ -157,7 +207,7 @@ def test_fetch_agent_rows_returns_incomplete_namespaces(monkeypatch):
     alongside the (partial) roster, not raised, since the roster itself is
     still usable; only the diff step needs to know about it."""
     class Client:
-        def list_agents_with_incomplete(self):
+        def list_agents_with_incomplete(self, *, force_refresh=False, require_complete=False):
             return [{"name": "a", "project": None}], [], ["codespace"], True
 
     monkeypatch.setattr(ic._core(), "_get_client", lambda: Client())
@@ -176,7 +226,7 @@ def test_subscribe_emits_delta_and_removed_frames(monkeypatch):
     ]
     calls = {"n": 0}
 
-    def fetch(args):
+    def fetch(args, force_refresh=False, require_complete=False):
         if calls["n"] < len(snapshots):
             snapshot = snapshots[calls["n"]]
             calls["n"] += 1
@@ -211,7 +261,7 @@ def test_subscribe_suppresses_removal_from_incomplete_namespace(monkeypatch):
     ]
     calls = {"n": 0}
 
-    def fetch(args):
+    def fetch(args, force_refresh=False, require_complete=False):
         if calls["n"] < len(snapshots):
             snapshot = snapshots[calls["n"]]
             calls["n"] += 1
@@ -250,7 +300,7 @@ def test_subscribe_suppresses_all_namespaced_removals_when_capability_unknown(
     ]
     calls = {"n": 0}
 
-    def fetch(args):
+    def fetch(args, force_refresh=False, require_complete=False):
         if calls["n"] < len(snapshots):
             snapshot = snapshots[calls["n"]]
             calls["n"] += 1
@@ -270,7 +320,7 @@ def test_subscribe_suppresses_all_namespaced_removals_when_capability_unknown(
 def test_subscribe_skips_transient_fetch_failure(monkeypatch):
     calls = {"n": 0}
 
-    def fetch(args):
+    def fetch(args, force_refresh=False, require_complete=False):
         calls["n"] += 1
         if calls["n"] == 1:
             return [{"name": "a"}], [], True

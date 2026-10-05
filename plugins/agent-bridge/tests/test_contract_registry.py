@@ -107,6 +107,7 @@ def test_http_protocol_constant_fixture_matches_production() -> None:
             bridge_protocol.CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION
         ),
         "live_session_alias": bridge_protocol.LIVE_SESSION_ALIAS_PROTOCOL_VERSION,
+        "agent_roster_cache": bridge_protocol.AGENT_ROSTER_CACHE_PROTOCOL_VERSION,
     }
 
 
@@ -195,6 +196,33 @@ def test_session_create_response_fixture_matches_model() -> None:
         status=expected["status"],
     )
     assert response.model_dump(mode="json") == expected
+
+
+@pytest.mark.asyncio
+async def test_agents_list_response_fixture_matches_route_serialization() -> None:
+    """The ``agent-roster-cache`` capability (generation 22): with a
+    resolver present (topology ready, no empty roster yet scanned/cached),
+    ``GET /api/v1/agents`` must produce exactly the registered empty-roster
+    shape -- the same default, non-``require_complete`` response shape
+    every pre-3b caller already relies on. (A *resolver-absent* daemon is a
+    distinct, even more degenerate case -- see
+    ``test_list_agents_no_resolver_returns_pre_3b_bare_shape`` in
+    ``test_routes.py`` -- covered separately, not by this fixture.)"""
+    from agent_bridge.agent_registry import AgentResolver
+    from agent_bridge.routes.agents import list_agents
+
+    fixture = _fixture("fixtures/http/current/agents-list-response.json")
+    expected = fixture["response"]["json"]
+    resolver = AgentResolver({}, {})
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                resolver=resolver, topology_ready=True, agent_roster_cache=None,
+            ),
+        ),
+    )
+    actual = await list_agents(request)
+    assert actual == expected
 
 
 def test_representative_error_fixture_matches_route() -> None:
