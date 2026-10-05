@@ -1,0 +1,9 @@
+{
+  "comment": "Never self-overwrite the running version slot; non-destructive reinstall failure path (#5219)",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
