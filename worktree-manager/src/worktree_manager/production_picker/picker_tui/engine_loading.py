@@ -74,7 +74,14 @@ class PickerScreenLoadingMixin:
         # than blocking on it; the deferred poll corrects it moments later,
         # same always-async-then-refine pattern used elsewhere in this file.
         self.update_state = "idle"
-        self._upd_poll_frame = -1
+        # picker-performance-and-responsiveness Phase A: wall-clock throttle
+        # state for ``_poll_update_state`` (not a frame counter -- the old
+        # ``_upd_poll_frame`` was never actually read anywhere, a dead stub
+        # for a throttle that hadn't been wired up yet). Starting at 0.0
+        # (not ``time.monotonic()``) lets the very first poll fire on this
+        # first ``call_after_refresh`` regardless of ``UPDATE_STATE_POLL_SECS``.
+        self._last_update_state_poll = 0.0
+        self._update_state_poll_pending = False
         self.call_after_refresh(self._poll_update_state)
         # Manager-self update check (distinct from update_state above, which
         # is the engine/marketplace payload's own staged-update signal --
@@ -86,6 +93,10 @@ class PickerScreenLoadingMixin:
         # fetch here.
         self.manager_update_state = "idle"
         self.call_after_refresh(self._poll_manager_update_state)
+        # Local claims-orphanage (worktree-claims-transitive-finalization
+        # Phase 4 item 2) -- same deferred-first-check shape as the two
+        # polls above.
+        self.call_after_refresh(self._poll_orphan_state)
         # ~10 fps drives the SSH spinner and the slower live-glyph pulse.
         self.set_interval(0.1, self._tick)
     def _setup_skeleton(self):
@@ -137,6 +148,8 @@ class PickerScreenLoadingMixin:
         self.grid = {}
         self.applied = {}
         self._prof_unavailable = set()
+        # (self._orphans / self._orphans_checked_at are initialized in
+        # __init__, not here -- see that comment for why.)
     def _load_config_cache_scope(self):
         """This Picker instance's shared, TTL-bounded config-cache scope.
 

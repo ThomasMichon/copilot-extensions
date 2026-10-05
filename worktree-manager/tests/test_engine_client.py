@@ -514,6 +514,40 @@ def test_list_worktree_sessions_parses_rows(monkeypatch):
     assert ec.list_worktree_sessions("dotfiles", "wt-ab12") == payload["sessions"]
 
 
+def test_orphaned_obligations_parses_rows(monkeypatch):
+    payload = {
+        "orphaned": [
+            {"kind": "codespace", "ref": "cs-1", "source_worktree": "wt-old",
+             "abandoned_at": "2026-10-01T00:00:00"},
+        ],
+        "count": 1,
+    }
+    calls = []
+
+    def handler(cmd, kw):
+        calls.append(cmd)
+        return _fake_completed(cmd, stdout=json.dumps(payload))
+
+    _install_fake(monkeypatch, handler)
+    assert ec.orphaned_obligations("dotfiles") == payload["orphaned"]
+    assert any("orphans" in part for cmd in calls for part in cmd)
+
+
+def test_orphaned_obligations_degrades_to_empty_on_engine_error(monkeypatch):
+    """An older engine predating ``claims orphans`` (or any other engine
+    failure) must never surface as a Picker crash -- this is a visibility
+    nicety, not a required capability (see the function's own docstring)."""
+    _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
+        cmd, returncode=2, stderr="unrecognized arguments: orphans"))
+    assert ec.orphaned_obligations("dotfiles") == []
+
+
+def test_orphaned_obligations_tolerates_a_non_list_or_missing_field(monkeypatch):
+    _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
+        cmd, stdout=json.dumps({"count": 0})))
+    assert ec.orphaned_obligations("dotfiles") == []
+
+
 def test_recent_worktree_messages_returns_envelope(monkeypatch):
     payload = {
         "version": 1,

@@ -8,7 +8,7 @@
   [agent-dispatch](../README.md) plugin vision, sibling to the
   [reviewer](../reviewer/README.md) child vision)
 - **Status:** Draft
-- **Last revised:** 2026-09-05
+- **Last revised:** 2026-10-04
 - **Reality docs:** `plugins/agent-dispatch/src/agent_dispatch/repository_issue_loops.py` ·
   `plugins/agent-dispatch/src/agent_dispatch/supervisor.py`
 
@@ -26,9 +26,8 @@ Adoption should be as easy for a colleague on an unfamiliar team as it is for
 its original author: declaring a new loop over a new backlog is authoring one
 small declaration, not learning or forking the engine. The same declarative
 engine should work equally over any backlog whose items can be listed,
-reserved, and settled through a provider adapter — GitHub issues today, an
-Azure DevOps (or other work-tracking) backlog tomorrow — without a
-backlog-specific rewrite of the engine itself.
+reserved, and settled through a provider adapter, without a backlog-specific
+rewrite of the engine itself.
 
 ## Concepts & Components
 
@@ -36,16 +35,18 @@ backlog-specific rewrite of the engine itself.
 
 A repository supplies one small, validated declaration: its backlog source
 and provider, eligibility (labels/fields, quiet period, batch size,
-priority), cadence, and acting identity. The declaration is the entire
-adoption surface; it carries no orchestration logic.
+priority), cadence, and acting identity. In the common case that declaration
+extends a plugin-shipped recipe base rather than spelling out the full loop
+shape directly. The declaration is the entire adoption surface; it carries no
+orchestration logic.
 
 ### The backlog provider
 
 Backlog capabilities are exposed through one coherent, provider-neutral
 surface: list open items, reserve one, claim it under a task, and release it.
 Loop policy composes this surface instead of embedding provider-specific
-listing, reservation-marker, and mutation code per backlog kind. GitHub issues
-and an Azure DevOps backlog are both, to the loop, just a `backlog provider`.
+listing, reservation-marker, and mutation code per backlog kind. Any adopted
+backlog is, to the loop, just a `backlog provider`.
 
 ### The worker identity
 
@@ -67,17 +68,19 @@ deferred, or durably blocked), and settles before the next occurrence begins.
 ### declarative-turnkey-adoption
 
 Adopting a new backlog is authoring one declaration and pointing it at a
-worker identity — no engine code, no bespoke scripts, no repository-specific
-orchestration. A colleague unfamiliar with the runtime's internals can stand
-up a new loop from the declaration schema and existing worker identities
-alone.
+worker identity — usually by extending a shipped recipe base, not by
+rewriting the loop. The raw `repository-issue-loop` engine is available when a
+consumer needs the bare backlog primitive; named shared specializations such as
+`backlog-triager`, `issue-reproducer`, and `effort-builder` exist when the
+shared contract is already known. Either way, no engine code, bespoke scripts,
+or repository-specific orchestration should be required merely to stand up the
+loop.
 
 ### provider-neutral-backlog-capability
 
 The reusable backlog-provider surface covers the common list/reserve/claim/
 release operations across supported backlog kinds. Provider differences stay
-behind adapters (GitHub issues, Azure DevOps work items, and others as
-adopted); loop policy, eligibility, and batching never reimplement
+behind adapters; loop policy, eligibility, and batching never reimplement
 provider-specific listing or mutation.
 
 ### declarative-worker-identity

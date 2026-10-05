@@ -25,6 +25,7 @@ from agent_logger.repo_trust import _normalize_git_remote
 from agent_logger.segmenter import prepare_log
 from agent_logger.segmenter.platform import detect_machine, sanitize_path_component
 
+from .conftest import git_test_env as _git_test_env
 from .conftest import init_git_repo as _init_git_repo
 
 
@@ -821,6 +822,8 @@ def test_repo_config_ignored_on_conflicting_registered_default_branches(
             "https://example.test/example-owner/other.git",
         ],
         check=True,
+        env=_git_test_env(),
+        timeout=20,
     )
     (repo / ".agent-logger.yaml").write_text(
         "log:\n  path_template: logs/{title}.md\n", encoding="utf-8"
@@ -893,6 +896,8 @@ def test_repo_config_ignores_global_git_config_remote(
             "https://example.test/example-owner/demo.git",
         ],
         check=True,
+        env=_git_test_env(),
+        timeout=20,
     )
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(fake_global))
     monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)

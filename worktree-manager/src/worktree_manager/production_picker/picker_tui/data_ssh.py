@@ -932,7 +932,7 @@ _LOCAL: tuple[str, str] | None = None
 
 def __getattr__(name: str):
     global _LOCAL
-    if name in ("REPO", "BRANCH"):
+    if name in ("REPO", "BRANCH", "orphans"):
         return getattr(data_local, name)
     if name == "LOCAL":
         if _LOCAL is None:
