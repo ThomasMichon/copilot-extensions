@@ -1,7 +1,7 @@
-"""Revision-history evaluator for the GitHub PR-state observer.
+"""Revision-history evaluator for reviewer-side PR-state observers.
 
-Phase 10 item 3, third slice: :mod:`agent_dispatch.github_provider_adapter`
-observes a PR's *current* raw state, but a single snapshot cannot tell
+Phase 10 item 3, third slice: the provider adapters observe a PR's *current*
+raw state, but a single snapshot cannot tell
 whether an existing ``APPROVED`` verdict still covers the PR's current head
 -- that is a function of *two* observations over time, per
 :func:`agent_dispatch.provider_state_machine.classify_revision_change`. This

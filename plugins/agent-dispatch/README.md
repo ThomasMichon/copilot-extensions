@@ -692,20 +692,24 @@ An optional top-level `stale_after_days` adds a reviewer-lifecycle stale-exit
 policy to the declaration's evaluator registration. When set, submitted
 verification abandons a reviewer task once the target change's last commit is
 older than that many days. The timestamp may come from inline reviewer metadata
-(`payload_inline.reviewer_loop.last_commit_at`) or, for the standard
-GitHub-backed flow, from a `payload_ref` like `github-pr:owner/repo#123`
-resolved through the persisted PR-observation cache. Suspended reviewer tasks
-also use the same deadline to wake a parked hibernation waiter instead of
-remaining dormant forever. The threshold is per declaration; omitting the key
-disables stale-exit checking entirely.
+(`payload_inline.reviewer_loop.last_commit_at`) or, for the built-in
+provider-backed flows, from a `payload_ref` like
+`github-pr:owner/repo#123` or
+`azure-devops-pr:organization/project/repository#123` resolved through the
+persisted PR-observation cache. Suspended reviewer tasks also use the same
+deadline to wake a parked hibernation waiter instead of remaining dormant
+forever. The threshold is per declaration; omitting the key disables
+stale-exit checking entirely.
 
 **Provider state today.** The reusable `reviewer-loop` lifecycle is recipe-able
 today (`global:reviewer` / `global:conflict-resolution` in the `extends:`
-registry below), but the forge-facing review capability is still only realized
-for GitHub. The GitHub-backed review producer / observation / verdict path is
-implemented; equivalent Azure DevOps and Gitea reviewer adapters for author /
-reviewer relationships, verdict posting, and merge-or-close state have not been
-built yet.
+registry below). Its read-side provider observation path is realized for
+GitHub and Azure DevOps (provider-backed `payload_ref` parsing, persisted
+observation lookup for stale-exit checks, and a read-only Azure DevOps PR
+adapter alongside the existing GitHub one). The forge-facing webhook receiver
+and the worker's direct verdict-posting / merge-or-close action path remain
+GitHub-shaped today: Azure DevOps currently relies on the polling/read path,
+and Gitea remains deferred to a structural stub only.
 
 ```bash
 agent-dispatch reviewer-loop setup .copilot-extensions/agent-dispatch/registrar/reviewer-loop.json
@@ -998,11 +1002,12 @@ remaining provider boundaries:
 - Backlog-side provider neutrality is realized for GitHub and Azure DevOps.
   Gitea remains a declared future adapter slot and is still validation-rejected
   pending the real implementation (`ThomasMichon/copilot-extensions#4825`).
-- Reviewer-side provider neutrality is only partially realized today. The
-  `reviewer-loop` engine and its `global:reviewer` /
-  `global:conflict-resolution` recipes exist, but their forge-facing review
-  producer / verdict path is still GitHub-only; Azure DevOps and Gitea reviewer
-  adapters remain future work.
+- Reviewer-side provider neutrality is still partial. The `reviewer-loop`
+  engine and its `global:reviewer` / `global:conflict-resolution` recipes
+  exist, and the read-side observation adapter surface now covers GitHub and
+  Azure DevOps; however, the forge-facing webhook receiver plus the worker's
+  direct verdict-posting / merge-or-close action path are still GitHub-shaped,
+  while Gitea remains the deferred future adapter slot.
 - For `global:backlog-triager`, `global:issue-reproducer`,
   `global:effort-builder`, and `global:effort-driver`, the shared recipe stops
   at the reusable lifecycle contract. The consuming repo still supplies its own
