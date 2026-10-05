@@ -355,18 +355,53 @@ risk wedging everything").
       `test_liveness_gc_publishes_a_bus_event_for_auto_suspend_with_zero_requeued`
       (HTTP 409 in liveness-GC/board-relay interaction). **Landed
       2026-10-05**, PR #5355 -- see Journal.
-- [ ] Root-cause and fix (or file) the remaining real, reproducible
-      findings from the full-matrix pass: `agent-logger`'s
-      Windows `MAX_PATH` (260-char) `bdist_wheel`/`install_egg_info` build
-      failure during cold snapshot provisioning (confirmed with TWO
-      different vendored libs -- `agent-config-migrate` and
-      `agent-plugin-activation` -- so it's a structural
-      deep-snapshot-path-length issue, not one library's own build
-      config); and 7 more `agent-logger` failures across
-      `test_chronicle.py`/`test_rescue_sync.py`/`test_scaffold.py`
-      (one -- `test_repo_config_validation_errors[...'C:\nas\sessions'...]`
-      -- looks like a genuine Windows-absolute-path validation bug, not a
-      flake).
+- [ ] Fix (or file) the remaining real, reproducible `agent-logger`
+      findings from the full-matrix pass (8 failures total, reconfirmed
+      2026-10-05 via `python tools/run-plugin-tests.py agent-logger
+      --timeout 600 --plugin-timeout 1200`):
+      - **`test_install_binstub.py::test_stamp_supports_first_use_provision_from_snapshot_only`**
+        -- the Windows `MAX_PATH` structural issue, root-caused precisely
+        this leg: `uv`'s `pip install` build of a vendored lib
+        (`agent-config-migrate` this run; `agent-plugin-activation`
+        previously -- confirms it's structural, not one library) fails
+        with `error: [Errno 2] No such file or directory:
+        'build\bdist.win-amd64\wheel\.\agent_config_migrate-0.1.0.dev2-py3.12.egg-info\dependency_links.txt'`
+        -- legacy `setuptools bdist_wheel`'s two-phase build (`build\lib\...`
+        then copy into `build\bdist.win-amd64\wheel\.\...`) pushes the full
+        path (snapshot dir + this relative build path) past Windows'
+        260-char `MAX_PATH`. Fix needs one of: enabling Windows long-path
+        support in the installer's own invocation (not a global registry
+        change an installer can assume), shortening the snapshot directory
+        structure, or moving these vendored libs off legacy `bdist_wheel`.
+      - **`test_chronicle.py`'s 3 failures** (`test_scan_uses_generic_provenance_when_origin_sidecar_is_absent`,
+        `test_newer_rescue_capture_is_a_distinct_chronicle_unit`,
+        `test_scan_validated_provenance_overrides_conflicting_origin`) --
+        same root cause: `FileNotFoundError: [WinError 3]` creating a path
+        under `.session-sync-rescue-captures\<64-hex>\<64-hex>` -- two
+        full SHA-256 hex path segments pushes a `tmp_path`-rooted pytest
+        temp path past `MAX_PATH` on this host. Likely the same
+        long-path-support fix as above, or hashing to a shorter digest
+        (e.g. truncated/base32) for the on-disk directory name.
+      - **`test_rescue_sync.py::test_failed_rollback_retains_recovery_backup`**
+        -- also `FileNotFoundError: [Errno 2]`, same deep-path family
+        (`.session-sync-replacement\<uuid>.active\old\session-state\...`);
+        needs its own confirmation it's the same `MAX_PATH` cause and not
+        a distinct rollback-bookkeeping bug (the original hypothesis).
+      - **`test_scaffold.py`'s 3 `sync.local_path` failures** -- root-caused
+        this leg: **not flakes or production bugs.** `_validate_native_absolute_path`
+        in `config.py` deliberately uses the *host-native* `Path(...).is_absolute()`
+        (its own docstring: "a foreign-platform path must never silently
+        resolve relative"), so on a Windows test host a POSIX-style
+        `/mnt/nas/...` genuinely is not absolute (correctly rejected) and
+        a Windows-style `C:\nas\sessions` genuinely *is* absolute
+        (correctly accepted) -- opposite of what these three test cases
+        assume, since they were written assuming a POSIX CI host. Fix is
+        in the **tests**, not `config.py`: make the `/mnt/nas/...`-success
+        case and the bare-`/`-root case platform-conditional (skip or
+        swap to a native-format equivalent on Windows), and drop
+        `'C:\nas\sessions'` from the "must be an absolute path" failure
+        parametrization entirely (it is a valid native-absolute path on
+        Windows, so it cannot belong in that failure list on this host).
 - [ ] `tools/run-plugin-tests.py`'s default 300s per-sub-suite wall-clock
       budget is too tight for `agent-dispatch`'s own 3rd 25-file sub-suite
       under real full-matrix host load (observed hitting `[LIMIT]
@@ -467,6 +502,41 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-05 — Phase 3.5: agent-logger's 8 remaining failures, root-caused (not yet fixed)
+Reconfirmed all 8 via `python tools/run-plugin-tests.py agent-logger
+--timeout 600 --plugin-timeout 1200` (the default 300s/900s budgets cut the
+run off before pytest's own summary printed). Precise diagnosis for each,
+now recorded in the Phase 3.5 Plan section above so the next session can
+implement directly rather than re-diagnosing:
+
+- The Windows `MAX_PATH` failure (`test_stamp_supports_first_use_provision_from_snapshot_only`)
+  is legacy `setuptools bdist_wheel`'s own two-phase `build\lib\...` ->
+  `build\bdist.win-amd64\wheel\.\...` copy pushing the full path (snapshot
+  dir + relative build path) past 260 chars -- `error: [Errno 2] No such
+  file or directory: '...\dependency_links.txt'`. Structural, confirmed
+  with `agent-config-migrate` this run (previously `agent-plugin-activation`).
+- `test_chronicle.py`'s 3 failures and `test_rescue_sync.py`'s 1 failure
+  are the *same* `MAX_PATH` family, not independent bugs: each builds a
+  pytest `tmp_path` path containing one or two full 64-char SHA-256 hex
+  segments (`.session-sync-rescue-captures\<hex>\<hex>`,
+  `.session-sync-replacement\<uuid>.active\...`), which on this host's
+  already-deep temp root exceeds 260 chars --
+  `FileNotFoundError: [WinError 3]` / `[Errno 2]`.
+- `test_scaffold.py`'s 3 `sync.local_path` failures are **not** a
+  production bug: `_validate_native_absolute_path` in `config.py`
+  deliberately checks host-native absoluteness (its own docstring: "a
+  foreign-platform path must never silently resolve relative"). On this
+  Windows host, `/mnt/nas/...` genuinely isn't absolute (correctly
+  rejected) and `C:\nas\sessions` genuinely *is* absolute (correctly
+  accepted) -- the opposite of what these POSIX-host-authored test cases
+  assume. The fix belongs in the tests (platform-conditional expectations
+  for the two POSIX-only cases; drop the `C:\nas\sessions` case from the
+  "must be an absolute path" failure parametrization, since it's a valid
+  native-absolute path on Windows).
+
+Did not implement fixes this leg (time-boxed after the agent-dispatch fix
+above) -- left for the next Next Slice item, with root cause already done.
 
 ### 2026-10-05 — Phase 3.5: agent-dispatch liveness-GC race fixed
 Continuing the full-matrix de-risking pass. Reproduced
