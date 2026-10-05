@@ -16,6 +16,12 @@ starts from what it was given: a new session, a resume of a different session
 (it never borrows another session's flags), ``--continue`` (no id to match),
 or explicit flags. A rejoin of a session that's already running changes
 nothing (its flags weren't applied), so it doesn't touch the record either.
+
+Its ``--forward`` ports (a worker's dev server, say) go the same way, but the
+Owner releases them with the stopped CodeSpace too: a resume of the recorded
+session that gives no ``--forward`` gets them back (see
+:func:`recall_forwards`), and a rejoin that sets them -- the Owner replaces a
+hold's forwards -- records the new ones. Reverse forwards are never recorded.
 """
 
 from __future__ import annotations
@@ -26,6 +32,7 @@ import os
 import re
 import uuid
 from pathlib import Path
+from typing import Any
 
 from venue_copilot import SESSION_SELECTORS
 
@@ -36,6 +43,25 @@ LAUNCHES_DIR = RUNTIME_DIR / "launches"
 DEFAULT_DRIVER = "cli-mode"
 
 _CODESPACE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,127}$")
+#: A recorded local forward, ``HOST_PORT:VENUE_PORT`` (``0:`` asks for any free host port).
+_FORWARD = re.compile(r"^(\d{1,5}):(\d{1,5})$")
+
+
+def _valid_forwards(specs: Any) -> bool:
+    """What :func:`copilot_detach.parse_local_forwards` would accept, as recorded
+    ``HOST:VENUE`` specs: a record that a resume couldn't launch with is no record."""
+    if not isinstance(specs, list):
+        return False
+    hosts: dict[int, int] = {}
+    for spec in specs:
+        match = _FORWARD.match(spec) if isinstance(spec, str) else None
+        if match is None:
+            return False
+        host, venue = int(match[1]), int(match[2])
+        if not (0 <= host < 65536 and 0 < venue < 65536) or hosts.get(host, venue) != venue:
+            return False
+        hosts[host] = venue
+    return True
 #: Selectors that name no session (so nothing can be matched to a record).
 _NO_ID = ("--continue",)
 
@@ -181,10 +207,12 @@ def _load(path: Path | None) -> dict:
     if not isinstance(data, dict):
         return {}
     args, driver = data.get("copilot_args"), data.get("driver")
+    forwards = data.get("local_forwards", [])
     if (
         not isinstance(data.get("tenant"), str) or not isinstance(data.get("session_id"), str)
         or not isinstance(args, list) or not all(isinstance(a, str) and a for a in args)
         or not isinstance(driver, str) or not driver
+        or not _valid_forwards(forwards)
     ):
         return {}
     return data
@@ -214,17 +242,61 @@ def apply(
     return own + selectors, driver, recalled
 
 
+def recall_forwards(
+    codespace: str, tenant: str, requested: list[str], local_forwards: list[str],
+) -> tuple[list[str], bool]:
+    """``(local forward specs, recalled)``: the ``--forward`` ports to launch
+    with. A resume of the recorded session by id that gives no ``--forward``
+    gets the session's recorded ones back; any ``--forward`` given replaces them
+    (as it does on the Connection Owner's hold). Independent of :func:`apply`:
+    a resume that changes its model still keeps its ports."""
+    if local_forwards:
+        return list(local_forwards), False
+    session_id = split_selectors(requested)[2]
+    record = _load(_path(codespace, tenant)) if session_id else {}
+    if record.get("tenant") != tenant or record.get("session_id") != session_id:
+        return [], False
+    specs = list(record.get("local_forwards") or [])
+    return specs, bool(specs)
+
+
+def forward_specs(local_forwards: dict[int, int]) -> list[str]:
+    """The parsed ``{host_port: venue_port}`` map as recordable ``HOST:VENUE`` specs."""
+    return [f"{host}:{venue}" for host, venue in local_forwards.items()]
+
+
+def remember_forwards(codespace: str, tenant: str, session_id: str, local_forwards: list[str]) -> None:
+    """A rejoin of the recorded session that set its ``--forward`` ports: keep
+    those as its ports from now on (its flags stay as recorded)."""
+    path = _path(codespace, tenant)
+    record = _load(path) if session_id else {}
+    if record.get("tenant") != tenant or record.get("session_id") != session_id:
+        return
+    _write(path, {**record, "local_forwards": list(local_forwards)})
+
+
 def remember(
     codespace: str, tenant: str, copilot_args: list[str], driver: str, session_id: str,
+    local_forwards: list[str] | None = None,
 ) -> None:
     """Record the flags a session was actually started with -- the final
     ``--copilot-arg`` list, host-propagated model flags included -- never a
-    session selector (a generated ``--session-id`` too)."""
+    session selector (a generated ``--session-id`` too), and the ``--forward``
+    ports it was started with. Its reverse forwards are never recorded: their
+    host end can move (a restarted host browser listens elsewhere), and opening
+    this host to the venue stays an explicit choice each launch."""
     path = _path(codespace, tenant)
     if path is None or not session_id:
         return
     data = {"tenant": tenant, "session_id": session_id,
-            "copilot_args": split_selectors(copilot_args)[0], "driver": driver}
+            "copilot_args": split_selectors(copilot_args)[0], "driver": driver,
+            "local_forwards": list(local_forwards or [])}
+    _write(path, data)
+
+
+def _write(path: Path | None, data: dict) -> None:
+    if path is None:
+        return
     # Owner-only (a record another local user could edit would inject flags,
     # permission flags included, into a later resume), atomic, like lease.py.
     tmp = path.with_name(f".{path.name}.tmp-{uuid.uuid4().hex}")

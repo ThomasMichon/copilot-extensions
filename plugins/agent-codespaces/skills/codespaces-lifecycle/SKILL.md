@@ -207,6 +207,14 @@ run with. Only a resume of that same session id with no other flags
 and no `--driver` reuses them -- never a new session, another
 session, `--continue`, or a launch with explicit flags -- and a rejoin of an
 already running session leaves the record alone.
+The record keeps the session's `--forward` ports as well, because the
+Connection Owner releases them along with a stopped CodeSpace's session: a
+resume of the recorded session id that passes no `--forward` re-adds them
+(`recalled` then lists `local_forwards`), whatever its other flags; any
+`--forward` given replaces them, and a rejoin that sets them records the new
+set. `--reverse-forward`s are never recorded or recalled -- their host end can
+move (a restarted host browser listens on a new port), and opening this host to
+the venue stays an explicit choice -- so pass them again on every resume.
 `--ref-file` (repeatable; a file or a folder, up to 256 MiB per call) copies
 reference material into `~/.agent-bridge/refs/<batch>/` on the venue -- outside <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 the product checkout, so it is never committed -- over the same egress-free

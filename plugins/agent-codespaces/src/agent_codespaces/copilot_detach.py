@@ -499,14 +499,18 @@ def cmd_detach(
 
     # A resume that names only the session (Harness Board's wake, say) keeps
     # the flags the session was launched with, like a rejoin keeps its forwards.
-    requested, args.driver, recalled = launch_memory.apply(
-        args.name, plan["tenant"], list(getattr(args, "copilot_args", None) or []), args.driver,
-    )
+    given = list(getattr(args, "copilot_args", None) or [])
+    requested, args.driver, recalled = launch_memory.apply(args.name, plan["tenant"], given, args.driver)
     # A recalled session runs exactly its recorded flags: no host model defaults added.
     copilot_args = with_new_session(requested + ([] if recalled else model_copilot_args(requested)))
+    # Its --forward ports too: the Owner released them when the CodeSpace stopped.
+    explicit_local = list(getattr(args, "local_forwards", None) or [])
+    local_specs, forwards_recalled = launch_memory.recall_forwards(
+        args.name, plan["tenant"], given, explicit_local)
+    reported_recall = recalled + (["local_forwards"] if forwards_recalled else [])
     try:
         reverse_forwards = parse_reverse_forwards(getattr(args, "reverse_forwards", None) or [])
-        local_forwards = parse_local_forwards(getattr(args, "local_forwards", None) or [])
+        local_forwards = parse_local_forwards(local_specs)
     except ValueError as exc:
         return _fail(str(exc), plan)
     ref_files = list(getattr(args, "ref_files", None) or [])
@@ -520,7 +524,7 @@ def cmd_detach(
     if getattr(args, "dry_run", False):
         print(json.dumps({"ok": True, "dry_run": True, **plan, "seed_len": len(seed or ""),
                           "copilot_args": copilot_args, "driver": args.driver,
-                          **({"recalled": recalled} if recalled else {}),
+                          **({"recalled": reported_recall} if reported_recall else {}),
                           "reverse_forwards": reverse_forwards,
                           "local_forwards": local_forwards,
                           "ref_files": [n for n, _ in refs_upload[2]] if ref_files else []}, indent=2))
@@ -775,7 +779,11 @@ def cmd_detach(
                 refs_delivered = "failed"
         ok = True
         if created:  # a rejoin of a running session applied none of its flags
-            launch_memory.remember(args.name, plan["tenant"], copilot_args, args.driver, session_id)
+            launch_memory.remember(args.name, plan["tenant"], copilot_args, args.driver, session_id,
+                                   local_forwards=launch_memory.forward_specs(local_forwards))
+        elif explicit_local:  # ... but the Owner did take its new --forward ports
+            launch_memory.remember_forwards(args.name, plan["tenant"], session_id,
+                                            launch_memory.forward_specs(local_forwards))
         local_pending: dict[int, int] = {}
         local_forward_error: str | None = None
         try:
@@ -808,7 +816,7 @@ def cmd_detach(
                            f"{session_id}` and resend with `agent-bridge send` if missing"}
                if seed_unconfirmed else {}),
             # A rejoin of a running session applied none of them: nothing was recalled.
-            **({"recalled": recalled} if recalled and created else {}),
+            **({"recalled": reported_recall} if reported_recall and created else {}),
             **({"session_handle": "provisional", "handle_warning": handle_warning}
                if handle_warning else {}),
             "plugin_dirs": captured.get("plugin_dirs", []),
