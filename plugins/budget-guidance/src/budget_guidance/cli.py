@@ -88,6 +88,11 @@ def _status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _version(_args: argparse.Namespace) -> int:
+    print(f"budget-guidance {__version__}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the public command parser."""
     parser = argparse.ArgumentParser(prog="budget-guidance")
@@ -98,6 +103,8 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--at", help="evaluate freshness at an RFC 3339 instant")
     status.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     status.set_defaults(handler=_status)
+    version = subparsers.add_parser("version", help="print the budget-guidance version and exit")
+    version.set_defaults(handler=_version)
     return parser
 
 
