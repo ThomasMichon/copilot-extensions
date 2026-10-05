@@ -97,7 +97,17 @@ def _hold_protocol_floor(client: Any, floor: int) -> None:
 
     request, resolve = client._request, getattr(client, "_reresolve", None)
     grace = getattr(client, "_connect_grace", 0.0)
-    client._reresolve, client._connect_grace = None, 0.0
+
+    def _attempt(*a: Any, **k: Any) -> Any:
+        # The client's own retries would skip the probe, so they're off for each
+        # protocol-checked attempt -- and only then: between attempts (a stream's
+        # endpoint refresh after a cutover) its resolver must still work.
+        saved = client._reresolve, client._connect_grace
+        client._reresolve, client._connect_grace = None, 0.0
+        try:
+            return request(*a, **k)
+        finally:
+            client._reresolve, client._connect_grace = saved
 
     def _floored(method: str, path: str, *a: Any, **k: Any) -> Any:
         deadline = time.monotonic() + grace
@@ -110,7 +120,7 @@ def _hold_protocol_floor(client: Any, floor: int) -> None:
                 if base:
                     client._base = base.rstrip("/")
             try:
-                version = int((request("GET", "/health") or {}).get("protocol_version") or 0)
+                version = int((_attempt("GET", "/health") or {}).get("protocol_version") or 0)
             except (BridgeConnectionError, OSError, TypeError, ValueError):
                 # OSError: a read timeout (TimeoutError) after connecting
                 # escapes the client's own wrapping; the probe is unanswered.
@@ -127,7 +137,7 @@ def _hold_protocol_floor(client: Any, floor: int) -> None:
             if last_error is not None and time.monotonic() >= deadline:
                 raise last_error  # a slow re-probe spent the budget: never send late
             try:
-                return request(method, path, *a, **k)
+                return _attempt(method, path, *a, **k)
             except BridgeConnectionError as exc:
                 # A request that may have reached the daemon (a reset, a timeout,
                 # a broken pipe) may have been accepted: resend only an

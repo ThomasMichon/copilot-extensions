@@ -503,3 +503,25 @@ def test_send_leaves_the_expected_session_check_to_an_alias_aware_daemon(
     else:
         m._cmd_send(args)
         assert sent == [("resumed-1", "placeholder")]  # the daemon checks it atomically
+
+def test_a_protocol_floor_suspends_endpoint_discovery_only_during_its_own_attempts():
+    """The floor turns off the client's own retries while it probes and sends --
+    and only then: afterwards (a stream refreshing its endpoint after a cutover)
+    the resolver and grace are the client's again."""
+    from agent_bridge import session_targeting_cli as stc
+
+    client = BridgeClient("http://127.0.0.1:57585", "tok", connect_grace=5.0,
+                          reresolve=lambda: "http://127.0.0.1:47000")
+    resolver = client._reresolve
+    during: list = []
+
+    def fake_request(method, path, *a, **k):
+        during.append((client._reresolve, client._connect_grace))
+        return {"protocol_version": 21} if path == "/health" else {"ok": True}
+
+    client._request = fake_request
+    stc._hold_protocol_floor(client, 21)
+    assert client._reresolve is resolver and client._connect_grace == 5.0  # intact between attempts
+    assert client._request("GET", "/api/v1/x") == {"ok": True}
+    assert during == [(None, 0.0), (None, 0.0)]  # probe and request: retries off
+    assert client._reresolve is resolver and client._connect_grace == 5.0  # restored after
