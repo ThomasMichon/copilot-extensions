@@ -119,7 +119,7 @@ def _cleanup_one(args: argparse.Namespace) -> int:
 #: from `cleanup`'s report entirely -- neither listed as skipped nor counted.
 _CLEANUP_PER_ITEM_BUCKETS = frozenset({
     "claimed", "open-pr", "closed-unmerged", "paired-pending",
-    "held-claims", "follow-up",
+    "held-claims", "held-claims-cross-machine", "follow-up",
 })
 
 
@@ -163,6 +163,7 @@ def _closure_blockers(
         rec, info, disp,
         held_claims=held_claims, open_follow_ups=open_follow_ups,
         evidence_mode="cached", turn_count=turn_count,
+        cross_machine_claims=prune.cross_machine_claim_count(rec),
     )
     return descriptor.blockers
 

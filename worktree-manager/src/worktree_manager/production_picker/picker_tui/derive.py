@@ -627,18 +627,14 @@ def _ff_from_raw(w):
 # in-use buckets are UNSAFE (never auto-pruned).
 BUCKET_DISPO = {
     "clean": "SAFE",
-    "unused": "REVIEW",
-    "conversation": "REVIEW",
+    "unused": "REVIEW", "conversation": "REVIEW",
     "follow-up": "REVIEW",
-    "closed-unmerged": "REVIEW",
-    "gone": "REVIEW",
-    "dirty": "UNSAFE",
-    "wip": "UNSAFE",
-    "unmerged": "UNSAFE",
-    "orphan": "UNSAFE",
+    "held-claims": "REVIEW", "held-claims-cross-machine": "REVIEW",
+    "closed-unmerged": "REVIEW", "gone": "REVIEW",
+    "dirty": "UNSAFE", "wip": "UNSAFE",
+    "unmerged": "UNSAFE", "orphan": "UNSAFE",
     "active": "UNSAFE",
-    "open-pr": "",
-    "unknown": "",
+    "open-pr": "", "unknown": "",
 }
 
 # Cleanup bucket -> short reason shown in the disposition chip.
@@ -647,6 +643,8 @@ BUCKET_REASON = {
     "unused": "idle · no commits/turns",
     "conversation": "chat history, no commits",
     "follow-up": "agent flagged follow-ups",
+    "held-claims": "resource claim(s) still held",
+    "held-claims-cross-machine": "claim(s) on a worktree hosted remotely",
     "closed-unmerged": "PR closed unmerged",
     "gone": "dir missing",
     "dirty": "uncommitted work",
