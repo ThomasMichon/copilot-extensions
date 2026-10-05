@@ -12,9 +12,12 @@ CANONICAL_SESSION_SQL = (
 )
 
 import json
+import logging
 from typing import Any
 
 from .db_core import LIVE_SESSION_STALE_SECONDS
+
+log = logging.getLogger("agent-bridge")
 
 #: How far two reports of one process's start time may differ: only float
 #: round-tripping (JSON, SQLite REAL). The extension pins the value on its
@@ -181,6 +184,23 @@ def register_live_session_atomic(
             raise
 
 
+def _report_unprovable_legacy_predecessor(conn: Any, worktree_id: str, session_id: str, successor: Any) -> None:
+    """Say so when a legacy registration (no start time) with the same pid and
+    machine might be this process's predecessor: its handle and claim stay put,
+    since without a start time on both sides only clocks could tell."""
+    legacy = conn.execute(
+        "SELECT session_id FROM live_sessions WHERE worktree_id=? AND session_id != ? AND cli_mode=1 "
+        "AND pid=? AND machine = ? COLLATE NOCASE AND process_started_at IS NULL "
+        "AND status IN ('live', 'wedged') LIMIT 1",
+        (worktree_id, session_id, successor["pid"], successor["machine"]),
+    ).fetchone()
+    if legacy is not None:
+        log.warning(
+            "live session %s: not folding in %s (same pid %s on %s): it reports no process start time, "
+            "so whether it is this process can't be established; its handle and claim stay with it",
+            session_id, legacy["session_id"], successor["pid"], successor["machine"])
+
+
 def _fold_in_predecessor(
     conn: Any, worktree_id: str, session_id: str, *, now: float
 ) -> str | None:
@@ -194,13 +214,12 @@ def _fold_in_predecessor(
     match), ``cli_mode``, and the *same, known*
     PID. A missing PID on either side never counts as a match. A PID alone
     does not prove the same process (it can be reused), so when both rows
-    carry ``process_started_at`` those must agree. A legacy predecessor
-    without one must have registered after this process started (else an
-    earlier holder of the pid registered it) and still be heartbeating (fresh
-    ``live``) or confirmed alive (``wedged``) -- never a lapsed or
-    confirmed-dead registration. When only the predecessor has a start time,
-    identity can't be established and nothing is folded in; when neither
-    does (older extensions), the fresh-or-wedged lease is the only evidence.
+    carry ``process_started_at`` those must agree. When only one side has a
+    start time the evidence is mixed: the only bridge would compare the
+    bridge's own clock (``registered_at``) with the venue's, which skew can
+    defeat, so identity can't be established, nothing is folded in, and that
+    is logged. When neither does (older extensions), the fresh-or-wedged lease
+    is the only evidence.
     """
     successor = conn.execute(
         "SELECT * FROM live_sessions WHERE session_id=? "
@@ -220,24 +239,19 @@ def _fold_in_predecessor(
         "AND pid=? AND machine = ? COLLATE NOCASE AND CASE "
         "WHEN ? IS NOT NULL AND process_started_at IS NOT NULL "
         "THEN ABS(process_started_at - ?) < ? "
-        # A legacy predecessor (no start time): the same process registered it
-        # after starting, so a registration from before this process started
-        # came from an earlier holder of the pid. A fresh lease alone is not
-        # process identity.
-        "WHEN ? IS NOT NULL "
-        "THEN registered_at >= ? - ? AND (status='wedged' OR (status='live' AND updated_at >= ?)) "
-        # Only the predecessor has a start time: mixed evidence, so identity
-        # can't be established.
-        "WHEN process_started_at IS NOT NULL THEN 0 "
+        # Only one side has a start time: mixed evidence (a cross-host clock
+        # comparison could only guess), so identity can't be established.
+        "WHEN ? IS NOT NULL OR process_started_at IS NOT NULL THEN 0 "
         # Neither side reports one (older extensions): the lease is all there is.
         "ELSE status='wedged' OR (status='live' AND updated_at >= ?) END "
         "ORDER BY updated_at DESC LIMIT 1",
         (worktree_id, session_id, session_id, successor["pid"], successor["machine"],
          started, started, PROCESS_START_TOLERANCE_SECONDS,
-         started, started, PROCESS_START_TOLERANCE_SECONDS,
-         now - LIVE_SESSION_STALE_SECONDS, now - LIVE_SESSION_STALE_SECONDS),
+         started, now - LIVE_SESSION_STALE_SECONDS),
     ).fetchone()
     if predecessor is None:
+        if started is not None:
+            _report_unprovable_legacy_predecessor(conn, worktree_id, session_id, successor)
         return None
     predecessor_id = predecessor["session_id"]
     # A reservation this registration just claimed (a rejoin) is the

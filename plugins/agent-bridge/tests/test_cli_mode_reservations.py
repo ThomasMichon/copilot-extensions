@@ -867,21 +867,28 @@ def test_a_reused_pid_never_inherits_a_confirmed_dead_registration(tmp_db: Datab
     assert tmp_db.get_live_session("placeholder")["session_id"] == "placeholder"
 
 
-def test_a_mixed_version_pid_reuse_never_inherits_a_fresh_legacy_registration(
-    tmp_db: Database,
+def test_mixed_version_identity_is_never_folded_and_is_reported(
+    tmp_db: Database, caplog,
 ) -> None:
-    """A legacy registration (no start time) heartbeated at ``now + 1``; a new
-    process reusing its pid that started at ``now + 10`` can't have made it,
-    however fresh the lease. The same process (started before it registered)
-    still rolls over; a legacy successor of a timed predecessor never does."""
+    """A legacy registration (no start time) and a successor with one: the only
+    bridge between them would compare the bridge's clock with the venue's, so
+    neither a pid reuse nor an apparently-same process is folded in -- whatever
+    the clocks say -- and the limitation is logged. The reverse (only the
+    predecessor timed) is mixed evidence too."""
     now = time.time()
     tmp_db.create_cli_mode_reservation("wt-R", now=now)
     assert _register(tmp_db, "placeholder", "wt-R", now + 1, pid=4242) == "live"
     assert _register(tmp_db, "stranger", "wt-R", now + 11, pid=4242, started=now + 10) == "live"
     assert tmp_db.get_live_session("stranger")["cli_mode"] == 0
     assert tmp_db.get_live_session("placeholder")["session_id"] == "placeholder"
-    assert _register(tmp_db, "resumed", "wt-R", now + 12, pid=4242, started=now - 5) == "live"
-    assert tmp_db.get_live_session("placeholder")["session_id"] == "resumed"
+    with caplog.at_level("WARNING", logger="agent-bridge"):
+        # The venue's clock is 120s ahead: its start time reads as after the
+        # registration; behind, as before it. Neither decides anything.
+        for i, started in enumerate((now + 120, now - 5)):
+            assert _register(tmp_db, f"resumed-{i}", "wt-R", now + 12 + i, pid=4242, started=started) == "live"
+            assert tmp_db.get_live_session("placeholder")["session_id"] == "placeholder"
+    assert "not folding in placeholder" in caplog.text
+    assert tmp_db.get_cli_mode_reservation("wt-R")["claimed_by_session_id"] == "placeholder"
     # Only the predecessor reports a start time: identity can't be established.
     tmp_db.create_cli_mode_reservation("wt-S", now=now)
     assert _register(tmp_db, "timed", "wt-S", now + 1, pid=77, started=now - 5) == "live"
