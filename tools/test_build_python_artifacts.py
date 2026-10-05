@@ -1125,7 +1125,8 @@ def _assume_governed_feed_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     their own dedicated mock; every other test below just wants its given
     `python` argument treated as a stable identity, unchanged."""
     monkeypatch.setattr(
-        btl, "_validated_trusted_index_url", lambda env: "https://example.internal/simple/"  # noqa: ARG005
+        btl, "_validated_trusted_index_url",
+        lambda env: ("https://example.internal/simple/", None),  # noqa: ARG005
     )
     monkeypatch.setattr(
         btl, "_resolve_interpreter_identity", lambda python: python or ""
@@ -1489,7 +1490,8 @@ def test_resolve_toolchain_lock_detects_resolved_interpreter_change_despite_same
     # (not raw text) must detect this and route to a fresh build, never
     # silently reuse the stale venv.
     monkeypatch.setattr(
-        btl, "_validated_trusted_index_url", lambda env: "https://example.internal/simple/"  # noqa: ARG005
+        btl, "_validated_trusted_index_url",
+        lambda env: ("https://example.internal/simple/", None),  # noqa: ARG005
     )
     resolved = {"value": "/opt/pythons/3.10/bin/python"}
     monkeypatch.setattr(
@@ -1891,8 +1893,18 @@ def test_governed_feed_configured_via_user_uv_toml_default_index_posix(
         '[[index]]\nname = "governed"\nurl = "https://example.internal/simple/"\ndefault = true\n',
         encoding="utf-8",
     )
-    assert bpa._governed_feed_configured(
-        env={"XDG_CONFIG_HOME": str(tmp_path), _TRUST_VAR: "example.internal"}
+    env = {"XDG_CONFIG_HOME": str(tmp_path), _TRUST_VAR: "example.internal"}
+    assert bpa._governed_feed_configured(env=env)
+    # Regression (round 19): a named `[[index]]` entry's own `name` must
+    # survive through both `_effective_default_index_url` and
+    # `_validated_trusted_index_url` -- a caller authenticating a named
+    # index (`UV_INDEX_<NAME>_USERNAME`/`PASSWORD`) cannot recover the
+    # name from the URL alone.
+    assert btl._effective_default_index_url(env) == (
+        "https://example.internal/simple/", "governed",
+    )
+    assert btl._validated_trusted_index_url(env) == (
+        "https://example.internal/simple/", "governed",
     )
 
 
@@ -2222,7 +2234,7 @@ def test_governed_feed_project_uv_toml_takes_precedence_over_user(
     monkeypatch.chdir(project_dir)
     assert btl._effective_default_index_url(
         {"APPDATA": str(tmp_path / "appdata")}
-    ) == "https://project.internal/simple/"
+    ) == ("https://project.internal/simple/", None)
 
 
 def test_governed_feed_project_pyproject_tool_uv_section_is_honored(
@@ -2238,7 +2250,7 @@ def test_governed_feed_project_pyproject_tool_uv_section_is_honored(
         encoding="utf-8",
     )
     monkeypatch.chdir(project_dir)
-    assert btl._effective_default_index_url({}) == "https://project.internal/simple/"
+    assert btl._effective_default_index_url({}) == ("https://project.internal/simple/", None)
 
 
 def test_governed_feed_project_pyproject_without_tool_uv_table_is_ignored(
@@ -2506,19 +2518,24 @@ def test_resolve_toolchain_lock_uses_unique_staging_dirs_per_call(
     assert staging_dirs_seen[0] != staging_dirs_seen[1]
 
 
-def test_resolve_toolchain_lock_pins_install_to_validated_index_only(
+def test_resolve_toolchain_lock_pins_install_via_sanitized_config_not_argv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression: the install must be pinned to EXACTLY the one validated
-    # index (--no-config --index-url <url>), with every ambient
-    # alternative-package-source environment variable stripped -- never
-    # trusting uv's own ambient config, which could otherwise still
-    # consult an untrusted supplemental index (UV_INDEX, UV_EXTRA_INDEX_URL,
-    # a plain [[index]] entry) or a flat-file link source (UV_FIND_LINKS,
-    # confirmed common on this repo's own clean-room runners).
+    # Regression (round 19): the validated index URL must never appear in
+    # the `uv pip install` subprocess's own argv (visible in process
+    # listings). Instead it is written to a minimal, sanitized temp uv
+    # config file pointed to via `UV_CONFIG_FILE` -- EXCLUSIVE in uv's own
+    # resolution, so nothing else can supply a different index, the same
+    # guarantee `--no-config --index-url` was providing. Every ambient
+    # alternative-package-source environment variable must still be
+    # stripped -- never trusting uv's own ambient config, which could
+    # otherwise still consult an untrusted supplemental index (UV_INDEX,
+    # UV_EXTRA_INDEX_URL, a plain [[index]] entry) or a flat-file link
+    # source (UV_FIND_LINKS, confirmed common on this repo's own
+    # clean-room runners).
     monkeypatch.setattr(
         btl, "_validated_trusted_index_url",
-        lambda env: "https://governed.example/simple/",  # noqa: ARG005
+        lambda env: ("https://governed.example/simple/", None),  # noqa: ARG005
     )
     monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python: python or "")
     monkeypatch.setenv("UV_INDEX", "https://untrusted.example/simple/")
@@ -2527,6 +2544,7 @@ def test_resolve_toolchain_lock_pins_install_to_validated_index_only(
     venv_dir = tmp_path / "toolchain-venv"
     install_cmds = []
     install_kwargs = []
+    config_texts_at_install_time = []
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
@@ -2537,6 +2555,13 @@ def test_resolve_toolchain_lock_pins_install_to_validated_index_only(
         if cmd[:3] == ["uv", "pip", "install"]:
             install_cmds.append(cmd)
             install_kwargs.append(kwargs)
+            # Read the config file NOW, while the install call is actually
+            # running -- `resolve_toolchain_lock`'s own `finally` block
+            # deletes it once this call returns, so it is gone by the time
+            # the test function resumes after `resolve_toolchain_lock`.
+            config_texts_at_install_time.append(
+                Path(kwargs["env"]["UV_CONFIG_FILE"]).read_text(encoding="utf-8")
+            )
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         return subprocess.CompletedProcess(
             cmd, 0,
@@ -2549,14 +2574,106 @@ def test_resolve_toolchain_lock_pins_install_to_validated_index_only(
 
     assert len(install_cmds) == 1
     install_cmd = install_cmds[0]
-    assert "--no-config" in install_cmd
-    assert "--index-url" in install_cmd
-    assert install_cmd[install_cmd.index("--index-url") + 1] == "https://governed.example/simple/"
+    assert "--index-url" not in install_cmd
+    assert not any("governed.example" in str(arg) for arg in install_cmd)
     install_env = install_kwargs[0].get("env")
     assert install_env is not None
     assert "UV_INDEX" not in install_env
     assert "UV_EXTRA_INDEX_URL" not in install_env
     assert "UV_FIND_LINKS" not in install_env
+    config_text = config_texts_at_install_time[0]
+    assert "[[index]]" in config_text
+    assert 'url = "https://governed.example/simple/"' in config_text
+    assert "default = true" in config_text
+    assert 'name = "' not in config_text  # unnamed index: no name line written
+    # Cleaned up afterward (success path).
+    assert not Path(install_env["UV_CONFIG_FILE"]).exists()
+
+
+def test_resolve_toolchain_lock_pins_named_index_and_preserves_credential_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression (round 19): a NAMED `[[index]]` entry's `name` must be
+    # written into the sanitized temp config too, so a
+    # `UV_INDEX_<NAME>_USERNAME`/`PASSWORD`-authenticated index can still
+    # authenticate -- and those credential env vars must themselves keep
+    # flowing through the install call's env unstripped, unlike every
+    # other alternative-package-source variable.
+    monkeypatch.setattr(
+        btl, "_validated_trusted_index_url",
+        lambda env: ("https://governed.example/simple/", "governed"),  # noqa: ARG005
+    )
+    monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python: python or "")
+    monkeypatch.setenv("UV_INDEX_GOVERNED_USERNAME", "svc-account")
+    monkeypatch.setenv("UV_INDEX_GOVERNED_PASSWORD", "token-value")
+    venv_dir = tmp_path / "toolchain-venv"
+    install_kwargs = []
+    config_texts_at_install_time = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[:2] == ["uv", "venv"]:
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            install_kwargs.append(kwargs)
+            config_texts_at_install_time.append(
+                Path(kwargs["env"]["UV_CONFIG_FILE"]).read_text(encoding="utf-8")
+            )
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.resolve_toolchain_lock(venv_dir)
+
+    install_env = install_kwargs[0].get("env")
+    assert install_env is not None
+    assert install_env.get("UV_INDEX_GOVERNED_USERNAME") == "svc-account"
+    assert install_env.get("UV_INDEX_GOVERNED_PASSWORD") == "token-value"
+    config_text = config_texts_at_install_time[0]
+    assert 'name = "governed"' in config_text
+    assert 'url = "https://governed.example/simple/"' in config_text
+    assert not Path(install_env["UV_CONFIG_FILE"]).exists()  # cleaned up afterward
+
+
+def test_resolve_toolchain_lock_cleans_up_sanitized_config_on_install_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: the temp sanitized config file must be cleaned up even
+    # when `uv pip install` itself fails, not just on the success path.
+    monkeypatch.setattr(
+        btl, "_validated_trusted_index_url",
+        lambda env: ("https://governed.example/simple/", None),  # noqa: ARG005
+    )
+    monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python: python or "")
+    venv_dir = tmp_path / "toolchain-venv"
+    seen_config_paths: list[Path] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[:2] == ["uv", "venv"]:
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            config_path = Path(kwargs["env"]["UV_CONFIG_FILE"])
+            assert config_path.exists()  # exists while the install call runs
+            seen_config_paths.append(config_path)
+            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa.resolve_toolchain_lock(venv_dir)
+
+    assert len(seen_config_paths) == 1
+    assert not seen_config_paths[0].exists()  # cleaned up despite the failure
+
 
 
 def test_resolve_toolchain_lock_strips_uv_constraint_and_override_vars(
@@ -2568,7 +2685,7 @@ def test_resolve_toolchain_lock_strips_uv_constraint_and_override_vars(
     # `--index-url`, bypassing the validated governed feed entirely.
     monkeypatch.setattr(
         btl, "_validated_trusted_index_url",
-        lambda env: "https://governed.example/simple/",  # noqa: ARG005
+        lambda env: ("https://governed.example/simple/", None),  # noqa: ARG005
     )
     monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python: python or "")
     monkeypatch.setenv("UV_CONSTRAINT", "https://untrusted.example/constraints.txt")
@@ -2611,7 +2728,7 @@ def test_resolve_toolchain_lock_strips_uv_insecure_host(
     # `_validated_trusted_index_url`.
     monkeypatch.setattr(
         btl, "_validated_trusted_index_url",
-        lambda env: "https://governed.example/simple/",  # noqa: ARG005
+        lambda env: ("https://governed.example/simple/", None),  # noqa: ARG005
     )
     monkeypatch.setattr(btl, "_resolve_interpreter_identity", lambda python: python or "")
     monkeypatch.setenv("UV_INSECURE_HOST", "governed.example")

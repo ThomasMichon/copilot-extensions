@@ -919,6 +919,52 @@ win grows with build complexity.
   will very likely require splitting a piece of this module out rather
   than trimming comments further). Smoke-tested for real again: built
   `agent-worktrees` fresh against the live governed feed.
+- `tools/build_toolchain_lock.py` reached 997/1,000 lines with the
+  eighteenth round's fix (no further headroom), and a nineteenth round's
+  finding needed new code -- split its "what index does this machine
+  trust" concern (project/user/system `uv.toml` discovery, the governed-
+  feed allowlist gate, and the credential-free/opaque index-identity
+  helpers) into a new `tools/governed_feed_trust.py`, re-imported and
+  re-exported from `build_toolchain_lock.py` exactly the way
+  `build_toolchain_lock.py` itself is re-imported/re-exported from
+  `build_python_artifacts.py`. Every existing caller/test kept seeing the
+  same names on `build_toolchain_lock.py`; no test changes were needed
+  for the split itself. 997 -> 758 lines; new module 297 lines. Verified
+  behavior-neutral: full test suite (151 tests) and
+  `check-module-size.py` both passed unchanged before any new code was
+  added on top.
+- A nineteenth review round found 1 more issue, on top of the split: the
+  validated index URL was passed directly in `uv pip install`'s own argv
+  (`--index-url <url>`), which (a) makes a credentialed URL visible in
+  process listings, and (b) silently discarded a NAMED `[[index]]`
+  entry's own `name`, since `--no-config --index-url` supplies only an
+  anonymous URL -- a `UV_INDEX_<NAME>_USERNAME`/`PASSWORD`-authenticated
+  governed feed would lose its authentication entirely. Fixed by
+  threading the index's own `name` through `_effective_default_index_url`/
+  `_validated_trusted_index_url` (now returning `(url, name)` instead of
+  a bare `url`), and replacing the install's `--no-config --index-url`
+  with a minimal, sanitized temp `uv.toml`-shaped file (written next to
+  the staging venv, cleaned up in the existing `finally:` block, success
+  and failure paths alike) naming just that one validated `[[index]]`
+  entry (with `name` when known), pointed to via `UV_CONFIG_FILE` --
+  `uv`'s own documented exclusivity for that variable already gives the
+  same "nothing else can supply a different index" guarantee
+  `--no-config --index-url` was providing, without ever putting the
+  (possibly credentialed) URL in argv. `UV_INDEX_<NAME>_USERNAME`/
+  `PASSWORD`-shaped env vars are deliberately left unstripped so a named
+  index keeps authenticating. 2 more unit tests (153 total, all passing):
+  a named entry's `name` surviving through both lookup functions, the
+  install argv no longer containing the raw URL for both a named and
+  unnamed index, the temp config file's content and cleanup (including
+  the install-failure path), and a credential env var surviving
+  sanitization. `check-module-size.py` still passes (`build_toolchain_
+  lock.py` 798 lines, `governed_feed_trust.py` 310 lines -- both with
+  real headroom again). Smoke-tested for real again: built
+  `agent-worktrees` fresh against the live governed feed, then
+  `agent-bridge` reusing the same `--toolchain-venv` -- identical
+  `lock_id` on reuse, confirming the `UV_CONFIG_FILE`-based install
+  still resolves the exact same governed index as before, and no temp
+  config file was left behind in either the venv or the working tree.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 

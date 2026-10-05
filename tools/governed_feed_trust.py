@@ -177,10 +177,16 @@ def _effective_uv_toml_candidates(env: dict) -> list[Path]:
     return candidates
 
 
-def _effective_default_index_url(env: dict) -> str | None:
-    """The URL of the index `uv` would actually use as its DEFAULT in this
-    environment, or ``None`` if nothing replaces `uv`'s own implicit
-    public-PyPI default. `UV_INDEX` (plural) and a plain `[[index]]` table
+def _effective_default_index_url(env: dict) -> tuple[str, str | None] | None:
+    """The ``(url, name)`` of the index `uv` would actually use as its
+    DEFAULT in this environment, or ``None`` if nothing replaces `uv`'s
+    own implicit public-PyPI default. ``name`` is the `[[index]]` entry's
+    own ``name`` field when the validated default came from a named entry
+    with ``default = true``, else ``None`` -- an env-var source or the
+    legacy bare ``index-url`` key never has a name. Callers that
+    authenticate a NAMED index (`UV_INDEX_<NAME>_USERNAME`/``PASSWORD``)
+    need this name preserved; a bare URL alone cannot recover it.
+    `UV_INDEX` (plural) and a plain `[[index]]` table
     without `default = true` only add a SUPPLEMENTAL index -- `uv` still
     falls back to public PyPI for anything it doesn't resolve, so neither
     is the effective default. Only `UV_DEFAULT_INDEX`/`UV_INDEX_URL`, the
@@ -200,7 +206,7 @@ def _effective_default_index_url(env: dict) -> str | None:
     for var in _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS:
         value = env.get(var)
         if value:
-            return value
+            return (value, None)
     candidates: list[tuple[Path, bool]] = []
     if not env.get("UV_CONFIG_FILE"):
         candidates.extend(_project_uv_toml_candidates())
@@ -232,7 +238,7 @@ def _effective_default_index_url(env: dict) -> str | None:
                 continue
         index_url = data.get("index-url")
         if isinstance(index_url, str) and index_url:
-            return index_url
+            return (index_url, None)
         indexes = data.get("index")
         if isinstance(indexes, list):
             for entry in indexes:
@@ -240,16 +246,20 @@ def _effective_default_index_url(env: dict) -> str | None:
                     continue
                 url = entry.get("url")
                 if isinstance(url, str) and url:
-                    return url
+                    name = entry.get("name")
+                    return (url, name if isinstance(name, str) and name else None)
     return None
 
 
-def _validated_trusted_index_url(env: dict) -> str | None:
-    """The effective default index URL, but ONLY if it is HTTPS, both
-    non-public AND affirmatively trusted (see `_governed_feed_configured`'s
-    own docstring for the allowlist rationale) -- returns the concrete URL
-    (rather than just a bool) so a caller can pin `uv` to EXACTLY this one
-    index at install time, instead of merely confirming "some index looks
+def _validated_trusted_index_url(env: dict) -> tuple[str, str | None] | None:
+    """The effective default index's ``(url, name)``, but ONLY if the URL
+    is HTTPS, both non-public AND affirmatively trusted (see
+    `_governed_feed_configured`'s own docstring for the allowlist
+    rationale) -- returns the concrete ``(url, name)`` pair (rather than
+    just a bool) so a caller can pin `uv` to EXACTLY this one index at
+    install time -- INCLUDING its name, when it has one, so a
+    `UV_INDEX_<NAME>_USERNAME`/``PASSWORD``-authenticated named index can
+    still authenticate -- instead of merely confirming "some index looks
     fine" and then trusting `uv`'s own ambient config to pick the real one
     used -- which could still consult an untrusted SUPPLEMENTAL index
     (`UV_INDEX`, or a plain `[[index]]` entry with no `default = true`)
@@ -261,7 +271,10 @@ def _validated_trusted_index_url(env: dict) -> str | None:
     trusted_hosts = _trusted_index_hosts(env)
     if not trusted_hosts:
         return None
-    url = _effective_default_index_url(env)
+    effective = _effective_default_index_url(env)
+    if effective is None:
+        return None
+    url, name = effective
     if not url or _is_public_pypi_url(url):
         return None
     # Require HTTPS: an allowlisted HOSTNAME is not itself proof of
@@ -274,7 +287,7 @@ def _validated_trusted_index_url(env: dict) -> str | None:
     host = _url_host(url)
     if host is None or host not in trusted_hosts:
         return None
-    return url
+    return (url, name)
 
 
 def _governed_feed_configured(*, env: dict | None = None) -> bool:

@@ -412,6 +412,16 @@ def _query_toolchain_versions(venv_python: Path) -> dict[str, str]:
     return packages
 
 
+def _toml_escape(value: str) -> str:
+    """Escapes ``value`` for embedding in a TOML basic string (``"..."``)
+    -- backslash and double-quote are the only characters a basic string
+    must escape for this module's own use (index URLs/names never
+    legitimately contain control characters or newlines). No stdlib TOML
+    WRITER exists (only `tomllib`, a reader), so this is a tiny, scoped
+    helper rather than a dependency."""
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> ToolchainLock:
     """Resolves one pinned build-toolchain venv and returns its exact
     installed ``setuptools``/``wheel``/``packaging`` versions.
@@ -446,8 +456,8 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
     (`_query_toolchain_versions`) -- so neither an interrupted setup nor
     a broken install ever gets published as "complete"."""
     env = dict(os.environ)
-    validated_index_url = _validated_trusted_index_url(env)
-    if validated_index_url is None:
+    validated = _validated_trusted_index_url(env)
+    if validated is None:
         raise ArtifactBuildError(
             "no affirmatively trusted governed package feed is configured "
             "on this machine (checked uv's effective default index -- "
@@ -460,6 +470,7 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             "otherwise silently resolve setuptools/wheel/packaging from "
             "an unverified index"
         )
+    validated_index_url, validated_index_name = validated
     target_dir = venv_dir
     python_identity = _resolve_interpreter_identity(python)
     if _occupied_by_other_identity(target_dir, validated_index_url, python_identity):
@@ -492,6 +503,7 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
         staging_venv_dir = Path(
             tempfile.mkdtemp(dir=target_dir.parent, prefix=f".{target_dir.name}.staging-")
         )
+        index_config_path: Path | None = None
         # Strip every ambient variable that could supply packages from
         # somewhere other than the one validated URL below -- `--no-config`
         # only disables config FILES, not these environment-based package
@@ -528,14 +540,40 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
                     f"{result.stdout}\n{result.stderr}"
                 )
             staging_venv_python = _venv_python_path(staging_venv_dir)
+            # Write a minimal, sanitized uv config naming ONLY the one
+            # validated index, instead of passing it via `--index-url`
+            # (visible in process listings) or trusting `uv`'s own
+            # ambient config. `UV_CONFIG_FILE` is EXCLUSIVE in `uv`'s own
+            # resolution (see `governed_feed_trust._effective_uv_toml_
+            # candidates`'s docstring) -- pointing it at this file alone
+            # already guarantees nothing else can supply a different
+            # index, the same guarantee `--no-config --index-url` was
+            # providing, without ever putting a possibly-credentialed URL
+            # in argv. The index's own `name` (when the validated default
+            # came from a named `[[index]]` entry) is preserved so a
+            # `UV_INDEX_<NAME>_USERNAME`/`PASSWORD`-authenticated index
+            # keeps authenticating -- `--no-config --index-url` discarded
+            # the name entirely, supplying only an anonymous URL.
+            index_config_path = target_dir.parent / f"{staging_venv_dir.name}.index-config.toml"
+            index_config_lines = [
+                "[[index]]",
+                f'url = "{_toml_escape(validated_index_url)}"',
+                "default = true",
+            ]
+            if validated_index_name:
+                index_config_lines.append(f'name = "{_toml_escape(validated_index_name)}"')
+            index_config_path.write_text(
+                "\n".join(index_config_lines) + "\n", encoding="utf-8"
+            )
+            install_env = dict(sanitized_env)
+            install_env["UV_CONFIG_FILE"] = str(index_config_path)
             install = subprocess.run(
                 [
-                    "uv", "pip", "install", "--no-config",
-                    "--index-url", validated_index_url,
+                    "uv", "pip", "install",
                     "--python", str(staging_venv_python),
                     *_LOCKED_TOOLCHAIN_PACKAGES,
                 ],
-                capture_output=True, text=True, env=sanitized_env,
+                capture_output=True, text=True, env=install_env,
             )
             if install.returncode != 0:
                 raise ArtifactBuildError(
@@ -577,6 +615,8 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
         finally:
             if staging_venv_dir.exists():
                 shutil.rmtree(staging_venv_dir, ignore_errors=True)
+            if index_config_path is not None and index_config_path.exists():
+                index_config_path.unlink(missing_ok=True)
     else:
         packages = _query_toolchain_versions(venv_python)
 
