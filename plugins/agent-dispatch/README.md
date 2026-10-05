@@ -703,13 +703,15 @@ stale-exit checking entirely.
 
 **Provider state today.** The reusable `reviewer-loop` lifecycle is recipe-able
 today (`global:reviewer` / `global:conflict-resolution` in the `extends:`
-registry below). Its read-side provider observation path is realized for
+registry below). Its read-side provider observation *primitives* now cover
 GitHub and Azure DevOps (provider-backed `payload_ref` parsing, persisted
-observation lookup for stale-exit checks, and a read-only Azure DevOps PR
-adapter alongside the existing GitHub one). The forge-facing webhook receiver
-and the worker's direct verdict-posting / merge-or-close action path remain
-GitHub-shaped today: Azure DevOps currently relies on the polling/read path,
-and Gitea remains deferred to a structural stub only.
+observation lookup for stale-exit checks, a provider-aware poll observer
+helper, and a read-only Azure DevOps PR adapter alongside the existing GitHub
+one). The forge-facing webhook receiver and the worker's direct
+verdict-posting / merge-or-close action path remain GitHub-shaped today, and
+this plugin does not yet ship a live Azure DevOps webhook or poll-service
+producer that seeds observations on its own. Gitea remains deferred to a
+structural stub only.
 
 ```bash
 agent-dispatch reviewer-loop setup .copilot-extensions/agent-dispatch/registrar/reviewer-loop.json
@@ -1004,10 +1006,11 @@ remaining provider boundaries:
   pending the real implementation (`ThomasMichon/copilot-extensions#4825`).
 - Reviewer-side provider neutrality is still partial. The `reviewer-loop`
   engine and its `global:reviewer` / `global:conflict-resolution` recipes
-  exist, and the read-side observation adapter surface now covers GitHub and
-  Azure DevOps; however, the forge-facing webhook receiver plus the worker's
-  direct verdict-posting / merge-or-close action path are still GitHub-shaped,
-  while Gitea remains the deferred future adapter slot.
+  exist, and the read-side observation adapter surface plus provider-aware
+  poll helper now cover GitHub and Azure DevOps; however, the forge-facing
+  webhook receiver plus the worker's direct verdict-posting / merge-or-close
+  action path are still GitHub-shaped, and no live Azure DevOps trigger/poll
+  producer is wired yet. Gitea remains the deferred future adapter slot.
 - For `global:backlog-triager`, `global:issue-reproducer`,
   `global:effort-builder`, and `global:effort-driver`, the shared recipe stops
   at the reusable lifecycle contract. The consuming repo still supplies its own

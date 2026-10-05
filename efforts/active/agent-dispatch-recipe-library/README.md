@@ -1471,8 +1471,10 @@ suite green (3743 passed, 23 skipped, the one known flake above).
   adding a second provider-specific trigger service is materially more scope
   than the read-side adapter gap this effort still had open, while the
   declared polling fallback already covers the one ADO event class known not
-  to push-notify reliably. The ADO adapter therefore lands as polling/read
-  support now; any future ADO webhook receiver can build on it separately.
+  to push-notify reliably. The ADO adapter therefore lands the **read-side
+  observation primitives** now (adapter, provider-aware payload refs, and
+  poll-observer routing helper); a future ADO webhook or live poll-service
+  producer can build on those separately.
 - Gitea remains explicitly deferred. Mirroring the backlog-side precedent,
   landed a reviewer-surface `GiteaPRAdapter` **stub only** in its own module;
   every method raises `NotImplementedError` pointing back at this effort's
