@@ -16,6 +16,7 @@ import pytest
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
 from agent_worktrees import copilot_launch_prefs as launch_prefs
+from agent_worktrees import front_door_cli as _fdc
 from agent_worktrees import registry_paths
 
 # NOTE: isolation from the real host ~/.copilot/settings.json is handled
@@ -1312,6 +1313,60 @@ def test_cmd_launch_uses_direct_fallback_when_relocated_unavailable(
 
     assert rc == 0
     assert direct_calls == [("example", [])]
+
+
+def test_run_direct_launch_fallback_honors_front_door_cli_override(monkeypatch):
+    """``_run_direct_launch_fallback`` lives in worktree_manager_launch.py but
+    is re-exported through front_door_cli AND __main__; a monkeypatch applied
+    on either compatibility root -- not just __main__ -- must be observed by
+    its internal calls to ``_resolve_direct_launch_plan``. This regressed
+    after the Worktree-Manager-launch split (copilot-extensions#5287
+    follow-up): the fallback's cross-calls were bare names, so an override
+    applied on ``front_door_cli`` (the layer between ``__main__`` and the new
+    module) was silently ignored."""
+    calls: list[tuple] = []
+
+    def _fake_resolve(project, passthrough):
+        calls.append((project, passthrough))
+        return {"action": "none", "exit_code": 7}, project
+
+    monkeypatch.setattr(_fdc, "_resolve_direct_launch_plan", _fake_resolve)
+
+    rc = m._run_direct_launch_fallback("example", ["--foo"])
+
+    assert rc == 7
+    assert calls == [("example", ["--foo"])]
+
+
+def test_run_direct_launch_fallback_honors_front_door_cli_wait_override(monkeypatch):
+    """Same compatibility-root concern as above, for the post-``exec``
+    cross-calls to ``_wait_for_launch_child`` and
+    ``_run_post_exit_for_direct_launch``: an override on ``front_door_cli``
+    must be observed, not just one on ``__main__``."""
+    plan = {
+        "action": "exec",
+        "work_dir": "/tmp",
+        "cmd": ["echo", "hi"],
+        "worktree_id": "wt-1",
+        "post_exit": True,
+    }
+    monkeypatch.setattr(_fdc, "_resolve_direct_launch_plan", lambda project, passthrough: (plan, project))
+    monkeypatch.setattr(m.subprocess, "Popen", lambda *a, **k: object())
+
+    wait_calls: list = []
+    post_exit_calls: list = []
+    monkeypatch.setattr(_fdc, "_wait_for_launch_child", lambda proc: wait_calls.append(proc) or 0)
+    monkeypatch.setattr(
+        _fdc,
+        "_run_post_exit_for_direct_launch",
+        lambda project, worktree_id: post_exit_calls.append((project, worktree_id)),
+    )
+
+    rc = m._run_direct_launch_fallback("example", [])
+
+    assert rc == 0
+    assert len(wait_calls) == 1
+    assert post_exit_calls == [("example", "wt-1")]
 
 
 def test_cmd_launch_uses_relocated_worktree_manager_launcher_when_available(

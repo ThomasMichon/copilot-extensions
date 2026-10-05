@@ -25,8 +25,21 @@ def _core():
     return core
 
 
+def _front_door():
+    from . import front_door_cli as fdc
+
+    return fdc
+
+
 def _core_helper(name: str, local):
+    # Both __main__ and front_door_cli re-export every name this module
+    # defines, so a monkeypatch applied to either compatibility root must be
+    # honored here -- __main__ (the oldest, outermost root) takes priority
+    # when both happen to be overridden.
     candidate = vars(_core()).get(name)
+    if callable(candidate) and candidate is not local:
+        return candidate
+    candidate = vars(_front_door()).get(name)
     if callable(candidate) and candidate is not local:
         return candidate
     return local
@@ -281,7 +294,9 @@ def _run_post_exit_for_direct_launch(project: str | None, worktree_id: str) -> N
 def _run_direct_launch_fallback(project: str | None, passthrough: list[str]) -> int:
     """Launch Copilot directly from the resolved plan when mux support is absent."""
     while True:
-        plan, project = _resolve_direct_launch_plan(project, passthrough)
+        plan, project = _core_helper("_resolve_direct_launch_plan", _resolve_direct_launch_plan)(
+            project, passthrough
+        )
         action = str(plan.get("action", "none"))
         if action == "none":
             return int(plan.get("exit_code", 0) or 0)
@@ -300,7 +315,7 @@ def _run_direct_launch_fallback(project: str | None, passthrough: list[str]) -> 
                 output.err("Remote launch plan is missing ssh handoff details.")
                 return 1
             proc = subprocess.Popen(["ssh", "-t", ssh_alias, remote_cmd])
-            return _wait_for_launch_child(proc)
+            return _core_helper("_wait_for_launch_child", _wait_for_launch_child)(proc)
         if action != "exec":
             output.err(f"Unknown launch action: {action}")
             return 1
@@ -321,10 +336,12 @@ def _run_direct_launch_fallback(project: str | None, passthrough: list[str]) -> 
         child_env.pop("WORKTREE_ID", None)
         child_env.pop("WORKTREE_PROJECT", None)
         proc = subprocess.Popen(cmd, cwd=work_dir, env=child_env)
-        rc = _wait_for_launch_child(proc)
+        rc = _core_helper("_wait_for_launch_child", _wait_for_launch_child)(proc)
         worktree_id = plan.get("worktree_id")
         if isinstance(worktree_id, str) and worktree_id and plan.get("post_exit"):
-            _run_post_exit_for_direct_launch(project, worktree_id)
+            _core_helper("_run_post_exit_for_direct_launch", _run_post_exit_for_direct_launch)(
+                project, worktree_id
+            )
         return rc
 
 

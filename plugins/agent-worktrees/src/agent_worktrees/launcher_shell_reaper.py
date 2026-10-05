@@ -262,7 +262,7 @@ def _enumerate_launcher_shells() -> list[dict] | None:
     child; they are never reap candidates themselves.
     """
     if platform.system() == "Windows":
-        return _enumerate_launcher_shells_windows()
+        return _core()._self_override("_enumerate_launcher_shells_windows", _enumerate_launcher_shells_windows)()
     # Stage D: the real POSIX implementation lives in reap_cli.
     from . import reap_cli as _reap_cli
 

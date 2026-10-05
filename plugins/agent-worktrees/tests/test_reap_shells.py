@@ -345,6 +345,24 @@ def test_windows_enumeration_queries_every_process(monkeypatch):
         assert f"Name='{image}'" not in query
 
 
+def test_windows_dispatcher_honors_overridden_enumerator(monkeypatch):
+    """``_enumerate_launcher_shells`` must resolve the Windows enumerator
+    through ``_self_override`` (as its POSIX branch already does), not a bare
+    call -- otherwise an override applied on the compatibility root (``cli``,
+    i.e. ``__main__``) is silently ignored once the dispatcher lives in a
+    separate module from the enumerator it calls (copilot-extensions#5287
+    follow-up: a monkeypatch on ``cli._enumerate_launcher_shells_windows``
+    stopped being observed after the launcher-shell-reaper split)."""
+    monkeypatch.setattr(cli.platform, "system", lambda: "Windows")
+    calls: list[str] = []
+    monkeypatch.setattr(
+        cli, "_enumerate_launcher_shells_windows", lambda: calls.append("stub") or []
+    )
+    result = cli._enumerate_launcher_shells()
+    assert calls == ["stub"]
+    assert result == []
+
+
 def test_posix_enumeration_keeps_witness_images():
     """The POSIX filter uses the same two sets, so /proc walks admit witnesses."""
     assert "psmux" in cli._LIVE_DESCENDANT_IMAGES

@@ -1675,6 +1675,26 @@ def test_discover_rejects_a_leaked_manifest_end_to_end(monkeypatch, capsys):
     assert "pytest-of-" in capsys.readouterr().out
 
 
+def test_select_control_plane_provider_honors_front_door_cli_override(monkeypatch):
+    """``_select_control_plane_provider_manifest`` lives in
+    worktree_manager_launch.py and resolves its discovery call through
+    ``_core_helper`` -- which must check ``front_door_cli`` as well as
+    ``__main__``, since front_door_cli re-exports
+    ``_discover_control_plane_provider_manifests`` too. This regressed after
+    the Worktree-Manager-launch split (copilot-extensions#5287 follow-up): a
+    monkeypatch on ``_fdc._discover_control_plane_provider_manifests`` alone
+    (not also on ``m``) stopped being observed."""
+    stub_manifest = object()
+    monkeypatch.setattr(
+        _fdc,
+        "_discover_control_plane_provider_manifests",
+        lambda: {"worktree-manager": stub_manifest},
+    )
+    monkeypatch.delenv(m._CONTROL_PLANE_PROVIDER_ENV, raising=False)
+    selected = _fdc._select_control_plane_provider_manifest()
+    assert selected is stub_manifest
+
+
 def test_bare_falls_back_to_picker_when_manager_broken(monkeypatch, tmp_path):
     """End-to-end: a broken Manager on PATH must NOT dead-end bare launch --
     the seam falls back to the bundled Picker (DQ8 invariant)."""
