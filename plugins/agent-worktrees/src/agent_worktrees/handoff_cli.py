@@ -138,7 +138,7 @@ def add_parsers(sub) -> None:
     r = p.add_mutually_exclusive_group()
     r.add_argument("--fresh", action="store_true", help="Start a new conversation even in an existing worktree. By default, an existing worktree embodied without a seed resumes its head session (the conversation the worktree's ledger names as current), so bringing a task back never loses its history")
     r.add_argument("--resume-head", dest="resume_head", action="store_true", help="Resume the worktree's head session even when a --seed (or pending seed) is given; the seed is then typed into the resumed conversation. Without this, a seeded embody starts a fresh conversation for its new task")
-    p.add_argument("--seed-ready-timeout", dest="seed_ready_timeout", type=float, default=180.0, metavar="SECONDS", help="How long to wait for Copilot's input prompt before typing the --seed (default 180). A fresh MCP/skill-heavy autopilot can take much longer than the fast handoff default to become ready; if this is too short the seed is never delivered and the session idles at an empty prompt")
+    p.add_argument("--seed-ready-timeout", dest="seed_ready_timeout", type=float, default=180.0, metavar="SECONDS", help="Idle window while waiting for Copilot's input prompt before typing the --seed (default 180). Visibly busy/changing panes keep waiting up to a hard cap; if the pane never reaches a confirmed live input prompt, the seed is never delivered and the session idles at an empty prompt")
     p.add_argument("--driver", default=None, help="Label of the agent steering this session; stamps the 'driven by <agent>' banner (AGENT_BRIDGE_DRIVEN_BY) so a human taking over in Neuron Forge sees who's at the wheel")
     p.add_argument("--verify-timeout", dest="verify_timeout", type=float, default=0.0, metavar="SECONDS", help="Wait up to N seconds for the mux session to come up before returning (default 0: don't wait)")
     p.add_argument("--recovery", action="store_true", help="Use the repo's recovery launch command")
@@ -408,17 +408,14 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 claimed = pending_seed_mod.claim_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml")
             except Exception:
                 claimed = None
-        pending_seed_result = {}
+        pending_seed_result, settled = {}, {}
         if claimed:
             pending_seed_result = sessions.mux_seed_pane(
-                copilot_pane, claimed,
+                copilot_pane, claimed, session_name=sessions.mux_session_name(wt_id),
                 ready_timeout=getattr(args, "seed_ready_timeout", None) or 180.0,
             )
-            if not pending_seed_result.get("ok"):
-                try:
-                    pending_seed_mod.restore_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml", claimed)
-                except Exception:
-                    pass
+            settled = pending_seed_mod.settle_claim(
+                cfg.tracking_dir() / f"{wt_id}.yaml", claimed, pending_seed_result)
         _json_output(
             {
                 "ok": True,
@@ -430,6 +427,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 "new_pane": display_pane,
                 "note": "a live mux session already embodies this worktree",
                 "seeded": bool(pending_seed_result.get("ok")) if claimed else False,
+                **settled,  # a claimed seed kept for later, or a possible draft (not retried)
             }
         )
         return 0
@@ -564,12 +562,13 @@ def cmd_embody(args: argparse.Namespace) -> int:
     # a slow-loading autopilot is still driven autonomously.
     seed_ready_timeout = getattr(args, "seed_ready_timeout", None) or 180.0
     seed_result = (
-        sessions.mux_seed_pane(new_pane, seed, ready_timeout=seed_ready_timeout)
+        sessions.mux_seed_pane(new_pane, seed, session_name=result.get("session"),
+                               ready_timeout=seed_ready_timeout)
         if (new_pane and seed)
         else {}
     )
-    if not explicit_seed and claimed_seed and not seed_result.get("ok"):
-        pending_seed_mod.restore_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml", claimed_seed)
+    settled = pending_seed_mod.settle_claim(  # restored only if nothing was typed
+        cfg.tracking_dir() / f"{wt_id}.yaml", None if explicit_seed else claimed_seed, seed_result)
 
     verified = None
     verify_timeout = getattr(args, "verify_timeout", 0.0) or 0.0
@@ -596,6 +595,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         "seed_ready": bool(seed_result.get("ready")) if seed else False,
         "seed_submitted": bool(seed_result.get("submitted")) if seed else False,
         "seed_reason": seed_result.get("reason") if seed else None,
+        **settled,  # a claimed pending seed kept for later, or a possible draft
         "mux_verified": verified,
         "verify_hint": (
             f"agent-bridge live-sessions | grep {wt_id}  "
@@ -727,7 +727,8 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
     new_pane = result.get("new_pane")
     seed_ready_timeout = getattr(args, "seed_ready_timeout", None) or 180.0
     seed_result = (
-        sessions.mux_seed_pane(new_pane, seed, ready_timeout=seed_ready_timeout)
+        sessions.mux_seed_pane(new_pane, seed, session_name=result.get("session"),
+                               ready_timeout=seed_ready_timeout)
         if (new_pane and seed)
         else {}
     )

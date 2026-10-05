@@ -550,12 +550,19 @@ def test_live_reply_to_falls_back_to_env_session(monkeypatch):
 class _LiveFakeClient:
     """Stand-in exercising the live-session delivery path of `send`."""
 
-    def __init__(self, resolved):
+    def __init__(self, resolved, by_handle=None):
         self._resolved = resolved
+        self._by_handle = by_handle or {}
         self.delivered: list[dict] = []
 
     def resolve_live_session(self, handle):
+        if handle in self._by_handle:
+            return dict(self._by_handle[handle] or {})
         return dict(self._resolved) if self._resolved else {}
+
+    def daemon_supports(self, _version):
+        # An older daemon: `send` keeps its client-side expected-session precheck.
+        return False
 
     def send_live_message(self, session_id, *, sender, body, reply_to=None,
                           kind="prompt", wait=False, wait_timeout=None, **options):
@@ -749,7 +756,9 @@ def test_cmd_send_forwards_expected_session_id(monkeypatch):
 
 
 def test_cmd_send_rejects_replaced_session(monkeypatch, capsys):
-    client = _LiveFakeClient(resolved={"session_id": "replacement"})
+    # "original" ended (no live alias), so "replacement" is a different session.
+    client = _LiveFakeClient(resolved={"session_id": "replacement"},
+                             by_handle={"original": None})
     monkeypatch.setattr(m, "_get_client", lambda: client)
     args = argparse.Namespace(
         target="wt-target", prompt="wake", new=False,

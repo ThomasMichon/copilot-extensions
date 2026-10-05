@@ -60,6 +60,8 @@ def seams(monkeypatch):
     monkeypatch.setattr(detach, "model_copilot_args", lambda existing: [])
     monkeypatch.setattr(copilot_venue, "_ensure_agent_bridge_plugin", lambda n: None)
     monkeypatch.setattr(venue_copilot, "resolve_daemon_port", lambda *a, **k: 41234)
+    # A rejoin always probes the daemon's protocol: an alias-capable one here.
+    monkeypatch.setattr(venue_copilot, "_daemon_health", lambda port: {"protocol_version": 21})
     monkeypatch.setattr(owner, "ensure_owner_running", lambda cfg: True)
     monkeypatch.setattr(owner, "hold", lambda *a, **k: calls.holds.append((a, k)))
     monkeypatch.setattr(owner, "release", lambda *a, **k: calls.releases.append((a, k)))
@@ -140,6 +142,7 @@ def test_detach_success_reports_exact_session_and_keeps_forwards(seams, capsys):
     }
     launch = seams.ssh[0]
     assert launch["settle"] is False  # claim stays active while the session runs
+    assert launch["ns"].timeout == 1320.0  # 300s lifecycle lock + 900s seed cap + 120s overhead
     remote = launch["remote"]
     assert remote.startswith("cd /workspaces/example-web && " + detach._VENUE_TOOLING + " && python3 -c ")
     assert detach.trust_folder_command("/workspaces/example-web") in remote
@@ -151,6 +154,7 @@ def test_detach_success_reports_exact_session_and_keeps_forwards(seams, capsys):
     assert "--copilot-arg=--plugin-dir=/stage/example-agent" in argv
     assert "--copilot-arg=--no-ask-user" in argv
     assert argv[argv.index("--seed") + 1] == "do the task"
+    assert argv[argv.index("--seed-ready-timeout") + 1] == "180.0"
     assert launch["ns"].auth_cache_warmup is True and launch["ns"].no_provision is False
 
 
@@ -184,16 +188,63 @@ def test_detach_rejoin_of_running_session_does_not_reseed(seams, capsys):
     assert seams.remote == []  # nothing killed
 
 
-def test_seed_never_submitted_tears_down_and_releases(seams, capsys):
+def test_seed_never_submitted_but_registered_is_delivered_over_bridge(seams, monkeypatch, capsys):
+    from venue_copilot import refs as venue_refs
+
+    sent = []
+    monkeypatch.setattr(venue_refs, "deliver_note", lambda sid, note, **kw: sent.append((sid, note)) or True)
     unready = json.dumps({"ok": True, "created": True, "seed_submitted": False,
-                          "seed_reason": "prompt not ready"})
+                          "seed_reason": "not-ready-timeout"})
     rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=unready))
-    assert rc == 1
-    assert "seed was not submitted" in capsys.readouterr().err
-    assert any("kill-session" in c for c in seams.remote)
-    assert seams.releases and seams.releases[0][0] == ("cs-1", "cli:anchor-example-web@cs-1")
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["seed_delivery"] == "bridge"
+    assert out["seeded"] is True
+    assert sent == [("sid-42", "do the task")]
+    assert not any("kill-session" in c for c in seams.remote)
+    assert seams.holds[-1][1]["confirmed"] is True
+    assert seams.releases == []
     assert seams.release_res == [("anchor-example-web@cs-1", "r1")]
 
+
+def test_a_typed_but_unsubmitted_seed_is_not_resent_over_bridge(seams, monkeypatch, capsys):
+    """An echo-confirmed draft may still be in Copilot's input; a bridge copy
+    could run the task twice, so the session is kept and the seed reported failed."""
+    from venue_copilot import refs as venue_refs
+
+    sent = []
+    monkeypatch.setattr(venue_refs, "deliver_note", lambda *a, **k: sent.append(a) or True)
+    drafted = json.dumps({"ok": True, "created": True, "seeded": True, "seed_submitted": False,
+                          "seed_reason": "enter-failed"})
+    rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=drafted))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["seed_delivery"] == "failed" and out["seeded"] is False
+    assert out["session_id"] == "sid-42" and seams.releases == []
+    assert sent == []
+
+
+@pytest.mark.parametrize("daemon_has_aliases", [True, False])
+def test_a_resumed_seed_needs_a_daemon_that_follows_renames(
+    seams, monkeypatch, capsys, daemon_has_aliases,
+):
+    """A resume may re-register under a new id after the claim: the seed is only
+    reported delivered when the daemon carries it across that rename."""
+    from venue_copilot import refs as venue_refs
+
+    sent = []
+    monkeypatch.setattr(
+        venue_refs, "deliver_note",
+        lambda sid, note, **kw: sent.append({k: v for k, v in kw.items() if k != "operation"}) or daemon_has_aliases,
+    )
+    unready = json.dumps({"ok": True, "created": True, "seed_submitted": False})
+    rc = detach.cmd_detach(_args(copilot_args=["--resume=abc"]), ssh_session=_ssh(seams, stdout=unready))
+    assert rc == 0
+    assert sent == [{"min_daemon_protocol": 21}]
+    out = json.loads(capsys.readouterr().out)
+    assert out["seed_delivery"] == ("bridge" if daemon_has_aliases else "failed")
+    assert out["seeded"] is daemon_has_aliases
+    assert out["session_id"] == "sid-42" and seams.releases == []  # the session is kept
 
 def test_unregistered_session_is_an_explicit_failure(seams, capsys):
     seams.claim_rows.clear()  # reservation never claimed
@@ -840,6 +891,7 @@ def test_failed_fresh_launch_after_a_dead_session_releases(seams, monkeypatch, c
     prior = {"mux_session": "wt-anchor-example-web", "confirmed": True, "generation": "g-old"}
     held = types.SimpleNamespace(sessions={"cli:anchor-example-web@cs-1": prior})
     monkeypatch.setattr(owner, "get_hold", lambda *a, **k: held)
+    seams.claim_rows.clear()
     created_but_unseeded = _CREATED.replace('"seed_submitted": true', '"seed_submitted": false')
     assert detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=created_but_unseeded)) == 1
     assert seams.releases
@@ -869,7 +921,7 @@ def test_ref_files_for_a_running_session_are_sent_as_a_message(seams, tmp_path, 
     from venue_copilot import refs as venue_refs
 
     sent = []
-    monkeypatch.setattr(venue_refs, "deliver_note", lambda sid, note: sent.append((sid, note)) or True)
+    monkeypatch.setattr(venue_refs, "deliver_note", lambda sid, note, **kw: sent.append((sid, note)) or True)
     resumed = json.dumps({"ok": True, "created": False, "resumed": True})
     rc = detach.cmd_detach(
         _args(ref_files=[_ref_file(tmp_path)]), ssh_session=_ssh(seams, stdout=resumed),
@@ -877,6 +929,32 @@ def test_ref_files_for_a_running_session_are_sent_as_a_message(seams, tmp_path, 
     assert rc == 0
     assert sent and sent[0][0] == "sid-42" and "refs/batch-1/trace.har" in sent[0][1]
     assert json.loads(capsys.readouterr().out)["refs_delivered"] == "message"
+
+
+@pytest.mark.parametrize("copilot_args", [["--resume=abc"], []])
+@pytest.mark.parametrize("daemon_has_aliases", [True, False])
+def test_a_resumed_rejoin_sends_ref_notes_only_through_a_daemon_that_follows_renames(
+    seams, tmp_path, monkeypatch, capsys, daemon_has_aliases, copilot_args,
+):
+    """A rejoin can claim a still-resuming session's placeholder id: an older
+    daemon would strand the note in that placeholder's inbox, so it is refused.
+    A flagless rejoin too: its flags say nothing about how the session started."""
+    from venue_copilot import refs as venue_refs
+
+    sent = []
+    monkeypatch.setattr(
+        venue_refs, "deliver_note",
+        lambda sid, note, **kw: sent.append({k: v for k, v in kw.items() if k != "operation"}) or daemon_has_aliases,
+    )
+    resumed = json.dumps({"ok": True, "created": False, "resumed": True})
+    rc = detach.cmd_detach(
+        _args(ref_files=[_ref_file(tmp_path)], copilot_args=copilot_args),
+        ssh_session=_ssh(seams, stdout=resumed),
+    )
+    assert rc == 0
+    assert sent == [{"min_daemon_protocol": 21}]
+    out = json.loads(capsys.readouterr().out)
+    assert out["refs_delivered"] == ("message" if daemon_has_aliases else "failed")
 
 
 def test_missing_ref_file_fails_before_touching_anything(seams, capsys):
@@ -948,6 +1026,161 @@ def test_launch_retries_a_transient_transport_failure_then_succeeds(seams, monke
     assert detach.cmd_detach(_args(), ssh_session=fake) == 0
     assert len(seams.ssh) == 2
     assert json.loads(capsys.readouterr().out)["session_id"] == "sid-42"
+
+
+@pytest.mark.parametrize("with_refs", [False, True])
+def test_a_lost_create_result_then_a_rejoin_never_reports_the_seed_delivered(
+    seams, monkeypatch, capsys, tmp_path, with_refs,
+):
+    """The first attempt may have created the session (its JSON was lost); the
+    retry rejoins it. The seed's fate is unknown: not resent, not claimed --
+    nor its reference note, which rode in that same seed."""
+    rejoined = json.dumps({"ok": True, "created": False, "resumed": True,
+                           "session": "wt-anchor-example-web"})
+    outcomes = [types.SimpleNamespace(exit_code=255, stdout="", stderr="ssh: connection reset"),
+                types.SimpleNamespace(exit_code=0, stdout=rejoined, stderr="")]
+
+    def fake(ns, *, remote_cmd_builder=None, result_sink=None, settle_on_disconnect=True):
+        seams.ssh.append({"ns": ns, "remote": remote_cmd_builder(["/stage/x"]), "settle": settle_on_disconnect})
+        return result_sink(outcomes.pop(0))
+
+    from venue_copilot import refs
+
+    monkeypatch.setattr(refs, "deliver_note", lambda *a, **k: pytest.fail("must not resend the seed"))
+    monkeypatch.setattr(detach.time, "sleep", lambda s: None)
+    args = _args(ref_files=[_ref_file(tmp_path)]) if with_refs else _args()
+    assert detach.cmd_detach(args, ssh_session=fake) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["seeded"] is False and out["seed_delivery"] == "unconfirmed"
+    assert "agent-bridge send" in out["warning"]
+    if with_refs:
+        assert out["refs_delivered"] == "unconfirmed"
+
+
+@pytest.mark.parametrize("retry_reports, delivery", [
+    ({}, "unconfirmed"),  # no outcome: the lost attempt may have delivered it
+    ({"seeded": True}, "typed"),  # a concrete outcome stands
+    ({"seed_deferred": True, "seed_reason": "not-ready-timeout"}, "deferred"),
+])
+def test_a_lost_worktree_launch_result_without_a_host_seed_never_hides_the_pending_seed(
+    seams, monkeypatch, capsys, retry_reports, delivery,
+):
+    """A --worktree-id launch with no host seed whose first result was lost
+    may already have delivered the worktree's pending seed: the rejoining
+    retry reports it unconfirmed unless it reports a concrete outcome."""
+    rejoined = json.dumps({"ok": True, "created": False, "resumed": True,
+                           "session": "wt-wt-7", **retry_reports})
+    outcomes = [types.SimpleNamespace(exit_code=255, stdout="", stderr="ssh: connection reset"),
+                types.SimpleNamespace(exit_code=0, stdout=rejoined, stderr="")]
+
+    def fake(ns, *, remote_cmd_builder=None, result_sink=None, settle_on_disconnect=True):
+        seams.ssh.append(1)
+        return result_sink(outcomes.pop(0))
+
+    from venue_copilot import refs
+
+    monkeypatch.setattr(refs, "deliver_note", lambda *a, **k: pytest.fail("must not resend"))
+    assert detach.cmd_detach(_args(worktree_id="wt-7", seed=None), ssh_session=fake) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["seed_delivery"] == delivery
+
+
+def test_a_flagless_rejoin_on_a_daemon_without_aliases_reports_a_provisional_handle(
+    seams, monkeypatch, capsys,
+):
+    """No resume flag on this call, but the running worker may still be loading
+    an earlier --resume: once the launch is a rejoin, a protocol-20 daemon's
+    handle is reported provisional."""
+    monkeypatch.setattr(venue_copilot, "_daemon_health", lambda port: {"protocol_version": 20})
+    rejoined = json.dumps({"ok": True, "created": False, "resumed": True,
+                           "session": "wt-anchor-example-web"})
+    assert detach.cmd_detach(_args(seed=None), ssh_session=_ssh(seams, stdout=rejoined)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["session_handle"] == "provisional" and "live-session aliases" in out["handle_warning"]
+
+
+def test_an_implicit_resume_on_a_daemon_without_aliases_reports_a_provisional_handle(
+    seams, monkeypatch, capsys,
+):
+    """No resume flag from the host, but embody resumed the existing worktree's
+    head itself (``resume_session``): a protocol-20 daemon's handle is provisional."""
+    monkeypatch.setattr(venue_copilot, "_daemon_health", lambda port: {"protocol_version": 20})
+    created = json.dumps({"ok": True, "created": True, "session": "wt-wt-7",
+                          "resume_session": "head-1"})
+    assert detach.cmd_detach(_args(worktree_id="wt-7", seed=None),
+                             ssh_session=_ssh(seams, stdout=created)) == 0
+    assert json.loads(capsys.readouterr().out)["session_handle"] == "provisional"
+
+
+def test_a_rejoin_with_a_host_seed_still_reports_the_pending_seed_outcome(seams, monkeypatch, capsys):
+    """A rejoin ignores the host seed but still runs the worktree's own pending
+    seed: that attempt's outcome is reported, not hidden."""
+    from venue_copilot import refs as venue_refs
+
+    monkeypatch.setattr(venue_refs, "deliver_note", lambda *a, **k: True)
+    rejoined = json.dumps({"ok": True, "created": False, "resumed": True, "session": "wt-wt-7",
+                           "seed_unconfirmed": True, "seed_reason": "enter-failed"})
+    assert detach.cmd_detach(_args(worktree_id="wt-7"), ssh_session=_ssh(seams, stdout=rejoined)) == 0
+    assert json.loads(capsys.readouterr().out)["seed_delivery"] == "unconfirmed"
+
+
+def test_the_reservation_outlives_every_launch_attempt_and_registration(seams, monkeypatch, capsys):
+    ttls: list[float] = []
+    monkeypatch.setattr(
+        venue_copilot, "reserve_cli_mode",
+        lambda scope, ttl_seconds, venue: ttls.append(ttl_seconds) or {"reservation_id": "r1"},
+    )
+    args = _args()
+    assert detach.cmd_detach(args, ssh_session=_ssh(seams, stdout=_CREATED)) == 0
+    launch = max(args.register_timeout + 300.0, detach._SEEDED_LAUNCH_TIMEOUT)
+    assert detach._SEEDED_LAUNCH_TIMEOUT > detach._LIFECYCLE_LOCK_WAIT + detach._SEED_READY_HARD_CAP
+    assert ttls and ttls[0] >= detach._LAUNCH_ATTEMPTS * launch + args.register_timeout
+
+
+@pytest.mark.parametrize("worktree_id", ["wt-7", None])
+def test_a_worktree_launch_without_a_seed_still_budgets_for_its_pending_seed(
+    seams, monkeypatch, capsys, worktree_id,
+):
+    """A --worktree-id launch can consume the remote worktree's pending seed
+    with no host-side seed or refs; its readiness wait can reach the hard cap,
+    so the SSH budget (and the reservation) get the same floor. An anchor
+    launch with nothing to seed keeps the shorter budget."""
+    ttls: list[float] = []
+    monkeypatch.setattr(
+        venue_copilot, "reserve_cli_mode",
+        lambda scope, ttl_seconds, venue: ttls.append(ttl_seconds) or {"reservation_id": "r1"},
+    )
+    args = _args(worktree_id=worktree_id, seed=None)
+    assert detach.cmd_detach(args, ssh_session=_ssh(seams, stdout=_CREATED)) == 0
+    floor = detach._LAUNCH_ATTEMPTS * detach._SEEDED_LAUNCH_TIMEOUT
+    assert (ttls[0] >= floor) is (worktree_id is not None)
+
+
+@pytest.mark.parametrize("embody_says, delivery, seeded", [
+    ({"seed_unconfirmed": True, "seed_reason": "enter-failed"}, "unconfirmed", False),
+    ({"seed_deferred": True, "seed_reason": "not-ready-timeout"}, "deferred", False),
+    ({"seed_lost": True, "seed_reason": "not-ready-timeout"}, "lost", False),
+    ({"seeded": True, "seed_submitted": True}, "typed", True),
+])
+def test_a_pending_seed_outcome_is_reported_without_a_host_seed(
+    seams, monkeypatch, capsys, embody_says, delivery, seeded,
+):
+    """A --worktree-id launch with no host seed reports how embody fared with
+    the worktree's pending seed (submitted, kept for later, or a possible
+    draft) -- and never resends it over the bridge."""
+    from venue_copilot import refs as venue_refs
+
+    monkeypatch.setattr(venue_refs, "deliver_note", lambda *a, **k: pytest.fail("must not resend"))
+    embodied = json.dumps({"ok": True, "created": True, "session": "wt-wt-7", **embody_says})
+    rc = detach.cmd_detach(_args(worktree_id="wt-7", seed=None),
+                           ssh_session=_ssh(seams, stdout=embodied))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert (out["seed_delivery"], out["seeded"]) == (delivery, seeded)
+    if delivery != "typed":
+        assert embody_says["seed_reason"] in out["warning"]
+    if delivery == "deferred":  # still stored: a manual send would run it twice
+        assert "agent-bridge send" not in out["warning"]
 
 
 def test_launch_does_not_retry_a_genuine_remote_failure(seams, monkeypatch, capsys):

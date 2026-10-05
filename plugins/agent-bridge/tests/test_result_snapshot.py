@@ -1234,3 +1234,29 @@ def test_cli_result_uses_represented_surface(monkeypatch, capsys) -> None:
 
     output = capsys.readouterr().out
     assert "wt-live  [live]  fidelity=reduced" in output
+
+
+def test_a_retired_id_rejects_a_reused_pid_with_another_start_time(client, app) -> None:
+    """Registering through an alias resolves to the live successor; a matching
+    pid with a different known process start time is another process."""
+    import time
+
+    db = app.state.db
+    now = time.time()
+    db.create_cli_mode_reservation("wt-alias", now=now)
+    for sid in ("placeholder", "resumed"):
+        assert db.register_live_session(
+            sid, machine="host", cwd="/wt", worktree_id="wt-alias", repo=None, branch=None,
+            pid=4242, role=None, now=now, process_started_at=100.0,
+        ) == "live"
+    assert db.get_live_session("placeholder")["session_id"] == "resumed"
+    body = {"session_id": "placeholder", "machine": "host", "cwd": "/wt",
+            "worktree_id": "wt-alias", "pid": 4242}
+    stranger = client.post("/api/v1/live-sessions", json={**body, "process_started_at": 200.0})
+    assert stranger.status_code == 409
+    assert stranger.json()["detail"]["reason"] == "incarnation_mismatch"
+    assert db.get_live_session_exact("resumed")["process_started_at"] == 100.0
+    same = client.post("/api/v1/live-sessions", json={**body, "process_started_at": 100.0})
+    assert same.status_code == 200
+    reused_fast = client.post("/api/v1/live-sessions", json={**body, "process_started_at": 100.1})
+    assert reused_fast.status_code == 409  # 100 ms later is still another process

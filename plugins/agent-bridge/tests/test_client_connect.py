@@ -624,6 +624,29 @@ class TestDrainGrace:
             f"{new_base}/api/v1/sessions",
         ]
 
+    def test_retries_a_result_read_while_its_history_is_merging(self) -> None:
+        """The result routes answer 503 "history is merging" while a session-id
+        merge copies events: a refusal, retried within the grace like
+        "initializing", so the reader sees the merged history, not an error."""
+        client = BridgeClient("http://127.0.0.1:57585", "tok", connect_grace=2.0)
+        merging = urllib.error.HTTPError(
+            "http://127.0.0.1/api/v1/live-sessions/s1/result", 503, "Service Unavailable", {},
+            io.BytesIO(json.dumps({"detail": "represented history is merging (a session-id "
+                                             "change); retry shortly"}).encode()))
+        answers = iter([merging, _FakeResp({"items": []})])
+
+        def respond(req, timeout=None):
+            answer = next(answers)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        with (
+            patch("agent_bridge.client.urllib.request.urlopen", side_effect=respond),
+            patch("time.sleep"),
+        ):
+            assert client._request("GET", "/api/v1/live-sessions/s1/result") == {"items": []}
+
     def test_waits_for_routing_flip_after_drain_503(self) -> None:
         old_base = "http://127.0.0.1:57585"
         new_base = "http://127.0.0.1:47000"

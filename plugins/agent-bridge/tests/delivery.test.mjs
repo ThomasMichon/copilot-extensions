@@ -13,7 +13,189 @@ import {
   PROMPT_REPLY_GUIDANCE,
   controlPlan,
   modeApplied,
+  adoptSessionId,
+  serializedRegister,
+  REJECTED_RETRY_MS,
+  drainInbox,
+  drainControls,
 } from "../extensions/agent-bridge/delivery.mjs";
+
+test("a same-process resume switches registration to the resumed id", () => {
+  const state = { sessionId: null, registered: false };
+  assert.equal(adoptSessionId(state, "placeholder"), true); // late id: register it
+  state.registered = true;
+  assert.equal(adoptSessionId(state, "placeholder"), false); // same id: nothing to do
+  assert.equal(adoptSessionId(state, undefined), false); // an event without an id
+  assert.equal(adoptSessionId(state, "resumed"), true); // the resume renamed it
+  assert.deepEqual(state, { sessionId: "resumed", registered: false });
+  assert.equal(adoptSessionId(state, "resumed"), false);
+});
+
+function deferredPoster() {
+  const calls = [];
+  const post = (id) => new Promise((resolve) => calls.push({ id, resolve }));
+  return { calls, post };
+}
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+test("a resumed id refused for a crashed predecessor's row keeps the placeholder serving", async () => {
+  // The resumed conversation's id still has the crashed process's expired row:
+  // the bridge refuses this process for it (incarnation mismatch).
+  let clock = 1_000;
+  const state = { sessionId: "placeholder", registered: false };
+  const posts = [];
+  const post = async (id) => { posts.push(id); return id === "resumed" ? "rejected" : true; };
+  const register = serializedRegister(state, post, () => {}, { now: () => clock });
+  await register();
+  assert.equal(adoptSessionId(state, "resumed", clock), true);
+  await register();
+  assert.deepEqual(posts, ["placeholder", "resumed", "placeholder"]);
+  assert.deepEqual([state.sessionId, state.registered], ["placeholder", true]);  // inbox/flush go on
+  assert.equal(adoptSessionId(state, "resumed", clock + 1), false);  // not re-tried on every event
+  await register();  // a heartbeat refreshes the placeholder
+  assert.equal(posts.at(-1), "placeholder");
+  clock += REJECTED_RETRY_MS;
+  assert.equal(adoptSessionId(state, "resumed", clock), true);  // retried later (the row may be purged)
+  assert.deepEqual(await register.close(), ["placeholder"]);
+});
+
+test("an accepted id-only registration later refused for the same id revokes delivery and cleanup", async () => {
+  // The first registration went out before this process's identity was known
+  // and was accepted onto another incarnation's row; the next heartbeat, with
+  // pid and start time, is refused for that very id.
+  const state = { sessionId: "resumed", registered: false };
+  let refuse = false;
+  const posts = [];
+  const post = async (id) => { posts.push(id); return refuse ? "rejected" : true; };
+  const register = serializedRegister(state, post);
+  assert.equal(await register(), true);
+  assert.equal(state.registered, true);
+  refuse = true;
+  assert.equal(await register(), false);
+  assert.deepEqual([state.sessionId, state.registered], ["resumed", false]);  // inbox/flush stop
+  assert.deepEqual(await register.close(), []);  // shutdown leaves the other process's row alone
+  assert.deepEqual(posts, ["resumed", "resumed"]);
+});
+
+test("a revoked id is served again once the other incarnation's row is gone", async () => {
+  const state = { sessionId: "resumed", registered: false };
+  let result = true;
+  const register = serializedRegister(state, async () => result);
+  await register();
+  result = "rejected";
+  await register();
+  assert.equal(state.registered, false);
+  result = true;  // the other row was purged: the next heartbeat registers it
+  assert.equal(await register(), true);
+  assert.equal(state.registered, true);
+  assert.deepEqual(await register.close(), ["resumed"]);
+});
+
+test("an old id refused after a rename is no longer deregistered at shutdown", async () => {
+  // The placeholder was registered; its in-flight heartbeat comes back refused
+  // (its row now belongs to another process) only after a resume renamed it.
+  const state = { sessionId: "placeholder", registered: false };
+  const { calls, post } = deferredPoster();
+  const register = serializedRegister(state, post);
+  const first = register();
+  await tick();
+  calls[0].resolve(true);
+  await first;
+  const beat = register();
+  await tick();
+  adoptSessionId(state, "resumed");
+  calls[1].resolve("rejected");  // the placeholder's heartbeat
+  await tick();
+  calls[2].resolve(true);  // the resumed id registers
+  await beat;
+  assert.deepEqual([state.sessionId, state.registered], ["resumed", true]);
+  assert.deepEqual(await register.close(), ["resumed"]);  // not the other process's placeholder row
+});
+
+test("registration waits for ready (the session metadata) and shutdown stops the wait", async () => {
+  const state = { sessionId: "placeholder", registered: false };
+  let release;
+  const ready = new Promise((resolve) => { release = resolve; });
+  const posts = [];
+  const register = serializedRegister(state, async (id) => { posts.push(id); return true; },
+    () => {}, { ready });
+  const first = register();
+  await tick();
+  assert.deepEqual(posts, []);  // nothing registers before the metadata settles
+  adoptSessionId(state, "resumed");  // a resume meanwhile: only the current id posts
+  release();
+  assert.equal(await first, true);
+  assert.deepEqual(posts, ["resumed"]);
+
+  const waiting = { sessionId: "s", registered: false };
+  const never = serializedRegister(waiting, async () => true, () => {}, { ready: new Promise(() => {}) });
+  never();
+  assert.deepEqual(await never.close(), []);  // close() doesn't hang on a slow lookup
+  assert.equal(waiting.registered, false);
+});
+
+test("shutdown drains a pending registration and returns every id to deregister", async () => {
+  const state = { sessionId: "placeholder", registered: false };
+  const { calls, post } = deferredPoster();
+  const register = serializedRegister(state, post);
+  register();
+  await tick();
+  adoptSessionId(state, "resumed");  // a resume while the placeholder's POST is pending
+  const closing = register.close();
+  register();  // a heartbeat after shutdown began: not admitted
+  let done = false;
+  closing.then(() => { done = true; });
+  await tick();
+  assert.equal(done, false);  // waits for the in-flight registration
+  calls[0].resolve(true);
+  const ids = await closing;
+  await tick();
+  assert.deepEqual(calls.map((c) => c.id), ["placeholder"]);  // the resumed id is never posted after it
+  assert.deepEqual(ids, ["placeholder"]);
+});
+
+test("a rename while the old id's registration is in flight registers the new id before ready", async () => {
+  const state = { sessionId: "placeholder", registered: false };
+  const { calls, post } = deferredPoster();
+  const register = serializedRegister(state, post);
+  const first = register();
+  await tick();
+  adoptSessionId(state, "resumed");
+  const second = register();  // the rename's own registration
+  calls[0].resolve(true);     // the old id's request completes first
+  await tick();
+  assert.equal(state.registered, false);  // not ready: the current id isn't registered yet
+  assert.deepEqual(calls.map((c) => c.id), ["placeholder", "resumed"]);
+  calls[1].resolve(true);
+  await first;
+  await tick();
+  assert.equal(state.registered, true);
+  calls.slice(2).forEach((c) => c.resolve(true));
+  await second;
+  assert.ok(calls.slice(1).every((c) => c.id === "resumed"));
+});
+
+test("a heartbeat queued before a rename never registers the old id after the new one", async () => {
+  const state = { sessionId: "placeholder", registered: true };
+  const { calls, post } = deferredPoster();
+  const register = serializedRegister(state, post);
+  const inFlight = register();
+  const heartbeat = register();  // queued behind it, before the rename
+  await tick();
+  adoptSessionId(state, "resumed");
+  const renamed = register();
+  for (let i = 0; i < 6 && calls.some((c) => !c.done); i++) {
+    for (const c of calls) if (!c.done) { c.done = true; c.resolve(true); }
+    await tick();
+  }
+  await Promise.all([inFlight, heartbeat, renamed]);
+  const ids = calls.map((c) => c.id);
+  assert.equal(ids[0], "placeholder");
+  assert.ok(ids.slice(1).every((id) => id === "resumed"), ids.join(","));
+  assert.equal(state.registered, true);
+  // Shutdown deregisters both rows this process registered, newest first.
+  assert.deepEqual(await register.close(), ["resumed", "placeholder"]);
+});
 
 test("buildDeliveredSendOptions always tags an explicit non-user source", () => {
   const options = buildDeliveredSendOptions({
@@ -157,4 +339,37 @@ test("modeApplied is false only when the CLI says the mode wasn't applied", () =
   assert.equal(modeApplied({ status: "applied", modelChanged: false, modeApplied: true }), true);
   assert.equal(modeApplied({ status: "rejected", modelChanged: false, modeApplied: false }), false);
   assert.equal(modeApplied(undefined), false);
+});
+
+test("an inbox delivery is acked under the id it was fetched for, even across a rename", async () => {
+  const state = { sessionId: "placeholder" };
+  let finishSend;
+  const posts = [];
+  const pending = drainInbox(state.sessionId, {
+    getJson: async (path) => ({ path, messages: [{ id: 1, sender: "a", body: "x", delivery: "queue" }] }),
+    post: async (method, path, body) => { posts.push([path, body]); return true; },
+    session: { send: () => new Promise((resolve) => { finishSend = resolve; }) },
+    inFlight: new InFlightMessages(),
+  });
+  await tick();
+  state.sessionId = "resumed";  // a resume renamed the session while the send was awaited
+  finishSend();
+  assert.deepEqual(await pending, [1]);
+  assert.deepEqual(posts, [["/api/v1/live-sessions/placeholder/messages/ack", { ids: [1] }]]);
+});
+
+test("a control is acked under the id it was claimed for, even across a rename", async () => {
+  const state = { sessionId: "placeholder" };
+  let finishSet;
+  const posts = [];
+  const pending = drainControls(state.sessionId, {
+    getJson: async () => ({ messages: [{ id: 7, kind: "control:set-mode", body: "autopilot" }] }),
+    post: async (method, path, body) => { posts.push([path, body]); return true; },
+    session: { rpc: { mode: { set: () => new Promise((resolve) => { finishSet = resolve; }) } } },
+  });
+  await tick();
+  state.sessionId = "resumed";
+  finishSet({ modeApplied: true });
+  await pending;
+  assert.deepEqual(posts, [["/api/v1/live-sessions/placeholder/controls/ack", { ids: [7], applied: true }]]);
 });

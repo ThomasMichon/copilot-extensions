@@ -1,0 +1,9 @@
+{
+  "comment": "Harden detached seed readiness against transcript redraws",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

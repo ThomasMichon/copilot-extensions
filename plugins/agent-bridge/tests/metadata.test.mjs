@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 
@@ -126,6 +126,26 @@ test("resolveMetadataAsync prefers an explicit AGENT_BRIDGE_SCOPE_ID", async (t)
   assert.equal(meta.worktree_id, "anchor-example-web@cs-1");
 });
 
+// The process start time is what lets the bridge tell this process apart from
+// an unrelated one that later reuses its pid, so it must never change.
+test("resolveMetadataAsync reports a fixed process start time", async (t) => {
+  const { dir, write } = makeFakeBinDir();
+  write("git", 0, "main");
+  write("agent-worktrees", 0, "anchor-example-web");
+
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${dir}${process.platform === "win32" ? ";" : ":"}${originalPath}`;
+  t.after(() => { process.env.PATH = originalPath; });
+
+  const first = await resolveMetadataAsync({ cwd: dir, env: {} });
+  const second = await resolveMetadataAsync({ cwd: dir, env: {} });
+
+  assert.equal(typeof first.process_started_at, "number");
+  assert.equal(first.process_started_at, second.process_started_at);
+  const expected = Date.now() / 1000 - process.uptime();
+  assert.ok(Math.abs(first.process_started_at - expected) < 2);
+});
+
 // Sanity check that the fake-binary harness itself is exercising a real
 // subprocess (not silently no-op-ing), so the timing assertion above is
 // actually meaningful.
@@ -136,3 +156,35 @@ test("fake bin harness sanity: the stub script really does sleep", () => {
   const out = execFileSync(bin, [], { cwd: dir, encoding: "utf-8", shell: process.platform === "win32" }).trim();
   assert.equal(out, "ok");
 });
+
+// A failed `agent-worktrees get machine` (timeout, crash) must not leave the
+// session without a machine: a resume could then never be folded into its
+// placeholder, stranding messages sent to the launch handle. It falls back to
+// the hostname, as agent-worktrees' own machine detection does.
+test("resolveMetadataAsync falls back to the hostname when the machine lookup fails", async (t) => {
+  const { dir, write } = makeFakeBinDir();
+  write("git", 0, "main");
+  const isWin = process.platform === "win32";
+  const failing = join(dir, isWin ? "agent-worktrees.cmd" : "agent-worktrees");
+  writeFileSync(failing, isWin ? "@echo off\r\nexit /b 1\r\n" : "#!/bin/sh\nexit 1\n");
+  if (!isWin) chmodSync(failing, 0o755);
+
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${dir}${isWin ? ";" : ":"}${originalPath}`;
+  t.after(() => { process.env.PATH = originalPath; });
+
+  const meta = await resolveMetadataAsync({ cwd: dir, env: {} });
+
+  assert.equal(meta.machine, hostname().toLowerCase());
+});
+
+// An extension reload in the same process is a new module instance: it must
+// still report the bit-identical start time, so the bridge can compare start
+// times exactly (no drift window a reused pid could slip through).
+test("a reloaded metadata module reports the same process start time exactly", async () => {
+  const first = (await import("../extensions/agent-bridge/metadata.mjs")).processIdentity();
+  const reloaded = await import(`../extensions/agent-bridge/metadata.mjs?reload=${Date.now()}`);
+  assert.equal(reloaded.processIdentity().process_started_at, first.process_started_at);
+  assert.equal(reloaded.processIdentity().pid, process.pid);
+});
+

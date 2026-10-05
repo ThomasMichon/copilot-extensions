@@ -3,7 +3,7 @@
 // per stretch of activity; only failures and the running tool stay visible.
 
 import { h, clear, replaceChildren, markdown, copyText } from "./dom.js";
-import { SessionModel, parseSseBlock, parseMarkdown, summarizeSteps, duration, ago } from "./model.js";
+import { SessionModel, parseSseBlock, parseMarkdown, summarizeSteps, duration, ago, followContinuity } from "./model.js";
 
 const PAGE = 60;  // blocks rendered per "show earlier" step
 
@@ -108,6 +108,17 @@ export class SessionViewer {
     clear(this.blocksEl);
   }
 
+  /** The bridge is replaying the current log from its start (a merge it
+   * couldn't translate, see followContinuity): show only the replay. */
+  _replayHistory(model) {
+    this.model = model;
+    this.nodes = [];
+    this.renderFrom = 0;
+    this.maxRendered = PAGE;
+    this.unseen = 0;
+    clear(this.blocksEl);
+  }
+
   /**
    * Show an ended session's transcript, read-only: no stream and no composer.
    * `events` are `{event, data, ts}` in the live stream's own kinds (the
@@ -177,10 +188,31 @@ export class SessionViewer {
   async _stream(w) {
     while (this.watch === w) {
       try {
+        // Fold what the last connection already delivered before naming its
+        // cursor: a delayed animation-frame flush (a background tab) would
+        // otherwise leave those events pending while the server sends them
+        // again from the older cursor, and both copies would be folded.
+        if (this.pending.length) this._flush();
+        const cont = this.model.continuity ? `&continuity_id=${encodeURIComponent(this.model.continuity)}` : "";
         const r = await this.request(
-          `/api/v1/live-sessions/${encodeURIComponent(w.id)}/events?after=${this.model.lastId}`,
+          `/api/v1/live-sessions/${encodeURIComponent(w.id)}/events?after=${this.model.lastId}${cont}`,
           { headers: { Accept: "text/event-stream" }, signal: w.ctrl.signal });
+        // open() may have switched sessions while this request was in flight:
+        // its cursor and continuity belong to the old session's model.
+        if (this.watch !== w) return;
         if (!r.ok) throw new Error("events " + r.status);
+        // lastId is numbered on this log; a reconnect names it so the bridge can
+        // translate the cursor if a session-id change merges the log meanwhile.
+        // The pair changes together: the bridge echoes the (translated) start.
+        const echoed = r.headers.get("X-Agent-Bridge-Continuity");
+        if (echoed) {
+          const cursor = r.headers.get("X-Agent-Bridge-Cursor");
+          const next = followContinuity(this.model, echoed, cursor == null ? NaN : Number(cursor));
+          if (next.replay) {
+            this.pending = [];  // blocks from the previous connection, numbered on the old log
+            this._replayHistory(next.model);
+          }
+        }
         w.state = "live";
         this._renderHead();
         const reader = r.body.getReader();
@@ -188,7 +220,7 @@ export class SessionViewer {
         let buf = "";
         for (;;) {
           const { value, done } = await reader.read();
-          if (done) break;
+          if (done || this.watch !== w) break;
           buf += dec.decode(value, { stream: true }).replace(/\r\n/g, "\n");
           let i;
           while ((i = buf.indexOf("\n\n")) >= 0) {
@@ -218,10 +250,22 @@ export class SessionViewer {
     if (!this.pending.length || !this.watch) return;
     const catching = !this.catchUp.done;
     const stick = catching || this._atBottom();
-    const before = this.model.blocks.length;
+    let before = this.model.blocks.length;
     const changed = new Set();
     for (const block of this.pending.splice(0)) {
       const ev = parseSseBlock(block);
+      if (ev.type === "continuity") {  // the stream followed a merge: ids are renumbered
+        if (ev.data && ev.data.continuity_id) {
+          // A replaced log the bridge couldn't translate into restarts at 0.
+          const next = followContinuity(this.model, ev.data.continuity_id, ev.data.after ?? 0);
+          if (next.replay) {
+            this._replayHistory(next.model);
+            changed.clear();
+            before = 0;
+          }
+        }
+        continue;
+      }
       if (!ev.data || ev.type === "bridge_control" || ev.type === "heartbeat") {
         if (ev.id != null) this.model.lastId = Math.max(this.model.lastId, ev.id);
         continue;

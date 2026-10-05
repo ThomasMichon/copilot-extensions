@@ -99,6 +99,16 @@ def test_ui_talks_only_to_existing_token_protected_routes() -> None:
     assert re.search(r"https?://(?!acp-ui\.github\.io)", _src("index.html") + code) is None
 
 
+def test_a_reconnect_folds_pending_events_before_naming_its_cursor() -> None:
+    """A delayed animation-frame flush must not leave the previous connection's
+    events pending while a reconnect asks again from the older cursor (both
+    copies would be folded): _stream flushes before building its request."""
+    src = _src("viewer.js")
+    stream = src[src.index("async _stream(w)"):src.index("_schedule()")]
+    flush = stream.index("this._flush()")
+    assert flush < stream.index("/events?after=") and flush < stream.index("this.model.continuity ?")
+
+
 def test_content_is_rendered_as_text_never_markup() -> None:
     for name in JS:
         src = _src(name)

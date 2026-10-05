@@ -823,8 +823,10 @@ def resolve_resume_target(record) -> str | None:
     all three agree on one target:
 
       1. the record's **asserted lifecycle head** (``resolved_head_session``)
-         when it still has on-disk conversation data -- the authoritative
-         "current session" a handoff/cutover may have advanced; then
+         -- the authoritative "current session" a handoff/cutover may have
+         advanced -- or, with none, a **yielded head** (a handoff no successor
+         linked here; the same one the worktree listing shows), whichever
+         still has on-disk conversation data; then
       2. the **filesystem-latest** valid session
          (``find_latest_session_id_fast``) for un-annotated records; else
       3. ``None`` -- nothing resumable exists (a genuine cold start).
@@ -836,6 +838,10 @@ def resolve_resume_target(record) -> str | None:
     """
     try:
         head = getattr(record, "resolved_head_session", None)
+        if not head:
+            from .tracking_lifecycle import yielded_head_session
+
+            head = yielded_head_session(record)
     except Exception:
         head = None
     if head and session_has_conversation_data(head):
@@ -2089,136 +2095,7 @@ def headless_new_session(
     return {"ok": True, "pid": proc.pid, "error": None}
 
 
-def mux_seed_pane(
-    pane_id: str,
-    seed: str,
-    *,
-    mux: str | None = None,
-    ready_timeout: float = 20.0,
-    poll_interval: float = 0.5,
-    settle: float = 0.6,
-) -> dict:
-    """Type ``seed`` as the first interactive prompt into a freshly spawned pane.
-
-    A cutover spawns a *plain* interactive Copilot (no ``--interactive`` launch
-    arg -- see :func:`build_mux_new_window_argv`: psmux cannot carry a
-    spaces-containing pane arg on Windows), then this injects the seed as literal
-    keystrokes once Copilot is ready. ``send-keys -l`` delivers the whole prompt
-    (spaces and all) as one line -- the same mux mechanism the retire path uses --
-    sidestepping every command-line quoting hazard.
-
-    Hardened against seeding into the wrong pane state (a half-loaded TUI, or a
-    pane that fell back to a bare shell whose ``❯`` looks like Copilot's caret):
-    confirmed-ready requires two consecutive stable polls (never a first-frame
-    match); an unconfirmed pane never gets a typed/submitted seed (the caller
-    sees ``sent``/``submitted`` false); a typed seed is echo-verified before
-    Enter is pressed. Also auto-dismisses known blocking startup dialogs (see
-    :mod:`agent_worktrees.pane_nudges`) -- e.g. Copilot's first-run desktop-app
-    nudge, which otherwise deadlocks a detached launch forever.
-
-    Returns ``{ok, pane, ready, sent, submitted, reason}`` -- ``ok`` is true only
-    when the seed was actually delivered as a turn (``submitted``).
-    """
-    import re
-    import subprocess
-    import time
-
-    from . import pane_nudges
-
-    mux_bin = _mux_bin(mux)
-
-    def _cap() -> str:
-        try:
-            r = subprocess.run(
-                [mux_bin, "capture-pane", "-p", "-t", pane_id],
-                capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace",
-            )
-            return (r.stdout or "") if r.returncode == 0 else ""
-        except (OSError, subprocess.TimeoutExpired):
-            return ""
-
-    def _is_copilot_ready(cap: str) -> bool:
-        low = cap.lower()
-        # Caret, interrupt footer, or 1.0.89's boxed input; never a selection dialog's caret.
-        return "enter to select" not in low and (
-            "❯" in cap or ("esc" in low and "interrupt" in low) or ("╻▄" in cap and "╹▀" in cap))
-
-    # Readiness must be STABLE (two polls) so a transient banner/spinner frame
-    # can't trip it. A known blocking dialog is dismissed at most once per call.
-    ready = False
-    stable, dismissed_nudge = 0, False
-    deadline = time.monotonic() + ready_timeout
-    while time.monotonic() < deadline:
-        cap = _cap()
-        if _is_copilot_ready(cap):
-            stable += 1
-            if stable >= 2:
-                ready = True
-                break
-        elif not dismissed_nudge and pane_nudges.is_desktop_app_nudge(cap):
-            dismissed_nudge, stable = True, 0
-            pane_nudges.dismiss(mux_bin, pane_id)
-        else:
-            stable = 0
-        time.sleep(poll_interval)
-
-    # Safety gate: without a confirmed-ready Copilot we do NOT type or submit --
-    # blind keystrokes into a half-loaded TUI or a fallback shell could execute a
-    # mistyped command. Degrade to "landed unseeded" (the operator can paste).
-    if not ready:
-        return {
-            "ok": False, "pane": pane_id, "ready": False,
-            "sent": False, "submitted": False, "reason": "not-ready-timeout",
-        }
-
-    def _send(*a: str) -> bool:
-        try:
-            r = subprocess.run(
-                [mux_bin, "send-keys", "-t", pane_id, *a],
-                capture_output=True, timeout=5,
-            )
-            return r.returncode == 0
-        except (OSError, subprocess.TimeoutExpired):
-            return False
-
-    # A distinctive head of the seed, whitespace-squashed so terminal soft-wrap
-    # (a newline inserted mid-line in the captured buffer) can't defeat the echo
-    # check below.
-    def _squash(s: str) -> str:
-        return re.sub(r"\s+", "", s)
-
-    head = _squash(seed)[:16]
-
-    # ``-l`` sends the seed literally (no key-name interpretation), so the whole
-    # multi-word prompt lands as one input line.
-    sent = _send("-l", seed)
-    time.sleep(settle)
-
-    # Echo-verify: press Enter only once the seed's head is visible in the pane,
-    # so a partially-eaten or lost seed is never submitted as a bogus turn.
-    echoed = False
-    if sent and head:
-        for _ in range(4):
-            if head in _squash(_cap()):
-                echoed = True
-                break
-            time.sleep(poll_interval)
-    elif sent:
-        echoed = True  # empty seed: nothing to verify
-
-    submitted = False
-    reason = None
-    if echoed:
-        submitted = _send("Enter")
-        if not submitted:
-            reason = "enter-failed"
-    else:
-        reason = "seed-not-echoed" if sent else "send-failed"
-
-    return {
-        "ok": bool(submitted), "pane": pane_id, "ready": ready,
-        "sent": bool(sent), "submitted": bool(submitted), "reason": reason,
-    }
+from .pane_seed import mux_seed_pane  # noqa: E402,F401 -- re-exported (moved for size)
 
 
 def mux_copilot_pane(

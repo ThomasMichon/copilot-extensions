@@ -64,6 +64,105 @@ def _resolve_prompt(args: argparse.Namespace, *, required: bool) -> str | None:
     return None
 
 
+def _connection_refused(exc: BaseException) -> bool:
+    """True when the error chain proves the connection was refused (nothing
+    was sent), as opposed to a reset, timeout or broken pipe that may have
+    delivered the request."""
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, ConnectionRefusedError) or isinstance(getattr(cur, "reason", None),
+                                                                   ConnectionRefusedError):
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
+
+
+def _hold_protocol_floor(client: Any, floor: int) -> None:
+    """Keep ``--min-daemon-protocol`` true for every request attempt.
+
+    The preflight checks only the daemon it first reached; an older daemon can
+    restart at the same URL (or a connection failure can move the client to a
+    replacement) before a later request. So each attempt -- the first and every
+    retry, which this takes over from the client (bounded by its own outage
+    grace) -- first probes the daemon that will receive it, and one below the
+    floor gets a 426, never the request. An unanswered probe is retried, never
+    skipped. The probe-to-request window left is milliseconds; closing it fully
+    needs the daemon itself to refuse, which an older daemon can't do.
+    """
+    import time
+
+    from .client import BridgeClientError, BridgeConnectionError
+
+    request, resolve = client._request, getattr(client, "_reresolve", None)
+    grace = getattr(client, "_connect_grace", 0.0)
+
+    def _attempt(*a: Any, **k: Any) -> Any:
+        # The client's own retries would skip the probe, so they're off for each
+        # protocol-checked attempt -- and only then: between attempts (a stream's
+        # endpoint refresh after a cutover) its resolver must still work.
+        saved = client._reresolve, client._connect_grace
+        client._reresolve, client._connect_grace = None, 0.0
+        try:
+            return request(*a, **k)
+        finally:
+            client._reresolve, client._connect_grace = saved
+
+    def _floored(method: str, path: str, *a: Any, **k: Any) -> Any:
+        deadline = time.monotonic() + grace
+        retrying = False
+        last_error: Exception | None = None
+        while True:
+            if retrying:
+                time.sleep(0.5)
+                base = resolve() if resolve else None
+                if base:
+                    client._base = base.rstrip("/")
+            try:
+                version = int((_attempt("GET", "/health") or {}).get("protocol_version") or 0)
+            except (BridgeConnectionError, OSError, TypeError, ValueError):
+                # OSError: a read timeout (TimeoutError) after connecting
+                # escapes the client's own wrapping; the probe is unanswered.
+                unanswered = BridgeConnectionError(
+                    f"the bridge daemon at {client._base} didn't answer a protocol check in time; "
+                    "the request was not sent")
+                if time.monotonic() >= deadline:
+                    raise unanswered from None
+                retrying, last_error = True, last_error or unanswered
+                continue
+            if version < floor:
+                raise BridgeClientError(426, f"the bridge daemon now at {client._base} predates protocol "
+                                             f"{floor}; not sending the request there")
+            if last_error is not None and time.monotonic() >= deadline:
+                raise last_error  # a slow re-probe spent the budget: never send late
+            try:
+                return _attempt(method, path, *a, **k)
+            except BridgeConnectionError as exc:
+                # A request that may have reached the daemon (a reset, a timeout,
+                # a broken pipe) may have been accepted: resend only an
+                # idempotent one, or one whose connection was refused outright.
+                if time.monotonic() >= deadline or (
+                        method not in ("GET", "HEAD") and not _connection_refused(exc)):
+                    raise
+                retrying, last_error = True, exc
+            except BridgeClientError as exc:
+                # The daemon refused the request outright (it was not
+                # accepted): a retiring one ("draining") hands over to its
+                # replacement, and a starting one ("initializing") answers
+                # /health before its session paths are ready. Retry either
+                # within the same deadline, re-probing the protocol first
+                # (client.py's own retries are off: they would skip the probe).
+                # Any other HTTP error is the answer.
+                detail = str(exc.detail).lower()
+                if exc.status != 503 or not ("drain" in detail or "initializing" in detail) \
+                        or time.monotonic() >= deadline:
+                    raise
+                retrying, last_error = True, exc
+
+    client._request = _floored
+
+
 def _companion_seed_prompt(prompt: str | None) -> str | None:
     text = (prompt or "").strip()
     if not text:
@@ -84,13 +183,29 @@ def _cmd_send(args: argparse.Namespace) -> None:
         sys.exit(2)
 
     client = core._get_client()
+    min_protocol = getattr(args, "min_daemon_protocol", None)
+    if min_protocol and not client.daemon_supports(min_protocol):
+        print(f"[FAIL] The running bridge daemon predates protocol {min_protocol}; "
+              "update agent-bridge, restart its daemon, then send again.", file=sys.stderr)
+        sys.exit(3)
+    if min_protocol:
+        _hold_protocol_floor(client, min_protocol)
     target = args.target
     prompt = _resolve_prompt(args, required=True)
 
     live = client.resolve_live_session(target)
     if live:
         expected_session_id = getattr(args, "expected_session_id", None)
-        if expected_session_id and live["session_id"] != expected_session_id:
+        # The delivery carries expected_session_id, which an alias-aware daemon checks
+        # atomically when enqueuing. Two lookups here could straddle a rollover that
+        # moves both handles, and refuse a send to the very session expected, so
+        # this client-side precheck is only for older daemons.
+        from .protocol import LIVE_SESSION_ALIAS_PROTOCOL_VERSION
+
+        precheck = expected_session_id and not client.daemon_supports(LIVE_SESSION_ALIAS_PROTOCOL_VERSION)
+        expected = (client.resolve_live_session(expected_session_id) or {}).get(
+            "session_id") if precheck else None
+        if precheck and live["session_id"] not in (expected_session_id, expected):
             print(
                 f"[FAIL] Target {target!r} now resolves to session "
                 f"{live['session_id']!r}, not expected session "
@@ -737,6 +852,7 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     send_p.add_argument("--queue", action="store_true", help="If the target's session is busy, durably queue this prompt server-side (in the bridge's pending_prompts table) for FIFO delivery when the current turn settles -- surviving a caller remount and a bridge/host restart -- instead of rejecting it. The opposite of --force: it preserves the in-flight turn.")
     send_p.add_argument("--idempotency-key", help="stable producer key; retries return the original live-message id instead of enqueuing a duplicate")
     send_p.add_argument("--expected-session-id", help="deliver only if the target still resolves to this exact live session id (checked again atomically when enqueuing)")
+    send_p.add_argument("--min-daemon-protocol", type=int, default=None, metavar="N", help="send nothing (exit 3) unless the running daemon advertises HTTP protocol N or newer")
     core._add_stream_args(send_p)
     send_p.set_defaults(func=_cmd_send)
 
