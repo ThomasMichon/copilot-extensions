@@ -58,8 +58,15 @@ the trust model and both postures are owned by the
   provider implements. Its surface is only the genuinely venue-specific concerns:
   - **Lifecycle** — provision, start, stop, and remove a venue (`gh codespace`
     for CodeSpaces; `docker` for containers).
-  - **An SSH endpoint** — *every* venue is reached over SSH. A container exposes
-    SSH just as a CodeSpace does, so the transport the core drives is identical.
+  - **An SSH endpoint for remote venues** — *every remote* venue (CodeSpace,
+    container, or a genuinely remote SSH-registered machine) is reached over
+    SSH. A container exposes SSH just as a CodeSpace does, so the transport
+    the core drives is identical. **Local loopback is not a remote venue**
+    and carries none of this — it shares the dispatching machine's process
+    and filesystem directly, with no network hop, no SSH endpoint, and no
+    relay back-channel to establish; it still owes the same launch/plugin/
+    auth *guarantees* (see below), just without the SSH machinery that
+    exists to deliver them remotely.
   - **GitHub-token bootstrap** — a CodeSpace is issued a `GITHUB_TOKEN`
     automatically; a container must have one bootstrapped. The core consumes a
     ready token; the venue supplies it.
@@ -67,12 +74,15 @@ the trust model and both postures are owned by the
     connect; a local container simply starts. The core tolerates the wait a
     venue declares.
 
-- **One auth-relay back-channel, over SSH.** The credential relay is reached the
-  **same way from every venue**: over the SSH reverse-forward (`-R`) from the
-  venue back to the host relay. There is a single back-channel and a single
-  relay-reach code path — not a per-venue transport (no venue-specific host-
-  gateway TCP hop). Auth "just works" in a container exactly as it does in a
-  CodeSpace because it travels the identical channel.
+- **One auth-relay back-channel, over SSH, for remote venues.** The credential
+  relay is reached the **same way from every remote venue**: over the SSH
+  reverse-forward (`-R`) from the venue back to the host relay. There is a
+  single back-channel and a single relay-reach code path for CodeSpaces,
+  containers, and remote SSH targets alike — not a per-venue transport (no
+  venue-specific host-gateway TCP hop). Auth "just works" in a container
+  exactly as it does in a CodeSpace because it travels the identical
+  channel. Local loopback needs no relay at all — it already runs with the
+  dispatching machine's own ambient credentials.
 
 - **The container venue as parity/repro harness.** Local containers are the
   controllable substrate for reproducing and hardening venue flows: put them into
@@ -93,11 +103,19 @@ the trust model and both postures are owned by the
     itself; the target is reclassified `type="local"` and reached without a
     network hop at all.
   - **Genuine remote SSH** — a different machine, reached over the same SSH
-    transport this vision already mandates, but with the remote `copilot
-    --acp` invocation assembled and exec'd by **that target project's own
-    `agent-worktrees`-generated binstub on the remote host**, not composed
-    by the coordination layer the way a CodeSpace/container launch command
-    is.
+    transport this vision already mandates. The remote `copilot --acp`
+    invocation is assembled by `transport._build_remote_cmd` in one of two
+    shapes depending on the target: when `target.project` is set (and the
+    dispatch didn't pin an explicit cwd), the command execs **that target
+    project's own `agent-worktrees`-generated binstub on the remote host**,
+    which resolves the concrete worktree and forwards any trailing args to
+    `copilot --acp` itself; otherwise the coordination layer composes a
+    direct `cd <cwd> && exec copilot --acp ...` command itself, the same way
+    it does for a CodeSpace/container launch. **Both shapes already forward
+    `target.copilot_args` into the final `copilot` invocation** — so both are
+    reachable through the same `--plugin-dir` append point `_own_plugin_args`
+    already uses for local loopback; neither currently populates it for a
+    genuine-remote `SpawnTarget` at all.
 
   Both sub-shapes are owed the same venue-agnostic-launch guarantee as
   `codespace:`/`container:` targets — a dispatched agent should carry the
@@ -153,8 +171,9 @@ genuine remote SSH. Concretely:
   repo-declared) and staging any control-repo-owned payload onto the remote
   host (reusing the existing SSH channel for an egress-free tar+base64 copy,
   the same technique `agent-codespaces` already uses) before the remote
-  launch command is built, so the target project's own binstub receives a
-  complete `--plugin-dir` set via `copilot_args` rather than none at all.
+  launch command is built, so the resulting `--plugin-dir` set reaches
+  `target.copilot_args` regardless of which of the two remote-launch shapes
+  above the target resolves to (project-binstub or direct-cwd).
 - **An elevated/privileged relay lane** (a dispatch that hands off to a
   separate privileged sub-daemon rather than running directly in the
   unprivileged SSH session used to reach it) is a **distinct** staging
@@ -242,9 +261,13 @@ shared back-channel with no venue-specific setup visible to the agent.
   are the *only* dispatch shape with working `--plugin-dir` resolution today
   — a bare static-registry agent resolving to local loopback gets only its
   own repo's plugins (no control-repo-declared ones), and one resolving to
-  genuine remote SSH gets **no** plugin resolution at all, because that
-  launch is assembled by the remote project's own binstub rather than
-  composed by the coordination layer. Added the
-  `plugin-dir-parity-for-static-targets` feature and named the
+  genuine remote SSH gets **no** plugin resolution at all, even though both
+  of remote SSH's own launch shapes (project-binstub and direct-cwd) already
+  forward `target.copilot_args` into the final `copilot` invocation — nothing
+  populates it for a genuine-remote `SpawnTarget` in the first place. Added
+  the `plugin-dir-parity-for-static-targets` feature and named the
   elevated/privileged-relay lane as a distinct, explicitly-handled staging
-  variant rather than an assumed extension of the plain SSH case.
+  variant rather than an assumed extension of the plain SSH case. Scoped the
+  SSH-endpoint/relay-back-channel transport requirements to *remote* venues
+  only after review (local loopback shares the dispatching machine directly
+  and needs neither).
