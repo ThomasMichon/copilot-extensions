@@ -2743,7 +2743,7 @@ def _cmd_status_write(
             },
             read_lock_data=lambda: _locks.read_lock(_monitor_lock_path()),
             ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
-            min_version=2,  # paused needs verb v2; skip stale daemons
+            min_version=2 if paused is not None else 1,  # only paused needs v2
         )
     except tracking_write.AmbiguousWriteOutcome as e:
         output.err(f"Disposition write to worktree {worktree_id} is in an unknown state: {e}")

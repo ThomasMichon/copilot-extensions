@@ -131,6 +131,29 @@ def test_unpaused_prints_an_explicit_confirmation(status_env, capsys):
     assert record.paused is False
 
 
+def test_only_a_write_touching_paused_requires_verb_v2(status_env, monkeypatch):
+    """A plain summary/title/activity/follow-up write must stay on verb
+    version 1 -- requiring v2 unconditionally would needlessly reject an
+    otherwise-compatible v1 daemon and incur its full boot-wait fallback
+    delay for writes that never touch `paused` at all."""
+    from agent_worktrees import tracking_write
+
+    args = argparse.Namespace(worktree_id=None)
+    captured_versions = []
+    real_dispatch = tracking_write.dispatch
+
+    def _spy_dispatch(verb, payload, **kwargs):
+        captured_versions.append(kwargs.get("min_version"))
+        return real_dispatch(verb, payload, **kwargs)
+
+    monkeypatch.setattr(tracking_write, "dispatch", _spy_dispatch)
+
+    assert main._cmd_status_write(args, summary="plain write", paused=None) == 0
+    assert main._cmd_status_write(args, summary=None, paused=True) == 0
+
+    assert captured_versions == [1, 2]
+
+
 def test_status_history_disambiguates_pausing_from_unpausing(status_env, capsys):
     """`status --history`'s plain-text rendering must not show the same
     `(paused)` label for both a --paused and a --unpaused entry -- the

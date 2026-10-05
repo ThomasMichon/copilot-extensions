@@ -63,7 +63,7 @@
   "plugins/agent-vault/src/agent_vault/service.py": 1399,
   "plugins/agent-worktrees/libs/plugin-activation/src/plugin_activation/resolver.py": 1269,
   "plugins/agent-worktrees/scripts/versioned_runtime.py": 1415,
-  "plugins/agent-worktrees/src/agent_worktrees/__main__.py": 7112,
+  "plugins/agent-worktrees/src/agent_worktrees/__main__.py": 7124,
   "plugins/agent-worktrees/src/agent_worktrees/claims_cli.py": 1023,
   "plugins/agent-worktrees/src/agent_worktrees/config.py": 2178,
   "plugins/agent-worktrees/src/agent_worktrees/finalize.py": 2185,
