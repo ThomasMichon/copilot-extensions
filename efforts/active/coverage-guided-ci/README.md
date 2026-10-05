@@ -337,6 +337,47 @@ order.
 - [ ] Measure and record real wall-clock PR-CI impact for `agent-worktrees`
       changes (before/after).
 
+### Phase 3.5 — Full-matrix local validation (de-risking prep for Phase 4 slice 2)
+Before Phase 4's eventual `--collect-only` -> real-execution cutover, every
+plugin's full test suite must actually be runnable to completion locally
+(`python tools/run-plugin-tests.py --all`) without the harness itself
+wedging on a single plugin's own flaky/slow test -- the exact risk the
+operator named when starting this validation pass ("if any are flaky we
+risk wedging everything").
+- [x] Harden `run-plugin-tests.py`'s own `--all`/`--changed` per-plugin loop
+      so an unexpected exception from one plugin's run never aborts the
+      rest of the matrix. **Landed 2026-10-05**, PR #5333 -- see Journal.
+- [x] Fix false-positive pytest-timeout failures in `agent-bridge`/
+      `agent-logger` tests whose own real subprocess work legitimately
+      exceeds the runner's blanket 30s-per-test default. **Landed
+      2026-10-05**, PR #5325 -- see Journal.
+- [ ] Root-cause and fix (or file) the remaining real, reproducible
+      findings from the full-matrix pass: `agent-dispatch`'s
+      `test_liveness_gc_publishes_a_bus_event_for_auto_suspend_with_zero_requeued`
+      (HTTP 409 in liveness-GC/board-relay interaction); `agent-logger`'s
+      Windows `MAX_PATH` (260-char) `bdist_wheel`/`install_egg_info` build
+      failure during cold snapshot provisioning (confirmed with TWO
+      different vendored libs -- `agent-config-migrate` and
+      `agent-plugin-activation` -- so it's a structural
+      deep-snapshot-path-length issue, not one library's own build
+      config); and 7 more `agent-logger` failures across
+      `test_chronicle.py`/`test_rescue_sync.py`/`test_scaffold.py`
+      (one -- `test_repo_config_validation_errors[...'C:\nas\sessions'...]`
+      -- looks like a genuine Windows-absolute-path validation bug, not a
+      flake). Complete a full `--all` run once the Phase 3.5 items above
+      are addressed, to reach the ~13 plugins never attempted across either
+      prior attempt (`agent-machines`, `agent-mcp`,
+      `agent-pull-requests`, `agent-ssh`, `agent-vault`, `agent-worktrees`,
+      `ai-attribution`, `budget-guidance`, `context-handoff`,
+      `copilot-extensions-harness`, `customizing-copilot`, `efforts`,
+      `harness-knowledge`).
+- [ ] Separately: `tools/run_tests_in_devcontainer.py` does not run at all
+      on Windows (`signal.SIGHUP`/`signal.pthread_sigmask` are POSIX-only)
+      -- already tracked as issue #5115; fix is scoped to this wrapper's
+      own signal-handling code, not a deeper devcontainer/WSL problem (the
+      devcontainer CLI itself works fine natively from Windows against
+      Docker Desktop's WSL2 backend).
+
 ### Phase 5 — Generalize beyond `agent-worktrees`
 - [ ] Assess whether other plugins would benefit from diff-scoped selection
       over their current smoke/full split (no plugin besides
@@ -357,6 +398,13 @@ copilot-extensions-specific Phase 1.
 
 ## Validation Plan
 
+- [ ] Phase 3.5: `python tools/run-plugin-tests.py --all` completes a full
+      pass over every one of the 20 plugins (reaching and reporting a
+      pass/fail summary for each one), with no single plugin's own test
+      failure able to abort the run before the rest are attempted --
+      proven by `test_unexpected_runner_error_does_not_wedge_remaining_plugins`
+      (landed), and ultimately by a real completed `--all` run once the
+      remaining Phase 3.5 findings are resolved.
 - [ ] Phase 1: a promotion run genuinely produces a baseline correlated to
       its own commit; a deliberately-broken correlation step is visibly
       surfaced, not silently swallowed; and a constructed run where one
@@ -408,6 +456,50 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-05 — Phase 3.5: full-matrix local validation, two fixes landed
+De-risking prep for Phase 4 slice 2 (the eventual `--collect-only` -> real-
+execution cutover): ran every plugin's full suite locally
+(`python tools/run-plugin-tests.py --all`) per the operator's "run all the
+tests locally... find out what breaks, and fix those" directive. Two
+from-scratch attempts both died partway through (~13 of 20 plugins never
+reached) -- the exact "one flaky test wedges everything" risk named at the
+start of this task.
+
+**Landed PR #5325:** added `@pytest.mark.timeout(N)` overrides to 6 tests
+across `agent-bridge`/`agent-logger` whose own real subprocess work (uv
+provisioning, PowerShell 5.1 startup) legitimately exceeds the runner's
+blanket 30s-per-test `pytest-timeout` default, so that default no longer
+kills them before their real work finishes. Same fix pattern already
+established by `test_first_install_bootstrap.py`'s own prior fix for this
+exact class. Verified real CI's per-plugin "full" matrix job runs on
+`ubuntu-latest`, where neither the Windows MAX_PATH bug nor this dev host's
+CFS-feed-proxy contention apply, so the larger per-test ceilings don't
+threaten the runner's 300s default sub-suite wall-clock budget there.
+
+**Landed PR #5333 (the actual root cause of the matrix dying early):**
+`run-plugin-tests.py`'s `--all`/`--changed` per-plugin loop only caught
+`ContainmentError`/`subprocess.CalledProcessError` from `run_plugin()`; any
+other exception type propagated uncaught and aborted the entire run,
+leaving every alphabetically-later plugin unattempted. Root-caused with a
+minimal repro proving a non-`ContainmentError` exception (not a hung
+subprocess or a `pytest-timeout` firing in isolation -- both of those were
+independently confirmed to already return cleanly) escapes the loop
+uncaught; broadened the `except` to `Exception` (leaving
+`KeyboardInterrupt`/`SystemExit` unaffected, since those are
+`BaseException`). New regression test
+`test_unexpected_runner_error_does_not_wedge_remaining_plugins` fails
+against the pre-fix code and passes after.
+
+**Not yet fixed** (see Phase 3.5's remaining Plan items): a reproducible
+`agent-dispatch` liveness-GC test failure; a reproducible Windows
+`MAX_PATH` (260-char) build failure during `agent-logger`'s cold snapshot
+provisioning (confirmed with two different vendored libs, so it's
+structural, not one library's build config); 7 more `agent-logger`
+failures (`test_chronicle.py`/`test_rescue_sync.py`/`test_scaffold.py`),
+one of which looks like a genuine Windows-absolute-path validation bug.
+A full completed `--all` run is still needed to reach the ~13 plugins
+never attempted in either prior attempt.
 
 ### 2026-10-04 — Phase 4 slice 1b: real-CI validation caught a genuine bug
 Direct proof of why the shadow-mode de-risking plan (slice 1, below) was
