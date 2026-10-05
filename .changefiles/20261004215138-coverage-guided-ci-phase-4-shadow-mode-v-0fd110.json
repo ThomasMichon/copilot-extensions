@@ -1,0 +1,9 @@
+{
+  "comment": "coverage-guided-ci Phase 4 shadow-mode validation pass: docstring-only touch to test_codename.py to trigger ci.yml's heavy-plugin path; no behavior change",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

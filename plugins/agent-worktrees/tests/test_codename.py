@@ -1,5 +1,9 @@
 """Tests for agent_worktrees.codename: built-in generator, declarative
-wordlist file loading, and collision-avoiding assignment."""
+wordlist file loading, and collision-avoiding assignment.
+
+(Touched only to trigger ci.yml's heavy-plugin path for a coverage-guided-ci
+Phase 4 shadow-mode validation pass -- see efforts/active/coverage-guided-ci's
+Journal. No behavior change.)"""
 
 from __future__ import annotations
 
