@@ -1342,3 +1342,18 @@ suite green (3743 passed, 23 skipped, the one known flake above).
     → **10 passed**
   - `python tools/run-plugin-tests.py agent-dispatch -k "effort_driver_loop_expansion_builds_periodic_emitter_command or builtin_effort_driver_loop" --timeout 600 --plugin-timeout 2400`
     → **2 passed**
+
+### 2026-10-04 (same day) — Review feedback, round 6
+- Automated review's remaining genuine concern was default eligibility: the
+  first effort-driver declaration shape would scan `efforts/active/` and drive
+  **every** README there when `effort_slugs` was omitted, which would include
+  Draft efforts in this repository's own active tree and violate the recipe's
+  "already-assigned effort" boundary. Fixed by making `effort_slugs` required:
+  a consumer must name one or more active effort slugs explicitly, and the
+  repo-local scan now serves only to resolve those named efforts from the bound
+  state root rather than to auto-adopt every active README by default.
+- Documentation updated in `plugins/agent-dispatch/README.md` to call out that
+  explicit selector requirement for `global:effort-driver`.
+- Focused validation after the fix:
+  - `python tools/run-plugin-tests.py agent-dispatch -k effort_driver --timeout 600 --plugin-timeout 2400`
+    → **10 passed**

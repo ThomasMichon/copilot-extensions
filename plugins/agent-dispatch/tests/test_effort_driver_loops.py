@@ -92,7 +92,9 @@ def _write_effort(tmp_path, slug, *, title, status, body=""):
 
 
 def test_expand_effort_driver_loop_builds_emitter_and_worker_lane(tmp_path):
-    declarations = expand_effort_driver_loop(_config(tmp_path), repo_root=tmp_path)
+    declarations = expand_effort_driver_loop(
+        _config(tmp_path, effort_slugs=["recipe-library"]), repo_root=tmp_path
+    )
 
     source = next(d for d in declarations if d.name == "effort-driver-source")
     workers = next(d for d in declarations if d.name == "effort-driver-workers")
@@ -163,6 +165,15 @@ def test_global_effort_driver_discovers_active_effort_and_authors_goal_driven_ta
     assert payload["effort_slug"] == "recipe-library"
     assert payload["effort_readme"] == "efforts/active/recipe-library/README.md"
     assert payload["coordination_refs"] == ["#4691", "#5200"]
+
+
+def test_validate_config_requires_explicit_effort_slug_selection(tmp_path):
+    try:
+        run_tick(FakeClient(), _config(tmp_path), clock=lambda: 10_000, cwd=tmp_path)
+    except Exception as exc:
+        assert "effort_slugs" in str(exc)
+    else:  # pragma: no cover - regression guard
+        raise AssertionError("expected missing effort_slugs to be rejected")
 
 
 def test_explicit_effort_slugs_require_every_named_effort_to_exist(tmp_path):

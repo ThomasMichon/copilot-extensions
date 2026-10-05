@@ -430,6 +430,7 @@ def test_effort_driver_loop_expansion_builds_periodic_emitter_command(tmp_path):
             "repo": "example/project",
             "source": "effort-driver",
             "cadence_seconds": 3600,
+            "effort_slugs": ["recipe-library"],
             "state_root": str(tmp_path),
             "task_label": "effort-work",
             "pool": {"body": {"type": "headless", "agent": "effort-worker"}},

@@ -1045,6 +1045,7 @@ def test_global_effort_driver_resolves_to_effort_driver_loop_with_verification(
                 "repo": "example/project",
                 "source": "effort-driver",
                 "cadence_seconds": 3600,
+                "effort_slugs": ["recipe-library"],
                 "task_label": "effort-work",
                 "state_root": str(tmp_path),
                 "pool": {

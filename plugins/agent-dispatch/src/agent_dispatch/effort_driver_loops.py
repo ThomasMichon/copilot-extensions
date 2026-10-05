@@ -160,6 +160,10 @@ def validate_config(
     if evaluator_ref is not None and (not isinstance(evaluator_ref, str) or not evaluator_ref):
         raise RegistrarError("effort-driver-loop evaluator_ref: expected a non-empty string")
     effort_slugs = _strings(data, "effort_slugs")
+    if not effort_slugs:
+        raise RegistrarError(
+            "effort-driver-loop effort_slugs: expected one or more active effort slugs"
+        )
     raw_state_root = data.get("state_root")
     if raw_state_root is not None and (
         not isinstance(raw_state_root, str) or not raw_state_root
