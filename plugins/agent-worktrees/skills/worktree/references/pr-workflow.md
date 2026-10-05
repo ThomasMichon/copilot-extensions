@@ -751,12 +751,12 @@ then update the PR branch with:
 In PR mode `push-changes` updates the PR head, never the default branch. Feedback commits
 ride on `worktree/{id}` (create-pr leaves HEAD there); `push-changes` preserves
 that published PR tip and then publishes the newer commits incrementally per
-scheme — under **refspec** (default) it force-with-lease pushes `worktree/{id}` to the provider-resolved PR
-head ref (`pr/{slug}-{suffix}` for non-Azure-DevOps repos;
+scheme — under **refspec** (default) it pushes `worktree/{id}` to the
+provider-resolved PR head ref (`pr/{slug}-{suffix}` for non-Azure-DevOps repos;
 `user/{username}/{slug}-{suffix}` for Azure DevOps); under **snapshot** it
 snapshots the local publish branch (`feature/{slug}-{suffix}` by default;
 Azure DevOps still defaults to `user/{username}/{slug}-{suffix}`) to the new
-tip and force-with-lease pushes that.
+tip and pushes that.
 Either way HEAD stays on
 `worktree/{id}` — just commit there and run `push-changes`. (A worktree still
 checked out on a legacy feature branch is accepted too and pushed as-is.) It

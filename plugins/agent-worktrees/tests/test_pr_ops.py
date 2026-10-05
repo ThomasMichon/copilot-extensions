@@ -83,7 +83,8 @@ class TestExistingFeaturePush:
             "This could be caused either by this worktree's own earlier "
             "create-pr/push-changes rewrite of the PR branch or by another actor "
             "updating the remote branch after your last fetch/observation. "
-            "Fetch/inspect the remote PR branch if needed, then re-run "
+            "Fetch/inspect the remote PR branch, reconcile any divergent local "
+            "PR history, then re-run "
             "agent-worktrees create-pr.\n"
             "[rejected] non-fast-forward"
         )

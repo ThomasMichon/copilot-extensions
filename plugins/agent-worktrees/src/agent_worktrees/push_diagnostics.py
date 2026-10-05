@@ -9,7 +9,8 @@ def pr_branch_non_fast_forward_hint(*, retry_command: str) -> str:
         "This could be caused either by this worktree's own earlier "
         "create-pr/push-changes rewrite of the PR branch or by another actor "
         "updating the remote branch after your last fetch/observation. "
-        f"Fetch/inspect the remote PR branch if needed, then re-run {retry_command}."
+        f"Fetch/inspect the remote PR branch, reconcile any divergent local PR "
+        f"history, then re-run {retry_command}."
     )
 
 
