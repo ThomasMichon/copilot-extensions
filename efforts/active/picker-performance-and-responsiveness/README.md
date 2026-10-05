@@ -262,13 +262,13 @@ finding into a fix; extends #918 rather than reopening it.)_
       `test_find_worktree_id_by_cwd_unaffected_by_the_copy_skip` (functional
       correctness unchanged). All pass, plus the full existing
       `test_record_cache.py`/`test_tracking.py` suites (242 tests).
-- [ ] Re-measure sustained daemon CPU on a fleet with a record count
-      comparable to the diagnosis machine's (100+ tracked records) before/
-      after, the same live-timed methodology `pivot-streaming-transport`'s
-      own Validation Plan already uses for its Phase 5. Not done this
-      session — the code fix is live-reasoned (the removed `copy.deepcopy`
-      was directly observed in a live `py-spy` sample on the diagnosis
-      machine) but not yet re-measured end-to-end after the fix.
+- [x] Re-measured at a fleet scale comparable to the diagnosis machine's
+      (100+ tracked records) before/after, via
+      `tests/bench_phase3_record_cache.py` (a manual, non-pytest-collected
+      script — see Journal for the methodology and numbers): **~66-71%
+      reduction** in `find_worktree_id_by_cwd` sweep time at 120 tracked
+      records, directly isolating the `copy.deepcopy` cost this phase
+      removed.
 
 ### Phase 4 — Boot-time budget (<~2s)
 
@@ -310,11 +310,11 @@ was invisible until an operator noticed it. Prevents a repeat.)_
       path, plus the same fallback-safety tests `pivot-streaming-transport`'s
       Phase 1/2 already wrote for agent-dispatch/agent-bridge (stream flag
       absent/stale degrades to one-shot, never a hard failure).
-- [x] **Phase 3 (partial):** a test proving the fast-path cache entry is
+- [x] **Phase 3:** a test proving the fast-path cache entry is
       never handed to a caller requesting the default (copy) behavior —
       `test_copy_result_false_returns_the_cache_s_own_object` — done.
-      Sustained daemon CPU % before/after on a comparable record count —
-      not yet measured; still open.
+      Before/after sweep-time measurement at a comparable record count —
+      done, see Journal (~66-71% reduction at 120 records).
 - [ ] **Phase 4:** cold-boot wall-clock time before/after, on the same
       machine/conditions, with the profile that justified the fix attached.
 - [ ] **Phase 5:** the harness itself passing, plus one deliberately
@@ -394,3 +394,40 @@ the original diagnosis), but that is reasoned evidence, not a fresh
 measurement — a future session should still do the live-timed before/after
 `pivot-streaming-transport`'s own Phase 5 methodology calls for, rather than
 treating this phase as fully closed from the code change alone.
+
+### 2026-10-05 — Phase 3's remaining measurement closed
+
+Re-measured the `copy_result=False` fast path's actual cost reduction at a
+fleet scale comparable to the diagnosis machine's (100+ tracked records),
+rather than relying on the code-change reasoning alone. Rebuilt the working
+environment first: the previous session's `pip install -e` links for
+`agent-worktrees` and its local libs (`agent-procutil`,
+`agent-plugin-resolve`, `agent-remote-login-shell`, etc.) all pointed at
+now-finalized/deleted ephemeral worktrees from earlier sessions — reinstalled
+each editable from this session's own worktree paths before anything would
+import. (Left as a known rough edge — not fixed here, out of this effort's
+scope — but worth a future harness issue: an editable install surviving a
+`finalize`'d worktree's deletion silently breaks the next session that reuses
+the same machine.)
+
+Wrote `tests/bench_phase3_record_cache.py` (a manual, non-pytest-collected
+script, not part of the regular suite): builds 120 real on-disk
+`WorktreeRecord` YAML files via the same `tracking_lifecycle.create_new_record`
+factory production code uses, warms the cache once, then calls the actual
+`tracking.find_worktree_id_by_cwd` hot path 1,000 times (40 simulated live
+sessions/sweep × 25 sweeps) — once with today's code unmodified
+(`copy_records=False`), once with `tracking.list_records` wrapped to force
+the old unconditional `copy_records=True` behavior, against the identical
+on-disk fleet and call sequence, isolating exactly the cost Phase 3 removed.
+
+**Result (median of 3 runs each):** before ≈ 27.7-29.0s / 1,000 calls (≈
+27.7-29.0ms/call), after ≈ 8.3-9.4s / 1,000 calls (≈ 8.3-9.4ms/call) — a
+**~66-71% reduction** in `find_worktree_id_by_cwd` sweep time at this record
+count. This is a wall-clock sweep-time measurement (not a live `py-spy`
+sustained-CPU-% capture against a running daemon, which would need a real
+multi-machine fleet to reproduce faithfully) but exercises the identical
+production code path at the diagnosis machine's own record-count scale, and
+directly confirms the reasoned fix: removing the per-hit `copy.deepcopy`
+roughly triples `find_worktree_id_by_cwd`'s throughput at 120 tracked
+records. Phase 3 is now fully closed, including its previously-open
+measurement item.

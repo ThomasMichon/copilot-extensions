@@ -234,6 +234,22 @@ class ThreadsResult:
 
 
 @dataclass(frozen=True)
+class PRDiff:
+    """A PR's current unified diff, plus whether the provider could report it.
+
+    The reviewer-side "read the current diff and surrounding context"
+    primitive (Vision ``plugins/agent-worktrees/pull-requests``
+    §Features/``reviewer-capable-provider``). ``supported`` is False (with
+    ``error`` explaining) when a provider cannot read a unified diff -- callers
+    treat that as "no diff available", never as "the PR has no changes".
+    """
+
+    diff: str = ""
+    supported: bool = True
+    error: str = ""
+
+
+@dataclass(frozen=True)
 class ReviewNudgeResult:
     """Result of asking a provider's bound automated reviewer to (re-)review
     a PR -- the ``pr-nudge`` primitive.

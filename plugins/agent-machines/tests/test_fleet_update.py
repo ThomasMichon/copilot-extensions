@@ -9,6 +9,7 @@ update`` instead of self-update's dtssh/repo-sweep steps).
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -203,6 +204,139 @@ def test_run_tier_reports_error_when_worktree_manager_update_fails(tmp_path):
     assert "network unreachable" in result.detail
     status = fleet_update_state.tier_status(tmp_path, "sweep")
     assert status.last_success is None
+
+
+def test_run_tier_converts_unexpected_exception_into_error_result_and_releases_lock(
+    monkeypatch, tmp_path
+):
+    """Mirrors self_update.run_tier's own safety-net test: an unexpected
+    exception from the runner must come back as a normal error `RunResult`
+    (lock released, `last_attempt` recorded) instead of propagating past
+    `run_tier` and crashing the whole `fleet-update run` CLI invocation."""
+    monkeypatch.setattr(fleet_update.sys, "platform", "win32")
+    monkeypatch.setattr(fleet_update_tasks.sys, "platform", "win32")
+    created_mutexes: list[_FakeMutex] = []
+
+    def _make_mutex(_name):
+        mutex = _FakeMutex("acquired")
+        created_mutexes.append(mutex)
+        return mutex
+
+    monkeypatch.setattr(fleet_update_lock, "_WindowsMutex", _make_mutex)
+    monkeypatch.setattr(fleet_update_state, "_WindowsMutex", lambda _name: _FakeMutex("acquired"))
+
+    def boom(argv, timeout=3600):
+        raise RuntimeError("boom")
+
+    result = fleet_update.run_tier("sweep", opted_in=True, runner=boom, home=tmp_path)
+
+    assert result.status == "error"
+    assert "boom" in result.detail
+    assert result.attempted_at is not None
+    assert len(created_mutexes) == 1
+    assert created_mutexes[0].released is True
+    assert created_mutexes[0].closed is True
+    assert not fleet_update_lock.lock_path("sweep", tmp_path).exists()
+
+
+def test_default_command_runner_tree_kills_job_on_timeout(monkeypatch):
+    """Same bug class as self_update_types.default_command_runner: a hung
+    child (and any grandchildren it spawned) must be torn down as a whole
+    Job, not just the immediate process, or a surviving grandchild can keep
+    the stdout pipe open and hang `communicate()` forever past the timeout."""
+    closed = {"job": False}
+
+    class _FakeJob:
+        def close(self):
+            closed["job"] = True
+
+    class _Proc:
+        returncode = None
+        killed = False
+
+        def communicate(self, timeout=None):
+            if not closed["job"]:
+                raise subprocess.TimeoutExpired(cmd="slow", timeout=timeout)
+            return "partial", ""
+
+        def kill(self):
+            self.killed = True
+
+    proc = _Proc()
+
+    def fake_spawn(argv, **kwargs):
+        return proc, _FakeJob()
+
+    monkeypatch.setattr(fleet_update.shutil, "which", lambda name: None)
+    monkeypatch.setattr(fleet_update, "spawn_sync_in_kill_on_close_job", fake_spawn)
+    result = fleet_update.default_command_runner(["slow-command"], timeout=5)
+
+    assert closed["job"] is True
+    assert not proc.killed
+    assert result.returncode == fleet_update.TIMEOUT_RETURNCODE
+    assert "timed out after 5s" in result.stderr
+    assert result.stdout == "partial"
+
+
+def test_default_command_runner_falls_back_to_kill_without_job(monkeypatch):
+    class _Proc:
+        returncode = None
+        killed = False
+
+        def communicate(self, timeout=None):
+            if not self.killed:
+                raise subprocess.TimeoutExpired(cmd="slow", timeout=timeout)
+            return "", ""
+
+        def kill(self):
+            self.killed = True
+
+    proc = _Proc()
+
+    def fake_spawn(argv, **kwargs):
+        return proc, None
+
+    monkeypatch.setattr(fleet_update.shutil, "which", lambda name: None)
+    monkeypatch.setattr(fleet_update, "spawn_sync_in_kill_on_close_job", fake_spawn)
+    result = fleet_update.default_command_runner(["slow-command"], timeout=5)
+
+    assert proc.killed is True
+    assert result.returncode == fleet_update.TIMEOUT_RETURNCODE
+
+
+def test_default_command_runner_preserves_partial_output_when_drain_also_times_out(
+    monkeypatch,
+):
+    closed = {"job": False}
+
+    class _FakeJob:
+        def close(self):
+            closed["job"] = True
+
+    class _Proc:
+        returncode = None
+
+        def communicate(self, timeout=None):
+            if not closed["job"]:
+                raise subprocess.TimeoutExpired(cmd="slow", timeout=timeout)
+            raise subprocess.TimeoutExpired(
+                cmd="slow", timeout=timeout, output="collected-stdout", stderr="collected-stderr"
+            )
+
+        def kill(self):
+            pass
+
+    def fake_spawn(argv, **kwargs):
+        return _Proc(), _FakeJob()
+
+    monkeypatch.setattr(fleet_update.shutil, "which", lambda name: None)
+    monkeypatch.setattr(fleet_update, "spawn_sync_in_kill_on_close_job", fake_spawn)
+    result = fleet_update.default_command_runner(["slow-command"], timeout=5)
+
+    assert closed["job"] is True
+    assert result.returncode == fleet_update.TIMEOUT_RETURNCODE
+    assert "collected-stdout" in result.stdout
+    assert "collected-stderr" in result.stderr
 
 
 # --------------------------------------------------------------------------- #

@@ -630,6 +630,26 @@ def run_tier(
             success_at=status.last_success,
             steps=steps,
         )
+    except Exception as exc:
+        # Every anticipated failure above already returns its own `RunResult`
+        # with status="error" from inside the `try`. This is a backstop for
+        # anything NOT anticipated (a bug in a step, an OSError resolving a
+        # project path, ...): without it, an uncaught exception here would
+        # propagate past `run_tier` entirely, crashing the whole `self-update
+        # run` CLI invocation with a raw traceback instead of a clean,
+        # structured error result -- the lock is still released by `finally`
+        # below and `last_attempt` is still recorded (written above, before
+        # any step runs), but the caller would otherwise get an unhandled
+        # exception instead of a normal `RunResult` it can log/report.
+        return RunResult(
+            tier=tier,
+            status="error",
+            opted_in=True,
+            detail=f"unexpected error: {exc}",
+            lock_reclaimed=lock.reclaimed,
+            attempted_at=locals().get("attempted_at"),
+            steps=locals().get("steps", []),
+        )
     finally:
         lock.release()
 

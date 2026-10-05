@@ -30,7 +30,7 @@ import pytest
 
 from agent_worktrees.providers import get_provider
 from agent_worktrees.providers.base import PRProvider, PRScope, _PROVIDERS
-from agent_worktrees.pr_contract import PRSnapshot, ThreadsResult
+from agent_worktrees.pr_contract import PRDiff, PRSnapshot, ThreadsResult
 
 ALL_PROVIDER_NAMES = tuple(sorted(_PROVIDERS))
 
@@ -321,3 +321,51 @@ class TestMockProviderLifecycle:
     def test_find_pull_by_head_no_match_returns_none(self, provider, scope):
         provider.create_pull(scope)
         assert provider.find_pull_by_head(scope.repo, "no-such-branch") is None
+
+    # -- reviewer-capable provider (Phase 3) -------------------------------
+
+    def test_get_diff_reports_supported_and_returns_fabricated_text(
+        self, provider, scope
+    ):
+        created = provider.create_pull(scope)
+        provider.set_diff(scope.repo, created.number, "diff --git a/x b/x\n")
+        result = provider.get_diff(scope.repo, created.number)
+        assert isinstance(result, PRDiff)
+        assert result.supported is True
+        assert result.diff == "diff --git a/x b/x\n"
+
+    def test_get_diff_defaults_to_empty_string(self, provider, scope):
+        created = provider.create_pull(scope)
+        result = provider.get_diff(scope.repo, created.number)
+        assert result.supported is True
+        assert result.diff == ""
+
+    def test_post_comment_succeeds(self, provider, scope):
+        created = provider.create_pull(scope)
+        assert provider.post_comment(scope.repo, created.number, "nice work") == ""
+
+    def test_submit_review_approved_adds_a_review(self, provider, scope):
+        created = provider.create_pull(scope)
+        err = provider.submit_review(
+            scope.repo, created.number, event="APPROVED", body="LGTM"
+        )
+        assert err == ""
+        snap = provider.get_snapshot(scope.repo, created.number)
+        assert [r.state for r in snap.reviews] == ["APPROVED"]
+
+    def test_submit_review_changes_requested_adds_a_review(self, provider, scope):
+        created = provider.create_pull(scope)
+        err = provider.submit_review(
+            scope.repo, created.number, event="CHANGES_REQUESTED",
+            body="please fix the thing",
+        )
+        assert err == ""
+        snap = provider.get_snapshot(scope.repo, created.number)
+        assert [r.state for r in snap.reviews] == ["CHANGES_REQUESTED"]
+
+    def test_submit_review_unknown_event_reports_error(self, provider, scope):
+        created = provider.create_pull(scope)
+        err = provider.submit_review(
+            scope.repo, created.number, event="not-a-real-event"
+        )
+        assert err != ""
