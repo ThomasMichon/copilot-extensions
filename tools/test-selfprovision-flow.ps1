@@ -9,8 +9,9 @@
     dir so the real ~/.<plugin> and ~/.local/bin are never touched:
 
       1. `<entry> stamp`   -> snapshot the payload SOURCE into
-         ~/.<plugin>/snapshots/<ver>/, write markers (payload-dir, stamped-version),
-         deploy the self-provisioning binstub. Assert: fast, NO venv, NO current-version.
+         ~/.<plugin>/snapshots/<ver>-<unique>/, publish that concrete path through
+         `payload-dir`, write `stamped-version`, deploy the self-provisioning
+         binstub. Assert: fast, NO venv, NO current-version.
       2. first binstub call -> self-provisions (builds the venv from the slot-local
          snapshot via `<entry> provision`) then dispatches. Assert: venv built,
          current-version published, rc == 0.
@@ -99,10 +100,15 @@ function Invoke-Binstub([string[]]$binArgs, [int]$timeoutSec) {
 try {
     Write-Host "`n=== STEP 1: stamp (fast, no venv) ===" -ForegroundColor Yellow
     & $pwshExe -NoProfile -ExecutionPolicy Bypass -File $inst stamp | Out-Host
-    $snap = Join-Path $root ("snapshots\$ver")
+    $payloadMarker = Join-Path $root 'payload-dir'
+    $snap = if (Test-Path $payloadMarker) {
+        (Get-Content $payloadMarker -Raw).Trim()
+    } else {
+        ''
+    }
     Check 'snapshot dir'          (Test-Path $snap)
     Check 'snapshot entry'        (Test-Path (Join-Path $snap "scripts\$Entry"))
-    Check 'payload-dir marker'    (Test-Path (Join-Path $root 'payload-dir'))
+    Check 'payload-dir marker'    (Test-Path $payloadMarker)
     Check 'stamped-version'       (Test-Path (Join-Path $root 'stamped-version'))
     Check 'binstub present'       ((Test-Path (Join-Path $localbin "$Plugin.cmd")) -or (Test-Path (Join-Path $localbin "$Plugin.ps1")))
     Check 'NO venv yet'           (-not (Test-Path (Join-Path $root "versions\$ver\Scripts\python.exe")))
