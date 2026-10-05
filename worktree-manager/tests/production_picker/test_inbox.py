@@ -349,6 +349,87 @@ def test_a_post_racing_a_failing_wake_still_gets_its_own_retry():
     assert inbox.drain() == {"slot-a": "a", "slot-b": "b"}
 
 
+def test_a_post_racing_a_concurrent_drain_never_strands_its_slot():
+    """A regression for the lost-wake race: a post() arriving while a
+    concurrent drain() is between "snapshot the pending batch" and "reset
+    the wake flag" must not see a stale `_wake_queued == True` and skip its
+    own wake, stranding its slot until some unrelated future drain. Hammer
+    concurrent posts and drains from many threads and confirm every posted
+    value is eventually observed by some drain -- the property this race
+    would violate (a slot silently never drained, and the wake never
+    retried) if the two steps were not serialized together."""
+    owner = _RecordingOwner()
+    inbox = Inbox(owner)  # constructed on this thread; posts come from others
+    total = 200
+    observed: dict[str, str] = {}
+    observed_lock = threading.Lock()
+    stop = threading.Event()
+
+    def _drainer():
+        while not stop.is_set():
+            batch = inbox.drain()
+            if batch:
+                with observed_lock:
+                    observed.update(batch)
+
+    drainer_threads = [threading.Thread(target=_drainer) for _ in range(3)]
+    for t in drainer_threads:
+        t.start()
+
+    def _poster(i):
+        inbox.post(f"slot-{i}", f"value-{i}")
+
+    poster_threads = [
+        threading.Thread(target=_poster, args=(i,)) for i in range(total)
+    ]
+    for t in poster_threads:
+        t.start()
+    for t in poster_threads:
+        t.join(timeout=10)
+        assert not t.is_alive()
+
+    # Give the drainers a final bounded window to pick up anything posted
+    # right at the tail end, then stop them and sweep once more ourselves.
+    deadline = time.monotonic() + 5
+    while len(observed) < total and time.monotonic() < deadline:
+        time.sleep(0.01)
+    stop.set()
+    for t in drainer_threads:
+        t.join(timeout=5)
+    with observed_lock:
+        observed.update(inbox.drain())
+
+    assert len(observed) == total, (
+        f"expected all {total} posted slots to be drained, got "
+        f"{len(observed)} -- a lost wake would strand some here"
+    )
+    for i in range(total):
+        assert observed[f"slot-{i}"] == f"value-{i}"
+
+
+def test_home_thread_post_logs_a_raising_closure_instead_of_escaping(caplog):
+    """``post()`` documents that it never raises -- but the home-thread
+    shortcut calls ``drain_apply()`` directly, which deliberately
+    re-raises an ordinary closure exception. Without its own catch, that
+    would escape straight out of ``post()`` itself on the home thread,
+    breaking the documented contract. Confirm it is logged, not left to
+    escape, and ``post()`` still returns ``True`` (applied inline, which
+    is what "never raises" promises)."""
+    owner = _RecordingOwner()
+    inbox = Inbox(owner)  # home thread == this test's own thread
+
+    def _boom():
+        raise RuntimeError("closure bug")
+
+    with caplog.at_level(logging.WARNING, logger="agent-worktrees.picker"):
+        ok = inbox.post("broken", _boom)
+    assert ok is True
+    assert any(
+        "a closure raised while applying inline" in r.message
+        for r in caplog.records
+    )
+
+
 def test_discard_removes_a_pending_slot_without_applying_it():
     inbox, _ = _inbox_with_foreign_home()
     calls = []

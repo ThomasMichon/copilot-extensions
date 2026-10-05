@@ -127,7 +127,21 @@ class Inbox:
             self._slots[slot] = value
             self._pending[slot] = None
         if threading.get_ident() == self._home_thread_id:
-            self.drain_apply()
+            # ``drain_apply()`` deliberately re-raises an ordinary closure
+            # exception (see its own docstring) -- but ``post()`` itself
+            # promises callers it never raises. Mirror
+            # ``engine_runtime._drain_inbox()``'s own boundary catch here
+            # too: log an escaping ``Exception`` rather than letting this
+            # "drains inline" path violate that promise, while still
+            # letting a genuine process-control ``BaseException``
+            # (``KeyboardInterrupt``/``SystemExit``) propagate.
+            try:
+                self.drain_apply()
+            except Exception:
+                log.warning(
+                    "Inbox.post(%r): a closure raised while applying "
+                    "inline on the home thread", slot, exc_info=True,
+                )
             return True
         # ``_wake_lock`` is held across the WHOLE check-attempt-reset
         # sequence below (not just the flag read/write), so it fully
@@ -179,10 +193,21 @@ class Inbox:
         handler, or a render tick draining proactively). Idempotent: calling
         it with nothing pending returns ``{}``.
         """
-        with self._lock:
-            changed = {name: self._slots.pop(name) for name in self._pending}
-            self._pending.clear()
+        # Holding ``_wake_lock`` across BOTH the data snapshot and the flag
+        # reset (not two separate critical sections) closes a lost-wake
+        # race: without this, a post() arriving after this drain's data
+        # snapshot but before its flag reset would see `_wake_queued`
+        # still `True`, conclude a wake was already in flight, and return
+        # success without ever actually posting one -- stranding its own
+        # (not-yet-drained) slot until the next proactive drain, or
+        # forever if ticks are paused. Serializing against post()'s own
+        # `_wake_lock`-held check means such a post() instead blocks here
+        # until the reset below has happened, then correctly sees
+        # `_wake_queued == False` and attempts its own, real wake.
         with self._wake_lock:
+            with self._lock:
+                changed = {name: self._slots.pop(name) for name in self._pending}
+                self._pending.clear()
             self._wake_queued = False
         return changed
 
