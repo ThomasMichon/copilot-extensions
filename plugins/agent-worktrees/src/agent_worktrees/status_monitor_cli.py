@@ -17,6 +17,28 @@ from . import config as cfg
 #: block a shutdown indefinitely (2026-09-26 PR review finding).
 _TRACKING_WRITE_SHUTDOWN_GRACE_S = 10.0
 
+#: Same bounded-grace discipline, applied to the self-retire path itself.
+#: Once this daemon observes a live, strictly-newer generation has taken over
+#: (self_retire.is_superseded), it stops admitting new work and should exit
+#: within one or two sweep cycles -- but the pre-existing gate required TWO
+#: *consecutive* iterations of "superseded AND every busy_reasons() channel
+#: clear" (sweep/hook/classify/tracking-write) before breaking, resetting the
+#: counter to zero on any single busy tick in between. On a machine with
+#: frequent concurrent CLI traffic (hook/classify/tracking-write calls arrive
+#: often enough that some channel is near-always busy at the exact instant
+#: checked), that AND-of-every-channel gate can go unsatisfied indefinitely --
+#: a demoted daemon confirmed-superseded on every single iteration, yet never
+#: accumulating two clean confirms in a row, observed lingering for *days*
+#: (ThomasMichon/copilot-extensions#5326's follow-up: the drain_timeout fix
+#: there covers the orchestrator-driven drain RPC; this covers the daemon's
+#: own independent self-retire loop, which must never depend on a clean
+#: confirm that can be perpetually denied by unrelated traffic). Fix: once
+#: superseded is first observed, start a bounded deadline; reaching it forces
+#: the break regardless of busy_reasons, so self-retire is always upper
+#: bounded, same as the tracking-write shutdown grace above -- never the
+#: multi-day lingering this constant replaces.
+_SELF_RETIRE_MAX_GRACE_S = 120.0
+
 
 def _wait_for_tracking_write_idle(
     is_busy,
@@ -159,12 +181,14 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     classify_daemon_compute = core._classify_daemon_compute
     worktree_status_compute = core._worktree_status_compute
     shutdown_requested = threading.Event()
+    shutdown_requested_since: float | None = None
     admission_closed = False
     published_lock = not passive_mode
     sweep_active = False
     self_retire_generation = None
     self_retire_confirms = 0
     self_retire_confirmations = 2
+    self_retire_first_detected: float | None = None
 
     def _other_current_monitor() -> bool:
         """A *different*, live monitor on a non-superseded runtime owns the host."""
@@ -533,8 +557,17 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 self_retire_generation = active_generation
                 if self_retire_generation is None and runtime_superseded():
                     break
-            if shutdown_requested.is_set() and not _drain_busy_reasons():
-                break
+            if shutdown_requested.is_set():
+                if shutdown_requested_since is None:
+                    shutdown_requested_since = time.monotonic()
+                if (
+                    not _drain_busy_reasons()
+                    or time.monotonic() - shutdown_requested_since >= _SELF_RETIRE_MAX_GRACE_S
+                ):
+                    # Same bounded-upper-bound discipline as self-retire below:
+                    # an explicit shutdown request must never wait on
+                    # busy_reasons() forever either.
+                    break
             if self_retire_generation is not None:
                 try:
                     superseded = self_retire.is_superseded(
@@ -547,12 +580,26 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 if superseded:
                     with state_lock:
                         _enter_drain_only_state()
+                    if self_retire_first_detected is None:
+                        self_retire_first_detected = time.monotonic()
+                else:
+                    self_retire_first_detected = None
+                grace_expired = (
+                    self_retire_first_detected is not None
+                    and time.monotonic() - self_retire_first_detected
+                    >= _SELF_RETIRE_MAX_GRACE_S
+                )
                 if superseded and not _drain_busy_reasons():
                     self_retire_confirms += 1
                     if self_retire_confirms >= self_retire_confirmations:
                         break
                 else:
                     self_retire_confirms = 0
+                if grace_expired:
+                    # Bounded upper bound: a confirmed-superseded daemon must
+                    # never linger past this regardless of busy_reasons()
+                    # never going quiet on its own (see _SELF_RETIRE_MAX_GRACE_S).
+                    break
             with state_lock:
                 can_sweep = published_lock and not admission_closed
                 if can_sweep:

@@ -37,6 +37,7 @@ from plugin_resolve import (
     split_source,
 )
 
+from ._memo import MarketplaceMemo, memo_get
 from .bare_anchor import git_root
 from .state import PluginStateError, read_json_object
 
@@ -820,6 +821,7 @@ def _local_root(
     loaded_settings: _SettingsLoad,
     *,
     base: Path,
+    _memo: MarketplaceMemo | None = None,
 ) -> _Candidate:
     name, marketplace = split_source(source)
     definition = loaded_settings.settings.marketplaces.get(marketplace)
@@ -940,8 +942,9 @@ def _local_root(
             indeterminate=True,
         )
 
-    manifest_path, manifest, manifest_error, manifest_indeterminate = _marketplace_manifest(
-        canonical_marketplace
+    manifest_path, manifest, manifest_error, manifest_indeterminate = memo_get(
+        _memo.manifests if _memo else None, canonical_marketplace,
+        lambda: _marketplace_manifest(canonical_marketplace),
     )
     if manifest_error is not None or manifest is None:
         return _Candidate(
@@ -971,7 +974,10 @@ def _local_root(
                 )
             ]
         )
-    loaded_marketplace = load_marketplace(canonical_marketplace)
+    loaded_marketplace = memo_get(
+        _memo.marketplaces if _memo else None, canonical_marketplace,
+        lambda: load_marketplace(canonical_marketplace),
+    )
     if loaded_marketplace is None or loaded_marketplace.name != marketplace:
         return _Candidate(
             findings=[
@@ -1124,13 +1130,14 @@ def resolve_active_plugins(
     scope_local_roots: dict[str, dict[str, Path]] = defaultdict(dict)
     source_findings: dict[str, list[Finding]] = defaultdict(list)
     source_indeterminate: set[str] = set()
+    memo = MarketplaceMemo()
 
     global_settings = _user_settings(copilot_home)
     registry_findings.extend(global_settings.findings)
     for source in global_settings.settings.enabled_sources():
         scope = "global"
         scopes[source].add(scope)
-        candidate = _local_root(source, global_settings, base=copilot_home)
+        candidate = _local_root(source, global_settings, base=copilot_home, _memo=memo)
         source_findings[source].extend(candidate.findings)
         if candidate.root is not None:
             local_roots[source].add(candidate.root)
@@ -1150,7 +1157,7 @@ def resolve_active_plugins(
         for source in project_settings.settings.enabled_sources():
             scope = f"project:{project}"
             scopes[source].add(scope)
-            candidate = _local_root(source, project_settings, base=root)
+            candidate = _local_root(source, project_settings, base=root, _memo=memo)
             source_findings[source].extend(candidate.findings)
             if candidate.root is not None:
                 local_roots[source].add(candidate.root)
