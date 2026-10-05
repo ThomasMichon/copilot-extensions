@@ -1064,6 +1064,49 @@ win grows with build complexity.
   stray `*.index-config.toml` file was left behind and the provenance
   marker/key files carry the expected owner-restricted ACLs on this
   Windows machine.
+- A twenty-second review round found 3 more issues. (1) the HMAC
+  provenance key itself was just as credential-bearing as the index-
+  config file it protects, but was never hardened via
+  `_restrict_file_to_owner` -- fixed by applying it there too, which
+  required moving `_restrict_file_to_owner` (and `ArtifactBuildError`,
+  which it raises) down into `governed_feed_trust.py` -- the lowest
+  layer both the key file (defined there) and the index-config file
+  (`build_toolchain_lock.py`, which now imports/re-exports both) need
+  it from. (2) empirically, `icacls <path> /inheritance:r /grant:r
+  <owner>:F SYSTEM:F` does NOT remove already-inherited ACEs on this
+  repo's own machines as the Microsoft documentation for `/inheritance:
+  r` implies -- it converts them to explicit entries instead, so
+  Authenticated Users/BUILTIN\Users/BUILTIN\Administrators all survived
+  the original fix. Fixed by explicitly stripping those well-known,
+  locale-independent SIDs afterward, then VERIFYING the final `icacls`
+  query output names only the owner and SYSTEM before trusting the file
+  as hardened -- a credential file whose ACL cannot be confirmed
+  restrictive must never be silently trusted as protected. (3) two
+  concurrent first-run callers could both observe a missing provenance
+  key and each publish their own via `os.replace`; whichever landed LAST
+  silently became the real machine key while the other caller kept
+  trusting its own (no-longer-persisted) in-memory bytes, making its own
+  provenance computations disagree with every other caller. Fixed by
+  re-reading and returning the file's ACTUAL final content after
+  publishing, rather than the in-memory key a call itself generated.
+  Also fixed the CI path-gate step (round 20) to include
+  `tools/uv_editable_ref.py`, which `build_python_artifacts.py` imports
+  but the gate's changed-path expression had omitted.
+
+  8 more unit tests (167 total, all passing). Tests that exercise
+  `_opaque_index_identity`/`_provenance_key` without otherwise mocking
+  subprocess calls now get a file-level autouse default stub for
+  `subprocess.run` (this machine's own real `icacls` behaves unreliably
+  against paths inside pytest's own tmp tree, the same untrusted-mount-
+  point quirk this file's own pytest-teardown workarounds already
+  document elsewhere -- unrelated to this fix's actual correctness,
+  separately verified via real smoke tests against normal paths).
+  `check-module-size.py` still passes (`build_toolchain_lock.py` 883
+  lines, `governed_feed_trust.py` 542 lines). Smoke-tested for real
+  again with a freshly-generated key: `Get-Acl`/`icacls` now confirm
+  only `NT AUTHORITY\SYSTEM` and the owning user have access to the
+  provenance key file, with no `BUILTIN\Administrators`/`Authenticated
+  Users`/`Users` entries surviving.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 

@@ -45,6 +45,7 @@ from governed_feed_trust import (  # noqa: E402
     _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS,
     _PUBLIC_PYPI_HOSTS,
     _TRUSTED_INDEX_HOSTS_ENV_VAR,
+    ArtifactBuildError,
     _credential_free_index_identity,
     _effective_default_index_url,
     _effective_uv_toml_candidates,
@@ -53,6 +54,7 @@ from governed_feed_trust import (  # noqa: E402
     _normalize_hostname,
     _opaque_index_identity,
     _project_uv_toml_candidates,
+    _restrict_file_to_owner,
     _trusted_index_hosts,
     _url_host,
     _validated_trusted_index_url,
@@ -209,12 +211,6 @@ def _occupied_by_other_identity(
         venv_python.is_file()
         and _provenance_matches(target_dir, validated_index_url, python)
     )
-
-
-class ArtifactBuildError(Exception):
-    """A plugin/lib wheel could not be built, or the result could not be
-    understood (unparseable filename, unreadable WHEEL metadata) -- callers
-    must fail closed rather than emit a manifest describing a guess."""
 
 
 def _hash_fields(*fields: str) -> str:
@@ -442,53 +438,6 @@ def _toml_escape(value: str) -> str:
     WRITER exists (only `tomllib`, a reader), so this is a tiny, scoped
     helper rather than a dependency."""
     return value.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _restrict_file_to_owner(path: Path) -> None:
-    """Best-effort hardens ``path``'s ACCESS CONTROL to the owning user
-    only, beyond the POSIX mode bits already applied at creation. `0o600`
-    does NOT establish an owner-only ACL on Windows (and may not be
-    authoritative on any ACL-backed filesystem) -- a credential-bearing
-    file created under a caller-selected directory can still inherit a
-    broader ACL from that directory, leaving it readable by other local
-    principals despite the mode bits (the same reasoning this repo
-    already applies to the Windows named-pipe transport in
-    `plugins/agent-vault/src/agent_vault/cutover.py`'s own
-    `OWNER_GATED_TRANSPORTS`: a Windows default DACL is never treated as
-    sufficient for a secret).
-
-    On Windows: strips inherited permissions and grants Full Control to
-    only the current user plus `SYSTEM` (required for normal OS
-    housekeeping, e.g. antivirus scanning) via `icacls` -- a standard
-    Windows tool, no new dependency. On POSIX: a no-op: the `0o600` mode
-    bits already applied at creation are authoritative there.
-
-    Raises `ArtifactBuildError` on any failure (the current user cannot be
-    determined, or `icacls` itself fails) -- a credential-bearing file
-    whose ACL could not be VERIFIED restrictive (via this command's own
-    exit code) must never be silently trusted as protected."""
-    if sys.platform != "win32":
-        return
-    owner = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}".strip("\\")
-    if not owner or not os.environ.get("USERNAME"):
-        raise ArtifactBuildError(
-            f"{path}: could not determine the current user to restrict "
-            "this credential-bearing file's ACL to -- refusing to "
-            "proceed with an unverified, possibly-inherited ACL"
-        )
-    result = subprocess.run(
-        [
-            "icacls", str(path),
-            "/inheritance:r",
-            "/grant:r", f"{owner}:F", "SYSTEM:F",
-        ],
-        capture_output=True, text=True,
-    )
-    if result.returncode != 0:
-        raise ArtifactBuildError(
-            f"{path}: could not restrict this credential-bearing file's "
-            f"ACL to the current user:\n{result.stdout}\n{result.stderr}"
-        )
 
 
 def _publish_staging_venv(

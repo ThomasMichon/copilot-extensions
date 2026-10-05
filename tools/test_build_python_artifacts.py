@@ -9,6 +9,15 @@ from pathlib import Path
 
 import pytest
 
+#: Captured at import time, BEFORE any test's monkeypatching -- the one
+#: genuine `subprocess.run`, for the single test that deliberately needs
+#: it (`test_query_marker_environment_against_real_interpreter`). `
+#: subprocess` is a shared singleton module object: by the time a test
+#: body runs, `subprocess.run` itself may already be this file's own
+#: autouse default stub, so grabbing "the real one" at THAT point would
+#: just return the stub.
+_REAL_SUBPROCESS_RUN = subprocess.run
+
 REPO = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO / "tools" / "build_python_artifacts.py"
 
@@ -37,8 +46,26 @@ def _isolated_provenance_key_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     """`_opaque_index_identity`'s keyed-hash machinery persists a per-
     machine key under the real LOCALAPPDATA/XDG_STATE_HOME -- no test in
     this file may read or write that real, shared location. Isolated to
-    this test's own `tmp_path` for every test, automatically."""
+    this test's own `tmp_path` for every test, automatically.
+
+    Also stubs `subprocess.run` to a trivial always-succeeding no-op by
+    default: on this machine (genuinely Windows), `_provenance_key`'s own
+    call to `_restrict_file_to_owner` would otherwise shell out to REAL
+    `icacls` against a path inside pytest's own tmp tree for every test
+    that merely touches `_opaque_index_identity`/`_provenance_key` --
+    those paths carry the SAME untrusted-mount-point quirk documented
+    elsewhere in this file's own pytest-teardown workarounds, and
+    `icacls` behaves unreliably against them, unrelated to this fix's
+    actual correctness (verified separately via real smoke tests against
+    normal paths). Any test that needs its OWN subprocess behavior
+    (nearly every `resolve_toolchain_lock`/`build_wheel` test) overrides
+    this default later in its own body, same as any other monkeypatch
+    stacking in this file."""
     monkeypatch.setattr(gft, "_provenance_key_dir", lambda: tmp_path / "provenance-key-dir")
+    monkeypatch.setattr(
+        gft.subprocess, "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(cmd, 0, stdout="", stderr=""),  # noqa: ARG005
+    )
 
 
 
@@ -1759,6 +1786,58 @@ def test_provenance_key_persists_and_is_reused_across_calls(
         assert mode == 0o600
 
 
+def test_provenance_key_hardens_acl_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression (round 22): the key is just as credential-bearing as the
+    # index-config temp file it protects -- 0o600 mode bits alone are not
+    # an owner-only ACL on Windows, so it must go through the same
+    # `_restrict_file_to_owner` hardening.
+    monkeypatch.setattr(gft, "_provenance_key_dir", lambda: tmp_path / "key-dir")
+    monkeypatch.setattr(gft.sys, "platform", "win32")
+    monkeypatch.setenv("USERDOMAIN", "REDMOND")
+    monkeypatch.setenv("USERNAME", "svc")
+    seen_cmds: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        seen_cmds.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(gft.subprocess, "run", fake_run)
+    gft._provenance_key()
+
+    assert len(seen_cmds) == 3
+    grant_cmd = seen_cmds[0]
+    assert grant_cmd[0] == "icacls"
+    assert "/inheritance:r" in grant_cmd
+    assert "REDMOND\\svc:F" in grant_cmd
+
+
+def test_provenance_key_returns_final_persisted_value_on_publish_race(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression (round 22): two concurrent first-run callers can both
+    # observe a missing key and each publish their own -- whichever
+    # `os.replace` lands LAST silently becomes the real machine key. A
+    # caller must return whatever is ACTUALLY persisted afterward, never
+    # trust the in-memory key it itself generated, or its own later
+    # provenance computations would key on a value no longer on disk.
+    monkeypatch.setattr(gft, "_provenance_key_dir", lambda: tmp_path / "key-dir")
+    real_replace = gft.os.replace
+
+    def racing_replace(src, dst):  # noqa: ARG001
+        # Simulate a concurrent winner publishing a DIFFERENT key
+        # immediately after this call's own os.replace, but before it
+        # re-reads -- by publishing the winner's key INSTEAD of this
+        # call's own.
+        Path(dst).write_bytes(b"\xaa" * 32)
+
+    monkeypatch.setattr(gft.os, "replace", racing_replace)
+    key = gft._provenance_key()
+    assert key == b"\xaa" * 32  # the winner's key, not whatever we generated
+    monkeypatch.setattr(gft.os, "replace", real_replace)
+
+
 def test_credential_free_index_identity_strips_userinfo_only():
     assert (
         btl._credential_free_index_identity(
@@ -3033,13 +3112,17 @@ def test_restrict_file_to_owner_invokes_icacls_on_windows(
     target = tmp_path / "secret.toml"
     btl._restrict_file_to_owner(target)
 
-    assert len(seen_cmds) == 1
-    cmd = seen_cmds[0]
-    assert cmd[0] == "icacls"
-    assert cmd[1] == str(target)
-    assert "/inheritance:r" in cmd
-    assert "REDMOND\\svc:F" in cmd
-    assert "SYSTEM:F" in cmd
+    # Three icacls invocations: grant owner+SYSTEM, strip broad built-in
+    # principals by well-known SID, then a final verify query.
+    assert len(seen_cmds) == 3
+    grant_cmd, remove_cmd, verify_cmd = seen_cmds
+    assert grant_cmd[0] == "icacls"
+    assert grant_cmd[1] == str(target)
+    assert "/inheritance:r" in grant_cmd
+    assert "REDMOND\\svc:F" in grant_cmd
+    assert "SYSTEM:F" in grant_cmd
+    assert remove_cmd[:3] == ["icacls", str(target), "/remove:g"]
+    assert verify_cmd == ["icacls", str(target)]
 
 
 def test_restrict_file_to_owner_fails_closed_when_icacls_fails(
@@ -3081,11 +3164,15 @@ def test_resolve_toolchain_lock_hardens_index_config_acl_on_windows(
     hardened_before_write: list[bool] = []
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
-        if cmd[:1] == ["icacls"]:
+        if cmd[:1] == ["icacls"] and str(cmd[1]).endswith(".index-config.toml"):
             config_path = Path(cmd[1])
             # The file must exist but still be EMPTY at hardening time --
             # content is written only after this call succeeds.
             hardened_before_write.append(config_path.read_text(encoding="utf-8") == "")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:1] == ["icacls"]:
+            # The provenance-key file's OWN icacls hardening (round 22) --
+            # not this test's concern; just let it succeed.
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         if cmd[:2] == ["uv", "venv"]:
             staging_python = bpa._venv_python_path(Path(cmd[3]))
@@ -3103,7 +3190,9 @@ def test_resolve_toolchain_lock_hardens_index_config_acl_on_windows(
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     bpa.resolve_toolchain_lock(venv_dir)
 
-    assert hardened_before_write == [True]
+    # Several icacls sub-invocations now touch the index-config file
+    # (grant, strip-broad-principals, verify) -- all must see it EMPTY.
+    assert hardened_before_write and all(hardened_before_write)
 
 
 def test_resolve_toolchain_lock_strips_pythonpath_and_pythonhome(
@@ -3486,13 +3575,19 @@ def test_query_marker_environment_malformed_json_raises(
         bpa._query_marker_environment(tmp_path / "python")
 
 
-def test_query_marker_environment_against_real_interpreter():
+def test_query_marker_environment_against_real_interpreter(
+    monkeypatch: pytest.MonkeyPatch,
+):
     # Regression: implementation_version must come from
     # sys.implementation.version (via the same format_full_version logic
     # packaging.markers uses), NOT platform.python_version() -- they
     # coincide on CPython today, but running the REAL query script end-to-
     # end against the actual interpreter proves it computes a well-formed
     # value via that code path rather than silently using the wrong one.
+    # Needs the REAL subprocess.run, not this file's own autouse default
+    # stub (which exists only to keep `_provenance_key`'s unrelated ACL
+    # hardening out of routine tests).
+    monkeypatch.setattr(gft.subprocess, "run", _REAL_SUBPROCESS_RUN)
     env = bpa._query_marker_environment(Path(sys.executable))
     expected = f"{sys.implementation.version.major}.{sys.implementation.version.minor}.{sys.implementation.version.micro}"
     if sys.implementation.version.releaselevel != "final":

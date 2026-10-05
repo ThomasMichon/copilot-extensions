@@ -24,6 +24,7 @@ import hmac
 import os
 import re
 import secrets
+import subprocess
 import sys
 import urllib.parse
 from pathlib import Path
@@ -33,6 +34,125 @@ try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
     import tomli as tomllib
+
+
+class ArtifactBuildError(Exception):
+    """A plugin/lib wheel could not be built, or the result could not be
+    understood (unparseable filename, unreadable WHEEL metadata) -- callers
+    must fail closed rather than emit a manifest describing a guess.
+
+    Defined HERE (the lowest layer) rather than in `build_toolchain_lock.py`
+    (which originally defined it) because `_restrict_file_to_owner` below
+    -- shared by that module's own index-config file AND this module's own
+    provenance key file -- needs to raise it; `build_toolchain_lock.py`
+    re-imports/re-exports it exactly like every other name moved here."""
+
+
+def _restrict_file_to_owner(path: Path) -> None:
+    """Best-effort hardens ``path``'s ACCESS CONTROL to the owning user
+    only, beyond the POSIX mode bits already applied at creation. `0o600`
+    does NOT establish an owner-only ACL on Windows (and may not be
+    authoritative on any ACL-backed filesystem) -- a credential-bearing
+    file created under a caller-selected directory can still inherit a
+    broader ACL from that directory, leaving it readable by other local
+    principals despite the mode bits (the same reasoning this repo
+    already applies to the Windows named-pipe transport in
+    `plugins/agent-vault/src/agent_vault/cutover.py`'s own
+    `OWNER_GATED_TRANSPORTS`: a Windows default DACL is never treated as
+    sufficient for a secret). Shared by `build_toolchain_lock.py`'s own
+    sanitized index-config file AND this module's own provenance key file
+    (`_provenance_key`) -- both are credential-bearing.
+
+    On Windows: strips inherited permissions and grants Full Control to
+    only the current user plus `SYSTEM` (required for normal OS
+    housekeeping, e.g. antivirus scanning) via `icacls` -- a standard
+    Windows tool, no new dependency. On POSIX: a no-op: the `0o600` mode
+    bits already applied at creation are authoritative there.
+
+    Raises `ArtifactBuildError` on any failure (the current user cannot be
+    determined, or `icacls` itself fails) -- a credential-bearing file
+    whose ACL could not be VERIFIED restrictive (via this command's own
+    exit code) must never be silently trusted as protected."""
+    if sys.platform != "win32":
+        return
+    owner = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}".strip("\\")
+    if not owner or not os.environ.get("USERNAME"):
+        raise ArtifactBuildError(
+            f"{path}: could not determine the current user to restrict "
+            "this credential-bearing file's ACL to -- refusing to "
+            "proceed with an unverified, possibly-inherited ACL"
+        )
+    result = subprocess.run(
+        [
+            "icacls", str(path),
+            "/inheritance:r",
+            "/grant:r", f"{owner}:F", "SYSTEM:F",
+        ],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise ArtifactBuildError(
+            f"{path}: could not restrict this credential-bearing file's "
+            f"ACL to the current user:\n{result.stdout}\n{result.stderr}"
+        )
+    # `/inheritance:r` alone does NOT remove already-inherited ACEs on
+    # this repo's own test machines -- empirically, it converts them to
+    # EXPLICIT entries instead (Authenticated Users/BUILTIN\Users/
+    # BUILTIN\Administrators all survived `/inheritance:r /grant:r
+    # <owner>:F SYSTEM:F` in isolation), since `/grant:r` only replaces
+    # the GRANT for the principals it names, leaving every other
+    # principal's own (now-explicit) ACE untouched. Explicitly strip
+    # every broad, well-known principal by SID (locale-independent,
+    # unlike group display names) so only the owner and SYSTEM remain.
+    remove_result = subprocess.run(
+        [
+            "icacls", str(path), "/remove:g",
+            *_BROAD_WINDOWS_PRINCIPAL_SIDS,
+        ],
+        capture_output=True, text=True,
+    )
+    if remove_result.returncode != 0:
+        raise ArtifactBuildError(
+            f"{path}: could not strip broad principals from this "
+            f"credential-bearing file's ACL:\n"
+            f"{remove_result.stdout}\n{remove_result.stderr}"
+        )
+    # VERIFY the final result rather than trusting exit codes alone: a
+    # credential-bearing file whose ACL cannot be confirmed restrictive
+    # must never be silently trusted as protected.
+    query = subprocess.run(
+        ["icacls", str(path)], capture_output=True, text=True
+    )
+    if query.returncode != 0:
+        raise ArtifactBuildError(
+            f"{path}: could not verify this credential-bearing file's "
+            f"final ACL:\n{query.stdout}\n{query.stderr}"
+        )
+    acl_lines = [
+        line.strip() for line in query.stdout.splitlines()
+        if ":(" in line
+    ]
+    unexpected = [
+        line for line in acl_lines
+        if owner.lower() not in line.lower() and "system" not in line.lower()
+    ]
+    if unexpected:
+        raise ArtifactBuildError(
+            f"{path}: this credential-bearing file's ACL still grants "
+            f"unexpected principal(s) after hardening: {unexpected!r} -- "
+            "refusing to trust it as owner-only"
+        )
+
+
+#: Well-known, locale-independent Windows SIDs for broad built-in
+#: principals that `icacls /grant:r` does not implicitly strip when
+#: granting a DIFFERENT principal -- see `_restrict_file_to_owner`.
+_BROAD_WINDOWS_PRINCIPAL_SIDS = (
+    "*S-1-1-0",       # Everyone
+    "*S-1-5-11",      # NT AUTHORITY\Authenticated Users
+    "*S-1-5-32-545",  # BUILTIN\Users
+    "*S-1-5-32-544",  # BUILTIN\Administrators
+)
 
 _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS = ("UV_DEFAULT_INDEX", "UV_INDEX_URL")
 _PUBLIC_PYPI_HOSTS = {"pypi.org", "pypi.python.org", "test.pypi.org"}
@@ -136,10 +256,22 @@ def _provenance_key() -> bytes:
     later call keeps reading back via the exists-and-right-length check
     below. A temp file is unique per attempt (no `O_EXCL` collision to
     race on at all), and `os.replace` only ever exposes a fully-written
-    32-byte file at the final path. Restrictive, owner-only permissions
-    (mirroring the index-config temp file in `build_toolchain_lock.py`)
-    are applied at the temp file's own creation, carried through the
-    rename."""
+    32-byte file at the final path. `_restrict_file_to_owner` (0o600 mode
+    bits alone are not an owner-only ACL on Windows -- this key is just
+    as credential-bearing as the index-config temp file it protects) is
+    applied to the temp file BEFORE the rename, so the final path never
+    exists at a broader ACL even momentarily.
+
+    After publishing, re-reads and returns the file's ACTUAL final
+    content rather than the in-memory ``key`` this call generated: two
+    concurrent first-run callers can both observe a missing key and each
+    publish their own, and whichever `os.replace` lands LAST silently
+    becomes the real machine key -- a caller that trusted its own
+    generated bytes instead of re-reading could persist provenance keyed
+    on a value no longer on disk, making its own computations
+    unverifiable and disagreeing with every other caller. Re-reading
+    makes every caller converge on whatever one, single key is actually
+    persisted, regardless of which one(s) raced to write it."""
     path = _provenance_key_dir() / "provenance-key"
     try:
         existing = path.read_bytes()
@@ -154,11 +286,12 @@ def _provenance_key() -> bytes:
     try:
         with os.fdopen(fd, "wb") as key_file:
             key_file.write(key)
+        _restrict_file_to_owner(tmp_path)
         os.replace(str(tmp_path), str(path))
     except BaseException:
         tmp_path.unlink(missing_ok=True)
         raise
-    return key
+    return path.read_bytes()
 
 
 def _opaque_index_identity(url: str) -> str:
