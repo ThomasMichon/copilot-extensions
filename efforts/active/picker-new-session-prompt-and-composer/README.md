@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase model (mirrors `agent-dispatch-tasks-pane-ux-overhaul`'s own convention)
 - **Created:** 2026-09-30
-- **Status:** Draft
+- **Status:** Done
 - **Vision:** `picker` (no existing §Features entry yet -- candidate follow-up
   once Phase A lands)
 
@@ -564,7 +564,7 @@ real code, not assumption:
   - [x] Confirm behavior with "Bare" selected: no prompt screen is shown at
         all (nothing to seed). (`test_new_worktree_bare_skips_seed_prompt`,
         passing against the now-default-on `_SEED_PROMPT_ENABLED`.)
-- [~] Phase B: from a live coordinator, use the Tasks pane's new "New
+- [x] Phase B: from a live coordinator, use the Tasks pane's new "New
       task…" action to hand-author a task; confirm it appears with the
       exact title/prompt/tags entered, immediately eligible for its
       declared pool per the tags/criteria submitted. **Partially validated
@@ -587,28 +587,36 @@ real code, not assumption:
       "+ New task…" affordance appeared (after discovering and fixing a
       real environment gap -- see below), and the Title/Prompt/Criteria
       tabbed dialog captured all three fields correctly, confirmed via
-      `capture-pane` at every step. **Still outstanding (keeps this item
-      unchecked):** submitting Create reached the real `agent-dispatch` CLI
-      but failed with `agent-dispatch: error: unrecognized arguments:
-      --criteria-json` -- the machine's globally-installed `agent-dispatch`
-      binstub (`~/.local/bin/agent-dispatch.ps1`, resolving a separately-
-      versioned venv under `~/.agent-dispatch/`) predates the merged
-      `--criteria-json` flag from PR #4991; `agent-worktrees update --force`
-      refreshes `agent-worktrees` itself plus the Copilot-plugin pivot-
-      manifest registration (which IS what made "+ New task…" appear at
-      all -- the installed `pivots/agent-dispatch.json` was also stale
-      before that) but does not reprovision `agent-dispatch`'s own CLI
-      venv. No orphan/partial task was created by the failed submission
-      (confirmed via `agent-dispatch list --json`) -- the failure is a
-      clean, atomic, deployment-currency gap, not a source-code defect:
-      the shipped code and its own tests are correct; a machine whose
-      installed `agent-dispatch` CLI is current would complete this item.
-      Did not force-reprovision the live `agent-dispatch` CLI this session
-      -- it is this machine's real, actively-serving coordinator (17 real
-      tasks, one real registrar), and safely rebuilding just the CLI venv
-      without disturbing the running daemon needs its own careful
-      investigation, better done as a focused follow-up than as a side
-      effect of this validation pass.
+      `capture-pane` at every step. **Blocked at the time** on
+      `agent-dispatch: error: unrecognized arguments: --criteria-json` --
+      the machine's globally-installed `agent-dispatch` CLI venv predated
+      the merged `--criteria-json` flag from PR #4991. Diagnosed as a
+      clean, atomic, deployment-currency gap, not a source-code defect, and
+      deliberately not force-reprovisioned mid-validation-pass against the
+      then-live coordinator.
+      **2026-10-05: item closed.** The machine's `agent-dispatch` CLI and
+      the running coordinator daemon had since converged on the same
+      current version (`0.11.6-dev1`, confirmed via `agent-dispatch
+      --version` and `agent-dispatch health`'s `slot.active.version`) --
+      the deployment-currency gap closed itself via this machine's normal
+      `agent-worktrees update --force` cadence, with no code change needed.
+      Re-ran the exact same live click-through in a fresh
+      `copilot-extensions` worktree (not the stale anchor): real Picker via
+      `tmux`/`psmux` (no `--demo`) against the real, actively-serving
+      coordinator (33 live tasks, registrar `agent-ssh-dtssh-host`
+      confirmed active via `agent-dispatch registrar doctor`), `]` to the
+      Tasks pivot, `+ New task…`, filled Title/Prompt/Criteria (Criteria
+      left on its `Other…` free-text fallback), `Enter` to submit. The
+      dialog closed and the coordinator confirmed creation
+      (`agent-dispatch find "VALIDATION-TEST" --repo copilot-extensions`
+      returned the task with the exact title/prompt entered, `repo:
+      github.com/ThomasMichon/copilot-extensions`, `status: queued`, id
+      `0caa5585697c48bd95554e3f15bddaa3`) -- no `--criteria-json` error, no
+      orphaned/partial task. Immediately abandoned the test task
+      (`agent-dispatch abandon 0caa5585... --permit --reason "..."`,
+      confirmed `status: abandoned`) and killed the tmux session, leaving
+      the real coordinator and its backlog otherwise untouched. This item
+      and the whole Validation Plan are now fully closed.
 - [x] Both phases: full `worktree-manager` + `agent-dispatch` test suites
       stay green (baseline: whatever the two packages' full-suite pass
       counts are at the time each phase's PR opens -- record them in that
@@ -2172,3 +2180,48 @@ that's already current) can complete this item without re-diagnosing from
 scratch. Both Validation Plan entries above reflect the precise, current
 state; flagged back to the operator per the handoff's instruction not to
 unilaterally decide on descoping either item.
+
+### 2026-10-05 — Last Validation Plan item closed; effort Done
+Picked this effort back up specifically to check whether it could close
+out. The 2026-10-03 blocker (`agent-dispatch: unrecognized arguments:
+--criteria-json`) turned out to have already resolved itself via this
+machine's normal update cadence: `agent-dispatch --version` and the live
+coordinator's own `agent-dispatch health` `slot.active.version` now both
+report `0.11.6-dev1` -- CLI and daemon are in sync, no reprovisioning
+needed, no code change required.
+
+Re-ran the exact live click-through from the 2026-10-03 entry, this time to
+completion: a fresh `copilot-extensions` worktree (never the stale
+anchor), real Picker launched via `tmux`/`psmux` (`python -m
+worktree_manager picker copilot-extensions`, no `--demo`,
+`PSMUX_SESSION`/`TMUX` cleared first per the standard gotcha), against the
+real, actively-serving coordinator (33 live tasks this time, registrar
+`agent-ssh-dtssh-host` reconfirmed active via `agent-dispatch registrar
+doctor`). `]` to the Tasks pivot, space to activate `+ New task…`, typed a
+clearly-marked `VALIDATION-TEST` title (first keystroke swallowed by the
+focus transition -- the same already-documented ill-paced-injection
+artifact as 2026-10-03's Phase A attempt; cleared with Ctrl+A/Ctrl+K and
+retyped cleanly), `Ctrl+Right` to Prompt, typed a prompt, `Ctrl+Right` to
+Criteria (left on its `Other…` free-text fallback -- the live-resolved
+`task-type` vocabulary didn't surface named options worth targeting for a
+throwaway validation task, and that's an orthogonal UX question, not this
+item's own pass/fail bar), `Enter` to submit.
+
+The dialog closed cleanly (no error this time) and the coordinator
+confirmed real creation: `agent-dispatch find "VALIDATION-TEST" --repo
+copilot-extensions` returned the task with the exact title and prompt
+typed, `repo: github.com/ThomasMichon/copilot-extensions`, `status:
+queued`, id `0caa5585697c48bd95554e3f15bddaa3` -- the full UI chain
+(options dialog -> tabbed Title/Prompt/Criteria collection -> `Create` ->
+real `agent-dispatch create --criteria-json ...` subprocess -> real queued
+task) proven end-to-end against a genuinely live, already-busy coordinator,
+with no orphaned/partial task and no `--criteria-json` error. Immediately
+abandoned the test task (`agent-dispatch abandon 0caa5585... --permit
+--reason "..."`, confirmed `status: abandoned`) and killed the tmux
+session, leaving the real coordinator and its 33-task backlog otherwise
+untouched -- same discipline as every prior live-validation entry in this
+effort.
+
+Both Validation Plan items are now fully checked. Phase A and Phase B are
+both code-complete, merged, and validated live end-to-end. **This effort
+is Done** -- no further Plan or Validation Plan work remains.
