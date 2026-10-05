@@ -2447,15 +2447,23 @@ def test_liveness_gc_publishes_a_bus_event_for_auto_suspend_with_zero_requeued(
     (`board_relay.py`) until the next 45s long reconcile."""
     from agent_dispatch.coordinator import create_app
 
+    # Start with a verdict the GC loop acts on for NOTHING (only "gone" is
+    # ever acted on -- see `queue_liveness.reconcile_liveness`'s `if verdict
+    # != self.LIVENESS_GONE: continue`), so an early GC pass racing the
+    # create/claim/start setup below is a harmless no-op instead of
+    # requeuing the task out from under us. A real-world full-matrix test
+    # run can make that setup take far longer than a short sweep_interval
+    # under heavy host load, so this is not just a hypothetical race -- see
+    # the Phase 3.5 effort notes. Flip to "gone" only once the task is
+    # actually STARTED, so the very next (now harmless-timing) GC pass is
+    # the one that performs the auto-suspend this test is about.
+    verdict = {"value": "unknown"}
     monkeypatch.setattr(
-        "agent_dispatch.tracking.liveness_verdict", lambda *a, **k: "gone"
+        "agent_dispatch.tracking.liveness_verdict",
+        lambda *a, **k: verdict["value"],
     )
     monkeypatch.setattr("agent_dispatch.identity.resolve_machine", lambda: None)
     q = TaskQueue(tmp_path / "tasks.db")
-    # A longer sweep_interval than the other loop tests in this module: the
-    # task must be created/claimed/started *before* the GC loop's first
-    # pass, which would otherwise requeue it (CLAIMED, not yet STARTED) on
-    # its very first sweep.
     app = create_app(q, sweep_interval=1.0, enable_mcp=False)
 
     events: list[dict] = []
@@ -2473,6 +2481,7 @@ def test_liveness_gc_publishes_a_bus_event_for_auto_suspend_with_zero_requeued(
         task = c.create("x")
         owner = c.claim(worker_id="m1/wt1", repo=TEST_REPO)["owner"]
         c.start(task["id"], owner)
+        verdict["value"] = "gone"
 
         deadline = time.time() + 10
         status = None
