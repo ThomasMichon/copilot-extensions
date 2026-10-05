@@ -403,6 +403,87 @@ function Invoke-VersionedGc {
 }
 # === end install-contract:v3 versioned-venv helpers ===
 
+function Test-UvConfiguredIndex {
+    $configPaths = if ($env:UV_CONFIG_FILE) {
+        @($env:UV_CONFIG_FILE)
+    } else {
+        $paths = @()
+        $roaming = [Environment]::GetFolderPath('ApplicationData')
+        if ($roaming) {
+            $paths += Join-Path $roaming 'uv\uv.toml'
+        }
+        if ($env:PROGRAMDATA) {
+            $paths += Join-Path $env:PROGRAMDATA 'uv\uv.toml'
+        }
+        $paths
+    }
+    foreach ($configPath in $configPaths) {
+        if (-not $configPath -or -not (Test-Path -LiteralPath $configPath)) { continue }
+        $inIndex = $false
+        foreach ($line in Get-Content -LiteralPath $configPath) {
+            $value = ($line -replace '\s+#.*$', '').Trim()
+            if ($value -match '^index-url\s*=') { return $true }
+            if ($value -match '^\[\[index\]\]$') {
+                $inIndex = $true
+                continue
+            }
+            if ($value -match '^\[') { $inIndex = $false }
+            if ($inIndex -and $value -match '^default\s*=\s*true$') {
+                return $true
+            }
+        }
+    }
+    return $false
+}
+
+function Ensure-UvIndex {
+    if ($env:UV_DEFAULT_INDEX -or $env:UV_INDEX_URL -or (Test-UvConfiguredIndex)) { return }
+    $idx = ''
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if (Get-Command pip -CommandType Application -ErrorAction SilentlyContinue) {
+            $out = & pip config get global.index-url 2>$null
+            if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
+        }
+        if (-not $idx) {
+            if (Get-Command py -CommandType Application -ErrorAction SilentlyContinue) {
+                $out = & py -3 -m pip config get global.index-url 2>$null
+                if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
+            } elseif (Get-Command python -CommandType Application -ErrorAction SilentlyContinue) {
+                $out = & python -m pip config get global.index-url 2>$null
+                if ($LASTEXITCODE -eq 0) { $idx = ($out | Out-String).Trim() }
+            }
+        }
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+    if (-not $idx) {
+        $configPaths = @($env:PIP_CONFIG_FILE)
+        $roaming = [Environment]::GetFolderPath('ApplicationData')
+        if ($roaming) {
+            $configPaths += Join-Path $roaming 'pip\pip.ini'
+        }
+        if ($env:PROGRAMDATA) {
+            $configPaths += Join-Path $env:PROGRAMDATA 'pip\pip.ini'
+        }
+        foreach ($configPath in $configPaths) {
+            if (-not $configPath -or -not (Test-Path -LiteralPath $configPath)) { continue }
+            $match = Select-String -LiteralPath $configPath `
+                -Pattern '^\s*index-url\s*=\s*(\S+)\s*$' |
+                Select-Object -First 1
+            if ($match) {
+                $idx = $match.Matches[0].Groups[1].Value
+                break
+            }
+        }
+    }
+    if ($idx) {
+        $env:UV_DEFAULT_INDEX = $idx
+        Write-Step 'uv index derived from pip config (governed-feed bridge)'
+    }
+}
+
 # === install-contract:v3 source-kind -- keep byte-identical across plugins ===
 # A runtime footprint's source is inferred from where the installer runs.
 # Vendored under the Copilot CLI installed-plugins dir => marketplace;
@@ -666,6 +747,7 @@ function Install-Runtime {
     }
     Write-Ok "Python: $pythonCmd"
 
+    Ensure-UvIndex
     $uvPath = Ensure-Uv -InstallRoot $InstallDir
     if (-not $uvPath) {
         Write-Fail 'uv is required but could not be resolved or acquired'
@@ -724,11 +806,11 @@ function Install-Runtime {
     }
     if (Get-Command uv -ErrorAction SilentlyContinue) {
         $pkgResultObj = Invoke-UvPipInstallResilient -UvCommand 'uv' -PayloadDirToScrub $PluginDir -Arguments @('--python', $VenvPython, "$PluginDir", '--quiet')
-        $pkgOut = $pkgResultObj.Output
+            $pkgOut = $pkgResultObj.Output
         $pkgResult = $pkgResultObj.ExitCode
     } else {
         $pkgOut = & $VenvPython -m pip install --quiet "$PluginDir" 2>&1
-        $pkgResult = $LASTEXITCODE
+            $pkgResult = $LASTEXITCODE
     }
     $ErrorActionPreference = $prevEAP
     if ($pkgResult -ne 0) {

@@ -988,7 +988,8 @@ appropriately larger/riskier for one sitting):
   `New-SignedVenv`, `Invoke-UvPipInstallResilient`,
   `Write-DeployManifest`, and `Write-SimpleBinstub`. Genuinely per-service
   logic stayed local: agent-vault's versioned-runtime helpers, downgrade
-  guard, KeePassXC prerequisite check + askpass helper, systemd/Scheduled Task
+  guard, the PowerShell-side pip→uv index bridge (`Ensure-UvIndex`),
+  KeePassXC prerequisite check + askpass helper, systemd/Scheduled Task
   lifecycle, Windows drain-safe fixed-endpoint cutover, and the PowerShell
   snapshot materialization needed for first-use provisioning from a stamped
   payload.
@@ -998,10 +999,10 @@ appropriately larger/riskier for one sitting):
   payload marker flips over, so first-use provisioning from a dev-time
   canonical-reference wrapper still ships a self-contained snapshot.
 - **Line-count / corpus result:** wrapper-only installer lines shrank from
-  `install.sh` 930 -> 831 (-99) and `install.ps1` 1253 -> 1164 (-89), for a
-  combined wrapper drop of 2183 -> 1995 (**-188**). The canonical engine stayed
+  `install.sh` 930 -> 831 (-99) and `install.ps1` 1253 -> 1246 (-7), for a
+  combined wrapper drop of 2183 -> 2077 (**-106**). The canonical engine stayed
   flat at `installer-engine.sh` 376 lines and `installer-engine.ps1` 462 lines,
-  so this conversion removed 188 lines from the combined agent-vault +
+  so this conversion removed 106 lines from the combined agent-vault +
   shared-engine corpus instead of merely relocating them.
 - Validation completed here:
   - `python3 tools/sync-vendored-libs.py --check`
@@ -1013,13 +1014,14 @@ appropriately larger/riskier for one sitting):
   - `python3 tools/check-docs-consistency.py`
   - `python3 tools/check-changefile-presence.py --base origin/dev`
   - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-vault --reinstall --admission-wait 540`
-    -> PASS (`257 passed, 12 skipped`)
+    -> PASS (`259 passed, 12 skipped`)
   - Focused follow-up after the initial full-suite run surfaced only the two
-    installer preinstall-loop guards:
-    `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-vault --reinstall --admission-wait 540 -k preinstall_loop`
-    -> PASS (`8 passed, 1 skipped, 260 deselected`). No other repeated full
-    runs happened between the first failing full suite and the final all-green
-    full suite.
+    installer preinstall-loop guards; the review-fix pass then re-ran only the
+    affected installer regressions (`preinstall_loop`, `uv_index`,
+    `snapshot_only`) before the final all-green full suite:
+    `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-vault --reinstall --admission-wait 540 -k "uv_index or snapshot_only or preinstall_loop"`
+    -> PASS (`10 passed, 1 skipped, 260 deselected`). No other repeated full
+    suite ran between the initial failing full run and the final all-green one.
   - Real POSIX install proof: with `HOME` redirected into the session-state
     files area and `--no-service --install-dir <scoped root>`, the converted
     `plugins/agent-vault/scripts/install.sh install` completed end-to-end,
@@ -1033,6 +1035,9 @@ appropriately larger/riskier for one sitting):
     check only.
 - Test-hygiene note: no new containment bug class was found in agent-vault's
   installer-adjacent tests. The touched preinstall-loop guards already used
-  temp-rooted work dirs and explicit 30-second subprocess timeouts; they only
-  needed shape updates so they continued extracting/exercising the refactored
-  wrapper logic.
+  temp-rooted work dirs and explicit 30-second subprocess timeouts; the new
+  PowerShell snapshot/uv-index regressions were written to the same model
+  (isolated HOME/XDG/temp roots, stripped inherited Python env, explicit
+  subprocess timeouts), and the existing preinstall-loop guards only needed
+  shape updates so they continued extracting/exercising the refactored wrapper
+  logic.

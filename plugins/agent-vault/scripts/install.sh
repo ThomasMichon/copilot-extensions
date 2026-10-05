@@ -563,13 +563,13 @@ _ensure_runtime() {
 
     if [[ "$have_uv" -eq 1 ]]; then
         pkg_out=""
-        if ! pkg_out=$(INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="$PLUGIN_DIR" invoke_uv_pip_install_resilient "${uv_cmd:-uv}" --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet); then
+        if ! pkg_out=$(INSTALLER_ENGINE_PAYLOAD_DIR_TO_SCRUB="$PLUGIN_DIR" invoke_uv_pip_install_resilient "${uv_cmd:-uv}" --python "$VENV_PYTHON" --no-deps "$PLUGIN_DIR" --quiet); then
             [[ -n "$pkg_out" ]] && printf '%s\n' "$pkg_out" >&2
             _fail 'Failed to install agent-vault package into venv'
             exit 1
         fi
     else
-        "$VENV_PYTHON" -m pip install --quiet "$PLUGIN_DIR" 2>/dev/null \
+        "$VENV_PYTHON" -m pip install --quiet --no-deps "$PLUGIN_DIR" 2>/dev/null \
             || { _fail 'Failed to install agent-vault package into venv'; exit 1; }
     fi
     _ok 'Package installed: agent-vault'
