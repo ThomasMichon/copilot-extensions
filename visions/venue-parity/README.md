@@ -262,7 +262,7 @@ shared back-channel with no venue-specific setup visible to the agent.
   elevated/privileged-relay lane as a distinct, explicitly-handled staging
   variant rather than an assumed extension of the plain SSH case. Scoped the
   SSH-endpoint/relay-back-channel transport requirements to *remote* venues
-  only after review (local loopback shares the dispatching machine directly
-  and needs neither), and defined the loopback/remote-SSH boundary by SSH
+  only (local loopback shares the dispatching machine directly and needs
+  neither), and defined the loopback/remote-SSH boundary by SSH
   reachability (machine *and* environment) rather than machine identity
   alone.
