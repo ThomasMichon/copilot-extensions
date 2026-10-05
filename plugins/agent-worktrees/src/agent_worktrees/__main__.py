@@ -5963,6 +5963,7 @@ def _load_full_command_surface() -> None:
     global cmd_git_merge_to_feature, cmd_git_sync, cmd_handoff_cutover, cmd_handoff_trace, cmd_handoffs_check, cmd_handoff_cutover_trigger, cmd_head_session, cmd_history_digest, cmd_hygiene
     global cmd_install, cmd_install_status, cmd_installer_readiness, cmd_knowledge_dispatch, cmd_link_succession, cmd_list, cmd_list_sessions, cmd_machine_context, cmd_repair_stale_anchor
     global cmd_mark_complete, cmd_note_handoff, cmd_cancel_handoff, cmd_picker, cmd_post_exit, cmd_pr_complete, cmd_pr_dispatch, cmd_pr_merge_dispatch, cmd_pr_nudge, cmd_pr_ready
+    global cmd_pr_abandon
     global cmd_pr_research_dispatch, cmd_pr_status, cmd_pr_watch_dispatch, cmd_pre_launch, cmd_push_changes, cmd_reap_sessions, cmd_reap_shells
     global cmd_recent_messages, cmd_reclaim, cmd_reconcile_binstubs, cmd_reconcile_marketplaces, cmd_reconcile_plugins, cmd_reconcile_sessions, cmd_register, cmd_register_project_entry
     global cmd_register_session, cmd_related_dispatch, cmd_remove_system, cmd_remux, cmd_repair, cmd_repos_dispatch, cmd_restart, cmd_run
@@ -6138,6 +6139,7 @@ def _load_full_command_surface() -> None:
     cmd_pr_status = pr_state_cli.cmd_pr_status
     cmd_pr_nudge = pr_state_cli.cmd_pr_nudge
     cmd_pr_complete = pr_state_cli.cmd_pr_complete
+    cmd_pr_abandon = pr_state_cli.cmd_pr_abandon
     cmd_status = status_cli.cmd_status
     cmd_status_monitor = status_monitor_cli.cmd_status_monitor
     _SEGMENT_STYLE = status_bar_cli._SEGMENT_STYLE
@@ -6385,6 +6387,7 @@ def _load_full_command_surface() -> None:
         "pr-status": cmd_pr_status,
         "pr-nudge": cmd_pr_nudge,
         "pr-complete": cmd_pr_complete,
+        "pr-abandon": cmd_pr_abandon,
         "mark-complete": cmd_mark_complete,
         "status": cmd_status,
         "effort-focus": cmd_effort_focus,
