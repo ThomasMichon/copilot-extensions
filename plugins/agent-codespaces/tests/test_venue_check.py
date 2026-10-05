@@ -250,6 +250,72 @@ class TestRemediateRemoteVenue:
         assert result.failed == []
         assert result.skipped == []
 
+    @pytest.mark.asyncio
+    async def test_updates_an_agent_bridge_plugin_older_than_the_host(self) -> None:
+        """Installed but months old: install-if-missing never touches it, and an old
+        plugin's CLI can start a venue-local daemon over the forwarded host route."""
+        readiness = venue_check.parse_probe_output(
+            _READY_PROBE_OUTPUT + "AGENT_BRIDGE_PLUGIN_VERSION=0.4.4-dev1\n")
+        assert readiness.agent_bridge_plugin_version == "0.4.4-dev1"
+        calls: list[str] = []
+
+        async def fake_exec_command(host: str, command: str) -> _FakeResult:
+            calls.append(command)
+            return _FakeResult(exit_code=0)
+
+        result = await venue_check.remediate_remote_venue(
+            fake_exec_command, "cs-target", readiness, bridge_version="0.9.9.dev1",
+        )
+        assert result.succeeded == ["update agent-bridge plugin"]
+        assert len(calls) == 1 and "copilot plugin update agent-bridge@copilot-extensions" in calls[0]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("venue, host", [
+        ("0.9.9-dev1", "0.9.9.dev1"),  # the same version in either spelling
+        ("1.0.0", "0.9.9.dev1"),       # newer than the host
+        (None, "0.9.9.dev1"),          # unknown venue version
+        ("0.4.4-dev1", None),          # unknown host version
+    ])
+    async def test_a_current_or_unknown_version_is_left_alone(self, venue, host) -> None:
+        readiness = venue_check.parse_probe_output(
+            _READY_PROBE_OUTPUT + (f"AGENT_BRIDGE_PLUGIN_VERSION={venue}\n" if venue else ""))
+
+        async def fake_exec_command(host_: str, command: str) -> _FakeResult:
+            raise AssertionError(f"no update expected for {venue} vs {host}")
+
+        result = await venue_check.remediate_remote_venue(
+            fake_exec_command, "cs-target", readiness, bridge_version=host,
+        )
+        assert result.attempted == []
+
+
+@pytest.mark.parametrize("venue, host, behind", [
+    ("0.4.4-dev1", "0.9.9.dev1", True),
+    ("0.9.9-dev1", "0.9.9.dev2", True),
+    ("0.9.9-dev3", "0.9.9", True),       # a dev build precedes its release
+    ("0.9.9", "0.9.9.dev3", False),
+    ("v1.2.10", "1.2.9", False),
+    ("garbage", "0.9.9", False),
+])
+def test_plugin_behind_compares_releases_then_dev_numbers(venue, host, behind) -> None:
+    assert venue_check.plugin_behind(venue, host) is behind
+
+
+def test_the_probe_reads_the_installed_agent_bridge_version() -> None:
+    """The probe's own sed, run against `copilot plugin list`'s line format."""
+    import re
+    import shutil
+    import subprocess
+
+    sed = re.search(r"sed -n '([^']+)'", venue_check._PROBE_SCRIPT.replace("'\"'\"'", "'"))
+    assert sed, "the probe reads the version with sed"
+    if shutil.which("sed") is None:
+        pytest.skip("no sed on this machine")
+    listing = ("Installed plugins:\n  • agent-worktrees@copilot-extensions (v1.21.4-dev2)\n"
+               "  • agent-bridge@copilot-extensions (v0.4.4-dev1) [disabled]\n")
+    out = subprocess.run(["sed", "-n", sed.group(1)], input=listing, capture_output=True, text=True)
+    assert out.stdout.strip() == "0.4.4-dev1"
+
 
 class TestFormatReport:
     def test_ready_report_has_no_gaps_section(self) -> None:
