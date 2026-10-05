@@ -35,6 +35,8 @@ def events_before_page(
             status_code=422,
             detail="before cannot be combined with after, controlled, or transient",
         )
+    if not isinstance(limit, int):  # direct callers see unresolved Query defaults
+        limit = DEFAULT_PAGE_LIMIT
     rows = db.get_events_before(session_id, before, limit + 1)
     has_more = len(rows) > limit
     if has_more:

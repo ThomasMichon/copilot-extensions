@@ -57,12 +57,8 @@ from ..session_manager import (
 )
 from ..transport import SpawnTarget
 from ..worktree_head import resolve_head
-from .event_pages import (
-    DEFAULT_PAGE_LIMIT,
-    MAX_PAGE_LIMIT,
-    events_before_page,
-    rows_to_events as _rows_to_events,
-)
+from .event_pages import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, events_before_page
+from .event_pages import rows_to_events as _rows_to_events
 
 if TYPE_CHECKING:
     from ..session_manager import Session, SessionManager
@@ -1243,13 +1239,9 @@ async def get_events(
     session = mgr.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    # Direct (non-FastAPI) callers see the unresolved Query defaults here.
-    if isinstance(before, int):
-        page_limit = limit if isinstance(limit, int) else DEFAULT_PAGE_LIMIT
+    if isinstance(before, int):  # direct callers see unresolved Query defaults
         streaming_args = after is not None or controlled or transient
-        return events_before_page(
-            mgr.db, session.session_id, before, page_limit, streaming_args
-        )
+        return events_before_page(mgr.db, session.session_id, before, limit, streaming_args)
     controlled_caller_id = (
         _controlled_cursor_key(caller_id) if controlled else None
     )
