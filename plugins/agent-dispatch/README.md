@@ -699,6 +699,14 @@ also use the same deadline to wake a parked hibernation waiter instead of
 remaining dormant forever. The threshold is per declaration; omitting the key
 disables stale-exit checking entirely.
 
+**Provider state today.** The reusable `reviewer-loop` lifecycle is recipe-able
+today (`global:reviewer` / `global:conflict-resolution` in the `extends:`
+registry below), but the forge-facing review capability is still only realized
+for GitHub. The GitHub-backed review producer / observation / verdict path is
+implemented; equivalent Azure DevOps and Gitea reviewer adapters for author /
+reviewer relationships, verdict posting, and merge-or-close state have not been
+built yet.
+
 ```bash
 agent-dispatch reviewer-loop setup .copilot-extensions/agent-dispatch/registrar/reviewer-loop.json
 agent-dispatch reviewer-loop inspect .copilot-extensions/agent-dispatch/registrar/reviewer-loop.json
@@ -807,11 +815,23 @@ is created; the task enters the worker queue only after every issue binds, and
 a bind failure abandons it. Later ticks retry approval for fully bound proposed
 tasks and terminal abandonment for incomplete ones, retaining reservations
 until terminal state is confirmed. Losers visibly release their provisional
-marker; an exact shared label remains while a distinct loser label is removed. Reservations
-owned by another loop are selection blockers and are never silently cleared. The configured
-`forge.producer_login` is verified against the authenticated `gh` identity and
-repository immediately before every mutation; comments from other authors are
-untrusted issue data.
+marker; an exact shared label remains while a distinct loser label is removed.
+Reservations owned by another loop are selection blockers and are never
+silently cleared.
+
+**Provider state today.** The provider-neutral backlog surface is realized for
+GitHub and Azure DevOps. GitHub uses the label + marker-comment flow described
+above; Azure DevOps implements the same list / reserve / claim / release
+surface for work-item backlogs through its own adapter. Gitea is only a
+structural future seam today: a stub provider exists so the runtime has a named
+adapter slot, but declarations with `forge.provider: gitea` are still
+validation-rejected until a real adapter lands (tracked separately as
+`ThomasMichon/copilot-extensions#4825`).
+
+The configured producer identity is verified against the selected provider
+immediately before every mutation (for example `gh` against the GitHub repo, or
+the authenticated Azure DevOps surface against its project/work-item backend);
+comments from other authors are untrusted issue data.
 
 **Rehearsing a new or edited declaration before trusting it to run
 unattended:** `rehearsal_mode: true` (default `false`) makes every
@@ -921,12 +941,18 @@ every other declaration file uses; a `global:<name>` ref looks up a
 plugin-shipped recipe built into
 `agent_dispatch.registrar_recipes.GLOBAL_RECIPES`.
 
-**Shipped global recipes.** Eight named recipes ship today, each
-covering the fields real adopters already repeat verbatim (shared
-exclude-label conventions, the headless pool body type, the archetype's
-standing-conduct charter) while leaving everything genuinely repo-specific
-(target repo, forge producer login, task label, emitter discovery command,
-evaluator verdict-application policy) for the declaration itself to supply:
+**Shipped global recipes.** Eight named recipes ship today. Four are the base
+archetype recipes (`reviewer`, `conflict-resolution`, `goal-driven`,
+`repository-issue-loop`). `backlog-triager`, `issue-reproducer`, and
+`effort-builder` are thin named instantiations of the existing
+`repository-issue-loop` engine, while `effort-driver` is the repo-local
+active-effort recipe and expands to `kind: effort-driver-loop` rather than the
+forge-backed issue engine. Each recipe covers the fields real adopters already
+repeat verbatim (shared exclude-label conventions, the headless pool body type,
+the archetype's standing-conduct charter) while leaving everything genuinely
+repo-specific (target repo, forge producer login, task label, emitter discovery
+command, evaluator verdict-application policy) for the declaration itself to
+supply:
 
 | `global:` name | Resolves to | What it supplies by default |
 |---|---|---|
@@ -964,6 +990,24 @@ drive-through-archive worker contract, while a repo-scoped trusted evaluator
 named `effort-driver` validates the repo's concrete archive-state evidence
 shape (for example which archive path, which merged-PR proof, and how the
 effort demonstrates its constituent issues are resolved or transferred).
+
+**Adoption boundary and provider matrix.** The shipped recipe library gives a
+consumer the shared loop shape and lifecycle contract; it does not erase the
+remaining provider boundaries:
+
+- Backlog-side provider neutrality is realized for GitHub and Azure DevOps.
+  Gitea remains a declared future adapter slot and is still validation-rejected
+  pending the real implementation (`ThomasMichon/copilot-extensions#4825`).
+- Reviewer-side provider neutrality is only partially realized today. The
+  `reviewer-loop` engine and its `global:reviewer` /
+  `global:conflict-resolution` recipes exist, but their forge-facing review
+  producer / verdict path is still GitHub-only; Azure DevOps and Gitea reviewer
+  adapters remain future work.
+- For `global:backlog-triager`, `global:issue-reproducer`,
+  `global:effort-builder`, and `global:effort-driver`, the shared recipe stops
+  at the reusable lifecycle contract. The consuming repo still supplies its own
+  trusted evaluator registration for the repo-specific schema (labels, markers,
+  archive evidence, effort-linking rules, and similar local policy).
 
 There is no path-traversal hardening on a file-path ref today; a
 declaration author is already a trusted party for the repo's own registrar
@@ -1006,6 +1050,58 @@ pool: {max_active_processes: 1, body: {agent: my-worker}}
 already supplies them; every field that *is* still spelled out is
 genuinely repo-specific, matching exactly what the sub-plan calls the
 "fields a real declaration commonly varies".)
+
+A hand-written `reviewer-loop` declaration with repo-local emitter wiring and
+an inline copy of the stock standing-reviewer charter collapses the same way:
+
+```yaml
+name: external-review
+kind: reviewer-loop
+repo: github.com/example/project
+task_label: external-review
+stale_after_days: 7
+emitter:
+  command: ["python", "tools/reviews.py", "discover"]
+  interval_seconds: 60
+  cwd: "../.."
+  task_output: json
+  side_load:
+    command: ["python", "tools/reviews.py", "side-load", "{change_ref}"]
+evaluator: {evaluator_spec: {rules: []}, interval: 30}
+pool:
+  max_active_processes: 2
+  body:
+    type: headless
+    agent: reviewer
+    charter: |
+      You are a standing reviewer for this pool's target repository...
+```
+
+becomes:
+
+```yaml
+name: external-review
+extends: "global:reviewer"
+repo: github.com/example/project
+task_label: external-review
+stale_after_days: 7
+emitter:
+  command: ["python", "tools/reviews.py", "discover"]
+  interval_seconds: 60
+  cwd: "../.."
+  task_output: json
+  side_load:
+    command: ["python", "tools/reviews.py", "side-load", "{change_ref}"]
+evaluator: {evaluator_spec: {rules: []}, interval: 30}
+pool:
+  max_active_processes: 2
+  body: {agent: reviewer}
+```
+
+The repo still owns the genuinely local parts (its discovery command,
+evaluator registration, worker agent name, and any lane-specific
+concurrency/filtering), but the shared standing-reviewer charter and headless
+body type are no longer a repo-local copy.
 
 ### Reactive webhook producer (`agent-dispatch webhook`)
 

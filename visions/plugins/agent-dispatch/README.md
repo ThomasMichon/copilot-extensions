@@ -197,6 +197,13 @@ backend, the actual machine and account names. Four archetypes are first-class:
    Its deeper contract lives in the
    [repository-issue-loop child vision](repository-issue-loop/README.md).
 
+These archetypes are meant to be *selected and extended*, not recopied. The
+plugin ships named `extends:` bases for the four archetypes above, plus
+ready-made named instantiations such as `backlog-triager`,
+`issue-reproducer`, `effort-builder`, and the repo-local `effort-driver`
+execution lane. A consumer should author a thin declaration against one of
+those shipped bases whenever the shared loop contract already fits.
+
 A consumer **selects and parameterizes** a recipe rather than hand-rolling a loop,
 and may **extend** one where its domain needs more. An instantiated pair knows how
 to **author its own tasks** — deriving the goal and payload, stamping the filters,
@@ -391,13 +398,20 @@ not a shared runtime.
 ### loop-recipes
 The layer ships the **shapes** of long-running agentic work — **reviewer**,
 **conflict-resolution**, **goal-driven**, and **repository-issue-loop** — as
-reusable **emitter/evaluator templates** (see *The recipe*). A domain
-**instantiates** one by registering a concrete emitter/evaluator pair and
-supplying the specifics (which repo, which review technology, which issue
-backend, which machine and account); the template fixes the suspend/resume
-rhythm and the resolution target for its class of work. Extension is expected
-where a domain needs more, but the default is **reuse**: the same template is
-the engine behind a standing automated service and an on-demand instance alike.
+reusable **emitter/evaluator templates** (see *The recipe*), and it ships a
+small named recipe library on top of them. A domain **instantiates** one by
+registering a concrete emitter/evaluator pair or by extending a plugin-shipped
+base, then supplying the specifics (which repo, which review technology, which
+issue backend, which machine and account); the template fixes the
+suspend/resume rhythm and the resolution target for its class of work.
+
+The default is **reuse** rather than repo-local re-derivation. A consumer
+adopts the raw archetype when it needs the bare engine, or selects a thinner
+named specialization when that shared contract already exists — for example
+`backlog-triager`, `issue-reproducer`, and `effort-builder` over the
+forge-backed backlog loop, and `effort-driver` for the distinct repo-local
+active-effort execution lane. Extension is expected where a domain needs more,
+but it extends a shipped base before it reimplements a loop.
 
 ### extend-any-declaration
 Extension is not fenced to the plugin's own enumerated recipes: **any**
@@ -1125,10 +1139,10 @@ does **not** quietly undo it.
   authors tasks via `task_output=json` already computes the created-task
   list (dedup_key -> real task id) every tick, but it was never durably
   delivered back to the domain command on a later invocation. Surfaced by a
-  cross-repo motivating consumer (aperture-labs' Permanent Record,
-  migrating off a bespoke push+poll dispatch mechanism onto this layer's
-  emitter/evaluator primitives) that needs to link a discovered work item to
-  the dispatch task it caused to exist. Tracked by
+  cross-repo motivating consumer (a private downstream repository's own
+  durable-record workflow, migrating off a bespoke push+poll dispatch
+  mechanism onto this layer's emitter/evaluator primitives) that needs to
+  link a discovered work item to the dispatch task it caused to exist. Tracked by
   `efforts/active/agent-dispatch-emitter-receipts`; implementation not yet
   landed by this revision.
 - **2026-09-26** — Added *status-through-tool-calls-not-prose*,
