@@ -310,6 +310,16 @@ order.
 - [ ] Wire `ci.yml`'s `worktrees-smoke` job to use diff-scoped selection
       (Phases 1-3's output) instead of `--collect-only`, keeping the
       existing `--guards` real-execution step alongside it.
+      **Step 1 of 2 done 2026-10-04 (shadow mode):** a new
+      `tools/coverage_guided_selection/{diff,cli}.py` pair computes a real
+      `decide()` decision against each PR/push's own diff for
+      `agent-worktrees` and reports it as a non-blocking step-summary
+      annotation (`COVERAGE_GUIDED_SELECTION_MODE: shadow`, a one-line
+      committed kill-switch) -- `--collect-only` + `--guards` stay the
+      actual, unaffected gate. De-risking plan (operator-approved):
+      observe real shadow-mode runs on real PRs first; only once that's
+      confirmed clean does step 2 (actually swapping `--collect-only` for
+      executing the selected subset) land, in a follow-up slice.
 - [ ] Validate against a **genuinely runtime-covered** regression, not
       #4353/#4378/#4379: that regression's own detecting test
       (`test_cluster_free_modules_matches_regenerated_scan`) reads each CLI
@@ -398,6 +408,55 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-04 — Phase 4 slice 1: shadow-mode selection, de-risked rollout
+Starts Phase 4 with the operator's own de-risking directive: light up
+coverage-guided selection for `agent-worktrees` (the only collect-only-
+gated plugin) in **observe-only shadow mode** first, with a committed
+kill-switch, rather than cutting PR CI over to it directly -- a flaky
+first cut here would block every PR repo-wide, not just one plugin's.
+
+**`diff.py`** (new): bridges a real PR/push diff into `decide()`'s own
+`changed_lines` shape -- every line in an added/modified hunk's new range,
+plus (for a pure deletion) the one surviving anchor line next to it.
+Deliberately simpler than `ancestor_resolution.py`'s own remap logic (no
+baseline/attribution involved, just "what did this diff touch"), reusing
+that module's own private git-diff-hunk parsing.
+
+**`cli.py`** (new): the actual `ci.yml`-facing entry point. Resolves the
+head ref to a real commit, computes changed lines via `diff.py`, calls
+`decide()`, and prints the resulting `SelectionDecision` as JSON plus a
+short Markdown summary appended to `$GITHUB_STEP_SUMMARY`. Never raises:
+every exception (a bad ref, a transient `gh` failure, anything else) is
+caught and reported as its own `mode: "error"` decision -- this is still
+a brand-new code path exercising a real git repo and a real (if currently
+failing, since no matching release exists yet) network call on every PR,
+and shadow mode's entire point is that a bug in it must never be able to
+turn into a red X.
+
+**`ci.yml`**: `worktrees-smoke`'s checkout gains `fetch-depth: 0` (needed
+for `main`'s own pointer-file history and a real base..head diff -- the
+default shallow clone can't support either). A new last step invokes
+`cli.py` for `agent-worktrees` against the real PR/push diff, gated on a
+new `COVERAGE_GUIDED_SELECTION_MODE: shadow` env var (the kill-switch --
+flip to `off` to disable the step entirely) and `continue-on-error: true`
+(belt-and-suspenders on top of `cli.py`'s own internal try/except). The
+existing `--collect-only` + `--guards` steps are completely untouched --
+this step only ever reports, never gates.
+
+18 new tests (`TestComputeChangedLines`, `TestCoverageGuidedSelectionCli`)
+-- the CLI tests run against a real throwaway git repo (no monkeypatching
+of `decide()`'s own collaborators), proving the CLI's actual wiring, not
+just `decide()` in isolation. All passing alongside the full existing
+suite (`python -m pytest tools/test_coverage_guided_selection.py`,
+excluding the two pre-existing Windows path-separator flakes).
+
+**Next slice (step 2 of this checklist item, not yet started):** once
+shadow-mode runs have been observed clean on real PR traffic (the
+operator's own validation bar -- land this, watch it run), swap
+`--collect-only` for actually executing the selected subset, keeping
+`--guards` alongside exactly as now. The shadow step itself stays in place
+afterward as a standing audit trail, not removed.
 
 ### 2026-10-04 — Phase 3 slice: real tier-restricted fallback eligibility
 Closes the last open Phase 3 checklist item and the Phase 3 Validation Plan

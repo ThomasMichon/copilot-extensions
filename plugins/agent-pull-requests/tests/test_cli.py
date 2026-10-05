@@ -53,6 +53,15 @@ def test_status_json_smoke(monkeypatch, capsys):
     assert payload["reviewDecision"] == "APPROVED"
 
 
+def test_version_subcommand_exits_zero_and_prints_version(capsys):
+    from agent_pull_requests import __version__
+
+    rc = main(["version"])
+
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == f"agent-pull-requests {__version__}"
+
+
 def test_planned_command_exits_cleanly(monkeypatch, capsys):
     monkeypatch.setattr(
         "agent_pull_requests.__main__._github_merge",

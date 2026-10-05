@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import json
 
-from budget_guidance.cli import main
+from budget_guidance.cli import __version__, main
+
+
+def test_version_subcommand_exits_zero_and_prints_version(capsys):
+    rc = main(["version"])
+
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == f"budget-guidance {__version__}"
 
 
 def _write_config(path):
