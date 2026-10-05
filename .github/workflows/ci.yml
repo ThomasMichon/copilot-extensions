@@ -221,13 +221,21 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
           elif [ "${{ github.event_name }}" = "push" ]; then
             base="${{ github.event.before }}"
+            head="HEAD"
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if git diff --name-only "$base"...HEAD | grep -Eq \
+          # Pin the real PR head sha, not the checkout's synthetic
+          # refs/pull/<n>/merge commit (same reason the changefile-presence
+          # step above pins --head explicitly): once dev advances past this
+          # PR's recorded base, a bare "HEAD" diff would fold in every
+          # intervening dev commit too, so an unrelated change to any listed
+          # file could wrongly trigger this subprocess-heavy suite.
+          if git diff --name-only "$base...$head" | grep -Eq \
             '^tools/(check-version-bump\.py|test_check_version_bump\.py|installer_engine_ref\.py|uv_editable_ref\.py|check-changefile-presence\.py|accumulate_bumps\.py)$'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else

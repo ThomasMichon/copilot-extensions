@@ -253,7 +253,7 @@ targets only `main`; `trusted-ci.yml` is path-scoped and opt-in):
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `validate-and-promote.yml` | `repository_dispatch: [dev-advanced]`, `workflow_dispatch` | The pipeline itself: `gate` (confirm the dispatch really reflects `dev`'s current tip) → full validation suite → `promote` (open a generated `release/promote-<run id>` PR against `main`, auto-merge via `APERTURE_RELEASE_TOKEN`). See [Promotion: dev → main](#promotion-dev--main). |
-| `purge-consumed-changefiles.yml` | `schedule` (daily), `repository_dispatch: [purge-changefiles-requested]` | Opens the routine "clear consumed changefiles on dev" housekeeping PR after a promotion consumes them. |
+| `purge-consumed-changefiles.yml` | `schedule` (daily), `repository_dispatch: [purge-changefiles-requested]` | Standalone daily (or on-demand) companion to the promotion pipeline: opens the "clear consumed changefiles on dev" housekeeping PR for whatever changefiles a promotion has already consumed by then -- pure housekeeping, not per-promotion and never load-bearing for promotion correctness. |
 
 **Scheduled sweeps and watchdogs** (not triggered by PR events — though
 `module-size-baseline-widen.yml` itself opens/updates a PR as its own
@@ -308,9 +308,15 @@ gh pr list --repo ThomasMichon/copilot-extensions --search "is:merged head:relea
 ```
 
 A small, separate **"clear consumed changefiles on dev"** housekeeping PR
-(opened by `purge-consumed-changefiles.yml`) normally follows a few
-minutes after each successful promotion — routine cleanup, not something
-that needs review, but expected to appear.
+(opened by `purge-consumed-changefiles.yml`) follows on its own **daily**
+schedule (or on-demand via a `repository_dispatch`), not per-promotion --
+it is a standalone companion, deliberately decoupled from the promotion
+pipeline itself (the purge is pure housekeeping, never load-bearing for
+promotion correctness: `tools/promote_release.py`'s own bump computation
+already excludes a consumed changefile regardless of whether it still
+physically exists on `dev`). Don't expect one to follow within minutes of
+every promotion -- routine cleanup, not something that needs review, but
+it can take up to a day to appear.
 
 ### Previewing without waiting for a real promotion
 
