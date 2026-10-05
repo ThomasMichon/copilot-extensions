@@ -577,7 +577,11 @@ def find_stuck_queued_reservations(
     is still ``queued`` **and** this is still its *current* (latest)
     reservation -- a reservation that failed but whose task has since
     progressed (a fresh attempt reserved, claimed, etc.) is not stuck and
-    must not be reported as if it still were.
+    must not be reported as if it still were. The fetched reservation's own
+    ``state`` is re-checked too (still required to be ``FAILED``), since an
+    operator's ``reservations rearm`` can race between the initial list
+    query and this per-task fetch -- same key, same queued task, but the
+    state moved on (``failed`` -> ``rearmed``) and it is no longer stuck.
     """
     diagnoses = []
     reservations = client.list_reservations(
@@ -603,5 +607,11 @@ def find_stuck_queued_reservations(
         current = task.get("spawn_reservation") or {}
         if current.get("key") != res.get("key"):
             continue  # superseded by a newer attempt -- not stuck anymore
+        if current.get("state") != SpawnState.FAILED:
+            # Same reservation key, but its state moved on since the list
+            # query above -- e.g. an operator's `reservations rearm` raced
+            # in between (failed -> rearmed), still queued, same key. No
+            # longer actually stuck.
+            continue
         diagnoses.append(diagnose(task))
     return diagnoses

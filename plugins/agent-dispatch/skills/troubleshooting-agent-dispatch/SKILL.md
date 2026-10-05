@@ -20,7 +20,8 @@ alone -- each of those omits exactly the state this skill exists to surface.
 > a catalog path as `& "<agent-dispatch catalog argv[0]>" <args>`.
 
 ```bash
-<agent-dispatch catalog argv[0]> doctor --check-live-sessions   # ground truth ONLY for started/claimed tasks
+<agent-dispatch catalog argv[0]> doctor --check-live-sessions   # ground truth for started/claimed tasks, PLUS
+  # (separately) a queued task whose current spawn reservation genuinely FAILED
 <agent-dispatch catalog argv[0]> supervise --repo <lane> --label <L> --max-concurrent N \
   --max-attempts N --headless-agent <A> --no-reactive --once   # the single most
   # useful diagnostic: prints dead-letter summaries doctor/list never surface
@@ -29,9 +30,17 @@ alone -- each of those omits exactly the state this skill exists to surface.
 <agent-dispatch catalog argv[0]> show <task_id>                               # excludes/hold_reason/spawn_reservation
 ```
 
-`<agent-dispatch catalog argv[0]> doctor --check-live-sessions` only checks
-worktree existence for tasks already `started`/`claimed` -- it says nothing
-about a `queued` task that never gets picked up, and it can report "healthy"
+`<agent-dispatch catalog argv[0]> doctor --check-live-sessions`'s main
+repo/label sweep only checks worktree existence for tasks already
+`started`/`claimed` -- it still says nothing about an ordinary `queued`
+task that never gets picked up. It DOES separately query (independent of
+that sweep's own `--limit`) any `queued` task whose *current* spawn
+reservation is genuinely `FAILED` -- the "tried once, landed back in
+queued, nothing else surfaced why" shape -- and reports it with the
+`queued_with_reservation_detail` verdict (copilot-extensions#5209). That
+check is advisory only and never auto-repairs; it also won't catch a task
+still mid-max-attempts (see the dead-letter row below) or one that simply
+never got a reservation at all, and `doctor` can still report "healthy"
 while the supervised lane itself has stalled. Use
 `<agent-bridge catalog argv[0]> status <session>` /
 `<agent-bridge catalog argv[0]> live-sessions` for ground truth on a

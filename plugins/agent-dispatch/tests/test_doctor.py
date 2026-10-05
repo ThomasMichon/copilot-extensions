@@ -751,6 +751,24 @@ def test_find_stuck_queued_reservations_skips_superseded_reservation():
     assert doctor.find_stuck_queued_reservations(_Client()) == []
 
 
+def test_find_stuck_queued_reservations_skips_rearmed_race():
+    """Same reservation key as the FAILED row the initial list query named,
+    task still queued -- but an operator's `reservations rearm` raced in
+    between (`failed` -> `rearmed`) before this per-task fetch. No longer
+    stuck; must not be reported."""
+
+    class _Client:
+        def list_reservations(self, **kw):
+            return [{"key": "k1", "task_id": "t-1", "state": "failed"}]
+
+        def get(self, task_id):
+            task = _task(task_id="t-1", status="queued", worktree_id=None)
+            task["spawn_reservation"] = {"key": "k1", "attempt": 1, "state": "rearmed"}
+            return task
+
+    assert doctor.find_stuck_queued_reservations(_Client()) == []
+
+
 def test_find_stuck_queued_reservations_skips_vanished_task():
     """A confirmed 404 (the task no longer exists) is the only failure this
     skips -- see the companion propagation test below."""
