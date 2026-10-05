@@ -403,6 +403,28 @@ out" means *safe*, not *deleted*. Three properties keep this honest and cheap:
   **un-finalizes it** by the same local-balance check above — there is no
   separate "locked" state finalize must be fought out of, and no risk of a
   stale `FINAL` marker outliving new, genuinely unsettled work.
+- **Abandoning a resource is rare and salvage-first, never a substitute for
+  routine conflict resolution.** The generic `finalize --abandon
+  --handoff-to` escape hatch (and its PR-specific `pr-abandon` sibling) exist
+  for a resource that is genuinely, irrecoverably moot — never as a
+  convenience for a heavy rebase or a messy merge conflict, which is simply
+  resolved (rebase onto the current default branch, then force-push the SAME
+  branch/PR) rather than discarded and reopened. Even a resource whose
+  *driving* work is truly superseded is rarely worth abandoning wholesale: a
+  structural reduction to whatever slice of it still carries standalone
+  value (a doc fix, a test, an unrelated correction bundled into the same
+  change) and continuing to drive *that* to completion is the default;
+  outright abandonment is reserved for the rarer case where nothing
+  survives review. Because an attributed abandon path is easy to reach for
+  reflexively, every such verb layers a **friction gate** in front of the
+  action itself rather than trusting judgment alone: a first, unconfirmed
+  attempt always refuses with the concrete alternatives named above, and
+  mutates nothing; only a second, explicit confirmation — reached only after
+  that warning, never pre-empted — proceeds. This is deliberately a
+  procedural safeguard, not an invoker-identity/authorization primitive (that
+  remains tracked separately, ThomasMichon/copilot-extensions#4411) — it
+  raises the bar against casual or reflexive abandonment without depending on
+  infrastructure this layer does not have yet.
 
 ### externally-observable
 Beyond the fabric's own picker legibility, each layer's lifecycle is
@@ -841,3 +863,16 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
   it — the one genuinely missing piece was this explicit "never a lock"
   framing, not a graph-walk primitive the effort's own header had assumed
   was needed (confirmed absent, not added).
+- **2026-10-05** — Extended §Concepts/`resource-accountability` with
+  *abandoning a resource is rare and salvage-first, never a substitute for
+  routine conflict resolution*: rebase+force-push (not abandon-and-reopen)
+  is the correct response to a heavy conflict; a structural reduction to
+  whatever slice of a superseded resource still has standalone value (not
+  wholesale discard) is the default even when the driving work is genuinely
+  moot; and every attributed abandon verb layers a friction gate (an
+  unconfirmed first attempt always refuses with the named alternatives and
+  mutates nothing) rather than trusting judgment alone. Landed alongside the
+  `pr-abandon` CLI verb (the `pr-merge-obligation-gate` effort's #4411
+  follow-up, implemented pragmatically as friction rather than waiting on
+  the deferred invoker-identity primitive) — see the `pr-abandon-flow`
+  effort.

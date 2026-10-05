@@ -410,6 +410,17 @@ class AzureDevOpsProvider:
              expected_head_sha)
         return _unsupported_merge(self.name)
 
+    def close_pull(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        comment: str = "",
+    ) -> str:
+        """Not implemented: pr-abandon is GitHub-only today (tracked follow-up:
+        Azure DevOps PRs have a native ``abandoned`` status that fits this
+        primitive well -- see the `pr-abandon-flow` effort's Phase 2 note)."""
+        from .base import _unsupported_close
+        _ = (repo, number, api_base, token, comment)
+        return _unsupported_close(self.name)
+
     def request_review(
         self, repo: str, number: int, *, reviewer: str = "", api_base: str = "",
         token: str | None = None,

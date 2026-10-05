@@ -2462,6 +2462,231 @@ class TestPrClaimHelpers:
         assert pr_ops._release_pr_claim(rec, tracking.PRRecord(number=5, repo="o/r")) is None
 
 
+class TestAbandonPr:
+    """``pr-abandon``'s two-step confirm gate and close/claim-settle contract
+    -- the pragmatic #4411 follow-up (friction, not a real identity
+    primitive)."""
+
+    def _config(self):
+        return cfg.Config(
+            srcroot="/s", machine="m", platform="linux", repo_name="ext",
+            repos={"ext": cfg.RepoConfig(
+                anchor="/a", worktree_root="/w",
+                pr=cfg.PRConfig(enabled=True, provider="gitea"),
+            )},
+        )
+
+    def _record(self, tmp_path, monkeypatch, *, state="open", claimed=True):
+        monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+        rec = tracking.WorktreeRecord(
+            worktree_id="wt-a", branch="worktree/wt-a",
+            worktree_path=str(tmp_path / "wt"), repo="o/r", machine="m",
+            platform="linux", started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00", resume_count=0, title=None,
+            status="active", completed_at=None, sessions=None,
+        )
+        rec.pr = tracking.PRRecord(
+            state=state, number=7, branch="pr/x", provider="gitea", repo="o/r")
+        if claimed:
+            tracking.add_resource_claim(
+                rec, tracking.ResourceClaim(
+                    kind="pr", ref=pr_ops._pr_claim_ref(rec.pr),
+                    created_at=tracking._now_iso(), state="active"),
+                save=False)
+        tracking.save_record(rec, tmp_path / "wt-a.yaml")
+        return rec
+
+    def _fake_provider(self, *, merged=False, state="open"):
+        from agent_worktrees.providers import PullResult
+
+        class _P:
+            name = "gitea"
+
+            def __init__(self):
+                self.closed = []
+                self.close_calls = 0
+
+            def get_pull(self, repo, number, *, api_base="", token=None):
+                return PullResult(number=number, state=state, merged=merged)
+
+            def close_pull(self, repo, number, *, api_base="", token=None, comment=""):
+                self.close_calls += 1
+                self.closed.append((repo, number, comment))
+                return ""
+
+        return _P()
+
+    def _patch(self, monkeypatch, fake):
+        import agent_worktrees.providers as prov
+        monkeypatch.setattr(prov, "get_provider", lambda name: fake)
+        monkeypatch.setattr(prov, "account_token_for_slug", lambda slug, prcfg: "t")
+
+    # ── the two-step confirm gate itself ─────────────────────────────────
+
+    def test_first_call_without_confirm_refuses_and_mutates_nothing(
+        self, tmp_path, monkeypatch,
+    ):
+        rec = self._record(tmp_path, monkeypatch)
+        fake = self._fake_provider()
+        self._patch(monkeypatch, fake)
+        result = pr_ops.abandon_pr(
+            "wt-a", self._config(), reason="superseded by #99", confirm=False,
+        )
+        assert result["success"] is False
+        assert result["needs_confirm"] is True
+        assert "--confirm" in result["error"]
+        assert "force-push" in result["error"]
+        assert fake.close_calls == 0
+        reloaded = tracking.load_record(rec.yaml_path)
+        assert reloaded.active_pr().state == "open"
+        assert reloaded.resources[0].state == "active"
+
+    def test_reason_required_even_without_confirm(self, tmp_path, monkeypatch):
+        self._record(tmp_path, monkeypatch)
+        result = pr_ops.abandon_pr("wt-a", self._config(), reason="", confirm=False)
+        assert result["success"] is False
+        assert "needs_confirm" not in result
+        assert "--reason" in result["error"]
+
+    def test_reason_required_even_with_confirm(self, tmp_path, monkeypatch):
+        self._record(tmp_path, monkeypatch)
+        result = pr_ops.abandon_pr("wt-a", self._config(), reason="  ", confirm=True)
+        assert result["success"] is False
+        assert "--reason" in result["error"]
+
+    # ── the confirmed path ────────────────────────────────────────────────
+
+    def test_confirm_closes_pr_and_settles_claim_abandoned(self, tmp_path, monkeypatch):
+        rec = self._record(tmp_path, monkeypatch)
+        fake = self._fake_provider(merged=False, state="open")
+        self._patch(monkeypatch, fake)
+        result = pr_ops.abandon_pr(
+            "wt-a", self._config(), reason="superseded by #99", confirm=True,
+        )
+        assert result["success"] is True
+        assert result["closed"] is True
+        assert result["already_closed"] is False
+        assert result["claim_released"] is True
+        assert fake.close_calls == 1
+        closed_repo, closed_number, comment = fake.closed[0]
+        assert closed_repo == "o/r" and closed_number == 7
+        assert "superseded by #99" in comment
+        reloaded = tracking.load_record(rec.yaml_path)
+        assert reloaded.active_pr().state == "closed"
+        assert reloaded.active_pr().closed_at
+        claims = [c for c in reloaded.resources if c.kind == "pr"]
+        assert len(claims) == 1
+        assert claims[0].state == obligations.ABANDONED
+        assert "superseded by #99" in claims[0].note
+        events = claim_history.history_for_ref(pr_ops._pr_claim_ref(rec.pr))
+        assert [e["event"] for e in events] == ["abandoned"]
+        assert events[0]["note"] == "superseded by #99"
+
+    def test_confirm_refuses_if_already_merged_live(self, tmp_path, monkeypatch):
+        """Never trust local pr.state alone -- a live-confirmed merge refuses
+        the abandon outright. The shared _reconcile_active_pr self-heal
+        runs first and settles the claim to `released` (a clean hand-back,
+        matching its own merged-PR contract) -- abandon_pr's own refusal is
+        on top of that, not instead of it."""
+        rec = self._record(tmp_path, monkeypatch)
+        fake = self._fake_provider(merged=True, state="closed")
+        self._patch(monkeypatch, fake)
+        result = pr_ops.abandon_pr(
+            "wt-a", self._config(), reason="superseded", confirm=True,
+        )
+        assert result["success"] is False
+        assert "already merged" in result["error"]
+        assert fake.close_calls == 0
+        reloaded = tracking.load_record(rec.yaml_path)
+        assert reloaded.active_pr().state == "merged"
+        assert reloaded.resources[0].state == "released"
+
+    def test_confirm_on_already_closed_pr_settles_claim_without_reclosing(
+        self, tmp_path, monkeypatch,
+    ):
+        rec = self._record(tmp_path, monkeypatch)
+        fake = self._fake_provider(merged=False, state="closed")
+        self._patch(monkeypatch, fake)
+        result = pr_ops.abandon_pr(
+            "wt-a", self._config(), reason="superseded", confirm=True,
+        )
+        assert result["success"] is True
+        assert result["already_closed"] is True
+        assert fake.close_calls == 0  # never re-closed an already-closed PR
+        reloaded = tracking.load_record(rec.yaml_path)
+        claims = [c for c in reloaded.resources if c.kind == "pr"]
+        assert claims[0].state == obligations.ABANDONED
+
+    def test_confirm_with_no_prior_claim_still_closes(self, tmp_path, monkeypatch):
+        """A PR tracked without ever having been claimed (e.g. a legacy
+        record) is still closeable. The shared reconcile self-heal claims
+        it just-in-time (it observes a confirmed-open PR), so abandon_pr's
+        own settle finds and abandons THAT claim -- not a precondition
+        failure."""
+        rec = self._record(tmp_path, monkeypatch, claimed=False)
+        fake = self._fake_provider(merged=False, state="open")
+        self._patch(monkeypatch, fake)
+        result = pr_ops.abandon_pr(
+            "wt-a", self._config(), reason="superseded", confirm=True,
+        )
+        assert result["success"] is True
+        assert result["claim_released"] is True
+        reloaded = tracking.load_record(rec.yaml_path)
+        assert reloaded.active_pr().state == "closed"
+        claims = [c for c in reloaded.resources if c.kind == "pr"]
+        assert claims[0].state == obligations.ABANDONED
+
+    def test_already_merged_tracked_state_refuses_before_any_network_call(
+        self, tmp_path, monkeypatch,
+    ):
+        self._record(tmp_path, monkeypatch, state="merged")
+        fake = self._fake_provider()
+        self._patch(monkeypatch, fake)
+        result = pr_ops.abandon_pr(
+            "wt-a", self._config(), reason="superseded", confirm=True,
+        )
+        assert result["success"] is False
+        assert "already merged" in result["error"]
+        assert fake.close_calls == 0
+
+    def test_comment_post_failure_is_a_warning_not_a_fatal_error(
+        self, tmp_path, monkeypatch,
+    ):
+        rec = self._record(tmp_path, monkeypatch)
+
+        class _WarnProvider(self._fake_provider().__class__):
+            def close_pull(self, repo, number, *, api_base="", token=None, comment=""):
+                return "comment post failed: unauthorized"
+
+        self._patch(monkeypatch, _WarnProvider())
+        result = pr_ops.abandon_pr(
+            "wt-a", self._config(), reason="superseded", confirm=True,
+        )
+        assert result["success"] is True
+        assert "comment post failed" in result["warning"]
+        reloaded = tracking.load_record(rec.yaml_path)
+        assert reloaded.active_pr().state == "closed"
+
+    def test_real_close_failure_is_fatal_and_leaves_claim_untouched(
+        self, tmp_path, monkeypatch,
+    ):
+        rec = self._record(tmp_path, monkeypatch)
+
+        class _FailProvider(self._fake_provider().__class__):
+            def close_pull(self, repo, number, *, api_base="", token=None, comment=""):
+                return "gh pr close failed: network error"
+
+        self._patch(monkeypatch, _FailProvider())
+        result = pr_ops.abandon_pr(
+            "wt-a", self._config(), reason="superseded", confirm=True,
+        )
+        assert result["success"] is False
+        assert "network error" in result["error"]
+        reloaded = tracking.load_record(rec.yaml_path)
+        assert reloaded.active_pr().state == "open"
+        assert reloaded.resources[0].state == "active"
+
+
 class TestReconcileActivePrSelfHeal:
     """#1375/#1703: reconcile heals a zombie open PR whose content already merged."""
 
