@@ -58,6 +58,17 @@ env:
   # The heavy plugin (~11 min) kept out of the fast lane; runs full only on
   # workflow_dispatch, and gets a collect-only smoke on PR/push.
   HEAVY_PLUGIN: agent-worktrees
+  # coverage-guided-ci Phase 4 rollout kill-switch (see
+  # efforts/active/coverage-guided-ci's Journal). "shadow": compute +
+  # report decide()'s own selection for HEAVY_PLUGIN as a non-blocking
+  # step-summary annotation only -- the real PR gate stays collect-only +
+  # guards exactly as before, completely unaffected. "off": skip the step
+  # entirely (flip this if shadow mode itself ever misbehaves -- a stuck
+  # `gh` call, excessive noise, rate limiting). A future "live" mode
+  # (actually gating worktrees-smoke on this decision) is intentionally
+  # not implemented yet -- see the effort's own Plan; this repo-wide env
+  # var is the single place that rollout will flip from.
+  COVERAGE_GUIDED_SELECTION_MODE: shadow
 
 jobs:
   main-gate:
@@ -701,6 +712,14 @@ jobs:
     timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history (not the default shallow depth-1 clone): Phase 4's
+          # shadow-mode step below needs `main`'s own full pointer-file
+          # history (`ancestor_resolution.resolve_nearest_baseline`) and a
+          # real base..head diff, neither of which a shallow clone can
+          # satisfy. `discover`/`full` already do the same for the same
+          # reason.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -721,6 +740,36 @@ jobs:
         # pair) explicitly marked safe to run on every PR, without paying
         # for this plugin's full heavy suite.
         run: python tools/run-plugin-tests.py "$HEAVY_PLUGIN" --guards
+      - name: Coverage-guided selection (shadow, non-blocking)
+        # coverage-guided-ci Phase 4 rollout, step 1 of 2 (see this
+        # effort's Journal): computes decide()'s own selection for
+        # HEAVY_PLUGIN against this PR/push's real diff and reports it as
+        # a step-summary annotation ONLY -- it never affects which tests
+        # actually ran above, and `continue-on-error: true` means even a
+        # genuine crash here (belt-and-suspenders on top of `cli.py`'s own
+        # internal try/except -- see that module's docstring) shows up as
+        # a neutral/skipped annotation, never a red X blocking the PR.
+        # Gated on the kill-switch above so this can be disabled with a
+        # one-line env-var change if it ever misbehaves (a stuck `gh`
+        # call, excessive noise) without touching this step's own body.
+        if: env.COVERAGE_GUIDED_SELECTION_MODE == 'shadow'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # `github.event.before` is all-zeros for a branch's first push
+          # ever (no real prior commit to diff against) -- decide()'s own
+          # CLI wraps every failure in a reported `mode: "error"` decision
+          # rather than crashing, so an invalid BASE_REF here degrades to
+          # a visible, harmless annotation rather than a job failure
+          # either way.
+          python tools/coverage_guided_selection/cli.py \
+            --repo "${{ github.repository }}" \
+            --plugin "$HEAVY_PLUGIN" \
+            --cov-source "plugins/$HEAVY_PLUGIN/src/${HEAVY_PLUGIN//-/_}" \
+            --base-ref "$BASE_REF" \
+            --head-ref "${{ github.sha }}"
 
   worktrees-windows-launch:
     name: agent-worktrees (Windows launch)
