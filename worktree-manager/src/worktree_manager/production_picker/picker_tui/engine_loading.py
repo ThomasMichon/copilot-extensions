@@ -74,7 +74,14 @@ class PickerScreenLoadingMixin:
         # than blocking on it; the deferred poll corrects it moments later,
         # same always-async-then-refine pattern used elsewhere in this file.
         self.update_state = "idle"
-        self._upd_poll_frame = -1
+        # picker-performance-and-responsiveness Phase A: wall-clock throttle
+        # state for ``_poll_update_state`` (not a frame counter -- the old
+        # ``_upd_poll_frame`` was never actually read anywhere, a dead stub
+        # for a throttle that hadn't been wired up yet). Starting at 0.0
+        # (not ``time.monotonic()``) lets the very first poll fire on this
+        # first ``call_after_refresh`` regardless of ``UPDATE_STATE_POLL_SECS``.
+        self._last_update_state_poll = 0.0
+        self._update_state_poll_pending = False
         self.call_after_refresh(self._poll_update_state)
         # Manager-self update check (distinct from update_state above, which
         # is the engine/marketplace payload's own staged-update signal --
