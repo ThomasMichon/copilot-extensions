@@ -1,0 +1,9 @@
+{
+  "comment": "Split __main__.py and front_door_cli.py to fix module-size guard failures (issue #5287)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
