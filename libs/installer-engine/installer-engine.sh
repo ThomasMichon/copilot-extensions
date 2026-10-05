@@ -263,7 +263,11 @@ write_deploy_manifest() {
     provenance_path="${source_path_override:-$plugin_path}"
     provenance_json_path="${provenance_path//\\//}"
     provenance_json_path="${provenance_json_path//\"/\\\"}"
-    kind="$(source_kind_for_path "$provenance_path")"
+    if [[ -n "$source_path_override" ]]; then
+        kind="$(source_kind_for_path "$provenance_path")"
+    else
+        kind="$(_source_kind "$provenance_path")"
+    fi
     ver="$version_override"
     if [[ -z "$ver" ]]; then
         ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$plugin_path/pyproject.toml" 2>/dev/null | head -n1 || true)"

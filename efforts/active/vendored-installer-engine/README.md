@@ -898,7 +898,7 @@ appropriately larger/riskier for one sitting):
   `libs/installer-engine/installer-engine.ps1` / `.sh`, proving the bug fix is
   now inherited from one shared source instead of preserved by a second manual
   port.
-- **Line-count / corpus result:** wrapper-only installer lines grew from
+- **Line-count / corpus result:** wrapper-only installer lines shrank from
   `install.sh` 1215 -> 1193 (-22) and `install.ps1` 1637 -> 1506 (-131), for
   a combined wrapper drop of 2852 -> 2699 (-153). The canonical engine grew by
   3 lines on the POSIX side (368 -> 371) to fail closed when `uv venv` returns
@@ -1001,7 +1001,7 @@ appropriately larger/riskier for one sitting):
   `single-instance-lease`) into the published snapshot before the staged
   payload marker flips over, so first-use provisioning from a dev-time
   canonical-reference wrapper still ships a self-contained snapshot.
-- **Line-count / corpus result:** wrapper-only installer lines grew from
+- **Line-count / corpus result:** wrapper-only installer lines shrank from
   `install.sh` 930 -> 831 (-99) and `install.ps1` 1253 -> 1246 (-7), for a
   combined wrapper drop of 2183 -> 2077 (**-106**). The canonical engine grew
   by 3 POSIX lines (`installer-engine.sh` 376 -> 379) to preserve the
