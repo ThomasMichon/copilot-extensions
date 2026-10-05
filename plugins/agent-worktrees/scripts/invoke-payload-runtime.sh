@@ -96,55 +96,38 @@ boot_trace_escape_json() {
 # (RETENTION_DAYS=7, _PRUNE_SIZE_BYTES=512*1024) so a launch that emits
 # boot_trace lines but never triggers a later Python-side log_event() call
 # (e.g. it exits before the real module runs any activity-logging code path)
-# does not grow activity.jsonl unbounded. Best-effort and lossy under a
-# concurrent writer during the rewrite, same posture as the Python pruner's
-# own documented tradeoff. Never lets a pruning failure affect the caller.
+# does not grow activity.jsonl unbounded.
+#
+# The rewrite itself is NEVER run inline here. This can run on every single
+# launch (including one dispatched from a live picker session), and
+# rewriting a multi-megabyte log line-by-line takes several seconds -- long
+# enough to freeze that picker between keypresses. Instead, once the file is
+# large, this debounces via a marker file (at most one dispatch per hour,
+# regardless of how many launches happen in between) and hands the actual
+# rewrite to a detached `agent_worktrees activity-prune-worker` child --
+# mirroring the Python-side activity._dispatch_background_prune -- so the
+# caller never waits on it. Best-effort throughout: a pruning failure (or no
+# runtime yet resolved to dispatch the worker with) never affects the caller.
 boot_trace_maybe_prune() {
     local log_path="$1" size
     size="$(wc -c < "$log_path" 2>/dev/null)" || return 0
     size="${size//[[:space:]]/}"
     [[ "$size" =~ ^[0-9]+$ ]] || return 0
     (( size >= 524288 )) || return 0
-    local cutoff
-    cutoff="$(boot_trace_prune_cutoff_iso)" || return 0
-    local tmp="${log_path}.prune.$$"
-    if LC_ALL=C awk -v cutoff="$cutoff" '
-        {
-            # Tolerate both the compact form this shell writer produces
-            # ("ts":"...") and the space-after-colon form Python'"'"'s
-            # json.dumps (default separators) writes for every OTHER
-            # activity.jsonl event ("ts": "...") -- matching only the
-            # compact form previously treated every real Python-emitted
-            # record as unparseable, retaining them forever and defeating
-            # the whole point of this prune (Copilot review, PR #3310).
-            match($0, /"ts"[[:space:]]*:[[:space:]]*"/)
-            if (RSTART == 0) { print; next }
-            rest = substr($0, RSTART + RLENGTH)
-            j = index(rest, "\"")
-            if (j == 0) { print; next }
-            ts = substr(rest, 1, j - 1)
-            if (ts >= cutoff) print
-        }
-    ' "$log_path" > "$tmp" 2>/dev/null; then
-        mv -f "$tmp" "$log_path" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
-    else
-        rm -f "$tmp" 2>/dev/null || true
+    [[ -n "${AGENT_RT_PY:-}" ]] || return 0  # no runtime yet to dispatch the worker with
+    local marker="${log_path}.prune-marker"
+    local marker_epoch now_epoch
+    marker_epoch="$(stat -c %Y -- "$marker" 2>/dev/null || stat -f %m -- "$marker" 2>/dev/null || true)"
+    if [[ -n "$marker_epoch" ]]; then
+        now_epoch="$(date +%s 2>/dev/null || echo 0)"
+        (( now_epoch - marker_epoch < 3600 )) && return 0
     fi
-}
-
-boot_trace_prune_cutoff_iso() {
-    local now cutoff raw
-    now="$(date +%s 2>/dev/null)" || return 1
-    cutoff=$((now - 7 * 86400))
-    if raw="$(date -u -d "@$cutoff" +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null)"; then
-        printf '%s\n' "$raw"
-        return 0
-    fi
-    if raw="$(date -u -r "$cutoff" +%Y-%m-%dT%H:%M:%S+00:00 2>/dev/null)"; then
-        printf '%s\n' "$raw"
-        return 0
-    fi
-    return 1
+    # Claim the debounce slot before dispatching (not after the prune
+    # completes), so a burst of launches in the same window can't each
+    # dispatch their own worker while one is already in flight.
+    : > "$marker" 2>/dev/null || return 0
+    ( PYTHONPATH="" "$AGENT_RT_PY" -I -m agent_worktrees activity-prune-worker \
+        "$log_path" 7 >/dev/null 2>&1 & ) || true
 }
 
 boot_trace() {

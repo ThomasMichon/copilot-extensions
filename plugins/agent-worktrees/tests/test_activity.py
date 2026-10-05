@@ -257,6 +257,108 @@ def test_prune_drops_old_lines(patch_install_dir: Path):
     assert remaining[0]["worktree_id"] == "new"
 
 
+def test_log_event_never_prunes_inline(patch_install_dir: Path, monkeypatch):
+    """A large log must dispatch a background worker, never rewrite inline.
+
+    log_event() can be called mid-interaction (a picker action, a submenu
+    open); a synchronous multi-second rewrite on that path would freeze the
+    caller between keypresses. This proves log_event() never calls the
+    actual rewrite (`_prune`) itself once the size threshold is crossed --
+    only the cheap, fire-and-forget dispatch.
+    """
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("x" * (activity._PRUNE_SIZE_BYTES + 1))
+
+    prune_calls = []
+    dispatch_calls = []
+    monkeypatch.setattr(activity, "_prune", lambda *a, **k: prune_calls.append((a, k)) or 0)
+    monkeypatch.setattr(
+        activity, "_dispatch_background_prune", lambda path: dispatch_calls.append(path)
+    )
+
+    activity.log_event("worktree_created", worktree_id="wt-1")
+
+    assert prune_calls == []
+    assert dispatch_calls == [log]
+
+
+def test_maybe_prune_dispatches_once_per_debounce_window(patch_install_dir: Path, monkeypatch):
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("x" * (activity._PRUNE_SIZE_BYTES + 1))
+
+    dispatch_calls = []
+    monkeypatch.setattr(
+        activity, "_dispatch_background_prune", lambda path: dispatch_calls.append(path)
+    )
+
+    activity._maybe_prune(log)
+    activity._maybe_prune(log)
+    activity._maybe_prune(log)
+
+    assert len(dispatch_calls) == 1, "debounce marker should suppress repeat dispatches"
+
+
+def test_maybe_prune_redispatches_after_debounce_window_expires(
+    patch_install_dir: Path, monkeypatch
+):
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text("x" * (activity._PRUNE_SIZE_BYTES + 1))
+
+    dispatch_calls = []
+    monkeypatch.setattr(
+        activity, "_dispatch_background_prune", lambda path: dispatch_calls.append(path)
+    )
+
+    activity._maybe_prune(log)
+    assert len(dispatch_calls) == 1
+
+    marker = log.with_name(log.name + ".prune-marker")
+    import os
+    stale = datetime.now().timestamp() - activity._PRUNE_DEBOUNCE_SECONDS - 1
+    os.utime(marker, (stale, stale))
+
+    activity._maybe_prune(log)
+    assert len(dispatch_calls) == 2
+
+
+def test_maybe_prune_skips_small_file(patch_install_dir: Path, monkeypatch):
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text('{"ts": "2026-01-01T00:00:00+00:00", "event": "x"}\n')
+
+    dispatch_calls = []
+    monkeypatch.setattr(
+        activity, "_dispatch_background_prune", lambda path: dispatch_calls.append(path)
+    )
+
+    activity._maybe_prune(log)
+    assert dispatch_calls == []
+
+
+def test_activity_prune_worker_cmd_invokes_prune(patch_install_dir: Path, monkeypatch):
+    log = activity.log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    old_ts = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    new_ts = datetime.now(timezone.utc).isoformat()
+    log.write_text(
+        f'{{"ts": "{old_ts}", "event": "x", "worktree_id": "old"}}\n'
+        f'{{"ts": "{new_ts}", "event": "x", "worktree_id": "new"}}\n'
+    )
+
+    class Args:
+        path = str(log)
+        retention_days = "7"
+
+    rc = activity.cmd_activity_prune_worker(Args())
+    assert rc == 0
+    remaining = activity.read_events()
+    assert len(remaining) == 1
+    assert remaining[0]["worktree_id"] == "new"
+
+
 def test_render_events_empty():
     assert activity.render_events([]) == "No activity recorded."
 

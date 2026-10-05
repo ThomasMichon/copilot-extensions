@@ -5606,6 +5606,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--field", action="append", default=[], help="Extra context as key=value (repeatable)"
     )
 
+    # activity-prune-worker -- background rewrite of a large activity log
+    # (internal; dispatched detached by activity._maybe_prune, never run
+    # directly from an interactive flow)
+    sp = sub.add_parser(
+        "activity-prune-worker",
+        help="Prune a large activity log in the background (internal)",
+    )
+    sp.add_argument("path", help="Path to the activity.jsonl log to prune")
+    sp.add_argument("retention_days", help="Retention window in days")
+
     # register-launch -- record this launch's own root pid (internal)
     launch_registry.add_parsers(sub)
 
@@ -5823,7 +5833,8 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
     "services", "repos", "accounts", "forks", "copilot-identity", "related", "state-root",
     "coordination-readiness", "config-root", "knowledge", "git",
     "pr-watch", "pr-merge", "pr-research", "pr",
-    "activity", "activity-log", "register-launch", "stage-update", "reconcile-marketplaces",
+    "activity", "activity-log", "activity-prune-worker", "register-launch", "stage-update",
+    "reconcile-marketplaces",
     "execution-leg", "copilot", "resolve", "handoff-trace", "identifiers",
 })
 
@@ -6500,6 +6511,7 @@ def _load_full_command_surface() -> None:
         "anchor-check": cmd_anchor_check,
         "activity": activity.cmd_activity,
         "activity-log": activity.cmd_activity_log,
+        "activity-prune-worker": activity.cmd_activity_prune_worker,
         "register-launch": launch_registry.cmd_register_launch,
     }
     _FULL_SURFACE_LOADED = True

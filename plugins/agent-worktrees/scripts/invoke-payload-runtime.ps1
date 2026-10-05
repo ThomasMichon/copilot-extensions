@@ -88,40 +88,46 @@ function Write-BootTraceRecord(
 # Mirrors agent_worktrees.activity._maybe_prune/_prune's own retention window
 # (RETENTION_DAYS=7, _PRUNE_SIZE_BYTES=512*1024) so a launch that emits
 # boot_trace lines but never triggers a later Python-side log_event() call
-# does not grow activity.jsonl unbounded. Best-effort and lossy under a
-# concurrent writer during the rewrite, same posture as the Python pruner's
-# own documented tradeoff. Never lets a pruning failure affect the caller.
+# does not grow activity.jsonl unbounded.
+#
+# The rewrite itself is NEVER run inline here. This function can run on
+# every single launch (including a key/action dispatched from a live
+# picker session), and rewriting a multi-megabyte log line-by-line takes
+# several seconds -- long enough to freeze that picker between keypresses.
+# Instead, once the file is large, this debounces via a marker file (at
+# most one dispatch per hour, regardless of how many launches happen in
+# between) and hands the actual rewrite to a detached, windowless
+# `agent_worktrees activity-prune-worker` child -- mirroring the Python-side
+# activity._dispatch_background_prune -- so the caller never waits on it.
+# Best-effort throughout: a pruning failure (or a runtime not yet resolved
+# to dispatch the worker with) never affects the caller.
 function Invoke-BootTraceMaybePrune([string]$LogPath) {
     try {
         $info = Get-Item -LiteralPath $LogPath -ErrorAction Stop
         if ($info.Length -lt 524288) { return }
-        $cutoff = [DateTimeOffset]::UtcNow.AddDays(-7).ToString('yyyy-MM-ddTHH:mm:sszzz')
-        $tmp = "$LogPath.prune.$PID"
-        $kept = [System.Collections.Generic.List[string]]::new()
-        foreach ($line in [IO.File]::ReadLines($LogPath)) {
-            # Tolerate both the compact form this launcher writes
-            # ("ts":"...") and the space-after-colon form Python's
-            # json.dumps (default separators) writes for every other
-            # activity.jsonl event ("ts": "...") -- matching only the
-            # compact form previously treated every real Python-emitted
-            # record as unparseable, retaining them forever (Copilot
-            # review, PR #3310).
-            $match = [regex]::Match($line, '"ts"\s*:\s*"')
-            if (-not $match.Success) { [void]$kept.Add($line); continue }
-            $rest = $line.Substring($match.Index + $match.Length)
-            $endIdx = $rest.IndexOf('"')
-            if ($endIdx -lt 0) { [void]$kept.Add($line); continue }
-            $ts = $rest.Substring(0, $endIdx)
-            if ([string]::CompareOrdinal($ts, $cutoff) -ge 0) { [void]$kept.Add($line) }
+    } catch { return }
+    if (-not $script:python) { return }  # no runtime yet to dispatch the worker with
+    $marker = "$LogPath.prune-marker"
+    try {
+        $markerInfo = Get-Item -LiteralPath $marker -ErrorAction Stop
+        if (((Get-Date).ToUniversalTime() - $markerInfo.LastWriteTimeUtc).TotalSeconds -lt 3600) {
+            return
         }
-        [IO.File]::WriteAllLines($tmp, $kept, [Text.UTF8Encoding]::new($false))
-        Move-Item -LiteralPath $tmp -Destination $LogPath -Force
-    } catch {
-        if ($tmp -and (Test-Path -LiteralPath $tmp)) {
-            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
-        }
-    }
+    } catch {}
+    try {
+        # Claim the debounce slot before dispatching (not after the prune
+        # completes), so a burst of launches in the same window can't each
+        # dispatch their own worker while one is already in flight.
+        [IO.File]::WriteAllText($marker, '')
+    } catch { return }
+    try {
+        Start-Process -FilePath 'conhost.exe' -ArgumentList (@(
+            '--headless', "`"$script:python`"", '-I', '-m', 'agent_worktrees',
+            'activity-prune-worker', "`"$LogPath`"", '7'
+        )) -WindowStyle Hidden -ErrorAction Stop | Out-Null
+    } catch {}
 }
+
 
 function Write-BootTrace([string]$Phase, [string]$DispatchPath = '') {
     $timestampMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()

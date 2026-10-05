@@ -128,7 +128,9 @@ import json
 import logging
 import os
 import socket
+import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -143,6 +145,13 @@ RETENTION_DAYS = 7
 # common append path cheap. Events are small and infrequent, so this
 # triggers rarely (hundreds of sessions).
 _PRUNE_SIZE_BYTES = 512 * 1024
+
+# Minimum time between prune *dispatches*, independent of how many
+# log_event() calls land on this path in between. Under heavy automated
+# usage (many sub-agents/launches per minute) the file can stay above
+# _PRUNE_SIZE_BYTES almost continuously, so without this debounce every
+# single log_event() call would spawn its own background prune worker.
+_PRUNE_DEBOUNCE_SECONDS = 3600
 
 _HOSTNAME = socket.gethostname()
 
@@ -350,13 +359,62 @@ def log_event(
 
 
 def _maybe_prune(path: Path) -> None:
-    """Prune lines older than the retention window if the file is large."""
+    """Dispatch a background prune if the file has grown large.
+
+    The rewrite is never run inline on this path. ``log_event()`` is called
+    from everywhere -- including a picker action mid-interaction (selecting
+    an item, opening a sub-menu) -- so a synchronous multi-second rewrite of
+    a large log here would freeze the caller *between keypresses*. Instead
+    this claims a short-lived debounce marker and hands the actual rewrite
+    to a detached ``activity-prune-worker`` subprocess (see
+    :func:`_dispatch_background_prune`), so the foreground caller never
+    waits on it.
+    """
     try:
         if path.stat().st_size < _PRUNE_SIZE_BYTES:
             return
     except OSError:
         return
-    _prune(path, RETENTION_DAYS)
+    marker = path.with_name(path.name + ".prune-marker")
+    try:
+        if time.time() - marker.stat().st_mtime < _PRUNE_DEBOUNCE_SECONDS:
+            return
+    except OSError:
+        pass
+    try:
+        # Claim the debounce slot before dispatching (not after the prune
+        # completes) so a burst of concurrent log_event() calls -- across
+        # many processes -- can't all dispatch their own worker while one is
+        # already in flight.
+        marker.write_text("", encoding="utf-8")
+    except OSError:
+        return
+    _dispatch_background_prune(path)
+
+
+def _dispatch_background_prune(path: Path) -> None:
+    """Fire-and-forget a detached worker that prunes *path*. Never blocks,
+    never raises into the caller."""
+    try:
+        from agent_procutil import (
+            detached_kwargs,
+            windowless_python,
+            windowless_python_env,
+        )
+
+        python = windowless_python(sys.executable)
+        env = {**os.environ, **windowless_python_env(sys.executable)}
+        subprocess.Popen(
+            [
+                python, "-I", "-m", "agent_worktrees", "activity-prune-worker",
+                str(path), str(RETENTION_DAYS),
+            ],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, env=env,
+            **detached_kwargs(breakaway=True),
+        )
+    except Exception:
+        log.debug("activity: failed to dispatch background prune for %s", path, exc_info=True)
 
 
 def _prune(path: Path, retention_days: int) -> int:
@@ -538,6 +596,23 @@ def cmd_activity(args) -> int:
             print(json.dumps(rec, ensure_ascii=True))
         return 0
     print(render_events(events))
+    return 0
+
+
+def cmd_activity_prune_worker(args) -> int:
+    """``agent-worktrees activity-prune-worker`` -- internal, hidden.
+
+    Performs the actual synchronous rewrite dropped out of ``log_event()``'s
+    own call path (see ``_maybe_prune``/``_dispatch_background_prune``).
+    Only ever invoked as a detached, windowless background child -- never
+    run this directly from an interactive flow.
+    """
+    path = Path(getattr(args, "path"))
+    try:
+        retention_days = int(getattr(args, "retention_days"))
+    except (TypeError, ValueError):
+        retention_days = RETENTION_DAYS
+    _prune(path, retention_days)
     return 0
 
 
