@@ -33,12 +33,18 @@
   **the main-branch bootstrap gotcha is RESOLVED** (2026-09-27: a
   workflow-file-only bootstrap PR, #4338, confirmed
   `ci-failure-fix-attempt.lock.yml` live on `main` via `git show`).
-  **The mechanism is fully wired end-to-end, but has NOT yet had a live
-  run** — no real trigger has fired an actual issue-to-draft-PR
-  execution; see the Validation Plan's still-unchecked items and the
-  2026-09-27 Journal entries for full detail, evidence, and the open
-  follow-up questions (closed-issue re-dispatch, cap-attempts) this
-  round of review surfaced.
+  **The mechanism is live and has had real end-to-end runs.** Two real
+  diagnosis bugs found and fixed via live dispatches: PR #5135 (the
+  agent was diagnosing GitHub's default branch, not `dev`'s actual tip --
+  5 real review rounds) and PR #5244 (widened the auth gate to also
+  trust the repo owner's own hand-filed issues, not just the watchdog
+  bot -- 2 real review rounds, then live-validated end to end: the
+  `agent` job ran, correctly diagnosed an already-resolved condition,
+  and declined via `noop` rather than opening a needless PR). See the
+  2026-10-04/2026-10-05 Journal entries for full detail. Still open: a
+  Phase-2 agent-authored *PR* (as opposed to a correct decline) has not
+  yet been observed live; see the Validation Plan's remaining unchecked
+  items.
 - **Vision:** [`visions/ci-failure-remediation`](../../../visions/ci-failure-remediation/README.md)
   (authored 2026-09-26 to resolve the reconciliation gate below). **Gate
   resolved:** the vision states the standing intent (detection+dedup,
@@ -2453,3 +2459,88 @@ validation failure (files a `ci-failure-signature` issue, fires the
 workflow automatically) or an operator-authorized `workflow_dispatch`
 against a real tracked issue. Continuing to monitor for the first live
 exercise of the corrected workflow.
+
+### 2026-10-05 — PR #5244 widened the auth gate to trust the owner's own issues
+
+The operator confirmed they want their own hand-filed issues (in the
+watchdog's Signature:/Run: format) to be a valid trigger too, for a
+failure observed directly rather than waiting for the watchdog itself to
+notice. Fixed additively in `verify-issue`: `OWNER_LOGIN:
+${{ github.repository_owner }}` (dynamic, matching the pattern `ci.yml`/
+`workflow-lockdown-guard.yml` already use -- never a hardcoded login),
+accepted alongside the existing `app/github-actions` bot identity. Every
+other check (label match, no-edit-since-filing, independent
+`reverify-signature` against the real run's current job logs) is
+unchanged and still rejects a hand-authored issue whose claimed
+Signature/Run doesn't independently reproduce from that **referenced
+run's own** still-fetchable logs -- `reverify-signature` confirms the
+issue's claim matches real historical output, not that the underlying
+condition still reproduces on current `dev` (the validation probe below
+deliberately exercises the opposite case: a real historical match for an
+already-fixed condition, correctly producing a decline rather than a
+PR). Merged after two real review rounds (commit `2633d00f2`).
+
+Also cleaned out a 12-issue stale `ci-failure-signature` backlog that had
+accumulated behind the PR #5135 wrong-tree bug: each verified
+individually against current `dev`, not assumed stale -- 9 matched to a
+specific merged fix PR by exact test name, 3 confirmed no-longer-
+reproducing by running the test directly.
+
+Like PR #5135, this is a non-push-triggered workflow change (`issues:
+labeled`/`workflow_dispatch`), so it was inert pre-promotion to `main`.
+Deferred live validation of the new owner-trust path to the next
+session/leg rather than guessing it worked from the diff alone.
+
+### 2026-10-05 — Owner-trust path validated live, end to end
+
+Confirmed `OWNER_LOGIN` present in `.github/workflows/ci-failure-fix-
+attempt.lock.yml` at `main`'s tip (contents API), then exercised the
+path for real: filed issue #5256 as the repo owner, reusing the
+already-verified Signature `654f487b6f5d` / Run `37171564718` from the
+already-closed, already-fixed issue #5130, and dispatched the workflow
+against it (`workflow_dispatch`, run 37262212347).
+
+**First attempt failed, but not for the reason being tested.**
+`verify-issue` concluded `failure` (NOT a clean `authorized=false`
+decline) and the `agent` job was skipped as a dependency failure, never
+actually evaluating authorization. Root cause, confirmed by extracting
+the exact step script from the compiled lock and reproducing it locally
+against the real issue via `gh`/`jq`: issue #5256's body carried CRLF
+line endings (a Windows file-round-trip artifact of how the probe body
+was authored), and `verify-issue`'s `SIGNATURE=$(... | grep -oE
+'^Signature: [0-9a-f]+$' | ...)` runs under `set -euo pipefail` -- `grep`
+with no match exits 1, `pipefail` propagates that through the pipeline,
+and `-e` aborts the script before any of its own diagnostic
+`::warning::` lines ever print, or `authorized` is ever written to
+`$GITHUB_OUTPUT` (explaining the silent, message-less failure). This
+probe's own body was the immediate trigger, but **real review finding
+(PR #5273): it is a genuine latent fragility in `verify-issue` itself,
+not merely a probe artifact** -- PR #5244's whole point is trusting
+hand-authored issue bodies, and hand-authored content can legitimately
+originate from a Windows client (unlike `tools/ci_failure_watchdog.py`'s
+own Python-constructed, always-LF bodies). Filed and tracked as
+[#5276](https://github.com/ThomasMichon/copilot-extensions/issues/5276)
+rather than silently working around it. Closed #5256 with that
+explanation and refiled as #5263 with a confirmed LF-only body (0
+carriage-return bytes verified before dispatch) to continue the actual
+validation this session was for.
+
+**Second attempt (run 37263300849) succeeded completely:** `verify-
+issue` set `authorized=true` for the owner-authored, non-bot issue; the
+`agent` job actually ran (not skipped); it correctly diagnosed that the
+underlying module-size condition (`resources.py` at 2023 lines against
+a 2023 ceiling) was already resolved on `dev`, and declined via a `noop`
+safe-output rather than opening a needless PR -- exactly the outcome the
+probe was designed to prove reachable. Closed #5263 with the run link
+and this explanation. **PR #5244's owner-trust path is now live-
+validated end to end**, the same standard applied to PR #5135's
+checkout fix above: not just "the diff looks right" but a real dispatch
+observed to authorize, run, and decide correctly.
+
+Remaining before this effort can be called fully validated: a Phase-2
+agent-authored PR has still never been observed in this exact proof
+(this probe's expected/correct outcome was a decline, not a PR), the
+cap-attempts-per-signature guardrail, and the explicit out-of-scope-
+instruction enforcement -- see the Validation Plan above, still open.
+Reverting to standing monitoring for a real `dev` validation failure to
+exercise the PR-authoring path next.

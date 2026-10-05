@@ -20,7 +20,10 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
+import shlex
 import subprocess
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING
@@ -141,6 +144,51 @@ def build_restricted_spawn_command(
         "-lc" if login else "-c",
         acp_command,
     ]
+
+
+AGENT_CONTAINERS_EXEC_COPILOT_ARGS_ENV = "AGENT_CONTAINERS_EXEC_COPILOT_ARGS"
+
+
+def _append_copilot_args(acp_command: str, extra: list[str] | None) -> str:
+    """Append caller-supplied copilot CLI args onto a fleet's configured
+    ``acp_command`` shell string, shell-quoting each one.
+
+    This is the container-side half of forwarding a venue/charter overlay
+    (``--agent <charter>``, etc.) into a container session -- the other half
+    is ``agent_bridge.transport.spawn_raw`` appending ``target.copilot_args``
+    onto the ``agent-containers exec`` invocation when spawning a
+    container-backed target. Returns ``acp_command`` unchanged when ``extra``
+    is empty or ``None``, so this is a no-op for every existing caller that
+    never passes extra args.
+    """
+    if not extra:
+        return acp_command
+    return acp_command + " " + " ".join(shlex.quote(a) for a in extra)
+
+
+def resolve_extra_copilot_args(cli_args: list[str] | None) -> list[str] | None:
+    """The extra copilot args ``exec`` should forward, env-first.
+
+    ``agent_bridge.transport.spawn_raw`` forwards a charter overlay via
+    ``AGENT_CONTAINERS_EXEC_COPILOT_ARGS`` (JSON-encoded), never trailing
+    argv -- on Windows the wrapper is often a ``.cmd`` shim routed through
+    ``cmd.exe``, which reparses argv metacharacters but passes the
+    environment block through untouched. The ``copilot_args`` positional
+    stays as a direct-CLI convenience (manual/test invocations), used only
+    when the env var is absent.
+    """
+    raw = os.environ.get(AGENT_CONTAINERS_EXEC_COPILOT_ARGS_ENV)
+    if raw:
+        decoded = json.loads(raw)
+        if not isinstance(decoded, list) or not all(
+            isinstance(a, str) for a in decoded
+        ):
+            raise ValueError(
+                f"{AGENT_CONTAINERS_EXEC_COPILOT_ARGS_ENV} must be a JSON "
+                f"array of strings, got: {raw!r}"
+            )
+        return decoded
+    return cli_args
 
 
 def build_wrapper_command(name: str) -> list[str]:

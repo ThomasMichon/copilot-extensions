@@ -746,6 +746,7 @@ class _SessionHostRecoveryMixin:
                         container_target,
                         prepared,
                         plugin_dirs,
+                        copilot_args=target.copilot_args,
                     ),
                     remote_cwd=remote_cwd,
                     load_session_id=(

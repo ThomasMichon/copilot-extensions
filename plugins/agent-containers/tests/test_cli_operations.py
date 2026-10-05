@@ -128,3 +128,120 @@ def test_remove_calls_remove_container_when_unleased(monkeypatch, capsys):
     assert rc == 0
     assert seen == [("box-1", True)]
     assert "Removed: box-1" in capsys.readouterr().out
+
+
+def test_append_copilot_args_is_noop_without_extra_args():
+    assert cli._append_copilot_args("copilot --acp --stdio", []) == "copilot --acp --stdio"
+    assert cli._append_copilot_args("copilot --acp --stdio", None) == "copilot --acp --stdio"
+
+
+def test_append_copilot_args_quotes_and_appends():
+    # A value containing a space must round-trip as one shell argument.
+    result = cli._append_copilot_args(
+        "copilot --acp --stdio", ["--agent", "some charter"]
+    )
+    assert result == "copilot --acp --stdio --agent 'some charter'"
+
+
+def test_cmd_exec_forwards_copilot_args_into_acp_command(monkeypatch):
+    """A charter overlay (``copilot_args``, e.g. from an agent-dispatch
+    registrar pool's ``body.charter``) passed to ``agent-containers exec``
+    must reach the launched in-container acp_command."""
+    from agent_containers.resolver import LiveExecTarget
+
+    target = LiveExecTarget(
+        name="myfleet-1",
+        container_id="abc123",
+        config=object(),
+        fleet=object(),
+        info=object(),
+        actual_profile="trusted",
+        user="node",
+        workspace_folder="/workspace/repo",
+        acp_command="copilot --acp --stdio --allow-all",
+    )
+    monkeypatch.setattr(cli, "resolve_live_exec_target", lambda *a, **k: target)
+    monkeypatch.setattr(cli, "load_config", lambda: object())
+
+    import ssh_manager
+
+    class _FakeLock:
+        def __init__(self, *a, **k):
+            pass
+
+        def acquire(self, force=False):
+            pass
+
+        def release(self):
+            pass
+
+    monkeypatch.setattr(ssh_manager, "TargetLock", _FakeLock)
+
+    captured_acp_command = {}
+
+    def fake_launch(args, config, fleet, actual_profile, user, acp_command, **kw):
+        captured_acp_command["value"] = acp_command
+        return 0
+
+    monkeypatch.setattr(cli, "_launch_container_agent", fake_launch)
+
+    args = argparse.Namespace(
+        name="myfleet-1", stdio=False, force=False,
+        copilot_args=["--agent", "some-charter"],
+    )
+    rc = cli._cmd_exec(args)
+
+    assert rc == 0
+    assert captured_acp_command["value"] == (
+        "copilot --acp --stdio --allow-all --agent some-charter"
+    )
+
+
+def test_cmd_exec_is_unchanged_without_copilot_args(monkeypatch):
+    """No extra copilot_args (the overwhelming common case today) must
+    launch the exact same acp_command as before this change."""
+    from agent_containers.resolver import LiveExecTarget
+
+    target = LiveExecTarget(
+        name="myfleet-1",
+        container_id="abc123",
+        config=object(),
+        fleet=object(),
+        info=object(),
+        actual_profile="trusted",
+        user="node",
+        workspace_folder="/workspace/repo",
+        acp_command="copilot --acp --stdio --allow-all",
+    )
+    monkeypatch.setattr(cli, "resolve_live_exec_target", lambda *a, **k: target)
+    monkeypatch.setattr(cli, "load_config", lambda: object())
+
+    import ssh_manager
+
+    class _FakeLock:
+        def __init__(self, *a, **k):
+            pass
+
+        def acquire(self, force=False):
+            pass
+
+        def release(self):
+            pass
+
+    monkeypatch.setattr(ssh_manager, "TargetLock", _FakeLock)
+
+    captured_acp_command = {}
+
+    def fake_launch(args, config, fleet, actual_profile, user, acp_command, **kw):
+        captured_acp_command["value"] = acp_command
+        return 0
+
+    monkeypatch.setattr(cli, "_launch_container_agent", fake_launch)
+
+    args = argparse.Namespace(
+        name="myfleet-1", stdio=False, force=False, copilot_args=[],
+    )
+    rc = cli._cmd_exec(args)
+
+    assert rc == 0
+    assert captured_acp_command["value"] == "copilot --acp --stdio --allow-all"

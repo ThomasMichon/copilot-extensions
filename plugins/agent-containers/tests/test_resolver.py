@@ -17,10 +17,12 @@ import pytest
 from ssh_manager import SSHConfig
 
 from agent_containers.resolver import (
+    AGENT_CONTAINERS_EXEC_COPILOT_ARGS_ENV,
     ContainerResolver,
     build_restricted_spawn_command,
     build_spawn_command,
     build_wrapper_command,
+    resolve_extra_copilot_args,
 )
 
 
@@ -562,3 +564,27 @@ def test_ensure_ready_rejects_profile_mismatch(monkeypatch):
 
     with pytest.raises(RuntimeError, match="does not match its fleet"):
         asyncio.run(ContainerResolver().ensure_ready("trusted-1"))
+
+
+def test_resolve_extra_copilot_args_prefers_env_over_cli(monkeypatch):
+    monkeypatch.setenv(
+        AGENT_CONTAINERS_EXEC_COPILOT_ARGS_ENV,
+        '["--agent", "env-charter"]',
+    )
+    assert resolve_extra_copilot_args(["--agent", "cli-charter"]) == [
+        "--agent", "env-charter",
+    ]
+
+
+def test_resolve_extra_copilot_args_falls_back_to_cli_without_env(monkeypatch):
+    monkeypatch.delenv(AGENT_CONTAINERS_EXEC_COPILOT_ARGS_ENV, raising=False)
+    assert resolve_extra_copilot_args(["--agent", "cli-charter"]) == [
+        "--agent", "cli-charter",
+    ]
+    assert resolve_extra_copilot_args(None) is None
+
+
+def test_resolve_extra_copilot_args_rejects_malformed_env(monkeypatch):
+    monkeypatch.setenv(AGENT_CONTAINERS_EXEC_COPILOT_ARGS_ENV, '{"not": "a list"}')
+    with pytest.raises(ValueError):
+        resolve_extra_copilot_args(None)
