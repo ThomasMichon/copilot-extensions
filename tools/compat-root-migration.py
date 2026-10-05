@@ -115,7 +115,9 @@ def find_core_call_sites(plugin: str, name: str) -> list[str]:
 def find_monkeypatch_sites(plugin: str, name: str) -> list[str]:
     hits = []
     # Four independent dotted/object-attribute shapes all target the root
-    # module for a given name:
+    # module for a given name (each accepts single- OR double-quoted string
+    # literals -- Python allows both, and nothing in this codebase's own
+    # style guide mandates one over the other):
     #   1. unittest.mock.patch("<pkg>.__main__.<name>") -- dotted string,
     #      unconditional (no alias import needed since it's a literal path).
     #   2. monkeypatch.setattr("<pkg>.__main__.<name>", replacement) --
@@ -126,10 +128,11 @@ def find_monkeypatch_sites(plugin: str, name: str) -> list[str]:
     #      alias must come from this file's own `as X` import).
     #   4. unittest.mock.patch.object(<alias>, "<name>", ...) -- the
     #      object-attribute sibling of patch(); also alias-gated.
+    quote = r'["\']'
     dotted_patterns = [
-        re.compile(rf'patch\(\s*"[\w.]+\.__main__\.{re.escape(name)}"'),
+        re.compile(rf'patch\(\s*{quote}[\w.]+\.__main__\.{re.escape(name)}{quote}'),
         re.compile(
-            rf'monkeypatch\.setattr\(\s*"[\w.]+\.__main__\.{re.escape(name)}"'
+            rf'monkeypatch\.setattr\(\s*{quote}[\w.]+\.__main__\.{re.escape(name)}{quote}'
         ),
     ]
     for path in _iter_py_files(_tests_dir(plugin)):
@@ -139,10 +142,10 @@ def find_monkeypatch_sites(plugin: str, name: str) -> list[str]:
             alias_group = "|".join(re.escape(a) for a in aliases)
             alias_patterns = [
                 re.compile(
-                    rf'monkeypatch\.setattr\(\s*(?:{alias_group})\s*,\s*\n?\s*"{re.escape(name)}"'
+                    rf'monkeypatch\.setattr\(\s*(?:{alias_group})\s*,\s*\n?\s*{quote}{re.escape(name)}{quote}'
                 ),
                 re.compile(
-                    rf'patch\.object\(\s*(?:{alias_group})\s*,\s*\n?\s*"{re.escape(name)}"'
+                    rf'patch\.object\(\s*(?:{alias_group})\s*,\s*\n?\s*{quote}{re.escape(name)}{quote}'
                 ),
             ]
             for pattern in alias_patterns:
@@ -216,9 +219,10 @@ def cmd_progress(plugin: str) -> int:
             call_names[name] += 1
 
     patch_names: Counter[str] = Counter()
+    quote = r'["\']'
     dotted_patterns = [
-        re.compile(r'patch\(\s*"[\w.]+\.__main__\.(\w+)"'),
-        re.compile(r'monkeypatch\.setattr\(\s*"[\w.]+\.__main__\.(\w+)"'),
+        re.compile(rf'patch\(\s*{quote}[\w.]+\.__main__\.(\w+){quote}'),
+        re.compile(rf'monkeypatch\.setattr\(\s*{quote}[\w.]+\.__main__\.(\w+){quote}'),
     ]
     for path in test_files:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -227,10 +231,10 @@ def cmd_progress(plugin: str) -> int:
             alias_group = "|".join(re.escape(a) for a in aliases)
             alias_patterns = [
                 re.compile(
-                    rf'monkeypatch\.setattr\(\s*(?:{alias_group})\s*,\s*\n?\s*"(\w+)"'
+                    rf'monkeypatch\.setattr\(\s*(?:{alias_group})\s*,\s*\n?\s*{quote}(\w+){quote}'
                 ),
                 re.compile(
-                    rf'patch\.object\(\s*(?:{alias_group})\s*,\s*\n?\s*"(\w+)"'
+                    rf'patch\.object\(\s*(?:{alias_group})\s*,\s*\n?\s*{quote}(\w+){quote}'
                 ),
             ]
             for pattern in alias_patterns:

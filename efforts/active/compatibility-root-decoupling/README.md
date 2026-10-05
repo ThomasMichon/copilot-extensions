@@ -375,3 +375,18 @@ _Pending._
   against the real repo: 159 distinct monkeypatched names (was 157) and
   1056 patch-site occurrences (was 1051) -- the +5 patch sites are the
   previously-invisible real `patch.object` call sites now counted.
+- **Sixth review round found one more genuine gap, both others
+  confirmed stale** (same `__main__.py`/CI-wiring restatements as
+  round 5 -- re-verified against current file content, unchanged):
+  all four patch-detection regexes hard-coded double-quoted string
+  literals, so a single-quoted `patch('...')`,
+  `monkeypatch.setattr('...', ...)`, `monkeypatch.setattr(alias, '...',
+  ...)`, or `patch.object(alias, '...', ...)` would have silently gone
+  undetected -- Python allows either quote style and nothing in this
+  repo's style guide mandates one. No real call site currently uses
+  single quotes (confirmed: re-running `--progress` after the fix
+  reports identical numbers -- 159 names, 1056 patch sites), but this
+  was a real robustness gap for any *future* test file, so fixed
+  proactively: all four patterns now accept `["']` for every quoted
+  name/path argument. Added 4 more regression tests (one per shape) plus
+  one `--progress` single-quote test (22 total).

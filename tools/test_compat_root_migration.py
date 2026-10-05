@@ -7,8 +7,9 @@ matching (not a suffix match on an unrelated longer identifier), indented/
 local root imports, the accessor-call vs. plain-alias-call shapes,
 multi-line ``monkeypatch.setattr``, dotted-string ``unittest.mock.patch``/
 ``monkeypatch.setattr`` targets, ``unittest.mock.patch.object(<alias>,
-"<name>", ...)``, and the two "reject vacuous success" guards (an
-unresolvable ``--plugin``, an unknown ``--name``).
+"<name>", ...)``, single-quoted string literals for every patch shape, and
+the two "reject vacuous success" guards (an unresolvable ``--plugin``, an
+unknown ``--name``).
 """
 from __future__ import annotations
 
@@ -236,6 +237,61 @@ def test_find_monkeypatch_sites_detects_patch_object(repo: Path):
     assert len(hits) == 1
 
 
+# -- single-quoted string literals: every shape accepts either quote style -
+
+def test_find_monkeypatch_sites_detects_single_quoted_dotted_patch(repo: Path):
+    _src, tests = _make_plugin(repo)
+    _write(
+        tests / "test_mod.py",
+        "from unittest.mock import patch\n"
+        "\n"
+        "def test_x():\n"
+        "    with patch('demo_plugin.__main__._json_output') as fake:\n"
+        "        pass\n",
+    )
+    hits = crm.find_monkeypatch_sites("demo-plugin", "_json_output")
+    assert len(hits) == 1
+
+
+def test_find_monkeypatch_sites_detects_single_quoted_dotted_setattr(repo: Path):
+    _src, tests = _make_plugin(repo)
+    _write(
+        tests / "test_mod.py",
+        "def test_x(monkeypatch):\n"
+        "    monkeypatch.setattr('demo_plugin.__main__._json_output', lambda *_: None)\n",
+    )
+    hits = crm.find_monkeypatch_sites("demo-plugin", "_json_output")
+    assert len(hits) == 1
+
+
+def test_find_monkeypatch_sites_detects_single_quoted_alias_setattr(repo: Path):
+    _src, tests = _make_plugin(repo)
+    _write(
+        tests / "test_mod.py",
+        "from demo_plugin import __main__ as m\n"
+        "\n"
+        "def test_x(monkeypatch):\n"
+        "    monkeypatch.setattr(m, '_json_output', lambda *_: None)\n",
+    )
+    hits = crm.find_monkeypatch_sites("demo-plugin", "_json_output")
+    assert len(hits) == 1
+
+
+def test_find_monkeypatch_sites_detects_single_quoted_patch_object(repo: Path):
+    _src, tests = _make_plugin(repo)
+    _write(
+        tests / "test_mod.py",
+        "from unittest.mock import patch\n"
+        "from demo_plugin import __main__ as cli\n"
+        "\n"
+        "def test_x():\n"
+        "    with patch.object(cli, '_json_output', return_value=None):\n"
+        "        pass\n",
+    )
+    hits = crm.find_monkeypatch_sites("demo-plugin", "_json_output")
+    assert len(hits) == 1
+
+
 # -- --progress aggregate scan honors the same whole-identifier fix -------
 
 def test_cmd_progress_excludes_alias_suffix_false_positive(repo: Path, capsys):
@@ -278,6 +334,23 @@ def test_cmd_progress_counts_patch_object(repo: Path, capsys):
         "\n"
         "def test_x():\n"
         "    with patch.object(cli, \"_json_output\", return_value=None):\n"
+        "        pass\n",
+    )
+    rc = crm.cmd_progress("demo-plugin")
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "distinct names monkeypatched on the root module: 1" in out
+
+
+def test_cmd_progress_counts_single_quoted_patch_object(repo: Path, capsys):
+    _src, tests = _make_plugin(repo)
+    _write(
+        tests / "test_mod.py",
+        "from unittest.mock import patch\n"
+        "from demo_plugin import __main__ as cli\n"
+        "\n"
+        "def test_x():\n"
+        "    with patch.object(cli, '_json_output', return_value=None):\n"
         "        pass\n",
     )
     rc = crm.cmd_progress("demo-plugin")
