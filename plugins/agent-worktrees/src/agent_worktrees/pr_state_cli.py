@@ -190,12 +190,12 @@ def cmd_set_pr(args: argparse.Namespace) -> int:
         config = cfg.load_config(Path(args.config) if args.config else None)
     except Exception as e:
         if use_json:
-            return core._json_error(str(e))
+            return output._json_error(str(e))
         raise
     worktree_id = core._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
-        return core._json_error(msg) if use_json else (output.err(msg) or 1)
+        return output._json_error(msg) if use_json else (output.err(msg) or 1)
     worktree_id = core._resolve_worktree_id(worktree_id)
 
     result = pr_ops.set_pr(
@@ -235,7 +235,7 @@ def cmd_set_pr(args: argparse.Namespace) -> int:
         except (OSError, ValueError) as exc:
             result["head_observation_error"] = str(exc)
     if use_json:
-        core._json_output(result)
+        output._json_output(result)
     elif result.get("success"):
         output.ok(
             f"Recorded PR for {worktree_id}: "
@@ -315,7 +315,7 @@ def cmd_pr_ready(args: argparse.Namespace) -> int:
             config = cfg.load_config(Path(args.config) if args.config else None)
         except Exception as e:
             if use_json:
-                return core._json_error(str(e))
+                return output._json_error(str(e))
             raise
         worktree_id = core._infer_worktree_id(args.worktree_id, config)
         if not worktree_id:
@@ -324,7 +324,7 @@ def cmd_pr_ready(args: argparse.Namespace) -> int:
                 "or run from inside a worktree."
             )
             if use_json:
-                return core._json_error(msg)
+                return output._json_error(msg)
             output.err(msg)
             return 1
         worktree_id = core._resolve_worktree_id(worktree_id)
@@ -336,7 +336,7 @@ def cmd_pr_ready(args: argparse.Namespace) -> int:
             pr_number=getattr(args, "pr", None),
         )
         if use_json:
-            core._json_output(result)
+            output._json_output(result)
         elif result.get("success"):
             n = result.get("number")
             repo = result.get("repo")
@@ -368,12 +368,12 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         config = cfg.load_config(Path(args.config) if args.config else None)
     except Exception as e:
         if use_json:
-            return core._json_error(str(e))
+            return output._json_error(str(e))
         raise
     worktree_id = core._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
-        return core._json_error(msg) if use_json else (output.err(msg) or 1)
+        return output._json_error(msg) if use_json else (output.err(msg) or 1)
     worktree_id = core._resolve_worktree_id(worktree_id)
 
     repo_cfg = config.default_repo
@@ -450,7 +450,7 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
             config=config,
         )
     if use_json:
-        core._json_output(result)
+        output._json_output(result)
         return 0 if result.get("has_pr") or "error" not in result else 1
     if result.get("error"):
         output.err(result["error"])
@@ -537,17 +537,17 @@ def cmd_pr_nudge(args: argparse.Namespace) -> int:
         config = cfg.load_config(Path(args.config) if args.config else None)
     except Exception as e:
         if use_json:
-            return core._json_error(str(e))
+            return output._json_error(str(e))
         raise
     worktree_id = core._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
-        return core._json_error(msg) if use_json else (output.err(msg) or 1)
+        return output._json_error(msg) if use_json else (output.err(msg) or 1)
     worktree_id = core._resolve_worktree_id(worktree_id)
 
     result = pr_nudge_ops.pr_nudge(worktree_id, config=config)
     if use_json:
-        core._json_output(result)
+        output._json_output(result)
         return 0 if "error" not in result else 1
     if result.get("error"):
         output.err(result["error"])
@@ -578,12 +578,12 @@ def cmd_pr_complete(args: argparse.Namespace) -> int:
         config = cfg.load_config(Path(args.config) if args.config else None)
     except Exception as e:
         if use_json:
-            return core._json_error(str(e))
+            return output._json_error(str(e))
         raise
     worktree_id = core._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
-        return core._json_error(msg) if use_json else (output.err(msg) or 1)
+        return output._json_error(msg) if use_json else (output.err(msg) or 1)
     worktree_id = core._resolve_worktree_id(worktree_id)
 
     result = pr_complete.complete_worktree(
@@ -592,7 +592,7 @@ def cmd_pr_complete(args: argparse.Namespace) -> int:
         dry_run=getattr(args, "dry_run", False),
     )
     if use_json:
-        core._json_output(result)
+        output._json_output(result)
         return 0 if result.get("success") else 1
     if result.get("success"):
         output.ok(result.get("message", f"pr-complete: {result.get('action')}"))

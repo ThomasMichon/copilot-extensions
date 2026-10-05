@@ -25,6 +25,7 @@ import agent_procutil
 import pytest
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import output
 
 
 def test_status_monitor_registered():
@@ -165,7 +166,7 @@ def test_reconcile_sessions_emits_one_bounded_pass(monkeypatch):
     )
     monkeypatch.setattr(m.shutil, "which", lambda name: None)
     monkeypatch.setattr(
-        m,
+        output,
         "_json_output",
         lambda value: captured.update({"output": value}),
     )

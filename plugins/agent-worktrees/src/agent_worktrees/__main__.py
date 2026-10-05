@@ -1070,9 +1070,6 @@ def _emit_plan(plan: dict) -> None:
 # Moved to output.py (module-size split); re-exported here since nothing about
 # these needs to be defined in the entry-point module itself.
 _JSON_SCHEMA_VERSION = output._JSON_SCHEMA_VERSION
-_json_output = output._json_output
-_json_error = output._json_error
-
 
 def _sync_status_tag(info: git_ops.WorktreeStateInfo) -> str:
     """Build the picker's inline sync tag (``↑ahead`` / ``↓behind``).
@@ -1582,7 +1579,7 @@ def cmd_execution_leg(args) -> int:
     worktree_id = _resolve_worktree_id(args.worktree_id)
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     if not yaml_path.exists():
-        return _json_error(f"Worktree not found: {worktree_id}")
+        return output._json_error(f"Worktree not found: {worktree_id}")
 
     try:
         if args.action == "get":
@@ -1591,7 +1588,7 @@ def cmd_execution_leg(args) -> int:
             if record.execution_leg_opaque or record.session_backend_opaque:
                 raise ValueError("worktree uses an unsupported hosted-session schema")
             binding = tracking.derive_execution_leg(record)
-            _json_output(
+            output._json_output(
                 _execution_leg_payload(
                     worktree_id,
                     binding,
@@ -1678,7 +1675,7 @@ def cmd_execution_leg(args) -> int:
                             reservation_path.unlink()
                             reservation = None
                             if args.action in {"set", "clear", "release"}:
-                                _json_output(_execution_leg_payload(worktree_id, current))
+                                output._json_output(_execution_leg_payload(worktree_id, current))
                                 return 0
                         elif (int(reservation.get("reserved_revision") or -1) != current_revision):
                             raise ValueError(
@@ -1798,7 +1795,7 @@ def cmd_execution_leg(args) -> int:
                         )
                         reservation_value["phase"] = "reserved"
                         _write_execution_leg_reservation(reservation_path, reservation_value,)
-                        _json_output({
+                        output._json_output({
                             **_execution_leg_payload(worktree_id, binding),
                             "reservation_token": token,
                             "reservation_owner": args.reservation_owner,
@@ -1821,7 +1818,7 @@ def cmd_execution_leg(args) -> int:
                             now + timedelta(seconds=args.lease_seconds)
                         ).isoformat(timespec="seconds")
                         _write_execution_leg_reservation(reservation_path, reservation,)
-                        _json_output({
+                        output._json_output({
                             **_execution_leg_payload(worktree_id, current),
                             "reservation_token": args.reservation_token,
                             "expires_at": reservation["expires_at"],
@@ -1857,7 +1854,7 @@ def cmd_execution_leg(args) -> int:
                             preserve_handoff_reservations=False,
                         )
                         reservation_path.unlink()
-                        _json_output(_execution_leg_payload(worktree_id, binding))
+                        output._json_output(_execution_leg_payload(worktree_id, binding))
                         return 0
 
                     if reservation is not None:
@@ -1949,9 +1946,9 @@ def cmd_execution_leg(args) -> int:
             finally:
                 lifecycle_lock.release()
     except (OSError, ValueError, json.JSONDecodeError) as exc:
-        return _json_error(str(exc), exit_code=3)
+        return output._json_error(str(exc), exit_code=3)
 
-    _json_output(_execution_leg_payload(worktree_id, binding))
+    output._json_output(_execution_leg_payload(worktree_id, binding))
     return 0
 
 
@@ -2156,7 +2153,7 @@ def _launch_preflight_error(
     """Emit a controlled launch error in the caller's established format."""
     message = preflight.error or "launch preflight failed"
     if json_output:
-        return _json_error(message, exit_code=3)
+        return output._json_error(message, exit_code=3)
     print(f"  \u2717 {message}", file=sys.stderr)
     _emit_plan({"action": "error", "error": message, "exit_code": 3})
     return 3
@@ -2789,7 +2786,7 @@ def _cmd_status_history(args: argparse.Namespace) -> int:
     limit = getattr(args, "limit", None)
     entries = disposition_history.read(worktree_id, limit=limit)
     if getattr(args, "json", False):
-        _json_output({"worktree_id": worktree_id, "history": entries})
+        output._json_output({"worktree_id": worktree_id, "history": entries})
         return 0
     if not entries:
         print(f"No disposition history for {worktree_id[-4:]}.")
@@ -5818,7 +5815,6 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "claims_cli",
     "cleanup_gc_cli",
-    "finalize_cli",
     "follow_ups_cli",
     "handoff_cancel_cli",
     "handoff_cli",
@@ -6376,7 +6372,7 @@ def _load_full_command_surface() -> None:
 
     def cmd_handoff_trace(args):
         return handoff_diagnostics.cmd_handoff_trace(
-            args, json_output=_json_output, json_error=_json_error
+            args, json_output=output._json_output, json_error=output._json_error
         )
     COMMAND_MAP = {
         "resolve": cmd_resolve,

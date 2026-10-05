@@ -622,11 +622,9 @@ def test_report_to_dict_shape(tmp_path):
 def test_cmd_worktree_status_audit_exit_code_clean(tmp_path, monkeypatch):
     fake_core = types.SimpleNamespace(
         _aw_runtime_home=lambda: tmp_path,
-        _json_output=lambda payload: None,
         _status_monitor_enabled=lambda: True,
         _ensure_status_monitor=lambda: True,
     )
-    monkeypatch.setattr(wsa, "_core", lambda: fake_core)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_aw_runtime_home", fake_core._aw_runtime_home)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_status_monitor_enabled", fake_core._status_monitor_enabled)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_ensure_status_monitor", fake_core._ensure_status_monitor)
@@ -655,11 +653,9 @@ def test_cmd_worktree_status_audit_passes_ensure_monitor_when_enabled(tmp_path, 
     sentinel_ensure_monitor = lambda: True  # noqa: E731 -- identity marker
     fake_core = types.SimpleNamespace(
         _aw_runtime_home=lambda: tmp_path,
-        _json_output=lambda payload: None,
         _status_monitor_enabled=lambda: True,
         _ensure_status_monitor=sentinel_ensure_monitor,
     )
-    monkeypatch.setattr(wsa, "_core", lambda: fake_core)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_aw_runtime_home", fake_core._aw_runtime_home)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_status_monitor_enabled", fake_core._status_monitor_enabled)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_ensure_status_monitor", fake_core._ensure_status_monitor)
@@ -696,11 +692,9 @@ def test_cmd_worktree_status_audit_omits_ensure_monitor_when_disabled(tmp_path, 
     audit can't spawn a monitor an operator deliberately turned off."""
     fake_core = types.SimpleNamespace(
         _aw_runtime_home=lambda: tmp_path,
-        _json_output=lambda payload: None,
         _status_monitor_enabled=lambda: False,
         _ensure_status_monitor=lambda: True,
     )
-    monkeypatch.setattr(wsa, "_core", lambda: fake_core)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_aw_runtime_home", fake_core._aw_runtime_home)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_status_monitor_enabled", fake_core._status_monitor_enabled)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_ensure_status_monitor", fake_core._ensure_status_monitor)
@@ -721,11 +715,9 @@ def test_cmd_worktree_status_audit_omits_ensure_monitor_when_disabled(tmp_path, 
 def test_cmd_worktree_status_audit_exit_code_nonzero_on_mismatch(tmp_path, monkeypatch):
     fake_core = types.SimpleNamespace(
         _aw_runtime_home=lambda: tmp_path,
-        _json_output=lambda payload: None,
         _status_monitor_enabled=lambda: False,
         _ensure_status_monitor=lambda: True,
     )
-    monkeypatch.setattr(wsa, "_core", lambda: fake_core)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_aw_runtime_home", fake_core._aw_runtime_home)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_status_monitor_enabled", fake_core._status_monitor_enabled)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_ensure_status_monitor", fake_core._ensure_status_monitor)
@@ -742,11 +734,9 @@ def test_cmd_worktree_status_audit_exit_code_nonzero_on_mismatch(tmp_path, monke
 def test_cmd_worktree_status_audit_respects_no_log(tmp_path, monkeypatch):
     fake_core = types.SimpleNamespace(
         _aw_runtime_home=lambda: tmp_path,
-        _json_output=lambda payload: None,
         _status_monitor_enabled=lambda: False,
         _ensure_status_monitor=lambda: True,
     )
-    monkeypatch.setattr(wsa, "_core", lambda: fake_core)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_aw_runtime_home", fake_core._aw_runtime_home)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_status_monitor_enabled", fake_core._status_monitor_enabled)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_ensure_status_monitor", fake_core._ensure_status_monitor)
@@ -762,11 +752,9 @@ def test_cmd_worktree_status_audit_respects_no_log(tmp_path, monkeypatch):
 def test_cmd_worktree_status_audit_uses_explicit_log_path(tmp_path, monkeypatch):
     fake_core = types.SimpleNamespace(
         _aw_runtime_home=lambda: tmp_path,
-        _json_output=lambda payload: None,
         _status_monitor_enabled=lambda: False,
         _ensure_status_monitor=lambda: True,
     )
-    monkeypatch.setattr(wsa, "_core", lambda: fake_core)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_aw_runtime_home", fake_core._aw_runtime_home)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_status_monitor_enabled", fake_core._status_monitor_enabled)
     monkeypatch.setattr(wsa.status_monitor_runtime, "_ensure_status_monitor", fake_core._ensure_status_monitor)

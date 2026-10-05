@@ -163,7 +163,7 @@ def _dispatch_sub(sub: str, rest: list[str], fork_pr, _opt) -> int:
     if sub == "list":
         entries = fork_pr.list_forks()
         if "--json" in rest:
-            _core()._json_output(
+            output._json_output(
                 {
                     "forks": [
                         {
@@ -206,7 +206,7 @@ def _dispatch_sub(sub: str, rest: list[str], fork_pr, _opt) -> int:
             output.err(f"No confirmed fork for '{repo}' in forks.yaml")
             return 1
         if "--json" in rest:
-            _core()._json_output(
+            output._json_output(
                 {
                     "forks": [
                         {

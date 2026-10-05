@@ -116,7 +116,7 @@ def cmd_identifiers_dispatch(argv: list[str]) -> int:
         )
 
         if fmt == "json":
-            _core()._json_output(
+            output._json_output(
                 {
                     "target": target,
                     "target_visibility": (target_entry.visibility if target_entry else ""),

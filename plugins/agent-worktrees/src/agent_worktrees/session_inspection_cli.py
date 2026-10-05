@@ -9,6 +9,7 @@ import sys
 import time
 
 from . import sessions
+from . import output
 
 
 def _core():
@@ -17,12 +18,8 @@ def _core():
     return core
 
 
-def _json_error(*args, **kwargs):
-    return _core()._json_error(*args, **kwargs)
 
 
-def _json_output(*args, **kwargs):
-    return _core()._json_output(*args, **kwargs)
 
 
 def _read_hook_stdin(*args, **kwargs):
@@ -119,7 +116,7 @@ def cmd_session_binding(args: argparse.Namespace) -> int:
         "copilot_pid": binding.get("copilot_pid") if binding else None,
         "copilot_start_time": (binding.get("copilot_start_time") if binding else None),
     }
-    _json_output(result)
+    output._json_output(result)
     return 0
 
 
@@ -139,7 +136,7 @@ def cmd_session_recovery(args: argparse.Namespace) -> int:
         if getattr(args, "emit_context", False):
             print("{}")
             return 0
-        return _json_error("an exact session id is required", exit_code=2)
+        return output._json_error("an exact session id is required", exit_code=2)
     report = session_projection.recovery_report(session_id, cwd=cwd)
     if getattr(args, "emit_context", False):
         message = session_projection.render_recovery_context(report)
@@ -150,7 +147,7 @@ def cmd_session_recovery(args: argparse.Namespace) -> int:
             )
         )
         return 0
-    _json_output(report)
+    output._json_output(report)
     return 0
 
 
@@ -158,5 +155,5 @@ def cmd_session_lineage(args: argparse.Namespace) -> int:
     """Emit one exact session's reciprocal lineage without discovery scans."""
     from . import lineage_surfaces
 
-    _json_output(lineage_surfaces.session_lineage(args.session_id))
+    output._json_output(lineage_surfaces.session_lineage(args.session_id))
     return 0

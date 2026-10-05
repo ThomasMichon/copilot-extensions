@@ -23,8 +23,6 @@ def _find_repo_dir(*args, **kwargs):
     return _core()._find_repo_dir(*args, **kwargs)
 
 
-def _json_output(*args, **kwargs):
-    return _core()._json_output(*args, **kwargs)
 
 
 def _current_session_ids(*args, **kwargs):
@@ -631,7 +629,7 @@ def cmd_doctor(args) -> int:
     }
 
     if json_mode:
-        _json_output(report)
+        output._json_output(report)
         return 0
 
     _render_doctor_report(

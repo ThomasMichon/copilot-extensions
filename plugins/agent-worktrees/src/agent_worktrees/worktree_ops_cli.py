@@ -57,12 +57,8 @@ def _infer_worktree_id_from_cwd(*args, **kwargs):
     return _core()._infer_worktree_id_from_cwd(*args, **kwargs)
 
 
-def _json_error(*args, **kwargs):
-    return _core()._json_error(*args, **kwargs)
 
 
-def _json_output(*args, **kwargs):
-    return _core()._json_output(*args, **kwargs)
 
 
 def _remove_managed_worktree(*args, **kwargs):
@@ -262,7 +258,7 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
         return 1
 
     def _fail(message: str) -> int:
-        return _json_error(message) if getattr(args, "json", False) else (output.err(message) or 1)
+        return output._json_error(message) if getattr(args, "json", False) else (output.err(message) or 1)
 
     outcome = remove_guard.perform(
         wt_id,
@@ -284,7 +280,7 @@ def cmd_remove_system(args: argparse.Namespace) -> int:
         )
     activity.log_event("system_worktree_removed", worktree_id=wt_id)
     if getattr(args, "json", False):
-        _json_output({"removed": wt_id})
+        output._json_output({"removed": wt_id})
     else:
         print(f"✅ Removed system worktree: {wt_id}")
     return 0
@@ -318,7 +314,7 @@ def cmd_create(args: argparse.Namespace) -> int:
             missing
         )
         if args.json:
-            return _json_error(message)
+            return output._json_error(message)
         output.err(message)
         return 1
     if present_dispatch_fields:
@@ -326,7 +322,7 @@ def cmd_create(args: argparse.Namespace) -> int:
         if not isinstance(attempt, int) or isinstance(attempt, bool) or attempt <= 0:
             message = "dispatch attempt must be a positive integer"
             if args.json:
-                return _json_error(message)
+                return output._json_error(message)
             output.err(message)
             return 1
         invalid = [
@@ -342,7 +338,7 @@ def cmd_create(args: argparse.Namespace) -> int:
                 f"{tracking.DISPATCH_PROVENANCE_TEXT_MAX} characters: {', '.join(invalid)}"
             )
             if args.json:
-                return _json_error(message)
+                return output._json_error(message)
             output.err(message)
             return 1
         for key in ("task_id", "reservation_key", "driver", "supervisor"):
@@ -374,12 +370,12 @@ def cmd_create(args: argparse.Namespace) -> int:
             return claims_cli._emit_coordination_rejection(exc.readiness, json_out=args.json)
         except Exception as e:
             if args.json:
-                return _json_error(str(e))
+                return output._json_error(str(e))
             output.err(str(e))
             return 1
 
     if args.json:
-        _json_output(result)
+        output._json_output(result)
         return 0
 
     wt = result["worktree"]
@@ -806,7 +802,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         if not yaml_path.exists():
             res = {"worktree_id": wt_id, "updated": False, "reason": "not-found", "behind": 0}
             if as_json:
-                _json_output(res)
+                output._json_output(res)
             else:
                 print(f"{wt_id}: not-found")
             return 1
@@ -843,7 +839,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     ]
 
     if as_json:
-        _json_output(results[0] if single else {"results": results})
+        output._json_output(results[0] if single else {"results": results})
     elif not results:
         print("No worktrees to sync.")
     else:

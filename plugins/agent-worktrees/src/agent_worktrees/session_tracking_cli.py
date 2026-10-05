@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 from . import config as cfg
+from . import output
 from . import installer as inst
 from . import profile_assignment, sessions, terminal_conclusion, tracking
 from . import reap_cli, status_monitor_runtime
@@ -307,7 +308,7 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
     if wt_id:
         records = [r for r in records if r.worktree_id == wt_id]
         if not records:
-            return _core()._json_error(f"No worktree found: {wt_id}")
+            return output._json_error(f"No worktree found: {wt_id}")
 
     by_session: dict[str, dict] = {}
     head_session: str | None = None
@@ -362,7 +363,7 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
         controllers = _core()._controller_metadata(records[0])
         controller_findings = _core()._controller_findings(records[0])
 
-    _core()._json_output(
+    output._json_output(
         {
             "sessions": list(by_session.values()),
             "head_session": head_session,
@@ -481,7 +482,7 @@ def cmd_head_session(args: argparse.Namespace) -> int:
     raw = args.worktree_id
     yaml_path = _find_tracking_file(raw)
     if yaml_path is None:
-        _core()._json_output(
+        output._json_output(
             {
                 "worktree_id": raw,
                 "tracked": False,
@@ -512,7 +513,7 @@ def cmd_head_session(args: argparse.Namespace) -> int:
         }
         for handoff in record.pending_handoffs
     ]
-    _core()._json_output(
+    output._json_output(
         {
             "worktree_id": record.worktree_id or raw,
             "tracked": True,
@@ -536,9 +537,9 @@ def cmd_worktree_lineage(args: argparse.Namespace) -> int:
 
     yaml_path = _find_tracking_file(args.worktree_id)
     if yaml_path is None:
-        return _core()._json_error(f"No worktree found: {args.worktree_id}")
+        return output._json_error(f"No worktree found: {args.worktree_id}")
     record = tracking.load_record(yaml_path)
-    _core()._json_output(lineage_surfaces.worktree_lineage(record))
+    output._json_output(lineage_surfaces.worktree_lineage(record))
     return 0
 
 
@@ -566,10 +567,10 @@ def cmd_worktree_status_bundle(args: argparse.Namespace) -> int:
     core = _core()
     yaml_path = _find_tracking_file(args.worktree_id)
     if yaml_path is None:
-        return core._json_error(f"No worktree found: {args.worktree_id}")
+        return core.output._json_error(f"No worktree found: {args.worktree_id}")
     project = _project_for_tracking_file(yaml_path)
     if project is None:
-        return core._json_error(
+        return core.output._json_error(
             f"Could not resolve the owning project for: {args.worktree_id}"
         )
     record = tracking.load_record(yaml_path)
@@ -583,7 +584,7 @@ def cmd_worktree_status_bundle(args: argparse.Namespace) -> int:
         # about to pass `record.worktree_id` as both, making the check a
         # tautology. Validate against the actual requested filename here,
         # before any substitution happens.
-        return core._json_error(
+        return core.output._json_error(
             f"tracked record at {yaml_path.name!r} declares a different "
             f"identity {record.worktree_id!r} -- refusing to serve it"
         )
@@ -620,7 +621,7 @@ def cmd_worktree_status_bundle(args: argparse.Namespace) -> int:
         payload=payload,
         fallback=_fallback,
     )
-    core._json_output(bundle)
+    core.output._json_output(bundle)
     return 0
 
 
@@ -666,7 +667,7 @@ def cmd_conclude_session(args: argparse.Namespace) -> int:
     raw = args.worktree_id
     yaml_path = _find_tracking_file(raw)
     if yaml_path is None:
-        return _core()._json_error(f"Worktree not found: {raw}")
+        return output._json_error(f"Worktree not found: {raw}")
     state = getattr(args, "state", "handed-off")
     from . import tracking_write
 
@@ -682,12 +683,12 @@ def cmd_conclude_session(args: argparse.Namespace) -> int:
             },
         )
     except tracking_write.AmbiguousWriteOutcome as exc:
-        return _core()._json_error(
+        return output._json_error(
             f"conclude-session: write to {raw} is in an unknown state: {exc}"
         )
     if result.get("error") == "lifecycle":
-        return _core()._json_error(result["message"])
-    _core()._json_output(
+        return output._json_error(result["message"])
+    output._json_output(
         {
             "worktree_id": result["worktree_id"],
             "session": result["session"],
@@ -770,14 +771,14 @@ def cmd_conclude_disposable(args: argparse.Namespace) -> int:
     """Conclude one exact disposable CLI worker and optionally remove it."""
     raw = args.worktree_id
     if not raw or re.search(r"[/\\]|\.\.", raw):
-        return _core()._json_error(f"Invalid exact worktree id: {raw!r}")
+        return output._json_error(f"Invalid exact worktree id: {raw!r}")
     try:
         yaml_path = _find_tracking_file_exact(raw)
     except RuntimeError as exc:
-        return _core()._json_error(str(exc))
+        return output._json_error(str(exc))
     if yaml_path is None:
         if getattr(args, "remove", False):
-            _core()._json_output(
+            output._json_output(
                 {
                     "worktree_id": raw,
                     "action": "already-removed",
@@ -785,17 +786,17 @@ def cmd_conclude_disposable(args: argparse.Namespace) -> int:
                 }
             )
             return 0
-        return _core()._json_error(f"Worktree not found by exact id: {raw}")
+        return output._json_error(f"Worktree not found by exact id: {raw}")
     project = _project_for_tracking_file(yaml_path)
     if not project:
-        return _core()._json_error(f"Could not resolve project for worktree: {raw}")
+        return output._json_error(f"Could not resolve project for worktree: {raw}")
     try:
         config = cfg.load_project_config(project)
         try:
             record = tracking.load_record(yaml_path)
         except FileNotFoundError:
             if getattr(args, "remove", False):
-                _core()._json_output(
+                output._json_output(
                     {
                         "worktree_id": raw,
                         "action": "already-removed",
@@ -805,10 +806,10 @@ def cmd_conclude_disposable(args: argparse.Namespace) -> int:
                 return 0
             raise
         if record.worktree_id != raw or record.worktree_id != yaml_path.stem:
-            return _core()._json_error(f"Tracking record identity mismatch for exact id: {raw}")
+            return output._json_error(f"Tracking record identity mismatch for exact id: {raw}")
         repo = _core_helper("_repo_for_record", tracking._repo_for_record)(config, record)
         if repo is None:
-            _core()._json_output(
+            output._json_output(
                 {
                     "worktree_id": record.worktree_id,
                     "action": "skipped",
@@ -828,7 +829,7 @@ def cmd_conclude_disposable(args: argparse.Namespace) -> int:
             )
         except FileNotFoundError:
             if getattr(args, "remove", False) and not yaml_path.exists():
-                _core()._json_output(
+                output._json_output(
                     {
                         "worktree_id": raw,
                         "action": "already-removed",
@@ -855,7 +856,7 @@ def cmd_conclude_disposable(args: argparse.Namespace) -> int:
                         reason="managed-gc-already-removed",
                         managed_gc_eligible=False,
                     )
-                    _core()._json_output(result)
+                    output._json_output(result)
                     return 0
                 skipped = next(
                     (
@@ -878,8 +879,8 @@ def cmd_conclude_disposable(args: argparse.Namespace) -> int:
                 removal=removed,
             )
     except Exception as exc:
-        return _core()._json_error(str(exc))
-    _core()._json_output(result)
+        return output._json_error(str(exc))
+    output._json_output(result)
     return 0
 
 
@@ -897,7 +898,7 @@ def cmd_link_succession(args: argparse.Namespace) -> int:
     raw = args.worktree_id
     yaml_path = _find_tracking_file(raw)
     if yaml_path is None:
-        return _core()._json_error(f"Worktree not found: {raw}")
+        return output._json_error(f"Worktree not found: {raw}")
     from . import tracking_write
 
     try:
@@ -913,12 +914,12 @@ def cmd_link_succession(args: argparse.Namespace) -> int:
             },
         )
     except tracking_write.AmbiguousWriteOutcome as exc:
-        return _core()._json_error(
+        return output._json_error(
             f"link-succession: write to {raw} is in an unknown state: {exc}"
         )
     if result.get("error") == "lifecycle":
-        return _core()._json_error(result["message"])
-    _core()._json_output(
+        return output._json_error(result["message"])
+    output._json_output(
         {
             "worktree_id": result["worktree_id"],
             "predecessor": result["predecessor"],
@@ -941,7 +942,7 @@ def cmd_session_transcript(args: argparse.Namespace) -> int:
     """
     session_id = args.session_id
     events = sessions.read_session_transcript(session_id)
-    _core()._json_output({"session_id": session_id, "events": events})
+    output._json_output({"session_id": session_id, "events": events})
     return 0
 
 
@@ -949,7 +950,7 @@ def cmd_session_tail(args: argparse.Namespace) -> int:
     """Emit one session's last N message-bearing turns as JSON."""
     session_id = args.session_id
     payload = sessions.session_message_tail(session_id, limit=getattr(args, "limit", 3))
-    _core()._json_output(payload)
+    output._json_output(payload)
     return 0
 
 
@@ -969,8 +970,8 @@ def cmd_recent_messages(args: argparse.Namespace) -> int:
     records = tracking.list_records(cfg.tracking_dir())
     rec = next((r for r in records if r.worktree_id == wt_id), None)
     if rec is None:
-        return _core()._json_error(f"No worktree found: {args.worktree_id}")
+        return output._json_error(f"No worktree found: {args.worktree_id}")
     payload = sessions.recent_worktree_messages(rec, limit=getattr(args, "limit", 3))
     payload["worktree_id"] = rec.worktree_id
-    _core()._json_output(payload)
+    output._json_output(payload)
     return 0

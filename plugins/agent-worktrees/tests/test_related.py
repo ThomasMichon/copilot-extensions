@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 from agent_worktrees import related
+from agent_worktrees import output
 from agent_worktrees.related import Locus, RelatedConfig, RelatedEntry
 
 # ---------------------------------------------------------------------------
@@ -1895,7 +1896,6 @@ def test_cli_owners_is_global_via_control_plane(tmp_path: Path, monkeypatch):
     """`related owners` reads the CONTROL-PLANE index regardless of cwd (so an
     ambient consumer gets the owned set from anywhere), never raising the
     cwd-anchor guard."""
-    from agent_worktrees import __main__ as m
     from agent_worktrees import related_cli as cli
     cp = tmp_path / "control-plane"; cp.mkdir()
     _patch_registry(monkeypatch, {
@@ -1912,7 +1912,7 @@ def test_cli_owners_is_global_via_control_plane(tmp_path: Path, monkeypatch):
     # by related_cli (patch there); _json_output is still __main__-native.
     monkeypatch.setattr(cli, "_related_anchor", lambda rest: None)
     captured: dict = {}
-    monkeypatch.setattr(m, "_json_output", lambda payload: captured.update(payload))
+    monkeypatch.setattr(output, "_json_output", lambda payload: captured.update(payload))
     rc = cli.cmd_related_dispatch(["owners", "--json"])
     assert rc == 0
     assert captured["source"] == "control-plane"
@@ -2205,7 +2205,6 @@ def test_show_and_resolve_json_surface_audience_and_resolved_attribution(
     `test_effective_audience_discards_private_from_an_untrusted_source`
     and its ai_attribution counterpart for that gate's own model-level
     proof, and the `resolve`-path case here for the full CLI wiring."""
-    from agent_worktrees import __main__ as m
     from agent_worktrees import related_cli as cli
     from agent_worktrees import repos as repos_mod
     from agent_worktrees import doctor as doctor_mod
@@ -2245,14 +2244,14 @@ def test_show_and_resolve_json_surface_audience_and_resolved_attribution(
     }
     for name, (expected_audience, expected_policy) in cases.items():
         captured: dict = {}
-        monkeypatch.setattr(m, "_json_output", lambda payload: captured.update(payload))
+        monkeypatch.setattr(output, "_json_output", lambda payload: captured.update(payload))
         rc = cli.cmd_related_dispatch(["show", name, "--json"])
         assert rc == 0, name
         assert captured["audience"] == expected_audience, name
         assert captured["ai_attribution"] == expected_policy, name
 
         captured2: dict = {}
-        monkeypatch.setattr(m, "_json_output", lambda payload: captured2.update(payload))
+        monkeypatch.setattr(output, "_json_output", lambda payload: captured2.update(payload))
         rc = cli.cmd_related_dispatch(["resolve", name, "--json"])
         assert rc == 0, name
         assert captured2["audience"] == expected_audience, name
@@ -2265,7 +2264,7 @@ def test_show_and_resolve_json_surface_audience_and_resolved_attribution(
         lambda rest, anc, name: ([anc], False),
     )
     captured3: dict = {}
-    monkeypatch.setattr(m, "_json_output", lambda payload: captured3.update(payload))
+    monkeypatch.setattr(output, "_json_output", lambda payload: captured3.update(payload))
     rc = cli.cmd_related_dispatch(["resolve", "untrusted_priv", "--json"])
     assert rc == 0
     assert captured3["audience"] == ""  # "private" claim discarded

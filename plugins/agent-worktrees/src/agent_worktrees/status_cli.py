@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 
 from . import config as cfg
-from . import git_ops, output, profile_assignment, sessions, tracking
+from . import output
+from . import git_ops, profile_assignment, sessions, tracking
 
 
 def _core():
@@ -135,7 +136,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     records = tracking.list_records(tracking_path)
     if not records:
         if args.json:
-            _core()._json_output({"worktrees": []})
+            output._json_output({"worktrees": []})
             return 0
         print("No tracked worktrees.")
         return 0
@@ -208,7 +209,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             results.append(result_entry)
 
     if args.json:
-        _core()._json_output({"worktrees": results})
+        output._json_output({"worktrees": results})
         return 0
 
     # Table output

@@ -14,7 +14,8 @@ import sys
 from pathlib import Path
 
 from . import config as cfg
-from . import git_ops, output, sessions, state_root as state_root_mod, tracking
+from . import output
+from . import git_ops, sessions, state_root as state_root_mod, tracking
 from . import installer as inst
 from . import installation_cli, pr_config, session_binding_cli, status_updater_cli
 
@@ -32,12 +33,8 @@ def _core_helper(name: str, local):
     return local
 
 
-def _json_output(*args, **kwargs):
-    return _core()._json_output(*args, **kwargs)
 
 
-def _json_error(*args, **kwargs):
-    return _core()._json_error(*args, **kwargs)
 
 
 def _resolve_active_project(*args, **kwargs):
@@ -480,7 +477,7 @@ def cmd_picker_bootstrap(args: argparse.Namespace) -> int:
     project = cfg.project_name()
     resolved, anchor = _resolve_active_project(project)
     if not resolved:
-        return _json_error(f"unknown project {project!r}")
+        return output._json_error(f"unknown project {project!r}")
     should_switch = bool(anchor is not None and not _cwd_is_inside_project(anchor))
     payload = {
         "version": 1,
@@ -490,7 +487,7 @@ def cmd_picker_bootstrap(args: argparse.Namespace) -> int:
         "default_live": not _in_ssh_session(),
     }
     if getattr(args, "json", False):
-        _json_output(payload)
+        output._json_output(payload)
     else:
         print(payload["project"])
     return 0
@@ -503,7 +500,7 @@ def cmd_repair_stale_anchor(args: argparse.Namespace) -> int:
     try:
         config = cfg.load_config()
     except Exception as exc:
-        return _json_error(str(exc))
+        return output._json_error(str(exc))
     before = update_runtime._self_entry_present(config)
     updated = update_runtime._heal_stale_anchor_if_self_missing(config)
     after = update_runtime._self_entry_present(updated)
@@ -515,7 +512,7 @@ def cmd_repair_stale_anchor(args: argparse.Namespace) -> int:
         "self_present_after": after,
     }
     if getattr(args, "json", False):
-        _json_output(payload)
+        output._json_output(payload)
     else:
         print(payload["status"])
     return 0

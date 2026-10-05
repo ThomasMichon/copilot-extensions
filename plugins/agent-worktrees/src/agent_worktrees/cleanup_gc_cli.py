@@ -29,7 +29,6 @@ def _age_str(*args, **kwargs): return _core()._age_str(*args, **kwargs)
 def _apply_tracking_override(*args, **kwargs): return _core()._apply_tracking_override(*args, **kwargs)
 def _build_active_paths(*args, **kwargs): return _core()._build_active_paths(*args, **kwargs)
 def _hosted_session_blocks_cleanup(*args, **kwargs): return _core()._hosted_session_blocks_cleanup(*args, **kwargs)
-def _json_output(*args, **kwargs): return _core()._json_output(*args, **kwargs)
 def _local_claimant_alive(*args, **kwargs): return _core()._local_claimant_alive(*args, **kwargs)
 def _make_pr_lookup(*args, **kwargs): return _core()._make_pr_lookup(*args, **kwargs)
 def _normalize_path(*args, **kwargs): return _core()._normalize_path(*args, **kwargs)
@@ -97,7 +96,7 @@ def _cleanup_one(args: argparse.Namespace) -> int:
         reconcile_prs=getattr(args, "reconcile_prs", False),
     )
     if getattr(args, "json", False):
-        _json_output(payload)
+        output._json_output(payload)
     else:
         tag = (
             "removed"
@@ -906,7 +905,7 @@ def _print_gc_lease(lease_gc: dict[str, object], dry: bool) -> None:
 def cmd_sweep_managed(args: argparse.Namespace) -> int:
     payload = sweep_managed_worktrees(dry_run=getattr(args, "dry_run", False))
     if getattr(args, "json", False):
-        _json_output(payload)
+        output._json_output(payload)
         return 0
     removed = payload.get("removed") or []
     print(f"Removed {len(removed)} managed worktree(s).")
@@ -919,7 +918,7 @@ def cmd_sweep_finished_sessions(args: argparse.Namespace) -> int:
         sweep_finished_session_worktrees,
     )(dry_run=getattr(args, "dry_run", False))
     if getattr(args, "json", False):
-        _json_output(payload)
+        output._json_output(payload)
         return 0
     removed = payload.get("removed") or []
     print(f"Removed {len(removed)} finished session worktree(s).")

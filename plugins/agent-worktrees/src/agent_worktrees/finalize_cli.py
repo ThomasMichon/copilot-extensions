@@ -281,14 +281,14 @@ def cmd_finalize(args: argparse.Namespace) -> int:
             config = cfg.load_config(Path(args.config) if args.config else None)
         except Exception as e:
             if use_json:
-                return core._json_error(str(e))
+                return output._json_error(str(e))
             raise
         positional_id = getattr(args, "worktree_id", None)
         flagged_id = getattr(args, "worktree_id_flag", None)
         if positional_id and flagged_id and positional_id != flagged_id:
             msg = "Conflicting worktree IDs: positional worktree-id and --worktree-id must match."
             if use_json:
-                return core._json_error(msg, 2)
+                return output._json_error(msg, 2)
             output.err(msg)
             return 2
         worktree_id = core._infer_worktree_id(flagged_id or positional_id, config)
@@ -298,7 +298,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
                 "or run from inside a worktree."
             )
             if use_json:
-                return core._json_error(msg)
+                return output._json_error(msg)
             output.err(msg)
             return 1
         worktree_id = core._resolve_worktree_id(worktree_id)
@@ -311,13 +311,13 @@ def cmd_finalize(args: argparse.Namespace) -> int:
                 "directed an affirmative handoff."
             )
             if use_json:
-                return core._json_error(msg, 2)
+                return output._json_error(msg, 2)
             output.err(msg)
             return 2
         if handoff_to and not abandon:
             msg = "--handoff-to is valid only with --abandon"
             if use_json:
-                return core._json_error(msg, 2)
+                return output._json_error(msg, 2)
             output.err(msg)
             return 2
         success = fin.validate_and_finalize(
@@ -338,7 +338,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
                     final_status = rec.status
                 except Exception:
                     pass
-            core._json_output(
+            output._json_output(
                 {
                     "worktree_id": worktree_id,
                     "success": success,
@@ -366,7 +366,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             config = cfg.load_config(Path(args.config) if args.config else None)
         except Exception as e:
             if use_json:
-                return core._json_error(str(e))
+                return output._json_error(str(e))
             raise
         worktree_id = core._infer_worktree_id(args.worktree_id, config)
         if not worktree_id:
@@ -375,7 +375,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
                 "or run from inside a worktree."
             )
             if use_json:
-                return core._json_error(msg)
+                return output._json_error(msg)
             output.err(msg)
             return 1
         worktree_id = core._resolve_worktree_id(worktree_id)
@@ -426,7 +426,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             }
             if reminder is not None:
                 out["reminder"] = reminder.as_dict()
-            core._json_output(out)
+            output._json_output(out)
         elif reminder is not None:
             print(reminder.text(), file=sys.stderr)
 
@@ -450,7 +450,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             config = cfg.load_config(Path(args.config) if args.config else None)
         except Exception as e:
             if use_json:
-                return core._json_error(str(e))
+                return output._json_error(str(e))
             raise
 
         if not getattr(args, "worktree_id", None):
@@ -464,7 +464,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
 
             _claimant_id, claimant_error = _pr_cli.require_claimant_worktree("create-pr")
             if claimant_error:
-                return core._json_error(claimant_error) if use_json else (
+                return output._json_error(claimant_error) if use_json else (
                     output.err(claimant_error) or 2
                 )
 
@@ -475,13 +475,35 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 "or run from inside a worktree."
             )
             if use_json:
-                return core._json_error(msg)
+                return output._json_error(msg)
             output.err(msg)
             return 1
         worktree_id = core._resolve_worktree_id(worktree_id)
 
         target_repo_arg = getattr(args, "repo", None)
         from_branch = getattr(args, "from_branch", None)
+        if target_repo_arg:
+            from . import pr_config as _pr_config
+
+            resolution = _pr_config.resolve_repo_config_for_slug(config, target_repo_arg)
+            if resolution.resolved and not resolution.same_as_active:
+                msg = (
+                    f"create-pr: --repo {target_repo_arg!r} names a different, "
+                    f"also-registered repo than this worktree's own "
+                    f"({config.repo_name!r}) -- create-pr pushes commits from "
+                    "THIS worktree's own local checkout, which is not a "
+                    f"checkout of {target_repo_arg!r}. There is no "
+                    "already-pushed-branch mode yet. Options: (1) create a "
+                    f"worktree of {target_repo_arg!r} itself and run create-pr "
+                    "from there, or (2) if the branch already exists and is "
+                    f"already pushed to {target_repo_arg!r}, use "
+                    f"`agent-pull-requests create --repo {target_repo_arg} "
+                    "--head <branch> --title ...` instead -- that plugin is "
+                    "built for exactly this (no local checkout required). "
+                    "Do not fall back to gh/az repos/git directly."
+                )
+                return output._json_error(msg) if use_json else (output.err(msg) or 2)
+
         body = getattr(args, "body", None)
         body_file = getattr(args, "body_file", None)
         if body_file:
@@ -489,7 +511,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 body = Path(body_file).read_text(encoding="utf-8")
             except OSError as e:
                 msg = f"Could not read --body-file '{body_file}': {e}"
-                return core._json_error(msg) if use_json else (output.err(msg) or 1)
+                return output._json_error(msg) if use_json else (output.err(msg) or 1)
 
         resolution = None
         if target_repo_arg:
@@ -602,7 +624,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             )
         except codename_tracking.CodenameAttributionPolicyError as e:
             msg = str(e)
-            return core._json_error(msg) if use_json else (output.err(msg) or 1)
+            return output._json_error(msg) if use_json else (output.err(msg) or 1)
 
         reminder_flow = None
         if result.get("viewer_permission"):
@@ -631,7 +653,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 "provider": result.get("provider"),
             }
         if use_json:
-            core._json_output(result)
+            output._json_output(result)
         elif result.get("success"):
             branch = result.get("branch", "")
             remote = result.get("remote", "")
@@ -687,15 +709,14 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
 
 
 def cmd_attribution_audit(args: argparse.Namespace) -> int:
-    core = _core()
     use_json = getattr(args, "json", False)
     try:
         config = cfg.load_config(Path(args.config) if args.config else None)
     except Exception as e:
-        return core._json_error(str(e)) if use_json else (output.err(str(e)) or 1)
+        return output._json_error(str(e)) if use_json else (output.err(str(e)) or 1)
     findings = pr_ops.audit_attribution_risk(config)
     if use_json:
-        core._json_output({"success": True, "findings": findings})
+        output._json_output({"success": True, "findings": findings})
         return 0
     if not findings:
         output.ok("No branch-name leak-class risk found in this repo's PR config.")

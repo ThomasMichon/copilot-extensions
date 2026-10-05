@@ -41,18 +41,13 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from . import config as cfg
+from . import output
 from . import installer as inst
 from . import locks
 from . import status_monitor_runtime
 from . import tracking
 from . import worktree_status_compute
 from .worktree_status_cache import DEFAULT_TTL_SECONDS
-
-
-def _core():
-    from . import __main__ as core
-
-    return core
 
 
 CACHE_DB_NAME = "worktree-status-cache.sqlite3"
@@ -745,7 +740,6 @@ def cmd_worktree_status_audit(args: argparse.Namespace) -> int:
     probe -- meant to be scriptable by a scheduled task, not just read by a
     human.
     """
-    core = _core()
     runtime_home = status_monitor_runtime._aw_runtime_home()
     if getattr(args, "no_log", False):
         log_path = None
@@ -772,7 +766,7 @@ def cmd_worktree_status_audit(args: argparse.Namespace) -> int:
         rng=rng,
         ensure_monitor=ensure_monitor,
     )
-    core._json_output(report_to_dict(report))
+    output._json_output(report_to_dict(report))
     daemon_failed = report.daemon.responsive is False
     return 1 if (report.mismatch_count or report.error_count or daemon_failed) else 0
 

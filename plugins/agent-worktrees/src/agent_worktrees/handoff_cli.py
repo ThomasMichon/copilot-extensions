@@ -30,8 +30,6 @@ def _create_worktree_core(*args, **kwargs): return _core()._create_worktree_core
 def _handoff_cutover_retire_result(*args, **kwargs): return _core()._handoff_cutover_retire_result(*args, **kwargs)
 def _handoff_cutover_retry_result(*args, **kwargs): return _core()._handoff_cutover_retry_result(*args, **kwargs)
 def _handoff_cutover_spawn_result(*args, **kwargs): return _core()._handoff_cutover_spawn_result(*args, **kwargs)
-def _json_error(*args, **kwargs): return _core()._json_error(*args, **kwargs)
-def _json_output(*args, **kwargs): return _core()._json_output(*args, **kwargs)
 def _launch_profile_selection(*args, **kwargs): return _core_helper("_launch_profile_selection", resolve_launch_cli._launch_profile_selection)(*args, **kwargs)
 def _perform_remux(*args, **kwargs): return _core_helper("_perform_remux", reclaim_cli._perform_remux)(*args, **kwargs)
 def _preflight_launch(*args, **kwargs): return _core()._preflight_launch(*args, **kwargs)
@@ -183,17 +181,17 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     retire_pane = getattr(args, "retire_pane", None)
     if retire_pane:
         rc, result = _handoff_cutover_retire_result(args)
-        _json_output(result)
+        output._json_output(result)
         return rc
 
     if getattr(args, "retry", False):
         rc, response = _handoff_cutover_retry_result(args)
-        _json_output(response)
+        output._json_output(response)
         return rc
 
     # ── Spawn / cutover mode ─────────────────────────────────────────────
     rc, response = _handoff_cutover_spawn_result(args)
-    _json_output(response)
+    output._json_output(response)
     return rc
 
 
@@ -269,31 +267,31 @@ def cmd_embody(args: argparse.Namespace) -> int:
             "_resolve_codename_anywhere", _resolve_codename_anywhere
         )(codename_arg)
         if resolved_id is None:
-            return _json_error(error_message, exit_code=1)
+            return output._json_error(error_message, exit_code=1)
         raw_id = resolved_id
     if make_new and raw_id:
-        return _json_error(
+        return output._json_error(
             "--new is mutually exclusive with --worktree-id/--codename",
             exit_code=2,
         )
     if anchor_mode and (make_new or raw_id):
-        return _json_error(
+        return output._json_error(
             "--anchor is mutually exclusive with --worktree-id/--codename/--new",
             exit_code=2,
         )
     if not anchor_mode and not make_new and not raw_id:
-        return _json_error(
+        return output._json_error(
             "embody requires --worktree-id <id>, --codename <name>, --new, or --anchor",
             exit_code=2,
         )
     passthrough_error = _passthrough_error(args)
     if passthrough_error:
-        return _json_error(passthrough_error, exit_code=2)
+        return output._json_error(passthrough_error, exit_code=2)
 
     try:
         config = cfg.load_config()
     except Exception as e:
-        return _json_error(str(e))
+        return output._json_error(str(e))
 
     if anchor_mode:
         return _cmd_embody_anchor(args, config)
@@ -309,16 +307,16 @@ def cmd_embody(args: argparse.Namespace) -> int:
                     recovery=getattr(args, "recovery", False),
                 )
         except _core().LaunchPreflightError as e:
-            return _json_error(str(e), exit_code=3)
+            return output._json_error(str(e), exit_code=3)
         except Exception as e:
-            return _json_error(f"failed to create worktree: {e}")
+            return output._json_error(f"failed to create worktree: {e}")
         wt_id = created["worktree"]["id"]
         work_dir = created["worktree"]["path"]
     else:
         wt_id = _resolve_worktree_id(raw_id)
         yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
         if not yaml_path.exists():
-            return _json_error(f"Worktree not found: {wt_id}")
+            return output._json_error(f"Worktree not found: {wt_id}")
         work_dir = tracking.load_record(yaml_path).worktree_path
 
     # Resume: a live mux session already embodies this worktree -- don't
@@ -329,7 +327,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
     if getattr(args, "dry_run", False) or not already:
         launch_preflight = _preflight_launch(config, args, work_dir)
         if launch_preflight.error:
-            return _json_error(launch_preflight.error, exit_code=3)
+            return output._json_error(launch_preflight.error, exit_code=3)
 
     record = None
     selection = profile_assignment.LaunchProfileSelection(profile=None)
@@ -339,7 +337,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
             record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
         except Exception:
             if not make_new:
-                return _json_error(f"Worktree record not found: {wt_id}")
+                return output._json_error(f"Worktree record not found: {wt_id}")
         if record is not None:
             # Peek only (no clear) -- the real claim happens right before
             # delivery, so an early return (dry-run, a validation failure,
@@ -351,7 +349,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 "embody",
             )
             if backend_error:
-                return _json_error(backend_error, exit_code=3)
+                return output._json_error(backend_error, exit_code=3)
             try:
                 selection = _launch_profile_selection(
                     config,
@@ -363,7 +361,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 )
                 _reflect_assignment(record, selection)
             except profile_assignment.ProfileAssignmentError as exc:
-                return _json_error(str(exc), exit_code=3)
+                return output._json_error(str(exc), exit_code=3)
 
     if getattr(args, "dry_run", False):
         launch_cmd = _build_launch_cmd(
@@ -377,7 +375,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
             None if already else embody_resume.resume_target(args, record, seed, make_new=make_new)
         )
         launch_cmd = embody_resume.with_resume(launch_cmd, resume_target)
-        _json_output(
+        output._json_output(
             {
                 "ok": True,
                 "dry_run": True,
@@ -416,7 +414,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
             )
             settled = pending_seed_mod.settle_claim(
                 cfg.tracking_dir() / f"{wt_id}.yaml", claimed, pending_seed_result)
-        _json_output(
+        output._json_output(
             {
                 "ok": True,
                 "worktree_id": wt_id,
@@ -457,10 +455,10 @@ def cmd_embody(args: argparse.Namespace) -> int:
         try:
             record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
         except Exception:
-            return _json_error(f"Worktree record not found: {wt_id}")
+            return output._json_error(f"Worktree record not found: {wt_id}")
     repo = _repo_for_record(config, record)
     if repo is None:
-        return _json_error(f"Repository not found for worktree: {record.repo}")
+        return output._json_error(f"Repository not found for worktree: {record.repo}")
     lifecycle_lock = fin.FinalizeLock(
         Path(repo.worktree_root) / ".finalize.lock",
         timeout=300,
@@ -469,18 +467,18 @@ def cmd_embody(args: argparse.Namespace) -> int:
     try:
         lifecycle_lock.acquire()
     except TimeoutError:
-        return _json_error("worktree lifecycle remained busy for five minutes", exit_code=3,)
+        return output._json_error("worktree lifecycle remained busy for five minutes", exit_code=3,)
     try:
         # A managed-GC pass may have completed while launch preflight ran.
         # Re-check under the shared lifecycle fence before creating a process.
         try:
             launch_record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
         except FileNotFoundError:
-            return _json_error(f"Worktree record disappeared before launch: {wt_id}", exit_code=3,)
+            return output._json_error(f"Worktree record disappeared before launch: {wt_id}", exit_code=3,)
         if getattr(launch_record, "kind", None) in tracking.MANAGED_KINDS and getattr(
             launch_record, "status", None
         ) in {"complete", "completed", "finalized"}:
-            return _json_error(
+            return output._json_error(
                 f"Worktree {wt_id} is terminal and managed; refusing embodiment",
                 exit_code=3,
             )
@@ -496,9 +494,9 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 and getattr(launch_record, "repo", None) != getattr(record, "repo", None)
             )
         ):
-            return _json_error(f"Worktree record changed before launch: {wt_id}", exit_code=3,)
+            return output._json_error(f"Worktree record changed before launch: {wt_id}", exit_code=3,)
         if sessions.has_mux_session(wt_id):
-            _json_output(
+            output._json_output(
                 {
                     "ok": True,
                     "worktree_id": wt_id,
@@ -534,13 +532,13 @@ def cmd_embody(args: argparse.Namespace) -> int:
         resume_target = embody_resume.resume_target(args, launch_record, seed, make_new=make_new)
         refusal = embody_resume.live_head_refusal(resume_target, wt_id)
         if refusal:
-            return _json_error(refusal, exit_code=3)
+            return output._json_error(refusal, exit_code=3)
         result = sessions.mux_new_session(
             wt_id, work_dir, embody_resume.with_resume(launch_cmd, resume_target), env)
     finally:
         lifecycle_lock.release()
     if not result.get("ok"):
-        return _json_error(
+        return output._json_error(
             f"failed to create session wt-{wt_id}: {result.get('error')}",
             exit_code=4,
         )
@@ -604,7 +602,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
     }
     if selection.assignment is not None:
         response["profile_assignment"] = profile_assignment.metadata(selection.assignment)
-    _json_output(response)
+    output._json_output(response)
     return 0
 
 
@@ -637,14 +635,14 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
     """
     repo_name = config.repo_name
     if not repo_name:
-        return _json_error(
+        return output._json_error(
             "--anchor requires an active project (cd into an adopted repo, "
             "or pass --project)",
             exit_code=2,
         )
     work_dir = config.default_repo.anchor
     if not work_dir:
-        return _json_error(
+        return output._json_error(
             f"project {repo_name!r} has no resolved anchor path", exit_code=2,
         )
     wt_id = f"anchor-{repo_name}"
@@ -655,13 +653,13 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
     if getattr(args, "dry_run", False) or not already:
         launch_preflight = _preflight_launch(config, args, work_dir)
         if launch_preflight.error:
-            return _json_error(launch_preflight.error, exit_code=3)
+            return output._json_error(launch_preflight.error, exit_code=3)
 
     if getattr(args, "dry_run", False):
         launch_cmd = _build_launch_cmd(
             config, args, work_dir, profile=None, preflight=launch_preflight,
         )
-        _json_output({
+        output._json_output({
             "ok": True,
             "dry_run": True,
             "worktree_id": wt_id,
@@ -675,7 +673,7 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
         return 0
 
     if already:
-        _json_output({
+        output._json_output({
             "ok": True,
             "worktree_id": wt_id,
             "anchor": True,
@@ -703,7 +701,7 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
     # the only concurrency guard this path needs (mirrors the worktree path's
     # own re-check pattern, just without the record-staleness half of it).
     if sessions.has_mux_session(wt_id):
-        _json_output({
+        output._json_output({
             "ok": True,
             "worktree_id": wt_id,
             "anchor": True,
@@ -719,7 +717,7 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
         sessions.ensure_mux_available()
     result = sessions.mux_new_session(wt_id, work_dir, launch_cmd, env)
     if not result.get("ok"):
-        return _json_error(
+        return output._json_error(
             f"failed to create session wt-{wt_id}: {result.get('error')}",
             exit_code=4,
         )
@@ -744,7 +742,7 @@ def _cmd_embody_anchor(args: argparse.Namespace, config: cfg.Config) -> int:
                 break
             time.sleep(0.3)
 
-    _json_output({
+    output._json_output({
         "ok": True,
         "worktree_id": wt_id,
         "anchor": True,
@@ -814,9 +812,9 @@ def cmd_handoffs_check(args: argparse.Namespace) -> int:
     worktree_id = getattr(args, "worktree_id", None)
     check_all = bool(getattr(args, "all", False))
     if not worktree_id and not check_all:
-        return _json_error("handoffs-check requires --worktree-id or --all")
+        return output._json_error("handoffs-check requires --worktree-id or --all")
     if worktree_id and check_all:
-        return _json_error("handoffs-check: pass --worktree-id or --all, not both")
+        return output._json_error("handoffs-check: pass --worktree-id or --all, not both")
 
     if check_all:
         records = tracking.list_records(cfg.tracking_dir())
@@ -824,7 +822,7 @@ def cmd_handoffs_check(args: argparse.Namespace) -> int:
         resolved = _resolve_worktree_id(worktree_id)
         record_path = cfg.tracking_dir() / f"{resolved}.yaml"
         if not record_path.exists():
-            return _json_error(f"Worktree not found: {resolved}")
+            return output._json_error(f"Worktree not found: {resolved}")
         records = [tracking.load_record(record_path)]
 
     execute = bool(getattr(args, "execute", False))
@@ -863,7 +861,7 @@ def cmd_handoffs_check(args: argparse.Namespace) -> int:
         "findings": findings,
     }
     if getattr(args, "json", False):
-        _json_output(payload)
+        output._json_output(payload)
     else:
         if not findings:
             output.ok("handoffs-check: no stalled predecessor retirements found.")
@@ -964,7 +962,7 @@ def cmd_handoff_cutover_trigger(args: argparse.Namespace) -> int:
     resolved = _resolve_worktree_id(worktree_id)
     record_path = cfg.tracking_dir() / f"{resolved}.yaml"
     if not record_path.exists():
-        return _json_error(f"Worktree not found: {resolved}")
+        return output._json_error(f"Worktree not found: {resolved}")
     before = tracking.load_record(record_path)
     before_head = before.resolved_head_session
     before_sessions = len(getattr(before, "sessions", None) or [])
@@ -987,7 +985,7 @@ def cmd_handoff_cutover_trigger(args: argparse.Namespace) -> int:
         "changed": after_head != before_head or after_sessions != before_sessions,
     }
     if getattr(args, "json", False):
-        _json_output(payload)
+        output._json_output(payload)
     elif payload["changed"]:
         output.ok(
             f"{resolved}: head {before_head or '(none)'} -> {after_head or '(none)'}"
