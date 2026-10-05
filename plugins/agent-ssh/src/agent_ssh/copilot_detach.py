@@ -19,6 +19,7 @@ from agent_procutil import (
     windowless_python,
     windowless_python_env,
 )
+from remote_login_shell import wrap_login_shell
 from ssh_manager import SSHProfileSource, SupervisedRelayForward, build_remote_exec_args
 from ssh_manager.forward_keeper import (
     KeeperStore,
@@ -255,7 +256,7 @@ def _remote_input(ssh_config: Any, command: str, stdin: bytes, *, timeout: float
 
 
 def _bash(command: str) -> str:
-    return f"bash -lc {shlex.quote(command)}"
+    return wrap_login_shell(command)
 
 
 def _ensure_posix(ssh_config: Any) -> None:

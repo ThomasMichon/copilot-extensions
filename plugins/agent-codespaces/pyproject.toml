@@ -25,6 +25,7 @@ dependencies = [
     "agent-zdd",
     "agent-session-liveness-probe",
     "agent-single-instance-lease",
+    "agent-remote-login-shell",
 ]
 
 [tool.uv.sources]
@@ -93,6 +94,14 @@ agent-session-liveness-probe = { path = "../../libs/session-liveness-probe", edi
 # OS-held lock (module ``single_instance_lease``): one transcript-mirror pass
 # per CodeSpace across Connection Owners. Shared with agent-bridge/agent-dispatch.
 agent-single-instance-lease = { path = "../../libs/single-instance-lease", editable = true }
+# Shared POSIX login-shell command wrapping for remote SSH exec (module
+# ``remote_login_shell``, copilot-extensions#5207). This is a `uv`-editable
+# canonical reference (vendor-pointer-generalization effort, Phase 1): `path`
+# escapes this plugin's own root and resolves live to
+# `libs/remote-login-shell`, so this `dev`-branch checkout has nothing to
+# keep manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
+agent-remote-login-shell = { path = "../../libs/remote-login-shell", editable = true }
 
 [project.scripts]
 agent-codespaces = "agent_codespaces.__main__:main"

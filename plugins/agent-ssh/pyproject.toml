@@ -19,6 +19,7 @@ dependencies = [
     "agent-zdd",
     "agent-procutil",
     "agent-dropin-registry",
+    "agent-remote-login-shell",
 ]
 
 [tool.uv.sources]
@@ -49,6 +50,14 @@ agent-ssh-manager = { path = "../../libs/ssh-manager", editable = true }
 agent-venue-copilot = { path = "../../libs/venue-copilot", editable = true }
 # Routing-table reader used by venue-copilot for host bridge discovery.
 agent-zdd = { path = "../../libs/zdd", editable = true }
+# Shared POSIX login-shell command wrapping for remote SSH exec (module
+# ``remote_login_shell``, copilot-extensions#5207). This is a `uv`-editable
+# canonical reference (vendor-pointer-generalization effort, Phase 1): `path`
+# escapes this plugin's own root and resolves live to
+# `libs/remote-login-shell`, so this `dev`-branch checkout has nothing to
+# keep manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
+agent-remote-login-shell = { path = "../../libs/remote-login-shell", editable = true }
 
 [project.scripts]
 agent-ssh = "agent_ssh.__main__:main"

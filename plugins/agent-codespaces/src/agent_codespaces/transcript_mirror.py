@@ -30,6 +30,8 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from remote_login_shell import wrap_login_shell
+
 from ._ssh_retry import exec_with_retry
 from .config import RUNTIME_DIR
 
@@ -367,7 +369,7 @@ class TranscriptMirror:
                 active_minutes=self._active, chunk=self._chunk,
             )
             result = await exec_with_retry(
-                manager, codespace, "bash -lc " + shlex.quote(script), timeout=60.0, attempts=2,
+                manager, codespace, wrap_login_shell(script), timeout=60.0, attempts=2,
             )
             if getattr(result, "exit_code", None) != 0:
                 log.debug("transcript mirror: read on %s exited %s", codespace,

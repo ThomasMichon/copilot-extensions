@@ -72,6 +72,7 @@ _resolve_ssh_manager() { _resolve_vendored_lib ssh-manager; }
 _resolve_agent_procutil() { _resolve_vendored_lib agent-procutil; }
 _resolve_venue_copilot() { _resolve_vendored_lib venue-copilot; }
 _resolve_zdd() { _resolve_vendored_lib zdd; }
+_resolve_remote_login_shell() { _resolve_vendored_lib remote-login-shell; }
 
 _install_agent_ssh_package() {
     if [[ "$HAVE_UV" -eq 1 ]]; then
@@ -87,7 +88,7 @@ _install_agent_ssh_package() {
         _step 'uv package install failed -- falling back to python -m pip'
     fi
 
-    local agent_procutil_dir ssh_manager_dir venue_copilot_dir zdd_dir
+    local agent_procutil_dir ssh_manager_dir venue_copilot_dir zdd_dir remote_login_shell_dir
     agent_procutil_dir="$(_resolve_agent_procutil)" || {
         _fail 'Cannot locate agent-procutil library'
         return 1
@@ -104,12 +105,17 @@ _install_agent_ssh_package() {
         _fail 'Cannot locate zdd library'
         return 1
     }
+    remote_login_shell_dir="$(_resolve_remote_login_shell)" || {
+        _fail 'Cannot locate remote-login-shell library'
+        return 1
+    }
     "$VENV_PYTHON" -m pip install --quiet \
         "$agent_procutil_dir" \
         "$PLUGIN_DIR/libs/dropin-registry" \
         "$ssh_manager_dir" \
         "$venue_copilot_dir" \
         "$zdd_dir" \
+        "$remote_login_shell_dir" \
         "$PLUGIN_DIR" 2>/dev/null
 }
 

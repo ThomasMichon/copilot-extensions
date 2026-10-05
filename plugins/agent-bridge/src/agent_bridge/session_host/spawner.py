@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from agent_procutil import no_window_flags
+from remote_login_shell import wrap_login_shell
 
 from .launcher import launch_session_host
 
@@ -342,7 +343,7 @@ def build_remote_launch(
         f"{env_prefix}setsid nohup {host_cmd} "
         f"</dev/null >{shlex.quote(log_remote)} 2>&1 & echo launched"
     )
-    return f"bash -lc {shlex.quote(prep + launch)}"
+    return wrap_login_shell(prep + launch)
 
 
 class CodeSpaceSpawner:
@@ -975,8 +976,7 @@ print("__REAPED__")
             probe = build_relay_ping_probe_command(relay_port)
             try:
                 rc, out, _err = await self._transport.run(
-                    f"bash -lc {shlex.quote(probe)}",
-                    timeout=5.0,
+                    wrap_login_shell(probe), timeout=5.0,
                 )
             except Exception:
                 if fail_open:

@@ -38,6 +38,7 @@ dependencies = [
     "agent-procutil",
     "agent-dropin-registry",
     "agent-plugin-activation",
+    "agent-remote-login-shell",
 ]
 
 [tool.uv.sources]
@@ -88,6 +89,14 @@ agent-plugin-resolve = { path = "../../libs/plugin-resolve", editable = true }
 agent-procutil = { path = "../../libs/agent-procutil", editable = true }
 # Resilient tri-state scans/findings for providers.d.
 agent-dropin-registry = { path = "../../libs/dropin-registry", editable = true }
+# Shared POSIX login-shell command wrapping for remote SSH exec (module
+# ``remote_login_shell``, copilot-extensions#5207). This is a `uv`-editable
+# canonical reference (vendor-pointer-generalization effort, Phase 1): `path`
+# escapes this plugin's own root and resolves live to
+# `libs/remote-login-shell`, so this `dev`-branch checkout has nothing to
+# keep manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
+agent-remote-login-shell = { path = "../../libs/remote-login-shell", editable = true }
 # Effective plugin enablement and identity-verified root resolution.
 agent-plugin-activation = { path = "../../libs/plugin-activation", editable = true }
 
