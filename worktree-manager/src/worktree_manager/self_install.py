@@ -449,6 +449,7 @@ def _cmd_binstub() -> str:
     return (
         "@echo off\r\n"
         "setlocal\r\n"
+        'set "PYTHONUTF8=1"\r\n'
         'if "%WORKTREE_MANAGER_ROOT%"=="" set "WORKTREE_MANAGER_ROOT=%USERPROFILE%\\.worktree-manager"\r\n'
         'set /p VER=<"%WORKTREE_MANAGER_ROOT%\\current-version"\r\n'
         'uv run --quiet --project "%WORKTREE_MANAGER_ROOT%\\versions\\%VER%" '
@@ -459,6 +460,7 @@ def _cmd_binstub() -> str:
 def _ps1_binstub() -> str:
     return (
         "# worktree-manager binstub (versioned) — resolves the current-version marker.\n"
+        "$env:PYTHONUTF8 = '1'\n"
         '$root = if ($env:WORKTREE_MANAGER_ROOT) { $env:WORKTREE_MANAGER_ROOT } '
         'else { Join-Path $env:USERPROFILE ".worktree-manager" }\n'
         '$ver = (Get-Content (Join-Path $root "current-version") -Raw).Trim()\n'

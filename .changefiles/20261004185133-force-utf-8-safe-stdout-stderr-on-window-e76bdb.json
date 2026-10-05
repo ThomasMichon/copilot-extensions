@@ -1,0 +1,9 @@
+{
+  "comment": "Force UTF-8 safe stdout/stderr on Windows binstubs and console_entry (#5218)",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
