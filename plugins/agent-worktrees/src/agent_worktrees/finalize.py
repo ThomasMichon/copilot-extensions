@@ -1153,6 +1153,11 @@ def _pr_finalize_precondition(
     if _pr_is_merged(record, repo):
         if not fopg.content_exceeds_merged_head_any(record, content_ref, upstream, cwd=cwd):
             return True, None
+        # The recorded merged head may be stale (a push made outside this tool):
+        # re-read it from the provider once before refusing.
+        if fopg.refresh_merged_head(record.pr, repo) and not fopg.content_exceeds_merged_head_any(
+                record, content_ref, upstream, cwd=cwd):
+            return True, None
         return False, fopg.merged_pr_block_message(record, content_ref, upstream, cwd=cwd)
 
     # (3) DETACHED mode only: "code is upstream in an OPEN PR" (feature branch on

@@ -1515,3 +1515,90 @@ def test_precondition_blocks_closed_pr_with_unmerged_commits_on_other_tracked_br
     assert err is not None
 
 
+
+
+# ---------------------------------------------------------------------------
+# A stale recorded merged head (a push made outside the tool) is re-read from
+# the provider before finalize refuses with "carries further commits".
+# ---------------------------------------------------------------------------
+
+class _HeadProvider:
+    name = "gitea"
+
+    def __init__(self, head=None, *, merged=True, boom=False):
+        self.head, self.merged, self.boom, self.calls = head, merged, boom, 0
+
+    def get_pull(self, repo, number, *, api_base="", token=None):
+        from agent_worktrees.providers import PullResult
+
+        self.calls += 1
+        if self.boom:
+            raise RuntimeError("provider unreachable")
+        return PullResult(number=number, state="merged" if self.merged else "open",
+                          merged=self.merged, head_sha=self.head)
+
+
+def _patch_head_provider(monkeypatch, fake):
+    import agent_worktrees.providers as prov
+
+    monkeypatch.setattr(prov, "get_provider", lambda name: fake)
+    monkeypatch.setattr(prov, "account_token_for_slug", lambda slug, prcfg: "t")
+
+
+def _stale_head_case(env):
+    """Two pushes; the record kept the first. The PR (head = second push) was
+    squash-merged, so the worktree's HEAD isn't an ancestor of master."""
+    stale = _git("rev-parse", "HEAD", cwd=env.clone)
+    _commit(env.clone, "review-fix.txt", "a fix pushed with a raw git push\n")
+    real = _git("rev-parse", "HEAD", cwd=env.clone)
+    _git("checkout", "master", cwd=env.seed)
+    (env.seed / "fix.txt").write_text("the fix\n")
+    (env.seed / "review-fix.txt").write_text("a fix pushed with a raw git push\n")
+    _git("add", "-A", cwd=env.seed)
+    _git("commit", "-m", "squashed PR", cwd=env.seed)
+    _git("push", "origin", "master", cwd=env.seed)
+    _git("fetch", "origin", cwd=env.clone)
+    record, repo = _record_and_repo(env)
+    record.prs = []
+    record.pr = SimpleNamespace(branch=env.slug, state="merged", head_sha=stale, number=7,
+                                repo="o/r", provider="gitea", url="")
+    repo.pr = SimpleNamespace(enabled=True, branch=env.slug, provider="gitea", api_base="")
+    return record, repo, stale, real
+
+
+def test_a_stale_recorded_merged_head_is_refreshed_before_refusing(refspec_worktree, monkeypatch):
+    env = refspec_worktree
+    record, repo, stale, real = _stale_head_case(env)
+    fake = _HeadProvider(real)
+    _patch_head_provider(monkeypatch, fake)
+    ok, err = finalize._pr_finalize_precondition(record, repo, str(env.clone), str(env.clone))
+    assert (ok, err) == (True, None)
+    assert record.pr.head_sha == real and fake.calls == 1
+
+
+def test_a_stale_head_still_blocks_when_the_provider_cannot_confirm_it(refspec_worktree, monkeypatch):
+    env = refspec_worktree
+    record, repo, stale, real = _stale_head_case(env)
+    for fake in (_HeadProvider(boom=True), _HeadProvider(stale), _HeadProvider(real, merged=False)):
+        _patch_head_provider(monkeypatch, fake)
+        record.pr.head_sha, record.pr.state = stale, "merged"
+        ok, err = finalize._pr_finalize_precondition(record, repo, str(env.clone), str(env.clone))
+        assert ok is False and "further commits" in err
+        assert (record.pr.head_sha, record.pr.state) == (stale, "merged")  # left as it was
+
+
+def test_work_beyond_the_refreshed_head_still_blocks(refspec_worktree, monkeypatch):
+    env = refspec_worktree
+    record, repo, stale, real = _stale_head_case(env)
+    _commit(env.clone, "after-merge.txt", "work after the merge\n")
+    _patch_head_provider(monkeypatch, _HeadProvider(real))
+    ok, err = finalize._pr_finalize_precondition(record, repo, str(env.clone), str(env.clone))
+    assert ok is False and "further commits" in err
+
+
+def test_a_confirmed_merge_takes_the_providers_head_over_a_recorded_one(monkeypatch):
+    pr = SimpleNamespace(state="open", head_sha="a" * 40, number=7, repo="o/r", provider="gitea", url="")
+    repo = SimpleNamespace(pr=SimpleNamespace(provider="gitea", api_base=""))
+    _patch_head_provider(monkeypatch, _HeadProvider("b" * 40))
+    assert finalize_open_pr_gate._pr_entry_merge_status(pr, repo) is True
+    assert (pr.head_sha, pr.state) == ("b" * 40, "merged")
