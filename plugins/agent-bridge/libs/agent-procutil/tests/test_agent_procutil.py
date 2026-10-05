@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -266,7 +266,9 @@ def test_assign_suspended_to_kill_on_close_job_assigns_pid_to_job(monkeypatch):
         ("OpenProcess", pu._PROCESS_SET_QUOTA | pu._PROCESS_TERMINATE, False, 12345),
         ("AssignProcessToJobObject", 101, 202),
     ]
-    assert fake.limit_flags == pu._JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    assert fake.limit_flags == (
+        pu._JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | pu._JOB_OBJECT_LIMIT_BREAKAWAY_OK
+    )
     assert fake.calls[4:] == [("CloseHandle", 202)]
 
     job.close()
@@ -367,6 +369,85 @@ def test_spawn_in_kill_on_close_job_kills_and_closes_job_when_resume_fails(monke
 
     with pytest.raises(RuntimeError, match="failed to resume suspended process"):
         asyncio.run(pu.spawn_in_kill_on_close_job("python"))
+
+    assert process.killed
+    assert ("AssignProcessToJobObject", 101, 202) in fake.calls
+    assert ("NtResumeProcess", 202) in fake.calls
+    assert [call[1] for call in fake.calls if call[0] == "CloseHandle"].count(101) == 1
+
+
+def test_spawn_sync_in_kill_on_close_job_noop_off_windows(monkeypatch):
+    process = _FakeProcess()
+    spawn = Mock(return_value=process)
+    monkeypatch.setattr(pu, "_is_windows", lambda: False)
+    monkeypatch.setattr(pu.subprocess, "Popen", spawn)
+
+    result, job = pu.spawn_sync_in_kill_on_close_job(["python"], creationflags=7)
+
+    assert result is process
+    assert job is None
+    assert spawn.call_args.args == (["python"],)
+    assert spawn.call_args.kwargs["creationflags"] == 7
+
+
+def test_spawn_sync_in_kill_on_close_job_assigns_before_resuming(monkeypatch):
+    fake = _FakeKernel32()
+    ntdll = _FakeNtdll(fake.calls)
+    process = _FakeProcess()
+    spawn = Mock(return_value=process)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(pu, "_kernel32", lambda: fake)
+    monkeypatch.setattr(pu, "_ntdll", lambda: ntdll)
+    monkeypatch.setattr(pu.subprocess, "Popen", spawn)
+
+    result, job = pu.spawn_sync_in_kill_on_close_job(
+        ["python"], creationflags=pu._CREATE_NO_WINDOW
+    )
+
+    assert result is process
+    assert job is not None
+    assert spawn.call_args.kwargs["creationflags"] == (
+        pu._CREATE_NO_WINDOW | pu._CREATE_SUSPENDED
+    )
+    operations = [call[0] for call in fake.calls]
+    assert operations.index("AssignProcessToJobObject") < operations.index("NtResumeProcess")
+    assert not process.killed
+    job.close()
+
+
+def test_spawn_sync_in_kill_on_close_job_resumes_when_assignment_fails(monkeypatch):
+    fake = _FakeKernel32()
+    fake.fail = "AssignProcessToJobObject"
+    ntdll = _FakeNtdll(fake.calls)
+    process = _FakeProcess()
+    spawn = Mock(return_value=process)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(pu, "_kernel32", lambda: fake)
+    monkeypatch.setattr(pu, "_ntdll", lambda: ntdll)
+    monkeypatch.setattr(pu.ctypes, "get_last_error", lambda: 5, raising=False)
+    monkeypatch.setattr(pu.subprocess, "Popen", spawn)
+
+    result, job = pu.spawn_sync_in_kill_on_close_job(["python"])
+
+    assert result is process
+    assert job is None
+    assert any(call[0] == "AssignProcessToJobObject" for call in fake.calls)
+    assert any(call[0] == "NtResumeProcess" for call in fake.calls)
+    assert not process.killed
+
+
+def test_spawn_sync_in_kill_on_close_job_kills_and_closes_job_when_resume_fails(monkeypatch):
+    fake = _FakeKernel32()
+    ntdll = _FakeNtdll(fake.calls, resume_status=-1)
+    process = _FakeProcess()
+    spawn = Mock(return_value=process)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(pu, "_kernel32", lambda: fake)
+    monkeypatch.setattr(pu, "_ntdll", lambda: ntdll)
+    monkeypatch.setattr(pu.subprocess, "Popen", spawn)
+
+    with pytest.raises(RuntimeError, match="failed to resume suspended process"):
+        pu.spawn_sync_in_kill_on_close_job(["python"])
 
     assert process.killed
     assert ("AssignProcessToJobObject", 101, 202) in fake.calls
@@ -486,3 +567,76 @@ time.sleep(10)
                 job.close()
 
     asyncio.run(scenario())
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Job Object integration")
+def test_windows_job_permits_explicit_breakaway_grandchild():
+    """The containment job must allow an ordinary descendant to die with it
+    while letting a descendant that explicitly requests
+    ``CREATE_BREAKAWAY_FROM_JOB`` escape and outlive it -- a real command run
+    through this containment (`agent-worktrees update`) can itself spawn a
+    daemon cutover successor with exactly that flag
+    (``windowless_daemon_kwargs(breakaway=True)``), and Windows rejects that
+    spawn outright unless the containing job's limit flags permit it."""
+    src = Path(__file__).resolve().parents[1] / "src"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(src) + os.pathsep + env.get("PYTHONPATH", "")
+    child_code = r"""
+import subprocess
+import sys
+import time
+
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
+# Only spawned once this process is itself already a job member (the test
+# harness assigns the job before resuming it), so both grandchildren inherit
+# membership at spawn time unless they opt out.
+ordinary = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+breakaway = subprocess.Popen(
+    [sys.executable, "-c", "import time; time.sleep(60)"],
+    creationflags=CREATE_BREAKAWAY_FROM_JOB,
+)
+print(ordinary.pid, breakaway.pid, flush=True)
+time.sleep(60)
+"""
+    process, job = pu.spawn_sync_in_kill_on_close_job(
+        [sys.executable, "-c", child_code],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    assert job is not None, "failed to spawn the test harness itself inside a job"
+    try:
+        pids = process.stdout.readline().strip().split()
+        assert len(pids) == 2, f"expected 'ordinary breakaway' pids, got: {pids!r}"
+        ordinary_pid, breakaway_pid = (int(p) for p in pids)
+
+        ordinary_handle = pu.ctypes.windll.kernel32.OpenProcess(
+            0x00100000 | 0x1000 | 0x0001, False, ordinary_pid
+        )
+        breakaway_handle = pu.ctypes.windll.kernel32.OpenProcess(
+            0x00100000 | 0x1000 | 0x0001, False, breakaway_pid
+        )
+        assert ordinary_handle and breakaway_handle
+        try:
+            job.close()
+            job = None
+            assert (
+                pu.ctypes.windll.kernel32.WaitForSingleObject(ordinary_handle, 5000) == 0
+            ), "ordinary descendant must die with the job"
+            assert (
+                pu.ctypes.windll.kernel32.WaitForSingleObject(breakaway_handle, 0) == 0x102
+            ), "breakaway descendant must survive the job closing"
+        finally:
+            _wait_or_terminate_process_handle(ordinary_handle, timeout_ms=0)
+            _wait_or_terminate_process_handle(breakaway_handle, timeout_ms=0)
+            pu.ctypes.windll.kernel32.CloseHandle(ordinary_handle)
+            pu.ctypes.windll.kernel32.CloseHandle(breakaway_handle)
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=5)
+        if job is not None:
+            job.close()
+

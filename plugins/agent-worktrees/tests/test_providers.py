@@ -3744,3 +3744,208 @@ class TestGitHubThreads:
         monkeypatch.setattr(github, "run_cli", fake)
         err = github.GitHubProvider().resolve_threads("o/r", 3, token="t")
         assert err == "" and len(mutations) == 1  # only the unresolved thread
+
+
+# ---------------------------------------------------------------------------
+# Reviewer-capable provider (Phase 3): diff / comment / verdict
+# ---------------------------------------------------------------------------
+
+class TestGitHubReviewerOps:
+    def test_get_diff_returns_provider_output(self, monkeypatch):
+        from agent_worktrees.providers import github
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: _proc(stdout="diff --git a/x b/x\n"))
+        result = github.GitHubProvider().get_diff("o/r", 3, token="t")
+        assert result.supported is True
+        assert result.diff == "diff --git a/x b/x\n"
+
+    def test_get_diff_failure_is_reported(self, monkeypatch):
+        from agent_worktrees.providers import github
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: _proc(returncode=1, stderr="no such PR"))
+        result = github.GitHubProvider().get_diff("o/r", 3, token="t")
+        assert result.supported is True
+        assert "no such PR" in result.error
+
+    def test_post_comment_posts_body(self, monkeypatch):
+        from agent_worktrees.providers import github
+        captured = {}
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.update(args=args), _proc())[1])
+        assert github.GitHubProvider().post_comment("o/r", 3, "nice work", token="t") == ""
+        assert captured["args"][-2:] == ["--body", "nice work"]
+
+    def test_post_comment_rejects_copilot_mention(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        def fake_run(args, **kwargs):
+            raise AssertionError("gh must not be invoked for a rejected mention")
+
+        monkeypatch.setattr(github, "run_cli", fake_run)
+        with pytest.raises(ProviderError, match="@copilot"):
+            github.GitHubProvider().post_comment("o/r", 3, "ask @copilot", token="t")
+
+    def test_submit_review_approve(self, monkeypatch):
+        from agent_worktrees.providers import github
+        captured = {}
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.update(args=args), _proc())[1])
+        err = github.GitHubProvider().submit_review(
+            "o/r", 3, event="APPROVED", body="LGTM", token="t")
+        assert err == ""
+        assert "--approve" in captured["args"]
+        assert captured["args"][-2:] == ["--body", "LGTM"]
+
+    def test_submit_review_request_changes(self, monkeypatch):
+        from agent_worktrees.providers import github
+        captured = {}
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.update(args=args), _proc())[1])
+        err = github.GitHubProvider().submit_review(
+            "o/r", 3, event="CHANGES_REQUESTED", body="fix it", token="t")
+        assert err == ""
+        assert "--request-changes" in captured["args"]
+
+    def test_submit_review_rejects_copilot_mention(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        def fake_run(args, **kwargs):
+            raise AssertionError("gh must not be invoked for a rejected mention")
+
+        monkeypatch.setattr(github, "run_cli", fake_run)
+        with pytest.raises(ProviderError, match="@copilot"):
+            github.GitHubProvider().submit_review(
+                "o/r", 3, event="COMMENTED", body="cc @copilot", token="t")
+
+    def test_submit_review_unknown_event_reports_error(self, monkeypatch):
+        from agent_worktrees.providers import github
+        err = github.GitHubProvider().submit_review("o/r", 3, event="bogus", token="t")
+        assert "unknown review event" in err
+
+
+class TestGiteaReviewerOps:
+    def test_get_diff_returns_body(self, monkeypatch):
+        from agent_worktrees.providers import gitea
+        prov = gitea.GiteaProvider()
+        monkeypatch.setattr(prov, "_curl",
+                            lambda m, u, t, **kw: (200, "diff --git a/x b/x\n"))
+        result = prov.get_diff("o/r", 3, api_base="https://h", token="t")
+        assert result.supported is True
+        assert result.diff == "diff --git a/x b/x\n"
+
+    def test_get_diff_needs_token(self):
+        from agent_worktrees.providers import gitea
+        result = gitea.GiteaProvider().get_diff("o/r", 3, api_base="https://h", token=None)
+        assert result.supported is False
+
+    def test_post_comment_creates_issue_comment(self, monkeypatch):
+        from agent_worktrees.providers import gitea
+        prov = gitea.GiteaProvider()
+        captured = {}
+
+        def fake_curl(method, url, token, *, payload=None):
+            captured.update(method=method, url=url, payload=payload)
+            return 201, "{}"
+
+        monkeypatch.setattr(prov, "_curl", fake_curl)
+        assert prov.post_comment(
+            "o/r", 3, "nice work", api_base="https://h", token="t"
+        ) == ""
+        assert captured["payload"] == {"body": "nice work"}
+
+    def test_submit_review_maps_event_vocabulary(self, monkeypatch):
+        from agent_worktrees.providers import gitea
+        prov = gitea.GiteaProvider()
+        captured = {}
+
+        def fake_curl(method, url, token, *, payload=None):
+            captured.update(method=method, url=url, payload=payload)
+            return 200, "{}"
+
+        monkeypatch.setattr(prov, "_curl", fake_curl)
+        err = prov.submit_review(
+            "o/r", 3, event="CHANGES_REQUESTED", body="fix it",
+            api_base="https://h", token="t",
+        )
+        assert err == ""
+        assert captured["payload"] == {"event": "REQUEST_CHANGES", "body": "fix it"}
+
+    def test_submit_review_unknown_event_reports_error(self):
+        from agent_worktrees.providers import gitea
+        err = gitea.GiteaProvider().submit_review(
+            "o/r", 3, event="bogus", api_base="https://h", token="t"
+        )
+        assert "unknown review event" in err
+
+
+class TestAzureDevOpsReviewerOps:
+    ORG = "https://dev.azure.com/org"
+
+    def _prov(self):
+        from agent_worktrees.providers import azure_devops as azure
+        return azure, azure.AzureDevOpsProvider()
+
+    def test_get_diff_is_unsupported(self):
+        _, prov = self._prov()
+        result = prov.get_diff("proj/repo", 5, api_base=self.ORG, token="pat")
+        assert result.supported is False
+
+    def test_post_comment_creates_thread(self, monkeypatch):
+        azure, prov = self._prov()
+        monkeypatch.setattr(prov, "_auth_header",
+                            lambda token: ("Authorization: ******", ""))
+        captured = {}
+        monkeypatch.setattr(
+            prov, "_rest_call",
+            lambda method, url, auth, payload=None: (
+                captured.update(method=method, payload=payload) or (201, "{}")
+            ),
+        )
+        assert prov.post_comment(
+            "proj/repo", 5, "nice work", api_base=self.ORG, token="pat"
+        ) == ""
+        assert json.loads(captured["payload"])["comments"][0]["content"] == "nice work"
+
+    def test_submit_review_approve_casts_vote(self, monkeypatch):
+        azure, prov = self._prov()
+        monkeypatch.setattr(prov, "_auth_header",
+                            lambda token: ("Authorization: ******", ""))
+        monkeypatch.setattr(prov, "_rest_call",
+                            lambda method, url, auth, payload=None: (201, "{}"))
+        captured = {}
+        monkeypatch.setattr(
+            azure, "run_cli",
+            lambda args, **kw: (captured.update(args=args), _proc())[1])
+        err = prov.submit_review(
+            "proj/repo", 5, event="APPROVED", api_base=self.ORG, token="pat"
+        )
+        assert err == ""
+        assert captured["args"][-2:] == ["--vote", "approve"]
+
+    def test_submit_review_commented_casts_no_vote(self, monkeypatch):
+        azure, prov = self._prov()
+        monkeypatch.setattr(prov, "_auth_header",
+                            lambda token: ("Authorization: ******", ""))
+        monkeypatch.setattr(prov, "_rest_call",
+                            lambda method, url, auth, payload=None: (201, "{}"))
+
+        def fail_run(args, **kw):
+            raise AssertionError("COMMENTED must not cast a vote")
+
+        monkeypatch.setattr(azure, "run_cli", fail_run)
+        err = prov.submit_review(
+            "proj/repo", 5, event="COMMENTED", body="fyi", api_base=self.ORG, token="pat"
+        )
+        assert err == ""
+
+    def test_submit_review_unknown_event_reports_error(self):
+        _, prov = self._prov()
+        err = prov.submit_review(
+            "proj/repo", 5, event="bogus", api_base=self.ORG, token="pat"
+        )
+        assert "unknown review event" in err

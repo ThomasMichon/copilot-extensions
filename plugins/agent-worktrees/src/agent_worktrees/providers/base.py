@@ -22,7 +22,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from ..pr_contract import PRSnapshot, ReviewNudgeResult, ThreadsResult
+    from ..pr_contract import PRDiff, PRSnapshot, ReviewNudgeResult, ThreadsResult
+
+
+#: Canonical review-verdict vocabulary a caller passes to
+#: :meth:`PRProvider.submit_review` -- matches the same ``Review.state`` /
+#: ``PRState.verdict`` vocabulary used elsewhere in the contract
+#: (``APPROVED`` / ``CHANGES_REQUESTED``), plus ``COMMENTED`` for a
+#: non-blocking review that carries no verdict.
+REVIEW_EVENTS: tuple[str, ...] = ("APPROVED", "CHANGES_REQUESTED", "COMMENTED")
 
 
 #: Matches a genuine ``@copilot`` mention (asking GitHub's Copilot cloud
@@ -475,6 +483,59 @@ class PRProvider(Protocol):
         provider doesn't recognize.
         """
         ...
+
+    def get_diff(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> PRDiff:
+        """Return the PR's current unified diff (the reviewer-side "read the
+        current diff and surrounding context" primitive).
+
+        ``PRDiff.supported`` is False when a provider cannot produce a unified
+        diff text -- callers treat that as "no diff available", never as "the
+        PR has no changes".
+        """
+        ...
+
+    def post_comment(
+        self, repo: str, number: int, body: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        """Post a general (non-review) comment on the PR; "" on success.
+
+        The reviewer-side "post a comment" primitive -- distinct from
+        :meth:`publish_source_marker` (a specific managed attribution
+        comment): this posts arbitrary caller-supplied text, so every
+        implementation must call :func:`reject_copilot_mention` on ``body``
+        before publishing.
+        """
+        ...
+
+    def submit_review(
+        self, repo: str, number: int, *, event: str, body: str = "",
+        api_base: str = "", token: str | None = None,
+    ) -> str:
+        """Publish a review verdict on the PR; "" on success.
+
+        The reviewer-side "publish a verdict" primitive. ``event`` is one of
+        :data:`REVIEW_EVENTS` (``"APPROVED"`` / ``"CHANGES_REQUESTED"`` /
+        ``"COMMENTED"``); each provider maps it to its own native vocabulary.
+        ``body`` is the review's summary text (optional for ``APPROVED``,
+        conventionally expected for ``CHANGES_REQUESTED``/``COMMENTED``) and,
+        when non-empty, must pass :func:`reject_copilot_mention` before
+        publishing, same as every other agent-authored-text operation.
+
+        Returns "" on success, or a human-readable error string.
+        """
+        ...
+
+
+def _unsupported_diff(name: str) -> PRDiff:
+    from ..pr_contract import PRDiff as _PD
+
+    return _PD(
+        supported=False,
+        error=f"Provider '{name}' does not support reading a unified diff.",
+    )
 
 
 def _unsupported_snapshot(name: str) -> PRSnapshot:

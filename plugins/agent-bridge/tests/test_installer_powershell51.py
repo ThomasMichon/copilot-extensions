@@ -58,6 +58,16 @@ def test_first_use_installer_captures_python_probes_and_bootstraps_uv():
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell compatibility")
+# Regression (coverage-guided-ci's full-matrix local validation pass,
+# 2026-10-04): this test's own subprocess call already anticipates a real
+# Windows PowerShell 5.1 startup (`timeout=60`), but with no
+# `@pytest.mark.timeout` override, `run-plugin-tests.py`'s own blanket
+# 30s-per-test pytest-timeout default can fire first under real machine
+# contention -- same false-positive class `test_first_install_bootstrap.py
+# ::test_posix_lean_provision_installs_resolver_and_launchers_reenter_
+# runtime` already hit and fixed the same way: real headroom above the
+# test's own internal subprocess ceiling, not a global timeout bump.
+@pytest.mark.timeout(90)
 def test_powershell_51_corrupt_cached_uv_fails_cleanly(tmp_path: Path):
     powershell = shutil.which("powershell.exe")
     if not powershell:

@@ -558,6 +558,23 @@ def main(argv: list[str] | None = None) -> int:
             except (ContainmentError, subprocess.CalledProcessError) as exc:
                 print(f"[FAIL] {name}: runner setup failed ({exc})", file=sys.stderr)
                 rc = 1
+            except Exception as exc:  # noqa: BLE001 -- see docstring below
+                # Deliberately broad: a single plugin's own test run must
+                # never be able to wedge the entire --all/--changed matrix.
+                # Any unexpected failure mode in the contained subprocess
+                # path (e.g. a transient OS-level resource exhaustion after
+                # many sequential heavy runs, or a containment primitive
+                # raising something other than ContainmentError /
+                # CalledProcessError) is recorded as a failure for THIS
+                # plugin only, so every remaining plugin still gets a real
+                # attempt. KeyboardInterrupt/SystemExit are BaseException,
+                # not Exception, so Ctrl-C and an explicit exit still work.
+                print(
+                    f"[FAIL] {name}: unexpected runner error "
+                    f"({type(exc).__name__}: {exc})",
+                    file=sys.stderr,
+                )
+                rc = 1
             if rc != 0:
                 failed.append(name)
 

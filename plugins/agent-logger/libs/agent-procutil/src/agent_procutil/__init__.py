@@ -62,6 +62,15 @@ _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 _CREATE_SUSPENDED = 0x00000004
 _CONTAINED_TEST_ENV = "COPILOT_EXTENSIONS_TEST_CONTAINED"
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+# Permit (but do not require) a contained descendant to opt out of the
+# kill-on-close job via its own CREATE_BREAKAWAY_FROM_JOB creation flag.
+# Without this, Windows rejects that child spawn outright -- a real hazard
+# for a command like `agent-worktrees update`, whose own daemon cutover
+# (``status_monitor_cutover.py``, via ``windowless_daemon_kwargs(breakaway=
+# True)``) deliberately spawns its successor with CREATE_BREAKAWAY_FROM_JOB
+# so the new daemon outlives the updater. Ordinary descendants that never
+# request breakaway stay contained and still die with the job as before.
+_JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x0800
 _JobObjectExtendedLimitInformation = 9
 _PROCESS_SET_QUOTA = 0x0100
 _PROCESS_TERMINATE = 0x0001
@@ -76,6 +85,7 @@ __all__ = [
     "no_window_kwargs",
     "JobHandle",
     "spawn_in_kill_on_close_job",
+    "spawn_sync_in_kill_on_close_job",
     "detached_kwargs",
     "windowless_daemon_kwargs",
     "windowless_python",
@@ -239,7 +249,9 @@ def _assign_suspended_to_kill_on_close_job(pid: int) -> JobHandle | None:
             return None
 
         limit_info = _build_job_extended_limit_info()()
-        limit_info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        limit_info.BasicLimitInformation.LimitFlags = (
+            _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | _JOB_OBJECT_LIMIT_BREAKAWAY_OK
+        )
         if not kernel32.SetInformationJobObject(
             job,
             _JobObjectExtendedLimitInformation,
@@ -352,6 +364,63 @@ async def spawn_in_kill_on_close_job(
             try:
                 process.kill()
             except ProcessLookupError:
+                pass
+            if job_handle is not None:
+                job_handle.close()
+            raise RuntimeError(f"failed to resume suspended process {pid}")
+    except BaseException:
+        if job_handle is not None:
+            job_handle.close()
+        raise
+    return process, job_handle
+
+
+def spawn_sync_in_kill_on_close_job(
+    argv: list[str],
+    **kwargs: Any,
+) -> tuple[subprocess.Popen, JobHandle | None]:
+    """Synchronous (``subprocess.Popen``) counterpart to
+    :func:`spawn_in_kill_on_close_job`, for callers that cannot use ``asyncio``.
+
+    Mirrors the same containment contract: on Windows the child is created
+    with ``CREATE_SUSPENDED``, assigned to a kill-on-close Job Object, and then
+    resumed, with no gap between creation and assignment in which it (or a
+    descendant it spawns) could escape the job. A caller that later needs to
+    forcibly terminate the whole process tree -- e.g. after its own
+    ``communicate(timeout=...)`` raises ``subprocess.TimeoutExpired`` -- should
+    call ``job_handle.close()``, which (via
+    ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE``) kills every process still in the
+    job, not just the immediate child. A plain ``proc.kill()`` on Windows only
+    terminates that immediate child: any grandchildren it spawned (a `.cmd`
+    shim re-execing `python.exe`, a `pwsh.exe` wrapper invoking `git`/`copilot`,
+    etc.) survive, can keep the stdout/stderr pipes open, and leave a
+    subsequent ``communicate()`` blocked indefinitely even though the direct
+    child is already dead -- exactly the failure mode that left a real
+    self-update sweep tick alive-but-stuck for over a day in practice.
+
+    If job creation or assignment fails, the child still runs (resumed) and is
+    returned with ``job_handle=None`` so existing cleanup paths remain in
+    charge -- containment is a best-effort hardening layer, not a hard
+    dependency for the child to execute at all. Off Windows this is a plain
+    ``subprocess.Popen`` call returning ``(process, None)``.
+    """
+    if not _is_windows():
+        return subprocess.Popen(argv, **kwargs), None  # noqa: S603 - argv list, no shell
+
+    spawn_kwargs = dict(kwargs)
+    spawn_kwargs["creationflags"] = (
+        int(spawn_kwargs.get("creationflags", 0)) | _CREATE_SUSPENDED
+    )
+    process = subprocess.Popen(argv, **spawn_kwargs)  # noqa: S603 - argv list, no shell
+    job_handle: JobHandle | None = None
+    try:
+        pid = process.pid
+        job_handle = _assign_suspended_to_kill_on_close_job(pid)
+        if not _resume_suspended_process(pid):
+            log.debug("killing pid %s because suspended-start resume failed", pid)
+            try:
+                process.kill()
+            except (ProcessLookupError, OSError):
                 pass
             if job_handle is not None:
                 job_handle.close()

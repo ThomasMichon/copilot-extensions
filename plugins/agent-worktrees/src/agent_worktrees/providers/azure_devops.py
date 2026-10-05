@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from .base import ProviderError, PRScope, PullResult, run_cli
 
 if TYPE_CHECKING:
-    from ..pr_contract import PRSnapshot, ThreadsResult
+    from ..pr_contract import PRDiff, PRSnapshot, ThreadsResult
 
 #: Canonical consent marker Azure DevOps emits in a snapshot's ``labels`` when
 #: the PR has native auto-complete set. A repo on this provider binds
@@ -704,3 +704,101 @@ class AzureDevOpsProvider:
             if status not in (200, 201):
                 errors.append(f"#{tid}: HTTP {status} {body[:120]}")
         return "; ".join(errors)
+
+    def get_diff(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> "PRDiff":
+        """Azure DevOps has no single REST/CLI call that returns a unified
+        diff text (it exposes structured per-iteration ``changes``, not a
+        patch-format body) -- stay explicitly unsupported, matching other
+        structurally-unavailable reads on this provider (e.g.
+        :meth:`observe_head`)."""
+        from ..pr_contract import PRDiff
+
+        _ = (repo, number, api_base, token)
+        return PRDiff(
+            supported=False,
+            error="Azure DevOps does not expose a unified-diff read "
+                  "(only structured per-iteration changes).",
+        )
+
+    def post_comment(
+        self, repo: str, number: int, body: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        """Post a general PR comment as a new (status-1 "active") thread."""
+        if not api_base:
+            return "Azure DevOps provider needs the org URL (api_base)."
+        auth_header, auth_error = self._auth_header(token)
+        if auth_error:
+            return auth_error
+        status, response = self._rest_call(
+            "POST",
+            f"{self._rest_base(api_base, repo, number)}/threads?api-version=7.1",
+            auth_header,
+            json.dumps(
+                {
+                    "comments": [
+                        {"parentCommentId": 0, "content": body, "commentType": 1}
+                    ],
+                    "status": 1,
+                }
+            ),
+        )
+        if status not in (200, 201):
+            return (
+                f"Azure DevOps PR #{number} comment failed "
+                f"(HTTP {status}): {response[:300]}"
+            )
+        return ""
+
+    #: Canonical event -> ``az repos pr set-vote --vote`` value. ADO's vote
+    #: model has no "comment only, no verdict" vote -- ``COMMENTED`` posts the
+    #: body as a plain comment and casts no vote at all, same as a reviewer who
+    #: leaves feedback without approving or blocking.
+    _REVIEW_EVENT_VOTE = {
+        "APPROVED": "approve",
+        "CHANGES_REQUESTED": "reject",
+    }
+
+    def submit_review(
+        self, repo: str, number: int, *, event: str, body: str = "",
+        api_base: str = "", token: str | None = None,
+    ) -> str:
+        """Publish a review verdict: ``az repos pr set-vote`` for the vote
+        (``APPROVED``/``CHANGES_REQUESTED``), plus ``body`` as a comment
+        thread when given (ADO votes carry no free text of their own).
+        ``COMMENTED`` casts no vote -- it only posts ``body``.
+        """
+        canonical = event.upper()
+        if canonical not in ("APPROVED", "CHANGES_REQUESTED", "COMMENTED"):
+            return (
+                f"azure-devops: unknown review event {event!r} (expected one "
+                "of 'APPROVED', 'CHANGES_REQUESTED', 'COMMENTED')."
+            )
+        if body:
+            comment_err = self.post_comment(
+                repo, number, body, api_base=api_base, token=token
+            )
+            if comment_err:
+                return comment_err
+        vote = self._REVIEW_EVENT_VOTE.get(canonical)
+        if vote is None:
+            return ""  # COMMENTED: body (if any) already posted; no vote to cast.
+        if not api_base:
+            return "Azure DevOps provider needs the org URL (api_base)."
+        proc = run_cli(
+            [
+                "az", "repos", "pr", "set-vote",
+                "--organization", api_base,
+                "--id", str(number),
+                "--vote", vote,
+            ],
+            env=self._env(token),
+        )
+        if proc.returncode != 0:
+            return (
+                f"az repos pr set-vote failed for {repo}#{number}: "
+                f"{proc.stderr.strip() or proc.stdout.strip()}"
+            )
+        return ""

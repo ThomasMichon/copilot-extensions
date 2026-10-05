@@ -14,7 +14,7 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 from urllib.parse import quote
 
-from ..pr_contract import Comment, CommentThread, PRSnapshot, Review, ReviewNudgeResult, ThreadsResult
+from ..pr_contract import Comment, CommentThread, PRDiff, PRSnapshot, Review, ReviewNudgeResult, ThreadsResult
 from .base import ProviderError, PRScope, PullResult, reject_copilot_mention, run_cli
 
 
@@ -1087,3 +1087,68 @@ class GitHubProvider:
             if merr:
                 errors.append(merr)
         return "; ".join(errors)
+
+    def get_diff(
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+    ) -> PRDiff:
+        """Return the PR's current unified diff via ``gh pr diff``."""
+        _ = api_base
+        proc = run_cli(
+            ["gh", "pr", "diff", str(number), "--repo", repo], env=self._env(token),
+        )
+        if proc.returncode != 0:
+            return PRDiff(
+                supported=True,
+                error=f"gh pr diff #{number} failed for {repo}: "
+                      f"{proc.stderr.strip() or proc.stdout.strip()}",
+            )
+        return PRDiff(diff=proc.stdout)
+
+    def post_comment(
+        self, repo: str, number: int, body: str, *, api_base: str = "",
+        token: str | None = None,
+    ) -> str:
+        """Post a general PR comment via ``gh pr comment``."""
+        _ = api_base
+        reject_copilot_mention(body)
+        proc = run_cli(
+            ["gh", "pr", "comment", str(number), "--repo", repo, "--body", body],
+            env=self._env(token),
+        )
+        if proc.returncode != 0:
+            return (
+                f"gh pr comment #{number} failed for {repo}: "
+                f"{proc.stderr.strip() or proc.stdout.strip()}"
+            )
+        return ""
+
+    _REVIEW_EVENT_FLAGS = {
+        "APPROVED": "--approve",
+        "CHANGES_REQUESTED": "--request-changes",
+        "COMMENTED": "--comment",
+    }
+
+    def submit_review(
+        self, repo: str, number: int, *, event: str, body: str = "",
+        api_base: str = "", token: str | None = None,
+    ) -> str:
+        """Publish a review verdict via ``gh pr review``."""
+        _ = api_base
+        flag = self._REVIEW_EVENT_FLAGS.get(event.upper())
+        if flag is None:
+            return (
+                f"gh: unknown review event {event!r} (expected one of "
+                f"{tuple(self._REVIEW_EVENT_FLAGS)})."
+            )
+        if body:
+            reject_copilot_mention(body, what="review")
+        args = ["gh", "pr", "review", str(number), "--repo", repo, flag]
+        if body:
+            args += ["--body", body]
+        proc = run_cli(args, env=self._env(token))
+        if proc.returncode != 0:
+            return (
+                f"gh pr review #{number} failed for {repo}: "
+                f"{proc.stderr.strip() or proc.stdout.strip()}"
+            )
+        return ""
