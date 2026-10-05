@@ -114,15 +114,18 @@ def find_core_call_sites(plugin: str, name: str) -> list[str]:
 
 def find_monkeypatch_sites(plugin: str, name: str) -> list[str]:
     hits = []
-    # Three independent dotted/object-attribute shapes all target the root
-    # module for a given name, and each is checked unconditionally -- none
-    # of them require (or are gated behind) an `as X` alias import in the
-    # file, since a dotted string is a literal path, not an alias
-    # reference:
-    #   1. unittest.mock.patch("<pkg>.__main__.<name>")
+    # Four independent dotted/object-attribute shapes all target the root
+    # module for a given name:
+    #   1. unittest.mock.patch("<pkg>.__main__.<name>") -- dotted string,
+    #      unconditional (no alias import needed since it's a literal path).
     #   2. monkeypatch.setattr("<pkg>.__main__.<name>", replacement) --
     #      pytest's monkeypatch also accepts a single dotted-string target
-    #      (resolved internally), not just an (object, "attr") pair.
+    #      (resolved internally), not just an (object, "attr") pair; also
+    #      unconditional.
+    #   3. monkeypatch.setattr(<alias>, "<name>", ...) -- alias-gated (the
+    #      alias must come from this file's own `as X` import).
+    #   4. unittest.mock.patch.object(<alias>, "<name>", ...) -- the
+    #      object-attribute sibling of patch(); also alias-gated.
     dotted_patterns = [
         re.compile(rf'patch\(\s*"[\w.]+\.__main__\.{re.escape(name)}"'),
         re.compile(
@@ -134,12 +137,18 @@ def find_monkeypatch_sites(plugin: str, name: str) -> list[str]:
         aliases = _root_aliases_in_file(text)
         if aliases:
             alias_group = "|".join(re.escape(a) for a in aliases)
-            pattern = re.compile(
-                rf'monkeypatch\.setattr\(\s*(?:{alias_group})\s*,\s*\n?\s*"{re.escape(name)}"'
-            )
-            for m in pattern.finditer(text):
-                line = text.count("\n", 0, m.start()) + 1
-                hits.append(f"{path.relative_to(REPO)}:{line}")
+            alias_patterns = [
+                re.compile(
+                    rf'monkeypatch\.setattr\(\s*(?:{alias_group})\s*,\s*\n?\s*"{re.escape(name)}"'
+                ),
+                re.compile(
+                    rf'patch\.object\(\s*(?:{alias_group})\s*,\s*\n?\s*"{re.escape(name)}"'
+                ),
+            ]
+            for pattern in alias_patterns:
+                for m in pattern.finditer(text):
+                    line = text.count("\n", 0, m.start()) + 1
+                    hits.append(f"{path.relative_to(REPO)}:{line}")
         for dotted_pattern in dotted_patterns:
             for m in dotted_pattern.finditer(text):
                 line = text.count("\n", 0, m.start()) + 1
@@ -216,11 +225,17 @@ def cmd_progress(plugin: str) -> int:
         aliases = _root_aliases_in_file(text)
         if aliases:
             alias_group = "|".join(re.escape(a) for a in aliases)
-            pattern = re.compile(
-                rf'monkeypatch\.setattr\(\s*(?:{alias_group})\s*,\s*\n?\s*"(\w+)"'
-            )
-            for name in pattern.findall(text):
-                patch_names[name] += 1
+            alias_patterns = [
+                re.compile(
+                    rf'monkeypatch\.setattr\(\s*(?:{alias_group})\s*,\s*\n?\s*"(\w+)"'
+                ),
+                re.compile(
+                    rf'patch\.object\(\s*(?:{alias_group})\s*,\s*\n?\s*"(\w+)"'
+                ),
+            ]
+            for pattern in alias_patterns:
+                for name in pattern.findall(text):
+                    patch_names[name] += 1
         # Dotted-string targets -- unconditional, independent of any alias
         # import in the file (see find_monkeypatch_sites).
         for dotted_pattern in dotted_patterns:

@@ -99,17 +99,18 @@ Any change that makes these files slightly smaller is a win."
 - [x] `--progress` mode reports live aggregate counts, ranked by traffic.
       Detects every root-alias shape in both source and test files:
       `_core()`-style lazy accessor calls, a plain assigned-variable
-      alias (`core = _core()` then `core.attr(...)`), and three
+      alias (`core = _core()` then `core.attr(...)`), and four
       independent test-side patch shapes --
       `monkeypatch.setattr(<alias>, "<name>", ...)` (single- or
-      multi-line), `unittest.mock.patch("<pkg>.__main__.<name>")`, and
-      `monkeypatch.setattr("<pkg>.__main__.<name>", ...)`. Whole-identifier
-      matching (not a substring/suffix match) throughout. `--plugin` and
-      `--name` both fail loud on an unresolvable plugin or a name with no
-      definition/call/patch site anywhere, rather than reporting a vacuous
-      success. Current baseline: **42 accessors, 290 call sites, 157
-      distinct monkeypatched names, 1051 patch-site occurrences.** Covered
-      by `tools/test_compat_root_migration.py`.
+      multi-line), `unittest.mock.patch("<pkg>.__main__.<name>")`,
+      `monkeypatch.setattr("<pkg>.__main__.<name>", ...)`, and
+      `unittest.mock.patch.object(<alias>, "<name>", ...)`.
+      Whole-identifier matching (not a substring/suffix match) throughout.
+      `--plugin` and `--name` both fail loud on an unresolvable plugin or a
+      name with no definition/call/patch site anywhere, rather than
+      reporting a vacuous success. Current baseline: **42 accessors, 290
+      call sites, 159 distinct monkeypatched names, 1056 patch-site
+      occurrences.** Covered by `tools/test_compat_root_migration.py`.
 
 ### Phase 2 — migrate the highest-traffic names
 - [x] `_json_output` + `_json_error` (migrated together: same files,
@@ -345,7 +346,7 @@ _Pending._
   Phase 1/2 bullets to state only the current contract/scope (timeless),
   moving the "corrected multiple times," "original estimate," and
   round-by-round narrative into this Journal where it belongs.
-- Next slice: `_resolve_worktree_id` (27 call sites / 48 monkeypatch
+- Next slice: `_resolve_worktree_id` (27 call sites / 49 monkeypatch
   sites) -- re-run `--progress` first, since this slice's corrected
   baseline may have shifted the ranking.
 - Post-round-4 sync picked up new `origin/dev` commits (including a
@@ -357,3 +358,20 @@ _Pending._
   and `_resolve_worktree_id`'s monkeypatch count moved 48 → 49 (both
   baseline/README numbers above corrected); `_json_output`/`_json_error`
   both still report zero call/monkeypatch sites.
+- **Fifth review round found one more genuine gap, both others
+  confirmed stale** (`__main__.py` root re-export removal and the CI
+  wiring for `test_compat_root_migration.py`, both already fixed in
+  rounds 2 and 4 respectively -- verified against current file content
+  before concluding so): a FOURTH independent patch shape,
+  `unittest.mock.patch.object(<alias>, "<name>", ...)` -- the
+  object-attribute sibling of `patch()`, alias-gated like
+  `monkeypatch.setattr(<alias>, "name", ...)` rather than a literal
+  dotted string. Live in the real repo at `test_resolve_mux.py` (e.g.
+  `patch.object(cli, "_resolve_profile", ...)` and
+  `patch.object(cli, "_resolve_new", ...)`), meaning the tool could have
+  silently reported either name "done" without ever seeing these patch
+  sites. Fixed in both `--name`/`--progress`, with 2 more regression
+  tests (17 total). Corrected `--progress` baseline after re-running
+  against the real repo: 159 distinct monkeypatched names (was 157) and
+  1056 patch-site occurrences (was 1051) -- the +5 patch sites are the
+  previously-invisible real `patch.object` call sites now counted.

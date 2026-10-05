@@ -5,9 +5,10 @@ plugin tree under ``tmp_path`` -- never the real repo -- covering the regex
 edge cases that have already needed fixes once: whole-identifier alias
 matching (not a suffix match on an unrelated longer identifier), indented/
 local root imports, the accessor-call vs. plain-alias-call shapes,
-multi-line ``monkeypatch.setattr``, dotted-string ``unittest.mock.patch``
-targets, and the two "reject vacuous success" guards (an unresolvable
-``--plugin``, an unknown ``--name``).
+multi-line ``monkeypatch.setattr``, dotted-string ``unittest.mock.patch``/
+``monkeypatch.setattr`` targets, ``unittest.mock.patch.object(<alias>,
+"<name>", ...)``, and the two "reject vacuous success" guards (an
+unresolvable ``--plugin``, an unknown ``--name``).
 """
 from __future__ import annotations
 
@@ -216,6 +217,25 @@ def test_find_monkeypatch_sites_detects_dotted_string_setattr(repo: Path):
     assert len(hits) == 1
 
 
+def test_find_monkeypatch_sites_detects_patch_object(repo: Path):
+    """unittest.mock.patch.object(<alias>, "<name>", ...) is a fourth,
+    independent shape -- the object-attribute sibling of patch(), and
+    alias-gated like monkeypatch.setattr(<alias>, "name", ...) rather than
+    a literal dotted string."""
+    _src, tests = _make_plugin(repo)
+    _write(
+        tests / "test_mod.py",
+        "from unittest.mock import patch\n"
+        "from demo_plugin import __main__ as cli\n"
+        "\n"
+        "def test_x():\n"
+        "    with patch.object(cli, \"_json_output\", return_value=None):\n"
+        "        pass\n",
+    )
+    hits = crm.find_monkeypatch_sites("demo-plugin", "_json_output")
+    assert len(hits) == 1
+
+
 # -- --progress aggregate scan honors the same whole-identifier fix -------
 
 def test_cmd_progress_excludes_alias_suffix_false_positive(repo: Path, capsys):
@@ -242,6 +262,23 @@ def test_cmd_progress_counts_dotted_string_setattr(repo: Path, capsys):
         "        \"demo_plugin.__main__._json_output\",\n"
         "        lambda *_: None,\n"
         "    )\n",
+    )
+    rc = crm.cmd_progress("demo-plugin")
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "distinct names monkeypatched on the root module: 1" in out
+
+
+def test_cmd_progress_counts_patch_object(repo: Path, capsys):
+    _src, tests = _make_plugin(repo)
+    _write(
+        tests / "test_mod.py",
+        "from unittest.mock import patch\n"
+        "from demo_plugin import __main__ as cli\n"
+        "\n"
+        "def test_x():\n"
+        "    with patch.object(cli, \"_json_output\", return_value=None):\n"
+        "        pass\n",
     )
     rc = crm.cmd_progress("demo-plugin")
     assert rc == 0
