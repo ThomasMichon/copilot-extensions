@@ -840,6 +840,51 @@ class TestEnsureAgentBridgePlugin:
 
         assert called == {"remediate": False}
 
+    def test_a_plugin_older_than_the_host_bridge_is_updated(self, monkeypatch) -> None:
+        from agent_codespaces import venue_check
+
+        readiness = venue_check.VenueReadiness(
+            copilot_path="/usr/local/bin/copilot", tmux=True, agent_worktrees_state="full",
+            agent_bridge_plugin=True, agent_bridge_plugin_version="0.4.4-dev1",
+        )
+
+        class _FakeManager:
+            async def ensure_connected(self, name, source, forwards):
+                return None
+
+            async def exec_command(self, host, script, timeout=None):
+                return argparse.Namespace(stdout="", exit_code=0, stderr="")
+
+            async def disconnect(self, name):
+                return None
+
+        monkeypatch.setattr("ssh_manager.ConnectionManager", lambda: _FakeManager())
+        monkeypatch.setattr("agent_codespaces.lifecycle.account_for_codespace", lambda name: None)
+        monkeypatch.setattr("agent_codespaces.codespace_config.CodespaceSource",
+                            lambda name, account=None: object())
+        monkeypatch.setattr("venue_copilot.resolve_daemon_port", lambda: 58800)
+        monkeypatch.setattr("venue_copilot.resolve_local_auth_token", lambda: "tok-xyz")
+        monkeypatch.setattr(venue_check, "host_bridge_version",
+                            lambda port=None: "0.9.9.dev1" if port == 58800 else None)
+
+        async def fake_check(exec_command, host, **kwargs):
+            return readiness
+
+        seen = {}
+
+        async def fake_remediate(exec_command, host, readiness, **kwargs):
+            seen.update(kwargs)
+            result = venue_check.RemediationResult()
+            result.succeeded.append("update agent-bridge plugin")
+            return result
+
+        monkeypatch.setattr(venue_check, "check_remote_venue", fake_check)
+        monkeypatch.setattr(venue_check, "remediate_remote_venue", fake_remediate)
+
+        copilot_venue._ensure_agent_bridge_plugin("cs-1")
+
+        assert seen == {"bridge_version": "0.9.9.dev1"}
+
     def test_a_probe_failure_never_raises(self, monkeypatch) -> None:
         """Best-effort: a broken connection during the implicit preflight
         must not prevent the operator from still attempting to connect."""

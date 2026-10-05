@@ -55,6 +55,7 @@ echo "UV=$(command -v uv >/dev/null 2>&1 && echo yes || echo no)"
 echo "APT=$(command -v apt-get >/dev/null 2>&1 && echo yes || echo no)"
 echo "SUDO_NOPASSWD=$(sudo -n true >/dev/null 2>&1 && echo yes || echo no)"
 echo "AGENT_BRIDGE_PLUGIN=$(command -v copilot >/dev/null 2>&1 && copilot plugin list 2>/dev/null | grep -q "agent-bridge@" && echo yes || echo no)"
+echo "AGENT_BRIDGE_PLUGIN_VERSION=$(command -v copilot >/dev/null 2>&1 && copilot plugin list 2>/dev/null | sed -n 's/.*agent-bridge@[^ ]* (v\([^)]*\)).*/\1/p' | head -1)"
 aw=$(command -v agent-worktrees || true)  # marketplace-isolation: allow registry
 if [ -z "$aw" ]; then
   echo "AGENT_WORKTREES_STATE=absent"
@@ -82,6 +83,9 @@ class VenueReadiness:
     apt_available: bool = False
     sudo_nopasswd: bool = False
     agent_bridge_plugin: bool = False
+    #: The venue's installed ``agent-bridge`` plugin version (``copilot plugin
+    #: list``), ``None`` when absent or unreadable.
+    agent_bridge_plugin_version: str | None = None
     agent_worktrees_state: str = "absent"  # absent | lean | full
     agent_worktrees_version: str | None = None
     raw_stdout: str = ""
@@ -133,6 +137,7 @@ class VenueReadiness:
             "apt_available": self.apt_available,
             "sudo_nopasswd": self.sudo_nopasswd,
             "agent_bridge_plugin": self.agent_bridge_plugin,
+            "agent_bridge_plugin_version": self.agent_bridge_plugin_version,
             "agent_worktrees_state": self.agent_worktrees_state,
             "agent_worktrees_version": self.agent_worktrees_version,
             "gaps": self.gaps,
@@ -141,6 +146,41 @@ class VenueReadiness:
 
 def _parse_bool(value: str) -> bool:
     return value.strip().lower() == "yes"
+
+
+def _version_key(version: str) -> tuple[tuple[int, ...], float] | None:
+    """``0.9.9-dev1`` / ``0.9.9.dev1`` / ``v1.2.3`` -> ``((0, 9, 9), 1)``: the
+    release, then its dev number (a release with none sorts after its dev builds).
+    ``None`` when it isn't a version."""
+    import re
+
+    m = re.fullmatch(r"v?(\d+(?:\.\d+)*)(?:[.-]?dev(\d+))?(?:[+-].*)?", version.strip(), re.IGNORECASE)
+    if not m:
+        return None
+    return tuple(int(p) for p in m.group(1).split(".")), (float(m.group(2)) if m.group(2) else float("inf"))
+
+
+def plugin_behind(venue_version: str | None, host_version: str | None) -> bool:
+    """Whether the venue's ``agent-bridge`` plugin is older than the host bridge
+    its sessions register with. Unknown on either side is never "behind": only a
+    version that is provably older triggers an update."""
+    venue = _version_key(venue_version or "")
+    host = _version_key(host_version or "")
+    return venue is not None and host is not None and venue < host
+
+
+def host_bridge_version(daemon_port: int | None = None) -> str | None:
+    """The version the host bridge reports on ``/health`` (its live port when
+    *daemon_port* isn't given); ``None`` when unknown."""
+    try:
+        from venue_copilot import _daemon_health, resolve_daemon_port
+
+        port = daemon_port if daemon_port is not None else resolve_daemon_port()
+        if port is None:
+            return None
+        return str(_daemon_health(port).get("version") or "") or None
+    except Exception:  # noqa: BLE001 -- unknown just means no version-based update
+        return None
 
 
 def parse_probe_output(stdout: str, *, exit_code: int = 0, stderr: str = "") -> VenueReadiness:
@@ -168,6 +208,8 @@ def parse_probe_output(stdout: str, *, exit_code: int = 0, stderr: str = "") -> 
             readiness.sudo_nopasswd = _parse_bool(value)
         elif key == "AGENT_BRIDGE_PLUGIN":
             readiness.agent_bridge_plugin = _parse_bool(value)
+        elif key == "AGENT_BRIDGE_PLUGIN_VERSION":
+            readiness.agent_bridge_plugin_version = value or None
         elif key == "AGENT_WORKTREES_STATE":
             readiness.agent_worktrees_state = value or "absent"
         elif key == "AGENT_WORKTREES_VERSION":
@@ -216,11 +258,13 @@ async def remediate_remote_venue(
     readiness: VenueReadiness,
     *,
     timeout: float = 240.0,
+    bridge_version: str | None = None,
 ) -> RemediationResult:
     """Best-effort, idempotent-safe fixes for the gaps this module can safely
     close without any project-specific context: a missing ``tmux``, an
     ``agent-worktrees`` binstub that exists but never provisioned (or is
-    still lean-staged), and a missing ``agent-bridge`` Copilot plugin.
+    still lean-staged), and a missing ``agent-bridge`` Copilot plugin -- or
+    one older than *bridge_version*, the host bridge its sessions register with.
 
     Never attempts to install the ``copilot`` CLI itself or the
     ``agent-worktrees`` **plugin** (that needs a marketplace registration
@@ -288,6 +332,20 @@ async def remediate_remote_venue(
             result.skipped.append(
                 "install agent-bridge plugin (no copilot CLI to install it into)"
             )
+    elif plugin_behind(readiness.agent_bridge_plugin_version, bridge_version):
+        # Present but stale: an old plugin's own CLI can start a venue-local
+        # daemon over the forwarded host route (fixed since), stranding every
+        # session's registration on it. Installing only when missing never
+        # repairs that, so a venue would keep its first-use version forever.
+        result.attempted.append("update agent-bridge plugin")
+        probe = await exec_command(
+            host,
+            wrap_login_shell("copilot plugin update agent-bridge@copilot-extensions 2>&1"),
+        )
+        if getattr(probe, "exit_code", 1) == 0:
+            result.succeeded.append("update agent-bridge plugin")
+        else:
+            result.failed.append("update agent-bridge plugin")
 
     return result
 

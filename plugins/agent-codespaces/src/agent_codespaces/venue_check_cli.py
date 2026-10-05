@@ -64,9 +64,12 @@ async def cmd_doctor_venue(args: argparse.Namespace) -> int:
             manager.exec_command, args.name, timeout=args.timeout,
         )
         remediation = None
-        if args.fix and readiness.gaps:
+        host_version = venue_check.host_bridge_version() if args.fix else None
+        stale = venue_check.plugin_behind(readiness.agent_bridge_plugin_version, host_version)
+        if args.fix and (readiness.gaps or stale):
             remediation = await venue_check.remediate_remote_venue(
                 manager.exec_command, args.name, readiness, timeout=args.timeout,
+                bridge_version=host_version,
             )
             # Re-probe so the report reflects what remediation actually
             # achieved, not the pre-fix snapshot.

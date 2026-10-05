@@ -200,7 +200,9 @@ def _resolve_anchor_identity(name: str, config) -> str:  # noqa: ANN001
 
 def _ensure_agent_bridge_plugin(name: str) -> None:
     """Implicit CLI-mode preflight: install the ``agent-bridge`` Copilot
-    plugin on the venue if it's missing, and provision the daemon's own
+    plugin on the venue if it's missing (or update it when it's older than the
+    host bridge its sessions register with: a venue otherwise keeps its
+    first-use version for good), and provision the daemon's own
     registration credentials there, all before ever opening the interactive
     connection.
 
@@ -245,6 +247,15 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
             readiness = await venue_check.check_remote_venue(
                 manager.exec_command, name,
             )
+            from venue_copilot import (
+                registration_credentials_script,
+                resolve_daemon_port,
+                resolve_local_auth_token,
+            )
+
+            daemon_port = resolve_daemon_port()
+            host_version = (venue_check.host_bridge_version(daemon_port)
+                            if readiness.agent_bridge_plugin and daemon_port is not None else None)
             if not readiness.agent_bridge_plugin:
                 print(
                     f"[PREP] agent-bridge plugin missing on '{name}' -- "
@@ -265,14 +276,26 @@ def _ensure_agent_bridge_plugin(name: str) -> None:
                         "to retry.",
                         file=sys.stderr,
                     )
+            elif venue_check.plugin_behind(readiness.agent_bridge_plugin_version, host_version):
+                print(
+                    f"[PREP] agent-bridge plugin on '{name}' is "
+                    f"{readiness.agent_bridge_plugin_version}, older than the host's "
+                    f"{host_version} -- updating ...",
+                    file=sys.stderr,
+                )
+                remediation = await venue_check.remediate_remote_venue(
+                    manager.exec_command, name, readiness, bridge_version=host_version,
+                )
+                if "update agent-bridge plugin" in remediation.succeeded:
+                    print("[PREP] agent-bridge plugin updated.", file=sys.stderr)
+                else:
+                    print(
+                        "[PREP] Could not update the agent-bridge plugin -- an old "
+                        "venue CLI can strand this session's registration. Run "
+                        f"`agent-codespaces doctor {name} --fix` to retry.",
+                        file=sys.stderr,
+                    )
 
-            from venue_copilot import (
-                registration_credentials_script,
-                resolve_daemon_port,
-                resolve_local_auth_token,
-            )
-
-            daemon_port = resolve_daemon_port()
             token = resolve_local_auth_token()
             if daemon_port is None or not token:
                 print(
