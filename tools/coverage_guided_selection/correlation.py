@@ -147,7 +147,7 @@ class BaselineFetchError(RuntimeError):
     or validated as a genuine, correctly-correlated baseline document."""
 
 
-def fetch_baseline_asset(repo: str, pointer: dict) -> dict:
+def fetch_baseline_asset(repo: str, pointer: dict, *, timeout_s: float = 300.0) -> dict:
     """Download and parse the **full** baseline document a `pointer`
     references.
 
@@ -157,27 +157,45 @@ def fetch_baseline_asset(repo: str, pointer: dict) -> dict:
     the full baseline itself; this is the one function in the package that
     actually fetches the real coverage map the pointer only ever points at.
 
-    Performs real network I/O via ``gh release download``; raises
+    Performs real network I/O via ``gh release download``, bounded by
+    `timeout_s` (matching `baseline.collect_baseline`'s own convention for
+    bounding a subprocess call -- a stalled `gh` connection must not block
+    the calling CI decision process indefinitely); raises
     `BaselineFetchError` on any failure -- a missing `gh` executable (an
-    `OSError` `subprocess` itself would raise), a missing release/asset, a
-    non-UTF-8 or malformed-JSON payload, or a syntactically-valid-but-wrong
-    document (not a dict, a non-mapping/absent `coverage`/`tests`, a
-    `generated_at` that isn't a parseable ISO8601 timestamp, or whose own
+    `OSError` `subprocess` itself would raise), a timed-out download, a
+    non-string/empty pointer field (which would otherwise reach
+    `subprocess`/`Path` and raise a raw `TypeError`), a missing
+    release/asset, a non-UTF-8 or malformed-JSON payload, or a
+    syntactically-valid-but-wrong document (not a dict, a
+    non-mapping/absent `coverage`/`tests`, a `generated_at` that isn't a
+    timezone-aware, parseable ISO8601 timestamp -- a naive one would be
+    interpreted in whichever timezone the *consuming* host happens to run
+    in, making coverage age environment-dependent -- or whose own
     `plugin`/`measured_commit` don't match the pointer that named it -- the
     correlation invariant a pointer and its asset must agree on) -- rather
     than returning a partial/empty/mismatched baseline a caller could
     mistake for "nothing covered" or silently select against the wrong
     generation.
+
+    Note: this only proves the asset agrees with the *pointer that named
+    it*. It does NOT prove that pointer was itself resolved for the
+    plugin a caller actually asked about -- `decide()` is responsible for
+    that outer check (comparing the resolved pointer's own `plugin` against
+    the plugin it resolved `resolve_nearest_baseline` for) before ever
+    calling this function.
     """
     release_tag = pointer.get("release_tag")
     asset = pointer.get("asset")
     pointer_plugin = pointer.get("plugin")
     pointer_measured_commit = pointer.get("measured_commit")
-    if not release_tag or not asset or not pointer_plugin or not pointer_measured_commit:
-        raise BaselineFetchError(
-            "pointer is missing one or more required fields "
-            f"(release_tag/asset/plugin/measured_commit): {pointer!r}"
-        )
+    for name, value in (
+        ("release_tag", release_tag), ("asset", asset),
+        ("plugin", pointer_plugin), ("measured_commit", pointer_measured_commit),
+    ):
+        if not isinstance(value, str) or not value:
+            raise BaselineFetchError(
+                f"pointer's {name!r} must be a non-empty string, got {value!r}: {pointer!r}"
+            )
     try:
         with tempfile.TemporaryDirectory() as tmp:
             out = subprocess.run(
@@ -185,7 +203,7 @@ def fetch_baseline_asset(repo: str, pointer: dict) -> dict:
                     "gh", "release", "download", release_tag,
                     "--repo", repo, "--pattern", asset, "--dir", tmp, "--clobber",
                 ],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, check=False, timeout=timeout_s,
             )
             if out.returncode != 0:
                 raise BaselineFetchError(
@@ -199,6 +217,10 @@ def fetch_baseline_asset(repo: str, pointer: dict) -> dict:
                 raise BaselineFetchError(
                     f"downloaded asset at {asset_path} could not be read as UTF-8 text: {error}"
                 ) from error
+    except subprocess.TimeoutExpired as error:
+        raise BaselineFetchError(
+            f"gh release download {release_tag} --pattern {asset} timed out after {timeout_s}s"
+        ) from error
     except OSError as error:
         # subprocess.run itself raises OSError (e.g. FileNotFoundError) when
         # `gh` isn't on PATH at all -- must not bypass BaselineFetchError
@@ -223,12 +245,18 @@ def fetch_baseline_asset(repo: str, pointer: dict) -> dict:
             f"downloaded asset {asset}'s generated_at is missing or not a string: {generated_at!r}"
         )
     try:
-        datetime.fromisoformat(generated_at)
+        parsed_generated_at = datetime.fromisoformat(generated_at)
     except ValueError as error:
         raise BaselineFetchError(
             f"downloaded asset {asset}'s generated_at is not a valid ISO8601 timestamp: "
             f"{generated_at!r} ({error})"
         ) from error
+    if parsed_generated_at.tzinfo is None or parsed_generated_at.utcoffset() is None:
+        raise BaselineFetchError(
+            f"downloaded asset {asset}'s generated_at is not timezone-aware: {generated_at!r} "
+            "-- a naive timestamp would be interpreted in whichever timezone the consuming "
+            "host happens to run in"
+        )
 
     for field_name in ("coverage", "tests"):
         value = baseline.get(field_name)

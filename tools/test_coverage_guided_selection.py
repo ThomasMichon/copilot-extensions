@@ -394,6 +394,22 @@ class TestFetchBaselineAsset:
                 "owner/repo", {"release_tag": "coverage-baselines-abc", "asset": "agent-x.json"}
             )
 
+    def test_rejects_a_pointer_with_non_string_fields(self) -> None:
+        # Regression: a syntactically-truthy but non-string field (e.g. a
+        # numeric release_tag, a list-valued asset) would otherwise reach
+        # subprocess.run/Path and raise a raw TypeError, bypassing
+        # BaselineFetchError entirely.
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset(
+                "owner/repo",
+                {"release_tag": 12345, "asset": "agent-x.json", "plugin": "agent-x", "measured_commit": "abc"},
+            )
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset(
+                "owner/repo",
+                {"release_tag": "t", "asset": ["agent-x.json"], "plugin": "agent-x", "measured_commit": "abc"},
+            )
+
     def test_downloads_and_parses_the_asset(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(self._VALID_PAYLOAD))
 
@@ -423,6 +439,18 @@ class TestFetchBaselineAsset:
 
         with pytest.raises(correlation.BaselineFetchError):
             correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_on_a_timed_out_download(self, monkeypatch) -> None:
+        # Regression: a stalled gh connection must not block the calling
+        # CI decision process indefinitely -- subprocess.TimeoutExpired
+        # must convert to BaselineFetchError like every other failure mode.
+        def _raise_timeout(args, **kwargs):
+            raise correlation.subprocess.TimeoutExpired(cmd=args, timeout=kwargs.get("timeout", 1))
+
+        monkeypatch.setattr(correlation.subprocess, "run", _raise_timeout)
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER, timeout_s=1.0)
 
     def test_raises_on_malformed_json(self, tmp_path, monkeypatch) -> None:
         def _fake_run(args, **kwargs):
@@ -487,6 +515,19 @@ class TestFetchBaselineAsset:
         # non-string) generated_at must be rejected here, not crash
         # downstream in debt.assess_debt with a confusing error.
         payload = {**self._VALID_PAYLOAD, "generated_at": "not-a-timestamp"}
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_when_generated_at_is_timezone_naive(self, monkeypatch) -> None:
+        # Regression: datetime.fromisoformat also accepts a naive timestamp
+        # (e.g. a bare date, or a time with no offset) even though the
+        # baseline contract writes an offset-aware UTC timestamp -- a naive
+        # value would later be interpreted in whichever timezone the
+        # CONSUMING host happens to run in, making coverage age
+        # environment-dependent.
+        payload = {**self._VALID_PAYLOAD, "generated_at": "2026-01-01T00:00:00"}  # no offset
         monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
 
         with pytest.raises(correlation.BaselineFetchError):
@@ -1586,9 +1627,12 @@ class TestDecide:
         "coverage": {"invalidated-away": "marker"}, "tests": {},
     }
 
-    def _resolved(self, measured_commit="m1", baseline_commit="b1"):
+    def _resolved(self, measured_commit="m1", baseline_commit="b1", plugin="plugin"):
         return ar.ResolvedBaseline(
-            baseline={"measured_commit": measured_commit, "release_tag": "t", "asset": "a.json"},
+            baseline={
+                "measured_commit": measured_commit, "release_tag": "t", "asset": "a.json",
+                "plugin": plugin,
+            },
             baseline_commit=baseline_commit,
         )
 
@@ -1608,6 +1652,29 @@ class TestDecide:
         # None (not ()): no curated evidence exists at all -- the caller
         # must run its own full/default suite, never interpret this as
         # "run nothing".
+        assert result.selected_tests is None
+
+    def test_pointer_plugin_mismatch_falls_back_without_fetching(self, tmp_path, monkeypatch):
+        # Regression: fetch_baseline_asset only proves the downloaded asset
+        # agrees with the POINTER -- it can't know which plugin the caller
+        # actually asked about. A misplaced/corrupt pointer resolved for
+        # plugin B while the caller asked about plugin A must never be
+        # fetched/trusted, even if B's own asset is internally consistent.
+        monkeypatch.setattr(
+            decide_mod, "resolve_nearest_baseline",
+            lambda *a, **k: self._resolved(plugin="other-plugin"),
+        )
+
+        def _boom(*_a, **_k):
+            raise AssertionError("must not fetch an asset for a mismatched pointer")
+
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", _boom)
+
+        result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {})
+
+        assert result.mode == "fallback"
+        assert result.reason.startswith(decide_mod.POINTER_PLUGIN_MISMATCH_PREFIX)
+        assert result.baseline_generation == "m1"
         assert result.selected_tests is None
 
     def test_fetch_failure_falls_back_with_the_error_recorded(self, tmp_path, monkeypatch):

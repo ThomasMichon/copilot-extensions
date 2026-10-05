@@ -54,6 +54,11 @@ except ModuleNotFoundError:
 #: Reason string for the one case with no coverage evidence to reason
 #: about at all -- never silently selected as "nothing to run".
 NO_BASELINE_AVAILABLE = "no_baseline_available"
+#: Reason for a resolved pointer whose own `plugin` doesn't match the
+#: plugin it was resolved for -- a misplaced/corrupt pointer file, never
+#: silently trusted even though its asset might itself be internally
+#: consistent.
+POINTER_PLUGIN_MISMATCH_PREFIX = "pointer_plugin_mismatch: "
 #: Reason prefix when a resolved baseline's own asset can't be fetched.
 FETCH_FAILED_PREFIX = "fetch_failed: "
 #: Reason prefix for the coverage-debt trigger (whole-selection fallback).
@@ -86,8 +91,12 @@ class SelectionDecision:
     baseline_generation: str | None
     #: Which `main` commit the pointer was read from, or `None`.
     baseline_commit_on_main: str | None
-    #: `debt.DebtAssessment.as_dict()`, or `None` if no baseline resolved
+    #: `debt.DebtAssessment.as_dict()`, or `None` on any pre-assessment
+    #: fallback path -- no baseline ever resolved, a resolved pointer's own
+    #: `plugin` didn't match, or its Release asset couldn't be fetched
     #: (debt is meaningless without a baseline to measure staleness of).
+    #: `debt is None` therefore does NOT by itself mean "no baseline
+    #: resolved" -- check `mode`/`reason` for which case applies.
     debt: dict | None = None
     selection_fallback_reasons: tuple[dict, ...] = field(default_factory=tuple)
     fallback_set: dict | None = None
@@ -138,6 +147,25 @@ def decide(
             reason=NO_BASELINE_AVAILABLE,
             baseline_generation=None,
             baseline_commit_on_main=None,
+        )
+
+    # `fetch_baseline_asset` only proves the DOWNLOADED asset agrees with
+    # the pointer that named it -- it has no way to know which plugin this
+    # caller actually asked about. A misplaced/corrupt pointer whose own
+    # `plugin` field disagrees with the plugin `resolve_nearest_baseline`
+    # was asked to resolve for must never be silently trusted just because
+    # its own asset happens to be internally self-consistent.
+    pointer_plugin = resolved.baseline.get("plugin")
+    if pointer_plugin != plugin:
+        return SelectionDecision(
+            mode="fallback",
+            selected_tests=None,
+            reason=(
+                f"{POINTER_PLUGIN_MISMATCH_PREFIX}resolved pointer's plugin "
+                f"{pointer_plugin!r} does not match requested plugin {plugin!r}"
+            ),
+            baseline_generation=resolved.baseline.get("measured_commit"),
+            baseline_commit_on_main=resolved.baseline_commit,
         )
 
     try:

@@ -391,7 +391,7 @@ baseline at all, a failed asset fetch, exceeded coverage-debt, or any
 per-file/per-line selection trigger (`no_baseline_entry`/
 `line_not_attributed`).
 
-19 new tests (`TestFetchBaselineAsset`, `TestDecide`) -- `decide()`'s own
+23 new tests (`TestFetchBaselineAsset`, `TestDecide`) -- `decide()`'s own
 tests monkeypatch its collaborators directly (each already has its own
 dedicated test class) rather than re-exercising them through real git/
 network I/O.
@@ -418,6 +418,26 @@ would have shrunk the fallback universe precisely on the riskiest files.
 `decide.py`'s own module docstring numbered steps now match its actual
 control flow (debt is assessed before remap/selection, and a debt-
 exceeded decision skips remap entirely).
+
+**Second round of review fixes (same PR):** `decide()` now also validates
+a resolved pointer's own `plugin` field matches the plugin it was resolved
+for -- `fetch_baseline_asset` can only prove its downloaded asset agrees
+with the *pointer*, never that the pointer itself was the one the caller
+actually asked about, so a misplaced/corrupt pointer whose own asset is
+internally self-consistent could otherwise still select the wrong
+plugin's tests. `fetch_baseline_asset` also now: requires every pointer
+field to be a non-empty *string* (not just truthy, closing a path where a
+numeric/list-valued field reached `subprocess`/`Path` and raised a raw
+`TypeError` instead of `BaselineFetchError`); bounds its `gh release
+download` call with a `timeout_s` (default 300s, matching
+`baseline.collect_baseline`'s own convention) and converts
+`subprocess.TimeoutExpired` to `BaselineFetchError`; and requires
+`generated_at` to be *timezone-aware*, not just ISO8601-parseable (a naive
+timestamp would be interpreted in whichever timezone the consuming host
+happens to run in, making coverage age environment-dependent).
+`SelectionDecision.debt`'s own docstring now documents both pre-assessment
+fallback paths (no baseline resolved, pointer mismatch, or fetch failed)
+that leave it `None`, not only the first.
 
 **Also noted, not caused by this work:** the operator flagged that
 `main`'s history was force-rewritten (via `git filter-repo`) to purge
