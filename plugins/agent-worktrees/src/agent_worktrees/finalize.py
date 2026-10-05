@@ -1151,12 +1151,7 @@ def _pr_finalize_precondition(
     ):
         return True, None
     if _pr_is_merged(record, repo):
-        if not fopg.content_exceeds_merged_head_any(record, content_ref, upstream, cwd=cwd):
-            return True, None
-        # The recorded merged head may be stale (a push made outside this tool):
-        # re-read it from the provider once before refusing.
-        if fopg.refresh_merged_head(record.pr, repo) and not fopg.content_exceeds_merged_head_any(
-                record, content_ref, upstream, cwd=cwd):
+        if not fopg.merged_content_exceeds(record, content_ref, upstream, cwd=cwd, repo=repo):
             return True, None
         return False, fopg.merged_pr_block_message(record, content_ref, upstream, cwd=cwd)
 

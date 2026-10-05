@@ -362,6 +362,19 @@ def refresh_merged_head(pr, repo) -> bool:
     return fresh != before[0].strip()
 
 
+def merged_content_exceeds(
+    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *, cwd: str, repo,
+) -> bool:
+    """:func:`content_exceeds_merged_head_any` for a merged PR, re-reading a
+    stale recorded merged head from the provider once (see
+    :func:`refresh_merged_head`) before concluding the worktree carries more."""
+    if not content_exceeds_merged_head_any(record, content_ref, upstream, cwd=cwd):
+        return False
+    if refresh_merged_head(record.pr, repo):
+        return content_exceeds_merged_head_any(record, content_ref, upstream, cwd=cwd)
+    return True
+
+
 def repair_other_tracked_pr_heads(record: tracking.WorktreeRecord, repo) -> None:
     """Best-effort, authority-validated repair of every OTHER tracked PR's
     missing ``head_sha`` -- not just ``record.pr`` (the active entry).

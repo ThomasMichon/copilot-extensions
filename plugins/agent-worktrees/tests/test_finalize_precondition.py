@@ -1568,7 +1568,7 @@ def _stale_head_case(env):
 
 def test_a_stale_recorded_merged_head_is_refreshed_before_refusing(refspec_worktree, monkeypatch):
     env = refspec_worktree
-    record, repo, stale, real = _stale_head_case(env)
+    record, repo, _stale, real = _stale_head_case(env)
     fake = _HeadProvider(real)
     _patch_head_provider(monkeypatch, fake)
     ok, err = finalize._pr_finalize_precondition(record, repo, str(env.clone), str(env.clone))
@@ -1576,10 +1576,13 @@ def test_a_stale_recorded_merged_head_is_refreshed_before_refusing(refspec_workt
     assert record.pr.head_sha == real and fake.calls == 1
 
 
-def test_a_stale_head_still_blocks_when_the_provider_cannot_confirm_it(refspec_worktree, monkeypatch):
+def test_a_stale_head_still_blocks_when_the_provider_cannot_confirm_it(
+    refspec_worktree, monkeypatch,
+):
     env = refspec_worktree
     record, repo, stale, real = _stale_head_case(env)
-    for fake in (_HeadProvider(boom=True), _HeadProvider(stale), _HeadProvider(real, merged=False)):
+    fakes = (_HeadProvider(boom=True), _HeadProvider(stale), _HeadProvider(real, merged=False))
+    for fake in fakes:
         _patch_head_provider(monkeypatch, fake)
         record.pr.head_sha, record.pr.state = stale, "merged"
         ok, err = finalize._pr_finalize_precondition(record, repo, str(env.clone), str(env.clone))
@@ -1589,7 +1592,7 @@ def test_a_stale_head_still_blocks_when_the_provider_cannot_confirm_it(refspec_w
 
 def test_work_beyond_the_refreshed_head_still_blocks(refspec_worktree, monkeypatch):
     env = refspec_worktree
-    record, repo, stale, real = _stale_head_case(env)
+    record, repo, _stale, real = _stale_head_case(env)
     _commit(env.clone, "after-merge.txt", "work after the merge\n")
     _patch_head_provider(monkeypatch, _HeadProvider(real))
     ok, err = finalize._pr_finalize_precondition(record, repo, str(env.clone), str(env.clone))
@@ -1597,7 +1600,8 @@ def test_work_beyond_the_refreshed_head_still_blocks(refspec_worktree, monkeypat
 
 
 def test_a_confirmed_merge_takes_the_providers_head_over_a_recorded_one(monkeypatch):
-    pr = SimpleNamespace(state="open", head_sha="a" * 40, number=7, repo="o/r", provider="gitea", url="")
+    pr = SimpleNamespace(state="open", head_sha="a" * 40, number=7, repo="o/r",
+                         provider="gitea", url="")
     repo = SimpleNamespace(pr=SimpleNamespace(provider="gitea", api_base=""))
     _patch_head_provider(monkeypatch, _HeadProvider("b" * 40))
     assert finalize_open_pr_gate._pr_entry_merge_status(pr, repo) is True
