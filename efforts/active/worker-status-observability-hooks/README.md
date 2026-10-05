@@ -186,20 +186,23 @@ capture policy; read as "beats" / "want" / "chosen.")
       and `tracking.enrich_task()`'s `embodiment.{turn_state,liveness,
       updated_at}` overlay (`task_lifecycle_cli.py:107-119`,
       `tracking.py:682-723`). A third, new signal would conflict rather
-      than help. **Verified (partial) during planning:** `enrich_task`
-      only attaches the `embodiment` overlay when `tracking.
-      resolve_live_session()` finds a live session for the task's
-      worktree — every `show` observed this session lacked an
-      `embodiment` key at all, suggesting that resolution silently misses
-      the same local-body session kind Phase 1 fixes for `peek` (unverified
-      — `resolve_live_session` reaches the same local `agent-bridge
-      sessions --json` call Phase 1 touches, but the exact failure point
-      wasn't traced during planning). This phase is now: audit why the
-      existing signals didn't answer the observed case, fix their
-      freshness/presentation (likely resolved as a side effect of Phase 1,
-      or needs its own small fix in `resolve_live_session`), and only add
-      new surface area if the audit finds the existing fields are
-      genuinely insufficient once working — never a parallel third signal.
+      than help.
+- [ ] **Root cause verified (review, source-confirmed):** `show`
+      (`_cmd_show` in `task_lifecycle_cli.py`) calls only `enrich_task()`
+      — the interactive/worktree path, which shells `agent-bridge
+      live-sessions resolve` via `resolve_live_session()`. A **separate**
+      helper, `tracking.enrich_local_body_tasks()` (`tracking.py:399-435`),
+      already exists specifically for local-body sessions: it joins a
+      task to its live `agent-bridge sessions` row through the task's own
+      `spawned` reservation's `local-body:<session-id>` handle — exactly
+      the case `show` was missing. It's currently only wired into the bulk
+      `list` enrichment path, never into single-task `show`. Phase 5 is:
+      make `_cmd_show` also call `enrich_local_body_tasks()` (adapted for
+      a single task + that task's own reservation, not the whole board
+      batch) so `embodiment` is populated for a local-body task the same
+      way `list` already gets it — reuse the existing helper, never
+      duplicate its join logic or touch `resolve_live_session` (that path
+      is correct for its own, different session kind).
 
 ## Validation Plan
 
@@ -231,11 +234,11 @@ evidence only — never a substitute for an automated test.
 - [ ] **Phase 4:** automated test confirming `agent-dispatch list
       --awaiting-steer` / `--has-excludes` returns exactly the expected
       filtered set against a fixture queue.
-- [ ] **Phase 5:** automated test confirming the audited fix (if any) makes
-      `embodiment`/`activity` correctly reflect liveness for a local-body
-      task; if the audit finds the existing signals already work once
-      Phase 1 lands, this becomes a regression test proving exactly that
-      (no new signal needed) rather than a feature test for one.
+- [ ] **Phase 5:** automated test confirming `agent-dispatch show` on a
+      local-body-embodied task returns a populated `embodiment` overlay
+      (reusing `enrich_local_body_tasks()`), matching what `list` already
+      produces for the same task — a single-task/bulk parity test, not a
+      new liveness mechanism.
 
 ## Proposal
 
@@ -318,4 +321,18 @@ _Pending — begin with Phase 1 implementation exploration._
   already-resolved round — the bot appears to echo an unresolved finding
   ID across passes rather than re-checking the PR body each time; no
   action needed (confirmed live in the PR body).
+
+### 2026-10-05 — Plan PR #5264 fourth review round (COMMENTED, 1 new Low + 1 stale Low)
+- Low, verified by direct source read: Phase 5's prior "audit
+  resolve_live_session" framing targeted the wrong seam. A dedicated
+  helper, `tracking.enrich_local_body_tasks()` (`tracking.py:399-435`),
+  already exists for exactly this join (task -> `spawned` reservation's
+  `local-body:<session-id>` handle -> `agent-bridge sessions` row) and is
+  already used by `list`'s bulk enrichment — `show`'s `_cmd_show` simply
+  never calls it, calling only the interactive-session path
+  (`enrich_task`/`resolve_live_session`) instead. Rewrote Phase 5 to wire
+  `enrich_local_body_tasks()` into `show` (adapted for one task), not
+  touch `resolve_live_session` at all.
+- Low (stale): Documentation impact, same bot-echo pattern as before.
+- All four real findings from the third round confirmed resolved.
 
