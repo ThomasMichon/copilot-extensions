@@ -8,6 +8,19 @@
 - **Umbrella issue:** [#5257](https://github.com/ThomasMichon/copilot-extensions/issues/5257)
   (agent-dispatch/agent-bridge: deeper worker-status CLI hooks)
 - **Sub-issues:** _none yet_
+
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| `tmichon-cloud2` (operator machine) | Sole implementer; drives all five phases | copilot-extensions worktree `tmichon-cloud2-win-20261002-150732-9532`, per-phase PRs off `dev` |
+
+## Coordination
+
+Solo effort, single participant, no multi-agent branch topology. The
+participant above opens and drives every phase's PR directly off `dev`
+(no shared feature branch, no delegate hand-off).
+
 - **Vision:** mostly **vision-closing** —
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   already states the intent Phase 1-2 close against: §*Features*/
@@ -56,7 +69,10 @@ and worked around, repeatedly, across that session:
   `agent-dispatch reservations list --task <id>` for the `worktree`, then
   `agent-worktrees worktree-status-bundle --worktree <id> --json` for
   `facts.lineage.value.head_session` — a 3-command chain before the
-  transcript could even be located.
+  transcript could even be located. **Correction from review:** agent-bridge
+  already owns exactly this resolution server-side as
+  `GET /api/v1/dispatch-tasks/{task_id}/session`; the gap is that no CLI
+  command wires a caller to it — not that the resolution logic is missing.
 - Three tasks sat **silently** dead-ended for days: self-excluded from the
   only machine running the fleet (`excludes: ["machine:tmichon-cloud2"]`),
   left over from a misdiagnosed "permanent" ACP host limitation that the
@@ -117,11 +133,20 @@ capture policy; read as "beats" / "want" / "chosen.")
       know which kind it got).
 
 ### Phase 2 — task_id → transcript resolution, one command
-- [ ] Add task_id as a resolvable input to `peek` (agent-bridge) or a new
-      `agent-dispatch peek <task_id>` wrapper (whichever owning repo/plugin
-      is the right seam — decide during implementation) that performs the
-      `show` → (fallback: `reservations list --task` → `worktree` →
-      `worktree-status-bundle` → `head_session`) chain internally.
+- [ ] **Correction from review (PR #5264):** do NOT reconstruct the
+      show→reservations→worktree-status-bundle resolution chain in the CLI.
+      agent-bridge already owns this exact resolution as
+      `GET /api/v1/dispatch-tasks/{task_id}/session`
+      (`plugins/agent-bridge/src/agent_bridge/routes/dispatch_tasks.py`) —
+      it ranks the task's current owner then attachment history
+      newest-first, tries live/cold-store/live-registration resolution for
+      each candidate, then falls back to the target worktree's own latest
+      known session. This is `resolve-by-any-origin-reference` already
+      realized for agent-dispatch task ids specifically.
+- [ ] Wire a `peek <task_id>` path (CLI flag or a thin `agent-dispatch peek`
+      wrapper — decide the right seam during implementation) to call this
+      existing endpoint for resolution, then render through the same path
+      Phase 1 fixes for local-body sessions. No new resolution logic.
 - [ ] Depends on Phase 1 (the resolved session is usually local-body).
 
 ### Phase 3 — `doctor` flags queued-with-excludes
@@ -142,11 +167,15 @@ capture policy; read as "beats" / "want" / "chosen.")
 
 ## Validation Plan
 
-- [ ] **Phase 1/2:** `agent-bridge peek <session_id>` against a real
+- [ ] **Phase 1:** `agent-bridge peek <session_id>` against a real
       `local-body:*` session spawned by the live `file-picker-repro` queue
       (this effort's own grounding context) returns a rendered transcript,
       not the `has no acp_session_id yet` error. Also re-run against an
       existing ACP-registered session to confirm no regression.
+- [ ] **Phase 2:** `peek <task_id>` against a live `file-picker-repro` task
+      resolves through `GET /api/v1/dispatch-tasks/{task_id}/session`
+      (confirm via the route's own logs/tests, not a reimplemented chain)
+      and renders the same transcript Phase 1 validates directly.
 - [ ] **Phase 3:** a task manually given a stale `excludes` entry is
       reported by a default (`--repo`/`--label`, no `--task`) `doctor` sweep.
 - [ ] **Phase 4:** `agent-dispatch list --awaiting-steer` /
@@ -170,3 +199,16 @@ _Pending — begin with Phase 1 implementation exploration._
 - Confirmed via vision search that Phase 1/2 are vision-closing (the
   agent-bridge vision already states the exact intent); Phase 3-5 don't
   appear to need a vision edit, flagged for re-check once design firms up.
+
+### 2026-10-04 — Plan PR #5264 review (COMMENTED, Medium + 2 Low)
+- Medium: Phase 2 would have reconstructed a resolution chain
+  (`GET /api/v1/dispatch-tasks/{task_id}/session`) agent-bridge already
+  owns and already ranks owner/attachment-history correctly. Revised Phase
+  2 to wire into that existing endpoint instead of reimplementing it.
+- Low: added the required `## Participants`/`## Coordination` sections
+  (this repo's addendum keeps the canonical template set even for a solo
+  effort, overriding the generic skill template's "omit when solo" note).
+- Low: added the required Documentation impact statement to the PR
+  description itself (not the effort file — confirmed via
+  `CONTRIBUTING.md`'s own requirement that it lives in the PR body).
+
