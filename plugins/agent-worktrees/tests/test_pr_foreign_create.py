@@ -400,3 +400,49 @@ class TestCreateForeignPrFromBranch:
         )
         scope, _token = fake_provider.calls[0]
         assert "shimmering-quartz" in scope.body
+
+    def test_raw_marker_uses_the_records_own_machine_and_latest_live_session(
+        self, monkeypatch, _tracking_setup,
+    ):
+        """The raw (non-codename) marker must identify the CALLING worktree's
+        own record (machine + latest live session), matching the local
+        path's selection -- never this process's own config.machine, and
+        never parent_session (the session that originally spawned the
+        worktree, which may not be the one driving this PR)."""
+        tracking_d, wid = _tracking_setup
+        record = tracking.load_record(tracking_d / f"{wid}.yaml")
+        record.machine = "record-own-machine"
+        record.parent_session = "spawning-session-should-be-ignored"
+        record.sessions = [
+            tracking.SessionEntry(
+                session_id="old-ended-session", started_at="2026-01-01T00:00:00",
+                ended_at="2026-01-01T01:00:00",
+            ),
+            tracking.SessionEntry(
+                session_id="latest-live-session", started_at="2026-01-02T00:00:00",
+                ended_at=None,
+            ),
+        ]
+        tracking.save_record(record)
+
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: _foreign_resolution(source_attribution=True),
+        )
+        fake_provider = _FakeProvider(
+            result=_FakePull(url="https://example/pr/10", number=10),
+        )
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
+
+        import dataclasses as _dc
+        config = _dc.replace(_config(), machine="process-own-machine-should-be-ignored")
+        pr_foreign_create.create_foreign_pr_from_branch(
+            wid, config, target_repo="owner/other-repo", from_branch="topic",
+            title="x", body="hello",
+        )
+        scope, _token = fake_provider.calls[0]
+        assert "machine=record-own-machine" in scope.body
+        assert "session=latest-live-session" in scope.body
+        assert "spawning-session-should-be-ignored" not in scope.body
+        assert "process-own-machine-should-be-ignored" not in scope.body

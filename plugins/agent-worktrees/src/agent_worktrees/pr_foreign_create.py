@@ -109,8 +109,19 @@ def create_foreign_pr_from_branch(
     rec_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
     pre_record = tracking.load_record(rec_path) if rec_path.exists() else None
 
-    machine = getattr(config, "machine", "") or ""
-    session = getattr(pre_record, "parent_session", "") if pre_record else ""
+    # Same caller-identity selection `create_pr`'s own local path uses for
+    # the raw (non-codename) marker: `machine` from the tracking record
+    # itself (never `config.machine`, which is this PROCESS's own machine
+    # and can differ from the record's if, e.g., config was resolved
+    # cross-machine), and `session` as the latest LIVE session (or, absent
+    # one, the latest recorded) from `record.sessions` -- never
+    # `parent_session`, which identifies whatever session originally
+    # SPAWNED the worktree and may not be the one driving this PR at all.
+    machine = getattr(pre_record, "machine", "") if pre_record else ""
+    session = ""
+    if pre_record and pre_record.sessions:
+        live = [s for s in pre_record.sessions if not s.ended_at]
+        session = (live[-1] if live else pre_record.sessions[-1]).session_id
     codename = getattr(pre_record, "codename", "") if pre_record else ""
 
     # Same tri-state resolution `create_pr`'s own local path uses:

@@ -262,6 +262,32 @@ def test_create_degrades_a_claim_journal_spawn_error_to_a_warning(monkeypatch, c
     assert "not found on PATH" in payload["claim_warning"]
 
 
+def test_create_refuses_when_claimant_resolution_itself_spawn_fails(monkeypatch, capsys):
+    """``_resolve_claimant_worktree_id`` must catch OSError too (not just
+    RuntimeError) -- a vanished/unexecutable resolved binary must degrade to
+    the normal no-claimant refusal, never an unhandled crash."""
+    def _raising_run_agent_worktrees_raw(argv):
+        raise OSError("executable disappeared")
+
+    monkeypatch.setattr(
+        "agent_pull_requests.__main__._run_agent_worktrees_raw",
+        _raising_run_agent_worktrees_raw,
+    )
+    called = {"create": False}
+    monkeypatch.setattr(
+        "agent_pull_requests.__main__._github_create",
+        lambda *a, **k: called.__setitem__("create", True) or {},
+    )
+
+    rc = main([
+        "create", "--repo", "octo/example", "--head", "feature/x",
+        "--title", "Add x", "--json",
+    ])
+
+    assert rc == 2
+    assert called["create"] is False
+
+
 def test_build_parser_merge_defaults_to_squash():
     args = build_parser().parse_args(["merge", "--repo", "octo/example", "--number", "5"])
 

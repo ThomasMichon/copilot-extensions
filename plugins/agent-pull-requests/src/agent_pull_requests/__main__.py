@@ -211,7 +211,7 @@ def _resolve_claimant_worktree_id() -> str | None:
     separate package, so it shells the equivalent query instead)."""
     try:
         proc = _run_agent_worktrees_raw(["get", "worktree-id"])
-    except RuntimeError:
+    except (RuntimeError, OSError):
         return None
     if proc.returncode != 0:
         return None
