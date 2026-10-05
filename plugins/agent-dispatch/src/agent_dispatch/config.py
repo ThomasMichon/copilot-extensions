@@ -211,7 +211,7 @@ def resolve_control_token(
         return direct
     command = os.environ.get(command_var)
     if command:
-        return _run_token_command(command)
+        return run_token_command(command)
     return None
 
 
@@ -593,7 +593,7 @@ def shared_token() -> str | None:
         return direct
     command = os.environ.get("AGENT_DISPATCH_SHARED_TOKEN_COMMAND")
     if command:
-        return _run_token_command(command)
+        return run_token_command(command)
     return None
 
 
@@ -604,7 +604,7 @@ def shared_control_token() -> str | None:
         return direct
     command = os.environ.get("AGENT_DISPATCH_SHARED_CONTROL_TOKEN_COMMAND")
     if command:
-        return _run_token_command(command)
+        return run_token_command(command)
     return None
 
 
@@ -617,13 +617,13 @@ def producer_capability() -> str | None:
     """
     command = os.environ.get("AGENT_DISPATCH_PRODUCER_CAPABILITY_COMMAND")
     if command:
-        fetched = _run_token_command(command)
+        fetched = run_token_command(command)
         if fetched:
             return fetched
     return os.environ.get("AGENT_DISPATCH_PRODUCER_CAPABILITY") or None
 
 
-def _run_token_command(command: str) -> str | None:
+def run_token_command(command: str) -> str | None:
     """Run a token-fetch command and return its stdout (stripped), or ``None``.
 
     ``command`` is parsed with :func:`shlex.split` and run **without a shell**

@@ -71,6 +71,7 @@ that pattern to this repository.
 | [Mux Companion Manual Cutover Diagnostics](active/mux-companion-manual-cutover-diagnostics/README.md) | Active | #4369 |
 | [Coverage-Guided CI Test Selection](active/coverage-guided-ci/README.md) | Draft | #4453 |
 | [Launch-Time Model/Effort/Context Preference Flags](active/launch-time-model-preference-flags/README.md) | Done; pending archive | #4776 |
+| [Picker New-Session Prompt + Registered-Pivot Composer](active/picker-new-session-prompt-and-composer/README.md) | Done; pending archive | See effort |
 
 
 ## Local conventions
