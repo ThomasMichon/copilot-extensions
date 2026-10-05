@@ -356,6 +356,72 @@ class TestRangeEndpoint:
         assert cur.json()["last_acked_id"] == 0
 
 
+def _seed_numbered(app, count: int):
+    return _seed_session(app, events=[
+        {"id": i, "event": "agent_message", "data": {"text": str(i)}}
+        for i in range(1, count + 1)
+    ])
+
+
+class TestEventsBeforePaging:
+    """GET /events?before=N&limit=M -- backward JSON paging.
+
+    Each test starts a full app, so cases are grouped to keep the suite fast.
+    """
+
+    def test_pages_are_ascending_and_report_has_more(self, client, app) -> None:
+        _seed_numbered(app, 10)
+        url = "/api/v1/sessions/sess-1/events"
+        resp = client.get(url, params={"before": 8, "limit": 3})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["session_id"] == "sess-1"
+        assert [e["id"] for e in body["events"]] == [5, 6, 7]
+        assert body["events"][0]["event"] == "agent_message"
+        assert body["events"][0]["data"] == {"text": "5"}
+        assert body["has_more"] is True
+        body = client.get(url, params={"before": 4, "limit": 3}).json()
+        assert [e["id"] for e in body["events"]] == [1, 2, 3]
+        assert body["has_more"] is False
+        # Chaining before=<events[0].id> walks back to the start.
+        seen: list[int] = []
+        before = 11
+        while True:
+            body = client.get(url, params={"before": before, "limit": 3}).json()
+            seen = [e["id"] for e in body["events"]] + seen
+            if not body["has_more"]:
+                break
+            before = body["events"][0]["id"]
+        assert seen == list(range(1, 11))
+
+    def test_default_limit_empty_page_and_cursor_untouched(self, client, app) -> None:
+        _seed_numbered(app, 3)
+        url = "/api/v1/sessions/sess-1/events"
+        body = client.get(url, params={"before": 1}).json()
+        assert body == {"session_id": "sess-1", "events": [], "has_more": False}
+        body = client.get(url, params={"before": 100}).json()
+        assert [e["id"] for e in body["events"]] == [1, 2, 3]
+        cur = client.get("/api/v1/sessions/sess-1/cursor")
+        assert cur.json()["last_acked_id"] == 0
+
+    def test_rejects_invalid_requests(self, client, app) -> None:
+        _seed_numbered(app, 3)
+        url = "/api/v1/sessions/sess-1/events"
+        for params in (
+            # before is not a stream: stream-only parameters are refused.
+            {"before": 3, "after": 1},
+            {"before": 3, "controlled": "true"},
+            {"before": 3, "transient": "true"},
+            # bounds
+            {"before": 0},
+            {"before": 3, "limit": 0},
+            {"before": 3, "limit": 1001},
+        ):
+            assert client.get(url, params=params).status_code == 422, params
+        resp = client.get("/api/v1/sessions/nope/events", params={"before": 3})
+        assert resp.status_code == 404
+
+
 class TestStatusEndpoint:
     """GET /api/v1/sessions/{id}/status -- compact dispatch status (#46.1)."""
 

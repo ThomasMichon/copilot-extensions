@@ -40,6 +40,7 @@ Copilot CLI sessions (multiple)
 | SSH carrier | `carrier.py` + vendored `ssh-manager` | One bounded, reconnecting framed stdio carrier per normalized SSH connection identity |
 | ACP agent | `acp_agent.py` | Upstream ACP agent interface (stdio mode) |
 | ACP client | `acp_client.py` | Downstream ACP client (subprocess comms) |
+| Sub-agent tracking | `acp_subagents.py` | Background-task detection and sub-agent attribution from Copilot's raw session-event feed |
 | Events | `events.py` | SSE event log with durable IDs; content-free session, conversation, and tool-call telemetry reduction. Owned and represented sources are labeled; represented turn completion supplies its terminal idle boundary. |
 | Config | `config.py` | Config loading, topology management |
 | Client | `client.py` | HTTP client for CLI commands |
@@ -171,7 +172,7 @@ POST   /api/v1/sessions                  # Start new session
 GET    /api/v1/sessions                  # List sessions
 GET    /api/v1/sessions/{id}             # Get session info
 POST   /api/v1/sessions/{id}/turns       # Submit prompt
-GET    /api/v1/sessions/{id}/events      # SSE event stream (resume from cursor)
+GET    /api/v1/sessions/{id}/events      # SSE event stream (resume from cursor); ?before=N&limit=M -> JSON backward page
 GET    /api/v1/sessions/{id}/events/range # Random-access read by event id range
 GET    /api/v1/sessions/{id}/cursor      # Read caller's delivery cursor
 POST   /api/v1/sessions/{id}/cursor      # Ack delivery (advance cursor)
@@ -221,6 +222,45 @@ ungraceful client death never skips output. `/events/range` is the only way to
 re-read already-consumed content and never moves the cursor. See
 [Streaming & the delivery cursor](../README.md#streaming--the-delivery-cursor)
 in the README for the consumer model.
+
+**Backward paging** (protocol version 21,
+`EVENTS_BEFORE_PAGING_PROTOCOL_VERSION`): `GET .../events?before=<id>&limit=<n>`
+is not a stream. It returns one JSON page `{session_id, events, has_more}` with
+the newest `limit` (default 200, max 1000) events whose id is `< before`, in
+ascending id order; page further back with `before=<events[0].id>` until
+`has_more` is false. It never moves a cursor and rejects (422) `after`,
+`controlled`, or `transient`. Gate on the protocol version: an older daemon
+ignores `before` and opens the SSE stream instead.
+
+**Sub-agent attribution.** On `initialize` / `session/new` / `session/load` the
+bridge asks the Copilot ACP agent to mirror a short list of its raw session
+events (`_meta["github.com/copilot"].events`, delivered as
+`github.com/copilot/sessionEvent` notifications) and uses them to attribute
+work done by sub-agents (Copilot's `task` tool). Clients rendering a session
+timeline can use the resulting events:
+
+- `subagent_started` / `subagent_completed` / `subagent_failed` --
+  `agent_id`, `parent_tool_call_id` (the launching `task` tool call),
+  `agent_name`, `agent_display_name`, `agent_description`, `model`; completed
+  adds `duration_ms`, `total_tool_calls`, `total_tokens`; failed adds `error`,
+  `duration_ms`.
+- `tool_call_start` / `tool_call_update` gain `agent_id` and
+  `parent_tool_call_id` when the call was made by a sub-agent. Main-agent tool
+  calls keep their exact previous shape (no keys added).
+- `subagent_message` / `subagent_thought` -- `{agent_id, parent_tool_call_id,
+  chunk_count}`. Copilot streams every agent's text as untagged
+  `agent_message` / `agent_thought` chunks, so attribution is retroactive: this
+  event says the last `chunk_count` `agent_message` (or `agent_thought`) events
+  before it belong to `agent_id`. Text is never recorded twice.
+
+Attribution is deliberately conservative and best-effort. A text run is
+attributed only when the agent's completed raw message equals, exactly, the
+concatenation of every chunk streamed since the previous message boundary; when
+several agents stream concurrently and interleave, or the agent drops a mirrored
+event under backpressure, the run is simply left unattributed (never
+mislabelled as another agent's). An agent that ignores the request sends no raw
+events and the bridge records exactly what it did before. Set
+`AGENT_BRIDGE_SUBAGENT_EVENTS=0` on the daemon to stop requesting the feed.
 
 The `/remote` endpoints are authenticated local proxy surfaces. Clients name a
 topology host and exact hosting-Bridge session, never SSH arguments. Each remote
