@@ -30,9 +30,15 @@ import subprocess
 import sys
 import time
 import urllib.parse
+from contextlib import contextmanager
 from pathlib import Path
 
 import ctypes
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - exercised only on Windows
+    fcntl = None
 
 try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
     # 3.10 support floor -- mirrors uv_editable_ref's own identical fallback.
@@ -468,33 +474,92 @@ def _provenance_key_dir() -> Path:
 _PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS = 10.0
 
 
-def _process_is_alive(pid: int) -> bool:
-    """Best-effort liveness check for a PID recorded by another process
-    in `_provenance_key`'s own lockfile -- used only to decide whether a
-    stale lock left behind by a now-dead process is safe to reclaim, not
-    for anything security-sensitive (a reused PID could in principle
-    produce a false positive here; the worst outcome is simply waiting
-    out the normal timeout as if the check had never run, never anything
-    worse than today's unconditional wait)."""
-    if sys.platform == "win32":
-        # `os.kill(pid, 0)` has no POSIX-style "signal 0" liveness-probe
-        # meaning on Windows -- query the OS's own process table instead.
-        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        handle = ctypes.windll.kernel32.OpenProcess(
-            PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+@contextmanager
+def _provenance_key_lock():
+    """An OS-BACKED, genuinely exclusive lock serializing first-run
+    `_provenance_key` creation across concurrent callers -- a named
+    Windows mutex (`CreateMutexW`) or a POSIX `flock` advisory lock,
+    never a plain `O_CREAT | O_EXCL` lockfile plus a manual liveness/
+    staleness check.
+
+    A manual scheme (read a recorded holder PID, check whether it's
+    still alive, unlink-and-retry if not) is NOT atomic: two waiters can
+    both observe the same dead PID, both unlink the stale lock, and the
+    SECOND of them can then also unlink the FIRST's newly created, very
+    much live replacement purely by pathname -- a real two-caller
+    reproduction against exactly that design converged on two DIFFERENT
+    published keys instead of one, defeating the entire point of this
+    lock. An OS-backed primitive has no such window: the OS itself owns
+    exclusivity and releases it automatically the instant the holding
+    process exits for ANY reason, including a crash, so there is no
+    separate "is the old holder still alive" question to answer or race
+    to get wrong.
+
+    Bounded by `_PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS`; raises
+    `ArtifactBuildError` if the lock cannot be acquired within it."""
+    lock_path = _provenance_key_dir() / "provenance-key.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32" or fcntl is None:
+        # A session-local named mutex, keyed off this machine's fixed
+        # provenance-key directory so every caller on this machine names
+        # the SAME mutex -- `CreateMutexW` both creates and opens an
+        # existing mutex of the same name, and the OS releases it
+        # automatically if the owning process terminates without an
+        # explicit `ReleaseMutex` (e.g. a crash). The `fcntl is None`
+        # half of this condition only matters off Windows, on a platform
+        # whose Python build lacks `fcntl` entirely -- ctypes' own
+        # `windll` access below only actually works on a genuine Windows
+        # OS either way, independent of what `sys.platform` reports.
+        mutex_name = (
+            "Local\\copilot-extensions-provenance-key-"
+            + hashlib.sha256(str(lock_path).encode("utf-8")).hexdigest()[:32]
         )
+        handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
         if not handle:
-            return False
-        ctypes.windll.kernel32.CloseHandle(handle)
-        return True
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # Exists, just owned by someone else -- still alive.
-        return True
-    return True
+            raise ArtifactBuildError(
+                "could not create the provenance-key OS mutex -- refusing "
+                "to proceed without a verified, agreed-upon key"
+            )
+        wait_result = ctypes.windll.kernel32.WaitForSingleObject(
+            handle, int(_PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS * 1000)
+        )
+        WAIT_OBJECT_0 = 0
+        WAIT_ABANDONED = 0x80
+        if wait_result not in (WAIT_OBJECT_0, WAIT_ABANDONED):
+            ctypes.windll.kernel32.CloseHandle(handle)
+            raise ArtifactBuildError(
+                f"{lock_path}: timed out waiting for another process to "
+                "finish publishing the provenance key -- refusing to "
+                "proceed without a verified, agreed-upon key"
+            )
+        try:
+            yield
+        finally:
+            ctypes.windll.kernel32.ReleaseMutex(handle)
+            ctypes.windll.kernel32.CloseHandle(handle)
+    else:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
+        deadline = time.monotonic() + _PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS
+        try:
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.monotonic() > deadline:
+                        raise ArtifactBuildError(
+                            f"{lock_path}: timed out waiting for another "
+                            "process to finish publishing the provenance "
+                            "key -- refusing to proceed without a "
+                            "verified, agreed-upon key"
+                        )
+                    time.sleep(0.05)
+            try:
+                yield
+            finally:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 def _provenance_key() -> bytes:
@@ -512,18 +577,13 @@ def _provenance_key() -> bytes:
     Generated once per machine and reused -- not per call -- so the same
     (index, python) identity keeps comparing equal across separate
     invocations, which `resolve_toolchain_lock`'s reuse/provenance-match
-    contract depends on. A sibling LOCKFILE (``<path>.lock``, created via
-    `O_CREAT | O_EXCL`) serializes first-run creation across concurrent
+    contract depends on. `_provenance_key_lock` (an OS-backed, genuinely
+    exclusive lock) serializes first-run creation across concurrent
     callers, so AT MOST ONE caller per machine ever actually creates the
     key; every other caller, racing or not, reads back that exact same
-    one. Bounded by a generous timeout so a crashed lock-holder cannot
-    wedge every future caller forever -- but a bounded wait alone would
-    still fail forever on every call AFTER that timeout, since the stale
-    lock file itself never goes away on its own: the lock file records
-    its creator's PID, and a waiter whose own wait would otherwise time
-    out instead checks whether that PID is still a live process
-    (`_process_is_alive`) and, if not, removes the stale lock and retries
-    immediately rather than failing closed on a lock nobody still holds."""
+    one -- see that function's own docstring for why this must be a real
+    OS primitive rather than a manual lockfile-plus-liveness-check
+    scheme."""
     path = _provenance_key_dir() / "provenance-key"
     try:
         existing = path.read_bytes()
@@ -532,40 +592,7 @@ def _provenance_key() -> bytes:
     if len(existing) == 32:
         return existing
     path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = path.with_name(f"{path.name}.lock")
-    deadline = time.monotonic() + _PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS
-    lock_fd = None
-    while lock_fd is None:
-        try:
-            lock_fd = os.open(
-                str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600
-            )
-        except FileExistsError:
-            # Before waiting out (or failing on) the timeout, check
-            # whether the lock's own recorded creator is even still
-            # running -- a lock left behind by a crashed process is safe
-            # to reclaim immediately, rather than every future caller
-            # waiting out the same timeout forever afterward.
-            try:
-                holder_pid = int(lock_path.read_text(encoding="utf-8").strip())
-            except (OSError, ValueError):
-                holder_pid = None
-            if holder_pid is not None and not _process_is_alive(holder_pid):
-                try:
-                    lock_path.unlink()
-                except OSError:
-                    pass
-                continue
-            if time.monotonic() > deadline:
-                raise ArtifactBuildError(
-                    f"{lock_path}: timed out waiting for another process "
-                    "to finish publishing the provenance key -- refusing "
-                    "to proceed without a verified, agreed-upon key"
-                )
-            time.sleep(0.05)
-    try:
-        os.write(lock_fd, str(os.getpid()).encode("ascii"))
-        os.close(lock_fd)
+    with _provenance_key_lock():
         # Re-check NOW, under the lock: another caller may have already
         # published while this one was waiting to acquire it.
         try:
@@ -607,8 +634,6 @@ def _provenance_key() -> bytes:
             tmp_path.unlink(missing_ok=True)
             raise
         return key
-    finally:
-        lock_path.unlink(missing_ok=True)
 
 
 def _opaque_index_identity(url: str) -> str:

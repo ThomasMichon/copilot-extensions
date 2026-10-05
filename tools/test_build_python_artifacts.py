@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import subprocess
 import sys
 import zipfile
@@ -12,7 +11,7 @@ import pytest
 
 #: Canned `whoami /user /fo csv /nh` identity used by every test that
 #: exercises `_restrict_file_to_owner`'s Windows ACL hardening --
-#: `_current_token_identity` (round 24) resolves the current process
+#: `_current_token_identity` resolves the current process
 #: token's account name/SID via this OS command, never via the
 #: `USERDOMAIN`/`USERNAME` environment variables.
 _FAKE_TOKEN_ACCOUNT = "REDMOND\\svc"
@@ -74,19 +73,19 @@ _REAL_CURRENT_TOKEN_IDENTITY = gft._current_token_identity
 #: existence-check logic (Windows-only; see that test's own skip guard).
 _REAL_TRUSTED_SYSTEM32_TOOL = gft._trusted_system32_tool
 #: Captured at import time, BEFORE the autouse fixture below patches it
-#: to a no-op on every test -- the one genuine `_verify_restricted_acl`
-#: (round 26), for the dedicated ACL-verification tests that construct
+#: to a no-op on every test -- the one genuine `_verify_restricted_acl`,
+#: for the dedicated ACL-verification tests that construct
 #: their own believable `icacls` transcript and need the REAL parsing/
 #: comparison logic exercised against it.
 _REAL_VERIFY_RESTRICTED_ACL = gft._verify_restricted_acl
 #: INERT fake stand-ins for the trusted absolute paths
 #: `_restrict_file_to_owner`/`_current_token_identity` resolve via
-#: `_trusted_system32_tool` (round 25) -- used only as comparison/match
+#: `_trusted_system32_tool` -- used only as comparison/match
 #: literals in `fake_run`s below, NEVER by calling the real resolver at
-#: import time (round 26: that real call raised on a non-Windows CI
-#: runner -- `C:\Windows\System32` does not exist there -- which broke
+#: import time: that real call raises on a non-Windows CI runner --
+#: `C:\Windows\System32` does not exist there -- which would break
 #: COLLECTING this entire test module on the required Ubuntu CI job, not
-#: merely failing a Windows-specific test). The autouse fixture below
+#: merely failing a Windows-specific test. The autouse fixture below
 #: patches `_trusted_system32_tool` itself to return these same literals
 #: on every platform, so production code never touches the real
 #: filesystem either, except in the one test that explicitly restores
@@ -137,9 +136,10 @@ def _isolated_provenance_key_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         gft, "_trusted_system32_tool",
         lambda name: {"icacls": _ICACLS_PATH, "whoami": _WHOAMI_PATH}[name],
     )
-    # `_verify_restricted_acl` (round 26) is stubbed to a no-op success by
+    # `_verify_restricted_acl` is stubbed to a no-op success by
     # default too: requiring it to parse a BELIEVABLE `icacls` transcript
-    # (now that round 26 closed the vacuous-empty-output pass) would
+    # (its own verification requires both expected principals to be
+    # positively observed, never a vacuous empty-output pass) would
     # otherwise force every test that merely exercises
     # `_restrict_file_to_owner`/`_provenance_key`/`resolve_toolchain_lock`
     # for real -- not just the handful of tests actually ABOUT ACL
@@ -1579,7 +1579,7 @@ def test_resolve_interpreter_identity_queries_uv_python_find(
     sentinel_env = {"SENTINEL": "1"}
     identity = btl._resolve_interpreter_identity("python3.12", sentinel_env)
 
-    # Regression (round 21): must probe with `--no-config` plus the
+    # Regression: must probe with `--no-config` plus the
     # CALLER's own already-sanitized env -- the SAME config context
     # `uv venv` itself uses -- never its own, separately-resolved one;
     # otherwise the probe and `uv venv` could silently disagree about
@@ -1594,7 +1594,7 @@ def test_resolve_interpreter_identity_queries_uv_python_find(
 def test_resolve_interpreter_identity_fails_closed_on_failure(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    # Regression (round 21): a failed probe (nonzero exit, empty output,
+    # Regression: a failed probe (nonzero exit, empty output,
     # or `uv` itself missing) must raise, never fall back to the raw
     # selector text. A text fallback is NOT fail-closed: if the probe
     # fails for two calls whose selector text is identical but whose
@@ -1824,7 +1824,7 @@ def test_opaque_index_identity_is_not_reversible_to_the_raw_url():
 def test_opaque_index_identity_is_keyed_not_a_bare_hash(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 20): a bare `hashlib.sha256(url)` digest is an
+    # Regression: a bare `hashlib.sha256(url)` digest is an
     # offline-crackable verifier for a low-entropy embedded credential --
     # most of a governed-feed URL is predictable, so an attacker holding
     # only the persisted digest could brute-force a guessable password
@@ -1869,7 +1869,7 @@ def test_provenance_key_persists_and_is_reused_across_calls(
 def test_provenance_key_hardens_acl_on_windows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 22): the key is just as credential-bearing as the
+    # Regression: the key is just as credential-bearing as the
     # index-config temp file it protects -- 0o600 mode bits alone are not
     # an owner-only ACL on Windows, so it must go through the same
     # `_restrict_file_to_owner` hardening.
@@ -1898,7 +1898,7 @@ def test_provenance_key_hardens_acl_on_windows(
 def test_provenance_key_concurrent_callers_converge_on_one_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 22/23): two concurrent first-run callers must
+    # Regression: two concurrent first-run callers must
     # both end up with the EXACT SAME key, never each publishing their
     # own and silently disagreeing. A real-thread test (not a mocked
     # race) exercises the actual lockfile serialization: at most one
@@ -1928,22 +1928,54 @@ def test_provenance_key_concurrent_callers_converge_on_one_key(
     assert len(results[0]) == 32
 
 
-def test_provenance_key_times_out_if_lock_held_by_crashed_process(
+def test_provenance_key_stale_lock_file_left_by_crashed_process_does_not_block(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression: a crashed lock-holder (lockfile left behind, never
-    # released) must not wedge every future caller forever -- it should
-    # fail loud (this effort's own fail-closed contract) after a bounded
-    # wait, never hang indefinitely.
+    # Regression: a lock FILE left behind on disk by a crashed process
+    # must not block a new caller -- `_provenance_key_lock` is OS-backed
+    # (a named Windows mutex / POSIX flock), which the OS itself releases
+    # the instant the owning process terminates for ANY reason, so a
+    # leftover file with no process actually still holding its OS-level
+    # lock is harmless; nothing needs to inspect or remove it.
     key_dir = tmp_path / "key-dir"
     monkeypatch.setattr(gft, "_provenance_key_dir", lambda: key_dir)
-    monkeypatch.setattr(gft, "_PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS", 0.2)
-    monkeypatch.setattr(gft.time, "sleep", lambda _seconds: None)  # fast retry loop
     key_dir.mkdir(parents=True)
-    (key_dir / "provenance-key.lock").write_bytes(b"")  # simulate a held lock
+    (key_dir / "provenance-key.lock").write_bytes(b"leftover from a crashed process")
 
-    with pytest.raises(bpa.ArtifactBuildError, match="timed out"):
-        gft._provenance_key()
+    key = gft._provenance_key()
+    assert len(key) == 32
+
+
+def test_provenance_key_times_out_when_lock_genuinely_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # A GENUINELY held lock (a real thread/process still inside the
+    # critical section, not merely a leftover file) must still cause a
+    # bounded, fail-closed timeout rather than hanging indefinitely.
+    import threading
+
+    key_dir = tmp_path / "key-dir"
+    monkeypatch.setattr(gft, "_provenance_key_dir", lambda: key_dir)
+    monkeypatch.setattr(gft, "_PROVENANCE_KEY_LOCK_TIMEOUT_SECONDS", 0.3)
+    key_dir.mkdir(parents=True)
+
+    holder_ready = threading.Event()
+    release_holder = threading.Event()
+
+    def hold_lock():
+        with gft._provenance_key_lock():
+            holder_ready.set()
+            release_holder.wait(timeout=5)
+
+    holder_thread = threading.Thread(target=hold_lock)
+    holder_thread.start()
+    try:
+        assert holder_ready.wait(timeout=5)
+        with pytest.raises(bpa.ArtifactBuildError, match="timed out"):
+            gft._provenance_key()
+    finally:
+        release_holder.set()
+        holder_thread.join(timeout=5)
 
 
 def test_credential_free_index_identity_strips_userinfo_only():
@@ -2159,7 +2191,7 @@ def test_governed_feed_configured_via_user_uv_toml_default_index_posix(
     )
     env = {"XDG_CONFIG_HOME": str(tmp_path), _TRUST_VAR: "example.internal"}
     assert bpa._governed_feed_configured(env=env)
-    # Regression (round 19): a named `[[index]]` entry's own `name` must
+    # Regression: a named `[[index]]` entry's own `name` must
     # survive through both `_effective_default_index_url` and
     # `_validated_trusted_index_url` -- a caller authenticating a named
     # index (`UV_INDEX_<NAME>_USERNAME`/`PASSWORD`) cannot recover the
@@ -2209,7 +2241,7 @@ def test_effective_uv_toml_candidates_posix_includes_system_paths(
     # Regression: a system-level uv.toml must also be discovered --
     # matching this repo's own install.sh precedent (_ensure_uv_index),
     # not just the user-level path. `uv` itself resolves system config to
-    # AT MOST ONE file (round 26: its own first-EXISTING XDG entry, else
+    # AT MOST ONE file (its own first-EXISTING XDG entry, else
     # `/etc/uv/uv.toml`), never every theoretical candidate.
     #
     # Compared via `.resolve()` below (not plain `==`/`in`): on THIS
@@ -2237,7 +2269,7 @@ def test_effective_uv_toml_candidates_posix_includes_system_paths(
 def test_effective_uv_toml_candidates_posix_honors_xdg_config_dirs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
-    # Regression (round 24, refined round 26): a SET `XDG_CONFIG_DIRS`
+    # Regression: a SET `XDG_CONFIG_DIRS`
     # (colon-separated, in listed order) must be consulted instead of the
     # hardcoded `/etc/xdg` default -- matching uv's own
     # `locate_system_config_xdg`/`system_config_file`
@@ -2276,7 +2308,7 @@ def test_effective_uv_toml_candidates_posix_xdg_config_dirs_ignores_empty_entrie
 def test_effective_default_index_url_honors_first_existing_xdg_config_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 24): with multiple `XDG_CONFIG_DIRS` entries, the
+    # Regression: with multiple `XDG_CONFIG_DIRS` entries, the
     # FIRST one that actually exists is used -- a later entry (or
     # `/etc/uv/uv.toml`) must never be consulted once an earlier one is
     # found.
@@ -2296,7 +2328,7 @@ def test_effective_default_index_url_honors_first_existing_xdg_config_dir(
 def test_effective_default_index_url_does_not_fall_through_past_chosen_system_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 26): once the system tier's first EXISTING file
+    # Regression: once the system tier's first EXISTING file
     # is chosen, a DIFFERENT (lower-priority) system file must never be
     # consulted even if the chosen one simply has no index configured --
     # `uv` itself never falls through within the system tier this way;
@@ -2630,7 +2662,7 @@ def test_governed_feed_project_pyproject_without_tool_uv_table_is_ignored(
 ):
     # A pyproject.toml with no [tool.uv] table at all carries no uv
     # config -- must not be mistaken for an empty-but-present index.
-    # Regression (round 24): since this gate no longer stops at such a
+    # Regression: since this gate no longer stops at such a
     # file, it keeps walking upward past `project_dir` -- a blocking,
     # index-free `uv.toml` at `tmp_path` itself stops that walk before it
     # can reach a REAL ambient uv.toml further up this machine's actual
@@ -2648,7 +2680,7 @@ def test_governed_feed_project_pyproject_without_tool_uv_table_is_ignored(
 def test_project_uv_toml_candidates_continues_past_pyproject_without_tool_uv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 24): `uv` itself ignores a `pyproject.toml` with
+    # Regression: `uv` itself ignores a `pyproject.toml` with
     # no `[tool.uv]` table and keeps searching parent directories -- this
     # must never be returned as a candidate, so a child/leaf package's
     # own plain `pyproject.toml` cannot shadow a REAL parent project's
@@ -2667,7 +2699,7 @@ def test_project_uv_toml_candidates_continues_past_pyproject_without_tool_uv(
 def test_project_uv_toml_candidates_stops_at_malformed_pyproject(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 25): a malformed/unreadable `pyproject.toml`
+    # Regression: a malformed/unreadable `pyproject.toml`
     # must STOP the walk (returned as a candidate anyway), never be
     # skipped the way a validly-parsed-but-`[tool.uv]`-less one is --
     # `uv` itself ERRORS on a malformed project config rather than
@@ -2865,7 +2897,7 @@ def test_resolve_toolchain_lock_defers_to_winner(
 def test_resolve_toolchain_lock_different_identity_race_redirects_to_alternate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 20): a rename failure caused by a DIFFERENT
+    # Regression: a rename failure caused by a DIFFERENT
     # identity winning the race must NOT fail closed -- two concurrent
     # callers validating DIFFERENT indexes can both observe an absent
     # destination before either publishes. This call's own already-
@@ -2963,7 +2995,7 @@ def test_resolve_toolchain_lock_fails_closed_on_mismatch_at_alternate_slot(
 def test_resolve_toolchain_lock_rechecks_occupancy_after_interpreter_resolution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 25): the occupied-by-other-identity check must
+    # Regression: the occupied-by-other-identity check must
     # happen as the LAST thing before the reuse/build decision -- AFTER
     # interpreter-identity resolution (which can itself take real time,
     # e.g. shelling out to `uv python find`), never before it. A
@@ -3120,7 +3152,7 @@ def test_resolve_toolchain_lock_uses_unique_staging_dirs_per_call(
 def test_resolve_toolchain_lock_pins_install_via_sanitized_config_not_argv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 19): the validated index URL must never appear in
+    # Regression: the validated index URL must never appear in
     # the `uv pip install` subprocess's own argv (visible in process
     # listings). Instead it is written to a minimal, sanitized temp uv
     # config file pointed to via `UV_CONFIG_FILE` -- EXCLUSIVE in uv's own
@@ -3192,7 +3224,7 @@ def test_resolve_toolchain_lock_pins_install_via_sanitized_config_not_argv(
 def test_resolve_toolchain_lock_pins_named_index_and_preserves_credential_env(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 19): a NAMED `[[index]]` entry's `name` must be
+    # Regression: a NAMED `[[index]]` entry's `name` must be
     # written into the sanitized temp config too, so a
     # `UV_INDEX_<NAME>_USERNAME`/`PASSWORD`-authenticated index can still
     # authenticate -- and those credential env vars must themselves keep
@@ -3356,7 +3388,7 @@ def test_resolve_toolchain_lock_strips_uv_insecure_host(
         assert "UV_INSECURE_HOST" not in env
 
 
-# --- round 21: shared strip helper + final-build credential stripping ----
+# --- shared strip helper + final-build credential stripping ----
 
 
 def test_strip_package_source_env_vars_keeps_credentials_by_default():
@@ -3393,7 +3425,7 @@ def test_strip_package_source_env_vars_with_strip_credentials():
 def test_build_wheel_strips_index_credentials_with_toolchain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 21): `--no-build-isolation` means this build needs
+    # Regression: `--no-build-isolation` means this build needs
     # NO index access at all -- yet the build BACKEND executes arbitrary
     # code from the source tree, which would otherwise still observe an
     # ambient credentialed index URL or named-index credential env var.
@@ -3463,7 +3495,7 @@ def test_build_wheel_keeps_index_credentials_without_toolchain(
     assert seen_envs[0].get("UV_INDEX_GOVERNED_USERNAME") == "svc-account"
 
 
-# --- round 21: Windows ACL hardening for the credential-bearing config ---
+# --- Windows ACL hardening for the credential-bearing config ---
 
 
 def test_restrict_file_to_owner_is_noop_on_posix(
@@ -3513,7 +3545,7 @@ def test_restrict_file_to_owner_invokes_icacls_on_windows(
     assert f"*{_FAKE_TOKEN_SID}:(OI)(CI)F" in grant_cmd
     assert f"*{gft._SYSTEM_ACCOUNT_SID}:(OI)(CI)F" in grant_cmd
     assert remove_cmd[:3] == [_ICACLS_PATH, str(target), "/remove:g"]
-    # Regression (round 25): a directory (e.g. the staging venv dir)
+    # Regression: a directory (e.g. the staging venv dir)
     # inherits `OWNER RIGHTS` by default on this repo's own machines --
     # must be stripped alongside the other broad, well-known principals.
     assert "*S-1-3-4" in remove_cmd
@@ -3523,7 +3555,7 @@ def test_restrict_file_to_owner_invokes_icacls_on_windows(
 def test_restrict_file_to_owner_ignores_forged_environment_variables(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 24): `USERDOMAIN`/`USERNAME` are ordinary,
+    # Regression: `USERDOMAIN`/`USERNAME` are ordinary,
     # caller-controlled process environment, not an authenticated
     # property of the process token -- a forged value here must NOT be
     # granted/verified against; only the identity resolved via
@@ -3562,7 +3594,7 @@ def test_restrict_file_to_owner_fails_closed_when_icacls_fails(
 def test_restrict_file_to_owner_fails_closed_when_identity_cannot_be_resolved(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    # Regression (round 24): a credential-bearing file must never be
+    # Regression: a credential-bearing file must never be
     # ACL'd against an identity this process could not itself confirm --
     # if `_current_token_identity` cannot resolve one (e.g. `whoami`
     # itself failed), `_restrict_file_to_owner` must fail closed too.
@@ -3579,7 +3611,7 @@ def test_restrict_file_to_owner_fails_closed_when_identity_cannot_be_resolved(
 def test_restrict_file_to_owner_rejects_similarly_named_principal(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    # Regression (round 23): the final verification must compare the
+    # Regression: the final verification must compare the
     # EXACT, normalized principal name, never a substring -- an icacls
     # query listing `REDMOND\svc-backup` must NOT be accepted just
     # because it CONTAINS the real owner `REDMOND\svc` as a substring.
@@ -3609,7 +3641,7 @@ def test_restrict_file_to_owner_rejects_similarly_named_principal(
 def test_restrict_file_to_owner_rejects_principal_containing_word_system(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    # Regression (round 23): a principal merely CONTAINING the substring
+    # Regression: a principal merely CONTAINING the substring
     # "system" (e.g. a local account literally named that) must not be
     # mistaken for `NT AUTHORITY\SYSTEM` by a loose substring check.
     monkeypatch.setattr(btl.sys, "platform", "win32")
@@ -3636,7 +3668,7 @@ def test_restrict_file_to_owner_rejects_principal_containing_word_system(
 def test_verify_restricted_acl_fails_closed_on_empty_output(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    # Regression (round 26): empty or unparseable `icacls` output must
+    # Regression: empty or unparseable `icacls` output must
     # NOT vacuously pass verification just because nothing UNEXPECTED was
     # found in it -- both expected principals must actually be OBSERVED.
     target = tmp_path / "secret.toml"
@@ -3742,7 +3774,7 @@ def test_current_token_identity_fails_closed_on_implausible_sid(
 def test_current_token_identity_invokes_whoami_by_trusted_absolute_path(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    # Regression (round 25): invoking `whoami` by a bare name does not
+    # Regression: invoking `whoami` by a bare name does not
     # authenticate the executable -- Windows resolves it through the
     # current directory/`PATH`, where a substituted `whoami.exe` could
     # return an attacker-chosen identity. Must always invoke the trusted
@@ -3759,6 +3791,7 @@ def test_current_token_identity_invokes_whoami_by_trusted_absolute_path(
     assert seen_cmds[0][0] == _WHOAMI_PATH
 
 
+@pytest.mark.windows_only
 @pytest.mark.skipif(sys.platform != "win32", reason="requires a real Windows System32")
 def test_trusted_system32_tool_resolves_absolute_path():
     # Exercises the REAL resolver (the autouse fixture fakes it for every
@@ -3781,11 +3814,12 @@ def test_trusted_system32_tool_fails_closed_when_missing(
         _REAL_TRUSTED_SYSTEM32_TOOL("whoami")
 
 
+@pytest.mark.windows_only
 @pytest.mark.skipif(sys.platform != "win32", reason="requires a real Windows System32")
 def test_trusted_system32_tool_ignores_forged_system_root(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
-    # Regression (round 27): `SystemRoot` is itself caller-controlled
+    # Regression: `SystemRoot` is itself caller-controlled
     # process environment -- an attacker-forged value pointing at a
     # directory with substituted executables must NOT be consulted at
     # all; the real resolver uses the `GetSystemDirectoryW` OS API
@@ -3799,6 +3833,7 @@ def test_trusted_system32_tool_ignores_forged_system_root(
     assert Path(icacls).is_file()
 
 
+@pytest.mark.windows_only
 @pytest.mark.skipif(sys.platform != "win32", reason="requires real Windows OS APIs")
 def test_well_known_sid_display_name_resolves_system_account():
     # Exercises the real `LookupAccountSidW`/`ConvertStringSidToSidW`
@@ -3807,44 +3842,10 @@ def test_well_known_sid_display_name_resolves_system_account():
     assert name.lower().endswith("system")
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="requires real Windows OS APIs")
-def test_process_is_alive_true_for_current_process():
-    assert gft._process_is_alive(os.getpid()) is True
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="requires real Windows OS APIs")
-def test_process_is_alive_false_for_implausible_pid():
-    # PID 0 is reserved (the System Idle Process); an ordinary caller can
-    # never legitimately hold a lock under that PID.
-    assert gft._process_is_alive(999_999_999) is False
-
-
-def test_provenance_key_reclaims_stale_lock_from_dead_process(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    # Regression (round 27): a lockfile left behind by a CRASHED lock
-    # holder (one that created the lock but never removed it) must be
-    # reclaimed as soon as that holder is observed to be dead, not only
-    # after waiting out the full timeout -- and not fail forever on every
-    # subsequent call after that.
-    monkeypatch.setattr(gft, "_provenance_key_dir", lambda: tmp_path / "key-dir")
-    key_dir = tmp_path / "key-dir"
-    key_dir.mkdir(parents=True)
-    stale_lock = key_dir / "provenance-key.lock"
-    # A PID essentially guaranteed not to correspond to a real, currently
-    # running process.
-    stale_lock.write_text("999999999", encoding="utf-8")
-    key1 = gft._provenance_key()
-    key2 = gft._provenance_key()
-    assert key1 == key2
-    assert len(key1) == 32
-    assert not stale_lock.exists()
-
-
 def test_resolve_toolchain_lock_hardens_staging_dir_before_index_config_exists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 21, restructured round 25): the sanitized temp
+    # Regression: the sanitized temp
     # index-config file must be protected from the moment it exists.
     # Round 25 moved it INSIDE the staging venv directory and instead
     # hardens THAT DIRECTORY's own ACL immediately after creation (before
@@ -3867,7 +3868,7 @@ def test_resolve_toolchain_lock_hardens_staging_dir_before_index_config_exists(
             )
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         if cmd[:1] == [_ICACLS_PATH]:
-            # The provenance-key file's OWN icacls hardening (round 22) --
+            # The provenance-key file's OWN icacls hardening --
             # not this test's concern; just let it succeed.
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         if cmd[:2] == ["uv", "venv"]:
@@ -3895,7 +3896,7 @@ def test_resolve_toolchain_lock_hardens_staging_dir_before_index_config_exists(
 def test_resolve_toolchain_lock_index_config_removed_before_publish(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression (round 25): the index-config file lives INSIDE the
+    # Regression: the index-config file lives INSIDE the
     # staging venv directory, which is renamed wholesale to publish it --
     # it must be removed before that rename, or it would end up
     # permanently inside the published toolchain venv.
@@ -3933,7 +3934,7 @@ def test_resolve_toolchain_lock_strips_pythonpath_and_pythonhome(
     # interpreter's own standard-library resolution entirely.
     _assume_governed_feed_configured(monkeypatch)
     # Pinned to a non-Windows platform so this test's own call count stays
-    # platform-independent -- `_restrict_file_to_owner` (round 21) only
+    # platform-independent -- `_restrict_file_to_owner` only
     # shells out to `icacls` on win32; see the dedicated
     # `test_resolve_toolchain_lock_hardens_index_config_acl_on_windows`
     # for that behavior instead.

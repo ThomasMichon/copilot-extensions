@@ -491,6 +491,51 @@ jobs:
           echo "running ${#suites[@]} JS test file(s): ${suites[*]}"
           node --test "${suites[@]}"
 
+  windows-python-artifact-builder:
+    name: Governed Python artifact build (Windows-only paths)
+    # Mirrors `checks`' own "Detect Python artifact-builder changes" gate
+    # (TESTING.md's "Gate specialized suites by changed paths" invariant):
+    # the Ubuntu `guards + lint` job runs this suite's full 198+ tests, but
+    # 3 of them are genuinely Windows-OS-API-only (`_trusted_system32_tool`/
+    # `_well_known_sid_display_name`'s real `GetSystemDirectoryW`/
+    # `LookupAccountSidW`/`ConvertStringSidToSidW` calls) and skip
+    # themselves out on that Ubuntu runner -- so they never actually
+    # execute in required CI at all. This job runs ONLY those, selected by
+    # the `windows_only` marker, rather than duplicating the entire suite
+    # on windows-latest.
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pytest
+      - id: python-artifact-builder
+        name: Detect Python artifact-builder changes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            base="${{ github.event.before }}"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$base"...HEAD | grep -Eq \
+            '^tools/(build_python_artifacts\.py|build_toolchain_lock\.py|governed_feed_trust\.py|uv_editable_ref\.py|test_build_python_artifacts\.py)$'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Windows-only governed Python artifact builder tests
+        if: steps.python-artifact-builder.outputs.run == 'true'
+        run: python -m pytest -q -m windows_only -W ignore::pytest.PytestUnknownMarkWarning tools/test_build_python_artifacts.py
+
   windows-hooks:
     name: Git hooks (Windows)
     if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
@@ -809,6 +854,7 @@ jobs:
     if: always() && github.event_name == 'pull_request' && github.event.pull_request.base.ref != 'main'
     needs:
       - checks
+      - windows-python-artifact-builder
       - windows-hooks
       - worktree-manager
       - test-runner-linux

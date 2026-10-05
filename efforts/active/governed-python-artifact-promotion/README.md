@@ -1227,6 +1227,60 @@ win grows with build complexity.
   index-config file leaves no leftovers anywhere, and the published
   venv's own ACL is hardened to only the resolved identity and `NT
   AUTHORITY\SYSTEM`.
+- A twenty-seventh review round found 4 more issues (all 4 of round
+  26's confirmed resolved). (1) `_trusted_system32_tool` resolved the
+  system directory from `%SystemRoot%` -- itself caller-controlled
+  process environment an attacker could repoint at a directory with
+  substituted `whoami.exe`/`icacls.exe`, recreating the exact bypass
+  this helper exists to close. Replaced with `_system_directory`,
+  calling the `GetSystemDirectoryW` OS API directly. (2) the ACL
+  verifier hardcoded the English display name `"NT AUTHORITY\SYSTEM"`,
+  and the grant used the literal name `"SYSTEM"` -- both localized on a
+  non-English Windows installation. Now grants by the well-known
+  `S-1-5-18` SID directly and resolves ITS OS-reported display name via
+  `_well_known_sid_display_name` (`LookupAccountSidW`/
+  `ConvertStringSidToSidW`). (3) a crashed lock holder left
+  `_provenance_key`'s own `O_EXCL` lockfile on disk forever -- every
+  call after the original timeout would wait out the same timeout and
+  fail closed, permanently. Added a PID-recording, liveness-checking
+  stale-lock reclaim path. (4) reworded 7 comments narrating this
+  effort's own prior review rounds/revisions instead of stating only the
+  current invariant.
+
+  5 more unit tests (200 total, all passing). Smoke-tested for real
+  again against the live governed feed.
+- A twenty-eighth review round found the round-27 stale-lock fix (3,
+  above) was itself NOT atomic: two waiters could both observe the same
+  dead PID, both unlink the stale lock, and the second could then also
+  unlink the first's brand-new, genuinely live replacement purely by
+  pathname -- a real two-thread reproduction against that design
+  converged on two DIFFERENT published keys instead of one. Replaced the
+  entire manual lockfile-plus-liveness-check scheme with a real OS-
+  backed, genuinely exclusive lock (`_provenance_key_lock`: a named
+  Windows mutex via `CreateMutexW`, or a POSIX `flock` advisory lock) --
+  the OS itself owns exclusivity and releases it automatically the
+  instant the holding process exits for ANY reason, including a crash,
+  so there is no separate "is the old holder still alive" question to
+  answer or race to get wrong; `_process_is_alive` and the PID-recording
+  scheme were removed entirely as no longer needed. Also added a
+  dedicated, path-gated `windows-python-artifact-builder` CI job
+  (`.github/workflows/ci.yml`) running just the 3 genuinely Windows-OS-
+  API-only tests (selected via a new `windows_only` pytest marker) that
+  the Ubuntu `guards + lint` job's own tests skip themselves out of --
+  those production paths had never actually executed in required CI at
+  all before this. Reworded the remaining review-round labels (round 19
+  through round 27) throughout `tools/test_build_python_artifacts.py`'s
+  own comments to timeless technical descriptions, keeping this Journal
+  as the sole place that retains the historical round-by-round mapping.
+
+  2 fewer, net, unit tests (198 total, all passing): removed
+  `_process_is_alive`'s own 2 dedicated tests and the now-invalid
+  stale-lock-reclaim test (replaced by a stale-lock-file-does-not-block
+  regression and a genuinely-held-lock-times-out test, using a real
+  background thread rather than a faked lockfile). `check-module-size.py`
+  and `ruff check --select F,E9 --output-format=github .` both pass
+  clean. Smoke-tested for real again against the live governed feed,
+  including directly exercising the real OS mutex/flock acquisition.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 
