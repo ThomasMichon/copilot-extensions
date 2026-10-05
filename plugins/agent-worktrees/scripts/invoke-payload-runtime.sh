@@ -102,12 +102,12 @@ boot_trace_escape_json() {
 # launch (including one dispatched from a live picker session), and
 # rewriting a multi-megabyte log line-by-line takes several seconds -- long
 # enough to freeze that picker between keypresses. Instead, once the file is
-# large, this debounces via a marker file (at most one dispatch per hour,
-# regardless of how many launches happen in between) and hands the actual
-# rewrite to a detached `agent_worktrees activity-prune-worker` child --
-# mirroring the Python-side activity._dispatch_background_prune -- so the
-# caller never waits on it. Best-effort throughout: a pruning failure (or no
-# runtime yet resolved to dispatch the worker with) never affects the caller.
+# large, this claims the current debounce window's marker (see
+# boot_trace_claim_prune_marker) and hands the actual rewrite to a detached
+# `agent_worktrees activity-prune-worker` child -- mirroring the Python-side
+# activity._dispatch_background_prune -- so the caller never waits on it.
+# Best-effort throughout: a pruning failure (or no runtime yet resolved to
+# dispatch the worker with) never affects the caller.
 boot_trace_maybe_prune() {
     local log_path="$1" size
     size="$(wc -c < "$log_path" 2>/dev/null)" || return 0
@@ -115,36 +115,34 @@ boot_trace_maybe_prune() {
     [[ "$size" =~ ^[0-9]+$ ]] || return 0
     (( size >= 524288 )) || return 0
     [[ -n "${AGENT_RT_PY:-}" ]] || return 0  # no runtime yet to dispatch the worker with
-    local marker="${log_path}.prune-marker"
-    local marker_epoch now_epoch refresh_stale=0
-    marker_epoch="$(stat -c %Y -- "$marker" 2>/dev/null || stat -f %m -- "$marker" 2>/dev/null || true)"
-    if [[ -n "$marker_epoch" ]]; then
-        now_epoch="$(date +%s 2>/dev/null || echo 0)"
-        (( now_epoch - marker_epoch < 3600 )) && return 0
-        refresh_stale=1
-    fi
-    boot_trace_claim_prune_marker "$marker" "$refresh_stale" || return 0
+    boot_trace_claim_prune_marker "$log_path" || return 0
     ( PYTHONPATH="" "$AGENT_RT_PY" -I -m agent_worktrees activity-prune-worker \
         "$log_path" 7 >/dev/null 2>&1 & ) || true
 }
 
-# Atomically claims the debounce slot so a burst of concurrent launches --
-# all seeing the log large for the first time -- dispatches at most one
-# background prune, not one per launch. Mirrors the Python-side
-# activity._claim_prune_marker: `set -C` (noclobber) makes the shell's own
-# redirection fail if the marker already exists, giving an atomic exclusive
-# create for that common case. Refreshing an existing-but-stale marker (the
-# rarer, once-per-hour case, $2=1) is best-effort instead -- a concurrent
-# refresher can still race here, same documented tradeoff as the underlying
-# prune's own posture; the worst case is two redundant background prunes,
-# never a correctness issue.
+# Atomically claims *this debounce window's* dispatch slot for $log_path, so
+# a burst of concurrent launches -- all seeing the log large at the same
+# time -- dispatches at most one background prune for this window, not one
+# per launch. Mirrors the Python-side activity._claim_prune_marker: each
+# window gets its own marker file (named by its epoch-hour bucket number).
+# `set -C` (noclobber) makes the shell's own redirection fail if that exact
+# marker already exists, giving an atomic exclusive create. Unlike a single
+# shared marker refreshed in place, there is no separate "renew a stale
+# marker" step and therefore no window where multiple processes can all
+# believe they renewed the same claim. Markers from older windows are
+# opportunistically cleaned up on a successful claim (best-effort: a
+# cleanup race never affects correctness, only tidiness).
 boot_trace_claim_prune_marker() {
-    local marker="$1" refresh_stale="$2"
-    if ( set -o noclobber; : > "$marker" ) 2>/dev/null; then
-        return 0
-    fi
-    [[ "$refresh_stale" == "1" ]] || return 1
-    touch -- "$marker" 2>/dev/null
+    local log_path="$1" now_epoch bucket marker
+    now_epoch="$(date +%s 2>/dev/null || echo 0)"
+    bucket=$(( now_epoch / 3600 ))
+    marker="${log_path}.prune-marker.${bucket}"
+    ( set -o noclobber; : > "$marker" ) 2>/dev/null || return 1
+    local f
+    for f in "${log_path}.prune-marker."*; do
+        [[ -e "$f" && "$f" != "$marker" ]] && rm -f -- "$f" 2>/dev/null
+    done
+    return 0
 }
 
 boot_trace() {

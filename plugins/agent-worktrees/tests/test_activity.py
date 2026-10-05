@@ -10,10 +10,14 @@ import pytest
 from agent_worktrees import activity, handoff_trace
 
 
-def _claim_prune_marker_in_subprocess(marker_str: str) -> bool:
+def _claim_prune_marker_in_subprocess(args: tuple[str, object]) -> bool:
     """Module-level (picklable) target for a real multi-process race test --
-    see test_claim_prune_marker_atomic_under_real_multiprocess_race."""
-    return activity._claim_prune_marker(Path(marker_str), refresh_stale=False)
+    see test_claim_prune_marker_atomic_under_real_multiprocess_race. Waits on
+    a shared barrier first so every worker's claim attempt genuinely
+    overlaps instead of running strictly one after another."""
+    log_str, barrier = args
+    barrier.wait()
+    return activity._claim_prune_marker(Path(log_str))
 
 
 @pytest.fixture
@@ -306,9 +310,7 @@ def test_maybe_prune_dispatches_once_per_debounce_window(patch_install_dir: Path
     assert len(dispatch_calls) == 1, "debounce marker should suppress repeat dispatches"
 
 
-def test_maybe_prune_redispatches_after_debounce_window_expires(
-    patch_install_dir: Path, monkeypatch
-):
+def test_maybe_prune_redispatches_in_a_new_debounce_window(patch_install_dir: Path, monkeypatch):
     log = activity.log_path()
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text("x" * (activity._PRUNE_SIZE_BYTES + 1))
@@ -317,59 +319,70 @@ def test_maybe_prune_redispatches_after_debounce_window_expires(
     monkeypatch.setattr(
         activity, "_dispatch_background_prune", lambda path: dispatch_calls.append(path)
     )
+    fake_now = [1_700_000_000.0]
+    monkeypatch.setattr(activity.time, "time", lambda: fake_now[0])
 
     activity._maybe_prune(log)
     assert len(dispatch_calls) == 1
 
-    marker = log.with_name(log.name + ".prune-marker")
-    import os
-    stale = datetime.now().timestamp() - activity._PRUNE_DEBOUNCE_SECONDS - 1
-    os.utime(marker, (stale, stale))
+    fake_now[0] += 10  # still inside the same window
+    activity._maybe_prune(log)
+    assert len(dispatch_calls) == 1
 
+    fake_now[0] += activity._PRUNE_DEBOUNCE_SECONDS  # a fresh window
     activity._maybe_prune(log)
     assert len(dispatch_calls) == 2
 
 
-def test_claim_prune_marker_is_atomic_for_concurrent_first_claim(patch_install_dir: Path):
-    """Two callers racing on the SAME never-before-seen marker must not both
-    win -- only one dispatches, closing the race Copilot review flagged on
-    the original (non-atomic write_text) implementation."""
+def test_claim_prune_marker_is_exclusive_per_window(patch_install_dir: Path):
+    """Each debounce window has exactly one winner: claiming it twice for
+    the same window returns ``True`` then ``False``."""
     log = activity.log_path()
     log.parent.mkdir(parents=True, exist_ok=True)
-    marker = log.with_name(log.name + ".prune-marker")
 
-    first = activity._claim_prune_marker(marker, refresh_stale=False)
-    second = activity._claim_prune_marker(marker, refresh_stale=False)
+    first = activity._claim_prune_marker(log)
+    second = activity._claim_prune_marker(log)
 
     assert first is True
     assert second is False
 
 
-def test_claim_prune_marker_atomic_under_real_multiprocess_race(tmp_path: Path):
-    """Reproduces the exact scenario Copilot review flagged on the original
-    (non-atomic) implementation: a synchronized 8-process reproduction there
-    produced 8 claims -- the storm this debounce exists to prevent. Uses
-    real OS processes (not threads/in-process calls) racing on the same
-    never-before-seen marker; only one may win."""
-    import concurrent.futures
-
-    marker = tmp_path / "activity.jsonl.prune-marker"
-    n = 12
-    with concurrent.futures.ProcessPoolExecutor(max_workers=n) as pool:
-        results = list(
-            pool.map(_claim_prune_marker_in_subprocess, [str(marker)] * n)
-        )
-
-    assert results.count(True) == 1, f"expected exactly one winner, got {results}"
-
-
-def test_claim_prune_marker_refresh_stale_best_effort(patch_install_dir: Path):
+def test_claim_prune_marker_cleans_up_older_windows(patch_install_dir: Path, monkeypatch):
     log = activity.log_path()
     log.parent.mkdir(parents=True, exist_ok=True)
-    marker = log.with_name(log.name + ".prune-marker")
-    marker.write_text("", encoding="utf-8")
 
-    assert activity._claim_prune_marker(marker, refresh_stale=True) is True
+    fake_now = [1_700_000_000.0]
+    monkeypatch.setattr(activity.time, "time", lambda: fake_now[0])
+    assert activity._claim_prune_marker(log) is True
+    old_marker = activity._prune_marker_path(log)
+    assert old_marker.exists()
+
+    fake_now[0] += activity._PRUNE_DEBOUNCE_SECONDS
+    assert activity._claim_prune_marker(log) is True
+
+    assert not old_marker.exists()
+
+
+def test_claim_prune_marker_atomic_under_real_multiprocess_race(tmp_path: Path):
+    """Many real OS processes (not threads, not sequential in-process calls)
+    racing on the same debounce window, released together from a shared
+    barrier so the claim attempts genuinely overlap: exactly one may win."""
+    import concurrent.futures
+    import multiprocessing
+
+    log = tmp_path / "activity.jsonl"
+    n = 12
+    with multiprocessing.Manager() as manager:
+        barrier = manager.Barrier(n)
+        with concurrent.futures.ProcessPoolExecutor(max_workers=n) as pool:
+            results = list(
+                pool.map(
+                    _claim_prune_marker_in_subprocess,
+                    [(str(log), barrier)] * n,
+                )
+            )
+
+    assert results.count(True) == 1, f"expected exactly one winner, got {results}"
 
 
 def test_maybe_prune_skips_small_file(patch_install_dir: Path, monkeypatch):

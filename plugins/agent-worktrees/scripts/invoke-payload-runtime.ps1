@@ -94,29 +94,20 @@ function Write-BootTraceRecord(
 # every single launch (including a key/action dispatched from a live
 # picker session), and rewriting a multi-megabyte log line-by-line takes
 # several seconds -- long enough to freeze that picker between keypresses.
-# Instead, once the file is large, this debounces via a marker file (at
-# most one dispatch per hour, regardless of how many launches happen in
-# between) and hands the actual rewrite to a detached, windowless
-# `agent_worktrees activity-prune-worker` child -- mirroring the Python-side
-# activity._dispatch_background_prune -- so the caller never waits on it.
-# Best-effort throughout: a pruning failure (or a runtime not yet resolved
-# to dispatch the worker with) never affects the caller.
+# Instead, once the file is large, this claims the current debounce
+# window's marker (see Invoke-ClaimPruneMarker) and hands the actual
+# rewrite to a detached, windowless `agent_worktrees activity-prune-worker`
+# child -- mirroring the Python-side activity._dispatch_background_prune --
+# so the caller never waits on it. Best-effort throughout: a pruning
+# failure (or a runtime not yet resolved to dispatch the worker with)
+# never affects the caller.
 function Invoke-BootTraceMaybePrune([string]$LogPath) {
     try {
         $info = Get-Item -LiteralPath $LogPath -ErrorAction Stop
         if ($info.Length -lt 524288) { return }
     } catch { return }
     if (-not $script:python) { return }  # no runtime yet to dispatch the worker with
-    $marker = "$LogPath.prune-marker"
-    $refreshStale = $false
-    try {
-        $markerInfo = Get-Item -LiteralPath $marker -ErrorAction Stop
-        if (((Get-Date).ToUniversalTime() - $markerInfo.LastWriteTimeUtc).TotalSeconds -lt 3600) {
-            return
-        }
-        $refreshStale = $true
-    } catch {}
-    if (-not (Invoke-ClaimPruneMarker -Marker $marker -RefreshStale:$refreshStale)) { return }
+    if (-not (Invoke-ClaimPruneMarker -LogPath $LogPath)) { return }
     try {
         Start-Process -FilePath 'conhost.exe' -ArgumentList (@(
             '--headless', "`"$script:python`"", '-I', '-m', 'agent_worktrees',
@@ -125,27 +116,36 @@ function Invoke-BootTraceMaybePrune([string]$LogPath) {
     } catch {}
 }
 
-# Atomically claims the debounce slot so a burst of concurrent launches --
-# all seeing the log large for the first time -- dispatches at most one
-# background prune, not one per launch. Mirrors the Python-side
-# activity._claim_prune_marker: an exclusive create (`CreateNew`, which
-# throws if the file already exists) handles that common case atomically.
-# Refreshing an existing-but-stale marker (the rarer, once-per-hour case) is
-# best-effort instead -- a concurrent refresher can still race here, same
-# documented tradeoff as the underlying prune's own posture; the worst case
-# is two redundant background prunes, never a correctness issue.
-function Invoke-ClaimPruneMarker([string]$Marker, [switch]$RefreshStale) {
+# Atomically claims *this debounce window's* dispatch slot for $LogPath, so
+# a burst of concurrent launches -- all seeing the log large at the same
+# time -- dispatches at most one background prune for this window, not one
+# per launch. Mirrors the Python-side activity._claim_prune_marker: each
+# window gets its own marker file (named by its epoch-hour bucket number),
+# claimed with an exclusive create (`CreateNew`, which throws if the file
+# already exists). Unlike a single shared marker refreshed in place, there
+# is no separate "renew a stale marker" step and therefore no window where
+# multiple processes can all believe they renewed the same claim. Markers
+# from older windows are opportunistically cleaned up on a successful claim
+# (best-effort: a cleanup race never affects correctness, only tidiness).
+function Invoke-ClaimPruneMarker([string]$LogPath) {
+    $bucket = [long][Math]::Floor(
+        ((Get-Date).ToUniversalTime() - [datetime]'1970-01-01').TotalSeconds / 3600
+    )
+    $marker = "$LogPath.prune-marker.$bucket"
     try {
-        $fs = [IO.File]::Open($Marker, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
+        $fs = [IO.File]::Open($marker, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
         $fs.Dispose()
-        return $true
-    } catch [IO.IOException] {
-        if (-not $RefreshStale) { return $false }
-        try {
-            (Get-Item -LiteralPath $Marker).LastWriteTimeUtc = (Get-Date).ToUniversalTime()
-            return $true
-        } catch { return $false }
-    } catch { return $false }
+    } catch {
+        return $false
+    }
+    try {
+        $dir = Split-Path -Parent $LogPath
+        $leaf = Split-Path -Leaf $LogPath
+        Get-ChildItem -LiteralPath $dir -Filter "$leaf.prune-marker.*" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -ne $marker } |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+    } catch {}
+    return $true
 }
 
 
