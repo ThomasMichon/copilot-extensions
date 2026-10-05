@@ -355,7 +355,8 @@ class AzureDevOpsPRAdapter:
         org_url = self._org_url(organization)
         pr_resp = self._rest_get(
             f"{org_url}/{quote(project, safe='')}/_apis/git/repositories/"
-            f"{quote(repository, safe='')}/pullRequests/{number}?api-version=7.1"
+            f"{quote(repository, safe='')}/pullRequests/{number}"
+            "?includeLabels=true&api-version=7.1"
         )
         pull_request = json.loads(pr_resp.stdout or "{}")
         if not isinstance(pull_request, Mapping) or not pull_request:
