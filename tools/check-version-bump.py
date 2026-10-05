@@ -2,6 +2,15 @@
 """Require a version bump whenever a plugin's content changes (docs/pipelines.md
 § Release & Versioning).
 
+**Retired as the per-PR enforcement guard** in favor of
+`check-changefile-presence.py` (which requires a pending changefile instead
+of a hand-applied bump); this module now serves two roles: (1) the shared
+diff engine `check-changefile-presence.py` and `accumulate_bumps.py` both
+import for "which consumer(s) does this diff touch", and (2) a standalone
+release/recovery check for directly verifying or enforcing an actual version
+bump outside the ordinary changefile-driven PR flow (its own CLI below still
+reports a real version-mismatch, it just no longer gates an ordinary PR).
+
 The marketplace only redeploys a plugin's runtime when its declared version
 **advances**: `<repo> update` refreshes the payload but the versioned-runtime
 install is version-gated, so new code shipped under an unchanged version silently
@@ -35,7 +44,7 @@ compare).
 
 Usage::
 
-    python tools/check-version-bump.py                 # diff vs origin/main (pre-push/CI)
+    python tools/check-version-bump.py                 # diff vs origin/main (release/recovery check)
     python tools/check-version-bump.py --base <sha>     # diff vs an explicit base
     python tools/check-version-bump.py --list           # show the plugin<->vendored-lib map
 
@@ -331,11 +340,20 @@ def check(base_ref: str, head_ref: str) -> tuple[int, list[str]]:
             # branch can't follow (plugin.json/marketplace.json don't exist
             # for a standalone consumer -- PR #4514 review).
             if (PLUGINS_DIR / plugin).is_dir():
+                has_pyproject = (PLUGINS_DIR / plugin / "pyproject.toml").is_file()
+                direct_fix = (
+                    "plugin.json + pyproject.toml + marketplace.json"
+                    if has_pyproject
+                    # A payload-only plugin (e.g. copilot-extensions-harness)
+                    # has no pyproject.toml at all -- naming it here would
+                    # prescribe a file that doesn't exist (docs/pipelines.md's
+                    # payload-only/runtime plugin distinction).
+                    else "plugin.json + marketplace.json"
+                )
                 fix = (
                     "for ordinary PR compliance, add a changefile for it "
                     "(python tools/changefile.py add --plugin <name> --type patch "
-                    "--comment '...'); to clear THIS check directly, bump "
-                    "plugin.json + pyproject.toml + marketplace.json"
+                    f"--comment '...'); to clear THIS check directly, bump {direct_fix}"
                 )
             else:
                 fix = (

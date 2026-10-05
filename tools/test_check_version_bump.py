@@ -391,6 +391,34 @@ def test_violation_message_for_standalone_consumer_omits_impossible_fix(repo: Pa
     assert "plugin.json" not in wtm_lines[0]
     assert "marketplace.json" not in wtm_lines[0]
     assert "changefile" in wtm_lines[0]
+    assert "pyproject.toml" in wtm_lines[0]
+
+
+def test_violation_message_for_payload_only_plugin_omits_nonexistent_pyproject(repo: Path):
+    """A payload-only plugin (e.g. copilot-extensions-harness: no root
+    `pyproject.toml` at all) must not be told to bump a file it doesn't
+    have -- the direct-fix guidance must name only plugin.json +
+    marketplace.json for this class of plugin."""
+    _write(repo, "plugins/gamma/plugin.json",
+           json.dumps({"name": "gamma", "version": "3.0.0-dev1"}) + "\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add payload-only gamma, no pyproject.toml")
+    gamma_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", gamma_sha)
+
+    _write(repo, "plugins/gamma/skills/example/SKILL.md", "# Example\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "gamma content change, no bump")
+    result = _run(repo)
+    assert result.returncode == 1
+    gamma_lines = [ln for ln in result.stderr.splitlines() if "gamma:" in ln]
+    assert len(gamma_lines) == 1, result.stderr
+    assert "changefile" in gamma_lines[0]
+    assert "pyproject.toml" not in gamma_lines[0]
+    assert "plugin.json" in gamma_lines[0]
+    assert "marketplace.json" in gamma_lines[0]
 
 
 def test_symlinked_pyproject_fails_closed_instead_of_dropping_consumer(repo: Path):
