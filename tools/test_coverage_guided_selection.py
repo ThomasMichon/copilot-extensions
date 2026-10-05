@@ -41,6 +41,8 @@ from tools.coverage_guided_selection import fallback, selection as select  # noq
 from tools.coverage_guided_selection import ancestor_resolution as ar
 from tools.coverage_guided_selection import debt  # noqa: E402
 from tools.coverage_guided_selection import decide as decide_mod  # noqa: E402
+from tools.coverage_guided_selection import diff as diff_mod  # noqa: E402
+from tools.coverage_guided_selection import cli as cli_mod  # noqa: E402
 
 
 def _synthetic_baseline() -> dict:
@@ -1612,6 +1614,153 @@ class TestComputeFileRemap:
         c2 = _commit(repo, "change binary content")
         result = ar.compute_file_remap(repo, "a.bin", c1, c2)
         assert result.status == "invalid"
+
+
+class TestComputeChangedLines:
+    """`diff.compute_changed_lines` -- the PR-diff-to-changed_lines bridge
+    Phase 4's shadow-mode CLI uses to feed `decide()` a real diff."""
+
+    def test_pure_addition_reports_the_new_lines(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.py").write_text("1\n2\n3\n")
+        c1 = _commit(repo, "first")
+        (repo / "a.py").write_text("1\nNEW\n2\n3\n")
+        c2 = _commit(repo, "insert a line")
+        changed = diff_mod.compute_changed_lines(repo, c1, c2)
+        assert changed == {"a.py": [2]}
+
+    def test_pure_deletion_reports_the_surviving_anchor_line(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.py").write_text("1\n2\n3\n")
+        c1 = _commit(repo, "first")
+        (repo / "a.py").write_text("1\n3\n")
+        c2 = _commit(repo, "delete a line")
+        changed = diff_mod.compute_changed_lines(repo, c1, c2)
+        assert changed == {"a.py": [1]}
+
+    def test_multiple_files_each_report_their_own_touched_lines(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.py").write_text("1\n2\n")
+        (repo / "b.py").write_text("x\n")
+        c1 = _commit(repo, "first")
+        (repo / "a.py").write_text("1\n2\nNEW\n")
+        (repo / "b.py").write_text("y\n")
+        c2 = _commit(repo, "touch both files")
+        changed = diff_mod.compute_changed_lines(repo, c1, c2)
+        assert changed == {"a.py": [3], "b.py": [1]}
+
+    def test_path_prefix_restricts_which_files_are_considered(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "src").mkdir()
+        (repo / "tests").mkdir()
+        (repo / "src" / "a.py").write_text("1\n")
+        (repo / "tests" / "test_a.py").write_text("1\n")
+        c1 = _commit(repo, "first")
+        (repo / "src" / "a.py").write_text("1\nNEW\n")
+        (repo / "tests" / "test_a.py").write_text("1\nNEW\n")
+        c2 = _commit(repo, "touch both trees")
+        changed = diff_mod.compute_changed_lines(repo, c1, c2, path_prefix="src")
+        assert changed == {"src/a.py": [2]}
+
+    def test_binary_file_change_is_skipped_entirely(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.bin").write_bytes(b"\x00\x01")
+        c1 = _commit(repo, "first")
+        (repo / "a.bin").write_bytes(b"\xff\xfe")
+        c2 = _commit(repo, "change binary content")
+        assert diff_mod.compute_changed_lines(repo, c1, c2) == {}
+
+    def test_no_diff_yields_no_changed_lines(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "a.py").write_text("1\n")
+        c1 = _commit(repo, "first")
+        assert diff_mod.compute_changed_lines(repo, c1, c1) == {}
+
+
+class TestCoverageGuidedSelectionCli:
+    """`cli.py` -- the Phase 4 shadow-mode entry point `ci.yml` invokes.
+    Exercises `build_decision_payload` directly (bypassing argv/stdout)
+    against a real throwaway git repo -- no monkeypatching: this lets a
+    real (expected-to-fail, no such release exists) `gh release download`
+    attempt prove the CLI surfaces that as an ordinary fallback decision,
+    not a crash."""
+
+    def _repo_with_a_pointer_and_a_diff(self, tmp_path):
+        repo = _init_repo(tmp_path)
+        (repo / "src").mkdir()
+        (repo / "src" / "a.py").write_text("1\n2\n")
+        measured_commit = _commit(repo, "first (measured)")
+
+        # A second "main"-ish branch carrying the pointer file, resolved
+        # via --main-ref (origin/main doesn't exist in this throwaway repo,
+        # so point main-ref at this real local ref instead).
+        _run_git(["checkout", "-q", "-b", "main"], cwd=repo)
+        pointer_dir = repo / ".github" / "coverage-baselines"
+        pointer_dir.mkdir(parents=True)
+        (pointer_dir / "demo-plugin.json").write_text(json.dumps({
+            "schema": "copilot-extensions.coverage-baseline-pointer",
+            "plugin": "demo-plugin",
+            "measured_commit": measured_commit,
+            "release_tag": "coverage-baselines-" + measured_commit,
+            "asset": "demo-plugin.json",
+        }))
+        _commit(repo, "check in pointer")
+        _run_git(["checkout", "-q", "dev"], cwd=repo)
+
+        (repo / "src" / "a.py").write_text("1\n2\nNEW\n")
+        head = _commit(repo, "touch src/a.py")
+        return repo, measured_commit, head
+
+    def test_a_real_full_baseline_fetch_failure_is_reported_as_fallback_not_a_crash(
+        self, tmp_path,
+    ):
+        # No real matching `gh` release exists for this throwaway repo:
+        # fetch_baseline_asset will genuinely fail -- confirms the CLI
+        # surfaces that as an ordinary, auditable fallback decision
+        # (mode="fallback", ...), never an unhandled exception.
+        repo, measured_commit, head = self._repo_with_a_pointer_and_a_diff(tmp_path)
+
+        payload = cli_mod.build_decision_payload(
+            repo_root=repo, repo="owner/repo-that-does-not-exist-12345", plugin="demo-plugin",
+            cov_source="src", base_ref=measured_commit, head_ref=head,
+            main_ref="main",
+        )
+
+        assert payload["mode"] == "fallback"
+        assert payload["reason"].startswith(decide_mod.FETCH_FAILED_PREFIX)
+        assert payload["baseline_generation"] == measured_commit
+
+    def test_an_unresolvable_head_ref_is_reported_as_an_error_not_a_crash(
+        self, tmp_path,
+    ):
+        repo, _measured_commit, _head = self._repo_with_a_pointer_and_a_diff(tmp_path)
+
+        payload = cli_mod.build_decision_payload(
+            repo_root=repo, repo="owner/repo", plugin="demo-plugin",
+            cov_source="src", base_ref="dev", head_ref="not-a-real-ref",
+            main_ref="main",
+        )
+
+        assert payload["mode"] == "error"
+        assert payload["selected_tests"] is None
+
+    def test_render_summary_reports_error_mode_distinctly_from_fallback(self):
+        error_summary = cli_mod.render_summary(
+            "demo-plugin",
+            {"mode": "error", "reason": "RuntimeError: boom", "selected_tests": None},
+        )
+        assert "`error`" in error_summary
+        assert "none (no curated evidence)" in error_summary
+
+        fallback_summary = cli_mod.render_summary(
+            "demo-plugin",
+            {
+                "mode": "fallback", "reason": "no_baseline_available",
+                "selected_tests": ("test_a",), "baseline_generation": None,
+            },
+        )
+        assert "`fallback`" in fallback_summary
+        assert "1 test(s)" in fallback_summary
 
 
 class TestRemapOrInvalidateBaseline:
