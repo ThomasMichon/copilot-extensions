@@ -8,17 +8,17 @@ import time
 
 import pytest
 
-from agent_dispatch import handoff_claim_release
-from agent_dispatch import remote_dispatch
+from agent_dispatch import handoff_claim_release, remote_dispatch
+from agent_dispatch.effort_driver_loops import run_tick as run_effort_driver_tick
 from agent_dispatch.github_provider_adapter import PRObservation
 from agent_dispatch.pr_observation_store import PRObservationStore
+from agent_dispatch.provider_state_machine import ApprovalStatus, Mergeability, Revision
 from agent_dispatch.queue import Status, TaskError
 from agent_dispatch.verification import evaluate_submitted_task
 from agent_dispatch.verification_drain import (
     _scheduled_wait_interval,
     drain_verification_requests,
 )
-from agent_dispatch.provider_state_machine import ApprovalStatus, Mergeability, Revision
 from tests._helpers import TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
@@ -718,10 +718,19 @@ def test_backlog_triager_verification_checks_repo_specific_label_schema_and_effo
         "    has_priority = any(label.startswith('priority:') for label in labels)\n"
         "    has_effort = 'efforts/active/' in issue['body'] and '/README.md' in issue['body']\n"
         "    if not (has_priority and has_effort):\n"
-        "        json.dump({'decision': 'noop', 'reason': 'triage schema incomplete'}, sys.stdout)\n"
+        "        json.dump(\n"
+        "            {'decision': 'noop', 'reason': 'triage schema incomplete'},\n"
+        "            sys.stdout,\n"
+        "        )\n"
         "        break\n"
         "else:\n"
-        "    json.dump({'decision': 'confirm', 'reason': 'triage schema + effort marker present'}, sys.stdout)\n",
+        "    json.dump(\n"
+        "        {\n"
+        "            'decision': 'confirm',\n"
+        "            'reason': 'triage schema + effort marker present',\n"
+        "        },\n"
+        "        sys.stdout,\n"
+        "    )\n",
         encoding="utf-8",
     )
     _register_script(queue, str(script), evaluator_ref="backlog-triager")
@@ -769,11 +778,17 @@ def test_repository_issue_loop_issue_reproducer_requires_evidence_and_outcome_ma
         "fixtures = {\n"
         "  27: {\n"
         "    'labels': ['bug', 'repro:confirmed'],\n"
-        "    'comments': ['Reproduction evidence: pytest tests/test_bug.py -k issue27\\nobserved the reported failure'],\n"
+        "    'comments': [\n"
+        "      'Reproduction evidence: pytest tests/test_bug.py -k issue27\\n'\n"
+        "      'observed the reported failure'\n"
+        "    ],\n"
         "  },\n"
         "  28: {\n"
         "    'labels': ['bug', 'repro:not-reproducible', 'repro:strike-1'],\n"
-        "    'comments': ['Reproduction evidence: tried on current dev with clean checkout\\nno failure reproduced'],\n"
+        "    'comments': [\n"
+        "      'Reproduction evidence: tried on current dev with clean checkout\\n'\n"
+        "      'no failure reproduced'\n"
+        "    ],\n"
         "  },\n"
         "  29: {\n"
         "    'labels': ['bug', 'repro:not-reproducible'],\n"
@@ -796,10 +811,22 @@ def test_repository_issue_loop_issue_reproducer_requires_evidence_and_outcome_ma
         "        continue\n"
         "    if has_evidence and not_reproducible and has_strike:\n"
         "        continue\n"
-        "    json.dump({'decision': 'noop', 'reason': 'repro evidence/outcome schema incomplete'}, sys.stdout)\n"
+        "    json.dump(\n"
+        "        {\n"
+        "            'decision': 'noop',\n"
+        "            'reason': 'repro evidence/outcome schema incomplete',\n"
+        "        },\n"
+        "        sys.stdout,\n"
+        "    )\n"
         "    break\n"
         "else:\n"
-        "    json.dump({'decision': 'confirm', 'reason': 'repro evidence + outcome markers present'}, sys.stdout)\n",
+        "    json.dump(\n"
+        "        {\n"
+        "            'decision': 'confirm',\n"
+        "            'reason': 'repro evidence + outcome markers present',\n"
+        "        },\n"
+        "        sys.stdout,\n"
+        "    )\n",
         encoding="utf-8",
     )
     _register_script(queue, str(script), evaluator_ref="issue-reproducer")
@@ -875,21 +902,36 @@ def test_repository_issue_loop_effort_builder_requires_shared_effort_assignment_
         "    body = fixtures['issues'][number]['body']\n"
         "    match = re.search(r'(efforts/active/[^\\s]+/README\\.md)', body)\n"
         "    if match is None:\n"
-        "        json.dump({'decision': 'noop', 'reason': 'issue missing effort assignment'}, sys.stdout)\n"
+        "        json.dump(\n"
+        "            {'decision': 'noop', 'reason': 'issue missing effort assignment'},\n"
+        "            sys.stdout,\n"
+        "        )\n"
         "        break\n"
         "    current = match.group(1)\n"
         "    if effort_path is None:\n"
         "        effort_path = current\n"
         "    elif current != effort_path:\n"
-        "        json.dump({'decision': 'noop', 'reason': 'issues assigned to different efforts'}, sys.stdout)\n"
+        "        json.dump(\n"
+        "            {'decision': 'noop', 'reason': 'issues assigned to different efforts'},\n"
+        "            sys.stdout,\n"
+        "        )\n"
         "        break\n"
         "else:\n"
         "    effort = fixtures['efforts'].get(effort_path, {})\n"
         "    gate = effort.get('review_gate')\n"
         "    if gate not in {'open', 'merged'}:\n"
-        "        json.dump({'decision': 'noop', 'reason': 'effort not yet in review gate'}, sys.stdout)\n"
+        "        json.dump(\n"
+        "            {'decision': 'noop', 'reason': 'effort not yet in review gate'},\n"
+        "            sys.stdout,\n"
+        "        )\n"
         "    else:\n"
-        "        json.dump({'decision': 'confirm', 'reason': 'issues grouped into one reviewed effort'}, sys.stdout)\n",
+        "        json.dump(\n"
+        "            {\n"
+        "                'decision': 'confirm',\n"
+        "                'reason': 'issues grouped into one reviewed effort',\n"
+        "            },\n"
+        "            sys.stdout,\n"
+        "        )\n",
         encoding="utf-8",
     )
     _register_script(queue, str(script), evaluator_ref="effort-builder")
@@ -925,6 +967,242 @@ def test_repository_issue_loop_effort_builder_requires_shared_effort_assignment_
     assert queue.get(unassigned_id).status == Status.SUBMITTED
     assert missing_gate["applied"][0]["decision"] == "noop"
     assert queue.get(missing_gate_id).status == Status.SUBMITTED
+
+
+def test_effort_driver_verification_requires_archive_state_with_pr_and_issue_evidence(
+    tmp_path,
+):
+    state_root = tmp_path / "state-root"
+    archived = state_root / "efforts" / "2026" / "10" / "04 recipe-library" / "README.md"
+    archived.parent.mkdir(parents=True, exist_ok=True)
+    archived.write_text(
+        "# agent-dispatch recipe library\n\n"
+        "- **Status:** Done (archived 2026-10-04)\n\n"
+        "Merged PRs: #5201, #5202\n"
+        "Closed issues: #4691, #5200\n",
+        encoding="utf-8",
+    )
+    active = state_root / "efforts" / "active"
+    active.mkdir(parents=True, exist_ok=True)
+    still_active = active / "still-active" / "README.md"
+    still_active.parent.mkdir(parents=True, exist_ok=True)
+    still_active.write_text(
+        "# still active\n\n- **Status:** In Progress\n",
+        encoding="utf-8",
+    )
+    missing_evidence = (
+        state_root / "efforts" / "2026" / "10" / "04 weak-evidence" / "README.md"
+    )
+    missing_evidence.parent.mkdir(parents=True, exist_ok=True)
+    missing_evidence.write_text(
+        "# weak evidence\n\n- **Status:** Done (archived 2026-10-04)\n",
+        encoding="utf-8",
+    )
+
+    queue = TaskQueue(tmp_path / "tasks.db")
+    script = tmp_path / "eval.py"
+    script.write_text(
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        f"root = Path({str(state_root)!r})\n"
+        "task = json.load(sys.stdin)['task']\n"
+        "payload = json.loads(task['payload_inline'])['effort_driver_loop']\n"
+        "active_path = root / payload['effort_readme']\n"
+        "slug = payload['effort_slug']\n"
+        "if active_path.exists():\n"
+        "    json.dump({'decision': 'noop', 'reason': 'effort still active'}, sys.stdout)\n"
+        "    raise SystemExit\n"
+        "matches = sorted(root.glob(f'efforts/*/*/* {slug}/README.md'))\n"
+        "if not matches:\n"
+        "    json.dump({'decision': 'noop', 'reason': 'archive missing'}, sys.stdout)\n"
+        "    raise SystemExit\n"
+        "text = matches[-1].read_text(encoding='utf-8')\n"
+        "if 'Merged PRs:' not in text or 'Closed issues:' not in text:\n"
+        "    json.dump(\n"
+        "        {\n"
+        "            'decision': 'noop',\n"
+        "            'reason': 'archive missing durable PR/issue evidence',\n"
+        "        },\n"
+        "        sys.stdout,\n"
+        "    )\n"
+        "    raise SystemExit\n"
+        "json.dump(\n"
+        "    {\n"
+        "        'decision': 'confirm',\n"
+        "        'reason': 'effort archived with PR and issue evidence',\n"
+        "    },\n"
+        "    sys.stdout,\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    _register_script(queue, str(script), evaluator_ref="effort-driver")
+    good_id = _submitted_task(
+        queue,
+        "recipe library archived",
+        require_verification=True,
+        evaluator_ref="effort-driver",
+        payload_inline=json.dumps(
+            {
+                "effort_driver_loop": {
+                    "effort_slug": "recipe-library",
+                    "effort_readme": "efforts/active/recipe-library/README.md",
+                }
+            }
+        ),
+    )
+    active_id = _submitted_task(
+        queue,
+        "still active effort",
+        require_verification=True,
+        evaluator_ref="effort-driver",
+        payload_inline=json.dumps(
+            {
+                "effort_driver_loop": {
+                    "effort_slug": "still-active",
+                    "effort_readme": "efforts/active/still-active/README.md",
+                }
+            }
+        ),
+    )
+    weak_evidence_id = _submitted_task(
+        queue,
+        "archived effort without proof",
+        require_verification=True,
+        evaluator_ref="effort-driver",
+        payload_inline=json.dumps(
+            {
+                "effort_driver_loop": {
+                    "effort_slug": "weak-evidence",
+                    "effort_readme": "efforts/active/weak-evidence/README.md",
+                }
+            }
+        ),
+    )
+
+    good = evaluate_submitted_task(queue, good_id, trigger="submitted")
+    active_result = evaluate_submitted_task(queue, active_id, trigger="submitted")
+    weak_evidence_result = evaluate_submitted_task(
+        queue, weak_evidence_id, trigger="submitted"
+    )
+
+    assert good["applied"][0]["decision"] == "complete"
+    assert queue.get(good_id).status == Status.COMPLETED
+    assert active_result["applied"][0]["decision"] == "noop"
+    assert queue.get(active_id).status == Status.SUBMITTED
+    assert weak_evidence_result["applied"][0]["decision"] == "noop"
+    assert queue.get(weak_evidence_id).status == Status.SUBMITTED
+
+
+def test_effort_driver_lifecycle_discovers_active_effort_then_confirms_archive_transition(
+    tmp_path,
+):
+    state_root = tmp_path / "state-root"
+    active_readme = (
+        state_root / "efforts" / "active" / "recipe-library" / "README.md"
+    )
+    active_readme.parent.mkdir(parents=True, exist_ok=True)
+    active_readme.write_text(
+        "# recipe library\n\n"
+        "- **Status:** Active\n\n"
+        "Open issues: #4691, #5200\n",
+        encoding="utf-8",
+    )
+
+    class _CreateClient:
+        def __init__(self):
+            self.created = []
+
+        def list(self, **_kwargs):
+            return []
+
+        def create(self, title, **fields):
+            task = {"id": "task-1", "title": title, **fields}
+            self.created.append(task)
+            return task
+
+    config = {
+        "name": "effort-driver",
+        "kind": "effort-driver-loop",
+        "repo": "example/project",
+        "source": "effort-driver",
+        "cadence_seconds": 3600,
+        "tick_interval_seconds": 60,
+        "effort_slugs": ["recipe-library"],
+        "state_root": str(state_root),
+        "task_label": "effort-work",
+        "require_verification": True,
+        "evaluator_ref": "effort-driver",
+        "pool": {
+            "max_active_processes": 1,
+            "body": {"type": "headless", "agent": "effort-worker"},
+        },
+    }
+    created = run_effort_driver_tick(
+        _CreateClient(), config, clock=lambda: 10_000, cwd=tmp_path
+    )["created"][0]
+
+    archived = (
+        state_root / "efforts" / "2026" / "10" / "04 recipe-library" / "README.md"
+    )
+    archived.parent.mkdir(parents=True, exist_ok=True)
+    active_readme.unlink()
+    archived.write_text(
+        "# recipe library\n\n"
+        "- **Status:** Done (archived 2026-10-04)\n\n"
+        "Merged PRs: #5201, #5202\n"
+        "Closed issues: #4691, #5200\n",
+        encoding="utf-8",
+    )
+
+    queue = TaskQueue(tmp_path / "tasks.db")
+    script = tmp_path / "eval.py"
+    script.write_text(
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        f"root = Path({str(state_root)!r})\n"
+        "task = json.load(sys.stdin)['task']\n"
+        "payload = json.loads(task['payload_inline'])['effort_driver_loop']\n"
+        "active_path = root / payload['effort_readme']\n"
+        "slug = payload['effort_slug']\n"
+        "if active_path.exists():\n"
+        "    json.dump({'decision': 'noop', 'reason': 'effort still active'}, sys.stdout)\n"
+        "    raise SystemExit\n"
+        "matches = sorted(root.glob(f'efforts/*/*/* {slug}/README.md'))\n"
+        "if not matches:\n"
+        "    json.dump({'decision': 'noop', 'reason': 'archive missing'}, sys.stdout)\n"
+        "    raise SystemExit\n"
+        "text = matches[-1].read_text(encoding='utf-8')\n"
+        "if 'Merged PRs:' not in text or 'Closed issues:' not in text:\n"
+        "    json.dump(\n"
+        "        {\n"
+        "            'decision': 'noop',\n"
+        "            'reason': 'archive missing durable PR/issue evidence',\n"
+        "        },\n"
+        "        sys.stdout,\n"
+        "    )\n"
+        "    raise SystemExit\n"
+        "json.dump(\n"
+        "    {\n"
+        "        'decision': 'confirm',\n"
+        "        'reason': 'effort archived with PR and issue evidence',\n"
+        "    },\n"
+        "    sys.stdout,\n"
+        ")\n",
+        encoding="utf-8",
+    )
+    _register_script(queue, str(script), evaluator_ref="effort-driver")
+    task_id = _submitted_task(
+        queue,
+        created["title"],
+        require_verification=True,
+        evaluator_ref="effort-driver",
+        payload_inline=created["payload_inline"],
+    )
+
+    result = evaluate_submitted_task(queue, task_id, trigger="submitted")
+
+    assert result["applied"][0]["decision"] == "complete"
+    assert queue.get(task_id).status == Status.COMPLETED
 
 
 def test_future_scheduled_verification_uses_idle_interval_not_retry_interval(tmp_path):

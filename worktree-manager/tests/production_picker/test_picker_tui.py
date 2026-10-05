@@ -2096,9 +2096,10 @@ def test_embody_cli_internal_action_exits_with_resume_decision(monkeypatch):
 
 
 def test_launch_in_new_window_offered_only_for_local_open_or_resume_rows():
-    """copilot --headed (#copilot-headed): the "Launch in new window" verb
-    rides alongside Open/Resume, but ONLY for a local row -- a headed
-    window pops on THIS machine, meaningless for a remote (SSH) worktree."""
+    """"Launch in new window" (Phase 9, #5210; a `LaunchRequest.new_window`
+    modifier since the retired `copilot --headed`) rides alongside
+    Open/Resume, but ONLY for a local row -- a new window pops on THIS
+    machine, meaningless for a remote (SSH) worktree."""
     from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
         PickerScreenWorktreeActionsMixin as M,
     )
@@ -2139,11 +2140,17 @@ def test_launch_in_new_window_offered_only_for_local_open_or_resume_rows():
 def test_launch_in_new_window_runs_in_background_without_exiting_picker(
     monkeypatch,
 ):
-    """Selecting "Launch in new window" must run `copilot --headed --json`
-    as a background subprocess and report through ``self.debug`` -- unlike
-    every other Actions-menu verb, it must NOT exit the Picker (no
-    ``_decide`` call, ``app.result`` stays unset)."""
-    from worktree_manager import engine_client
+    """Selecting "Launch in new window" (Phase 9, #5210) must call
+    `_run_launch` in-process with `LaunchRequest.new_window=True` and report
+    through ``self.debug`` -- unlike every other Actions-menu verb, it must
+    NOT exit the Picker (no ``_decide`` call, ``app.result`` stays unset).
+    Reusing `_run_launch` (the same function every other launch decision
+    dispatches through, post-exit) is the whole point of Phase 9: "new
+    window" is a modifier on the ordinary launch plan, not a parallel
+    code path that could skip the mux-daemon registration
+    `launch-session.{ps1,sh}` performs."""
+    from worktree_manager import __main__ as manager_main
+    from worktree_manager.picker_app import LaunchRequest
     from worktree_manager.production_picker import context as picker_context
 
     src = _fixture_source()
@@ -2163,11 +2170,11 @@ def test_launch_in_new_window_runs_in_background_without_exiting_picker(
             monkeypatch.setattr(picker_context, "project", lambda: "my-project")
             calls = []
 
-            def fake_run_json(project, args, **kwargs):
-                calls.append((project, args))
-                return {"ok": True, "session": "wt-aaaa", "spawner": "wt.exe", "pid": 4242}
+            def fake_run_launch(request):
+                calls.append(request)
+                return 0
 
-            monkeypatch.setattr(engine_client, "run_json", fake_run_json)
+            monkeypatch.setattr(manager_main, "_run_launch", fake_run_launch)
 
             rec = next(
                 r for r in scr.list_records()
@@ -2176,12 +2183,13 @@ def test_launch_in_new_window_runs_in_background_without_exiting_picker(
             scr._wt_submenu_dispatch(rec, ("Launch in new window", False, False))
 
             assert app.result is None  # the Picker was never exited
-            assert calls == [(
-                "my-project",
-                ["copilot", "--worktree-id", "anomalous-potato-win-20260627-aaaa",
-                 "--headed", "--json"],
-            )]
-            assert "wt.exe" in scr.debug
+            assert len(calls) == 1
+            request = calls[0]
+            assert isinstance(request, LaunchRequest)
+            assert request.project == "my-project"
+            assert request.worktree_id == "anomalous-potato-win-20260627-aaaa"
+            assert request.new_window is True
+            assert scr.debug == "Opened in a new window"
 
     asyncio.run(run())
 
@@ -2189,7 +2197,7 @@ def test_launch_in_new_window_runs_in_background_without_exiting_picker(
 def test_launch_in_new_window_failure_is_reported_via_debug_not_raised(
     monkeypatch,
 ):
-    from worktree_manager import engine_client
+    from worktree_manager import __main__ as manager_main
     from worktree_manager.production_picker import context as picker_context
 
     src = _fixture_source()
@@ -2208,10 +2216,11 @@ def test_launch_in_new_window_failure_is_reported_via_debug_not_raised(
             monkeypatch.setattr(scr, "_run_bg", _sync_run_bg)
             monkeypatch.setattr(picker_context, "project", lambda: "my-project")
 
-            def boom(project, args, **kwargs):
-                raise engine_client.EngineError("no visible terminal spawner found")
+            def boom(request):
+                print("error: could not open a new window: no visible terminal spawner found")
+                return 1
 
-            monkeypatch.setattr(engine_client, "run_json", boom)
+            monkeypatch.setattr(manager_main, "_run_launch", boom)
 
             rec = next(
                 r for r in scr.list_records()
@@ -2222,6 +2231,52 @@ def test_launch_in_new_window_failure_is_reported_via_debug_not_raised(
             assert app.result is None
             assert "Launch in new window failed" in scr.debug
             assert "no visible terminal spawner found" in scr.debug
+
+    asyncio.run(run())
+
+
+def test_launch_in_new_window_does_not_leak_stdout_into_the_live_tui(
+    monkeypatch, capfd,
+):
+    """`_run_launch` is CLI-shaped and `print()`s its own errors; unlike
+    every other call site (which only runs after the TUI has exited),
+    `headed_actions` calls it WHILE the Picker is still rendering, so any
+    such output must be captured and surfaced via ``self.debug`` instead of
+    reaching the real terminal and corrupting the live render."""
+    from worktree_manager import __main__ as manager_main
+    from worktree_manager.production_picker import context as picker_context
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+
+            def _sync_run_bg(_label, work, done=None, **_kwargs):
+                result = work()
+                if done is not None:
+                    done(result)
+
+            monkeypatch.setattr(scr, "_run_bg", _sync_run_bg)
+            monkeypatch.setattr(picker_context, "project", lambda: "my-project")
+
+            def noisy(request):
+                print("Creating psmux session: wt-anomalous-potato-win-20260627-aaaa")
+                return 0
+
+            monkeypatch.setattr(manager_main, "_run_launch", noisy)
+
+            rec = next(
+                r for r in scr.list_records()
+                if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
+            )
+            scr._wt_submenu_dispatch(rec, ("Launch in new window", False, False))
+
+            assert scr.debug == "Opened in a new window"
+            # The captured message never reached the real stdout.
+            assert "Creating psmux session" not in capfd.readouterr().out
 
     asyncio.run(run())
 

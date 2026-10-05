@@ -37,9 +37,11 @@ def validate_spec(spec: dict[str, Any]) -> None:
         raise EmitterError("command emitter needs a non-empty 'id'")
     command = spec.get("command")
     builtin = spec.get("repository_issue_loop")
-    if command is None and builtin is None:
+    effort_builtin = spec.get("effort_driver_loop")
+    if command is None and builtin is None and effort_builtin is None:
         raise EmitterError(
-            "emitter needs a 'command' or 'repository_issue_loop' configuration"
+            "emitter needs a 'command', 'repository_issue_loop', or "
+            "'effort_driver_loop' configuration"
         )
     if command is not None and (
         not isinstance(command, list)
@@ -52,9 +54,10 @@ def validate_spec(spec: dict[str, Any]) -> None:
         if value is not None and (not isinstance(value, str) or not value):
             raise EmitterError(f"'{key}' must be a non-empty string")
     if builtin is not None:
-        if command is not None:
+        if command is not None or effort_builtin is not None:
             raise EmitterError(
-                "'command' and 'repository_issue_loop' are mutually exclusive"
+                "'command', 'repository_issue_loop', and 'effort_driver_loop' "
+                "are mutually exclusive"
             )
         if not isinstance(builtin, dict):
             raise EmitterError("'repository_issue_loop' must be an object")
@@ -62,6 +65,20 @@ def validate_spec(spec: dict[str, Any]) -> None:
 
         try:
             validate_config(builtin, cwd=spec.get("cwd"))
+        except ValueError as exc:
+            raise EmitterError(str(exc)) from exc
+    if effort_builtin is not None:
+        if command is not None or builtin is not None:
+            raise EmitterError(
+                "'command', 'repository_issue_loop', and 'effort_driver_loop' "
+                "are mutually exclusive"
+            )
+        if not isinstance(effort_builtin, dict):
+            raise EmitterError("'effort_driver_loop' must be an object")
+        from ..effort_driver_loops import validate_config
+
+        try:
+            validate_config(effort_builtin, cwd=spec.get("cwd"))
         except ValueError as exc:
             raise EmitterError(str(exc)) from exc
     try:
@@ -468,6 +485,25 @@ def run_tick(
             result = run_issue_tick(
                 client,
                 spec["repository_issue_loop"],
+                clock=clock,
+                cwd=spec.get("cwd"),
+            )
+            return {
+                "held": True,
+                "lease": lease.get("lease"),
+                "scope": scope,
+                "returncode": 0,
+                "error": None,
+                "created": result.get("created", []),
+                "result": result,
+                "duration_seconds": max(0.0, clock() - started_at),
+            }
+        if spec.get("effort_driver_loop") is not None:
+            from ..effort_driver_loops import run_tick as run_effort_tick
+
+            result = run_effort_tick(
+                client,
+                spec["effort_driver_loop"],
                 clock=clock,
                 cwd=spec.get("cwd"),
             )

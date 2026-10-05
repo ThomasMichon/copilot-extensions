@@ -310,6 +310,24 @@ fi
 LINK_DIR="$INSTALL_DIR/venv"
 VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 
+# Stable, documented contract (ThomasMichon/copilot-extensions#5066): a file
+# containing a single epoch-seconds expiry, present for the duration of a
+# live-service update/cutover lifecycle (do_update/do_start) -- any downstream
+# consumer (a local liveness watchdog, a diagnostic tool) can check
+# `[[ -f "$INSTALL_DIR/update-in-progress" ]] && (( $(cat ...) > $(date +%s) ))`
+# without needing any plugin-specific caller-side wrapping.
+UPDATE_MARKER="${INSTALL_DIR}/update-in-progress"
+UPDATE_MARKER_TTL_DEFAULT=1200  # 20 min -- generous past any observed real cutover
+UPDATE_MARKER_REFCOUNT="${UPDATE_MARKER}.refcount"
+UPDATE_MARKER_REFCOUNT_LOCK="${UPDATE_MARKER}.refcount.lock"
+# Process-local: true once THIS invocation holds a refcount slot (see
+# _write_update_marker). Lets a nested call -- do_update calls do_start
+# internally via _update_lifecycle_start, both wanting to manage the SAME
+# marker within the SAME process -- extend the outer scope's existing
+# lifecycle instead of acquiring (and later releasing) a second slot for
+# what is really one logical holder.
+_UPDATE_MARKER_HELD=false
+
 # -- Helpers -----------------------------------------------------------------
 
 _ok()   { echo "  [OK]   $*"; }
@@ -317,6 +335,71 @@ _skip() { echo "  [SKIP] $*"; }
 _fail() { echo "  [FAIL] $*" >&2; }
 _step() { echo "  ...    $*"; }
 _warn() { echo "  [WARN] $*" >&2; }
+
+# Reference-counted, not single-owner: do_update holding the marker for a
+# long cutover and a separate, brief do_start both legitimately want it
+# live at once, and a single-owner/last-writer-wins scheme would let the
+# SHORT invocation's own exit delete the marker while the LONG one is
+# still mid-transition (review finding) -- the marker must stay present
+# until every concurrent holder has released its own slot, not just the
+# most recent one. The refcount file + its own dedicated flock (fd 9,
+# separate from the main install lock so a brief do_start never needs to
+# content for -- or risk reentering -- that longer-held lock) make
+# increment/decrement atomic across processes.
+#
+# `mkdir -p` first: on a fresh or deleted install root, $INSTALL_DIR itself
+# may not exist yet at the point either live-service lifecycle starts (its
+# own provisioning step is what would normally create it) -- the marker
+# must not fail BEFORE that provisioning ever gets a chance to run.
+_write_update_marker() {
+    if [[ "$_UPDATE_MARKER_HELD" == true ]]; then
+        return 0
+    fi
+    local ttl="${1:-${UPDATE_MARKER_TTL_DEFAULT}}"
+    mkdir -p "$(dirname "${UPDATE_MARKER}")"
+    exec 9>"${UPDATE_MARKER_REFCOUNT_LOCK}"
+    flock -w 10 9 || true   # best-effort: proceed even if briefly uncontended-but-slow
+    local count tmp
+    count="$(cat "${UPDATE_MARKER_REFCOUNT}" 2>/dev/null || echo 0)"
+    [[ "$count" =~ ^[0-9]+$ ]] || count=0
+    if (( count == 0 )); then
+        # First holder: stamp a fresh marker. A later joiner deliberately
+        # does NOT refresh the expiry -- the TTL is a safety-net backstop,
+        # not a per-holder renewal lease.
+        tmp="$(mktemp "${UPDATE_MARKER}.XXXXXX")"
+        echo "$(( $(date +%s) + ttl ))" > "${tmp}"
+        mv -f "${tmp}" "${UPDATE_MARKER}"
+    fi
+    tmp="$(mktemp "${UPDATE_MARKER_REFCOUNT}.XXXXXX")"
+    echo "$(( count + 1 ))" > "${tmp}"
+    mv -f "${tmp}" "${UPDATE_MARKER_REFCOUNT}"
+    exec 9>&-
+    _UPDATE_MARKER_HELD=true
+}
+# Releases this invocation's own refcount slot; only the holder that takes
+# the count to zero actually removes the marker file, so it stays present
+# for the full duration of whichever concurrent transition runs longest.
+# Best-effort: a read/write race here is never fatal to the caller's own
+# exit (the TTL remains the backstop if the refcount file itself is ever
+# lost or corrupted).
+_clear_update_marker() {
+    [[ "$_UPDATE_MARKER_HELD" == true ]] || return 0
+    _UPDATE_MARKER_HELD=false
+    exec 9>"${UPDATE_MARKER_REFCOUNT_LOCK}" 2>/dev/null || return 0
+    flock -w 10 9 || true
+    local count tmp
+    count="$(cat "${UPDATE_MARKER_REFCOUNT}" 2>/dev/null || echo 0)"
+    [[ "$count" =~ ^[0-9]+$ ]] || count=0
+    (( count > 0 )) && (( count-- ))
+    if (( count <= 0 )); then
+        rm -f "${UPDATE_MARKER}" "${UPDATE_MARKER_REFCOUNT}"
+    else
+        tmp="$(mktemp "${UPDATE_MARKER_REFCOUNT}.XXXXXX")"
+        echo "${count}" > "${tmp}"
+        mv -f "${tmp}" "${UPDATE_MARKER_REFCOUNT}"
+    fi
+    exec 9>&-
+}
 
 # Detects `AssertionError: SRE module mismatch` -- a transient race on a
 # shared uv-managed Python interpreter that surfaces when several installers
@@ -1703,6 +1786,13 @@ do_start() {
         exit 1
     fi
 
+    # Mark the live-service start lifecycle as in-progress (ce#5066), past
+    # every "nothing to do" early return above -- a local liveness watchdog
+    # should only ever see this during an actual start attempt, never while
+    # an already-healthy daemon or a forward route is correctly left alone.
+    _write_update_marker
+    trap _clear_update_marker EXIT
+
     _step "Starting agent-bridge..."
 
     # Prefer systemd if available
@@ -2113,6 +2203,21 @@ do_update() {
         active_forward=true
         _step "Forwarded host bridge route detected -- updating runtime files without draining/stopping/starting a local daemon"
     fi
+
+    # Mark the live-service update lifecycle as in-progress (ce#5066) so a
+    # local liveness watchdog never force-restarts a daemon that is
+    # legitimately, briefly down for drain/stop/stage/start or a zero-downtime
+    # cutover -- ONLY when a local daemon transition can actually happen.
+    # The forwarded-route branch above never drains/stops/starts anything
+    # local, so marking it would advertise a live transition where none
+    # occurs. The EXIT trap covers every path below uniformly -- success,
+    # a cutover-then-fallback, a failed update's rollback, or an unhandled
+    # error under `set -euo pipefail`.
+    if [[ "$active_forward" != true ]]; then
+        _write_update_marker
+        trap _clear_update_marker EXIT
+    fi
+
     local predecessor_signature=""
     if [[ "$active_forward" != true ]]; then
         predecessor_signature="$(_active_signature 2>/dev/null || true)"
