@@ -2107,6 +2107,71 @@ class TestVenueBoundResolve:
         assert target.project == "SPO.Core"
 
     @pytest.mark.asyncio
+    async def test_repo_at_machine_rebinds_plugin_args_not_default_projects(self):
+        # Regression: _resolve_static(venue) resolves plugin args for the
+        # venue's own DEFAULT project ("dotfiles") before _bind_repo swaps
+        # in the requested repo ("SPO.Core") -- the final copilot_args must
+        # carry SPO.Core's plugin args, never dotfiles' stale ones.
+        from unittest.mock import patch
+        local = self.machines["host-dev6"]
+
+        def _own(project, cwd=None):
+            return ["--plugin-dir", f"/own/{project}"]
+
+        def _related(project):
+            return ["--plugin-dir", f"/related/{project}"]
+
+        with patch(
+            "agent_bridge.agent_registry._detect_local_machine",
+            return_value=(local, "windows"),
+        ):
+            resolver = AgentResolver(self.agents, self.machines)
+            with (
+                patch.object(resolver, "_own_plugin_args", side_effect=_own),
+                patch.object(resolver, "_related_plugin_args", side_effect=_related),
+            ):
+                target = await resolver.resolve_async("SPO.Core@dev6")
+
+        assert target.project == "SPO.Core"
+        assert "/own/dotfiles" not in target.copilot_args
+        assert "/related/dotfiles" not in target.copilot_args
+        assert "/own/SPO.Core" in target.copilot_args
+        assert "/related/SPO.Core" in target.copilot_args
+
+    @pytest.mark.asyncio
+    async def test_bare_venue_rebind_through_sender_repo_uses_final_project(self):
+        # The other rebinding path (#5306 review): a bare machine resolved
+        # via a namespace/bare candidate, then rebound through _bind_repo.
+        # Exercise it the same way the venue-bound path is exercised above --
+        # a bare local agent with no `host`, rebound onto a different repo.
+        from unittest.mock import patch
+
+        agents = {
+            "box": AgentConfig(name="box", project="dotfiles", derived=True),
+        }
+
+        def _own(project, cwd=None):
+            return ["--plugin-dir", f"/own/{project}"]
+
+        def _related(project):
+            return ["--plugin-dir", f"/related/{project}"]
+
+        resolver = AgentResolver(agents, self.machines)
+        with (
+            patch.object(resolver, "_own_plugin_args", side_effect=_own),
+            patch.object(resolver, "_related_plugin_args", side_effect=_related),
+        ):
+            target = resolver._bind_repo(
+                resolver._resolve_static("box"), "SPO.Core", "box",
+            )
+
+        assert target.project == "SPO.Core"
+        assert "/own/dotfiles" not in target.copilot_args
+        assert "/related/dotfiles" not in target.copilot_args
+        assert "/own/SPO.Core" in target.copilot_args
+        assert "/related/SPO.Core" in target.copilot_args
+
+    @pytest.mark.asyncio
     async def test_explicit_repo_at_machine_agent_resolves_static(self):
         # A derived <repo>@<machine> entry that IS an exact registry key resolves
         # directly (loopback) -- it needs no bare venue agent to rebind onto.

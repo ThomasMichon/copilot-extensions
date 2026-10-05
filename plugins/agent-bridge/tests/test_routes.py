@@ -3263,6 +3263,39 @@ def test_resolve_local_binstub_falls_back_to_path_when_no_local_shim(
     assert resolved == "/resolved/private-downstream-repo"
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="POSIX execute-permission semantics; Windows has no X_OK concept "
+    "for a plain file and always takes the PATHEXT branch instead.",
+)
+def test_resolve_local_binstub_skips_non_executable_explicit_path(
+    tmp_path, monkeypatch,
+) -> None:
+    """Regression (#5306 review): a non-executable file sitting at the exact
+    ``~/.local/bin/<project>`` path must not be selected -- ``shutil.which``
+    itself checks ``os.access(X_OK)``, so the explicit-path fast path must
+    too, or a real executable resolvable via ``PATH`` gets masked by a
+    stale/non-executable local file, raising ``PermissionError`` at spawn."""
+    import shutil
+    from pathlib import Path
+
+    from agent_bridge.routes.worktrees import _resolve_local_binstub
+
+    bin_dir = tmp_path / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    non_exec = bin_dir / "private-downstream-repo"
+    non_exec.write_text("not executable\n")
+    non_exec.chmod(0o644)
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(
+        shutil, "which",
+        lambda name: "/resolved/path" if name == "private-downstream-repo" else None,
+    )
+    resolved = _resolve_local_binstub("private-downstream-repo")
+    assert resolved == "/resolved/path"
+
+
 def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
     """agent-bridge-worktree-native-agents (Phase 3): a worktree's bound
     charter borrows its own launch shape (copilot_path/mcp_servers/env, and

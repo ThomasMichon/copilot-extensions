@@ -392,3 +392,48 @@ def test_related_plugin_no_refs_returns_empty(monkeypatch):
     )
     assert repo_own_plugins.related_plugin_dir_args("target-repo") == []
     assert repo_own_plugins.related_plugin_dir_args(None) == []
+
+
+def test_related_plugin_first_claiming_anchor_wins_even_if_broken(tmp_path, monkeypatch):
+    # The FIRST repo_root declaring `control-local` as a local marketplace
+    # claims it -- even if its declared plugin is missing -- and must not
+    # fall through to a second root that also declares the same marketplace
+    # name with the plugin actually present, nor to the installed payload.
+    # Mirrors agent_codespaces.plugin_staging's shadowing-safe behavior.
+    first_root = tmp_path / "first"
+    _make_local_marketplace(first_root / ".ai", "control-local", "other-plugin")
+    _make_repo(
+        first_root,
+        enabled={},
+        marketplaces={
+            "control-local": {
+                "source": {"source": "directory", "path": str(first_root / ".ai")}
+            }
+        },
+    )
+    second_root = tmp_path / "second"
+    _make_local_marketplace(second_root / ".ai", "control-local", "enhancer")
+    _make_repo(
+        second_root,
+        enabled={},
+        marketplaces={
+            "control-local": {
+                "source": {"source": "directory", "path": str(second_root / ".ai")}
+            }
+        },
+    )
+    installed = tmp_path / "installed"
+    _write(installed / "control-local" / "enhancer" / "plugin.json", {"name": "enhancer"})
+    repo_own_plugins._INSTALLED = installed
+
+    monkeypatch.setattr(
+        related_plugins,
+        "related_plugins_for_repo",
+        lambda repo, anchors=None: [PluginRef("enhancer@control-local", enable=True)],
+    )
+
+    args = repo_own_plugins.related_plugin_dir_args(
+        "target-repo", repo_roots=[first_root, second_root],
+    )
+
+    assert args == []

@@ -144,10 +144,17 @@ def _resolve_ref_dir(source: str, repo_roots: list[Path]) -> Path | None:
     """Resolve one ``PluginRef`` source to a local payload dir, or ``None``.
 
     Mirrors ``agent_codespaces.plugin_staging``'s local-marketplace lookup
-    (first-wins across ``repo_roots``) without depending on that package --
-    both consume the same shared ``plugin_resolve`` primitives. Falls back to
-    the installed-plugin payload when no ``repo_roots`` entry declares the
-    marketplace locally. Fail-safe -> ``None``.
+    (first-wins across ``repo_roots``, shadowing-safe) without depending on
+    that package -- both consume the same shared ``plugin_resolve``
+    primitives. The **first** ``repo_roots`` entry whose settings declare
+    ``marketplace`` as a local source *claims* it: if that marketplace lacks
+    ``name`` or has an unreadable manifest, resolution stops there rather
+    than falling through to a different (shadowed) anchor's declaration of
+    the same marketplace name, or to the installed-plugin payload -- both of
+    which could silently load a different or stale payload than the one the
+    winning anchor actually declares. Only an **undeclared** marketplace (no
+    ``repo_roots`` entry claims it at all) falls back to the installed
+    payload. Fail-safe -> ``None``.
     """
     name, marketplace = split_source(source)
     if not name or not marketplace:
@@ -161,16 +168,19 @@ def _resolve_ref_dir(source: str, repo_roots: list[Path]) -> Path | None:
             continue
         if marketplace_source_kind(marketplace, settings) is not MarketplaceSourceKind.LOCAL:
             continue
+        # This anchor claims the marketplace name -- resolve exactly here,
+        # success or failure, and never consult another anchor or the
+        # installed inventory for this source.
         mp_root = local_marketplace_path(marketplace, settings, repo_dir=root)
         if mp_root is None:
-            continue
+            return None
         mp_root = mp_root.resolve()
         mp = load_marketplace(mp_root)
         if mp is None:
-            continue
+            return None
         payload = plugin_dir(mp, name)
         if payload is None:
-            continue
+            return None
         payload = payload.resolve()
         try:
             payload.relative_to(mp_root)
@@ -180,8 +190,7 @@ def _resolve_ref_dir(source: str, repo_roots: list[Path]) -> Path | None:
                 source, mp_root, payload,
             )
             return None
-        if has_plugin_manifest(payload):
-            return payload
+        return payload if has_plugin_manifest(payload) else None
     return _installed_dir(name, marketplace)
 
 

@@ -519,15 +519,22 @@ def _resolve_local_binstub(project: str) -> str:
     directory component (like the explicit ``~/.local/bin/<project>`` path
     below) is checked for an *exact* match only, with no suffix search at
     all -- so it silently misses the installed ``.cmd``/``.ps1`` shim sitting
-    right next to it. Try the exact name first, then each ``PATHEXT`` suffix
-    directly against that same directory, before falling back to a bare
-    ``shutil.which(project)`` PATH search.
+    right next to it. Try the exact name first (POSIX: only if it is also
+    executable, matching what ``shutil.which`` itself checks -- a non-
+    executable file at that exact path must still fall through to PATH),
+    then each ``PATHEXT`` suffix directly against that same directory on
+    Windows, before falling back to a bare ``shutil.which(project)`` PATH
+    search.
     """
     import shutil
     from pathlib import Path
 
     explicit = Path.home() / ".local" / "bin" / project
-    if explicit.is_file():
+    is_executable = (
+        explicit.is_file()
+        and (os.name == "nt" or os.access(explicit, os.X_OK))
+    )
+    if is_executable:
         return str(explicit)
     if os.name == "nt":
         for ext in os.environ.get("PATHEXT", "").split(os.pathsep):

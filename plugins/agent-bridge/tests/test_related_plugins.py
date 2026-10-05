@@ -116,6 +116,23 @@ def test_entry_key_match_is_case_insensitive(tmp_path: Path):
     assert [r.source for r in refs] == ["only@mkt"]
 
 
+def test_non_string_yaml_key_does_not_crash_other_entries(tmp_path: Path):
+    # YAML deserializes an unquoted `42:`/`true:` key as int/bool, not str --
+    # a bare .lower() on that key must not raise and drop every later entry.
+    _write_related(
+        tmp_path,
+        "related:\n"
+        "  42:\n"
+        "    locus: { preferred: local }\n"
+        "  copilot-extensions:\n"
+        "    locus: { preferred: local }\n"
+        "    plugins:\n"
+        "      - only@mkt\n",
+    )
+    refs = rp.related_plugins_for_repo("copilot-extensions", anchors=[tmp_path])
+    assert [r.source for r in refs] == ["only@mkt"]
+
+
 def test_control_plane_anchors_from_topology(tmp_path, monkeypatch):
     # A topology whose machines_yaml lives at an anchor with related.yaml.
     _write_related(tmp_path, _RELATED)

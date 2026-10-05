@@ -199,7 +199,10 @@ def related_plugins_for_repo(
         for key, entry in related.items():
             if not isinstance(entry, dict):
                 continue
-            if key.lower() == target or any(
+            # YAML may deserialize an unquoted key as a non-string (int,
+            # bool, etc.) -- normalize before lowercasing so one oddly-typed
+            # entry can't raise and drop every later entry's plugins.
+            if str(key).lower() == target or any(
                 r.lower() == target for r in _entry_repos(entry)
             ):
                 return _parse_plugin_items(entry.get("plugins"))
