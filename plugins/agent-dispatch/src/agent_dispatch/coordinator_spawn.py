@@ -392,6 +392,7 @@ def register_spawn_routes(
         label: str | None = None,
         conclusion_state: str | None = None,
         resume_requested: bool | None = None,
+        latest_only: bool = False,
         limit: int = 200,
     ) -> list[dict]:
         states = (
@@ -406,6 +407,7 @@ def register_spawn_routes(
                 label=label,
                 conclusion_state=conclusion_state,
                 resume_requested=resume_requested,
+                latest_only=latest_only,
                 limit=limit,
             )
         ]

@@ -947,6 +947,40 @@ def _fail_attempts(q, task_id, count=3):
         q.fail_spawn(reservation.key, detail="transport unavailable")
 
 
+def test_list_reservations_latest_only_dedupes_per_task(q):
+    """A retried task accumulates one reservation row per attempt, most now
+    superseded. ``latest_only`` must return exactly the single
+    highest-attempt row per task, not every historical attempt -- the
+    semantics `agent_dispatch.doctor.find_stuck_queued_reservations` relies
+    on so a busy fleet's older-but-still-stuck tasks aren't crowded out of
+    a bounded ``limit`` by other tasks' already-superseded old attempts."""
+    t = q.create("work")
+    _fail_attempts(q, t.id, count=3)
+
+    all_failed = q.list_reservations(task_id=t.id, state=SpawnState.FAILED)
+    assert len(all_failed) == 3
+
+    latest = q.list_reservations(
+        task_id=t.id, state=SpawnState.FAILED, latest_only=True
+    )
+    assert len(latest) == 1
+    assert latest[0].attempt == 3
+
+
+def test_list_reservations_latest_only_across_multiple_tasks(q):
+    """Across several tasks, ``latest_only`` returns at most one row per
+    ``task_id`` -- each task's own highest-attempt row -- regardless of how
+    many older, superseded attempts any of them individually accumulated."""
+    busy = q.create("busy")
+    _fail_attempts(q, busy.id, count=5)
+    quiet = q.create("quiet")
+    _fail_attempts(q, quiet.id, count=1)
+
+    latest = q.list_reservations(state=SpawnState.FAILED, latest_only=True)
+    by_task = {r.task_id: r.attempt for r in latest}
+    assert by_task == {busy.id: 5, quiet.id: 1}
+
+
 def test_rearm_atomically_retires_failed_history(q):
     t = q.create("work")
     _fail_attempts(q, t.id)

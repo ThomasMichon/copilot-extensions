@@ -567,25 +567,29 @@ def find_stuck_queued_reservations(
     consume the sweep's own ``limit`` before any claimed/started/suspended
     row is examined).
 
-    This queries ``GET /spawn-reservations?state=failed`` directly --
-    a **separate**, reservation-state-filtered, independently-limited query
-    that never competes with the task sweep's own budget. For each matching
-    reservation it fetches the owning task (``GET /tasks/{id}``, the one
-    endpoint that actually attaches ``spawn_reservation`` -- the bulk
-    ``GET /tasks`` list endpoint does not, which is why this cannot simply
-    filter an already-fetched task list) and reports it only when that task
-    is still ``queued`` **and** this is still its *current* (latest)
-    reservation -- a reservation that failed but whose task has since
-    progressed (a fresh attempt reserved, claimed, etc.) is not stuck and
-    must not be reported as if it still were. The fetched reservation's own
-    ``state`` is re-checked too (still required to be ``FAILED``), since an
-    operator's ``reservations rearm`` can race between the initial list
-    query and this per-task fetch -- same key, same queued task, but the
-    state moved on (``failed`` -> ``rearmed``) and it is no longer stuck.
+    This queries ``GET /spawn-reservations?state=failed&latest_only=true``
+    directly -- a **separate**, reservation-state-filtered, independently-
+    limited query that never competes with the task sweep's own budget.
+    ``latest_only`` restricts the result to each task's single
+    highest-attempt reservation row -- without it, a retried task's older,
+    already-superseded failed attempts could crowd a busy fleet's bounded
+    ``limit`` and hide an older, genuinely-still-stuck task further back in
+    the newest-first ordering. For each matching reservation it fetches the
+    owning task (``GET /tasks/{id}``, the one endpoint that actually
+    attaches ``spawn_reservation`` -- the bulk ``GET /tasks`` list endpoint
+    does not, which is why this cannot simply filter an already-fetched
+    task list) and reports it only when that task is still ``queued``
+    **and** this is still its *current* (latest) reservation -- a defense-
+    in-depth re-check in case a fresh attempt was reserved between the two
+    queries above. The fetched reservation's own ``state`` is re-checked
+    too (still required to be ``FAILED``), since an operator's
+    ``reservations rearm`` can race in the same window -- same key, same
+    queued task, but the state moved on (``failed`` -> ``rearmed``) and it
+    is no longer stuck.
     """
     diagnoses = []
     reservations = client.list_reservations(
-        state=SpawnState.FAILED, repo=repo, label=label, limit=limit
+        state=SpawnState.FAILED, repo=repo, label=label, latest_only=True, limit=limit
     )
     for res in reservations:
         task_id = res.get("task_id")

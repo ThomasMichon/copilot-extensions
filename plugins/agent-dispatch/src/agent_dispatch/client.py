@@ -927,6 +927,7 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, Complet
         label: str | None = None,
         conclusion_state: str | None = None,
         resume_requested: bool | None = None,
+        latest_only: bool = False,
         limit: int = 200,
     ) -> list[dict]:
         params: dict[str, Any] = {"limit": limit}
@@ -942,6 +943,8 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, Complet
             params["conclusion_state"] = conclusion_state
         if resume_requested is not None:
             params["resume_requested"] = resume_requested
+        if latest_only:
+            params["latest_only"] = latest_only
         return self._unwrap(self._http.get("/spawn-reservations", params=params))
 
     def get_reservation(self, key: str) -> dict:

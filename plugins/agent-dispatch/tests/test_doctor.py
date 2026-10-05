@@ -524,7 +524,9 @@ def test_cli_doctor_check_live_sessions_fetches_reservations_per_task(
     fake = _ListClient(tasks)
     fake.list_reservations_calls = []
 
-    def _list_reservations(*, task_id=None, state=None, repo=None, label=None, limit=1000):
+    def _list_reservations(
+        *, task_id=None, state=None, repo=None, label=None, latest_only=False, limit=1000
+    ):
         if task_id is None:
             # The separate stuck-queued-reservation query also calls
             # list_reservations (with no task_id); irrelevant to this
@@ -715,7 +717,13 @@ def test_find_stuck_queued_reservations_queries_failed_state_separately():
     assert len(diagnoses) == 1
     assert diagnoses[0].verdict == doctor.QUEUED_STUCK_RESERVATION_VERDICT
     assert client.list_reservations_calls == [
-        {"state": doctor.SpawnState.FAILED, "repo": "r", "label": "l", "limit": 50}
+        {
+            "state": doctor.SpawnState.FAILED,
+            "repo": "r",
+            "label": "l",
+            "latest_only": True,
+            "limit": 50,
+        }
     ]
 
 

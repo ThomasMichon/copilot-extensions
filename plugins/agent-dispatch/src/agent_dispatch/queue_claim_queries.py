@@ -367,9 +367,21 @@ class QueueClaimQueriesMixin:
         label: str | None = None,
         conclusion_state: str | None = None,
         resume_requested: bool | None = None,
+        latest_only: bool = False,
         limit: int = 200,
     ) -> list[SpawnReservation]:
-        """List spawn reservations, newest first, optionally filtered."""
+        """List spawn reservations, newest first, optionally filtered.
+
+        ``latest_only`` restricts the result to each task's single
+        highest-``attempt`` reservation row (one row per ``task_id``). A
+        task retried several times accumulates one reservation row per
+        attempt, most now superseded; without this, a state filter (e.g.
+        ``state="failed"``) orders and limits across EVERY historical row,
+        so many tasks' old, already-superseded failed attempts can crowd
+        out an older task's single current-and-still-failed reservation out
+        of a bounded ``limit`` -- exactly the latest-only semantics
+        :func:`agent_dispatch.doctor.find_stuck_queued_reservations` needs.
+        """
         repo = self._canonical_repo(repo)
         clauses: list[str] = []
         params: list[object] = []
@@ -380,6 +392,11 @@ class QueueClaimQueriesMixin:
             states = [state] if isinstance(state, str) else list(state)
             clauses.append(f"r.state IN ({','.join('?' * len(states))})")
             params.extend(states)
+        if latest_only:
+            clauses.append(
+                "r.attempt = (SELECT MAX(r2.attempt) FROM spawn_reservations r2 "
+                "WHERE r2.task_id = r.task_id)"
+            )
         join_tasks = repo is not None or label is not None or resume_requested is not None
         if repo is not None:
             clauses.append("t.repo = ?")
