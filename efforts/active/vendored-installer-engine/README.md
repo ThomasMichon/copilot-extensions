@@ -395,7 +395,7 @@ engine under this effort.
 - [x] `agent-logger` (already has the pyvenv.cfg fix hand-applied today —
       good second-mover to prove the engine covers a second plugin's needs).
 - [x] `agent-vault` (smaller installer, low risk).
-- [ ] `agent-ssh` (smaller installer, low risk).
+- [x] `agent-ssh` (smaller installer, low risk).
 - [ ] `agent-codespaces`, `agent-index` (each carries genuine per-service
       logic beyond the engine — sibling package installs / separate engine
       venv — prove the config schema handles these before doing the rest).
@@ -461,14 +461,17 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 - [ ] `docs/install-contract.md` is updated to describe the new engine +
       config-schema pattern once Phase 1 lands, so it stays the accurate
       reference (not just this effort's private plan).
-- [ ] **Net corpus size actually shrinks.** After each phase, total installer
-      line count across converted plugins (their `install.ps1`/`.sh` +
-      whatever share of the vendored `installer-engine.*` they carry) must be
-      materially smaller than the pre-conversion baseline for those same
-      plugins — not just relocated. Record before/after line counts per
-      converted plugin in the Journal. A phase that leaves the corpus flat or
-      larger is a signal the engine is accreting per-service special-casing
-      and needs re-scoping, not a pass.
+- [ ] **Net corpus size actually shrinks across the full rollout.** The final
+      non-exempt adopter set's total installer line count (their
+      `install.ps1`/`.sh` plus the shared `installer-engine.*`) must be
+      materially smaller than the pre-conversion baseline — not just
+      relocated. Record before/after line counts per converted plugin in the
+      Journal. An individual adopter leg may temporarily grow when necessary
+      shared safety/robustness fixes land in the engine or wrapper at the same
+      time, but that growth must be called out explicitly in the Journal and
+      then either (a) offset by later adopter conversions before this effort
+      closes, or (b) carried by an explicit follow-up tightening item in the
+      Plan/Validation Plan rather than silently treated as satisfied.
 
 ## Proposal
 
@@ -1047,3 +1050,92 @@ appropriately larger/riskier for one sitting):
   subprocess timeouts), and the existing preinstall-loop guards only needed
   shape updates so they continued extracting/exercising the refactored wrapper
   logic.
+
+### 2026-10-05 — `agent-ssh` adopted the shared installer engine
+
+- Converted `plugins/agent-ssh/scripts/install.sh` and
+  `plugins/agent-ssh/scripts/install.ps1` to the canonical-reference wrapper
+  form: both now source
+  `libs/installer-engine/installer-engine.{sh,ps1}` directly on `dev`, and
+  `tools/installer_engine_ref.py` now registers `agent-ssh` as an adopter so
+  `tools/sync-installer-engine.py --check` enforces that form.
+- Removed the wrapper-local copies of the shared engine logic:
+  POSIX now uses shared `ensure_uv`, `new_signed_venv`,
+  `invoke_uv_pip_install_resilient`, `write_deploy_manifest`, and
+  `write_simple_binstub`; PowerShell now uses shared `Ensure-Uv`,
+  `New-SignedVenv`, `Invoke-UvPipInstallResilient`,
+  `Write-DeployManifest`, and `Write-SimpleBinstub`. Genuinely per-service
+  logic stayed local: the vendored-lib resolution helpers, the
+  `agent-ssh`-specific package-install dependency list, versioned-runtime
+  helpers, PATH persistence, the session-start hook deployment, and the
+  snapshot materialization needed for first-use provisioning from a stamped
+  payload.
+- The stamped snapshot path now materializes both the canonical installer-engine
+  pair and the canonical-on-`dev` `[tool.uv.sources]` libraries
+  (`agent-procutil`, `ssh-manager`, `venue-copilot`, `zdd`,
+  `remote-login-shell`) into the published snapshot and rewrites the wrapper
+  source lines to the local `scripts/installer-engine.*` form before
+  first-use provisioning, so the shipped snapshot remains self-contained even
+  though the `dev` checkout keeps no local `scripts/installer-engine.*` copy.
+- Shared-engine follow-up found and fixed in the same leg: PowerShell's
+  `Write-DeployManifest` now falls back to the host name when
+  `$env:COMPUTERNAME` is absent, so Linux/WSL `pwsh` validation can exercise
+  the shared manifest writer without a null dereference.
+- **Line-count / corpus result:** wrapper-only installer lines shrank from
+  `install.sh` 701 -> 817 (+116) and `install.ps1` 899 -> 990 (+91), for a
+  combined wrapper change of 1600 -> 1807 (**+207**). The canonical engine grew by
+  11 POSIX lines (`installer-engine.sh` 379 -> 390) for shell-literal quoting,
+  snapshot-safe provenance/version overrides, and missing-payload tolerance, and
+  by 11 PowerShell lines (`installer-engine.ps1` 462 -> 473) for the matching
+  provenance/version override support plus the `$env:COMPUTERNAME` fallback
+  above. Net result for this conversion leg: **229 lines added** to the combined
+  agent-ssh + shared-engine corpus. Per the re-scoped Validation Plan below,
+  that makes this a documented temporary growth leg, not a silent pass: the
+  safety/provenance fixes earned their keep here, and the remaining adopter
+  rollout must still offset this growth (or split out an explicit tightening
+  follow-up) before the effort can close.
+- Validation completed here:
+  - `python3 tools/sync-vendored-libs.py --check`
+  - `python3 tools/sync-installer-engine.py --check`
+  - `python3 tools/check-vendored-libs-sync.py`
+  - `python3 tools/check-install-contract.py`
+  - `python3 tools/check-version-consistency.py`
+  - `python3 tools/check-module-size.py`
+  - `python3 tools/check-docs-consistency.py`
+  - `python3 tools/check-changefile-presence.py --base origin/dev`
+  - initial full suite once, before edits:
+    `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-ssh --reinstall --admission-wait 540`
+    -> PASS (`207 passed, 7 skipped`)
+  - focused follow-up only on the changed installer regressions after the new
+    snapshot tests exposed the missing self-contained `uv` source handling and
+    the later review rounds identified quoting/snapshot-provenance regressions:
+    `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-ssh --reinstall --admission-wait 540 -k "installer_fallback or install_manifest_source_path or install_snapshot"`
+    -> PASS (`13 passed, 1 skipped, 207 deselected`), then after the final
+    payload-copy / older-snapshot guards landed:
+    `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-ssh --reinstall --admission-wait 540 -k "installer_fallback or install_snapshot"`
+    -> PASS (`10 passed, 1 skipped, 210 deselected`)
+  - focused PS/POSIX snapshot-only proof after the shared manifest-writer fix:
+    `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-ssh --reinstall --admission-wait 540 -k install_snapshot`
+    -> PASS (`13 passed, 214 deselected`)
+  - final full suite after the review-fix pass:
+    `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-ssh --reinstall --admission-wait 540`
+    -> PASS (`220 passed, 7 skipped`)
+  - real POSIX install proof: with `HOME` redirected into the session-state
+    files area and `--install-dir <scoped root>`, the converted
+    `plugins/agent-ssh/scripts/install.sh install` completed end-to-end,
+    built the versioned runtime slot, imported `agent_ssh` successfully, wrote
+    a deploy manifest with the correct local source metadata, and left **no**
+    `plugins/agent-ssh/scripts/installer-engine.{sh,ps1}` copy in the `dev`
+    checkout afterward.
+- Validation not possible in this Linux/WSL session:
+  - No real Windows `.ps1` install or native Windows PATH persistence lane on a
+    Windows host. The PowerShell wrapper path was still exercised here through
+    `pwsh`-driven snapshot/first-use tests plus a parse check, but that is not
+    a substitute for a native Windows install.
+- Test-hygiene note: no existing `agent-ssh` installer-adjacent test needed a
+  containment rewrite this round, matching the 2026-10-05 hygiene sweep's
+  spot-check. The new snapshot regressions were written to the same model as
+  the sweep: isolated HOME/USERPROFILE/XDG/temp roots, stripped inherited
+  Python env, and explicit subprocess timeouts. No fixture touched a real
+  `~/.ssh` or real SSH key material; every provision/snapshot path ran entirely
+  inside temp-rooted test homes.

@@ -11,6 +11,7 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1]
 INSTALLER = PLUGIN / "scripts" / "install.ps1"
 SHELL_INSTALLER = PLUGIN / "scripts" / "install.sh"
+ENGINE_PS1 = PLUGIN.parents[1] / "libs" / "installer-engine" / "installer-engine.ps1"
 PWSH = shutil.which("pwsh")
 # A bare shutil.which("bash") can resolve to a Windows App Execution Alias
 # stub or the classic `C:\Windows\System32\bash.exe` WSL launcher (both
@@ -100,7 +101,10 @@ def test_package_install_falls_back_when_resolved_uv_cannot_launch(
             [
                 "$ErrorActionPreference = 'Stop'",
                 "function Write-Step { param([string]$Msg) Write-Host $Msg }",
+                "function Write-Warn { param([string]$Msg) Write-Host $Msg }",
+                f". '{ps_quote(str(ENGINE_PS1))}'",
                 install_package,
+                "function Resolve-VenueCopilot { return '__unused__' }",
                 (
                     "$ok = Install-AgentSshPackage "
                     f"-Python '{ps_quote(str(fake_python))}' "
@@ -108,7 +112,8 @@ def test_package_install_falls_back_when_resolved_uv_cannot_launch(
                     "-Dependencies @("
                     f"'{ps_quote(str(dependency_a))}',"
                     f"'{ps_quote(str(dependency_b))}'"
-                    ")"
+                    ") "
+                    f"-UvCommand '{ps_quote(str(fake_bin / 'uv.exe'))}'"
                 ),
                 "if (-not $ok) { throw 'fallback install failed' }",
             ]
@@ -150,7 +155,7 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
     install_package = _shell_function_source(
         installer,
         "_install_agent_ssh_package",
-        "\n# #935:",
+        '\nACTION="${AGENT_SSH_ACTION:-install}"',
     )
 
     plugin = tmp_path / "plugin"
@@ -234,7 +239,7 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
     install_package = _shell_function_source(
         installer,
         "_install_agent_ssh_package",
-        "\n# #935:",
+        '\nACTION="${AGENT_SSH_ACTION:-install}"',
     )
 
     # git-checkout layout: repo_root/plugins/agent-ssh (no local libs/
@@ -313,13 +318,15 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
 def test_powershell_installer_resolves_uv_editable_libs_via_shared_helper() -> None:
     installer = INSTALLER.read_text(encoding="utf-8")
 
-    assert "[switch]$SkipUv" in installer
+    assert ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')" in installer
     assert "function Resolve-VenueCopilot" in installer
     assert "Resolve-VendoredLib -LibName 'venue-copilot'" in installer
     assert "$venueCopilotDir = Resolve-VenueCopilot" in installer
-    assert "--reinstall-package agent-venue-copilot" in installer
-    assert "venue-copilot uv preinstall failed -- falling back to python -m pip" in installer
-    assert "-SkipUv:$skipUv" in installer
+    assert "$pkgResult = Invoke-UvPipInstallResilient" in installer
+    assert "$depResult = Invoke-UvPipInstallResilient" in installer
+    assert "--reinstall-package" in installer
+    assert "agent-venue-copilot" in installer
+    assert "-UvCommand $uvPath" in installer
     assert "function Resolve-Zdd" in installer
     assert "Resolve-VendoredLib -LibName 'zdd'" in installer
     assert "$zddDir = Resolve-Zdd" in installer

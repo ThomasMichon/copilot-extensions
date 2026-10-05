@@ -1,0 +1,9 @@
+{
+  "comment": "Adopt the shared installer engine wrapper for agent-ssh",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

@@ -250,18 +250,25 @@ new_signed_venv() {
 
 write_deploy_manifest() {
     local service="$1" plugin="$2" install_path="$3" plugin_path="$4" venv_path="$5"
-    local additional_json="${6:-}"
+    local additional_json="${6:-}" source_path_override="${7:-}" version_override="${8:-}"
     local manifest="$install_path/deploy-manifest.json"
-    local kind ver commit branch dirty content_hash tmp
-    kind="$(_source_kind "$plugin_path")"
-    ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$plugin_path/pyproject.toml" 2>/dev/null | head -n1)"
+    local kind ver commit branch dirty content_hash tmp provenance_path
+    provenance_path="${source_path_override:-$plugin_path}"
+    kind="$(_source_kind "$provenance_path")"
+    ver="$version_override"
+    if [[ -z "$ver" ]]; then
+        ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$plugin_path/pyproject.toml" 2>/dev/null | head -n1 || true)"
+    fi
     [[ -n "$ver" ]] || ver="0.0.0"
     commit="null"; branch="null"; dirty="false"
     if [[ "$kind" == "local" ]]; then
         local repo_root _c _b _d
-        repo_root="$(cd "$plugin_path/.." && pwd)"
-        read -r _c _b _d <<< "$(_git_info "$repo_root")"
-        commit="\"$_c\""; branch="\"$_b\""; dirty="$_d"
+        repo_root="$(dirname "$provenance_path")"
+        if [[ -d "$repo_root" ]]; then
+            repo_root="$(cd "$repo_root" && pwd)"
+            read -r _c _b _d <<< "$(_git_info "$repo_root")"
+            commit="\"$_c\""; branch="\"$_b\""; dirty="$_d"
+        fi
     fi
     content_hash=""
     if declare -F _payload_hash >/dev/null 2>&1; then
@@ -276,7 +283,7 @@ write_deploy_manifest() {
   "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
   "source": {
     "kind": "$kind",
-    "path": "$plugin_path",
+    "path": "$provenance_path",
     "repo": "copilot-extensions",
     "plugin": "$plugin",
     "version": "$ver",
@@ -295,6 +302,9 @@ EOF
 write_simple_binstub() {
     local command_name="$1" module_name="$2" runtime_root="$3" local_bin="$4" install_bin_dir="$5" snapshot_installer_rel="$6" no_self_provision_env="$7"
     local resolver_ps1_source="${8:-}" resolver_sh_source="${9:-}"
+    local runtime_root_literal snapshot_installer_literal
+    printf -v runtime_root_literal '%q' "$runtime_root"
+    printf -v snapshot_installer_literal '%q' "$snapshot_installer_rel"
     mkdir -p "$local_bin" "$install_bin_dir"
     [[ -n "$resolver_ps1_source" && -f "$resolver_ps1_source" ]] && cp -f "$resolver_ps1_source" "$install_bin_dir/resolve-runtime.ps1"
     [[ -n "$resolver_sh_source" && -f "$resolver_sh_source" ]] && cp -f "$resolver_sh_source" "$install_bin_dir/resolve-runtime.sh"
@@ -303,7 +313,8 @@ write_simple_binstub() {
 #!/usr/bin/env bash
 export PYTHONUTF8=1
 _name="$command_name"
-_root="$runtime_root"
+_root=$runtime_root_literal
+_snapshot_installer_rel=$snapshot_installer_literal
 _resolver="\$_root/bin/resolve-runtime.sh"
 _resolve() {
     AGENT_RT_PY=""
@@ -353,7 +364,7 @@ trap '_unlock_provision' EXIT INT TERM
 _resolve
 [ -n "\$AGENT_RT_PY" ] && { _unlock_provision; trap - EXIT INT TERM; exec "\$AGENT_RT_PY" -m "$module_name" "\$@"; }
 _snapshot="\$(cat "\$_root/payload-dir" 2>/dev/null || true)"
-_install="\$_snapshot/$snapshot_installer_rel"
+_install="\$_snapshot/\$_snapshot_installer_rel"
 if [ ! -f "\$_install" ]; then
     printf '[%s] cannot self-provision: owning snapshot installer unavailable: %s\n' "\$_name" "\$_install" >&2
     exit 127
