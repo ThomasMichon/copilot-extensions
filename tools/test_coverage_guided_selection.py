@@ -40,6 +40,7 @@ from tools.coverage_guided_selection import correlation  # noqa: E402
 from tools.coverage_guided_selection import fallback, selection as select  # noqa: E402
 from tools.coverage_guided_selection import ancestor_resolution as ar
 from tools.coverage_guided_selection import debt  # noqa: E402
+from tools.coverage_guided_selection import decide as decide_mod  # noqa: E402
 
 
 def _synthetic_baseline() -> dict:
@@ -352,6 +353,243 @@ class TestCorrelation:
         # The pointer is a correlation index, never the payload -- no
         # per-line coverage map should ever be embedded here.
         assert "coverage" not in pointer
+
+
+class TestFetchBaselineAsset:
+    _POINTER = {
+        "release_tag": "coverage-baselines-abc", "asset": "agent-x.json",
+        "plugin": "agent-x", "measured_commit": "abc",
+    }
+    _VALID_PAYLOAD = {
+        "plugin": "agent-x", "measured_commit": "abc",
+        "generated_at": "2026-01-01T00:00:00+00:00",
+        "coverage": {}, "tests": {},
+    }
+
+    def _write_asset(self, args, payload) -> None:
+        dest_dir = Path(args[args.index("--dir") + 1])
+        (dest_dir / "agent-x.json").write_text(json.dumps(payload))
+
+    def _fake_run_writing(self, payload):
+        def _fake_run(args, **_kwargs):
+            self._write_asset(args, payload)
+
+            class _Result:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return _Result()
+        return _fake_run
+
+    def test_rejects_a_pointer_missing_release_tag_or_asset(self) -> None:
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", {"plugin": "x", "measured_commit": "abc"})
+
+    def test_rejects_a_pointer_missing_plugin_or_measured_commit(self) -> None:
+        # Regression: a pointer that omits its own identity fields must be
+        # rejected outright, not silently skip the later
+        # plugin/measured_commit correlation check.
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset(
+                "owner/repo", {"release_tag": "coverage-baselines-abc", "asset": "agent-x.json"}
+            )
+
+    def test_rejects_a_pointer_with_non_string_fields(self) -> None:
+        # Regression: a syntactically-truthy but non-string field (e.g. a
+        # numeric release_tag, a list-valued asset) would otherwise reach
+        # subprocess.run/Path and raise a raw TypeError, bypassing
+        # BaselineFetchError entirely.
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset(
+                "owner/repo",
+                {"release_tag": 12345, "asset": "agent-x.json", "plugin": "agent-x", "measured_commit": "abc"},
+            )
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset(
+                "owner/repo",
+                {"release_tag": "t", "asset": ["agent-x.json"], "plugin": "agent-x", "measured_commit": "abc"},
+            )
+
+    def test_downloads_and_parses_the_asset(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(self._VALID_PAYLOAD))
+
+        result = correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+        assert result == self._VALID_PAYLOAD
+
+    def test_raises_on_a_failed_download(self, monkeypatch) -> None:
+        class _Failed:
+            returncode = 1
+            stdout = ""
+            stderr = "release not found"
+
+        monkeypatch.setattr(correlation.subprocess, "run", lambda *a, **k: _Failed())
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_when_gh_is_not_launchable(self, monkeypatch) -> None:
+        # Regression: `subprocess.run` itself raises OSError (e.g.
+        # FileNotFoundError) when `gh` isn't on PATH at all -- this must
+        # not bypass BaselineFetchError.
+        def _raise_oserror(*_a, **_k):
+            raise FileNotFoundError("gh not found")
+
+        monkeypatch.setattr(correlation.subprocess, "run", _raise_oserror)
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_on_a_timed_out_download(self, monkeypatch) -> None:
+        # Regression: a stalled gh connection must not block the calling
+        # CI decision process indefinitely -- subprocess.TimeoutExpired
+        # must convert to BaselineFetchError like every other failure mode.
+        def _raise_timeout(args, **kwargs):
+            raise correlation.subprocess.TimeoutExpired(cmd=args, timeout=kwargs.get("timeout", 1))
+
+        monkeypatch.setattr(correlation.subprocess, "run", _raise_timeout)
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER, timeout_s=1.0)
+
+    def test_raises_on_malformed_json(self, tmp_path, monkeypatch) -> None:
+        def _fake_run(args, **kwargs):
+            dest_dir = Path(args[args.index("--dir") + 1])
+            (dest_dir / "agent-x.json").write_text("not valid json {{{")
+
+            class _Result:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return _Result()
+
+        monkeypatch.setattr(correlation.subprocess, "run", _fake_run)
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_on_non_utf8_content(self, tmp_path, monkeypatch) -> None:
+        # Regression: invalid UTF-8 raises UnicodeDecodeError, which must
+        # also be converted to BaselineFetchError, not bypass it.
+        def _fake_run(args, **kwargs):
+            dest_dir = Path(args[args.index("--dir") + 1])
+            (dest_dir / "agent-x.json").write_bytes(b"\xff\xfe\x00\x01invalid-utf8")
+
+            class _Result:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return _Result()
+
+        monkeypatch.setattr(correlation.subprocess, "run", _fake_run)
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_when_downloaded_json_is_not_an_object(self, monkeypatch) -> None:
+        def _fake_run(args, **kwargs):
+            dest_dir = Path(args[args.index("--dir") + 1])
+            (dest_dir / "agent-x.json").write_text("[1, 2, 3]")
+
+            class _Result:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return _Result()
+
+        monkeypatch.setattr(correlation.subprocess, "run", _fake_run)
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_when_generated_at_is_missing(self, monkeypatch) -> None:
+        payload = {**self._VALID_PAYLOAD}
+        del payload["generated_at"]
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_when_generated_at_is_not_a_parseable_timestamp(self, monkeypatch) -> None:
+        # Regression: a syntactically-present but non-ISO8601 (or
+        # non-string) generated_at must be rejected here, not crash
+        # downstream in debt.assess_debt with a confusing error.
+        payload = {**self._VALID_PAYLOAD, "generated_at": "not-a-timestamp"}
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_when_generated_at_is_timezone_naive(self, monkeypatch) -> None:
+        # Regression: datetime.fromisoformat also accepts a naive timestamp
+        # (e.g. a bare date, or a time with no offset) even though the
+        # baseline contract writes an offset-aware UTC timestamp -- a naive
+        # value would later be interpreted in whichever timezone the
+        # CONSUMING host happens to run in, making coverage age
+        # environment-dependent.
+        payload = {**self._VALID_PAYLOAD, "generated_at": "2026-01-01T00:00:00"}  # no offset
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_when_coverage_or_tests_is_not_a_mapping(self, monkeypatch) -> None:
+        # Regression: a missing/non-dict coverage map must be rejected
+        # here -- not silently curated downstream as "empty, nothing
+        # covered" (a fundamentally different, evidenced outcome).
+        payload = {**self._VALID_PAYLOAD, "coverage": []}
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_when_a_coverage_entrys_per_line_value_is_not_a_mapping(self, monkeypatch) -> None:
+        # Regression: a shallow-valid top-level coverage dict whose PER-FILE
+        # entry is itself a list (not a line-number -> test-list mapping)
+        # must also be rejected here -- not escape as a raw AttributeError
+        # from `ancestor_resolution.remap_or_invalidate_baseline`'s own
+        # `per_line.items()` call downstream.
+        payload = {**self._VALID_PAYLOAD, "coverage": {"f.py": []}}
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_when_a_coverage_lines_test_list_is_malformed(self, monkeypatch) -> None:
+        payload = {**self._VALID_PAYLOAD, "coverage": {"f.py": {"1": "not-a-list"}}}
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_when_a_tests_record_is_not_a_mapping(self, monkeypatch) -> None:
+        # Regression: a non-mapping test record must also be rejected here
+        # -- not escape as a raw AttributeError from
+        # `fallback.compute_fallback_set`'s own `.get("duration_s")` call
+        # downstream.
+        payload = {**self._VALID_PAYLOAD, "tests": {"test_x": "not-a-dict"}}
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_when_downloaded_plugin_does_not_match_the_pointer(self, monkeypatch) -> None:
+        # Regression: a syntactically valid baseline document whose OWN
+        # plugin/measured_commit disagree with the pointer that named it
+        # must never be trusted -- that would silently select against the
+        # wrong generation.
+        payload = {**self._VALID_PAYLOAD, "plugin": "agent-y"}  # mismatch
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
+
+    def test_raises_when_downloaded_measured_commit_does_not_match_the_pointer(self, monkeypatch) -> None:
+        payload = {**self._VALID_PAYLOAD, "measured_commit": "different-sha"}  # mismatch
+        monkeypatch.setattr(correlation.subprocess, "run", self._fake_run_writing(payload))
+
+        with pytest.raises(correlation.BaselineFetchError):
+            correlation.fetch_baseline_asset("owner/repo", self._POINTER)
 
 
 class TestPlanChunks:
@@ -1025,6 +1263,59 @@ class TestResolveNearestBaseline:
         resolved = ar.resolve_nearest_baseline(repo, "nope", c1, main_ref="dev")
         assert resolved is None
 
+    def test_skips_a_generation_whose_document_is_not_an_object(self, tmp_path):
+        # Regression: valid JSON that isn't a dict at all (e.g. a bare
+        # list) must be skipped like a JSON-decode failure -- `.get()` on
+        # it would otherwise raise AttributeError, crashing past this
+        # function's own "raises only for a genuine plumbing failure"
+        # contract.
+        repo = _init_repo(tmp_path)
+        (repo / "src.py").write_text("line1\n")
+        dev_c1 = _commit(repo, "dev c1")
+
+        _run_git(["checkout", "-q", "-b", "main"], cwd=repo)
+        baseline_path = repo / ".github" / "coverage-baselines" / "myplugin.json"
+        baseline_path.parent.mkdir(parents=True)
+        # Older, genuinely valid generation.
+        baseline_path.write_text(json.dumps({"measured_commit": dev_c1, "coverage": {}}))
+        _commit(repo, "valid older generation")
+        # Newest generation is malformed (a bare list, not an object).
+        baseline_path.write_text(json.dumps([dev_c1]))
+        _commit(repo, "malformed newest generation")
+
+        _run_git(["checkout", "-q", "-b", "pr", dev_c1], cwd=repo)
+        fork_commit = dev_c1
+
+        resolved = ar.resolve_nearest_baseline(repo, "myplugin", fork_commit, main_ref="main")
+
+        assert resolved is not None
+        assert resolved.baseline["measured_commit"] == dev_c1
+
+    def test_skips_a_generation_whose_measured_commit_is_not_a_string(self, tmp_path):
+        # Regression: a numeric/list-valued measured_commit is truthy, so
+        # the old `if not measured_commit: continue` check didn't catch it
+        # -- it reached `is_ancestor`'s own `subprocess.run` call and
+        # raised a raw TypeError there instead.
+        repo = _init_repo(tmp_path)
+        (repo / "src.py").write_text("line1\n")
+        dev_c1 = _commit(repo, "dev c1")
+
+        _run_git(["checkout", "-q", "-b", "main"], cwd=repo)
+        baseline_path = repo / ".github" / "coverage-baselines" / "myplugin.json"
+        baseline_path.parent.mkdir(parents=True)
+        baseline_path.write_text(json.dumps({"measured_commit": dev_c1, "coverage": {}}))
+        _commit(repo, "valid older generation")
+        baseline_path.write_text(json.dumps({"measured_commit": 12345, "coverage": {}}))
+        _commit(repo, "malformed newest generation")
+
+        _run_git(["checkout", "-q", "-b", "pr", dev_c1], cwd=repo)
+        fork_commit = dev_c1
+
+        resolved = ar.resolve_nearest_baseline(repo, "myplugin", fork_commit, main_ref="main")
+
+        assert resolved is not None
+        assert resolved.baseline["measured_commit"] == dev_c1
+
 
 class TestComputeFileRemap:
     def test_unchanged_file(self, tmp_path):
@@ -1319,13 +1610,12 @@ class TestAssessDebt:
         assert "age_seconds" in over.reasons[0]
 
     def test_age_is_anchored_to_generated_at_not_the_commits_own_timestamp(self, tmp_path):
-        # Regression (Copilot review on PR #5146): a commit can sit for
-        # days before CI finally collects coverage against it. Age must
-        # reflect when the baseline was EARNED (`generated_at`), not the
-        # commit's own, potentially much older or newer, commit time --
-        # otherwise a freshly-collected baseline would report a stale (or
-        # falsely fresh) age driven by the commit's timestamp instead of
-        # when collection actually ran.
+        # Regression: a commit can sit for days before CI finally collects
+        # coverage against it. Age must reflect when the baseline was
+        # EARNED (`generated_at`), not the commit's own, potentially much
+        # older or newer, commit time -- otherwise a freshly-collected
+        # baseline would report a stale (or falsely fresh) age driven by
+        # the commit's timestamp instead of when collection actually ran.
         repo = _init_repo(tmp_path)
         (repo / "a.txt").write_text("1\n")
         c1 = _commit(repo, "first")
@@ -1343,9 +1633,8 @@ class TestAssessDebt:
         assert abs(result.age_seconds - 5) < 1e-3
 
     def test_recollecting_against_the_same_old_commit_resets_age(self, tmp_path):
-        # Regression (Copilot review on PR #5146): re-running coverage
-        # collection against the SAME commit must reset reported age to
-        # near-zero -- a stale baseline for an unchanged commit must become
+        # Regression: re-running coverage collection against the SAME
+        # commit must reset reported age to near-zero -- a stale baseline for an unchanged commit must become
         # fresh again once re-collected, which anchoring age to the
         # commit's own timestamp could never allow.
         repo = _init_repo(tmp_path)
@@ -1402,6 +1691,240 @@ class TestAssessDebt:
 
         with pytest.raises(debt.CoverageDebtError):
             debt.assess_debt(repo, "0" * 40, self._GENERATED_AT)
+
+
+class TestDecide:
+    """`decide()` orchestrates every other module via its own imported
+    names, so each collaborator is monkeypatched directly on `decide_mod`
+    rather than re-exercised here (each already has its own dedicated test
+    class above)."""
+
+    _FULL_BASELINE = {
+        "measured_commit": "m1", "generated_at": "2026-01-01T00:00:00+00:00",
+        "coverage": {}, "tests": {},
+    }
+    # A deliberately DIFFERENT object from _FULL_BASELINE so a test can
+    # prove which one `compute_fallback_set` actually received.
+    _REMAPPED_BASELINE = {
+        "measured_commit": "m1", "generated_at": "2026-01-01T00:00:00+00:00",
+        "coverage": {"invalidated-away": "marker"}, "tests": {},
+    }
+
+    def _resolved(self, measured_commit="m1", baseline_commit="b1", plugin="plugin"):
+        return ar.ResolvedBaseline(
+            baseline={
+                "measured_commit": measured_commit, "release_tag": "t", "asset": "a.json",
+                "plugin": plugin,
+            },
+            baseline_commit=baseline_commit,
+        )
+
+    def test_no_baseline_resolved_falls_back_with_no_evidence(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: None)
+
+        def _boom(*_a, **_k):
+            raise AssertionError("must not fetch/assess/select without a resolved baseline")
+
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", _boom)
+
+        result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {})
+
+        assert result.mode == "fallback"
+        assert result.reason == decide_mod.NO_BASELINE_AVAILABLE
+        assert result.baseline_generation is None
+        # None (not ()): no curated evidence exists at all -- the caller
+        # must run its own full/default suite, never interpret this as
+        # "run nothing".
+        assert result.selected_tests is None
+
+    def test_pointer_plugin_mismatch_falls_back_without_fetching(self, tmp_path, monkeypatch):
+        # Regression: fetch_baseline_asset only proves the downloaded asset
+        # agrees with the POINTER -- it can't know which plugin the caller
+        # actually asked about. A misplaced/corrupt pointer resolved for
+        # plugin B while the caller asked about plugin A must never be
+        # fetched/trusted, even if B's own asset is internally consistent.
+        monkeypatch.setattr(
+            decide_mod, "resolve_nearest_baseline",
+            lambda *a, **k: self._resolved(plugin="other-plugin"),
+        )
+
+        def _boom(*_a, **_k):
+            raise AssertionError("must not fetch an asset for a mismatched pointer")
+
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", _boom)
+
+        result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {})
+
+        assert result.mode == "fallback"
+        assert result.reason.startswith(decide_mod.POINTER_PLUGIN_MISMATCH_PREFIX)
+        assert result.baseline_generation == "m1"
+        assert result.selected_tests is None
+
+    def test_fetch_failure_falls_back_with_the_error_recorded(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: self._resolved())
+
+        def _fail(*_a, **_k):
+            raise decide_mod.BaselineFetchError("boom")
+
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", _fail)
+
+        result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {})
+
+        assert result.mode == "fallback"
+        assert result.reason.startswith(decide_mod.FETCH_FAILED_PREFIX)
+        assert result.baseline_generation == "m1"
+        assert result.baseline_commit_on_main == "b1"
+        assert result.selected_tests is None
+
+    def test_debt_exceeded_falls_back_to_the_curated_set(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: self._resolved())
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", lambda *a, **k: self._FULL_BASELINE)
+
+        def _boom_remap(*_a, **_k):
+            raise AssertionError("must not remap/invalidate once debt already trips fallback")
+
+        monkeypatch.setattr(decide_mod, "remap_or_invalidate_baseline", _boom_remap)
+        over_debt = debt.DebtAssessment(
+            commit_volume=100, age_seconds=1.0,
+            commit_volume_threshold=5, age_threshold_seconds=None,
+            exceeded=True, reasons=("commit_volume 100 exceeds threshold 5",),
+        )
+        monkeypatch.setattr(decide_mod, "assess_debt", lambda *a, **k: over_debt)
+        curated = fallback.FallbackSet(selected_tests=("test_smoke",), total_runtime_s=1.0, covered_fraction=0.5, universe_size=2)
+        captured_baseline = {}
+
+        def _fake_compute_fallback_set(baseline, *a, **k):
+            captured_baseline["value"] = baseline
+            return curated
+
+        monkeypatch.setattr(decide_mod, "compute_fallback_set", _fake_compute_fallback_set)
+
+        def _boom_select(*_a, **_k):
+            raise AssertionError("must not run diff-scoped selection once debt already trips fallback")
+
+        monkeypatch.setattr(decide_mod, "select_tests", _boom_select)
+
+        result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {}, commit_volume_threshold=5)
+
+        assert result.mode == "fallback"
+        assert result.reason.startswith(decide_mod.COVERAGE_DEBT_PREFIX)
+        assert result.selected_tests == ("test_smoke",)
+        assert result.debt == over_debt.as_dict()
+        assert result.fallback_set == curated.as_dict()
+        # Curated from the FULL earned baseline, never a remapped one --
+        # remap wasn't even called here.
+        assert captured_baseline["value"] is self._FULL_BASELINE
+
+    def test_selection_fallback_trigger_curates_from_the_full_baseline(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: self._resolved())
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", lambda *a, **k: self._FULL_BASELINE)
+        monkeypatch.setattr(decide_mod, "remap_or_invalidate_baseline", lambda *a, **k: self._REMAPPED_BASELINE)
+        clean_debt = debt.DebtAssessment(
+            commit_volume=1, age_seconds=1.0,
+            commit_volume_threshold=None, age_threshold_seconds=None,
+            exceeded=False, reasons=(),
+        )
+        monkeypatch.setattr(decide_mod, "assess_debt", lambda *a, **k: clean_debt)
+        triggered = select.SelectionResult(
+            selected_tests=(), fallback_triggered=True,
+            fallback_reasons=(select.FallbackReason("f.py", 3, "no_baseline_entry"),),
+        )
+
+        def _fake_select_tests(baseline, changed_lines):
+            # select_tests DOES get the remapped baseline -- it needs
+            # fork-commit-relative line coordinates.
+            assert baseline is self._REMAPPED_BASELINE
+            return triggered
+
+        monkeypatch.setattr(decide_mod, "select_tests", _fake_select_tests)
+        curated = fallback.FallbackSet(selected_tests=("test_smoke",), total_runtime_s=1.0, covered_fraction=0.5, universe_size=2)
+        captured_baseline = {}
+
+        def _fake_compute_fallback_set(baseline, *a, **k):
+            captured_baseline["value"] = baseline
+            return curated
+
+        monkeypatch.setattr(decide_mod, "compute_fallback_set", _fake_compute_fallback_set)
+
+        result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {"f.py": [3]})
+
+        assert result.mode == "fallback"
+        assert result.reason.startswith(decide_mod.SELECTION_FALLBACK_PREFIX)
+        assert result.selection_fallback_reasons == ({"file": "f.py", "line": 3, "reason": "no_baseline_entry"},)
+        assert result.selected_tests == ("test_smoke",)
+        # Curated from the FULL earned baseline, never the remapped one
+        # that just dropped this diff's own touched-file coverage.
+        assert captured_baseline["value"] is self._FULL_BASELINE
+
+    def test_selection_fallback_unions_real_selected_tests_with_the_curated_set(self, tmp_path, monkeypatch):
+        # Regression: a mixed diff can have SOME changed lines genuinely
+        # attributed (select_tests returns real selected_tests for those)
+        # while others trip the fallback trigger. The fallback must only
+        # ever ADD safety-net coverage for the unattributed lines, never
+        # silently drop already-earned coverage evidence for the
+        # attributed ones.
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: self._resolved())
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", lambda *a, **k: self._FULL_BASELINE)
+        monkeypatch.setattr(decide_mod, "remap_or_invalidate_baseline", lambda *a, **k: self._REMAPPED_BASELINE)
+        clean_debt = debt.DebtAssessment(
+            commit_volume=1, age_seconds=1.0,
+            commit_volume_threshold=None, age_threshold_seconds=None,
+            exceeded=False, reasons=(),
+        )
+        monkeypatch.setattr(decide_mod, "assess_debt", lambda *a, **k: clean_debt)
+        mixed = select.SelectionResult(
+            selected_tests=("test_attributed",), fallback_triggered=True,
+            fallback_reasons=(select.FallbackReason("g.py", 7, "no_baseline_entry"),),
+        )
+        monkeypatch.setattr(decide_mod, "select_tests", lambda *a, **k: mixed)
+        curated = fallback.FallbackSet(
+            selected_tests=("test_smoke", "test_attributed"),  # overlap is fine, union dedupes
+            total_runtime_s=1.0, covered_fraction=0.5, universe_size=2,
+        )
+        monkeypatch.setattr(decide_mod, "compute_fallback_set", lambda *a, **k: curated)
+
+        result = decide_mod.decide(
+            tmp_path, "owner/repo", "plugin", "fork", {"f.py": [3], "g.py": [7]},
+        )
+
+        assert result.mode == "fallback"
+        assert set(result.selected_tests) == {"test_attributed", "test_smoke"}
+
+    def test_clean_selection_returns_the_selected_tests(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: self._resolved())
+        monkeypatch.setattr(decide_mod, "fetch_baseline_asset", lambda *a, **k: self._FULL_BASELINE)
+        monkeypatch.setattr(decide_mod, "remap_or_invalidate_baseline", lambda *a, **k: self._REMAPPED_BASELINE)
+        clean_debt = debt.DebtAssessment(
+            commit_volume=1, age_seconds=1.0,
+            commit_volume_threshold=None, age_threshold_seconds=None,
+            exceeded=False, reasons=(),
+        )
+        monkeypatch.setattr(decide_mod, "assess_debt", lambda *a, **k: clean_debt)
+        clean_selection = select.SelectionResult(
+            selected_tests=("test_a", "test_b"), fallback_triggered=False,
+        )
+        monkeypatch.setattr(decide_mod, "select_tests", lambda *a, **k: clean_selection)
+
+        def _boom(*_a, **_k):
+            raise AssertionError("must not curate a fallback set on a clean selection")
+
+        monkeypatch.setattr(decide_mod, "compute_fallback_set", _boom)
+
+        result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {"f.py": [1]})
+
+        assert result.mode == "selected"
+        assert result.reason == decide_mod.FRESH_SELECTION
+        assert result.selected_tests == ("test_a", "test_b")
+        assert result.baseline_generation == "m1"
+        assert result.fallback_set is None
+
+    def test_as_dict_round_trips_through_json(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(decide_mod, "resolve_nearest_baseline", lambda *a, **k: None)
+
+        result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {})
+
+        json.dumps(result.as_dict())  # must not raise
+
 
 
 
