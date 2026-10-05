@@ -24,6 +24,8 @@ from typing import TYPE_CHECKING, Any
 import pyarrow as pa
 from agent_procutil import no_window_kwargs
 
+from agent_index.store.repo_filter import _like_pattern, _sql_str, repo_filter_sql
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -921,8 +923,7 @@ class ContentStore:
             if file_path_glob:
                 filters.append(f"file_path LIKE '{_sql_str(file_path_glob)}'")
             if repo:
-                repo_like = "%:" + _like_pattern(repo)
-                filters.append(f"source LIKE '{repo_like}' ESCAPE '\\'")
+                filters.append(f"({repo_filter_sql(repo)})")
             if filters:
                 fts_query = fts_query.where(" AND ".join(filters))
 
@@ -1011,21 +1012,6 @@ class ContentStore:
 # -- helpers -----------------------------------------------------------------
 
 
-def _sql_str(value: str) -> str:
-    """Escape a value for use inside a single-quoted SQL string literal."""
-    return value.replace("'", "''")
-
-
-def _like_pattern(value: str) -> str:
-    """Escape a value for a SQL ``LIKE`` pattern (with ``ESCAPE '\\'``).
-
-    Escapes the ``LIKE`` metacharacters ``%`` and ``_`` (and the escape
-    char ``\\`` itself) so that e.g. a repo named ``owner/home_assistant``
-    does not also match ``owner/homeXassistant``.  The result is still
-    single-quoted by the caller, so SQL-quote escaping is applied last.
-    """
-    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return _sql_str(escaped)
 
 
 def sanitize_fts_query(query: str) -> str:
