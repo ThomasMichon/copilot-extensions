@@ -1660,6 +1660,31 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _ensure_utf8_streams() -> None:
+    """Make ``stdout``/``stderr`` UTF-8-safe regardless of the console codepage.
+
+    Windows consoles default to the system ANSI codepage (e.g. ``cp1252``)
+    for a process's standard streams unless ``PYTHONUTF8=1``/
+    ``PYTHONIOENCODING=utf-8`` was set *before* the interpreter started. The
+    generated binstubs set ``PYTHONUTF8=1`` for exactly this reason, but a
+    stale (not-yet-redeployed) binstub, a direct
+    ``python -m worktree_manager`` invocation, or ``uv run`` bypassing the
+    binstub entirely can still reach here with a non-UTF-8 stream -- in which
+    case printing a status glyph (``\u2713``/``\u2192``) raises
+    ``UnicodeEncodeError`` and crashes the whole command (#5218). Reconfigure
+    defensively so every command is covered, not just the ones that happen to
+    print a glyph today.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (OSError, ValueError):
+            pass
+
+
 def console_entry() -> None:
     """Entry point for both the ``python -m worktree_manager`` guard below
     and the installed ``worktree-manager`` console script
@@ -1670,6 +1695,7 @@ def console_entry() -> None:
     """
     from ._shutdown_exit import run_and_exit
 
+    _ensure_utf8_streams()
     run_and_exit(main)
 
 

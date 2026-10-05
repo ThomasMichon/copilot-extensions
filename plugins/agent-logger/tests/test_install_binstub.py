@@ -23,6 +23,34 @@ _COMMANDS = (
 )
 
 
+def _stage_payload(tmp_path: Path) -> Path:
+    payload = tmp_path / "plugins" / "agent-logger"
+    payload.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        _PLUGIN_ROOT,
+        payload,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            "__pycache__",
+            ".pytest_cache",
+            "tests",
+        ),
+    )
+    staged_libs = tmp_path / "libs"
+    staged_libs.mkdir(parents=True, exist_ok=True)
+    for lib in (
+        "installer-engine",
+        "config-migrate",
+        "agent-procutil",
+        "dropin-registry",
+        "plugin-resolve",
+        "plugin-activation",
+    ):
+        shutil.copytree(_PLUGIN_ROOT.parents[1] / "libs" / lib, staged_libs / lib)
+    return payload
+
+
 def _host_pip_index_url() -> str | None:
     """Read a configured pip index-url straight from the well-known SYSTEM
     config path, bypassing any per-process env-var sandboxing (this test's
@@ -49,18 +77,7 @@ def _host_pip_index_url() -> str | None:
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer behavior")
 def test_stamp_replaces_dangling_legacy_binstub(tmp_path: Path) -> None:
-    payload = tmp_path / "payload"
-    shutil.copytree(
-        _PLUGIN_ROOT,
-        payload,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            "__pycache__",
-            ".pytest_cache",
-            "tests",
-        ),
-    )
+    payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
     local_bin = home / ".local" / "bin"
     local_bin.mkdir(parents=True)
@@ -125,18 +142,7 @@ def test_stamp_replaces_dangling_legacy_binstub(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows installer behavior")
 def test_windows_stamp_publishes_complete_command_family(tmp_path: Path) -> None:
-    payload = tmp_path / "payload"
-    shutil.copytree(
-        _PLUGIN_ROOT,
-        payload,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            "__pycache__",
-            ".pytest_cache",
-            "tests",
-        ),
-    )
+    payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
     home.mkdir()
     env = os.environ.copy()
@@ -339,18 +345,7 @@ def test_posix_snapshot_uses_self_staged_payload_not_original() -> None:
 def test_provision_publishes_durable_compatibility_wrappers(
     tmp_path: Path,
 ) -> None:
-    payload = tmp_path / "payload"
-    shutil.copytree(
-        _PLUGIN_ROOT,
-        payload,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            "__pycache__",
-            ".pytest_cache",
-            "tests",
-        ),
-    )
+    payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
     home.mkdir()
     env = os.environ.copy()
@@ -405,19 +400,9 @@ def test_provision_publishes_durable_compatibility_wrappers(
             "provision",
         ]
         wrapper = home / ".local" / "bin" / "collate-session.ps1"
-        invoke = [
-            powershell,
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(wrapper),
-            "--help",
-        ]
     else:
         command = ["bash", str(payload / "scripts" / "install.sh"), "provision"]
         wrapper = home / ".local" / "bin" / "collate-session"
-        invoke = [str(wrapper), "--help"]
 
     provision = subprocess.run(
         command,
@@ -438,13 +423,62 @@ def test_provision_publishes_durable_compatibility_wrappers(
     )
     assert snapshot.is_dir()
     assert wrapper.is_file()
-    assert "payload-dir" in wrapper.read_text(encoding="utf-8")
 
-    sentinel = snapshot / ".snapshot-sentinel"
-    sentinel.write_text("keep", encoding="utf-8")
-    repeat = [*command[:-1], "stamp"]
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required")
+def test_stamp_supports_first_use_provision_from_snapshot_only(tmp_path: Path) -> None:
+    payload = _stage_payload(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    version = next(
+        line.split('"')[1]
+        for line in (_PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8").splitlines()
+        if line.startswith("version = ")
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "LOCALAPPDATA": str(home / "AppData" / "Local"),
+            "COPILOT_PLUGIN_INSTALL_STAGED": "1",
+        }
+    )
+    env.pop("PYTHONHOME", None)
+    env.pop("PYTHONPATH", None)
+    internal_index = _host_pip_index_url()
+    if internal_index and not (env.get("UV_DEFAULT_INDEX") or env.get("UV_INDEX_URL")):
+        env["UV_DEFAULT_INDEX"] = internal_index
+
+    if os.name == "nt":
+        powershell = shutil.which("pwsh") or shutil.which("powershell")
+        assert powershell is not None
+        stamp = [
+            powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(payload / "scripts" / "install.ps1"),
+            "stamp",
+        ]
+        wrapper = home / ".local" / "bin" / "agent-logger.ps1"
+        invoke = [
+            powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(wrapper),
+            "version",
+        ]
+    else:
+        stamp = ["bash", str(payload / "scripts" / "install.sh"), "stamp"]
+        wrapper = home / ".local" / "bin" / "agent-logger"
+        invoke = [str(wrapper), "version"]
+
     stamped = subprocess.run(
-        repeat,
+        stamp,
         env=env,
         capture_output=True,
         text=True,
@@ -452,37 +486,110 @@ def test_provision_publishes_durable_compatibility_wrappers(
         check=False,
     )
     assert stamped.returncode == 0, stamped.stderr
-    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+    snapshot = Path(
+        (home / ".agent-logger" / "payload-dir").read_text(encoding="utf-8").strip()
+    )
+    assert (snapshot / "scripts" / "installer-engine.sh").is_file()
+    assert (snapshot / "scripts" / "installer-engine.ps1").is_file()
+    assert '. "$SCRIPT_DIR/installer-engine.sh"' in (
+        snapshot / "scripts" / "install.sh"
+    ).read_text(encoding="utf-8")
+    assert ". (Join-Path $PSScriptRoot 'installer-engine.ps1')" in (
+        snapshot / "scripts" / "install.ps1"
+    ).read_text(encoding="utf-8")
 
     shutil.rmtree(payload)
-    delegated = subprocess.run(
+    shutil.rmtree(tmp_path / "libs")
+
+    provision = subprocess.run(
         invoke,
         env=env,
         capture_output=True,
         text=True,
-        # 30s can be tight for a delegated wrapper's own first-use checks
-        # under shared-machine contention; matches the provision timeout's
-        # rationale above.
-        timeout=90,
+        timeout=420,
         check=False,
     )
-    assert delegated.returncode != 127
-    assert "owning payload shim not found" not in delegated.stderr
+    assert provision.returncode == 0, provision.stderr
+    assert f"agent-logger {version}" in provision.stdout
+
+
+def test_stamp_reuses_pre_adoption_same_version_snapshot(tmp_path: Path) -> None:
+    payload = _stage_payload(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    version = next(
+        line.split('"')[1]
+        for line in (_PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8").splitlines()
+        if line.startswith("version = ")
+    )
+    legacy_snapshot = home / ".agent-logger" / "snapshots" / version
+    shutil.copytree(payload, legacy_snapshot)
+    legacy_bin = legacy_snapshot / "bin" / "agent-logger"
+    legacy_bin.parent.mkdir(parents=True, exist_ok=True)
+    legacy_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    legacy_bin.chmod(0o755)
+    install_sh = legacy_snapshot / "scripts" / "install.sh"
+    install_ps1 = legacy_snapshot / "scripts" / "install.ps1"
+    install_sh.write_text("#!/usr/bin/env bash\n# legacy self-contained install\n", encoding="utf-8")
+    install_ps1.write_text("<# legacy self-contained install #>\n", encoding="utf-8")
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "LOCALAPPDATA": str(home / "AppData" / "Local"),
+            "COPILOT_PLUGIN_INSTALL_STAGED": "1",
+        }
+    )
+    if os.name == "nt":
+        powershell = shutil.which("pwsh") or shutil.which("powershell")
+        assert powershell is not None
+        command = [
+            powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(payload / "scripts" / "install.ps1"),
+            "stamp",
+        ]
+    else:
+        command = ["bash", str(payload / "scripts" / "install.sh"), "stamp"]
+
+    result = subprocess.run(
+        command,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "incomplete" not in result.stderr.lower()
+
+    snapshot = Path(
+        (home / ".agent-logger" / "payload-dir").read_text(encoding="utf-8").strip()
+    )
+    assert snapshot == legacy_snapshot
+
+    sentinel = snapshot / ".snapshot-sentinel"
+    sentinel.write_text("keep", encoding="utf-8")
+    repeat = subprocess.run(
+        command,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert repeat.returncode == 0, repeat.stderr
+    assert sentinel.read_text(encoding="utf-8") == "keep"
 
 
 def test_scoped_stamp_avoids_global_compatibility_wrappers(tmp_path: Path) -> None:
-    payload = tmp_path / "payload"
-    shutil.copytree(
-        _PLUGIN_ROOT,
-        payload,
-        ignore=shutil.ignore_patterns(
-            ".git",
-            ".venv",
-            "__pycache__",
-            ".pytest_cache",
-            "tests",
-        ),
-    )
+    payload = _stage_payload(tmp_path)
     home = tmp_path / "home"
     home.mkdir()
     install_dir = (

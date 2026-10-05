@@ -1,5 +1,5 @@
 """Regression coverage for the transient SRE-module-mismatch retry wrapper
-(#6785) in agent-logger's ``install.ps1`` -- mirrors the equivalent coverage
+(#6785) in the shared installer engine -- mirrors the equivalent coverage
 in agent-bridge's ``test_install_sre_retry.py``/``test_install_sh_sre_retry.py``.
 A shared uv-managed Python interpreter can momentarily disagree with its own
 compiled `_sre` extension when several installers hit it in quick succession
@@ -19,8 +19,8 @@ from pathlib import Path
 import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
-_INSTALL_PS1 = PLUGIN / "scripts" / "install.ps1"
-_INSTALL_SH = PLUGIN / "scripts" / "install.sh"
+_INSTALL_PS1 = PLUGIN.parents[1] / "libs" / "installer-engine" / "installer-engine.ps1"
+_INSTALL_SH = PLUGIN.parents[1] / "libs" / "installer-engine" / "installer-engine.sh"
 # A bare shutil.which("bash") can resolve to a Windows App Execution Alias
 # stub or the classic `C:\Windows\System32\bash.exe` WSL launcher (both
 # invoke an actual WSL distro rather than running this script in the
@@ -64,7 +64,7 @@ def _run_ps_harness(
     delays_file_ps = str(delays_file).replace("\\", "\\\\")
     harness = tmp_path / f"harness-{shell.replace('.exe', '')}.ps1"
     harness.write_text(
-        _extract_ps1_functions("Test-IsSreModuleMismatch", "Invoke-UvPipInstallResilient")
+        _extract_ps1_functions("Invoke-NativeCapture", "Test-IsSreModuleMismatch", "Invoke-UvPipInstallResilient")
         + f"""
 
 function Write-Warn {{ param([string]$m) Write-Host "WARN: $m" }}
@@ -203,12 +203,12 @@ def _run_sh_harness(
     harness = tmp_path / "harness.sh"
     harness.write_text(
         "#!/bin/sh\nset -eu\n"
-        + _extract_sh_functions("_is_sre_module_mismatch", "_uv_pip_install_resilient")
+        + _extract_sh_functions("test_is_sre_module_mismatch", "invoke_uv_pip_install_resilient")
         # Matches the real `warn() { log "WARN" "$1"; }` -- routed to stdout,
         # since agent-logger's own `log()` helper (unlike agent-bridge's
         # `_warn`) does not redirect to stderr.
         + """
-warn() { echo "WARN: $*"; }
+_warn() { echo "WARN: $*"; }
 
 """
         + uv_stub_body
@@ -254,7 +254,7 @@ uv() {{
 }}
 """
     extra = """
-if out=$(_uv_pip_install_resilient --python fake-python some-package --quiet); then
+if out=$(invoke_uv_pip_install_resilient uv --python fake-python some-package --quiet); then
     echo "EXIT:0"
 else
     echo "EXIT:1"
@@ -290,16 +290,17 @@ uv() {{
 }}
 """
     extra = """
-if out=$(_uv_pip_install_resilient --python fake-python some-package --quiet); then
+if out=$(invoke_uv_pip_install_resilient uv --python fake-python some-package --quiet); then
     echo "EXIT:0"
 else
     echo "EXIT:1"
 fi
+echo "OUT:$out"
 """
     result = _run_sh_harness(tmp_path, uv_stub, extra, delays_file)
     assert "uv build hit a transient SRE module mismatch" not in result.stdout
     assert "EXIT:1" in result.stdout
-    assert "error: network unreachable" in result.stderr
+    assert "OUT:error: network unreachable" in result.stdout
     assert counter_file.read_text(encoding="utf-8").strip() == "1"
     assert _delays(delays_file) == []
 
@@ -322,7 +323,7 @@ uv() {{
 }}
 """
     extra = """
-if out=$(_uv_pip_install_resilient --python fake-python some-package --quiet); then
+if out=$(invoke_uv_pip_install_resilient uv --python fake-python some-package --quiet); then
     echo "EXIT:0"
 else
     echo "EXIT:1"
