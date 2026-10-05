@@ -409,6 +409,41 @@ _Pending review of this plan._
 
 ## Journal
 
+### 2026-10-04 — Phase 4 slice 1b: real-CI validation caught a genuine bug
+Direct proof of why the shadow-mode de-risking plan (slice 1, below) was
+worth doing: landed PR #5267 (CI green -- but `worktrees-smoke` was
+legitimately **skipped** on that PR itself, since it touched only `tools/`
+and `.github/`, never `plugins/agent-worktrees/`, so the new shadow step
+had never actually executed yet). Opened a dedicated validation-only draft
+PR (#5275, per `CONTRIBUTING.md`'s "Validate beyond unit tests" section --
+a docstring-only comment touch to `test_codename.py` just to make
+`discover` mark `agent-worktrees` changed) specifically to watch the
+shadow step run for real for the first time.
+
+**Result:** the job stayed green exactly as designed (`continue-on-error`
+never needed to fire), but the step's own JSON output was `mode: "error"`,
+`reason: "ImportError: attempted relative import with no known parent
+package"` -- a real bug. `cli.py`'s primary plain-script import path (the
+one `ci.yml` actually uses) succeeds directly, so execution reaches
+`decide()` -> `ancestor_resolution.resolve_nearest_baseline`, whose own
+internal `from . import correlation` assumed it always runs as a package
+submodule. It doesn't in this path -- the exact same "plain-script sys.path
+prepend" hazard `baseline.py`'s own `TestNoStdlibModuleNameCollisions`
+docstring already documents for a different failure mode, just never
+previously hit here because every existing test imports this package the
+normal (qualified) way. **Fixed:** the same try/except dual-import idiom
+every other cross-module reference in this package already uses. Added
+`test_cli_runs_as_a_plain_script_and_actually_resolves_a_baseline`, which
+drives `cli.py` as a real subprocess against a real throwaway repo far
+enough to actually reach `resolve_nearest_baseline` -- `--help` alone (the
+existing script-smoke test) never calls it and so never would have caught
+this.
+
+Per `CONTRIBUTING.md`'s rule against a validation-only PR carrying the
+actual fix: #5275 was closed (not merged) with a comment recording the
+finding and the run URL, its worktree reset to `origin/dev` and finalized,
+and the fix landed through its own separate PR instead.
+
 ### 2026-10-04 — Phase 4 slice 1: shadow-mode selection, de-risked rollout
 Starts Phase 4 with the operator's own de-risking directive: light up
 coverage-guided selection for `agent-worktrees` (the only collect-only-
