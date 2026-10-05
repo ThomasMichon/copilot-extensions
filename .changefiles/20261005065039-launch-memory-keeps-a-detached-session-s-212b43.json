@@ -1,9 +1,0 @@
-{
-  "comment": "Launch memory keeps a detached session's --forward ports: a bare resume of the recorded session re-adds them after a CodeSpace stop, and a rejoin that sets them records the new set. Reverse forwards stay explicit.",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

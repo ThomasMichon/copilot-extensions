@@ -1,9 +1,0 @@
-{
-  "comment": "Keep registered detached container sessions live when typed seed delivery misses readiness",
-  "changes": [
-    {
-      "plugin": "agent-containers",
-      "type": "patch"
-    }
-  ]
-}

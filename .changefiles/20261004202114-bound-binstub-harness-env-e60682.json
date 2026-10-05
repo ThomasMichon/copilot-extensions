@@ -1,9 +1,0 @@
-{
-  "comment": "bound binstub harness env",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

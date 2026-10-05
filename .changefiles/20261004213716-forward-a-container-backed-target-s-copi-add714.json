@@ -1,9 +1,0 @@
-{
-  "comment": "Forward a container-backed target's copilot_args (charter overlay, etc.) into the agent-containers exec launch instead of silently dropping them.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

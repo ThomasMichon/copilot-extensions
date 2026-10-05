@@ -1,9 +1,0 @@
-{
-  "comment": "Resolve related-repo (control-repo-declared) plugins for local-loopback static dispatch; fix PATHEXT-aware local binstub resolution on Windows",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

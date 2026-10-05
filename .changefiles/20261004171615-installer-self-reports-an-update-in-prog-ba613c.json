@@ -1,9 +1,0 @@
-{
-  "comment": "Installer self-reports an update-in-progress marker so a local liveness watchdog never force-restarts a legitimately mid-transition daemon",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

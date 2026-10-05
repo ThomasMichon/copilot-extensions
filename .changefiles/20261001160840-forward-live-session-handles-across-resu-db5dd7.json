@@ -1,9 +1,0 @@
-{
-  "comment": "Forward live-session handles across resumed CLI session id changes",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

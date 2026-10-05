@@ -1,9 +1,0 @@
-{
-  "comment": "Add Azure DevOps reviewer observation adapter",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

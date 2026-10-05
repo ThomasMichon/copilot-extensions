@@ -1,9 +1,0 @@
-{
-  "comment": "Distinguish a cross-machine held claim (a worktree-kind claim whose target is hosted on a different machine -- informational, not a promise it resolves on its own) from a genuinely local held one: new held-claims-cross-machine cleanup bucket, XM<N> compact marker, and Picker disposition-chip entries for held-claims/held-claims-cross-machine (worktree-claims-transitive-finalization effort, Phase 4).",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "Record a diagnosed setup-reload failure instead of silently dropping the payload when app is unresolvable or call_from_thread raises (#5220)",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

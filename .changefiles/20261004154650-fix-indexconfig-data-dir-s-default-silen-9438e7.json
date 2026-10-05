@@ -1,9 +1,0 @@
-{
-  "comment": "Fix IndexConfig.data_dir's default silently ignoring AGENT_INDEX_HOME (unlike every other data-location resolver in the package), which let a test believe it was isolated while actually writing real task-queue rows into production ~/.agent-index/data",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

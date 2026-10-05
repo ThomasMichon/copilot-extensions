@@ -1,9 +1,0 @@
-{
-  "comment": "Fix the --source/--repo search filter: 'repo' matching was inherited from an unrelated 'forge:subtype:owner/repo' source scheme and silently missed most of a repo's own sources (byproducts, github: counterpart) under agent-index's real git:/github: naming convention",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "minor"
-    }
-  ]
-}

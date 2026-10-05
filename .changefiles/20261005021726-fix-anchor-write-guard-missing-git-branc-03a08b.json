@@ -1,9 +1,0 @@
-{
-  "comment": "Fix anchor-write-guard missing 'git branch' as a write subcommand: 'git branch -f <name> <ref>' (e.g. force-moving a stale local main to match a rewritten origin/main) could force-move/delete/rename/copy a ref in the anchor undetected. Adds a precise exemption so a safe read-only invocation (listing, --show-current, etc.) still passes.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

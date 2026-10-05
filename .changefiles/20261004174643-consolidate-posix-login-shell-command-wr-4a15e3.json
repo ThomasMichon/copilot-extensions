@@ -1,9 +1,0 @@
-{
-  "comment": "Consolidate POSIX login-shell command wrapping into shared libs/remote-login-shell (#5207)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

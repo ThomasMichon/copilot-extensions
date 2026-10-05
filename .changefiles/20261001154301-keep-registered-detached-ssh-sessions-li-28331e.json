@@ -1,9 +1,0 @@
-{
-  "comment": "Keep registered detached SSH sessions live when typed seed delivery misses readiness",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "patch"
-    }
-  ]
-}

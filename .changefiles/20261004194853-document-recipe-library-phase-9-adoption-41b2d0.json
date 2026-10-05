@@ -1,9 +1,0 @@
-{
-  "comment": "Document recipe-library Phase 9 adoption and provider guidance",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}
