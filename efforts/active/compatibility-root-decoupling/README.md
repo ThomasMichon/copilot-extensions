@@ -108,7 +108,7 @@ Any change that makes these files slightly smaller is a win."
       `--name` both fail loud on an unresolvable plugin or a name with no
       definition/call/patch site anywhere, rather than reporting a vacuous
       success. Current baseline: **42 accessors, 290 call sites, 157
-      distinct monkeypatched names, 1050 patch-site occurrences.** Covered
+      distinct monkeypatched names, 1051 patch-site occurrences.** Covered
       by `tools/test_compat_root_migration.py`.
 
 ### Phase 2 — migrate the highest-traffic names
@@ -124,7 +124,7 @@ Any change that makes these files slightly smaller is a win."
       call/monkeypatch sites for both names; full targeted test sweep
       (1330+ tests across every touched file) green; `ruff
       check --select F,E9` clean; `check-module-size.py` clean.
-- [ ] `_resolve_worktree_id` (27 call sites / 48 monkeypatch sites) —
+- [ ] `_resolve_worktree_id` (27 call sites / 49 monkeypatch sites) —
       next slice.
 - [ ] `_infer_worktree_id`, `_self_override`, `_normalize_path`,
       `_find_repo_dir`, `_apply_tracking_override`, `_build_active_paths`
@@ -348,3 +348,12 @@ _Pending._
 - Next slice: `_resolve_worktree_id` (27 call sites / 48 monkeypatch
   sites) -- re-run `--progress` first, since this slice's corrected
   baseline may have shifted the ranking.
+- Post-round-4 sync picked up new `origin/dev` commits (including a
+  `handoff_cli.py` refactor this slice's rebase had to hand-merge: dev
+  added a `settle_claim`-based restore path that predated this slice's
+  `output._json_output` rename, so the resolution kept dev's newer
+  `settle_claim()` call and applied the rename on top). Re-ran
+  `--progress`/`--name` after: patch-site occurrences moved 1050 → 1051
+  and `_resolve_worktree_id`'s monkeypatch count moved 48 → 49 (both
+  baseline/README numbers above corrected); `_json_output`/`_json_error`
+  both still report zero call/monkeypatch sites.
