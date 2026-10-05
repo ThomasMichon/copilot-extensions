@@ -130,6 +130,14 @@ def test_build_parser_accepts_create_flags():
 
 def test_create_json_smoke(monkeypatch, capsys):
     monkeypatch.setattr(
+        "agent_pull_requests.__main__._resolve_claimant_worktree_id",
+        lambda: "caller-wt-1",
+    )
+    monkeypatch.setattr(
+        "agent_pull_requests.__main__._journal_pr_claim",
+        lambda worktree_id, url, *, note: None,
+    )
+    monkeypatch.setattr(
         "agent_pull_requests.__main__._github_create",
         lambda repo, head, base, title, body, draft: {
             "repo": repo,
@@ -159,6 +167,125 @@ def test_create_json_smoke(monkeypatch, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["number"] == 42
     assert payload["url"].endswith("/pull/42")
+    assert payload["claimed_by"] == "caller-wt-1"
+
+
+def test_create_refuses_when_cwd_has_no_claimant(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "agent_pull_requests.__main__._resolve_claimant_worktree_id", lambda: None,
+    )
+    called = {"create": False}
+    monkeypatch.setattr(
+        "agent_pull_requests.__main__._github_create",
+        lambda *a, **k: called.__setitem__("create", True) or {},
+    )
+
+    rc = main([
+        "create", "--repo", "octo/example", "--head", "feature/x",
+        "--title", "Add x", "--json",
+    ])
+
+    assert rc == 2
+    assert called["create"] is False
+    payload = json.loads(capsys.readouterr().out)
+    assert "no claimant" in payload["error"] or "tracked agent-worktrees worktree" in payload["error"]
+
+
+def test_create_surfaces_a_claim_journal_failure_as_a_warning_not_a_create_failure(
+    monkeypatch, capsys,
+):
+    monkeypatch.setattr(
+        "agent_pull_requests.__main__._resolve_claimant_worktree_id",
+        lambda: "caller-wt-1",
+    )
+    monkeypatch.setattr(
+        "agent_pull_requests.__main__._journal_pr_claim",
+        lambda worktree_id, url, *, note: "worktree not found: caller-wt-1",
+    )
+    monkeypatch.setattr(
+        "agent_pull_requests.__main__._github_create",
+        lambda repo, head, base, title, body, draft: {
+            "repo": repo, "number": 7, "title": title,
+            "url": f"https://github.com/{repo}/pull/7",
+            "head": head, "base": base, "isDraft": draft,
+        },
+    )
+
+    rc = main([
+        "create", "--repo", "octo/example", "--head", "feature/x",
+        "--title", "Add x", "--json",
+    ])
+
+    # The PR itself was created successfully -- a claim-journal failure is
+    # never fatal to that (it already exists and can't be un-created).
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["number"] == 7
+    assert payload["claimed_by"] is None
+    assert "claim_warning" in payload
+
+
+def test_create_degrades_a_claim_journal_spawn_error_to_a_warning(monkeypatch, capsys):
+    """``_journal_pr_claim`` must never let a spawn failure (agent-worktrees
+    missing on PATH, OSError) escape and crash the CLI after the PR already
+    exists on the provider."""
+    monkeypatch.setattr(
+        "agent_pull_requests.__main__._resolve_claimant_worktree_id",
+        lambda: "caller-wt-1",
+    )
+
+    def _raising_run_agent_worktrees_raw(argv):
+        raise RuntimeError("agent-worktrees command not found on PATH")
+
+    monkeypatch.setattr(
+        "agent_pull_requests.__main__._run_agent_worktrees_raw",
+        _raising_run_agent_worktrees_raw,
+    )
+    monkeypatch.setattr(
+        "agent_pull_requests.__main__._github_create",
+        lambda repo, head, base, title, body, draft: {
+            "repo": repo, "number": 8, "title": title,
+            "url": f"https://github.com/{repo}/pull/8",
+            "head": head, "base": base, "isDraft": draft,
+        },
+    )
+
+    rc = main([
+        "create", "--repo", "octo/example", "--head", "feature/x",
+        "--title", "Add x", "--json",
+    ])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["number"] == 8
+    assert payload["claimed_by"] is None
+    assert "not found on PATH" in payload["claim_warning"]
+
+
+def test_create_refuses_when_claimant_resolution_itself_spawn_fails(monkeypatch, capsys):
+    """``_resolve_claimant_worktree_id`` must catch OSError too (not just
+    RuntimeError) -- a vanished/unexecutable resolved binary must degrade to
+    the normal no-claimant refusal, never an unhandled crash."""
+    def _raising_run_agent_worktrees_raw(argv):
+        raise OSError("executable disappeared")
+
+    monkeypatch.setattr(
+        "agent_pull_requests.__main__._run_agent_worktrees_raw",
+        _raising_run_agent_worktrees_raw,
+    )
+    called = {"create": False}
+    monkeypatch.setattr(
+        "agent_pull_requests.__main__._github_create",
+        lambda *a, **k: called.__setitem__("create", True) or {},
+    )
+
+    rc = main([
+        "create", "--repo", "octo/example", "--head", "feature/x",
+        "--title", "Add x", "--json",
+    ])
+
+    assert rc == 2
+    assert called["create"] is False
 
 
 def test_build_parser_merge_defaults_to_squash():

@@ -124,7 +124,7 @@ trace; not repeated here (public-artifact rule: keep this effort generic).
       same assertions, which didn't fit this slice's scope. Left as a
       concrete next step before Phase 3 reuses this resolver.
 
-### Phase 2d — create-pr: real foreign creation from an already-pushed branch (not started)
+### Phase 2d — create-pr: real foreign creation from an already-pushed branch (operator-directed, in progress)
 - [ ] Design + implement an additive code path in `pr_ops.create_pr()` (or a
       new sibling function) for: `--repo <foreign, registered>` +
       `--from-branch <branch>` (a branch some other process already pushed
@@ -133,14 +133,28 @@ trace; not repeated here (public-artifact rule: keep this effort generic).
       resolve the foreign repo's own binding via
       `pr_config.resolve_repo_config_for_slug()`, and call
       `provider.create_pull()` directly against it.
-- [ ] Decide what create-pr's fuller machinery (vs. the leaner
-      `agent-pull-requests create`) should still apply in this mode:
-      attribution/codename marker (whose codename -- the calling worktree's
-      own?), label application, and a tracking record on the CALLING
-      worktree (per `venue-and-claims.md`'s "a cross-repo PR is an
-      obligation on your worktree" framing -- should this auto-journal a
-      claim instead of requiring the manual `claims add pr` it documents
-      today?).
+- [x] **Decided (2026-10-04, operator-directed):** the CALLING worktree
+      always auto-journals a `pr`-kind claim via the existing
+      `_ensure_pr_claim`/`add_resource_claim` primitive -- never the manual
+      `claims add pr` workaround `venue-and-claims.md` documents today. The
+      motivating case is a host agent (e.g. a container/other source
+      pushed the remote branch) that wants to open and durably own a PR on
+      a repo it has no local checkout of; the whole point is a turn-key
+      "create + claim" in one call. Attribution/codename marker uses the
+      CALLING worktree's own codename (consistent with every other
+      create-pr invocation -- there is no other sensible identity to
+      stamp). Label application: apply whatever labels the TARGET repo's
+      own config declares for a normal create-pr, same as the local path.
+- [ ] Give `agent-pull-requests create` the same two behaviors (it already
+      supports `--repo`/`--head` with no local checkout, per the Journal
+      entry below, but today does neither): require a resolvable claimant
+      worktree (shell `agent-worktrees get worktree-id`; refuse with a
+      `pr_cli.require_claimant_worktree`-style actionable message if empty,
+      since this plugin can't import agent-worktrees internals directly),
+      then auto-journal the same `pr`-kind claim via `agent-worktrees claims
+      add pr <url> --worktree <id> --json` (best-effort, non-fatal --
+      mirrors `context-handoff`'s own `addHandoffClaim` pattern for calling
+      across the same plugin boundary).
 - [ ] Still gated by `require_claimant_worktree()` (already in place from
       the slice above).
 - [ ] Motivating case: `create-pr --repo <product-repo> --from-branch

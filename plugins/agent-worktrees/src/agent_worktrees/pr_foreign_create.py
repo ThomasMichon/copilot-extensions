@@ -1,0 +1,298 @@
+"""Foreign-repo PR creation from an already-pushed branch -- no local
+checkout required (``pull-request-capability`` effort, Phase 2d).
+
+New module rather than extending ``pr_ops.py`` (already at its grandfathered
+line-count ceiling): the motivating case is a host agent whose worktree never
+checked out the target repo at all -- a container, another host, or any
+other process already pushed the feature branch there, and the calling
+worktree just wants to open the PR and durably own the resulting obligation.
+``create_pr``'s own ~400-line local path (squash, push, title derivation from
+commit history, branch-reuse semantics) is entirely inapplicable here and
+deliberately NOT reused; what IS reused is the same provider dispatch
+(``providers.get_provider``/``account_token_for_slug``/``PRScope``) and the
+same claim-journal primitive (``pr_ops._ensure_pr_claim``) the local path
+already relies on, so both paths converge on identical claim/attribution
+semantics rather than growing two divergent implementations.
+
+Always auto-journals a ``pr``-kind claim on the calling worktree itself --
+never the manual ``claims add pr`` workaround ``venue-and-claims.md``
+documents as today's only path. This is deliberately NOT also appended to the
+calling worktree's own ``prs`` list (unlike a PR the worktree's own checkout
+opened): the calling worktree never owns this PR's lifecycle in the full
+create-pr sense (it has no checkout to push updates from), only the
+obligation to see it through -- a claim is the right-sized bookkeeping,
+not a full tracked-PR record.
+"""
+from __future__ import annotations
+
+from . import claim_history, config as cfg, obligations, pr_config, pr_ops, tracking
+from .codename import is_valid_handle
+from .providers import attribution as attr
+from .providers import base as providers
+from .pr_ops import _ensure_pr_claim
+
+#: Per-provider "this PR is open" vocabulary, normalized to the literal
+#: "open" `_ensure_pr_claim`/`tracking.PRRecord` require -- Azure DevOps'
+#: own `create_pull()` returns its native `status` value (``"active"``)
+#: verbatim, never the cross-provider "open" literal every other provider
+#: uses, so an unnormalized ADO PR would silently open unclaimed.
+_OPEN_STATE_ALIASES = {"active": "open"}
+
+
+def create_foreign_pr_from_branch(
+    worktree_id: str,
+    config: cfg.Config,
+    *,
+    target_repo: str,
+    from_branch: str,
+    title: str,
+    body: str = "",
+    base: str | None = None,
+    draft: bool = False,
+    attribution: bool | None = None,
+    new: bool = False,
+) -> dict:
+    """Open a PR on ``target_repo`` from ``from_branch`` (already pushed
+    there by some other process) and claim it onto ``worktree_id``'s own
+    ledger. Returns a result dict shaped like ``create_pr``'s own
+    (``url``/``number``/``state``/``pr_opened``/...) on success, or
+    ``{"error": "..."}`` on a resolution/provider failure -- never raises for
+    an expected failure mode.
+
+    Idempotent by default (``new=False``, matching ``create_pr``'s own
+    "safe to re-run" contract): a retry for the SAME ``from_branch`` reuses
+    any still-open PR already found there (``result["reused"]``) instead of
+    asking the provider to open a duplicate. Pass ``new=True`` to force a
+    fresh PR unconditionally.
+
+    ``target_repo`` must already be a DIFFERENT, registered repo (the caller
+    is expected to have already rejected ``same_as_active`` -- see
+    ``finalize_cli.cmd_create_pr``'s own ``--repo``/``--from-branch`` gating,
+    which is this function's only caller today).
+    """
+    resolution = pr_config.resolve_repo_config_for_slug(config, target_repo)
+    if not resolution.resolved:
+        return {
+            "error": (
+                f"'{target_repo}' is not a registered repo this machine can "
+                "resolve a PR binding for"
+            ),
+            "repo": target_repo,
+        }
+    if resolution.same_as_active:
+        return {
+            "error": (
+                f"'{target_repo}' is this worktree's own active repo -- use "
+                "the normal create-pr path (push + open), not --from-branch"
+            ),
+            "repo": target_repo,
+        }
+
+    repo_cfg = resolution.repo_config
+    prcfg = repo_cfg.pr
+    if not prcfg.enabled:
+        return {
+            "error": (
+                f"PR mode is not enabled for '{target_repo}'. That repo's "
+                "own config must set pr.enabled: true before anything can "
+                "open a PR against it."
+            ),
+            "repo": target_repo,
+        }
+    base_branch = base or repo_cfg.default_branch
+
+    rec_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    pre_record = tracking.load_record(rec_path) if rec_path.exists() else None
+
+    # Same caller-identity selection `create_pr`'s own local path uses for
+    # the raw (non-codename) marker: `machine` from the tracking record
+    # itself (never `config.machine`, which is this PROCESS's own machine
+    # and can differ from the record's if, e.g., config was resolved
+    # cross-machine), and `session` as the latest LIVE session (or, absent
+    # one, the latest recorded) from `record.sessions` -- never
+    # `parent_session`, which identifies whatever session originally
+    # SPAWNED the worktree and may not be the one driving this PR at all.
+    machine = getattr(pre_record, "machine", "") if pre_record else ""
+    session = ""
+    if pre_record and pre_record.sessions:
+        live = [s for s in pre_record.sessions if not s.ended_at]
+        session = (live[-1] if live else pre_record.sessions[-1]).session_id
+    codename = getattr(pre_record, "codename", "") if pre_record else ""
+
+    # Same tri-state resolution `create_pr`'s own local path uses:
+    # `prcfg.source_attribution` (a per-repo "codename" | True | False
+    # config value, NOT a bool-only toggle) is the default, overridden only
+    # by an explicit `attribution=` argument (today only ever `False`, from
+    # `--no-attribution` -- `None` otherwise).
+    effective_attribution = (
+        prcfg.source_attribution if attribution is None else attribution
+    )
+    if effective_attribution == "codename":
+        # Same provenance gate the local path's codename-mode branch
+        # applies (`attribution.may_publish_codename`): a codename from a
+        # CUSTOM wordlist only publishes when this repo has explicitly
+        # opted into source attribution (`source_attribution_configured`);
+        # the bare implicit default never does, closing exactly the
+        # custom-vocabulary-leak case that check exists to prevent. This
+        # lean no-checkout path never attempts a live codename BACKFILL on
+        # a missing/invalid codename (unlike the local path) -- it
+        # degrades to no marker rather than guessing or crashing.
+        if is_valid_handle(codename) and attr.may_publish_codename(
+            codename_source=(
+                getattr(pre_record, "codename_source", None) if pre_record else None
+            ),
+            source_attribution_configured=prcfg.source_attribution_configured,
+        ):
+            full_body = attr.append_marker(body or "", attr.build_codename_marker(codename))
+        else:
+            full_body = attr.strip_marker(body or "")
+    elif effective_attribution is True:
+        # `build_marker`'s own `head=` parameter is documented as a commit
+        # SHA (the local path passes its own just-pushed squash commit's
+        # SHA) -- this no-checkout path never has one verified before the
+        # provider call, so it's omitted rather than passing the branch
+        # NAME as if it were authoritative SHA metadata.
+        marker = attr.build_marker(worktree_id, machine=machine, session=session)
+        full_body = attr.append_marker(body or "", marker)
+    else:
+        full_body = attr.strip_marker(body or "")
+
+    labels = tuple(
+        lbl.replace("{machine}", machine) for lbl in (getattr(prcfg, "labels", ()) or ())
+    )
+    scope = providers.PRScope(
+        repo=target_repo, head=from_branch, base=base_branch, title=title,
+        body=full_body, api_base=getattr(prcfg, "api_base", "") or "",
+        labels=labels, draft=draft,
+    )
+    try:
+        provider = providers.get_provider(prcfg.provider)
+        token = providers.account_token_for_slug(scope.repo, prcfg)
+        reused = False
+        pull = None
+        if not new:
+            # Idempotency (matches `create_pr`'s own contract -- safe to
+            # re-run): a retried `--repo/--from-branch` call for the SAME
+            # head must reuse any still-open PR rather than asking the
+            # forge to open a duplicate (which normally just fails once a
+            # head already has an open PR, but is never something to rely
+            # on across every provider). `--new`-equivalent callers skip
+            # this and always open fresh.
+            existing = provider.find_pull_by_head(
+                target_repo, from_branch, api_base=scope.api_base, token=token,
+            )
+            if existing is not None:
+                existing_state = _OPEN_STATE_ALIASES.get(existing.state, existing.state) or "open"
+                if not tracking._pr_is_terminal(
+                    tracking.PRRecord(state=existing_state),
+                ):
+                    pull = existing
+                    reused = True
+        if pull is None:
+            # Deferred until we actually need to open a PR (not just
+            # reuse one) -- matching the local path, which only validates
+            # the body when it's genuinely about to publish one. Checking
+            # this earlier would fail an idempotent retry against a
+            # required_body_sections repo even when no new PR would be
+            # created at all.
+            missing_body = pr_ops.missing_required_body_sections(
+                body, prcfg.required_body_sections,
+            )
+            if missing_body:
+                return {
+                    "error": (
+                        "PR body is missing required non-empty section(s): "
+                        + ", ".join(missing_body)
+                        + ". Pass --body or --body-file before opening the PR."
+                    ),
+                    "repo": target_repo,
+                }
+            pull = provider.create_pull(scope, token=token)
+    except (providers.ProviderError, OSError) as e:
+        return {"error": str(e), "repo": target_repo}
+
+    normalized_state = _OPEN_STATE_ALIASES.get(pull.state, pull.state) or "open"
+    result: dict = {
+        "repo": target_repo,
+        "url": pull.url,
+        "number": pull.number,
+        "state": normalized_state,
+        # A reused PR's draft state is whatever the provider already
+        # reports it as, not the caller's OWN --draft request for a PR
+        # that was never actually created this call -- mirrors the local
+        # path's own retry contract (draft is only ever true for a PR
+        # THIS call just opened as one).
+        "draft": False if reused else bool(draft),
+        "head": from_branch,
+        "base": base_branch,
+        "pr_opened": True,
+        "reused": reused,
+    }
+    if getattr(pull, "label_error", ""):
+        result["pr_label_error"] = pull.label_error
+
+    claimed_ref = None
+    claim_worktree_id = worktree_id
+    claim_machine = ""
+    claim_project = ""
+    try:
+        # Lock only the load/mutate/save window -- RIGHT BEFORE the claim
+        # read-modify-write, not the pre-network-call snapshot above, so a
+        # concurrent CLI's own claim/settle in the gap while this function
+        # awaited the provider can't be silently clobbered by saving a
+        # stale copy. `claim_history.record_pr_event` runs AFTER this
+        # block, never inside it: it takes its own separate filesystem
+        # lock and does real I/O, and holding this worktree's record lock
+        # across that risks starving a concurrent `require_sidecar=True`
+        # updater into a timeout.
+        with tracking._RecordLock(rec_path, require_sidecar=True):
+            record = tracking.load_record(rec_path) if rec_path.exists() else None
+            if record is None:
+                raise FileNotFoundError(f"no tracking record for {worktree_id!r}")
+            target_pr = tracking.PRRecord(
+                repo=target_repo, number=pull.number, url=pull.url,
+                state=normalized_state,
+            )
+            # `_ensure_pr_claim` returns ``None`` for TWO different cases --
+            # a genuine failure (the owner is frozen/finalizing), and an
+            # idempotent no-op (the claim is ALREADY active, so there is
+            # nothing new to journal). Conflating them would report
+            # `claimed: false` + a bogus "not claimed" warning on a retry
+            # whose ledger was already perfectly correct. `claimed_ref` is
+            # kept ONLY to decide whether a NEW history event is warranted;
+            # whether the PR is claimed at all is checked independently.
+            claimed_ref = _ensure_pr_claim(record, target_pr)
+            tracking.save_record(record)
+            claim_worktree_id, claim_machine, claim_project = (
+                record.worktree_id, record.machine, record.repo,
+            )
+            is_claimed = any(
+                c.ref == pull.url and c.kind == "pr" and c.state == obligations.ACTIVE
+                for c in record.resources
+            )
+        result["claimed"] = is_claimed
+        if not is_claimed:
+            result["claim_warning"] = "PR not claimed (owner worktree is frozen)."
+    except FileNotFoundError:
+        result["claimed"] = False
+        result["claim_warning"] = (
+            f"no tracking record found for worktree {worktree_id!r} -- PR "
+            "opened but not claimed; run `claims add pr` manually"
+        )
+    except Exception as e:
+        # The PR already exists on the provider by this point -- a
+        # claim-persistence failure must never read as the create itself
+        # failing (there is nothing left to roll back). Degrade to a
+        # warning with a concrete manual recovery command instead.
+        result["claimed"] = False
+        result["claim_warning"] = (
+            f"PR opened ({pull.url}), but claiming it onto worktree "
+            f"{worktree_id!r} failed: {e}. Run `agent-worktrees claims "
+            f"add pr {pull.url} --worktree {worktree_id}` manually."
+        )
+    if claimed_ref:
+        claim_history.record_pr_event(
+            claimed_ref, worktree_id=claim_worktree_id,
+            machine=claim_machine, event="claimed", project=claim_project,
+        )
+    return result

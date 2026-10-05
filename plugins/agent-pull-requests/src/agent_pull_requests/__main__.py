@@ -187,6 +187,66 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_agent_worktrees_raw(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run a plain ``agent-worktrees <argv>`` call (NOT the ``repos gh``
+    proxy -- this is agent-worktrees' own claim/identity surface, local to
+    THIS worktree, with no cross-account GitHub auth to route)."""
+    return subprocess.run(
+        [_agent_worktrees_command(), *argv],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=_creation_flags(),
+        check=False,
+    )
+
+
+def _resolve_claimant_worktree_id() -> str | None:
+    """The worktree CWD traces back to, or ``None`` if it doesn't trace to
+    any tracked worktree at all -- same claimant contract
+    ``agent_worktrees.pr_cli.require_claimant_worktree`` enforces for
+    ``create-pr``/``pr-watch``/``pr-merge`` (owning project is always the
+    CWD; this plugin can't import that check directly since it lives in a
+    separate package, so it shells the equivalent query instead)."""
+    try:
+        proc = _run_agent_worktrees_raw(["get", "worktree-id"])
+    except (RuntimeError, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    worktree_id = proc.stdout.strip()
+    return worktree_id or None
+
+
+_CLAIMANT_REFUSAL = (
+    "agent-pull-requests: this directory isn't a tracked agent-worktrees "
+    "worktree, so there's no claimant to own this PR. Run this FROM the "
+    "worktree responsible for the work (your own project's worktree -- `cd` "
+    "there, or launch/resume it first) and address the target repo as an "
+    "explicit argument -- this works for a repo you have no local checkout "
+    "of at all. Do not fall back to a bare `gh pr create` -- that skips the "
+    "claim this command journals automatically."
+)
+
+
+def _journal_pr_claim(worktree_id: str, url: str, *, note: str) -> str | None:
+    """Best-effort: journal a ``pr``-kind claim for ``url`` onto
+    ``worktree_id``'s own ledger. Returns an error string on failure (never
+    raises) -- a failed journal must never un-create the PR that already
+    exists; the caller surfaces it as a warning instead."""
+    try:
+        proc = _run_agent_worktrees_raw(
+            ["claims", "add", "pr", url, "--worktree", worktree_id, "--note", note, "--json"]
+        )
+    except (RuntimeError, OSError) as e:
+        return str(e)
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip() or "unknown claims-add failure"
+        return detail
+    return None
+
+
 def _github_create(
     repo: str, head: str, base: str | None, title: str, body: str, draft: bool
 ) -> dict[str, Any]:
@@ -215,6 +275,13 @@ def _github_create(
 
 
 def _cmd_create(args: argparse.Namespace) -> int:
+    worktree_id = _resolve_claimant_worktree_id()
+    if not worktree_id:
+        if args.json:
+            print(json.dumps({"error": _CLAIMANT_REFUSAL, "repo": args.repo}))
+        else:
+            print(_CLAIMANT_REFUSAL, file=sys.stderr)
+        return 2
     try:
         result = _github_create(args.repo, args.head, args.base, args.title, args.body, args.draft)
     except RuntimeError as exc:
@@ -223,6 +290,16 @@ def _cmd_create(args: argparse.Namespace) -> int:
         else:
             print(f"agent-pull-requests: {exc}", file=sys.stderr)
         return 1
+    claim_error = _journal_pr_claim(
+        worktree_id, result["url"], note=f"PR #{result['number']} ({result['repo']})",
+    )
+    result["claimed_by"] = worktree_id if claim_error is None else None
+    if claim_error:
+        result["claim_warning"] = (
+            f"PR opened, but claiming it onto worktree {worktree_id!r} failed: "
+            f"{claim_error}. Run `agent-worktrees claims add pr {result['url']} "
+            f"--worktree {worktree_id}` manually."
+        )
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
@@ -230,6 +307,10 @@ def _cmd_create(args: argparse.Namespace) -> int:
         print(f"repo:     {result['repo']}")
         print(f"number:   #{result['number']}")
         print(f"head/base: {result['head']} -> {result['base'] or '(default)'}")
+        if result.get("claimed_by"):
+            print(f"claimed:  {result['claimed_by']}")
+        elif result.get("claim_warning"):
+            print(f"agent-pull-requests: {result['claim_warning']}", file=sys.stderr)
     return 0
 
 
