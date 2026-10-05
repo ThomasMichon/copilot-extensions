@@ -3246,12 +3246,19 @@ def test_resolve_local_binstub_uses_pathext_aware_resolution(tmp_path, monkeypat
     assert os.path.normcase(resolved) == os.path.normcase(str(shim))
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows restricts the PATH fallback to a direct manual search "
+    "(see test_resolve_local_binstub_path_fallback_skips_ps1_for_cmd), not "
+    "a bare shutil.which call -- only POSIX still delegates to it.",
+)
 def test_resolve_local_binstub_falls_back_to_path_when_no_local_shim(
     tmp_path, monkeypatch,
 ) -> None:
     """No ``~/.local/bin/<project>`` shim -> fall back to whatever ``PATH``
-    resolves (still via the PATHEXT-aware :func:`shutil.which`), never the
-    bare, unresolved project name."""
+    resolves via :func:`shutil.which` (POSIX's own ``os.access(X_OK)`` check
+    already guarantees direct launchability), never the bare, unresolved
+    project name."""
     import shutil
     from pathlib import Path
 
@@ -3261,6 +3268,39 @@ def test_resolve_local_binstub_falls_back_to_path_when_no_local_shim(
     monkeypatch.setattr(shutil, "which", lambda name: f"/resolved/{name}" if name == "private-downstream-repo" else None)
     resolved = _resolve_local_binstub("private-downstream-repo")
     assert resolved == "/resolved/private-downstream-repo"
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows-only PATH-fallback search; POSIX uses shutil.which "
+    "directly (see test_resolve_local_binstub_falls_back_to_path_when_no_local_shim).",
+)
+def test_resolve_local_binstub_path_fallback_skips_ps1_for_cmd(
+    tmp_path, monkeypatch,
+) -> None:
+    """Regression (#5306 review): the **PATH** fallback (no local
+    ``~/.local/bin/<project>`` shim at all) must apply the identical
+    directly-launchable restriction as the explicit-path case -- a bare
+    ``shutil.which(project)`` could itself resolve to an interpreter-
+    dependent ``.ps1``/``.py``/... match ranked ahead of an equally-present
+    ``.cmd`` on ``PATH``, failing to launch with the same Windows error 193.
+    """
+    from pathlib import Path
+
+    from agent_bridge.routes.worktrees import _resolve_local_binstub
+
+    path_dir = tmp_path / "on-path"
+    path_dir.mkdir(parents=True)
+    (path_dir / "private-downstream-repo.ps1").write_text("# not directly launchable\n")
+    cmd_shim = path_dir / "private-downstream-repo.cmd"
+    cmd_shim.write_text("@echo off\n")
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "empty-home")
+    monkeypatch.setenv("PATH", str(path_dir))
+    monkeypatch.setenv("PATHEXT", ".PS1;.CMD;.EXE")
+    resolved = _resolve_local_binstub("private-downstream-repo")
+    import os as _os
+    assert _os.path.normcase(resolved) == _os.path.normcase(str(cmd_shim))
 
 
 @pytest.mark.skipif(

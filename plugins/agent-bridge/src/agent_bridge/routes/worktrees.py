@@ -531,8 +531,14 @@ def _resolve_local_binstub(project: str) -> str:
     ``.cmd`` and failing to launch at all -- a plain extensionless file is
     *never* launchable on Windows this way, so it must fall through exactly
     like a non-executable POSIX file does) -- then each directly-launchable
-    suffix against that same directory on Windows, before falling back to a
-    bare ``shutil.which(project)`` PATH search.
+    suffix against that same directory on Windows. The final **PATH**
+    fallback applies the identical restriction on Windows (a bare
+    ``shutil.which(project)`` could itself resolve to a ``.ps1``/``.py``/...
+    match ahead of an equally-present ``.cmd`` on PATH, the same failure
+    mode as the explicit-path case) by searching PATH directly rather than
+    trusting ``shutil.which``'s own, broader PATHEXT order; POSIX keeps the
+    plain ``shutil.which`` fallback, since its own ``os.access(X_OK)`` check
+    already guarantees direct launchability there.
     """
     import shutil
     from pathlib import Path
@@ -553,7 +559,21 @@ def _resolve_local_binstub(project: str) -> str:
             candidate = explicit.with_name(explicit.name + ext)
             if candidate.is_file():
                 return str(candidate)
-    elif explicit.is_file() and os.access(explicit, os.X_OK):
+        # PATH fallback, restricted the same way: don't trust a bare
+        # shutil.which(project) match that might be an interpreter-
+        # dependent script ranked ahead of a directly-launchable one.
+        for directory in os.environ.get("PATH", "").split(os.pathsep):
+            if not directory:
+                continue
+            base = Path(directory) / project
+            for ext in pathext:
+                if ext.upper() not in direct_launch_exts:
+                    continue
+                candidate = base.with_name(base.name + ext)
+                if candidate.is_file():
+                    return str(candidate)
+        return project
+    if explicit.is_file() and os.access(explicit, os.X_OK):
         return str(explicit)
     return shutil.which(project) or project
 
