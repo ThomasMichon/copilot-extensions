@@ -253,14 +253,18 @@ class CleanupDisposition:
 def _count_cross_machine_worktree_claims(
     held_claims: list, this_machine: str,
 ) -> int:
-    """How many held claims are ``worktree``-kind, qualified, and name a
-    DIFFERENT machine than ``this_machine`` -- not stuck on anything THIS
-    worktree can act on (mirrors ``finalize._settle_parent_obligation``'s
-    own ``owner.machine != config.machine`` test, from the opposite
-    direction). Note: today nothing actually sweeps/settles a cross-machine
-    ``worktree``-kind claim (``sweep.gone_of``/``safe_of`` both spare an
+    """How many of ``held_claims`` (outbound claims THIS record holds) are
+    ``worktree``-kind claims whose qualified ref names a worktree hosted on
+    a DIFFERENT machine than ``this_machine`` -- i.e. the claim's TARGET
+    lives remotely, not this record itself.
+
+    This proves only that the target is remote, nothing about its state:
+    an ``active`` claim here may be a genuinely busy remote worktree, not
+    an idle/settled one -- this count never implies the target is safe,
+    settled, or self-resolving. Nothing today actually sweeps/settles this
+    kind of claim either way (``sweep.gone_of``/``safe_of`` both spare an
     unjudgeable cross-machine ref, and ``worktree`` isn't in
-    ``sweep._LEASEABLE_KINDS``) -- see the ``cross_machine_claims`` doc on
+    ``sweep._LEASEABLE_KINDS``). See the ``cross_machine_claims`` doc on
     :func:`assemble_closure_descriptor` for what this does and doesn't claim.
     """
     count = 0
@@ -362,18 +366,19 @@ def cleanup_disposition(
         rec.status == "finalized" or info.state == S.COMPLETED
         or v.category in ("merged", "empty", "conversation-only")
     ):
-        # When EVERY held claim is cross-machine, nothing here is stuck on
-        # a LOCAL blocker -- it's held by a worktree on another machine.
-        # NOT a claim this is known to self-clear: today nothing actually
-        # sweeps/settles a cross-machine worktree claim (see
-        # _count_cross_machine_worktree_claims's docstring) -- this bucket
-        # only tells an operator WHERE to look, not that it needs no look.
+        # When EVERY held claim targets a worktree on a different machine,
+        # this isn't a LOCAL blocker -- it's an outbound claim ON a worktree
+        # hosted remotely, not something held locally. NOT a claim this is
+        # known to self-clear: today nothing actually sweeps/settles this
+        # kind of claim (see _count_cross_machine_worktree_claims's
+        # docstring) -- this bucket only names WHERE the target lives, not
+        # that it needs no further look.
         xm = _count_cross_machine_worktree_claims(held_claims, rec.machine)
         if xm == len(held_claims):
             return CleanupDisposition(
                 False, "held-claims-cross-machine",
                 f"{v.reason} · {len(held_claims)} cross-machine claim(s) "
-                "held (not local)")
+                "(target worktree hosted elsewhere)")
         return CleanupDisposition(
             False, "held-claims",
             f"{v.reason} · {len(held_claims)} held resource claim(s) pending")

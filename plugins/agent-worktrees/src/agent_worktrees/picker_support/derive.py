@@ -305,15 +305,15 @@ BUCKET_REASON = {
     "unused": "idle · no commits/turns",
     "conversation": "chat history, no commits",
     "follow-up": "agent flagged follow-ups",
-    # worktree-claims-transitive-finalization (effort), Phase 4: a worktree
-    # whose own git/PR state is otherwise clean can still be held open by a
-    # resource claim it holds elsewhere (a codespace, a container, another
-    # worktree...). The cross-machine variant below names WHERE the claim is
-    # held (not a local problem) -- it is NOT claimed to self-clear: nothing
-    # today actually sweeps/settles a cross-machine worktree-kind claim (see
+    # A worktree whose own git/PR state is otherwise clean can still be held
+    # open by a resource claim it holds elsewhere (a codespace, a container,
+    # another worktree...). The cross-machine variant below names the claim's
+    # TARGET as remote (not this record) -- informational only, never a
+    # promise the claim resolves on its own: nothing today actually
+    # sweeps/settles a cross-machine worktree-kind claim (see
     # prune._count_cross_machine_worktree_claims's docstring).
     "held-claims": "resource claim(s) still held",
-    "held-claims-cross-machine": "claim(s) held by another machine",
+    "held-claims-cross-machine": "claim(s) on a worktree hosted remotely",
     "closed-unmerged": "PR closed unmerged",
     "gone": "dir missing",
     "dirty": "uncommitted work",

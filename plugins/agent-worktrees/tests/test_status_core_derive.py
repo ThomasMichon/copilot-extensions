@@ -240,12 +240,11 @@ class TestFollowUpBucket:
 
 
 class TestHeldClaimsBucket:
-    """worktree-claims-transitive-finalization (effort), Phase 4: the
-    ``held-claims``/``held-claims-cross-machine`` cleanup buckets emitted by
-    ``prune.cleanup_disposition`` had no disposition-chip entry at all until
-    now (a held-claims-blocked worktree rendered no chip) -- the
-    cross-machine variant needs its own calmer reason distinct from the
-    generic one.
+    """The ``held-claims``/``held-claims-cross-machine`` cleanup buckets
+    emitted by ``prune.cleanup_disposition`` must each have their own
+    disposition-chip entry (a held-claims-blocked worktree must never render
+    with no chip at all) -- the cross-machine variant needs its own reason
+    naming the claim's target as remote, distinct from the generic one.
     """
 
     def test_held_claims_bucket_has_a_review_chip(self):

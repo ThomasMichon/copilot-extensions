@@ -195,6 +195,30 @@ def test_completed_with_held_claim_renders_merged_with_marker(monkeypatch, capsy
     assert "FINAL" not in out
 
 
+def test_completed_with_cross_machine_claim_renders_xm_marker(monkeypatch, capsys):
+    # A cross-machine worktree-kind claim must render its own XM<N> marker
+    # alongside C<N> -- existing coverage above only exercises a generic
+    # (codespace) claim, which would leave this status-segment path green
+    # even if cross_machine_claims were never threaded through.
+    rec = _record(
+        worktree_path=str(Path("wt-xm").resolve()),
+        resources=[tracking.ResourceClaim(
+            kind="worktree",
+            ref=tracking.format_claim_ref("other-machine", "proj", "wt-child"),
+            state="active")],
+    )
+    target = rec.worktree_path
+    _wire(monkeypatch, target, state=git_ops.WorktreeState.COMPLETED, turns=0, rec=rec)
+    ns = argparse.Namespace(path=target, fetch=True, plain=True, no_title=True)
+    rc = m.cmd_status_segment(ns)
+    assert rc == 0
+    out = capsys.readouterr().out.strip()
+    assert "MERGED" in out
+    assert "C1" in out
+    assert "XM1" in out
+    assert "FINAL" not in out
+
+
 def test_dirty_with_open_follow_up_shows_marker_but_keeps_dirty_label(monkeypatch, capsys):
     # design.md: blocker markers ride on ANY base state's compact text; only
     # COMPLETED gets the MERGED/FINAL label swap.
@@ -331,6 +355,29 @@ def test_status_segment_json_held_claim_surfaces_blocker(monkeypatch, capfd):
     assert out["closure"]["label"] == "MERGED"
     codes = {b["code"] for b in out["closure"]["blockers"]}
     assert "held-claims" in codes
+
+
+def test_status_segment_json_cross_machine_claim_surfaces_xm_fact(monkeypatch, capfd):
+    # The JSON status-segment path (_status_segment_json) must also carry
+    # the cross-machine claim count -- separate call site from the
+    # plain-text path above, so covering only that one would still leave
+    # this path green even if cross_machine_claims were never threaded
+    # through here.
+    rec = _record(
+        worktree_path=str(Path("wt-json-xm").resolve()),
+        resources=[tracking.ResourceClaim(
+            kind="worktree",
+            ref=tracking.format_claim_ref("other-machine", "proj", "wt-child"),
+            state="active")],
+    )
+    target = rec.worktree_path
+    _wire(monkeypatch, target, state=git_ops.WorktreeState.COMPLETED, turns=0, rec=rec)
+    rc = m.cmd_status_segment(_json_ns(target, fetch=True))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["closure"]["label"] == "MERGED"
+    assert out["closure"]["facts"]["open_claims"]["cross_machine_held"] == 1
+    assert "XM1" in out["closure"]["compact"]
 
 
 def test_status_segment_json_reports_turn_count(monkeypatch, capfd):

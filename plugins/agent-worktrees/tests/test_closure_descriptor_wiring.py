@@ -49,11 +49,11 @@ def test_closure_reports_merged_when_held_claim_present():
 
 
 def test_closure_wires_cross_machine_claims_through_production_call_site():
-    # worktree-claims-transitive-finalization (effort), Phase 4: a review
-    # finding caught this production call site (list --json --classify's
-    # own `_worktree_to_dict`) NOT threading `cross_machine_claims` through,
-    # so the advertised `facts.open_claims.cross_machine_held`/`XM<N>`
-    # marker never actually reached the real engine ↔ Picker contract.
+    # The production list --json --classify path (_worktree_to_dict) must
+    # carry the cross-machine claim count into the engine <-> Picker
+    # contract, not just assemble_closure_descriptor's own unit coverage --
+    # otherwise facts.open_claims.cross_machine_held/XM<N> never reach real
+    # output.
     rec = _rec()
     rec.resources = [
         tracking.ResourceClaim(

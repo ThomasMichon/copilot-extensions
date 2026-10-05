@@ -148,26 +148,28 @@ entry on Picker label parity).
 
 ##### Cross-machine held claims (worktree-claims-transitive-finalization, Phase 4)
 
-A held `worktree`-kind claim naming a **different** machine isn't a LOCAL
-blocker -- it's held by a worktree on another machine, not something this
-worktree itself can resolve. (`finalize`'s own `_settle_parent_obligation`
-defers that reverse case -- settling a cross-machine PARENT's claim -- to
-"the lease mirror/sweep"; today nothing actually implements that for
-`worktree`-kind claims: `sweep.py`'s `gone_of`/`safe_of` both spare an
+An outbound `worktree`-kind claim whose ref names a **different** machine
+targets a worktree hosted remotely -- it isn't a LOCAL blocker, since this
+worktree holds the claim but the claimed resource lives elsewhere. This
+proves only that the target is remote, nothing about its state: a
+cross-machine claim may target a genuinely busy remote worktree, not an
+idle/settled one, and nothing today actually sweeps/settles this kind of
+claim either way (`sweep.py`'s `gone_of`/`safe_of` both spare an
 unjudgeable cross-machine ref, and `worktree` isn't in
-`sweep._LEASEABLE_KINDS`. This bucket names WHERE the claim lives, not that
-it will clear itself.) When **every** held claim on a worktree is one of
-these, `cleanup_disposition` reports the `held-claims-cross-machine` bucket
-instead of the generic `held-claims` -- same safety posture (still not
-cleanable, still `blocked`), but a distinct reason ("claim(s) held by
-another machine") so an operator isn't left thinking an otherwise-clean
-worktree is blocked on something local. A single same-machine or
-non-`worktree`-kind claim in the mix keeps the generic bucket -- never
-collapsed into the cross-machine reading when something might genuinely
-need local attention. The sub-count rides the `open_claims` fact as
-`cross_machine_held` and renders its own `XM<N>` `compact` marker (alongside
-the ordinary `C<N>`) -- both additive: the wire-safe `held-claims` blocker
-code and `DESCRIPTOR_VERSION` are unchanged, so an older consumer degrades
+`sweep._LEASEABLE_KINDS`). This bucket names WHERE the target lives, not
+that the claim needs no further look or clears itself. When **every** held
+claim on a worktree is one of these, `cleanup_disposition` reports the
+`held-claims-cross-machine` bucket instead of the generic `held-claims` --
+same safety posture (still not cleanable, still `blocked`), but a distinct
+reason ("claim(s) on a worktree hosted remotely") so an operator isn't left
+thinking an otherwise-clean worktree is blocked on something local. A
+single same-machine or non-`worktree`-kind claim in the mix keeps the
+generic bucket -- never collapsed into the cross-machine reading when
+something might genuinely need local attention. The sub-count rides the
+`open_claims` fact as `cross_machine_held` and renders its own `XM<N>`
+`compact` marker (alongside the ordinary `C<N>`) -- both additive: the
+wire-safe `held-claims` blocker code and `DESCRIPTOR_VERSION` are
+unchanged, so an older consumer degrades
 gracefully to the generic reading.
 
 ### The status core — an orthogonal disposition layer

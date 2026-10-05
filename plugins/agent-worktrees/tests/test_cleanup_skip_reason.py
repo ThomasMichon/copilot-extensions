@@ -20,14 +20,13 @@ def test_held_claims_gets_its_own_reason():
 
 
 def test_held_claims_cross_machine_gets_its_own_reason():
-    # worktree-claims-transitive-finalization (effort), Phase 4: a review
-    # finding caught this new bucket missing from
-    # _CLEANUP_PER_ITEM_BUCKETS -- a cross-machine-only blocked worktree
-    # would silently vanish from `cleanup`'s report (neither skipped nor
-    # counted), same defect class this whole module guards against.
+    # held-claims-cross-machine must get its own per-item skip line, same as
+    # held-claims -- a cross-machine-only blocked worktree must never
+    # silently vanish from `cleanup`'s report (neither skipped nor counted).
     assert m._cleanup_per_item_skip_reason(
-        _disp("held-claims-cross-machine", "1 cross-machine claim held (not local)")
-    ) == "1 cross-machine claim held (not local)"
+        _disp("held-claims-cross-machine",
+              "1 cross-machine claim(s) (target worktree hosted elsewhere)")
+    ) == "1 cross-machine claim(s) (target worktree hosted elsewhere)"
 
 
 def test_follow_up_gets_its_own_reason():
