@@ -137,6 +137,52 @@ if (-not $env:UV_DEFAULT_INDEX) {{ exit 1 }}
     assert proc.stdout.strip() == index_url
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX installer behavior")
+def test_posix_stamp_wrapper_fails_when_provision_reports_success_without_runtime(
+    tmp_path: Path,
+) -> None:
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("native POSIX bash is unavailable")
+
+    home = tmp_path / "home"
+    env = _isolated_install_env(home)
+    install_dir = home / ".agent-vault"
+    stamp = subprocess.run(
+        [
+            bash,
+            str(_PLUGIN_ROOT / "scripts" / "install.sh"),
+            "stamp",
+            "--install-dir",
+            str(install_dir),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert stamp.returncode == 0, stamp.stderr
+
+    fake_snapshot = tmp_path / "fake-snapshot"
+    installer = fake_snapshot / "scripts" / "install.sh"
+    installer.parent.mkdir(parents=True, exist_ok=True)
+    installer.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    installer.chmod(0o755)
+    (install_dir / "payload-dir").write_text(str(fake_snapshot), encoding="utf-8")
+
+    invoke = subprocess.run(
+        [str(home / ".local" / "bin" / "agent-vault"), "--version"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert invoke.returncode == 1, invoke.stderr
+    assert "provisioning completed without a resolvable runtime" in invoke.stderr
+
+
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is required")
 def test_stamp_supports_first_use_provision_from_snapshot_only_ps1(tmp_path: Path) -> None:
     pwsh = shutil.which("pwsh") or shutil.which("powershell")

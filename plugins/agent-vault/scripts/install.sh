@@ -454,6 +454,17 @@ _deploy_binstub() {
         "AGENT_VAULT_NO_SELFPROVISION" \
         "$SCRIPT_DIR/resolve-runtime.ps1" \
         "$SCRIPT_DIR/resolve-runtime.sh"
+    python3 - "$STUB" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+old = """printf '[%s] provisioning completed without a resolvable runtime.\\n' \"$_name\" >&2\nexit \"${_rc:-1}\"\n"""
+new = """printf '[%s] provisioning completed without a resolvable runtime.\\n' \"$_name\" >&2\nif [ \"${_rc:-1}\" -eq 0 ]; then\n    exit 1\nfi\nexit \"${_rc:-1}\"\n"""
+if old in text:
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
 }
 
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):
@@ -591,7 +602,7 @@ _ensure_runtime() {
 
     _deploy_binstub
     _write_askpass
-    write_deploy_manifest "agent-vault" "agent-vault" "$INSTALL_DIR" "$PLUGIN_DIR" "$LINK_DIR"
+    write_deploy_manifest "agent-vault" "agent-vault" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR"
     _check_keepassxc
 
     if "$LINK_PYTHON" -c 'import agent_vault' 2>/dev/null; then
