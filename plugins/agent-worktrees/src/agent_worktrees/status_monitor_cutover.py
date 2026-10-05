@@ -27,6 +27,38 @@ _BIND = "127.0.0.1"
 _READ_TIMEOUT_S = 5.0
 _CUTOVER_LOCK_TIMEOUT_S = 300.0
 
+# A single resident sweep pass (core._monitor_sweep) is one atomic,
+# non-interruptible unit of work covering every tracked worktree across every
+# registered project/machine -- "busy: ['sweep']" in a drain's busy_sessions
+# means that pass hasn't finished yet, not that anything is stuck. On a large
+# fleet that one pass can legitimately take well over 30s (observed
+# 44s-2m10s+), and this module's own `activate_after_update()` was overriding
+# CutoverOrchestrator's already-generous built-in drain_timeout default
+# (zdd.cutover.CutoverOrchestrator, 300.0s) down to a needlessly aggressive
+# 30.0s -- making cutover's drain lose the race essentially every time and
+# leave the superseded daemon un-reaped, accumulating orphaned
+# status-monitor processes on every auto-update (#5326). Fix: stop
+# overriding the orchestrator's own default drain_timeout, and align
+# health_timeout with its default too (both were previously hardcoded here
+# to match the orchestrator's defaults anyway, so this is a no-op for
+# health_timeout and a pure increase for drain_timeout). Both remain
+# overridable per-machine via env var so an even larger fleet can be tuned
+# without another code change.
+def _env_timeout(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw:
+        try:
+            parsed = float(raw)
+            if parsed > 0:
+                return parsed
+        except ValueError:
+            pass
+    return default
+
+
+_DEFAULT_HEALTH_TIMEOUT_S = _env_timeout("AGENT_WORKTREES_STATUS_MONITOR_HEALTH_TIMEOUT", 60.0)
+_DEFAULT_DRAIN_TIMEOUT_S = _env_timeout("AGENT_WORKTREES_STATUS_MONITOR_DRAIN_TIMEOUT", 300.0)
+
 
 def routing_dir(runtime_home: Path | None = None) -> Path:
     from . import status_monitor_runtime as smr
@@ -371,8 +403,8 @@ def _reap_abandoned_passive(record: dict | None) -> dict:
 def activate_after_update(
     *,
     runtime_python: str | None = None,
-    health_timeout: float = 60.0,
-    drain_timeout: float = 30.0,
+    health_timeout: float = _DEFAULT_HEALTH_TIMEOUT_S,
+    drain_timeout: float = _DEFAULT_DRAIN_TIMEOUT_S,
     monitor_was_live: bool | None = None,
 ) -> dict[str, object]:
     """Installer seam: cut over a live monitor after activating a new slot."""
