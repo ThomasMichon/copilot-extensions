@@ -39,7 +39,20 @@ dependencies = [
     # jina-v2-base-code loads via trust_remote_code; transformers 5.x broke that
     # custom modeling path (copilot-extensions#114). Pin below 5 so every host gets
     # the newest working 4.x -- a compat ceiling, not a capability downgrade.
-    "transformers>=4.40,<6",
+    #
+    # The ceiling above was accidentally written as "<6", which still permits
+    # the entire broken 5.x line this comment describes excluding -- a typo
+    # between stated intent and the actual constraint, not a deliberate
+    # widening. Confirmed reproducing live on a real host: an engine cold-load
+    # with transformers==5.17.0 installed hits
+    #   ImportError: cannot import name 'find_pruneable_heads_and_indices'
+    #   from 'transformers.pytorch_utils'
+    # inside the jina model's cached trust_remote_code modeling_bert.py (the
+    # Hub-pinned revision hasn't been updated for the 5.x pruning-utils
+    # cleanup that removed that symbol). Re-pinning to transformers==4.57.6
+    # (the newest 4.x at diagnosis time) resolved it immediately with no other
+    # changes.
+    "transformers>=4.40,<5",
     "sentence-transformers",
 ]
 
