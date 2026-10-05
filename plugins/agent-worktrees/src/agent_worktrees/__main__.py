@@ -1206,6 +1206,8 @@ def _worktree_to_dict(
         effort_state = effort_focus.inspect_effort(Path(rec.worktree_path), rec.active_effort)
         d["active_effort"] = effort_state.to_dict()
     d["follow_up"] = rec.follow_up or bool(effort_state and effort_state.active)
+    if rec.paused:
+        d["paused"] = True
     effective_summary = (
         effort_state.summary if effort_state is not None and effort_state.active else rec.summary
     )

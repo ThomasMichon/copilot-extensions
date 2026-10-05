@@ -387,6 +387,11 @@ def norm(
     # after the title. ``state`` stays pure (bucket()/prune key off it); the
     # not-auto-prune-SAFE behavior comes from the ``follow-up`` cleanup bucket.
     follow_up = bool(w.get("follow_up"))
+    # Purely informational "intentionally idle for now" overlay (status-core
+    # addition following the pause-verb review) -- never fed into bucket()/
+    # the prune verdict, unlike follow_up; just a scannable title glyph +
+    # a field callers can filter/display on.
+    paused = bool(w.get("paused"))
     # #93: a bare (un-muxed) bound Copilot -- invisible to the mux fleet view.
     bare_orphan = bool(w.get("session_bare_orphan"))
     # copilot-extensions#228: the graded rest state's standout value -- the
@@ -408,6 +413,8 @@ def norm(
                       else f"{title} — {summary}")
     if follow_up:
         disp_title = f"✚ {disp_title}"
+    if paused:
+        disp_title = f"⏸ {disp_title}"
     # citadel pair marker: a link glyph (inner of the urgent ⚠/✚ markers) so a
     # paired row is scannable without widening the state column. Gated on the
     # pair id, so an unpaired worktree's title is untouched.
@@ -448,6 +455,7 @@ def norm(
         "source_capabilities": capabilities,
         "title": disp_title,
         "follow_up": follow_up,
+        "paused": paused,
         "summary": summary,
         # worktree-status-core live pulse: the derived agent-intent line + its
         # freshness ('awaiting'/'fresh'/'stale'/None). Rendered dim by the
