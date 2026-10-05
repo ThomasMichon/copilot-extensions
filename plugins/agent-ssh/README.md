@@ -103,7 +103,11 @@ reconciles this machine's *outbound* reach into the mesh: it re-runs the
 transport's own discovery (e.g. `dtssh discover` for the dtssh transport) to
 capture live tunnel/host ids, re-renders this machine's managed
 `config.d` fragment from that live state, and probes reachability of every
-declared alias. It never trusts a previously cached id -- transports such as
+declared alias *other than this machine's own* -- an alias whose declared
+`hostname` (or, when `hostname` is omitted, its `machines.yaml` key) matches
+this machine's own raw hostname is reported reachable without an outbound SSH
+dial, since a machine never needs a network hop through its own relay/tunnel
+to reach itself. It never trusts a previously cached id -- transports such as
 dtssh rotate tunnel ids on every host restart, and nothing else re-validates a
 peer's cached id once it goes stale. `agent-machines`' hourly `watchdog`
 self-update tier calls this on every opted-in machine, so a stale cached id

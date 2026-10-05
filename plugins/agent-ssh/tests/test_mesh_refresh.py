@@ -51,11 +51,39 @@ machines:
       ready: true
 """
 
+KEY_ONLY_SAMPLE = """
+control_plane:
+  project: example-mesh
+
+machines:
+  host-a:
+    display_name: host-a
+    ssh:
+      ready: true
+    dtssh:
+      alias: host-a
+      port: 2222
+  host-b:
+    display_name: host-b
+    ssh:
+      ready: true
+    dtssh:
+      alias: host-b
+      port: 2222
+"""
+
 
 @pytest.fixture()
 def machines_file(tmp_path: Path) -> Path:
     p = tmp_path / "machines.yaml"
     p.write_text(SAMPLE, encoding="utf-8")
+    return p
+
+
+@pytest.fixture()
+def key_only_machines_file(tmp_path: Path) -> Path:
+    p = tmp_path / "machines.yaml"
+    p.write_text(KEY_ONLY_SAMPLE, encoding="utf-8")
     return p
 
 
@@ -205,6 +233,13 @@ def test_refresh_mesh_flags_unreachable_alias(
         ("", "host-a-raw", False),
         ("host-a-raw", "", False),
         ("", "", False),
+        # Two distinct FQDNs sharing a leading label must NEVER be equated by
+        # truncating both sides to their short name (copilot-extensions#5382
+        # review finding) -- only an exact match, or a bare short name on
+        # exactly one side, counts.
+        ("host-a.corp.example", "host-a.lab.example", False),
+        ("host-a.corp.example", "host-a.corp.example", True),
+        ("HOST-A.CORP.EXAMPLE", "host-a.corp.example", True),
     ],
 )
 def test_is_local_machine_matches_raw_hostname_case_and_domain_insensitively(
@@ -305,3 +340,54 @@ def test_refresh_mesh_unresolvable_local_hostname_never_matches_everything(
 
     assert sorted(probed) == ["host-a", "host-b"]
     assert all(not alias.local for alias in result.aliases)
+
+
+def test_refresh_mesh_skips_local_alias_using_key_fallback_when_hostname_omitted(
+    tmp_path, monkeypatch, key_only_machines_file: Path, payload_root: Path
+) -> None:
+    """``hostname`` is optional in the shared machines.yaml contract -- an
+    empty value means the machine's own key IS its hostname
+    (agent_bridge.topology.MachineConfig.hostname). Self-detection must fall
+    back to the key, not silently stay blind to the common key-only
+    declaration (copilot-extensions#5382 review)."""
+
+    def fake_run(argv, **kwargs):
+        out_index = argv.index("--out") + 1
+        Path(argv[out_index]).write_text("transport: dtssh\nmachines: []\n", encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    class _FakeReport:
+        def refresh(self):
+            return self
+
+    probed: list[str] = []
+
+    def fake_probe(alias, timeout):
+        probed.append(alias)
+        return True
+
+    monkeypatch.setattr(mesh_refresh.subprocess, "run", fake_run)
+    monkeypatch.setattr(mesh_refresh.ssh_profile, "load_file", lambda path: {"transport": "dtssh"})
+    monkeypatch.setattr(
+        mesh_refresh.ssh_profile, "write_fragment", lambda *a, **k: Path("frag")
+    )
+    monkeypatch.setattr(
+        mesh_refresh.fragment_registry,
+        "FragmentRegistry",
+        lambda config_d: _FakeReport(),
+    )
+    monkeypatch.setattr(mesh_refresh, "probe_alias", fake_probe)
+
+    result = mesh_refresh.refresh_mesh(
+        machines_yaml=key_only_machines_file,
+        resolve_payload_root=lambda: payload_root,
+        # No declared `hostname` for either machine in KEY_ONLY_SAMPLE -- the
+        # local hostname matches the "host-a" machines.yaml key directly.
+        local_hostname="host-a",
+    )
+
+    assert probed == ["host-b"]
+    by_alias = {alias.alias: alias for alias in result.aliases}
+    assert by_alias["host-a"].local is True
+    assert by_alias["host-a"].reachable is True
+    assert by_alias["host-b"].local is False
