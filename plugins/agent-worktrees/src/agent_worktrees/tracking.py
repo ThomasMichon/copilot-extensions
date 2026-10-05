@@ -787,23 +787,8 @@ class WorktreeRecord:
     # the prune verdict. The live "pulse" (assistant.intent) is a SEPARATE
     # sidecar, never stored on this durable record.
     follow_up: bool = False
-    # Agent-asserted "intentionally idle for now" overlay -- purely
-    # informational, orthogonal to `status` (the git/push/finalize
-    # lifecycle) and `follow_up` (an actionable gap fed to the prune
-    # verdict). Never consulted by finalize/cleanup/any other gate; set
-    # via `agent-worktrees status --paused`/`--unpaused` so a human or
-    # Picker reader can see "this worktree has work left open on
-    # purpose, not abandoned" without it affecting pruning eligibility.
-    paused: bool = False
-    # Monotonic counter, bumped on every `set_disposition` call that touches
-    # `paused` -- lets `_save_record_unlocked` merge it the same way as
-    # `effort_revision`/`pending_seed_revision`/every other per-field
-    # revision below: an ordinary full-record writer can hold a snapshot
-    # across Git/network I/O and save it well after a concurrent `status
-    # --paused`/`--unpaused` write released the record lock; without its
-    # own revision, that later save would silently overwrite the
-    # already-persisted newer `paused` value with its own stale one.
-    paused_revision: int = 0
+    paused: bool = False  # informational only; never gates finalize/cleanup
+    paused_revision: int = 0  # lets stale full-record saves merge it safely
     summary: str = ""
     status_note_at: str | None = None
     # #3307 worktrees-pivot-ux-overhaul follow-up: the agent-asserted CURRENT
@@ -2410,12 +2395,6 @@ def _save_record_unlocked(
             record.follow_up = current.follow_up
             record.summary = current.summary
             record.status_note_at = current.status_note_at
-        # `set_disposition` advances `paused_revision` under the record
-        # lock on every `status --paused`/`--unpaused` write. A stale
-        # full-record writer loaded before that write (e.g. `finalize.py`
-        # holding a snapshot across Git/network I/O, per this function's
-        # own "universal write chokepoint" note above) must never save its
-        # older `paused` value back over the already-persisted newer one.
         if current.paused_revision > record.paused_revision:
             record.paused = current.paused
             record.paused_revision = current.paused_revision
@@ -2444,13 +2423,9 @@ def _save_record_unlocked(
             record.session_backend = None
             record.session_backend_opaque = True
             record.session_backend_raw = current.session_backend_raw
-        elif (
-            current_backend is not None
-            and (
-                record_backend is None
-                or current_backend.binding_revision
-                > record_backend.binding_revision
-            )
+        elif current_backend is not None and (
+            record_backend is None
+            or current_backend.binding_revision > record_backend.binding_revision
         ):
             record.session_backend = current_backend
             record.session_backend_opaque = False
@@ -2461,43 +2436,30 @@ def _save_record_unlocked(
             record.execution_leg = None
             record.execution_leg_opaque = True
             record.execution_leg_raw = current.execution_leg_raw
-        elif (
-            current_leg is not None
-            and (
-                record_leg is None
-                or current_leg.binding_revision > record_leg.binding_revision
-            )
+        elif current_leg is not None and (
+            record_leg is None
+            or current_leg.binding_revision > record_leg.binding_revision
         ):
             record.execution_leg = current_leg
             record.execution_leg_opaque = False
             record.execution_leg_raw = None
-        if (
-            current.profile_assignment_revision
-            > record.profile_assignment_revision
-        ):
-            record.profile_assignment_revision = (
-                current.profile_assignment_revision
-            )
+        if current.profile_assignment_revision > record.profile_assignment_revision:
+            record.profile_assignment_revision = current.profile_assignment_revision
             record.profile_assignments = current.profile_assignments
         if current.controller_revision > record.controller_revision:
             record.controller_revision = current.controller_revision
             record.controllers = current.controllers
-            record.controller_metadata_opaque = (
-                current.controller_metadata_opaque)
+            record.controller_metadata_opaque = current.controller_metadata_opaque
             record.controller_raw_revision = current.controller_raw_revision
             record.controller_raw_entries = current.controller_raw_entries
-            record.controller_raw_revision_present = (
-                current.controller_raw_revision_present)
-            record.controller_raw_entries_present = (
-                current.controller_raw_entries_present)
+            record.controller_raw_revision_present = current.controller_raw_revision_present
+            record.controller_raw_entries_present = current.controller_raw_entries_present
         elif current.controller_metadata_opaque:
             record.controller_metadata_opaque = True
             record.controller_raw_revision = current.controller_raw_revision
             record.controller_raw_entries = current.controller_raw_entries
-            record.controller_raw_revision_present = (
-                current.controller_raw_revision_present)
-            record.controller_raw_entries_present = (
-                current.controller_raw_entries_present)
+            record.controller_raw_revision_present = current.controller_raw_revision_present
+            record.controller_raw_entries_present = current.controller_raw_entries_present
         current_by_ref = {claim.ref: claim for claim in current.resources}
         reserved = {
             claim.ref: claim for claim in current.resources
@@ -3537,9 +3499,7 @@ def set_disposition(
     if paused is not None:
         record.paused = paused
         record.paused_revision += 1
-        changed.append("paused")
-        # Deliberately NO gate interaction (no reopen, no prune-verdict
-        # effect) -- `paused` is purely informational, unlike `follow_up`.
+        changed.append("paused")  # no gate interaction -- informational only
     record.status_note_at = _now_iso()
     if changed:
         disposition_history.append(

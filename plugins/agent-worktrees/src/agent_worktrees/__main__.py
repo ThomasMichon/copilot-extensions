@@ -2743,11 +2743,7 @@ def _cmd_status_write(
             },
             read_lock_data=lambda: _locks.read_lock(_monitor_lock_path()),
             ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
-            # Requires the verb's version-2 payload shape (the `paused`
-            # arg) -- a resident daemon still advertising only version 1
-            # is never dialed; the in-process fallback always runs this
-            # call site's own current code instead.
-            min_version=2,
+            min_version=2,  # paused needs verb v2; skip stale daemons
         )
     except tracking_write.AmbiguousWriteOutcome as e:
         output.err(f"Disposition write to worktree {worktree_id} is in an unknown state: {e}")
@@ -2768,10 +2764,7 @@ def _cmd_status_write(
     if result.get("paused"):
         msg += " (paused)"
     elif paused is False:
-        # Confirm the clear explicitly -- `result.get("paused")` is falsy
-        # either way, so without this branch `--unpaused` prints the exact
-        # same message as a write that never touched `paused` at all.
-        msg += " (unpaused)"
+        msg += " (unpaused)"  # explicit clear confirmation, not just silence
     if title is not None and result["title"]:
         msg += f" -- title: {result['title']}"
     if activity is not None and result.get("activity"):
@@ -2810,12 +2803,7 @@ def _cmd_status_history(args: argparse.Namespace) -> int:
         at = e.get("at") or "?"
         changed = ",".join(e.get("changed") or []) or "-"
         flag = "!" if e.get("follow_up") else " "
-        # The snapshot's CURRENT `paused` value (same convention as `flag`
-        # above for `follow_up`) -- renders regardless of whether THIS
-        # entry's own write is what flipped it, so a `paused` entry in
-        # `changed` is unambiguous: the glyph present means --paused, its
-        # absence means --unpaused.
-        pause_flag = "\u23f8" if e.get("paused") else " "
+        pause_flag = "\u23f8" if e.get("paused") else " "  # disambiguates (un)pausing
         kind = e.get("kind") or "status"
         sess = e.get("session")
         sess_tag = f" {sess[-6:]}" if isinstance(sess, str) and sess else ""
