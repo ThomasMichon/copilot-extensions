@@ -895,11 +895,12 @@ appropriately larger/riskier for one sitting):
   now inherited from one shared source instead of preserved by a second manual
   port.
 - **Line-count / corpus result:** wrapper-only installer lines shrank from
-  `install.sh` 1215 -> 1065 (-150) and `install.ps1` 1637 -> 1424 (-213), for
-  a combined wrapper drop of 2852 -> 2489 (-363). The canonical engine itself
-  remained unchanged at 368 lines (`.sh`) + 462 lines (`.ps1`) before and after
-  this PR, so this conversion added **zero** new shared-engine corpus while
-  deleting 363 plugin-local duplicate lines.
+  `install.sh` 1215 -> 1152 (-63) and `install.ps1` 1637 -> 1462 (-175), for
+  a combined wrapper drop of 2852 -> 2614 (-238). The canonical engine grew by
+  3 lines on the POSIX side (368 -> 371) to fail closed when `uv venv` returns
+  success without leaving `pyvenv.cfg`; the PowerShell engine stayed flat at
+  462 lines. Net result for this conversion leg: **235 lines removed** from the
+  combined agent-logger + shared-engine corpus, not just relocated.
 - Validation completed here:
   - `python3 tools/check-install-contract.py`
   - `python3 tools/sync-installer-engine.py --check`
@@ -908,7 +909,9 @@ appropriately larger/riskier for one sitting):
   - `python3 tools/check-module-size.py`
   - `python3 tools/check-changefile-presence.py --base origin/dev`
   - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-logger --reinstall --admission-wait 540`
-    -> PASS (`493 passed, 17 skipped`; wrapper runner summary `247 passed, 7 skipped`)
+    -> PASS (`494 passed, 17 skipped`; wrapper runner summary `247 passed, 7 skipped`)
+  - `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-pull-requests --reinstall --admission-wait 540`
+    -> PASS (`21 passed`; wrapper runner summary `21 passed`) to prove the shared-engine bash fix did not regress the existing pilot adopter
   - Real POSIX install proof: ran `plugins/agent-logger/scripts/install.sh
     install --install-dir <scoped session scratch>` against the live checkout
     with the real user systemd instance, confirmed the scoped timer became

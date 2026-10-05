@@ -583,20 +583,59 @@ deploy_runtime_helpers() {
     done
 }
 
+_resolve_snapshot_engine_source() {
+    local ext="$1"
+    local local_engine="$SCRIPT_DIR/installer-engine.${ext}"
+    local canonical_engine="$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.${ext}"
+    if [[ -f "$local_engine" ]]; then
+        printf '%s' "$local_engine"
+    else
+        printf '%s' "$canonical_engine"
+    fi
+}
+
+_rewrite_snapshot_engine_ref() {
+    local path="$1" canonical_ref="$2" local_ref="$3"
+    local tmp="$path.tmp.$$"
+    : > "$tmp"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        local cr=""
+        if [[ "$line" == *$'\r' ]]; then
+            cr=$'\r'
+            line=${line%$'\r'}
+        fi
+        if [[ "$line" == "$canonical_ref" ]]; then
+            printf '%s%s\n' "$local_ref" "$cr" >> "$tmp"
+        else
+            printf '%s%s\n' "$line" "$cr" >> "$tmp"
+        fi
+    done < "$path"
+    mv -f "$tmp" "$path"
+}
+
 _materialize_snapshot_engine() {
     local snapshot_dir="$1"
     local scripts_dir="$snapshot_dir/scripts"
+    local sh_src ps1_src sh_dest ps1_dest
     mkdir -p "$scripts_dir"
-    cp -f "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh" "$scripts_dir/installer-engine.sh"
-    cp -f "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.ps1" "$scripts_dir/installer-engine.ps1"
-
-    local tmp="$scripts_dir/install.sh.tmp.$$"
-    sed 's|^\. "\$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"$|. "\$SCRIPT_DIR/installer-engine.sh"|' "$scripts_dir/install.sh" > "$tmp"
-    mv -f "$tmp" "$scripts_dir/install.sh"
-
-    tmp="$scripts_dir/install.ps1.tmp.$$"
-    sed "s|^\. (Join-Path \$PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')$|. (Join-Path \$PSScriptRoot 'installer-engine.ps1')|" "$scripts_dir/install.ps1" > "$tmp"
-    mv -f "$tmp" "$scripts_dir/install.ps1"
+    sh_src="$(_resolve_snapshot_engine_source sh)"
+    ps1_src="$(_resolve_snapshot_engine_source ps1)"
+    sh_dest="$scripts_dir/installer-engine.sh"
+    ps1_dest="$scripts_dir/installer-engine.ps1"
+    if [[ "$sh_src" != "$sh_dest" ]]; then
+        cp -f "$sh_src" "$sh_dest"
+    fi
+    if [[ "$ps1_src" != "$ps1_dest" ]]; then
+        cp -f "$ps1_src" "$ps1_dest"
+    fi
+    _rewrite_snapshot_engine_ref \
+        "$scripts_dir/install.sh" \
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"' \
+        '. "$SCRIPT_DIR/installer-engine.sh"'
+    _rewrite_snapshot_engine_ref \
+        "$scripts_dir/install.ps1" \
+        ". (Join-Path \$PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')" \
+        ". (Join-Path \$PSScriptRoot 'installer-engine.ps1')"
 }
 
 deploy_auxiliary_compatibility_binstubs() {
@@ -633,7 +672,9 @@ publish_payload_snapshot() {
     local snapshot_dir="${INSTALL_DIR}/snapshots/${SRC_VERSION}"
     if [ -d "$snapshot_dir" ]; then
         if [ ! -f "$snapshot_dir/plugin.json" ] || \
-           [ ! -x "$snapshot_dir/bin/agent-logger" ]; then
+           [ ! -x "$snapshot_dir/bin/agent-logger" ] || \
+           [ ! -f "$snapshot_dir/scripts/installer-engine.sh" ] || \
+           [ ! -f "$snapshot_dir/scripts/installer-engine.ps1" ]; then
             printf 'ERROR: existing agent-logger snapshot is incomplete; refusing replacement: %s\n' \
                 "$snapshot_dir" >&2
             return 1
@@ -656,10 +697,9 @@ publish_payload_snapshot() {
             "$snapshot_tmp/.pytest_cache" \
             "$snapshot_tmp/.mypy_cache" \
             "$snapshot_tmp/tests"
+        _materialize_snapshot_engine "$snapshot_tmp"
         mv "$snapshot_tmp" "$snapshot_dir"
     fi
-
-    _materialize_snapshot_engine "$snapshot_dir"
 
     local payload_tmp="${INSTALL_DIR}/payload-dir.tmp.$$"
     local version_tmp="${INSTALL_DIR}/stamped-version.tmp.$$"

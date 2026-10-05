@@ -676,13 +676,25 @@ function Get-SourceKind {
 }
 # === end install-contract:v3 source-kind ===
 
+function Resolve-SnapshotInstallerEngineSource {
+    param([Parameter(Mandatory)][ValidateSet('ps1', 'sh')][string]$Ext)
+    $localEngine = Join-Path $PSScriptRoot ("installer-engine.$Ext")
+    if (Test-Path -LiteralPath $localEngine) { return $localEngine }
+    return Join-Path (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine') ("installer-engine.$Ext")
+}
+
 function Materialize-SnapshotInstallerEngine {
     param([Parameter(Mandatory)][string]$SnapshotDir)
     $scriptsDir = Join-Path $SnapshotDir 'scripts'
     if (-not (Test-Path $scriptsDir)) { New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     foreach ($name in @('installer-engine.ps1', 'installer-engine.sh')) {
-        Copy-Item -LiteralPath (Join-Path (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine') $name) -Destination (Join-Path $scriptsDir $name) -Force
+        $ext = [System.IO.Path]::GetExtension($name).TrimStart('.')
+        $source = Resolve-SnapshotInstallerEngineSource -Ext $ext
+        $destination = Join-Path $scriptsDir $name
+        if ([System.IO.Path]::GetFullPath($source) -ne [System.IO.Path]::GetFullPath($destination)) {
+            Copy-Item -LiteralPath $source -Destination $destination -Force
+        }
     }
     $installSh = Join-Path $scriptsDir 'install.sh'
     if (Test-Path $installSh) {
@@ -693,7 +705,7 @@ function Materialize-SnapshotInstallerEngine {
     $installPs1 = Join-Path $scriptsDir 'install.ps1'
     if (Test-Path $installPs1) {
         $ps1Text = [System.IO.File]::ReadAllText($installPs1)
-        $ps1Text = $ps1Text.Replace(". (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')", ". (Join-Path $PSScriptRoot 'installer-engine.ps1')")
+        $ps1Text = $ps1Text.Replace('. (Join-Path $PSScriptRoot ''..\..\..\libs\installer-engine\installer-engine.ps1'')', '. (Join-Path $PSScriptRoot ''installer-engine.ps1'')')
         [System.IO.File]::WriteAllText($installPs1, $ps1Text, $utf8NoBom)
     }
 }
@@ -710,7 +722,9 @@ function Publish-PayloadSnapshot {
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
     if (Test-Path $snapDir) {
         $complete = (Test-Path (Join-Path $snapDir 'plugin.json')) -and
-            (Test-Path (Join-Path $snapDir 'bin\agent-logger.ps1'))
+            (Test-Path (Join-Path $snapDir 'bin\agent-logger.ps1')) -and
+            (Test-Path (Join-Path $snapDir 'scripts\installer-engine.ps1')) -and
+            (Test-Path (Join-Path $snapDir 'scripts\installer-engine.sh'))
         if (-not $complete) {
             throw "Existing agent-logger snapshot is incomplete; refusing replacement: $snapDir"
         }
@@ -730,10 +744,9 @@ function Publish-PayloadSnapshot {
                 Copy-Item -LiteralPath $_.FullName `
                     -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
             }
+        Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
         Move-Item -LiteralPath $snapTmp -Destination $snapDir
     }
-
-    Materialize-SnapshotInstallerEngine -SnapshotDir $snapDir
 
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     foreach ($marker in @{

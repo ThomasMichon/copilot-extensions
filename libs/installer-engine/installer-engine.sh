@@ -71,7 +71,10 @@ invoke_uv_venv_resilient() {
     if [[ $rc -eq 0 && -f "$venv_dir/pyvenv.cfg" ]]; then
         return 0
     fi
-    return "${rc:-1}"
+    if [[ $rc -eq 0 ]]; then
+        return 1
+    fi
+    return "$rc"
 }
 
 ensure_uv() {
