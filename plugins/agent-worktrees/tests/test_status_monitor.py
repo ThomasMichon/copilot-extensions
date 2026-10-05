@@ -26,6 +26,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import output
+from agent_worktrees import worktree_identity
 
 
 def test_status_monitor_registered():
@@ -2365,7 +2366,7 @@ def test_monitor_trigger_handoff_cutover_trusts_fresh_binding_over_bad_hint(
 def test_monitor_retire_handoff_predecessor_preserves_identity_guard(
     monkeypatch,
 ):
-    monkeypatch.setattr(m, "_resolve_worktree_id", lambda raw: raw)
+    monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda raw: raw)
     monkeypatch.setattr(m.sessions, "mux_session_for_pane", lambda pane: "wt-a")
     monkeypatch.setattr(
         m.sessions,

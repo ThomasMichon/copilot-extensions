@@ -9,7 +9,7 @@ from pathlib import Path
 from agent_worktrees import __main__ as m
 from agent_worktrees import claim_history
 from agent_worktrees import config as cfg
-from agent_worktrees import git_ops, obligations, pr_ops, tracking
+from agent_worktrees import git_ops, obligations, pr_ops, tracking, worktree_identity
 
 # ---------------------------------------------------------------------------
 # Pure helpers
@@ -5290,7 +5290,7 @@ class TestCreatePRCLIArgs:
 
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
         monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: candidate)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
 
         def _fake_create_pr(worktree_id, passed_config, **kwargs):
             captured["worktree_id"] = worktree_id
@@ -5326,7 +5326,7 @@ class TestCreatePRCLIArgs:
 
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
         monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: candidate)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
 
         def _fake_create_pr(_worktree_id, _config, **kwargs):
             captured["kwargs"] = kwargs

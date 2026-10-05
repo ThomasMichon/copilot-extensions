@@ -6,7 +6,7 @@ import argparse
 import os
 import platform
 
-from . import output, reclaim, sessions, tracking
+from . import output, reclaim, sessions, tracking, worktree_identity
 from . import config as cfg
 
 
@@ -23,7 +23,6 @@ def _core_helper(name: str, local):
 
 
 def _infer_worktree_id_from_cwd(*args, **kwargs): return _core()._infer_worktree_id_from_cwd(*args, **kwargs)
-def _resolve_worktree_id(*args, **kwargs): return _core()._resolve_worktree_id(*args, **kwargs)
 
 
 def add_parsers(sub) -> None:
@@ -86,7 +85,7 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
         return None
 
     if raw_wt:
-        wt_id = _resolve_worktree_id(raw_wt)
+        wt_id = worktree_identity._resolve_worktree_id(raw_wt)
         if as_json and getattr(args, "yes", False) and not session_id and not want_all:
             payload = _core_helper("reclaim_one", reclaim_one)(
                 wt_id,
@@ -335,7 +334,7 @@ def cmd_remux(args: argparse.Namespace) -> int:
     wt_id: str | None = None
     wt_path: str | None = None
     if raw_wt:
-        wt_id = _resolve_worktree_id(raw_wt)
+        wt_id = worktree_identity._resolve_worktree_id(raw_wt)
         wt_path = _wt_path(wt_id)
     elif not session_id:
         wt_id = _infer_worktree_id_from_cwd()

@@ -125,8 +125,37 @@ Any change that makes these files slightly smaller is a win."
       call/monkeypatch sites for both names; full targeted test sweep
       (1330+ tests across every touched file) green; `ruff
       check --select F,E9` clean; `check-module-size.py` clean.
-- [ ] `_resolve_worktree_id` (27 call sites / 49 monkeypatch sites) —
-      next slice.
+- [x] `_resolve_worktree_id` (27 call sites / 49 monkeypatch sites).
+      Every caller does `from . import worktree_identity` +
+      `worktree_identity._resolve_worktree_id(...)`; every test
+      (`monkeypatch.setattr`, all root-alias shapes -- `m`, `cli`, `main`)
+      targets `worktree_identity` directly. 14 source files + 14 test
+      files touched (the 8 sibling shims this name lived in --
+      `git_cli.py`, `handoff_cancel_cli.py`, `handoff_cli.py`,
+      `reclaim_cli.py`, `resolve_cli.py`, `session_binding_cli.py`,
+      `session_metadata_cli.py`, `worktree_ops_cli.py` -- plus 5 modules
+      that called through the root directly with no local shim at all
+      (`finalize_cli.py`, `handoff_cutover.py`, `pr_cli.py`,
+      `pr_state_cli.py`, `session_tracking_cli.py`), plus `__main__.py`
+      itself for the re-export removal). Every now-fully-unused shim
+      deleted outright (no dead forwarding stub left behind); no sibling
+      module's `_core()` accessor reached zero remaining callers this
+      slice (each of the 8 still routes at least one other name through
+      it), so `__main__._CLUSTER_FREE_MODULES` needed no change --
+      confirmed by running `test_lazy_dispatch.py` directly rather than
+      assuming.
+      Validated: `tools/compat-root-migration.py --name
+      _resolve_worktree_id` reports zero call/monkeypatch sites; full
+      targeted test sweep (split into ~10 `-k`-filtered batches to stay
+      under the bounded runner's per-sub-suite wall-clock budget --
+      `test_pr_ops.py` alone needed ~21 minutes) all green, 1830+ tests
+      passed, zero failures, zero skips introduced; `ruff
+      check --select F,E9` clean; `check-module-size.py` clean (one file,
+      `handoff_cutover.py`, was already sitting exactly at the 1000-line
+      cap and tipped to 1001 from the new import -- fixed by folding
+      `from . import config as cfg` into the existing tuple import and
+      trimming a redundant blank line, net zero lines added, same fix
+      shape as the prior slice's own module-size save).
 - [ ] `_infer_worktree_id`, `_self_override`, `_normalize_path`,
       `_find_repo_dir`, `_apply_tracking_override`, `_build_active_paths`
       (next-highest traffic; re-measure with `--progress` before picking
@@ -349,6 +378,88 @@ _Pending._
 - Next slice: `_resolve_worktree_id` (27 call sites / 49 monkeypatch
   sites) -- re-run `--progress` first, since this slice's corrected
   baseline may have shifted the ranking.
+
+### 2026-10-05 — Phase 2 slice 2: `_resolve_worktree_id` migrated
+- Re-ran `tools/compat-root-migration.py --name _resolve_worktree_id`
+  first per the prior slice's own instruction; counts matched the
+  plan's recorded 27 call sites / 49 monkeypatch sites exactly -- no
+  drift from the prior slice's corrections this time.
+- The real implementation already lived in `worktree_identity.py` (no
+  dependency on `__main__.py`), so this slice was pure call-site/
+  patch-site migration, no new shared module to create. Migrated all 8
+  sibling shims (`git_cli.py`, `handoff_cancel_cli.py`, `handoff_cli.py`,
+  `reclaim_cli.py`, `resolve_cli.py`, `session_binding_cli.py`,
+  `session_metadata_cli.py`, `worktree_ops_cli.py`) to
+  `from . import worktree_identity` + `worktree_identity._resolve_
+  worktree_id(...)`, deleting each now-dead forwarding shim outright,
+  plus 5 further modules that called through the root directly with no
+  local shim at all (`finalize_cli.py`, `handoff_cutover.py`,
+  `pr_cli.py`, `pr_state_cli.py`, `session_tracking_cli.py`).
+- **One call-site shape the tool's own scan doesn't track at all:**
+  `__main__.py` itself had 4 bare in-module calls to `_resolve_
+  worktree_id(...)` that resolved via its own `from .worktree_identity
+  import (..., _resolve_worktree_id, ...)` re-export -- invisible to the
+  tool's root-alias scan (which only looks for `core()._name`/alias-
+  dot-name shapes reached from *other* modules, not a name's own
+  module-local bare use). These only surfaced as `ruff`'s `F821
+  Undefined name` once the re-export was removed from `__main__.py`'s
+  import tuple. Fixed by adding `from . import worktree_identity` as a
+  module import in `__main__.py` and repointing all 4 bare calls to
+  `worktree_identity._resolve_worktree_id(...)`. **Takeaway for future
+  slices:** after removing a name from `__main__.py`'s re-export tuple,
+  always `ruff check --select F,E9` on `__main__.py` itself before
+  declaring the slice done -- the compat-root-migration tool only
+  proves other modules stopped reaching through the root, not that the
+  root's own body stopped relying on its former re-export.
+- No sibling module's `_core()` accessor reached zero remaining callers
+  this slice -- each of the 8 shim-hosting modules still routes at
+  least one other name through `_core()` (e.g. `git_cli._infer_
+  worktree_id`, `session_metadata_cli._infer_worktree_id`). Confirmed
+  by grepping each file's remaining `_core()` call count (all >= 2)
+  before touching `__main__._CLUSTER_FREE_MODULES`, then running
+  `test_lazy_dispatch.py` directly rather than trusting the grep alone
+  -- it passed unchanged, confirming no drift this slice.
+  `__main__._CLUSTER_FREE_MODULES` needed no edit.
+- `handoff_cutover.py` was already sitting exactly at the 1000-line cap
+  (confirmed via `git show HEAD:<path>` after an initial miscount from
+  piping through `Measure-Object -Line`, which mishandled the file's
+  CRLF-free line endings) -- the new `worktree_identity` import tipped
+  it to 1001. Fixed the same way the prior slice's own journal
+  recommended: folded the file's standalone `from . import config as
+  cfg` into the existing multi-line tuple import and trimmed a
+  redundant blank line the merge left behind, netting zero added lines.
+  `check-module-size.py` confirmed clean afterward.
+- All 49 test monkeypatch sites were the single `monkeypatch.setattr(
+  <alias>, "_resolve_worktree_id", ...)` shape (no `unittest.mock.patch`
+  dotted-string or `SimpleNamespace`-faked-whole-`_core()` shapes this
+  time, unlike the `_json_output` slice) -- repointed to `worktree_
+  identity` directly across all 14 test files, adding `from
+  agent_worktrees import worktree_identity` (or the file's existing
+  `from . import` convention) only where not already imported;
+  `test_pr_create_claimant_guard.py` already imported `worktree_
+  identity` for an unrelated reason, so only its patch-alias needed
+  changing there.
+  `tools/compat-root-migration.py --name _resolve_worktree_id` now
+  reports zero call sites and zero monkeypatch sites.
+- Validation: full targeted test sweep, split into ~10 `-k`-filtered
+  batches per the bounded runner's per-sub-suite wall-clock budget
+  (`test_pr_ops.py` alone needed ~21 minutes at 252 tests) -- every
+  batch green, 1830+ tests passed total, zero failures, zero skips
+  introduced. `ruff check --select F,E9` clean across all 28 touched
+  files. `check-module-size.py` clean. `test_lazy_dispatch.py` run
+  directly and confirmed unaffected.
+- Final `--progress` aggregate (from the prior slice's 42/290/159/1056):
+  **42 accessors, 263 call sites, 158 distinct monkeypatched names, 1007
+  patch-site occurrences.** Next-highest-traffic names per the current
+  ranking: `_infer_worktree_id` (18 calls/30 patches), `_self_override`
+  (16/0), `_normalize_path` (10/1), `_find_repo_dir` (10/9),
+  `_apply_tracking_override` (9/7), `_build_active_paths` (8/17) --
+  matches the Plan's pre-named next batch; `_infer_worktree_id_from_cwd`
+  (6 calls but 34 monkeypatch sites) and `_build_env`/`_build_launch_cmd`/
+  `_preflight_launch`/`_repo_session_env` (5 calls each, 21-24 patches
+  each) stand out as monkeypatch-heavy relative to call-site count,
+  worth considering for the next slice pick per the Plan's own
+  re-ranking instruction.
 - Post-round-4 sync picked up new `origin/dev` commits (including a
   `handoff_cli.py` refactor this slice's rebase had to hand-merge: dev
   added a `settle_claim`-based restore path that predated this slice's

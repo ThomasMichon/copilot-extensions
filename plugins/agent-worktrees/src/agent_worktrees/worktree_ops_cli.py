@@ -20,6 +20,7 @@ from . import (
     reap_cli,
     sessions,
     tracking,
+    worktree_identity,
 )
 from . import config as cfg
 from . import (
@@ -63,10 +64,6 @@ def _infer_worktree_id_from_cwd(*args, **kwargs):
 
 def _remove_managed_worktree(*args, **kwargs):
     return reap_cli._remove_managed_worktree(*args, **kwargs)
-
-
-def _resolve_worktree_id(*args, **kwargs):
-    return _core()._resolve_worktree_id(*args, **kwargs)
 
 
 def add_parsers(sub) -> None:
@@ -737,7 +734,7 @@ def sync_one(wt_id: str) -> dict:
     config = cfg.load_config()
     repo = config.default_repo
     tracking_path = cfg.tracking_dir()
-    wt_id = _resolve_worktree_id(wt_id)
+    wt_id = worktree_identity._resolve_worktree_id(wt_id)
     yaml_path = tracking_path / f"{wt_id}.yaml"
     if not yaml_path.exists():
         return {"worktree_id": wt_id, "updated": False, "reason": "not-found", "behind": 0}
@@ -766,7 +763,7 @@ def finalize_one(wt_id: str) -> dict:
             "ok": False,
             "reason": str(e) or "config load failed",
         }
-    wt_id = _resolve_worktree_id(wt_id)
+    wt_id = worktree_identity._resolve_worktree_id(wt_id)
     sink = io.StringIO()
     try:
         with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
@@ -797,7 +794,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     single = getattr(args, "worktree_id", None)
 
     if single:
-        wt_id = _resolve_worktree_id(single)
+        wt_id = worktree_identity._resolve_worktree_id(single)
         yaml_path = tracking_path / f"{wt_id}.yaml"
         if not yaml_path.exists():
             res = {"worktree_id": wt_id, "updated": False, "reason": "not-found", "behind": 0}
