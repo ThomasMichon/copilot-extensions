@@ -140,22 +140,39 @@ capture policy; read as "beats" / "want" / "chosen.")
       each candidate, then falls back to the target worktree's own latest
       known session. This is `resolve-by-any-origin-reference` already
       realized for agent-dispatch task ids specifically.
-- [ ] Wire a `peek <task_id>` path (CLI flag or a thin `agent-dispatch peek`
-      wrapper — decide the right seam during implementation) to call this
-      existing endpoint for resolution, then render through the same path
-      Phase 1 fixes for local-body sessions. No new resolution logic.
+- [ ] **Verified gap (review):** that route's `dispatch:` namespace
+      resolver (`plugins/agent-dispatch/src/agent_dispatch/bridge_namespace_cli.py`,
+      `_cmd_namespace_resolve`) only derives a worktree from a *claimed*
+      task's `owner` or from the task record's own `target_machine`/
+      `target_worktree` fields — never from a live **spawn reservation**.
+      An unclaimed/pre-claim task (status `queued`/`started` with no
+      `owner` yet, but an active `spawned` reservation naming a real
+      worktree — the exact shape observed repeatedly this session) returns
+      bad-state (exit 4) before the route's own cold-store/worktree
+      fallback ever runs. Extend the resolver to also consult the task's
+      current spawn reservation's worktree before falling through to
+      bad-state, THEN wire `peek` to the (now-complete) existing endpoint
+      — keep resolution in agent-bridge/agent-dispatch's existing seam,
+      extend it rather than duplicating it in the CLI.
 - [ ] Depends on Phase 1 (the resolved session is usually local-body).
 
-### Phase 3 — shared queued-task filter seam + `doctor` excludes diagnosis
+### Phase 3 — shared queued-task filter seam + `doctor` excludes visibility
 - [ ] Build a server-side filter/query seam for "which queued tasks carry a
       non-empty `excludes` array" (and, while there, `awaiting_steer`) —
       the existing sweep deliberately excludes bare `queued` tasks from its
       bounded `--task`-less pass (`plugins/agent-dispatch/src/agent_dispatch/doctor.py:104-110`),
       so an unbounded scan of the whole backlog isn't the answer; this
       needs a real filtered query, not a client-side list-then-filter.
-- [ ] Add a `doctor` diagnosis (e.g. `excluded_from_target_machine`) built
-      on that seam, so a default sweep (no `--task`) surfaces a
-      stale-excluded `queued` task instead of reporting `examined: 0`.
+- [ ] **Corrected from review:** `excludes` is an intentional anti-affinity
+      selector, not inherent evidence of a dead end — a task excluded from
+      one machine/worktree may still be claimable by another eligible
+      target (confirmed against `tests/test_selectors.py:24-42,68-81`).
+      Add a **neutral** `doctor` finding (e.g. `queued_with_excludes` —
+      visibility, not an assumed-blocked verdict) built on the Phase 3
+      seam. A stronger "genuinely dead-ended" diagnosis is in scope only
+      if it can first prove the exclusions eliminate every eligible
+      target; treat that as a stretch goal within this phase, not a
+      requirement for it to ship.
 - [ ] This phase and Phase 4 share one filter implementation — build it
       once here, consume it from both `doctor` and `list`.
 
@@ -163,12 +180,26 @@ capture policy; read as "beats" / "want" / "chosen.")
 - [ ] Expose Phase 3's filter seam as `--awaiting-steer` and
       `--has-excludes` boolean filters on `agent-dispatch list`.
 
-### Phase 5 — liveness signal on `show`
-- [ ] Surface a cheap liveness signal (session's own last-event timestamp,
-      or a lightweight version of `doctor --check-live-sessions`'s per-
-      attempt probe) directly in `agent-dispatch show`'s output, so a single
-      task lookup doesn't understate how stale `last_seen_at` can get
-      relative to real activity.
+### Phase 5 — audit (not duplicate) `show`'s existing liveness signals
+- [ ] **Corrected from review:** `show` already carries two liveness
+      surfaces — the task record's own `activity`/`activity_updated_at`,
+      and `tracking.enrich_task()`'s `embodiment.{turn_state,liveness,
+      updated_at}` overlay (`task_lifecycle_cli.py:107-119`,
+      `tracking.py:682-723`). A third, new signal would conflict rather
+      than help. **Verified (partial) during planning:** `enrich_task`
+      only attaches the `embodiment` overlay when `tracking.
+      resolve_live_session()` finds a live session for the task's
+      worktree — every `show` observed this session lacked an
+      `embodiment` key at all, suggesting that resolution silently misses
+      the same local-body session kind Phase 1 fixes for `peek` (unverified
+      — `resolve_live_session` reaches the same local `agent-bridge
+      sessions --json` call Phase 1 touches, but the exact failure point
+      wasn't traced during planning). This phase is now: audit why the
+      existing signals didn't answer the observed case, fix their
+      freshness/presentation (likely resolved as a side effect of Phase 1,
+      or needs its own small fix in `resolve_live_session`), and only add
+      new surface area if the audit finds the existing fields are
+      genuinely insufficient once working — never a parallel third signal.
 
 ## Validation Plan
 
@@ -183,19 +214,28 @@ evidence only — never a substitute for an automated test.
       ACP-session path is unchanged. Supplemental: `agent-bridge peek
       <session_id>` against a real local-body session from a live
       downstream repro-queue fleet, if one is running during this phase.
-- [ ] **Phase 2:** automated test in `test_dispatch_task_session_route.py`
-      (or a new CLI-level test) confirming `peek <task_id>` resolves through
-      `GET /api/v1/dispatch-tasks/{task_id}/session` rather than
-      reimplementing the chain. Supplemental: dogfood against a live task.
-- [ ] **Phase 3:** automated test in `test_doctor.py` confirming a task
+- [ ] **Phase 2:** two distinct test layers, not one — (a) a route-level
+      case in (or alongside) `test_dispatch_task_session_route.py` /
+      `bridge_namespace_cli`'s own test covering the new spawn-reservation
+      fallback specifically; (b) a **CLI-level** regression that invokes
+      the chosen task-id `peek` surface, verifies it calls the endpoint
+      (not a reimplemented chain), and verifies the resolved session
+      reaches Phase 1's renderer. Supplemental: dogfood against a live
+      pre-claim task.
+- [ ] **Phase 3:** automated test in `test_doctor.py` confirming (a) a task
       manually given a stale `excludes` entry is reported by a default
-      (`--repo`/`--label`, no `--task`) sweep.
+      (`--repo`/`--label`, no `--task`) sweep as a neutral
+      `queued_with_excludes` finding, and (b) a **negative** test proving
+      an intentionally-excluded-but-still-claimable task is not
+      misdiagnosed as blocked.
 - [ ] **Phase 4:** automated test confirming `agent-dispatch list
       --awaiting-steer` / `--has-excludes` returns exactly the expected
       filtered set against a fixture queue.
-- [ ] **Phase 5:** automated test confirming `show` reports a task live
-      when its session's own last-event timestamp is recent, even if
-      `last_seen_at` itself is stale.
+- [ ] **Phase 5:** automated test confirming the audited fix (if any) makes
+      `embodiment`/`activity` correctly reflect liveness for a local-body
+      task; if the audit finds the existing signals already work once
+      Phase 1 lands, this becomes a regression test proving exactly that
+      (no new signal needed) rather than a feature test for one.
 
 ## Proposal
 
@@ -245,4 +285,37 @@ _Pending — begin with Phase 1 implementation exploration._
 - Low: Documentation impact statement finding was stale (already present
   in the PR body from the first round) — no action needed beyond the
   repro-queue alias scrub already covered above.
+
+### 2026-10-05 — Plan PR #5264 third review round (COMMENTED, 1 High + 3 Medium + 1 stale Low)
+- **High, verified by direct source read:** Phase 2's target endpoint
+  resolves a worktree from a *claimed* task's `owner` or from
+  `target_machine`/`target_worktree` (`bridge_namespace_cli.py`'s
+  `_cmd_namespace_resolve`) — never from a live spawn reservation. An
+  unclaimed/pre-claim task (observed repeatedly this session: `queued`/
+  `started`, no `owner` yet, but an active `spawned` reservation naming a
+  real worktree) hits bad-state before the route's own fallback chain
+  runs. Added an explicit sub-step to extend that resolver with the
+  reservation-worktree case before wiring `peek` to it.
+- Medium, verified against `tests/test_selectors.py`: a non-empty
+  `excludes` is an anti-affinity selector, not inherent evidence of a dead
+  end (another eligible target may still claim it). Softened Phase 3's
+  diagnosis to a neutral `queued_with_excludes` visibility finding, added
+  a negative-test requirement.
+- Medium, verified by direct source read: `show` already enriches via
+  `tracking.enrich_task()`'s `embodiment` overlay (`task_lifecycle_cli.py`
+  calls it on every `show`) — but every `show` observed this session
+  lacked that key entirely, consistent with (unverified, not traced to
+  the exact failure point) the same local-body resolution gap Phase 1
+  fixes, since `resolve_live_session` reaches the same local
+  `agent-bridge sessions --json` surface. Reframed Phase 5 from "add a
+  signal" to "audit the existing ones, fix or confirm-working, never add
+  a third parallel signal."
+- Medium: Phase 2's validation split into a route-level test for the new
+  reservation-fallback behavior and a separate CLI-level test for the
+  `peek`-wiring behavior itself (a route test alone can't prove the CLI
+  wiring works).
+- Low (stale): Documentation impact finding persisted from an
+  already-resolved round — the bot appears to echo an unresolved finding
+  ID across passes rather than re-checking the PR body each time; no
+  action needed (confirmed live in the PR body).
 
