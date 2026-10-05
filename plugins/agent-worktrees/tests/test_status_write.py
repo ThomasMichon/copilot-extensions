@@ -131,11 +131,16 @@ def test_unpaused_prints_an_explicit_confirmation(status_env, capsys):
     assert record.paused is False
 
 
-def test_only_a_write_touching_paused_requires_verb_v2(status_env, monkeypatch):
-    """A plain summary/title/activity/follow-up write must stay on verb
-    version 1 -- requiring v2 unconditionally would needlessly reject an
-    otherwise-compatible v1 daemon and incur its full boot-wait fallback
-    delay for writes that never touch `paused` at all."""
+def test_every_status_write_requires_verb_v2_even_without_paused(status_env, monkeypatch):
+    """Scoping the v2 requirement to only writes that touch `paused` was
+    tried and reverted: during rolling skew, a --paused write correctly
+    falls back to the new in-process writer while an old (v1) daemon
+    remains resident, but a LATER plain summary/title/follow-up write at
+    v1 would then dial that same old daemon -- whose old full-record
+    writer silently drops `paused`/`paused_revision`, erasing the
+    already-persisted pause. Every status write must require v2, so none
+    of them ever reach an incompatible old daemon while it's still
+    resident."""
     from agent_worktrees import tracking_write
 
     args = argparse.Namespace(worktree_id=None)
@@ -151,7 +156,7 @@ def test_only_a_write_touching_paused_requires_verb_v2(status_env, monkeypatch):
     assert main._cmd_status_write(args, summary="plain write", paused=None) == 0
     assert main._cmd_status_write(args, summary=None, paused=True) == 0
 
-    assert captured_versions == [1, 2]
+    assert captured_versions == [2, 2]
 
 
 def test_status_history_disambiguates_pausing_from_unpausing(status_env, capsys):
