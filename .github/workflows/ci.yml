@@ -496,9 +496,11 @@ jobs:
     # Mirrors `checks`' own "Detect Python artifact-builder changes" gate
     # (TESTING.md's "Gate specialized suites by changed paths" invariant):
     # the Ubuntu `guards + lint` job runs this suite's full 198+ tests, but
-    # 3 of them are genuinely Windows-OS-API-only (`_trusted_system32_tool`/
+    # 4 of them are genuinely Windows-OS-API-only (`_trusted_system32_tool`/
     # `_well_known_sid_display_name`'s real `GetSystemDirectoryW`/
-    # `LookupAccountSidW`/`ConvertStringSidToSidW` calls) and skip
+    # `LookupAccountSidW`/`ConvertStringSidToSidW` calls, plus
+    # `_provenance_key_lock`'s real `LockFileEx` cross-process exclusion,
+    # which a same-process cross-thread test cannot exercise) and skip
     # themselves out on that Ubuntu runner -- so they never actually
     # execute in required CI at all. This job runs ONLY those, selected by
     # the `windows_only` marker, rather than duplicating the entire suite
@@ -513,7 +515,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install pytest
+      - uses: astral-sh/setup-uv@v9.0.0
       - id: python-artifact-builder
         name: Detect Python artifact-builder changes
         shell: bash
@@ -534,7 +536,10 @@ jobs:
           fi
       - name: Windows-only governed Python artifact builder tests
         if: steps.python-artifact-builder.outputs.run == 'true'
-        run: python -m pytest -q -m windows_only -W ignore::pytest.PytestUnknownMarkWarning tools/test_build_python_artifacts.py
+        run: >-
+          uv run --with pytest python -m pytest -q -m windows_only
+          -W ignore::pytest.PytestUnknownMarkWarning
+          tools/test_build_python_artifacts.py
 
   windows-hooks:
     name: Git hooks (Windows)

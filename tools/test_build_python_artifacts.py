@@ -4,6 +4,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -3854,6 +3855,52 @@ def test_well_known_sid_display_name_resolves_system_account():
     # resolution for the well-known SYSTEM SID.
     name = gft._well_known_sid_display_name(gft._SYSTEM_ACCOUNT_SID)
     assert name.lower().endswith("system")
+
+
+@pytest.mark.windows_only
+@pytest.mark.skipif(sys.platform != "win32", reason="requires the real Windows LockFileEx path")
+def test_provenance_key_lock_excludes_a_real_child_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: `_provenance_key_lock`'s Windows branch uses a
+    # `LockFileEx` byte-range lock on the lock file itself rather than a
+    # named `Local\` mutex, precisely because a named mutex is scoped to
+    # ONE Terminal Services session and would let a second process for
+    # the SAME account in a DIFFERENT session enter this critical
+    # section concurrently. The genuinely-held-lock-times-out test above
+    # proves exclusion across two THREADS in the same process, which
+    # share a session by definition and so cannot exercise that gap. A
+    # real CHILD PROCESS is required: it blocks on the lock exactly as
+    # long as the parent holds it, and acquires it immediately once the
+    # parent releases -- proving genuine cross-process, OS-level
+    # exclusion on the actual `LockFileEx` code path (never mocked).
+    key_dir = tmp_path / "key-dir"
+    monkeypatch.setattr(gft, "_provenance_key_dir", lambda: key_dir)
+    key_dir.mkdir(parents=True)
+
+    child_script = (
+        "import sys; sys.path.insert(0, " + repr(str(Path(gft.__file__).parent)) + ")\n"
+        "import pathlib\n"
+        "import governed_feed_trust as gft\n"
+        "gft._provenance_key_dir = lambda: pathlib.Path(" + repr(str(key_dir)) + ")\n"
+        "with gft._provenance_key_lock():\n"
+        "    print('CHILD_ACQUIRED')\n"
+    )
+    child_path = tmp_path / "child_lock_holder.py"
+    child_path.write_text(child_script, encoding="utf-8")
+
+    with gft._provenance_key_lock():
+        proc = subprocess.Popen(
+            [sys.executable, str(child_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+        time.sleep(1.0)
+        # The child must still be blocked while the parent holds the lock.
+        assert proc.poll() is None
+    out, _ = proc.communicate(timeout=10)
+    assert "CHILD_ACQUIRED" in out
 
 
 def test_resolve_toolchain_lock_hardens_staging_dir_before_index_config_exists(
