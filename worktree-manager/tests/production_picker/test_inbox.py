@@ -24,13 +24,19 @@ from worktree_manager.production_picker.picker_tui.inbox import (
 
 class _RecordingOwner:
     """A fake ``MessagePump`` owner that records every ``post_message`` call
-    instead of actually waking a running Textual app."""
+    instead of actually waking a running Textual app.
+
+    Mirrors ``MessagePump.post_message``'s real return contract (``True`` =
+    queued, ``False`` = undeliverable) so ``Inbox.post()``'s own handling of
+    that return value is exercised the same way it would be in production.
+    """
 
     def __init__(self):
         self.messages = []
 
     def post_message(self, message):
         self.messages.append(message)
+        return True
 
 
 class _BrokenOwner:
@@ -39,6 +45,18 @@ class _BrokenOwner:
 
     def post_message(self, message):
         raise RuntimeError("owner already torn down")
+
+
+class _ClosingOwner:
+    """An owner whose ``post_message`` returns ``False`` without raising --
+    ``MessagePump``'s own contract for an already-closing/closed pump."""
+
+    def __init__(self):
+        self.messages = []
+
+    def post_message(self, message):
+        self.messages.append(message)
+        return False
 
 
 def _inbox_with_foreign_home(owner=None):
@@ -228,6 +246,83 @@ def test_post_from_background_thread_returns_false_and_logs_on_wake_failure(capl
     # The value itself is never lost even though the wake failed -- it sits
     # in the inbox for whatever next drains it.
     assert inbox.drain() == {"slot": "value"}
+
+
+def test_post_message_returning_false_without_raising_still_counts_as_a_failed_wake(caplog):
+    """``MessagePump.post_message``'s own contract: it returns ``False`` --
+    not a raise -- when the pump is already closing/closed. ``post()`` must
+    treat that exactly like a raised wake failure, not silently report
+    success while nothing is actually going to drain the posted value."""
+    owner = _ClosingOwner()
+    inbox = Inbox(owner)
+    with caplog.at_level(logging.WARNING, logger="agent-worktrees.picker"):
+        ok = _post_from_other_thread(inbox, "slot", "value")
+    assert ok is False
+    assert len(owner.messages) == 1
+    assert any(
+        "failed to wake the owning render flow" in r.message
+        for r in caplog.records
+    )
+    assert inbox.drain() == {"slot": "value"}
+
+
+def test_wake_failure_resets_wake_state_so_a_later_post_retries_the_wake():
+    """A raised/false wake must not leave ``_wake_queued`` stuck ``True`` --
+    otherwise every later post in the same batch (even for an unrelated
+    slot, even a different epoch's setup/reload outcome) takes the
+    "already queued" branch and returns ``True`` without ever actually
+    retrying the wake, so it can hang forever believing it already
+    succeeded."""
+    owner = _ClosingOwner()
+    inbox = Inbox(owner)
+    first_ok = _post_from_other_thread(inbox, "slot-a", "a")
+    assert first_ok is False
+    assert len(owner.messages) == 1
+    # A second, later post must attempt its OWN wake rather than silently
+    # folding into the failed one.
+    second_ok = _post_from_other_thread(inbox, "slot-b", "b")
+    assert second_ok is False
+    assert len(owner.messages) == 2
+    assert inbox.drain() == {"slot-a": "a", "slot-b": "b"}
+
+
+def test_discard_removes_a_pending_slot_without_applying_it():
+    inbox, _ = _inbox_with_foreign_home()
+    calls = []
+    inbox.post("doomed", lambda: calls.append("ran"))
+    assert inbox.discard("doomed") is True
+    assert inbox.pending_slots() == frozenset()
+    assert inbox.snapshot() == {}
+    # Drained (and discarded) -- the closure must never run.
+    assert inbox.drain_apply() == 0
+    assert calls == []
+
+
+def test_discard_on_an_absent_or_already_drained_slot_returns_false():
+    inbox, _ = _inbox_with_foreign_home()
+    assert inbox.discard("never-posted") is False
+    inbox.post("x", 1)
+    inbox.drain()
+    assert inbox.discard("x") is False
+
+
+def test_drain_apply_runs_every_closure_even_when_one_raises():
+    """A batch is independent producers' outcomes -- one producer's closure
+    raising must never cause a different, unrelated producer's own posted
+    closure (in the same batch) to go silently un-invoked."""
+    ran = []
+    inbox, _ = _inbox_with_foreign_home()
+    inbox.post("first", lambda: ran.append("first"))
+
+    def _boom():
+        ran.append("boom")
+        raise ValueError("first failure")
+
+    inbox.post("raiser", _boom)
+    inbox.post("last", lambda: ran.append("last"))
+    with pytest.raises(ValueError, match="first failure"):
+        inbox.drain_apply()
+    assert sorted(ran) == ["boom", "first", "last"]
 
 
 def test_home_thread_post_never_consults_post_message_even_if_it_would_raise():

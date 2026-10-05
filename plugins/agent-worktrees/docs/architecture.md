@@ -359,13 +359,18 @@ latest value, so a fast-moving producer never queues one apply per post.
   synchronous unit test) observe its own post take effect without a real
   Textual app running.
 - **The `bool` wake-success contract.** `inbox.post()` returns `True` unless
-  a *needed* wake failed to deliver. The value itself is never lost either
-  way -- it stays in the inbox for whatever next drains it -- but a caller
-  with its own diagnosability contract for "this update must become
-  visible" (the setup-reload worker's `#5220` fix) can use a `False` return
-  to fall back to a direct, off-thread diagnostic write, mirroring the one
+  a *needed* wake failed to deliver -- checking `post_message`'s own return
+  value (`False` on an already-closing/closed pump), not just whether it
+  raised. The value itself is never lost either way -- it stays in the
+  inbox for whatever next drains it -- but a caller with its own
+  diagnosability contract for "this update must become visible" (the
+  setup-reload worker's `#5220` fix) can use a `False` return to fall back
+  to a direct, off-thread diagnostic write, mirroring the one
   narrowly-scoped, already-documented exception for a producer with no app
-  to post into at all.
+  to post into at all. A caller that takes its own fallback this way must
+  also `inbox.discard(slot)` the posted value first -- otherwise a later,
+  unrelated drain would still pick it up and re-apply it against state the
+  fallback has since torn down.
 - **`background.run_background(...)`** wraps the common "spawn a worker
   thread, post its outcome into the Inbox" shape (busy label, quiet mode,
   cancellation via `_bg_cancel`, thread tracking via `_bg_threads`) so

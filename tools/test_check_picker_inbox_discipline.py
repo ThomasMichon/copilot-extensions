@@ -78,6 +78,29 @@ def test_flags_bare_name_call(repo):
     assert any("call_from_thread(" in p for p in guard.verify())
 
 
+def test_flags_aliased_call_via_attribute_assignment(repo):
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_worktree_actions.py",
+        "marshal = self.app.call_from_thread\nmarshal(fn)\n",
+    )
+    assert any("engine_worktree_actions.py" in p and "call_from_thread(" in p
+               for p in guard.verify())
+
+
+def test_flags_alias_of_an_alias(repo):
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_sessions_actions.py",
+        "marshal = self.app.call_from_thread\n"
+        "also_marshal = marshal\n"
+        "also_marshal(fn)\n",
+    )
+    assert any("call_from_thread(" in p for p in guard.verify())
+
+
 def test_docstring_mention_not_flagged(repo):
     d = _picker_tui_dir(repo)
     _write(

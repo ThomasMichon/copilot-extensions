@@ -115,17 +115,34 @@ class Inbox:
             return True
         if not need_wake:
             return True
+        delivered = False
+        log_exc_info = False
         try:
-            self._owner.post_message(InboxUpdated())
-            return True
+            # MessagePump.post_message's own contract: it returns ``False``
+            # (not a raise) when the pump is already closing/closed -- an
+            # undeliverable wake that looks identical to success unless the
+            # return value itself is checked, not just "did it raise".
+            delivered = self._owner.post_message(InboxUpdated())
         except Exception:
-            log.warning(
-                "Inbox.post(%r): failed to wake the owning render flow "
-                "(posted value is still recorded and will be picked up "
-                "by the next proactive drain, if any)", slot,
-                exc_info=True,
-            )
-            return False
+            log_exc_info = True
+        if delivered:
+            return True
+        with self._lock:
+            # Only reset if this post's own wake is still the one on
+            # record -- a concurrent post() that queued (and is about to
+            # successfully deliver) its own wake after this one failed must
+            # never have its claim clobbered back to "needs a wake" by this
+            # stale failure, letting a later setup epoch wrongly believe its
+            # own wake already succeeded.
+            if self._wake_queued:
+                self._wake_queued = False
+        log.warning(
+            "Inbox.post(%r): failed to wake the owning render flow "
+            "(posted value is still recorded and will be picked up "
+            "by the next proactive drain, if any)", slot,
+            exc_info=log_exc_info,
+        )
+        return False
 
     def drain(self) -> dict[str, Any]:
         """Return and clear every slot posted since the last drain.
@@ -156,13 +173,37 @@ class Inbox:
         directly and handle both shapes itself; it must not also call
         ``drain_apply()`` against the same inbox.
 
+        ``drain()`` removes the whole batch up front, so every closure in
+        it runs even if an earlier one raises -- a batch is independent
+        producers' results, and one producer's failure must never cause a
+        later, unrelated producer's own outcome to go silently unapplied.
+        The first exception raised (in posting order) is re-raised after
+        every closure has had a chance to run; any further exception is
+        logged, not swallowed, so it is at least diagnosable even though
+        only one exception can propagate.
+
         Returns the number of closures actually invoked.
         """
         applied = 0
+        first_exc: BaseException | None = None
         for value in self.drain().values():
-            if callable(value):
+            if not callable(value):
+                continue
+            try:
                 value()
-                applied += 1
+            except BaseException as exc:  # noqa: BLE001 -- see docstring
+                if first_exc is None:
+                    first_exc = exc
+                else:
+                    log.warning(
+                        "Inbox.drain_apply: a later closure also raised "
+                        "(only the first exception in this batch "
+                        "propagates)",
+                        exc_info=True,
+                    )
+            applied += 1
+        if first_exc is not None:
+            raise first_exc
         return applied
 
     def peek(self, slot: str, default: Any = None) -> Any:
@@ -170,6 +211,23 @@ class Inbox:
         consumer that wants "the current value", not "what changed"."""
         with self._lock:
             return self._slots.get(slot, default)
+
+    def discard(self, slot: str) -> bool:
+        """Remove *slot* without applying/returning its value, if pending.
+
+        For a caller whose ``post()`` wake failed and that chose its own
+        fallback handling of the outcome (e.g. the setup-reload worker's
+        ``#5220`` diagnosability path): the closure/value it posted must not
+        survive to be picked up -- and incorrectly re-applied, against
+        state the fallback has since disposed -- by some later, unrelated
+        drain. Returns ``True`` if *slot* was actually pending (and is now
+        removed), ``False`` if it was already drained/never posted.
+        """
+        with self._lock:
+            was_pending = slot in self._pending
+            self._pending.discard(slot)
+            self._slots.pop(slot, None)
+            return was_pending
 
     def pending_slots(self) -> frozenset[str]:
         """Slots with an undrained value right now (diagnostics/tests)."""

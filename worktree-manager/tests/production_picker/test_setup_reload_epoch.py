@@ -327,6 +327,70 @@ def test_setup_reload_records_a_diagnosed_failure_when_waking_the_render_flow_fa
     assert "could not wake the render flow" in str(err)
 
 
+def test_setup_reload_wake_failure_leaves_no_stale_closure_for_a_later_drain():
+    """A regression for the wake-failure fallback above: the posted
+    ``_apply`` closure must be invalidated/removed from the inbox when the
+    wake itself fails, not merely left to be (re-)drained later. Otherwise
+    a subsequent, unrelated drain (a render tick) would still invoke the
+    stale closure, which re-reads the by-then-already-disposed payload via
+    ``_release_setup_payload(epoch) or payload`` and re-applies it --
+    exactly the double-apply-after-dispose bug this guards against.
+    """
+    disposed = threading.Event()
+    failed = threading.Event()
+
+    class _Loader:
+        def cancel(self):
+            disposed.set()
+
+    class _Screen(PickerScreenRuntimeMixin):
+        def __init__(self):
+            self.app = object()  # resolvable but has no post_message at all
+            self._bg_cancel = threading.Event()
+            self._setup_epoch = 0
+            self._setup_applied_epoch = 0
+            self._setup_failed_epoch = 0
+            self._pending_setup_payloads = {}
+            self._setup_payloads_lock = threading.Lock()
+            self.applied = []
+            self.failures: list[tuple[int, Exception]] = []
+
+        def _prime_setup_reload(self):
+            return None
+
+        def _collect_setup_payload(self):
+            return _payload("live").__class__(
+                **{
+                    **_payload("live").__dict__,
+                    "loader": _Loader(),
+                }
+            )
+
+        def _invalidate_setup_reload_caches(self):
+            return None
+
+        def _apply_setup_payload(self, payload):
+            self.applied.append(payload)
+
+        def _apply_setup_failure(self, epoch, err):
+            self.failures.append((epoch, err))
+            failed.set()
+
+        def refresh(self):
+            return None
+
+    screen = _Screen()
+    screen._start_setup_reload_worker()
+    assert disposed.wait(timeout=5)
+    assert failed.wait(timeout=5)
+    # The fallback already recorded a diagnosed failure -- confirm the
+    # actual regression: nothing is left pending for a later, unrelated
+    # drain to wrongly pick up and re-apply.
+    assert screen.inbox.pending_slots() == frozenset()
+    assert screen.inbox.drain_apply() == 0
+    assert screen.applied == []
+
+
 def test_setup_reload_records_a_diagnosed_failure_when_app_is_unresolvable():
     """#5220's other traced failure mode: ``self.app`` raising/being ``None``
     when the worker was scheduled (e.g. the screen wasn't yet mounted into

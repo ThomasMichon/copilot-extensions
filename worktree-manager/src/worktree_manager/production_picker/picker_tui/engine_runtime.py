@@ -760,17 +760,24 @@ class PickerScreenRuntimeMixin:
                 )
                 return
             if not inbox.post(f"setup-reload:{epoch}", _apply):
-                # The outcome is still sitting in the inbox (never lost),
-                # but nothing is guaranteed to ever drain it if waking the
-                # render flow itself failed (#5220's other traced failure
-                # mode: the App's event loop not running, or already
-                # stopped/shutting down). A poller elsewhere (capture.py's
-                # `_wait_for_initial_setup`) must see the real cause
-                # instead of spinning until its own unrelated timeout, so
-                # this records a diagnosed failure directly -- the same
-                # narrow, already-established off-thread-mutation exception
-                # as the "app is None" branch above, for the same reason:
-                # there is nothing else to hand this outcome to.
+                # The posted `_apply` closure is still sitting in the inbox
+                # at this point (post() only failed to *wake* the render
+                # flow, never the record itself) -- if left there, a later,
+                # unrelated drain (e.g. the next `_tick()`) would still
+                # invoke it, re-disposing/re-applying state this fallback
+                # is about to tear down itself. Discard it first so this is
+                # the only path that ever decides this epoch's outcome.
+                #
+                # #5220's other traced failure mode: the App's event loop
+                # not running, or already stopped/shutting down. A poller
+                # elsewhere (capture.py's `_wait_for_initial_setup`) must
+                # see the real cause instead of spinning until its own
+                # unrelated timeout, so this records a diagnosed failure
+                # directly -- the same narrow, already-established
+                # off-thread-mutation exception as the "app is None" branch
+                # above, for the same reason: there is nothing else to hand
+                # this outcome to.
+                inbox.discard(f"setup-reload:{epoch}")
                 self._dispose_setup_payload(self._release_setup_payload(epoch))
                 self._apply_setup_failure(
                     epoch,

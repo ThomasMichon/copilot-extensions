@@ -22,8 +22,8 @@ instead.
 
 **AST-based**, so a docstring or comment that merely *names*
 ``call_from_thread`` is never flagged -- only a real call
-(``self.app.call_from_thread(...)``, a bound/aliased reference, etc.)
-counts.
+(``self.app.call_from_thread(...)``, or a call through a locally-assigned
+alias, e.g. ``marshal = self.app.call_from_thread; marshal(fn)``) counts.
 
 A genuinely-intentional low-level exception carries an inline
 ``# inbox-guard: allow <why>`` comment on the offending line and is
@@ -70,20 +70,44 @@ class _CallFinder(ast.NodeVisitor):
     """Collect line numbers where ``call_from_thread`` is called (not just
     referenced -- a bound-method reference with no call is not itself a
     marshalling attempt, though in practice this call is always invoked
-    directly)."""
+    directly), including through a locally-assigned alias (e.g.
+    ``marshal = self.app.call_from_thread; marshal(fn)``)."""
 
     def __init__(self) -> None:
         self.hits: list[int] = []
+        self.aliases: set[str] = set()
 
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func
-        name = None
+        flagged = False
         if isinstance(func, ast.Attribute):
-            name = func.attr
+            flagged = func.attr == _FLAGGED_ATTR
         elif isinstance(func, ast.Name):
-            name = func.id
-        if name == _FLAGGED_ATTR:
+            flagged = func.id == _FLAGGED_ATTR or func.id in self.aliases
+        if flagged:
             self.hits.append(node.lineno)
+        self.generic_visit(node)
+
+    def _record_alias(self, target: ast.expr, value: ast.expr | None) -> None:
+        if not isinstance(target, ast.Name) or value is None:
+            return
+        # `marshal = self.app.call_from_thread` (any attribute chain ending
+        # in the flagged attribute) or `marshal = call_from_thread` (an
+        # alias of an alias).
+        if isinstance(value, ast.Attribute) and value.attr == _FLAGGED_ATTR:
+            self.aliases.add(target.id)
+        elif isinstance(value, ast.Name) and (
+            value.id == _FLAGGED_ATTR or value.id in self.aliases
+        ):
+            self.aliases.add(target.id)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        for target in node.targets:
+            self._record_alias(target, node.value)
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        self._record_alias(node.target, node.value)
         self.generic_visit(node)
 
 
