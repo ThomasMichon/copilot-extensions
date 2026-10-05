@@ -1113,7 +1113,7 @@ body type are no longer a repo-local copy.
 
 ### Reactive webhook producer (`agent-dispatch webhook`)
 
-A small HTTP app that maps two generic, forge-neutral event shapes onto tasks:
+A small HTTP app that maps three generic, forge-neutral event shapes onto tasks:
 
 - `POST /webhook/pr` -- a git-forge PR event; when **merged**, creates a
   follow-up task (`source=pr-webhook`, `origin_ref=pr/<n>`) in the lane derived
@@ -1121,9 +1121,28 @@ A small HTTP app that maps two generic, forge-neutral event shapes onto tasks:
 - `POST /webhook/telemetry` -- a monitoring alert; a **firing** alert creates a
   remediation task (`source=telemetry`). Accepts an Alertmanager-style
   `{"alerts": [...]}` batch or a single flat alert object.
+- `POST /webhook/issue` -- a git-forge issue event (GitHub's `issues` webhook
+  shape, which Gitea mirrors closely enough to reuse). Driven by a list of
+  independent **rules** (`config["issues"]`) rather than one fixed template, so
+  several label-watching backlogs can share one listener. Each rule matches on
+  issue `action` (default `opened`/`labeled`/`label_updated` -- the latter is
+  Gitea's own label-change action name, fired for both additions and
+  removals; a pure removal, with no `changes.added_labels`, is treated as a
+  no-op and never enqueues) and a set of required forge labels, optionally
+  restricts to a repo allowlist, and creates a task
+  (`source=issue-webhook`, `origin_ref=issue/<n>`) with a deterministic
+  `dedup_key` of `<task_label>:<repo full name>#<issue number>` -- this is the
+  reactive half of a "webhook-primary, polling-fallback" pair: a deployer-owned
+  periodic poller using the same dedup-key shape is an idempotent backstop for
+  a missed or undelivered webhook **while the first task is still
+  non-terminal** (the dedup key releases once its task completes/is abandoned,
+  so a very late redelivery or poll after that point mints a fresh task rather
+  than being recognized as a repeat).
 
-Every task carries a deterministic `dedup_key`, so a redelivered webhook doesn't
-double-enqueue. Behavior (templates, base-branch/severity allowlists, an optional
+Every task carries a deterministic `dedup_key`, so a redelivered webhook
+doesn't double-enqueue **as long as the original task is still in flight** --
+see the caveat above for what happens after it reaches a terminal status.
+Behavior (templates, base-branch/severity/label allowlists, an optional
 inbound bearer token, the coordinator URL) is set in an optional JSON config:
 
 ```bash
