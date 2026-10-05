@@ -141,36 +141,76 @@ class _CallFinder(ast.NodeVisitor):
         self._visit_new_scope(node, _param_names(node.args))
 
     def _visit_conditionally(self, node: ast.AST) -> None:
-        """Visit a control-flow node (``if``/``try``/``for``/``while``/
-        ``with``) whose body may or may not actually execute at runtime --
-        a branch not taken must never be allowed to permanently clear an
-        alias that held before it, since some OTHER branch (or no branch
-        at all) might leave it aliased. Calls inside are still visited and
+        """Visit a control-flow node with a single body (``with``) whose
+        body may or may not actually execute at runtime -- a reassignment
+        inside it must never be allowed to permanently clear an alias that
+        held before it, since the body might raise partway through or
+        (conceptually) not run at all. Calls inside are still visited and
         flagged normally; only the ALIAS STATE afterward is conservatively
-        merged: anything aliased before the node, or newly aliased by
-        ANY path through it, stays aliased after -- only a plain,
-        unconditional (outside any such node) reassignment ever actually
-        clears an alias. This errs toward flagging more, never fewer,
-        real ``call_from_thread`` calls.
+        merged: anything aliased before the node, or newly aliased inside
+        it, stays aliased after -- only a plain, unconditional (outside any
+        such node) reassignment ever actually clears an alias.
         """
         before = set(self._aliases)
         self.generic_visit(node)
         self._scopes[-1] = before | self._aliases
 
+    def _merge_branches(self, *branches: list[ast.stmt]) -> None:
+        """Visit each MUTUALLY EXCLUSIVE branch (an ``if``/``else`` body, a
+        ``try``'s body and each ``except`` handler, ...) independently,
+        every one starting from the SAME pre-branch alias state, then
+        merge the results by union.
+
+        Visiting branches sequentially against one shared, mutable alias
+        set (the naive approach) lets an EARLIER branch's reassignment
+        hide a real call in a LATER, independently-reachable branch --
+        e.g. ``if use_safe: marshal = safe`` clearing ``marshal`` before
+        an ``else: marshal(fn)`` is ever visited, even though at runtime
+        the ``else`` branch running means that reassignment never
+        happened. Each branch must instead see the alias state as it
+        actually was at the point control flow forked, not whatever an
+        unrelated sibling branch happened to leave behind.
+        """
+        start = set(self._aliases)
+        merged = set(start)
+        for stmts in branches:
+            self._scopes[-1] = set(start)
+            for stmt in stmts:
+                self.visit(stmt)
+            merged |= self._aliases
+        self._scopes[-1] = merged
+
     def visit_If(self, node: ast.If) -> None:
-        self._visit_conditionally(node)
+        self.visit(node.test)
+        self._merge_branches(node.body, node.orelse)
 
     def visit_Try(self, node: ast.Try) -> None:
-        self._visit_conditionally(node)
+        branches = [node.body, *[h.body for h in node.handlers]]
+        if node.orelse:
+            branches.append(node.orelse)
+        self._merge_branches(*branches)
+        # `finally` always runs regardless of which branch above executed,
+        # after whichever one did -- visit it sequentially against the
+        # merged outcome, not as another alternative branch.
+        for stmt in node.finalbody:
+            self.visit(stmt)
 
     def visit_For(self, node: ast.For) -> None:
-        self._visit_conditionally(node)
+        self.visit(node.iter)
+        # The loop body may run zero or more times, and `orelse` (a
+        # for/else clause) runs only if the loop completes without
+        # `break` -- treat both as alternative outcomes of the same fork,
+        # same as an if/else, rather than visiting them as if `orelse`
+        # always follows a fully-executed `body`.
+        self._merge_branches(node.body, node.orelse)
 
     def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
-        self._visit_conditionally(node)
+        self.visit(node.iter)
+        self._merge_branches(node.body, node.orelse)
 
     def visit_While(self, node: ast.While) -> None:
-        self._visit_conditionally(node)
+        self.visit(node.test)
+        self._merge_branches(node.body, node.orelse)
 
     def visit_With(self, node: ast.With) -> None:
         self._visit_conditionally(node)

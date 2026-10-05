@@ -390,9 +390,10 @@ exception. It runs in CI and in the local pre-push hook alongside
 polling + GIL safety rather than routing through the `Inbox` -- a real, if
 lower-priority, violation of this invariant that predates `Inbox` and has
 not yet been migrated. Threading it through `Inbox` safely (without
-regressing the live progress-bar UI) is a tracked follow-up, not something
-the static guard currently catches (it flags raw `call_from_thread`, not
-unmarshalled shared-state mutation).
+regressing the live progress-bar UI) is a tracked follow-up
+(`ThomasMichon/copilot-extensions#5343`), not something the static guard
+currently catches (it flags raw `call_from_thread`, not unmarshalled
+shared-state mutation).
 
 ## Session Lifecycle
 

@@ -167,6 +167,28 @@ def test_conditional_reassignment_does_not_clear_an_alias_afterward(repo):
     assert any("call_from_thread(" in p for p in guard.verify())
 
 
+def test_a_call_in_one_branch_is_flagged_even_when_an_earlier_sibling_branch_clears_the_alias(repo):
+    """Mutually exclusive branches (an ``if``/``else``) must each be
+    analyzed from the SAME pre-branch alias state, not sequentially
+    against one shared, mutable set -- otherwise visiting the ``if``
+    branch's reassignment first would incorrectly clear the alias before
+    the ``else`` branch (which actually keeps the original alias at
+    runtime, since the two branches are mutually exclusive) is ever
+    visited."""
+    d = _picker_tui_dir(repo)
+    _write(
+        d,
+        "engine_views.py",
+        "def f(self, use_safe):\n"
+        "    marshal = self.app.call_from_thread\n"
+        "    if use_safe:\n"
+        "        marshal = some_safe_callable\n"
+        "    else:\n"
+        "        marshal(fn)\n",
+    )
+    assert any("call_from_thread(" in p for p in guard.verify())
+
+
 def test_alias_in_one_function_does_not_flag_an_unrelated_name_in_another(repo):
     """An alias assigned inside one function must not leak into a sibling
     function -- a parameter or local that merely happens to share the

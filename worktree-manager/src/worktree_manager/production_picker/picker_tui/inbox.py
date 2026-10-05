@@ -135,16 +135,34 @@ class Inbox:
             self._pending.pop(slot, None)
             self._pending[slot] = None
         if threading.get_ident() == self._home_thread_id:
-            # ``drain_apply()`` deliberately re-raises an ordinary closure
-            # exception (see its own docstring) -- but ``post()`` itself
+            if not callable(value):
+                # A non-callable (pure data) value is meant for a
+                # peek()/drain() consumer, never auto-invoked -- leave it
+                # recorded (already written above) for whatever consumer
+                # wants it.
+                return True
+            # Apply exactly the slot THIS post just wrote -- never the
+            # whole batch via `drain_apply()`, which would also silently
+            # discard any OTHER producer's still-pending data slot (never
+            # auto-invoked, but drained and dropped all the same) or claim
+            # a different, unrelated closure this call has no business
+            # taking credit/blame for. `discard()` reports whether the
+            # slot was still genuinely pending (always true here, since
+            # nothing else runs between the write above and this, but
+            # mirrors the same defensive pattern used elsewhere in this
+            # module) before invoking it.
+            if not self.discard(slot):
+                return True
+            # `drain_apply()` deliberately re-raises an ordinary closure
+            # exception (see its own docstring) -- but `post()` itself
             # promises callers it never raises. Mirror
             # ``engine_runtime._drain_inbox()``'s own boundary catch here
             # too: log an escaping ``Exception`` rather than letting this
-            # "drains inline" path violate that promise, while still
+            # "apply inline" path violate that promise, while still
             # letting a genuine process-control ``BaseException``
             # (``KeyboardInterrupt``/``SystemExit``) propagate.
             try:
-                self.drain_apply()
+                value()
             except Exception:
                 log.warning(
                     "Inbox.post(%r): a closure raised while applying "

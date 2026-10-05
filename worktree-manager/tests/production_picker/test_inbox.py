@@ -207,6 +207,42 @@ def test_posting_from_the_home_thread_applies_immediately_without_a_wake():
     assert owner.messages == []
 
 
+def test_posting_a_data_value_from_the_home_thread_preserves_it_for_drain():
+    """A non-callable (pure data) value posted on the home thread must
+    survive for a later ``peek()``/``drain()`` consumer -- the home-thread
+    shortcut must NOT route it through ``drain_apply()`` (which only ever
+    invokes callables, silently discarding everything else per its own
+    documented contract). Without this, the exact same value posted from
+    a background thread round-trips correctly, but posted on the home
+    thread it would vanish before anyone ever read it."""
+    owner = _RecordingOwner()
+    inbox = Inbox(owner)  # home thread == this test's own thread
+    ok = inbox.post("status", "ready")
+    assert ok is True
+    assert inbox.peek("status") == "ready"
+    assert inbox.drain() == {"status": "ready"}
+
+
+def test_posting_a_closure_from_the_home_thread_does_not_disturb_an_unrelated_pending_data_slot():
+    """Applying a just-posted closure inline on the home thread must only
+    ever touch ITS OWN slot -- never drain the whole inbox, which could
+    silently discard a different producer's still-pending data value
+    (never auto-invoked, but drained and dropped all the same by
+    ``drain_apply()``) or claim a different, unrelated closure this call
+    has no business taking credit/blame for."""
+    owner = _RecordingOwner()
+    inbox = Inbox(owner)  # home thread == this test's own thread
+    # A different producer's data, not yet drained.
+    inbox.post("other-data", "untouched")
+    calls = []
+    ok = inbox.post("apply-me", lambda: calls.append("applied"))
+    assert ok is True
+    assert calls == ["applied"]
+    # The unrelated data slot must still be there for its own consumer.
+    assert inbox.peek("other-data") == "untouched"
+    assert inbox.drain() == {"other-data": "untouched"}
+
+
 def test_posting_from_a_background_thread_queues_exactly_one_wake():
     owner = _RecordingOwner()
     inbox = Inbox(owner)
