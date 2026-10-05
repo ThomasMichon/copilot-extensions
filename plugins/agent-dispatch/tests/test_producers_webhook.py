@@ -239,6 +239,17 @@ def test_issue_action_not_matched_is_skipped():
     assert sink == []
 
 
+def test_issue_gitea_label_updated_action_matches_default_rule():
+    """Gitea's own added-label webhook action is 'label_updated' (GitHub's
+    is 'labeled') -- the default match_actions must cover both so an
+    adopter doesn't have to know to override it just to run on Gitea."""
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {**_CI_FAILURE_ISSUE, "action": "label_updated"}
+    r = tc.post("/webhook/issue", json=body)
+    assert len(r.json()["created"]) == 1
+    assert len(sink) == 1
+
+
 def test_issue_repo_allowlist_rejects_other_repo():
     tc, sink = _client(_ISSUE_RULES_CONFIG)
     body = {
@@ -260,6 +271,21 @@ def test_issue_non_issue_body_skipped():
 def test_issue_malformed_repository_is_not_a_500():
     tc, sink = _client(_ISSUE_RULES_CONFIG)
     body = {**_CI_FAILURE_ISSUE, "repository": "not-an-object"}
+    r = tc.post("/webhook/issue", json=body)
+    assert r.status_code == 200
+    assert r.json()["skipped"] == "not an issue event"
+    assert sink == []
+
+
+def test_issue_empty_full_name_is_skipped_not_collided():
+    """An empty/missing repository.full_name must not fall through to a
+    shared, ambiguous dedup-key/repo identity that distinct repositories'
+    malformed events could collide on."""
+    tc, sink = _client(_ISSUE_RULES_CONFIG)
+    body = {
+        **_CI_FAILURE_ISSUE,
+        "repository": {**_CI_FAILURE_ISSUE["repository"], "full_name": ""},
+    }
     r = tc.post("/webhook/issue", json=body)
     assert r.status_code == 200
     assert r.json()["skipped"] == "not an issue event"
@@ -297,8 +323,9 @@ def test_issue_non_string_label_name_is_not_a_500():
 
 def test_issue_unnamed_rules_in_same_lane_each_get_a_task():
     """Two unnamed rules matching the same issue in the same lane must not
-    collide on the same default dedup_key (both previously fell back to
-    the literal "issue-rule" name/task_label)."""
+    collide on the same default dedup_key: an identical fallback identity
+    for both (e.g. a shared literal "issue-rule" name/task_label) would
+    collapse their two independent creates into one."""
     tc, sink = _client({
         "issues": [
             {"match_labels": ["ci-failure-signature"], "repo": "lane-a"},

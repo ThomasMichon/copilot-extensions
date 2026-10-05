@@ -535,7 +535,8 @@ mismatches remain unclaimable and emit a bounded, fingerprinted
   `source=telemetry`), and `POST /webhook/issue` (a forge issue event matched
   against a list of independent, config-driven rules -> task,
   `source=issue-webhook`, `origin_ref=issue/<n>`). Deterministic `dedup_key`s
-  make redelivery safe.
+  make redelivery safe while the matching task is still non-terminal (the key
+  releases once that task completes/is abandoned).
 - **`<agent-dispatch catalog argv[0]> evaluate --spec <cfg>`** -- the *evaluator*: pipe one task
   lifecycle event (stdin or `--event-file`) through a declarative rule set that
   decides what happens next (emit a follow-up task, or nothing). Hook-like; the

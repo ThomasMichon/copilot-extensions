@@ -1125,18 +1125,23 @@ A small HTTP app that maps three generic, forge-neutral event shapes onto tasks:
   shape, which Gitea mirrors closely enough to reuse). Driven by a list of
   independent **rules** (`config["issues"]`) rather than one fixed template, so
   several label-watching backlogs can share one listener. Each rule matches on
-  issue `action` (default `opened`/`labeled`) and a set of required forge
-  labels, optionally restricts to a repo allowlist, and creates a task
+  issue `action` (default `opened`/`labeled`/`label_updated` -- the latter is
+  Gitea's own added-label action name) and a set of required forge labels,
+  optionally restricts to a repo allowlist, and creates a task
   (`source=issue-webhook`, `origin_ref=issue/<n>`) with a deterministic
   `dedup_key` of `<task_label>:<repo full name>#<issue number>` -- this is the
   reactive half of a "webhook-primary, polling-fallback" pair: a deployer-owned
-  periodic poller using the same dedup-key shape is a safe, idempotent backstop
-  for a missed or undelivered webhook.
+  periodic poller using the same dedup-key shape is an idempotent backstop for
+  a missed or undelivered webhook **while the first task is still
+  non-terminal** (the dedup key releases once its task completes/is abandoned,
+  so a very late redelivery or poll after that point mints a fresh task rather
+  than being recognized as a repeat).
 
-Every task carries a deterministic `dedup_key`, so a redelivered webhook doesn't
-double-enqueue. Behavior (templates, base-branch/severity/label allowlists, an
-optional inbound bearer token, the coordinator URL) is set in an optional JSON
-config:
+Every task carries a deterministic `dedup_key`, so a redelivered webhook
+doesn't double-enqueue **as long as the original task is still in flight** --
+see the caveat above for what happens after it reaches a terminal status.
+Behavior (templates, base-branch/severity/label allowlists, an optional
+inbound bearer token, the coordinator URL) is set in an optional JSON config:
 
 ```bash
 agent-dispatch webhook --config webhook.json --host 127.0.0.1 --port 9331

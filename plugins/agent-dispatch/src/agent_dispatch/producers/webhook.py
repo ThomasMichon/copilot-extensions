@@ -70,7 +70,7 @@ Config (JSON), all keys optional::
       "issues": [
         {
           "name": "ci-failure-fix-worker",         # identifies this rule in skip reasons
-          "match_actions": ["opened", "labeled"],  # default: opened, labeled
+          "match_actions": ["opened", "labeled"],  # default: opened, labeled, label_updated
           "match_labels": ["ci-failure-signature"],# ALL must be present on the issue
           "repo_allowlist": ["acme/widget"],        # optional
           "repo": "example.com/acme/widget",        # dispatch lane (else default_repo)
@@ -161,6 +161,14 @@ def extract_issue(payload: dict[str, Any]) -> dict[str, Any] | None:
         # repository", which a rule with a fixed `repo` and no
         # `repo_allowlist` would otherwise happily process).
         return None
+    repo_full_name = repo.get("full_name")
+    if not isinstance(repo_full_name, str) or not repo_full_name:
+        # An empty/missing/non-string full_name produces a shared,
+        # ambiguous dedup-key/repo identity ("<label>:#<number>") that
+        # distinct repositories' malformed events would collide on --
+        # reject rather than let a fixed-lane, no-allowlist rule process
+        # an issue whose actual source repo could not be determined.
+        return None
     remote = repo.get("clone_url") or repo.get("html_url") or repo.get("ssh_url")
     raw_labels = issue.get("labels")
     if not isinstance(raw_labels, list):
@@ -182,7 +190,7 @@ def extract_issue(payload: dict[str, Any]) -> dict[str, Any] | None:
         "labels": labels,
         "action": payload.get("action", ""),
         "repo_remote": remote,
-        "repo_full_name": repo.get("full_name", ""),
+        "repo_full_name": repo_full_name,
     }
 
 
@@ -374,7 +382,11 @@ def build_app(
                 # first rule's task for both, silently dropping the second
                 # rule's "independent" create.
                 name = rule.get("name") or f"issue-rule-{index}"
-                match_actions = rule.get("match_actions") or ["opened", "labeled"]
+                match_actions = rule.get("match_actions") or [
+                    "opened",
+                    "labeled",  # GitHub's own action name for an added label
+                    "label_updated",  # Gitea's equivalent (HookIssueLabelUpdated)
+                ]
                 if issue["action"] not in match_actions:
                     skipped.append({
                         "rule": name, "number": issue["number"],
