@@ -2,14 +2,26 @@
 """PickerScreen mixin extracted from ``engine.py``."""
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
 from dataclasses import dataclass
 
 from .engine_helpers import _DEFAULT_HOST_COLS, _DEFAULT_TARGET_ENVS, start_loader, target_rows
+from .inbox import ensure_inbox
 from .selection import ListSelection
 from .. import update_stage
+
+log = logging.getLogger("agent-worktrees.picker")
+
+#: Guards the lazy, exactly-once construction of each screen's own
+#: `_setup_epoch_lock` (see `PickerScreenRuntimeMixin._ensure_setup_epoch_lock`).
+#: A single shared, module-level lock -- not any per-screen attribute, since
+#: not every test double that constructs this mixin directly sets the same
+#: fixed set of attributes `PickerScreen.__init__` does.
+_SETUP_EPOCH_LOCK_INIT_LOCK = threading.Lock()
+
 
 #: Minimum time between real ``update_stage.indicator_state()`` polls
 #: (picker-performance-and-responsiveness Phase A). That call is a full
@@ -289,7 +301,43 @@ class PickerScreenRuntimeMixin:
                     rt.repoll(scope)
             except Exception:
                 continue
+    def on_inbox_updated(self, message) -> None:
+        """Wake from ``self.inbox.post(...)``. Draining here (not just on
+        the next ``_tick``) gives a background producer's outcome prompt
+        effect even if the screen's own tick were ever slowed/paused; the
+        tick below drains too, so applying twice for the same batch is a
+        guaranteed-safe no-op (``Inbox.drain`` empties what it returns)."""
+        message.stop()
+        self._drain_inbox()
+    def _drain_inbox(self) -> int:
+        """Apply every closure posted to ``self.inbox`` since the last
+        drain. The sole place that turns a background producer's posted
+        outcome into actual widget/state mutation -- see inbox.py.
+
+        ``Inbox.drain_apply()`` deliberately re-raises a closure's own
+        exception (so it's never silently swallowed) -- but this method is
+        invoked from ``_tick()`` and the ``InboxUpdated`` message handler,
+        both squarely on the render flow: letting an uncaught producer bug
+        escape here would terminate rendering entirely, for every producer
+        sharing this one inbox, not just the one that actually failed. Each
+        producer's closure is expected to record its own diagnosed failure
+        before it could ever raise (see the setup-reload worker's `_apply`
+        for the pattern) -- this is the last-resort net for one that
+        doesn't, logged so it's at least diagnosable rather than silently
+        lost along with the render flow.
+        """
+        try:
+            return self.inbox.drain_apply()
+        except Exception:
+            log.warning(
+                "_drain_inbox: a posted closure raised -- the render flow "
+                "continues, but this producer's own outcome was not fully "
+                "applied and recorded no diagnosed failure of its own",
+                exc_info=True,
+            )
+            return 0
     def _tick(self):
+        self._drain_inbox()
         self.frame += 1
         if self._frame_health is not None:
             self._frame_health.tick(
@@ -410,9 +458,39 @@ class PickerScreenRuntimeMixin:
         except Exception:
             pass
 
+    def _ensure_setup_epoch_lock(self) -> threading.Lock:
+        """Lazily resolve ``self._setup_epoch_lock`` -- the dedicated lock
+        serializing epoch allocation (``_next_setup_epoch``) against the
+        wake-failure fallback's own epoch-currency check + failure
+        publication (see ``_start_setup_reload_worker``). Without a SHARED
+        lock across both, "check epoch currency, then publish" is a
+        classic check-then-act race: a newer reload can allocate a fresh
+        epoch (and, if its own wake also fails, publish its own newer
+        failure) in the gap between an older worker's check passing and
+        its own publish actually running, letting that older worker
+        downgrade `_setup_failed_epoch` back down afterward.
+
+        Guarded by a shared, module-level lock (`_SETUP_EPOCH_LOCK_INIT_LOCK`)
+        so this lazy construction itself can't race two different
+        `Lock()` instances into existence for the SAME screen -- each
+        screen still ends up with its own dedicated `_setup_epoch_lock`,
+        created at most once. Production code reaches it the normal way
+        via `PickerScreen.__init__` constructing it eagerly; a test
+        double that never ran that `__init__` gets it lazily instead.
+        """
+        lock = getattr(self, "_setup_epoch_lock", None)
+        if lock is not None:
+            return lock
+        with _SETUP_EPOCH_LOCK_INIT_LOCK:
+            lock = getattr(self, "_setup_epoch_lock", None)
+            if lock is None:
+                lock = self._setup_epoch_lock = threading.Lock()
+            return lock
+
     def _next_setup_epoch(self) -> int:
-        self._setup_epoch += 1
-        return self._setup_epoch
+        with self._ensure_setup_epoch_lock():
+            self._setup_epoch += 1
+            return self._setup_epoch
 
     def _dispose_setup_payload(self, payload: _SetupPayload | None) -> None:
         if payload is None:
@@ -671,11 +749,36 @@ class PickerScreenRuntimeMixin:
         self._busy_label = "Load failed"
         self.debug = f"setup-failed: {err}"
 
+    def _publish_setup_failure_if_current(
+        self, epoch: int, cancel: threading.Event, err: Exception
+    ) -> None:
+        """The ONE place that publishes a diagnosed setup/reload failure
+        -- every potentially-superseded call site (off-thread, or
+        synchronous-but-still-racing-with-another-thread's-own-epoch-
+        allocation) routes through here instead of calling
+        ``_apply_setup_failure`` directly. Re-checking epoch currency
+        immediately before publishing is not, by itself, atomic with
+        epoch ALLOCATION (``_next_setup_epoch``) -- a newer reload could
+        still interleave between that check passing and the publish
+        actually running without a lock shared across both. Holding
+        ``_ensure_setup_epoch_lock()`` here closes that window: while
+        this call holds it, `_next_setup_epoch()` (which acquires the
+        very same lock) cannot allocate a fresh epoch out from under this
+        check, and vice versa.
+        """
+        with self._ensure_setup_epoch_lock():
+            if not cancel.is_set() and epoch == self._setup_epoch:
+                self._apply_setup_failure(epoch, err)
+
     def _start_setup_reload_worker(self) -> int:
         """Schedule a setup/reload collect pass and apply it only if current."""
         self._prime_setup_reload()
         epoch = self._next_setup_epoch()
         cancel = self._bg_cancel
+        # A minimal test double that never ran PickerScreen.__init__ still
+        # gets a working Inbox here, lazily -- resolved on this (the calling)
+        # thread, before the worker below ever touches it.
+        inbox = ensure_inbox(self)
         app_lookup_error: Exception | None = None
         try:
             app = self.app
@@ -701,16 +804,27 @@ class PickerScreenRuntimeMixin:
                     return
                 if err is not None:
                     self._dispose_setup_payload(self._release_setup_payload(epoch))
-                    self._apply_setup_failure(epoch, err)
+                    self._publish_setup_failure_if_current(epoch, cancel, err)
                     self.refresh()
                     return
                 payload_to_apply = self._release_setup_payload(epoch) or payload
                 try:
                     self._invalidate_setup_reload_caches()
                     self._apply_setup_payload(payload_to_apply)
-                except Exception:
+                except Exception as apply_exc:
+                    # Record a diagnosed failure instead of letting this
+                    # escape -- this closure runs inside
+                    # ``Inbox.drain_apply()`` on the render flow itself
+                    # (via ``_tick()``/``on_inbox_updated``), so a bare
+                    # re-raise here would propagate into Textual's render
+                    # loop and could terminate it, with no
+                    # `_setup_failed_epoch` ever recorded for a poller to
+                    # see (the exact #5220 failure mode, just triggered by
+                    # `_apply_setup_payload` instead of a wake failure).
                     self._dispose_setup_payload(payload_to_apply)
-                    raise
+                    self._publish_setup_failure_if_current(epoch, cancel, apply_exc)
+                    self.refresh()
+                    return
                 self._setup_applied_epoch = epoch
                 self.refresh()
 
@@ -730,8 +844,9 @@ class PickerScreenRuntimeMixin:
                 # exactly as already-established off-thread pollers like
                 # `_poll_update_state` do) rather than dropping silently.
                 self._dispose_setup_payload(self._release_setup_payload(epoch))
-                self._apply_setup_failure(
+                self._publish_setup_failure_if_current(
                     epoch,
+                    cancel,
                     app_lookup_error
                     or RuntimeError(
                         "no Textual App was resolvable for this screen when "
@@ -740,16 +855,64 @@ class PickerScreenRuntimeMixin:
                     ),
                 )
                 return
-            try:
-                app.call_from_thread(_apply)
-            except Exception as exc:
-                # Same silent-drop gap as above, for the OTHER failure mode:
-                # `call_from_thread` itself raising -- most commonly the
-                # App's event loop not running, or already stopped/
-                # shutting down (#5220). Record the real exception instead
-                # of a generic downstream timeout.
-                self._dispose_setup_payload(self._release_setup_payload(epoch))
-                self._apply_setup_failure(epoch, exc)
+            wake_error: list[Exception] = []
+            if not inbox.post(
+                f"setup-reload:{epoch}", _apply, on_wake_failed=wake_error.append
+            ):
+                # The posted `_apply` closure is still sitting in the inbox
+                # at this point (post() only failed to *wake* the render
+                # flow, never the record itself) -- if left there, a later,
+                # unrelated drain (e.g. the next `_tick()`) would still
+                # invoke it, re-disposing/re-applying state this fallback
+                # is about to tear down itself. Discard it first so this is
+                # the only path that ever decides this epoch's outcome.
+                #
+                # But a wake failure and `_tick()`'s own periodic drain are
+                # racing each other independently: `_tick()` drains
+                # unconditionally, whether or not THIS post's wake
+                # succeeded, so a proactive tick landing between `post()`
+                # failing and this `discard()` call can already have
+                # claimed and run `_apply` itself. `discard()`'s own
+                # return value is the single source of truth for who won
+                # that race: `True` means this call genuinely removed a
+                # still-pending closure (nothing else could have run it),
+                # so the fallback below is this worker's alone to run.
+                # `False` means `_apply` already ran via the render flow --
+                # whatever outcome IT recorded (success or its own
+                # diagnosed failure) is authoritative, and disposing the
+                # payload or recording a conflicting failure here would be
+                # wrong (the payload may already be in active use, or a
+                # genuine success already recorded would be incorrectly
+                # overwritten as failed).
+                #
+                # #5220's other traced failure mode: the App's event loop
+                # not running, or already stopped/shutting down. A poller
+                # elsewhere (capture.py's `_wait_for_initial_setup`) must
+                # see the real cause instead of spinning until its own
+                # unrelated timeout, so this records a diagnosed failure
+                # directly -- the same narrow, already-established
+                # off-thread-mutation exception as the "app is None" branch
+                # above, for the same reason: there is nothing else to hand
+                # this outcome to.
+                if inbox.discard(f"setup-reload:{epoch}"):
+                    self._dispose_setup_payload(self._release_setup_payload(epoch))
+                    # Prefer the real underlying exception `post_message`
+                    # raised, when there was one -- falling back to a
+                    # generic message only when the wake instead returned
+                    # `False` without raising at all (an already-closing/
+                    # closed pump), which carries no further detail of
+                    # its own. `_publish_setup_failure_if_current` is what
+                    # actually guards this against a newer, superseding
+                    # epoch (see its own docstring for the exact race).
+                    underlying = wake_error[0] if wake_error else None
+                    self._publish_setup_failure_if_current(
+                        epoch,
+                        cancel,
+                        underlying or RuntimeError(
+                            "could not wake the render flow to apply "
+                            "this setup/reload payload"
+                        ),
+                    )
 
         threading.Thread(
             target=_worker, name=f"picker-setup-reload:{epoch}", daemon=True

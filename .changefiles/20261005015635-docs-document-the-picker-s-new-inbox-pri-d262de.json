@@ -1,0 +1,9 @@
+{
+  "comment": "docs: document the Picker's new Inbox primitive as the sole sanctioned cross-thread UI-update marshalling mechanism, replacing the old call_from_thread description",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

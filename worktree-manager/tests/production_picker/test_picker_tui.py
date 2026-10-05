@@ -9765,33 +9765,36 @@ def test_steer_submit_is_offloaded_off_the_render_flow(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
-def test_run_bg_logs_when_marshalling_the_outcome_back_to_the_ui_fails(caplog):
+def test_run_bg_logs_when_waking_the_render_flow_fails(caplog):
     """`_run_bg` must never let a worker's outcome vanish with zero signal.
 
-    Normally `_apply` (marshalled via `app.call_from_thread`) is the only place
-    that surfaces ok/failed on the status line -- but if that marshal itself
-    raises (app already exited, screen gone, ...), the action's real result
-    (which may have genuinely succeeded, e.g. a steer submission that reached
-    the coordinator) is otherwise dropped with the operator seeing nothing
-    change and no error at all. This proves the failure is at least logged so
-    it is diagnosable, since the status line itself is unreachable at that
-    point.
+    The outcome (`_apply`) is always posted into the screen's `Inbox` --
+    recorded there regardless of what happens next. But if *waking* the
+    render flow to drain it fails (the owning widget/app already torn down,
+    ``post_message`` raising for some other exotic reason), the outcome would
+    otherwise sit in the inbox forever with nothing to ever drain it, and the
+    operator sees nothing change -- no status line update, no error -- for an
+    action that may have genuinely succeeded (e.g. a steer submission that
+    reached the coordinator). This proves the wake failure is at least
+    logged (by ``Inbox.post`` itself) so it is diagnosable, and that the
+    outcome is still recorded in the inbox rather than silently dropped.
     """
     import logging as _logging
     import threading as _threading
     import time as _time
 
     from worktree_manager.production_picker.picker_tui import engine as engine_mod
+    from worktree_manager.production_picker.picker_tui.inbox import Inbox
 
-    class _FakeApp:
-        def call_from_thread(self, fn):
-            raise RuntimeError("app already exited")
+    class _BrokenOwner:
+        def post_message(self, message):
+            raise RuntimeError("owner already torn down")
 
     class _Screen:
         pass
 
     screen = _Screen()
-    screen.app = _FakeApp()
+    screen.inbox = Inbox(_BrokenOwner())
     screen._busy_label = None
     screen._bg_cancel = _threading.Event()
     screen._bg_threads = set()
@@ -9800,26 +9803,31 @@ def test_run_bg_logs_when_marshalling_the_outcome_back_to_the_ui_fails(caplog):
         engine_mod.PickerScreen._run_bg(
             screen, "steer", lambda: (True, "ok"),
         )
+        deadline = _time.monotonic() + 2
+        while screen._bg_threads and _time.monotonic() < deadline:
+            _time.sleep(0.02)
         for _ in range(100):
             if caplog.records:
                 break
             _time.sleep(0.02)
 
     assert any(
-        "could not marshal its outcome back to the UI" in r.message
+        "failed to wake the owning render flow" in r.message
         for r in caplog.records
     )
+    # The outcome itself was NOT lost -- it is sitting in the inbox, ready
+    # for whatever next drains it (a tick, a retried wake, ...).
+    assert len(screen.inbox.pending_slots()) == 1
 
 
 def test_run_bg_drops_quietly_when_the_picker_already_cancelled_it(caplog):
     """When ``on_unmount`` has already set ``_bg_cancel`` (the picker itself is
     tearing down -- a launch decision, cancel, or quit), a worker still
-    finishing its blocking ``work()`` at that moment must NOT attempt
-    ``app.call_from_thread`` at all, and must NOT log a WARNING: this is an
-    expected, intentional exit, not an unforeseen marshal failure. Distinguishes
-    this case from
-    ``test_run_bg_logs_when_marshalling_the_outcome_back_to_the_ui_fails``,
-    which covers a genuinely unexpected marshal failure."""
+    finishing its blocking ``work()`` at that moment must NOT attempt to post
+    into the inbox at all, and must NOT log a WARNING: this is an expected,
+    intentional exit, not an unforeseen wake failure. Distinguishes this case
+    from ``test_run_bg_logs_when_waking_the_render_flow_fails``, which covers
+    a genuinely unexpected wake failure."""
     import logging as _logging
     import threading as _threading
     import time as _time
