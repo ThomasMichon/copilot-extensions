@@ -532,6 +532,112 @@ def test_router_non_project_slug_omits_project(monkeypatch):
     assert captured == {"slug": "mcp", "project": None, "rest": ["list"]}
 
 
+def test_router_ssh_mesh_status_is_a_project_chdir_verb(monkeypatch):
+    """`<repo> ssh mesh-status` pins the child's cwd to the resolved project
+    (#2426 candidate 2): agent-ssh's mesh-status/refresh-mesh otherwise
+    silently resolve machines.yaml from the caller's raw cwd, ignoring the
+    explicitly-named <repo> binstub. agent-ssh sits below agent-worktrees in
+    the plugin-stack tier, so the router resolves+chdirs itself rather than
+    forwarding --project for agent-ssh to resolve (which would be a forbidden
+    upward call)."""
+    assert m._PROJECT_CHDIR_VERBS["ssh"] == frozenset({"mesh-status", "refresh-mesh"})
+    assert "ssh" not in m._PROJECT_ARG_SLUGS
+    import subprocess as _sp
+
+    stub = Path(__file__)  # any existing file; _sibling_binstub is stubbed out
+    monkeypatch.setattr(m, "_sibling_binstub", lambda slug: stub)
+    monkeypatch.setattr(m, "_resolve_project_checkout", lambda project: Path("/resolved/demo"))
+    seen = {}
+
+    class _R:
+        returncode = 0
+
+    def _fake_run(cmd, *a, **kw):
+        seen["cmd"] = cmd
+        seen["cwd"] = kw.get("cwd")
+        seen["env"] = kw.get("env")
+        return _R()
+
+    monkeypatch.setattr(_sp, "run", _fake_run)
+    rc = m._route_to_sibling_plugin("ssh", "demo", ["mesh-status"])
+    assert rc == 0
+    assert seen["cwd"] == str(Path("/resolved/demo"))
+    assert "--project" not in seen["cmd"]  # chdir'd, not forwarded as a flag
+    assert "AGENT_WORKTREES_PROJECT_ROUTED" not in (seen["env"] or {})
+
+
+def test_router_ssh_non_chdir_verb_stays_cwd_preserving(monkeypatch):
+    """A non-project `ssh` verb (e.g. `doctor`, `emit-profile`) must stay a
+    plain cwd-preserving alias even when --project was supplied: it must not
+    chdir (that would silently break a verb's own relative-path arguments,
+    e.g. `emit-profile CONFIG --module MODULE`), must not fail closed on an
+    unresolvable project (those verbs have no project concept at all), and
+    must not forward --project (agent-ssh's own CLI never declared it)."""
+    import subprocess as _sp
+
+    stub = Path(__file__)
+    monkeypatch.setattr(m, "_sibling_binstub", lambda slug: stub)
+
+    def _fail_resolve(project):
+        raise AssertionError("must not resolve a project for a non-chdir verb")
+
+    monkeypatch.setattr(m, "_resolve_project_checkout", _fail_resolve)
+    seen = {}
+
+    class _R:
+        returncode = 0
+
+    def _fake_run(cmd, *a, **kw):
+        seen["cmd"] = cmd
+        seen["cwd"] = kw.get("cwd")
+        seen["env"] = kw.get("env")
+        return _R()
+
+    monkeypatch.setattr(_sp, "run", _fake_run)
+    rc = m._route_to_sibling_plugin("ssh", "demo", ["doctor", "--json"])
+    assert rc == 0
+    assert seen["cwd"] is None
+    assert "--project" not in seen["cmd"]
+    assert "AGENT_WORKTREES_PROJECT_ROUTED" not in (seen["env"] or {})
+
+
+def test_router_ssh_unresolvable_project_fails_closed(monkeypatch, capsys):
+    """An unresolvable --project fails a matched chdir-verb's routed call
+    closed instead of silently running agent-ssh against the caller's
+    original cwd (the wrong-project behavior #2426 exists to prevent)."""
+    stub = Path(__file__)
+    monkeypatch.setattr(m, "_sibling_binstub", lambda slug: stub)
+    monkeypatch.setattr(m, "_resolve_project_checkout", lambda project: None)
+    import subprocess as _sp
+
+    def _fail_run(*a, **kw):
+        raise AssertionError("subprocess.run must not be called when the "
+                              "project can't be resolved")
+
+    monkeypatch.setattr(_sp, "run", _fail_run)
+    rc = m._route_to_sibling_plugin("ssh", "nope", ["mesh-status"])
+    assert rc == 1
+    assert "no checkout found" in capsys.readouterr().err
+
+
+def test_main_router_actually_threads_project_for_chdir_slug(monkeypatch):
+    """End-to-end through `m.main(...)`, not a direct `_route_to_sibling_plugin`
+    call: a bare unit test on the helper alone previously missed a real bug
+    where the router's `<repo> <slug>` dispatch only ever threaded `project`
+    for `_PROJECT_ARG_SLUGS` members, so every real `<repo> ssh …` invocation
+    reached `_route_to_sibling_plugin` with `project=None` and the chdir/
+    fail-closed path never ran."""
+    captured = {}
+    monkeypatch.setattr(
+        m, "_route_to_sibling_plugin",
+        lambda slug, project, rest: captured.update(
+            slug=slug, project=project, rest=rest) or 0,
+    )
+    rc = m.main(["--project", "demo", "ssh", "mesh-status"])
+    assert rc == 0
+    assert captured == {"slug": "ssh", "project": "demo", "rest": ["mesh-status"]}
+
+
 def test_router_derives_from_installed_binstubs(monkeypatch):
     """A non-core slug is routable when its agent-<slug> binstub is installed
     (the routable set is derived, not hardcoded)."""

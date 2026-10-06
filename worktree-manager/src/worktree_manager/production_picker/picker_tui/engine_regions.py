@@ -437,7 +437,100 @@ class _PickerNativeData(OptionList):
             self._sync_from_sel()
             self._update_sticky()
             return
+        # Content-only fast path (pivot-streaming-transport Phase 4): a
+        # background reconcile/poll (e.g. a PR state or git-status refresh,
+        # `_maybe_repoll()`) that updates one or a few rows' title/age/sess
+        # fields -- with the same row count, same order, and no row CHANGING
+        # STATE (a state change can move a row to a different section, which
+        # a text-only patch can't express, see `_rebuild()`'s own
+        # section-grouping construction) -- used to force the exact same
+        # full O(rows) clear+rebuild the pulse-only fast path was built to
+        # avoid for a different trigger. Repaint just the changed rows in
+        # place, same pattern as the two fast paths above.
+        if self._try_content_repaint(new_sig):
+            self._sig = new_sig
+            self._sync_from_sel()
+            self._update_sticky()
+            return
         self._rebuild()
+
+    def _try_content_repaint(self, new_sig) -> bool:
+        """Repaint only the worktree rows whose own content (title/age_secs/
+        sess) changed, in place. Returns True if it fully handled the
+        update; False to fall back to :meth:`_rebuild`.
+
+        Applies only when the signature delta is *content-only*: the pivot is
+        Worktrees, every field except ``fp`` (index 12) is unchanged, the row
+        COUNT and ORDER (the ``fp`` id sequence) are unchanged, and -- the
+        safety condition that matters most -- no differing row's ``state``
+        field itself changed. A state change can move a row into a different
+        section (Active/Recent/Completed), which shifts the index of every
+        row after it in the rebuilt option list; this fast path can only ever
+        be correct for a pure content edit that leaves every row exactly
+        where it already was."""
+        old = self._sig
+        if old is None or len(old) != len(new_sig):
+            return False
+        if old[0] != "worktrees" or new_sig[0] != "worktrees":
+            return False
+        # Differ ONLY in the fp field -- index 12 of _signature().
+        if any(old[i] != new_sig[i] for i in range(len(old)) if i != 12):
+            return False
+        old_fp, new_fp = old[12], new_sig[12]
+        if len(old_fp) != len(new_fp):
+            return False
+        # Row order (the id sequence) must be unchanged -- a reorder, even
+        # with identical membership, can't be expressed as an in-place patch.
+        if tuple(t[0] for t in old_fp) != tuple(t[0] for t in new_fp):
+            return False
+        changed = [i for i in range(len(old_fp)) if old_fp[i] != new_fp[i]]
+        if not changed:
+            return False
+        # No differing row may have changed STATE (fp index 2 within each
+        # per-row tuple) -- see the docstring above.
+        if any(old_fp[i][2] != new_fp[i][2] for i in changed):
+            return False
+        scr = self._screen
+        W = scr.size.width or 100
+        try:
+            cols, _sections = scr.current_list()
+            lcols = fit(cols, W - 2, _NO_FLEX_COLUMN, 0)
+            rows = scr.list_records()
+        except Exception:
+            return False
+        if len(rows) != len(new_fp):
+            return False   # list_records() raced ahead of the signature probe
+        # Defensive re-check: the fresh `rows` fetch above is a SEPARATE call
+        # from the one `_signature()` made to build `new_fp` -- re-derive the
+        # same fingerprint from `rows` and confirm it still matches `new_fp`
+        # exactly before trusting positional indices into it. A mismatch here
+        # (data mutated between the two calls) falls back to a full rebuild
+        # rather than risk patching the wrong row's text into the wrong slot.
+        refetched_fp = tuple((r.get("id"), r.get("title"), r.get("state"),
+                              r.get("age_secs"), r.get("sess")) for r in rows)
+        if refetched_fp != new_fp:
+            return False
+        view = scr.worktrees_view
+        count = self.option_count
+        for i in changed:
+            rec = rows[i]
+            rid = scr._row_key(rec)
+            if rid is None:
+                return False
+            row = self._l_rows.get(rid)
+            if row is None:
+                return False   # unknown row -> safe fallback to a full rebuild
+            idx, _old_rec, li = row
+            if not (0 <= idx < count):
+                return False
+            text = view._row_text(rec, li, self._SENTINEL_SEL, W, lcols,
+                                  None, None)
+            self.replace_option_prompt_at_index(idx, text)
+            # Keep _l_rows current so a LATER pulse/selection fast path (or
+            # another content repaint) diffs against this row's fresh data,
+            # not the stale record this patch just replaced on screen.
+            self._l_rows[rid] = (idx, rec, li)
+        return True
 
     def _try_selection_repaint(self, new_sig) -> bool:
         """Repaint only the worktree rows whose checkbox glyph changed, in place

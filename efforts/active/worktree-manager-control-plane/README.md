@@ -941,15 +941,14 @@ worktree-manager.
       disposition.
 - [ ] Place each accepted public tracker item in exactly one existing phase,
       extending this plan before implementation when necessary.
-- [ ] Cached worktree-status projection for external consumers: expose a
+- [x] Cached worktree-status projection for external consumers: expose a
       manager/engine-backed, cached worktree-status view (e.g. the
       agent-dispatch Tasks-pane's Worktree Status card) over the `--json`
       engine boundary so external consumers stop polling `agent-worktrees`
-      directly per render. In flight under the
-      `agent-worktrees-external-status-accelerator` effort/PR
-      [#3102](https://github.com/ThomasMichon/copilot-extensions/pull/3102)
-      (not yet merged); no separate public issue is needed unless that PR
-      does not land, since it already covers this exact scope.
+      directly per render. Landed under the
+      `agent-worktrees-external-status-accelerator` effort via
+      [PR #3102](https://github.com/ThomasMichon/copilot-extensions/pull/3102)
+      (merged 2026-09-21).
 - [ ] Keep configuration examples synthetic and repository-neutral.
 
 ### Phase 9 — Relocate "Launch in new window" terminal spawning out of agent-worktrees (Done — #5210, PR #5232)
@@ -1022,8 +1021,10 @@ fixed with a dedicated `_applescript_quote` helper and regression test.
 
 _Correlated via a facility-driven sweep of open `bug`-labeled issues against active efforts (VEI + direct review). Not yet triaged into a numbered phase — listed here as upcoming work for whoever picks this effort back up._
 
-- [ ] **#2426** Worktree Manager/Picker can show/act on the wrong project's content
+- [x] **#2426** Worktree Manager/Picker can show/act on the wrong project's content
   - Showing/acting on the wrong project's content is a direct control-plane bug.
+  - Fixed via [PR #5413](https://github.com/ThomasMichon/copilot-extensions/pull/5413)
+    (see Journal, 2026-10-05); closes the issue.
 
 ## Validation Plan
 
@@ -1115,6 +1116,65 @@ claiming discipline alone.
   current load (observed up to 15.5s for a nominal ~0.6s workload),
   widened to 20s with an explicit thread-liveness assertion.
   Phases 2-4 (the actual retirement sweep) remain open.
+- **2026-10-05** — Claimed and landed the **bug sweep's #2426 candidate 2**
+  audit (the router's `_PROJECT_ARG_SLUGS` sibling-plugin scoping question
+  left open by the maintainer's own 2026-09-16 comment on #2426). Audited
+  every remaining `_CORE_SLUGS` sibling (`dispatch`, `containers`, `logger`,
+  `vault`, `mcp`) for whether it has a top-level `--project` the router
+  could meaningfully inject: none do currently, so adding any of them
+  mechanically would only break them with an argparse error, not fix
+  anything — `dispatch` has no project concept at all (cross-project task
+  queue); `containers`' own `--project` is a distinct, subcommand-scoped
+  concept (a Picker source label) unrelated to "the repo this invocation is
+  about"; `logger`/`vault`/`mcp` each resolve config by ascending from cwd
+  with no top-level `--project` surface, and `vault` in particular is
+  plausibly *intentionally* cwd-scoped (a secrets operation tied to the
+  literal directory stood in) per the issue's own caution. One sibling
+  *did* have a clear, confirmed-safe case: `agent-ssh`'s `mesh-status`/
+  `refresh-mesh` resolve `machines.yaml` by ascending from cwd
+  (`mesh.find_machines_file`) with no stated CWD-pinning rationale, so a
+  `<repo> ssh mesh-status` invocation silently acted on whatever repo the
+  caller's raw cwd happened to resolve to — ignoring the explicitly-named
+  `<repo>` binstub, exactly candidate 2's reported symptom. Landed via
+  [PR #5413](https://github.com/ThomasMichon/copilot-extensions/pull/5413).
+  First pass forwarded a top-level `--project` for `agent-ssh` to resolve
+  itself (mirroring `agent-bridge`/`agent-codespaces`' `--project` pattern,
+  #1080) — review correctly caught that this violates the plugin-stack
+  layering rule (`docs/patterns/a-la-carte-independence.md`): `agent-ssh`
+  sits *below* `agent-worktrees`, so it must never reach upward
+  (`shutil.which("agent-worktrees")`) to resolve a project name itself,
+  unlike `agent-bridge`/`agent-codespaces` which sit *above* it. Revised to
+  have the router resolve the project and chdir the child process itself
+  (`_resolve_project_checkout` via `repos.py`'s own in-process registry) —
+  `agent-ssh` needed no CLI changes at all, since its existing cwd-ascending
+  `machines.yaml` resolution now simply sees the correct cwd. An
+  unresolvable `--project` fails the routed call closed (nonzero exit)
+  rather than silently running against the caller's original cwd. A second
+  review round caught two more real issues: the router's own `<repo> <slug>`
+  dispatch only ever threaded the resolved `project` through for
+  `_PROJECT_ARG_SLUGS` members, so every real `<repo> ssh …` call actually
+  reached `_route_to_sibling_plugin` with `project=None` and the whole
+  chdir/fail-closed path was dead code in practice — caught only because
+  review asked for an end-to-end test through `m.main(...)` rather than
+  trusting a unit test that called the helper directly; and the chdir had
+  been scoped per-*slug* rather than per-*verb*, so it would have silently
+  broken `ssh`'s own relative-path arguments (e.g. `emit-profile CONFIG
+  --module MODULE`) and wrongly failed machine-global verbs (`doctor`) closed
+  on an unresolvable project. Fixed by threading `project` through whenever
+  a slug has *either* kind of consumer, and replacing the per-slug
+  `_PROJECT_CHDIR_SLUGS` with a per-verb `_PROJECT_CHDIR_VERBS` map
+  (`{"ssh": {"mesh-status", "refresh-mesh"}}`) that `_route_to_sibling_plugin`
+  consults via `_chdir_verb_for`, with every other `ssh` verb staying a
+  plain cwd-preserving alias. New routing tests in agent-worktrees'
+  `test_cli_routing.py` (an end-to-end `m.main(...)` test for the threading
+  bug, a non-chdir-verb regression case); full `agent-ssh` suite unaffected
+  (clean dev shows the same 2 pre-existing/environmental failures — a
+  Windows `bash.exe` path-mangling issue in
+  `test_shared_installer_engine_manifest_kind.py` -- plus an unrelated,
+  non-reproducing test-ordering flake seen once in `test_host_restore.py`
+  that passed on rerun and in isolation).
+  Candidate 1 (the Picker's silent `projects[0].name` fallback) was already
+  fixed in #2732; this closes out candidate 2's open scope. Closes #2426.
 
 - **2026-10-04/05** — Executed and landed Phase 9 (PR #5232, merged): moved
   `wt.exe`/`CREATE_NEW_CONSOLE`/`osascript`/POSIX-terminal probing into a new
