@@ -835,6 +835,38 @@ function Remove-PluginBuildArtifacts {
     }
 }
 
+function Enter-PluginSnapshotLock {
+    <# Serializes New-PluginBuildSnapshot's check/copy/publish sequence
+       against concurrent invocations (two near-simultaneous install/stamp
+       actions) under one named mutex keyed by $InstallDir -- mirrors
+       agent-machines' own Enter-StampLock
+       (plugins/agent-machines/scripts/init.ps1) in a distinct namespace.
+       Without this, two callers can both observe no valid snapshot, each
+       finish their own temp copy, and the LATER publisher's rename-aside
+       step retires the snapshot the EARLIER caller already returned and
+       may still be actively building from. #>
+    param([Parameter(Mandatory)][string]$InstallDir)
+    $hash = [BitConverter]::ToString(
+        [Security.Cryptography.SHA256]::Create().ComputeHash(
+            [Text.Encoding]::UTF8.GetBytes($InstallDir.ToLowerInvariant())
+        )
+    ).Replace('-', '').Substring(0, 24)
+    $mutexName = if ($env:OS -eq 'Windows_NT') {
+        "Local\CopilotExtensions.AgentDispatch.Snapshot.$hash"
+    } else {
+        "CopilotExtensions.AgentDispatch.Snapshot.$hash"
+    }
+    $mutex = New-Object Threading.Mutex($false, $mutexName)
+    $held = $false
+    try {
+        $held = $mutex.WaitOne([TimeSpan]::FromSeconds(20))
+    } catch [Threading.AbandonedMutexException] {
+        $held = $true
+    }
+    if (-not $held) { $mutex.Dispose(); throw 'Timed out waiting for the agent-dispatch snapshot lock.' }
+    return $mutex
+}
+
 function New-PluginBuildSnapshot {
     <# Copy $PluginDir into a durable, version-pinned snapshot under
        $InstallDir/snapshots/<ver>/ and return that path -- so every build
@@ -924,47 +956,60 @@ function New-PluginBuildSnapshot {
         return $PluginDir
     }
     try {
-        if (-not (Test-Path $InstallDir)) { New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null }
-        $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $Version
-        # Same-version idempotent fast path (mirrors agent-machines'
-        # scripts/init.ps1 stamp mutex): a snapshot for this EXACT version
-        # that already looks valid would be rebuilt byte-identical anyway,
-        # so skip the whole copy -- also closes the replacement race below
-        # for the common case (nothing to publish means nothing to race).
-        $snapValid = Test-Path (Join-Path $snapDir 'pyproject.toml')
-        if ($snapValid) {
-            Write-Ok "Reusing existing build snapshot: $snapDir"
+        # Serialize the whole check/copy/publish sequence below against a
+        # concurrent caller racing the same $InstallDir (see
+        # Enter-PluginSnapshotLock's own docstring for the exact race this
+        # closes). A lock-acquisition timeout flows through this same catch,
+        # so -BestEffort still governs whether that degrades gracefully.
+        $snapMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir
+        try {
+            if (-not (Test-Path $InstallDir)) { New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null }
+            $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $Version
+            # Same-version idempotent fast path (mirrors agent-machines'
+            # scripts/init.ps1 stamp mutex): a snapshot for this EXACT version
+            # that already looks valid would be rebuilt byte-identical anyway,
+            # so skip the whole copy -- also closes the replacement race below
+            # for the common case (nothing to publish means nothing to race).
+            $snapValid = Test-Path (Join-Path $snapDir 'pyproject.toml')
+            if ($snapValid) {
+                Write-Ok "Reusing existing build snapshot: $snapDir"
+                return $snapDir
+            }
+            $snapTmp = "$snapDir.tmp-$PID"
+            if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+            New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+            # Copy everything needed to `uv pip install .` (src, libs, scripts,
+            # pyproject, plugin.json, hooks, README); skip VCS/build/test junk --
+            # same exclusion list Invoke-Stamp uses for its own snapshot.
+            $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+            Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+                Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+            }
+            # A published snapshot is immutable: Invoke-Stamp's payload-dir
+            # marker, and this function's own return value, can be read by a
+            # CONCURRENT first-use binstub invocation outside this mutex (the
+            # binstub is a reader, never a publisher, so it never takes this
+            # lock). Deleting $snapDir before moving the replacement in would
+            # leave NO snapshot at all for the entire remainder of this copy
+            # -- a race reading that window sees a missing directory, not
+            # merely a stale one. Rename the old copy aside first (a
+            # directory rename is metadata-only, so the window where
+            # $snapDir doesn't exist shrinks to the Move-Item's own atomic
+            # rename) rather than deleting the still-advertised snapshot
+            # outright.
+            if (Test-Path $snapDir) {
+                $snapStale = "$snapDir.stale-$PID"
+                Rename-Item -LiteralPath $snapDir -NewName (Split-Path -Leaf $snapStale) -ErrorAction SilentlyContinue
+            }
+            Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+            Get-ChildItem -LiteralPath (Split-Path -Parent $snapDir) -Directory -Filter "$(Split-Path -Leaf $snapDir).stale-*" -ErrorAction SilentlyContinue |
+                ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+            Write-Ok "Building from durable snapshot: $snapDir (never locks the marketplace payload)"
             return $snapDir
+        } finally {
+            [void]$snapMutex.ReleaseMutex()
+            $snapMutex.Dispose()
         }
-        $snapTmp = "$snapDir.tmp-$PID"
-        if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-        New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-        # Copy everything needed to `uv pip install .` (src, libs, scripts,
-        # pyproject, plugin.json, hooks, README); skip VCS/build/test junk --
-        # same exclusion list Invoke-Stamp uses for its own snapshot.
-        $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
-        Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
-        }
-        # A published snapshot is immutable: Invoke-Stamp's payload-dir
-        # marker, and this function's own return value, can be read by a
-        # CONCURRENT first-use binstub invocation outside any mutex this
-        # function holds. Deleting $snapDir before moving the replacement in
-        # would leave NO snapshot at all for the entire remainder of this
-        # copy -- a race reading that window sees a missing directory, not
-        # merely a stale one. Rename the old copy aside first (a directory
-        # rename is metadata-only, so the window where $snapDir doesn't
-        # exist shrinks to the Move-Item's own atomic rename) rather than
-        # deleting the still-advertised snapshot outright.
-        if (Test-Path $snapDir) {
-            $snapStale = "$snapDir.stale-$PID"
-            Rename-Item -LiteralPath $snapDir -NewName (Split-Path -Leaf $snapStale) -ErrorAction SilentlyContinue
-        }
-        Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
-        Get-ChildItem -LiteralPath (Split-Path -Parent $snapDir) -Directory -Filter "$(Split-Path -Leaf $snapDir).stale-*" -ErrorAction SilentlyContinue |
-            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
-        Write-Ok "Building from durable snapshot: $snapDir (never locks the marketplace payload)"
-        return $snapDir
     } catch {
         if (-not $BestEffort) { throw }
         Write-Warn "Could not create build snapshot ($($_.Exception.Message)) -- building from the live payload"

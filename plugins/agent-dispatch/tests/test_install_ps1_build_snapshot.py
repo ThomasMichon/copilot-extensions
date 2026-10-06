@@ -50,8 +50,14 @@ def _extract_function_block(name: str) -> str:
     raise AssertionError(f"unbalanced braces extracting function {name!r}")
 
 
-def _run_harness(extra_script: str) -> subprocess.CompletedProcess[str]:
-    script = (
+def _harness_script(extra_script: str) -> str:
+    """The script every test runs under `pwsh`: this file's own stub
+    Write-* helpers (matching install.ps1's actual Write-Host-based
+    implementations, which never pollute a captured function's pipeline
+    return value) plus every function New-PluginBuildSnapshot depends on,
+    extracted verbatim from the real install.ps1 so this module proves the
+    actual source behaves correctly, not a reimplementation of it."""
+    return (
         # Matches install.ps1's own top-level `$ErrorActionPreference = 'Stop'`
         # (line ~78) -- without it, a non-existent $PluginDir's Get-ChildItem
         # error is merely non-terminating under pwsh's own 'Continue' default,
@@ -62,13 +68,18 @@ def _run_harness(extra_script: str) -> subprocess.CompletedProcess[str]:
         "function Write-Skip { param($m) Write-Host \"SKIP: $m\" }\n"
         + _extract_function_block("Get-SourceKind")
         + "\n\n"
+        + _extract_function_block("Enter-PluginSnapshotLock")
+        + "\n\n"
         + _extract_function_block("New-PluginBuildSnapshot")
         + "\n\n"
         + extra_script
         + "\n"
     )
+
+
+def _run_harness(extra_script: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [_PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
+        [_PWSH, "-NoProfile", "-NonInteractive", "-Command", _harness_script(extra_script)],
         capture_output=True,
         text=True,
         env=os.environ,
@@ -349,3 +360,56 @@ Write-Output "RESULT:$result"
     # fresh (redundant) copy.
     assert snap_dir == plugin_dir
     assert sorted(p.name for p in (install_dir / "snapshots").iterdir()) == ["0.1.0-dev1"]
+
+
+def test_concurrent_publishers_never_corrupt_or_lose_the_snapshot(tmp_path: Path) -> None:
+    """Two near-simultaneous callers (e.g. two install/stamp actions
+    launched back-to-back) racing the SAME $InstallDir/$Version must never
+    both observe "no valid snapshot" and each publish their own copy --
+    the later publisher's rename-aside+reap step would otherwise retire the
+    snapshot the earlier caller already returned and may still be actively
+    using. Enter-PluginSnapshotLock serializes the two, so exactly one
+    caller does the real copy and the other reuses it (the idempotent fast
+    path), and the end state is a single, complete, uncorrupted snapshot
+    with no leftover .tmp-/.stale- siblings."""
+    plugin_dir = _marketplace_plugin_dir(tmp_path)
+    install_dir = tmp_path / "install"
+    _seed_plugin_dir(plugin_dir)
+    # Enough file content that the copy takes measurable time, widening the
+    # real race window between the two processes below.
+    bulk_dir = plugin_dir / "src" / "bulk"
+    bulk_dir.mkdir()
+    for i in range(300):
+        (bulk_dir / f"file_{i:03d}.py").write_text(f"x = {i}\n", encoding="utf-8")
+
+    extra = f"""
+$result = New-PluginBuildSnapshot -PluginDir "{plugin_dir}" -InstallDir "{install_dir}" -Version "0.1.0-dev1"
+Write-Output "RESULT:$result"
+"""
+    script = _harness_script(extra)
+    procs = [
+        subprocess.Popen(
+            [_PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=os.environ,
+        )
+        for _ in range(2)
+    ]
+    results = [p.communicate(timeout=60) for p in procs]
+
+    for (stdout, stderr), proc in zip(results, procs):
+        assert proc.returncode == 0, stdout + stderr
+
+    snap_dirs = {
+        Path(stdout.split("RESULT:", 1)[1].strip().splitlines()[0]) for stdout, _ in results
+    }
+    expected = install_dir / "snapshots" / "0.1.0-dev1"
+    assert snap_dirs == {expected}
+
+    # A single complete snapshot, nothing torn or duplicated.
+    assert (expected / "pyproject.toml").exists()
+    assert len(list((expected / "src" / "bulk").glob("file_*.py"))) == 300
+    assert sorted(p.name for p in (install_dir / "snapshots").iterdir()) == ["0.1.0-dev1"]
+
