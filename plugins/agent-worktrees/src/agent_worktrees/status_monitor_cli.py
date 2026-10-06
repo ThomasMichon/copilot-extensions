@@ -204,6 +204,24 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         op = d.get("prefix")
         return not (op and runtime_superseded(prefix=op))
 
+    def _still_own_lock_slot() -> bool:
+        """True unless a replacement candidate already published while we
+        were still running. The muxless/superseded-runtime replacement
+        bypass is keyed purely on lock-FILE metadata (`_other_current_
+        monitor()`'s own exceptions), not this loop's generation-based
+        routing/self-retire mechanism -- a replaceable incumbent can keep
+        running (and periodically renewing its own metadata) with no
+        routing generation ever telling it to retire. Blindly renewing
+        over a replacement's fresh publish would overwrite it with our
+        own stale "replaceable" record, letting a LATER contender see
+        that stale metadata and duplicate (review finding, PR #5412).
+        Checked immediately before each periodic renewal."""
+        existing = _locks.read_lock(lock)
+        if not isinstance(existing, dict):
+            return True
+        owner_pid = existing.get("pid")
+        return owner_pid is None or owner_pid == os.getpid()
+
     # Atomic exclusivity gate -- MUST run before the lock-file check below,
     # not instead of it. The lock file remains the metadata channel other
     # tooling reads (pid/prefix/mux, supersession comparisons); it was never
@@ -328,7 +346,17 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     return 0
             if _other_current_monitor():
                 return 0
-            _locks.write_lock(lock, extra={"prefix": my_prefix, "mux": bool(mux_bin)})
+            if not _locks.write_lock(lock, extra={"prefix": my_prefix, "mux": bool(mux_bin)}):
+                # Best-effort I/O failure (`locks.write_lock()` never
+                # raises). Continuing anyway would be especially unsafe
+                # for a replacement candidate: it holds no lifetime
+                # ownership lease, so a failed publish leaves the
+                # replaceable incumbent's stale metadata visible, letting
+                # a LATER contender take the same bypass and duplicate
+                # (review finding, PR #5412). Abort rather than risk that.
+                if _lease is not None:
+                    _lease.release()
+                return 1
         finally:
             _startup_claim.release()
     elif _other_current_monitor():
@@ -771,6 +799,17 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             try:
                 core._status_monitor_recheck(governance, "iteration-boundary")
                 core._status_monitor_recheck(governance, "pre-mutation:lock-renewal")
+                if not _still_own_lock_slot():
+                    # A replacement candidate already published while we
+                    # were still running (the muxless/superseded-runtime
+                    # bypass is keyed purely on lock-file metadata, not
+                    # this generation-based routing/self-retire
+                    # mechanism) -- renewing now would overwrite their
+                    # fresh metadata with our own stale "replaceable"
+                    # record, letting a LATER contender see it and
+                    # duplicate (review finding, PR #5412). Self-retire
+                    # immediately instead of ever writing.
+                    break
                 _locks.write_lock(lock, extra=_lock_extra())
 
                 picker_projects = monitor_roots.live_picker_projects()
