@@ -65,8 +65,16 @@ set -euo pipefail
 # under-sized override -- would kill mid-cutover, terminating a perfectly
 # healthy install. An operator's own explicit override (env var already
 # set before this script runs) always wins -- only supply a default when
-# none is present.
-: "${AGENT_DISPATCH_INSTALL_DEADLINE_SEC:=1050}"
+# none is present. Checks BOTH the plugin-specific AND the documented
+# generic cross-plugin override (docs/install-contract.md's resolution
+# order: <NAME>_INSTALL_DEADLINE_SEC -> COPILOT_PLUGIN_INSTALL_DEADLINE_SEC
+# -> default): setting only the plugin-specific variable here would mask
+# an operator-provided generic value -- including 0 to disable the
+# watchdog entirely -- since the self-stage block always resolves the
+# plugin-specific name first.
+if [ -z "${AGENT_DISPATCH_INSTALL_DEADLINE_SEC:-}" ] && [ -z "${COPILOT_PLUGIN_INSTALL_DEADLINE_SEC:-}" ]; then
+    AGENT_DISPATCH_INSTALL_DEADLINE_SEC=1050
+fi
 export AGENT_DISPATCH_INSTALL_DEADLINE_SEC
 
 _ok()   { printf '  [OK]   %s\n' "$1"; }

@@ -95,8 +95,15 @@ $ErrorActionPreference = 'Stop'
 # the shared 480s default -- or an under-sized override -- would kill mid-
 # cutover, terminating a perfectly healthy install. An operator's own
 # explicit override (env var already set before this script runs) always
-# wins -- only supply a default when none is present.
-if (-not $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC) { $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC = '1050' }
+# wins -- only supply a default when none is present. Checks BOTH the
+# plugin-specific AND the documented generic cross-plugin override
+# (docs/install-contract.md's resolution order:
+# <NAME>_INSTALL_DEADLINE_SEC -> COPILOT_PLUGIN_INSTALL_DEADLINE_SEC ->
+# default): setting only the plugin-specific variable here would mask an
+# operator-provided generic value -- including 0 to disable the watchdog
+# entirely -- since the self-stage block always resolves the
+# plugin-specific name first.
+if (-not $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC -and -not $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC) { $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC = '1050' }
 
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
