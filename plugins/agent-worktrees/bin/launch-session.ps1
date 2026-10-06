@@ -1649,6 +1649,17 @@ function Invoke-AwPsmuxPassthroughSafe {
         catch { Write-SetupLog "psmux: passthrough apply failed: $($_.Exception.Message)" 'WARN' }
     }
 }
+# Boost this session's psmux server to AboveNormal priority (interim
+# psmux#608 mitigation -- see Set-AwPsmuxServerPriority in session-options.ps1
+# for the full rationale). Called at create + join so a rejoined long-lived
+# server picks up the boost even if it predates this launcher version.
+function Set-AwPsmuxServerPrioritySafe {
+    param([string]$Session)
+    if (Get-Command Set-AwPsmuxServerPriority -ErrorAction SilentlyContinue) {
+        try { Set-AwPsmuxServerPriority -Session $Session }
+        catch { Write-SetupLog "psmux: priority boost failed: $($_.Exception.Message)" 'WARN' }
+    }
+}
 if (-not $noMux) {
     $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
     # `.` is the window/pane separator in a mux target -- keep in sync with
@@ -1686,6 +1697,7 @@ if (-not $noMux) {
         # source-file) so a rejoined long-lived session picks up PageUp/wheel/
         # arrow passthrough.
         Invoke-AwPsmuxPassthroughSafe $sessName
+        Set-AwPsmuxServerPrioritySafe $sessName
         Invoke-ManagedMuxRegister $sessName $muxStatusPath
         # Write last_session immediately before attach: the 3.3.6 attach
         # regression reads that file instead of honoring -t, so this must
@@ -1989,6 +2001,7 @@ if (-not $noMux) {
         # Apply the keystroke passthrough to the new session's server
         # (per-session source-file) so PageUp/wheel/arrows reach Copilot.
         Invoke-AwPsmuxPassthroughSafe $sessName
+        Set-AwPsmuxServerPrioritySafe $sessName
         Invoke-ManagedMuxRegister $sessName $muxStatusPath
         Invoke-SeedDeliverySafe $plan.worktree_id
         if ($nested) {
