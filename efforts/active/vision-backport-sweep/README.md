@@ -324,19 +324,25 @@ then rather than assuming either answer.
   `#5472`/`#5468` ("port `agent-pull-requests`' refusal pattern") was
   incomplete: a refusal alone leaves no sanctioned fast inner loop for
   genuine same-version iteration, and a separately-corrupted (not just
-  content-mismatched) slot needs its own repair story — stop, delete the
-  whole slot, rebuild fresh at the same version, never patch in place.
-- This repo already has exactly the mechanism the operator described:
-  `efforts/active/mutable-dev-slot/` (design doc
+  content-mismatched) slot needs its own repair story.
+- This repo already has exactly the mechanism the operator described for
+  the iteration side: `efforts/active/mutable-dev-slot/` (design doc
   `docs/patterns/mutable-dev-slot.md`) built a protected, claim-gated,
-  genuinely mutable `versions/dev` slot per plugin for precisely this case
-  — piloted on `agent-codespaces`, not yet rolled out to the other 11
-  vendoring plugins (its own Phase 3, previously unprioritized).
-- Added the operator's corruption-repair guidance as a new doc section
-  (*Repairing a broken numbered slot is a delete, never an edit*) and an
-  *Ordinary installers* refusal-guard section to
-  `docs/patterns/mutable-dev-slot.md`; updated `#5472`/`#5468` to point at
-  both; prioritized `mutable-dev-slot`'s Phase 3 rollout list with the
-  specific plugins this audit found. This is a fix-direction correction
-  only — the Phase 3 conformance table and classifications above are
-  unchanged.
+  genuinely mutable `versions/dev` slot per plugin — piloted on
+  `agent-codespaces`, not yet rolled out to the other 11 vendoring plugins
+  (its own Phase 3, previously unprioritized).
+- Added the operator's corruption-repair instinct as a new doc section —
+  but a first draft of it (stop, delete the whole slot, rebuild fresh at
+  the *same* version) was itself flagged by that PR's own review as
+  violating `immutable-versioned-runtime`'s rollback guarantee (reusing a
+  retired identity for a new build is still a rewrite of what that identity
+  means). Reworked to the correct shape: a broken-slot repair is an
+  ordinary generation cutover — build the replacement under a **distinct**
+  generation identity, promote it only once health-gated, then drain and
+  retire the broken slot through the exact same serialize/promote-before-
+  retire/drain discipline `graceful-daemon-cutover` already requires for
+  every other cutover path — not a delete-and-reuse shortcut.
+- Updated `#5472`/`#5468` to point at both pieces; prioritized
+  `mutable-dev-slot`'s Phase 3 rollout list with the specific plugins this
+  audit found. This is a fix-direction correction only — the Phase 3
+  conformance table and classifications above are unchanged.

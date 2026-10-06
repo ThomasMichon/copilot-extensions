@@ -219,17 +219,21 @@ correctness bug on top of the immutability violation.
   anti-pattern: same version string, genuinely different content), **refuse**
   — exit non-zero with a message naming the mismatch and pointing at `dev`/
   `dev-release` as the correct path for iterating without a version bump.
-  `agent-pull-requests`' installer (`install.ps1`) is the reference
-  implementation of this refusal. A `--force` override must not bypass this
-  check; forcing a rebuild over a live, completed slot is exactly what this
-  guard exists to prevent, not an escape hatch from it.
+  `agent-pull-requests`' installer (`install.ps1`/`install.sh`) already
+  implements the **refusal half** of this ("bump the version instead of
+  rebuilding an immutable slot in place") — copy that check, not its error
+  message, since neither installer yet points the caller at `dev`/
+  `dev-release` (it hasn't adopted that mechanism itself). A `--force`
+  override must not bypass this check; forcing a rebuild over a live,
+  completed slot is exactly what this guard exists to prevent, not an
+  escape hatch from it.
 
 This refusal is what actually closes the loop `dev` opened: without it, a
 contributor (or an impatient automation) can still reach for "just run
 install.ps1 again" and silently re-trigger the old hot-patch-equivalent
 hazard against a numbered slot, bypassing `dev` entirely.
 
-## Repairing a broken numbered slot is a delete, never an edit
+## Repairing a broken numbered slot is a cutover, not a delete-and-rebuild
 
 A numbered slot can end up broken at runtime despite having a seemingly
 valid completion marker — a partial write survived a crash in a way
@@ -241,32 +245,61 @@ the ordinary no-op/refuse logic sees nothing wrong), yet the slot is
 provably unhealthy by a direct check (an import smoke-test, a health
 endpoint, a corrupted trampoline).
 
-Recovering from this is explicitly **not** a routine update, and must not
-be handled by patching files inside the existing directory — that is
-editing an immutable slot in place by another name, just triggered by a
-health check instead of a version bump. The correct repair sequence is:
+**This is not a license to delete and rebuild the same slot directory.**
+An earlier draft of this section said exactly that; it was wrong; keep
+reading rather than copying that shape. `immutable-versioned-runtime`
+(`visions/plugin-services/README.md`'s *Features*) requires that "a new
+version is installed **beside** the old one... switching versions... is a
+selection, not a rewrite." Deleting `versions/<v>` and recreating a build
+under that same identity still rewrites what that identity refers to — it
+destroys the one build `last-known-good`/an operator's rollback intent
+might still be pointing at, exactly as if the files had been edited in
+place one at a time. Treat recovery as an ordinary generation cutover whose
+trigger is a failed health check instead of a version bump, reusing the
+exact serialization and promote-before-retire discipline
+[`graceful-daemon-cutover`](graceful-daemon-cutover.md) already requires
+for every other cutover/repair path in this repo:
 
 1. **Confirm the slot is genuinely broken** via a direct check (import
    smoke-test, signature/trampoline validation, a declared health probe) —
    never assume brokenness from an absent marker alone; `toss_incomplete()`
-   already handles the markerless case.
-2. **Stop whatever is live on that slot first**, if anything — the same
-   daemon-stop step an ordinary cutover would use, since the slot is about
-   to be destroyed out from under it.
-3. **Delete the entire slot directory**, not selected files within it — a
-   partial, surgical patch cannot prove it removed every trace of whatever
-   corrupted the slot in the first place.
-4. **Rebuild fresh at the same version number**, exactly as a first install
-   would, then re-run the completion marker + health gate before
-   activating.
+   already handles the markerless case, and is not what this section is
+   about.
+2. **Acquire the same exclusive cutover lease an ordinary update/promotion
+   holds** before touching any generation state — a repair racing a
+   concurrent installer run (or a second repair attempt) must not be
+   possible, per *graceful-daemon-cutover*'s serialization rule.
+3. **Build the replacement under a distinct generation identity**, never
+   back into the broken slot's own directory — e.g. a repair-sequence
+   suffix on the version string (`<version>+repair1`), so the broken
+   slot's identity is left completely untouched and `last-known-good`
+   still means what it said before the repair started. Health-gate the new
+   build in isolation, exactly like an ordinary install.
+4. **Promote before you retire, never the reverse**: once the replacement's
+   health gate passes, atomically flip `current-version` (and any routing)
+   to it. Only after that promotion is *confirmed* — not merely
+   attempted — does the broken slot become eligible for retirement.
+5. **Drain and retire the broken slot through the ordinary cutover path**:
+   closed admission + any already-admitted work finished before removal,
+   same as a routine cutover. Re-validate the broken slot's own identity
+   immediately before removing it (its owner/lock/routing agreement may
+   have changed between step 1's detection and this action) rather than
+   trusting a stale snapshot — if nothing was ever live on it, this
+   collapses to an immediate, uneventful removal.
 
-Because this sequence razes and rebuilds the whole directory rather than
-editing any file in it, it satisfies `immutable-versioned-runtime` by
-construction — a repaired slot is a **new build that happens to share its
-predecessor's version number**, not a mutation of the old one. Treat it as
-a rare, logged, operator-visible event (this is infrastructure self-repair,
-not silent-and-routine), distinct from both the ordinary install/update
-path above and from `dev`'s deliberately-mutable, claim-gated exception.
+Because the replacement is built under its own distinct identity and
+promoted before the broken slot is ever touched, this satisfies
+`immutable-versioned-runtime` and `zero-downtime-cutover` by construction —
+no identity is ever rewritten, and the broken slot's own (non-)rollback
+value is lost only because it was never a valid rollback target to begin
+with. Treat this as a rare, logged, operator-visible event (infrastructure
+self-repair, not silent-and-routine), distinct from both the ordinary
+install/update path above and from `dev`'s deliberately-mutable,
+claim-gated exception. The exact generation-naming scheme (`+repairN` or
+otherwise) and lease primitive are implementation detail for whichever
+plugin needs this first — this section fixes the *contract* (distinct
+identity, promote-before-retire, same lease as every other cutover), not
+the wiring.
 
 ## Rationale
 
@@ -287,6 +320,9 @@ adding a second, uncontrolled mutability posture to the runtime.
 - [`durable-vs-versioned-runtime`](durable-vs-versioned-runtime.md) — the
   general immutable/durable split this pattern narrows for one specific,
   worktree-scoped exception.
+- [`graceful-daemon-cutover`](graceful-daemon-cutover.md) — the
+  serialization, promote-before-retire, and drain discipline *Repairing a
+  broken numbered slot* reuses rather than inventing a parallel contract.
 - `libs/versioned-runtime/versioned_runtime.py` — `claim_dev` / `release_dev`
   / `read_dev_claim`, and `gc()`'s dev-slot protection.
 - `plugins/agent-worktrees/src/agent_worktrees/finalize.py` --

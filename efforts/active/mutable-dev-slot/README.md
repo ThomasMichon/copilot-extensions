@@ -167,13 +167,18 @@ for the full design.
   path still silently mutates a completed numbered slot in place for a
   same-version, changed-content update -- the exact anti-pattern this
   effort's `dev`/`dev-release` mechanism exists to replace, still reachable
-  because no plugin's ordinary path *refuses* it. Added two new sections to
+  because most plugins' ordinary paths don't *refuse* it (`agent-pull-requests`
+  is the one exception already carrying the refusal guard, just not the
+  `dev`/`dev-release` redirect). Added two new sections to
   `docs/patterns/mutable-dev-slot.md` (*Ordinary installers: refuse, never
   silently mutate a numbered slot*, and *Repairing a broken numbered slot is
-  a delete, never an edit* -- the latter per an operator design note: a
-  genuinely corrupted slot is stopped, deleted whole, and rebuilt fresh at
-  the same version, never patched in place) and prioritized Phase 3's
-  rollout list with the specific plugins that audit identified.
+  a cutover, not a delete-and-rebuild* -- reworked after review correctly
+  flagged that an earlier delete-and-rebuild-same-version draft of the
+  latter still violated `immutable-versioned-runtime`'s rollback guarantee;
+  it now reuses `graceful-daemon-cutover`'s existing serialize/promote-
+  before-retire/drain contract under a distinct generation identity instead)
+  and prioritized Phase 3's rollout list with the specific plugins that
+  audit identified.
 
 ### 2026-09-23 — Phase 1 landed
 - Core primitive, tests, GC protection, finalize warning hook, and design
