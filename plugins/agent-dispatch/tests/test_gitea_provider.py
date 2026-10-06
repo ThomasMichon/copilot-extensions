@@ -178,10 +178,37 @@ def test_all_comments_raises_past_the_bounded_scan(monkeypatch):
             return _status({"login": "issue-bot"}, 200)
         if url.endswith("/api/v1/repos/example/project"):
             return _status({"full_name": "example/project"}, 200)
-        return _status([{"id": n} for n in range(50)], 200)  # always a full page
+        # Every page returns a full page of genuinely new ids, so the scan
+        # legitimately never terminates within the bounded page count.
+        page = int(url.rsplit("page=", 1)[1].split("&", 1)[0])
+        start = (page - 1) * 50
+        return _status([{"id": n} for n in range(start, start + 50)], 200)
 
     with pytest.raises(RuntimeError, match="bounded"):
         _provider(runner)._all_comments("example/project", 1)
+
+
+def test_all_comments_stops_when_gitea_ignores_pagination(monkeypatch):
+    """Gitea's issue-comments endpoint has been observed (live, against
+    gitea.michon.ski) to silently ignore ``page``/``limit`` and return the
+    same full, unpaginated comment list on every call. Stopping only on an
+    *empty* page would never trigger here, spuriously raising the bounded-
+    scan error for any issue with at least one comment."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+
+    def runner(args, **kwargs):
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status({"login": "issue-bot"}, 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status({"full_name": "example/project"}, 200)
+        # Same two comments returned verbatim regardless of page/limit.
+        return _status(
+            [{"id": 1, "body": "first"}, {"id": 2, "body": "second"}], 200
+        )
+
+    comments = _provider(runner)._all_comments("example/project", 1)
+    assert [c["id"] for c in comments] == [1, 2]
 
 
 def test_reservation_marker_roundtrips_through_comments(monkeypatch):
@@ -291,10 +318,11 @@ def test_label_id_resolution_raises_when_label_absent(monkeypatch):
             return _status({"login": "issue-bot"}, 200)
         if url.endswith("/api/v1/repos/example/project"):
             return _status({"full_name": "example/project"}, 200)
-        if "/issues/1/comments?" in url and method == "GET":
-            return _status([], 200)
         if url.endswith("/issues/1/comments") and method == "POST":
-            return _status({"id": 1}, 201)
+            raise AssertionError(
+                "reserve() must not persist the reserved marker comment "
+                "before the label prerequisite succeeds"
+            )
         if "/labels?page=" in url and method == "GET":
             return _status([], 200)
         raise AssertionError(f"unexpected curl invocation: {method} {url}")

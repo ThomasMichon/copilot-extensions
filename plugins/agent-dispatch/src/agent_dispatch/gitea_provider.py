@@ -147,8 +147,18 @@ class GiteaProvider:
         enough comments to push it past the first page -- discovery would
         then treat an already-reserved issue as unreserved and dispatch
         duplicate work.
+
+        Gitea's issue-comments endpoint (unlike its issues/labels listings)
+        has been observed to silently ignore ``page``/``limit`` and return
+        the full, unpaginated comment list on every call. Stopping only on
+        an *empty* page would then never trigger -- every page repeats the
+        same non-empty result until the bounded-pages ceiling raises, even
+        though all comments were already seen on page 1. Stop as soon as a
+        page contributes no new comment id, which is correct whether the
+        server paginates normally or ignores pagination entirely.
         """
         comments: list[dict[str, Any]] = []
+        seen_ids: set[Any] = set()
         for _page_index in range(_MAX_ISSUE_PAGES):
             page = _page_index + 1
             rows = self._call(
@@ -158,7 +168,12 @@ class GiteaProvider:
             ) or []
             if not rows:
                 return comments
-            comments.extend(rows)
+            new_rows = [row for row in rows if row.get("id") not in seen_ids]
+            if not new_rows:
+                return comments
+            for row in new_rows:
+                seen_ids.add(row.get("id"))
+            comments.extend(new_rows)
         raise RuntimeError(
             f"Gitea comment listing for {repo}#{number} exceeded the bounded "
             f"{_MAX_ISSUE_PAGES} pages"
@@ -288,13 +303,17 @@ class GiteaProvider:
         )
 
     def reserve(self, repo: str, issue: "Issue", reservation: dict[str, Any]) -> None:
-        self._comment(repo, issue, {**reservation, "issue": issue.number})
+        # Resolve the label prerequisite (lookup + add) *before* writing the
+        # `reserved` marker comment. If the label is missing or the add fails,
+        # this raises before any marker exists, so discovery never sees a
+        # phantom reservation on an issue the caller never actually reserved.
         self._verify_identity(repo, allow_cache=False)
         label_id = self._label_id(repo, reservation["label"])
         self._call(
             "POST", f"/repos/{repo}/issues/{issue.number}/labels",
             payload={"labels": [label_id]}, ok=(200, 201),
         )
+        self._comment(repo, issue, {**reservation, "issue": issue.number})
 
     def claim(
         self, repo: str, issue: "Issue", reservation: dict[str, Any], task_id: str
