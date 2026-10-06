@@ -85,9 +85,10 @@ def cmd_daemons(rest: list[str]) -> int:
         print("   session can retain live: true until the next real probe. Shared")
         print("   across every resident daemon for this root, not attributable to")
         print("   one specific pid)")
-        print("  (attached_clients reflects only what a register() caller supplied --")
-        print("   today's shipped launch scripts never populate it, so it reads 0")
-        print("   even for a genuinely attached session; preliminary listing only)")
+        print("  (attached_clients converges onto the real list-clients count within")
+        print("   one status-render cycle of the daemon observing a live session --")
+        print("   see mux_daemon._mux_attached_clients (#4564); a brand-new mapping")
+        print("   that hasn't yet seen its first cycle may still read 0)")
         return 0
     print(f"error: unknown daemons action {action!r}")
     return 2

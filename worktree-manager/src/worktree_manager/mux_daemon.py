@@ -45,9 +45,8 @@ from pathlib import Path
 from work_coalescing_singleton import CoalescingServer
 from zdd.diagnostics import process_start_time
 
-from . import mux_daemon_cutover
-from . import mux_daemon_live
-from . import mux_daemon_process
+from . import mux_daemon_cutover, mux_daemon_live, mux_daemon_process
+from .mux_attached_clients import refresh_attached_clients
 from .mux_mapping_registry import (
     MuxMappingRegistry,
     LIVE_MAPPING_BACKSTOP_INTERVAL_S,
@@ -564,6 +563,7 @@ def build_compute(
             ):
                 return {"applied": False, "reason": "not-live"}
 
+            refresh_attached_clients(registry, current)  # #4564 freshness
             if handler_tracker is not None:
                 handler_tracker.enter()
             try:

@@ -343,19 +343,20 @@ def mapping_statuses(root: Path | None = None) -> list[dict[str, Any]]:
     Manager has ever registered, each one's own ``live`` flag, and its
     registry-tracked ``attached_clients`` count.
 
-    **Known, real limitation in ``attached_clients`` today:** this field is
-    only ever as accurate as whatever a ``register()`` caller actually
-    populates. Both shipped launch paths
-    (``bin/launch-session.sh``/``.ps1``) never pass ``--attached-clients``
-    at all, so normalization (``_normalize_mapping_entry``) defaults it to
-    ``0`` for every real mapping registered today, and nothing refreshes it
-    afterward (status-monitor applies only ever touch
-    ``last_status_rendered_at``). This function reports that value exactly
-    as stored -- it does not invent, estimate, or silently correct it. A
-    genuinely live, actively-attached session can therefore show
-    ``attached_clients: 0`` in production right now; fixing that is
-    separate, tracked follow-on work (populating/refreshing the field at
-    its real source), not something this read-only listing can paper over.
+    **``attached_clients`` freshness (#4564):** neither shipped launch path
+    (``bin/launch-session.sh``/``.ps1``) ever passes ``--attached-clients``
+    at register() time, so normalization (``_normalize_mapping_entry``)
+    defaults a brand-new mapping to ``0``. ``mux_daemon.build_compute``'s
+    ``mux-status-v1`` handler now opportunistically refreshes the field
+    (``list-clients``) at the same periodic cadence routed status renders
+    already arrive at, so a genuinely live, attached session converges onto
+    its real count within one status-render cycle of the daemon observing
+    it -- it is no longer stuck at a stale launch-time value forever. This
+    function still reports whatever is currently stored exactly as-is (it
+    never invents or estimates); a brand-new mapping that hasn't yet seen
+    its first status-render cycle, or one whose mux session accepts no
+    routed status (@aw_* writes are the only thing that currently drives
+    this refresh), can still read ``0``/stale momentarily.
 
     This is NOT filtered to currently-live mappings either: ``snapshot()``
     also returns tombstoned entries (``live: False``), which the registry
