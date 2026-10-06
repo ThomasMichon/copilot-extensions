@@ -217,3 +217,111 @@ def test_do_update_holds_cutover_lock_through_the_real_cutover_call() -> None:
     # the lock must span the real cutover call AND the unit reconciliation
     # that completes the fallback, not be released in between.
     assert cutover_call_idx < install_service_idx < unlock_idx
+
+
+def _run_do_stamp_harness(
+    tmp_path: Path,
+    *,
+    src_version: str,
+    existing_stamped_version: str | None,
+    existing_active_version: str | None = None,
+    force: bool = False,
+) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    """do_stamp's version-ordering guard (parity with install.ps1's
+    Invoke-Stamp), with `_versioned_current` stubbed to return
+    `existing_active_version` (the real `current-version` authority a
+    direct install/update advances, independent of the dedicated
+    stamped-version marker this guard also checks) and `deploy_binstub`
+    stubbed to drop a marker file -- so a test can prove whether the real
+    binstub deploy happened, not just what it printed."""
+    install_dir = tmp_path / "install"
+    install_dir.mkdir(parents=True)
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir(parents=True)
+    if existing_stamped_version is not None:
+        (install_dir / "stamped-version").write_text(existing_stamped_version, encoding="utf-8")
+    deployed_marker = tmp_path / "binstub-deployed"
+
+    script = "\n".join([
+        "#!/bin/sh",
+        "set -eu",
+        '_ok() { printf "OK: %s\\n" "$1"; }',
+        '_skip() { printf "SKIP: %s\\n" "$1"; }',
+        '_fail() { printf "FAIL: %s\\n" "$1" >&2; }',
+        # Stubbed: irrelevant to the version-ordering guard under test.
+        f'_versioned_current() {{ printf \'%s\' "{existing_active_version or ""}"; }}',
+        f'deploy_binstub() {{ : > "{deployed_marker}"; }}',
+        _extract_function_block("_version_lt"),
+        _extract_function_block("do_stamp"),
+        f'INSTALL_DIR="{install_dir.as_posix()}"',
+        f'LOCAL_BIN="{(tmp_path / "localbin").as_posix()}"',
+        f'PLUGIN_DIR="{plugin_dir.as_posix()}"',
+        f'SRC_VERSION="{src_version}"',
+        f"FORCE={1 if force else 0}",
+        "do_stamp",
+    ])
+
+    fd, script_path = tempfile.mkstemp(suffix=".sh", dir=str(_INSTALL_SH.parent))
+    try:
+        with os.fdopen(fd, "w", newline="\n", encoding="utf-8") as f:
+            f.write(script + "\n")
+        env = dict(os.environ)
+        env["MSYS"] = "winsymlinks:nativestrict"
+        result = subprocess.run(
+            [_BASH, os.path.basename(script_path)],
+            cwd=str(_INSTALL_SH.parent),
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env=env,
+        )
+    finally:
+        os.unlink(script_path)
+    return result, install_dir / "stamped-version", deployed_marker
+
+
+def test_do_stamp_publishes_normally_with_nothing_prior(tmp_path: Path) -> None:
+    result, marker, deployed = _run_do_stamp_harness(
+        tmp_path, src_version="0.2.0-dev1", existing_stamped_version=None
+    )
+    assert marker.read_text(encoding="utf-8") == "0.2.0-dev1", result.stdout + result.stderr
+    assert deployed.exists()
+
+
+def test_do_stamp_skips_when_older_than_the_active_install(tmp_path: Path) -> None:
+    """A direct install/update advances `current-version` without ever
+    touching `stamped-version` -- do_stamp must still reject a delayed
+    stamp older than the real active install, not just one older than a
+    prior stamp."""
+    result, marker, deployed = _run_do_stamp_harness(
+        tmp_path,
+        src_version="0.2.0-dev1",
+        existing_stamped_version=None,
+        existing_active_version="0.2.0-dev2",
+    )
+    assert "Not publishing" in result.stdout, result.stdout + result.stderr
+    assert "already-active" in result.stdout, result.stdout + result.stderr
+    assert not deployed.exists()
+    assert not marker.exists()
+
+
+def test_do_stamp_skips_when_older_than_a_prior_stamp(tmp_path: Path) -> None:
+    result, marker, deployed = _run_do_stamp_harness(
+        tmp_path, src_version="0.2.0-dev1", existing_stamped_version="0.2.0-dev2"
+    )
+    assert "Not publishing" in result.stdout, result.stdout + result.stderr
+    assert "already-stamped" in result.stdout, result.stdout + result.stderr
+    assert not deployed.exists()
+    assert marker.read_text(encoding="utf-8") == "0.2.0-dev2"
+
+
+def test_do_stamp_force_overrides_both_version_guards(tmp_path: Path) -> None:
+    result, marker, deployed = _run_do_stamp_harness(
+        tmp_path,
+        src_version="0.2.0-dev1",
+        existing_stamped_version="0.2.0-dev2",
+        existing_active_version="0.2.0-dev2",
+        force=True,
+    )
+    assert marker.read_text(encoding="utf-8") == "0.2.0-dev1", result.stdout + result.stderr
+    assert deployed.exists()

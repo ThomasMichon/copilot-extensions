@@ -672,15 +672,19 @@ def _run_stamp_harness(
     *,
     src_version: str,
     existing_stamped_version: str | None,
+    existing_active_version: str | None = None,
     force: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """Invoke-Stamp's version-ordering guard, with everything it depends on
     OTHER than Test-VersionLt/Enter-PluginSnapshotLock/Publish-FileAtomically
     stubbed out (a real snapshot build is irrelevant to the guard itself and
-    heavy to construct here). The Deploy-SelfProvisioningBinstub stub writes
-    a marker file instead of a plain no-op, so a test can prove whether it
-    ran (and thus whether it ran INSIDE the lock, before a guard-triggered
-    early return)."""
+    heavy to construct here). Get-VersionedCurrent is stubbed to return
+    `existing_active_version` -- the REAL `current-version` authority a
+    direct install/update advances, independent of (and never read by) the
+    stamped-version marker this guard also checks. The
+    Deploy-SelfProvisioningBinstub stub writes a marker file instead of a
+    plain no-op, so a test can prove whether it ran (and thus whether it
+    ran INSIDE the lock, before a guard-triggered early return)."""
     install_dir = tmp_path / "install"
     install_dir.mkdir(parents=True)
     plugin_dir = _marketplace_plugin_dir(tmp_path)
@@ -698,6 +702,7 @@ def _run_stamp_harness(
         # Stubbed: irrelevant to the version-ordering guard under test.
         "function New-PluginBuildSnapshot { param($PluginDir, $InstallDir, $Version) return Join-Path $InstallDir \"snapshots/$Version\" }\n"
         f'function Deploy-SelfProvisioningBinstub {{ Set-Content -Path "{deployed_marker}" -Value "deployed" }}\n'
+        f'function Get-VersionedCurrent {{ return "{existing_active_version or ""}" }}\n'
         + _extract_function_block("Get-VerTuple")
         + "\n\n"
         + _extract_function_block("Test-VersionLt")
@@ -754,6 +759,38 @@ def test_stamp_skips_publishing_when_older_than_current(tmp_path: Path) -> None:
     assert "Not publishing" in result.stdout, result.stdout + result.stderr
     assert not deployed.exists()
     assert marker.read_text(encoding="utf-8") == "0.2.0-dev2"
+
+
+def test_stamp_skips_publishing_when_older_than_the_active_install(tmp_path: Path) -> None:
+    """A direct install/update advances `current-version` WITHOUT ever
+    touching `stamped-version` -- the stamped-version-only guard above
+    catches a delayed stamp racing another STAMP, but not one racing a
+    real install/update that has since activated a newer build. A delayed
+    stamp reaching this guard with NO prior stamped-version at all (so the
+    stamped-version check alone would let it through) must still be
+    rejected when a newer version is already the real active install."""
+    result, marker, deployed = _run_stamp_harness(
+        tmp_path,
+        src_version="0.2.0-dev1",
+        existing_stamped_version=None,
+        existing_active_version="0.2.0-dev2",
+    )
+    assert "Not publishing" in result.stdout, result.stdout + result.stderr
+    assert "already-active" in result.stdout, result.stdout + result.stderr
+    assert not deployed.exists()
+    assert not marker.exists()
+
+
+def test_stamp_force_overrides_the_active_install_version_guard(tmp_path: Path) -> None:
+    result, marker, deployed = _run_stamp_harness(
+        tmp_path,
+        src_version="0.2.0-dev1",
+        existing_stamped_version=None,
+        existing_active_version="0.2.0-dev2",
+        force=True,
+    )
+    assert marker.read_text(encoding="utf-8") == "0.2.0-dev1", result.stdout + result.stderr
+    assert deployed.exists()
 
 
 def test_stamp_force_overrides_the_version_ordering_guard(tmp_path: Path) -> None:

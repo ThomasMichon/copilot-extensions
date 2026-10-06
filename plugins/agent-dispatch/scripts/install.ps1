@@ -3466,6 +3466,18 @@ function Invoke-Stamp {
         $currentStamped = if (Test-Path $stampedVersionMarker) {
             (Get-Content -LiteralPath $stampedVersionMarker -Raw -ErrorAction SilentlyContinue).Trim()
         } else { $null }
+        # A direct install/update advances `current-version` (via
+        # Invoke-VersionedActivate) WITHOUT ever touching `stamped-version`
+        # -- the stamped-version check above only catches a delayed stamp
+        # racing another STAMP, not one racing a real install/update that
+        # has since activated a newer build. Check BOTH authorities (still
+        # under this same lock, so this reads the true latest of each) and
+        # skip if the source is older than EITHER one.
+        $currentActive = Get-VersionedCurrent
+        if ($currentActive -and (Test-VersionLt -A $SrcVersion -B $currentActive) -and -not $Force) {
+            Write-Skip "Not publishing: source $SrcVersion is older than already-active $currentActive (a newer install/update activated first; -Force to override)"
+            return
+        }
         if ($currentStamped -and (Test-VersionLt -A $SrcVersion -B $currentStamped) -and -not $Force) {
             Write-Skip "Not publishing: source $SrcVersion is older than already-stamped $currentStamped (a newer stamp arrived first; -Force to override)"
             return

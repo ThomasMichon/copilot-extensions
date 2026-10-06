@@ -45,6 +45,23 @@
 
 set -euo pipefail
 
+# Raise the shared self-stage watchdog's deadline for THIS plugin
+# specifically, via the exact per-plugin override hook the byte-identical
+# install-contract:v4 self-stage block below already reads
+# (__ss_dl_var="<PLUGIN>_INSTALL_DEADLINE_SEC") -- deliberately set OUTSIDE
+# that block (never edit its literal "480" default: tools/check-install-
+# contract.py enforces it byte-identical across every plugin's own copy;
+# mirrors the identical install.ps1 override just above its own
+# byte-identical self-stage block). agent-dispatch specifically can
+# legitimately spend 30-120s building PLUS up to ~450s waiting on its own
+# cross-version activation/cutover lock (_versioned_activate's lock) -- a
+# genuine ~570s worst case the shared 480s default would kill mid-wait,
+# terminating a perfectly healthy newer install. An operator's own explicit
+# override (env var already set before this script runs) always wins --
+# only supply a default when none is present.
+: "${AGENT_DISPATCH_INSTALL_DEADLINE_SEC:=650}"
+export AGENT_DISPATCH_INSTALL_DEADLINE_SEC
+
 _ok()   { printf '  [OK]   %s\n' "$1"; }
 _skip() { printf '  [SKIP] %s\n' "$1"; }
 _fail() { printf '  [FAIL] %s\n' "$1" >&2; }
@@ -1781,11 +1798,9 @@ _install_supervisor_service() {
 do_stamp() {
     echo ''; echo '=== agent-dispatch stamp (defer runtime to first use) ==='; echo ''
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
     # Serialized under the SAME global activation lock _versioned_activate/
     # _ensure_runtime's own post-supersession-check deploy_binstub use: this
-    # fast, version-unaware stamp path has no version comparison of its own,
-    # but its deploy_binstub call still writes the identical shared
+    # fast path's deploy_binstub call still writes the identical shared
     # binstub/resolver surface a concurrent real install/update's own
     # (correctly version-ordered) deploy_binstub call writes -- without this
     # lock the two writes could interleave with no defined winner at all.
@@ -1823,6 +1838,33 @@ do_stamp() {
             fi
         done
     fi
+    # Version-ordering guard, UNDER this same lock (parity with install.ps1's
+    # Invoke-Stamp): unlike that PowerShell path, this fast stamp previously
+    # recorded and compared NO version at all, so a delayed stamp from an
+    # older payload could acquire this lock after a newer install/update (or
+    # a newer stamp) had already published and silently overwrite the shared
+    # resolver/binstub surface. Check BOTH authorities a real install/update
+    # or a prior stamp could have advanced -- the live active version
+    # (_versioned_current) and this dedicated stamped-version marker --
+    # mirroring _downgrade_guard's own --force/AGENT_DISPATCH_ALLOW_DOWNGRADE
+    # override for a deliberate rollback.
+    local stamped_version_marker="$INSTALL_DIR/stamped-version"
+    local current_stamped=""
+    [[ -f "$stamped_version_marker" ]] && current_stamped="$(cat "$stamped_version_marker" 2>/dev/null || true)"
+    local current_active
+    current_active="$(_versioned_current)"
+    if [[ -n "$current_active" ]] && _version_lt "$SRC_VERSION" "$current_active" && [[ "$FORCE" -ne 1 ]]; then
+        _skip "Not publishing: source $SRC_VERSION is older than already-active $current_active (a newer install/update activated first; --force to override)"
+        _unlock_stamp_binstub
+        return 0
+    fi
+    if [[ -n "$current_stamped" ]] && _version_lt "$SRC_VERSION" "$current_stamped" && [[ "$FORCE" -ne 1 ]]; then
+        _skip "Not publishing: source $SRC_VERSION is older than already-stamped $current_stamped (a newer stamp arrived first; --force to override)"
+        _unlock_stamp_binstub
+        return 0
+    fi
+    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+    printf '%s' "$SRC_VERSION" > "$stamped_version_marker"
     deploy_binstub
     _unlock_stamp_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
