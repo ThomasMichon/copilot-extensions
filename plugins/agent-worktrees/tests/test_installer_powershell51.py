@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -383,13 +384,14 @@ def test_slot_clean_reports_failure_instead_of_silently_downgrading_signed_venv(
 
 
 def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
-    """#5439 review finding: `Invoke-VersionedSlotClean`'s liveness check alone
-    is check-then-act -- two concurrent installer invocations could both
-    observe a clean slot (neither has started its external build yet) and
-    then both build into it. `Deploy-Venv` must acquire an OS-level exclusive
-    build lease FIRST (before even attempting slot-clean), fail immediately
-    if another live process already holds it, and `Invoke-VersionedActivate`
-    must release that lease afterward regardless of outcome."""
+    """A slot-clean liveness check alone is check-then-act -- two concurrent
+    installer invocations could both observe a clean slot (neither has
+    started its external build yet) and then both build into it (#5439).
+    `Deploy-Venv` must acquire an OS-level exclusive build lease FIRST --
+    before even its existing-unsigned-venv-removal logic, let alone
+    `Invoke-VersionedSlotClean` -- fail immediately if another live process
+    already holds it, and `Invoke-VersionedActivate` must release that lease
+    afterward regardless of outcome."""
     installer = INSTALLER.read_text(encoding="utf-8")
     deploy_fn = installer.split("function Deploy-Venv", 1)[1].split(
         "function Deploy-Wrappers", 1
@@ -398,9 +400,11 @@ def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
 
     lease_idx = deploy_fn.index("Enter-VersionedSlotLease")
     clean_idx = deploy_fn.index("Invoke-VersionedSlotClean")
-    assert lease_idx < clean_idx, (
-        "the exclusive build lease must be acquired before the slot-clean "
-        "check, not after"
+    rebuild_idx = deploy_fn.index("Rebuild an existing venv")
+    assert lease_idx < rebuild_idx < clean_idx, (
+        "the exclusive build lease must be acquired before ANY slot "
+        "inspection or mutation, including the existing-unsigned-venv "
+        "removal logic -- not just before the slot-clean check"
     )
     assert "if (-not (Enter-VersionedSlotLease)) {" in deploy_fn
     lease_fail_branch = deploy_fn.split(
@@ -414,6 +418,129 @@ def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
     assert "Invoke-VersionedActivateInner" in activate_wrapper
     assert "finally {" in activate_wrapper
     assert "Exit-VersionedSlotLease" in activate_wrapper
+
+
+def test_versioned_slot_lease_handle_initialized_before_use_under_strict_mode():
+    """This installer runs under `Set-StrictMode -Version Latest` (asserted
+    below): reading a script-scoped variable that was never assigned throws
+    `VariableIsUndefined` rather than treating it as falsy/null. The first
+    read of `$script:VersionedSlotLeaseHandle` happens in
+    `Enter-VersionedSlotLease` (and again in `Exit-VersionedSlotLease`), so
+    it must be explicitly initialized at script scope before either
+    function can ever run -- not left to spring into existence on first
+    assignment."""
+    installer = INSTALLER.read_text(encoding="utf-8")
+    assert "Set-StrictMode -Version Latest" in installer
+
+    init_idx = installer.index("$script:VersionedSlotLeaseHandle = $null")
+    enter_fn_idx = installer.index("function Enter-VersionedSlotLease")
+    exit_fn_idx = installer.index("function Exit-VersionedSlotLease")
+    assert init_idx < enter_fn_idx < exit_fn_idx, (
+        "the script-scoped lease handle must be initialized to $null before "
+        "either Enter-VersionedSlotLease or Exit-VersionedSlotLease is "
+        "defined, so it already exists by the time either one is called"
+    )
+
+
+def _extract_lease_functions(installer_text: str) -> str:
+    """Pull the lease primitive (and its script-scope init) out of the full
+    installer, standalone and runnable under `Set-StrictMode -Version
+    Latest` without needing the rest of install.ps1's argument parsing /
+    side effects."""
+    get_path_fn = installer_text.split(
+        "function Get-VersionedSlotLeasePath {", 1
+    )[1].split("\n}\n", 1)[0]
+    enter_fn = installer_text.split("function Enter-VersionedSlotLease {", 1)[
+        1
+    ].split("\n}\n", 1)[0]
+    exit_fn = installer_text.split("function Exit-VersionedSlotLease {", 1)[
+        1
+    ].split("\n}\n", 1)[0]
+    return f"""
+Set-StrictMode -Version Latest
+function Get-VersionedSlotLeasePath {{
+{get_path_fn}
+}}
+$script:VersionedSlotLeaseHandle = $null
+function Enter-VersionedSlotLease {{
+{enter_fn}
+}}
+function Exit-VersionedSlotLease {{
+{exit_fn}
+}}
+"""
+
+
+def test_versioned_slot_lease_enforces_real_cross_process_exclusion(tmp_path: Path):
+    """Behavioral (not just textual) regression guard: under
+    `Set-StrictMode -Version Latest`, a process acquiring the lease must not
+    crash, acquiring it twice in the SAME process must be idempotent, and a
+    SECOND, independent process must be unable to acquire the same version's
+    lease while the first one holds it -- proving this is a real OS-level
+    exclusive lock, not merely a textual contract."""
+    pwsh = shutil.which("pwsh") or shutil.which("powershell.exe") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+
+    installer = INSTALLER.read_text(encoding="utf-8")
+    lease_functions = _extract_lease_functions(installer)
+    install_dir = tmp_path / "install"
+    install_dir.mkdir()
+    ready_marker = tmp_path / "holder-ready.txt"
+    release_marker = tmp_path / "release-now.txt"
+
+    common_preamble = f"""
+{lease_functions}
+$VersionedRuntime = $true
+$InstallDir = "{install_dir}"
+$SrcVersion = "1.2.3"
+"""
+
+    holder_script = common_preamble + f"""
+$first = Enter-VersionedSlotLease
+$second = Enter-VersionedSlotLease
+[System.IO.File]::WriteAllText("{ready_marker}", "$first,$second")
+while (-not (Test-Path "{release_marker}")) {{ Start-Sleep -Milliseconds 100 }}
+Exit-VersionedSlotLease
+"""
+    holder = subprocess.Popen(
+        [pwsh, "-NoProfile", "-Command", holder_script],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        for _ in range(100):  # up to ~10s
+            if ready_marker.exists():
+                break
+            if holder.poll() is not None:
+                break
+            time.sleep(0.1)
+        assert ready_marker.exists(), (
+            "holder process never reported readiness: "
+            f"{holder.stdout.read() if holder.stdout else ''} "
+            f"{holder.stderr.read() if holder.stderr else ''}"
+        )
+        assert ready_marker.read_text().strip() == "True,True", (
+            "the lease must be acquirable (idempotently, no strict-mode "
+            "crash) by its own holder"
+        )
+
+        contender_script = common_preamble + "[Console]::Out.Write((Enter-VersionedSlotLease))"
+        contender = subprocess.run(
+            [pwsh, "-NoProfile", "-Command", contender_script],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert contender.returncode == 0, contender.stderr
+        assert contender.stdout.strip() == "False", (
+            "a second, independent process must NOT be able to acquire the "
+            "same version's build lease while the first process holds it"
+        )
+    finally:
+        release_marker.write_text("go")
+        try:
+            holder.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            holder.kill()
+    assert holder.returncode == 0, holder.stderr.read() if holder.stderr else ""
 
 
 def test_deploy_venv_calls_uv_retry_helper():

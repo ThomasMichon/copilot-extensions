@@ -68,13 +68,13 @@ def test_deploy_venv_retries_then_hard_fails_on_a_dirty_slot():
 
 
 def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
-    """#5439 review finding: `_versioned_slot_clean`'s liveness check alone is
-    check-then-act -- two concurrent installer invocations could both
-    observe a clean slot (neither has started its external build yet) and
-    then both build into it. `deploy_venv` must acquire an OS-level exclusive
-    build lease FIRST (before even attempting slot-clean), fail immediately
-    if another live process already holds it, and `_versioned_activate` must
-    release that lease afterward regardless of outcome."""
+    """A slot-clean liveness check alone is check-then-act -- two concurrent
+    installer invocations could both observe a clean slot (neither has
+    started its external build yet) and then both build into it (#5439).
+    `deploy_venv` must acquire an OS-level exclusive build lease FIRST
+    (before even attempting slot-clean), fail immediately if another live
+    process already holds it, and `_versioned_activate` must release that
+    lease afterward regardless of outcome."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
     deploy_body = _function_body(text, "deploy_venv")
     activate_wrapper = _function_body(text, "_versioned_activate")
@@ -100,8 +100,9 @@ def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
 def test_versioned_slot_lease_uses_flock_held_for_process_lifetime():
     """The lease primitive must be an OS-level `flock` held on an open fd
     (auto-released by the kernel on crash/exit -- never a PID-recorded
-    marker file requiring staleness detection), and must gracefully no-op
-    (not fail installs) when `flock` isn't available on this platform."""
+    marker file requiring staleness detection) on platforms that have it,
+    and must never silently treat "couldn't lock" as "no contention" --
+    acquisition and release failures must propagate, not be swallowed."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
     acquire_body = _function_body(text, "_acquire_versioned_slot_lease")
     release_body = _function_body(text, "_release_versioned_slot_lease")
@@ -109,5 +110,36 @@ def test_versioned_slot_lease_uses_flock_held_for_process_lifetime():
     assert "command -v flock" in acquire_body
     assert 'exec {_VERSIONED_SLOT_LEASE_FD}>"$lease_path"' in acquire_body
     assert 'flock -n "$_VERSIONED_SLOT_LEASE_FD"' in acquire_body
+    # A failed `exec` open must fail closed (return 1), never treat "we
+    # couldn't even open the lease file" as a successful acquisition.
+    exec_fail_branch = acquire_body.split(
+        'if ! exec {_VERSIONED_SLOT_LEASE_FD}>"$lease_path"; then', 1
+    )[1][:200]
+    assert "return 1" in exec_fail_branch
     assert "exec {_VERSIONED_SLOT_LEASE_FD}>&-" in release_body
+
+
+def test_versioned_slot_lease_mkdir_fallback_fails_closed_without_flock():
+    """When `flock` isn't available (e.g. stock macOS), the lease must fall
+    back to a portable, PID-liveness-checked `mkdir` lock -- never silently
+    succeed (fail-open) just because the preferred primitive is missing,
+    which would let every lockless host build the same slot unlocked."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    acquire_body = _function_body(text, "_acquire_versioned_slot_lease")
+    fallback_body = _function_body(
+        text, "_acquire_versioned_slot_lease_mkdir_fallback"
+    )
+
+    assert "if ! command -v flock >/dev/null 2>&1; then" in acquire_body
+    no_flock_branch = acquire_body.split(
+        "if ! command -v flock >/dev/null 2>&1; then", 1
+    )[1][:200]
+    assert "_acquire_versioned_slot_lease_mkdir_fallback" in no_flock_branch
+    assert "return 0" not in no_flock_branch, (
+        "the no-flock branch must defer to the mkdir fallback's own return "
+        "code, never hardcode success"
+    )
+
+    assert 'mkdir "$lock_dir"' in fallback_body
+    assert 'kill -0 "$holder_pid"' in fallback_body
 

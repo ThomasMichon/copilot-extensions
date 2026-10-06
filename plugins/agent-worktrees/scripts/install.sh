@@ -769,7 +769,7 @@ _versioned_activate() {
     # the build entirely) regardless of how _versioned_activate_inner
     # returns, so a lease acquired in deploy_venv is held through package
     # deployment and completion-marker publication and ALWAYS released
-    # afterward -- never leaked past this run (#5439 review finding).
+    # afterward -- never leaked past this run (#5439).
     _versioned_activate_inner
     local rc=$?
     _release_versioned_slot_lease
@@ -840,29 +840,65 @@ _payload_hash() {
 # by _acquire_versioned_slot_lease; cleared by _release_versioned_slot_lease,
 # or automatically by the OS the instant this process exits/crashes).
 _VERSIONED_SLOT_LEASE_FD=""
+# Fallback lock directory when `flock` isn't available (e.g. stock macOS) --
+# a PID-liveness-checked mkdir lock instead (mkdir is atomic on POSIX
+# filesystems, so this never silently runs multiple builders unlocked).
+_VERSIONED_SLOT_LEASE_DIR=""
 
 _versioned_slot_lease_path() {
     printf '%s/.build-lease-%s.lock' "$INSTALL_DIR" "$SRC_VERSION"
 }
 
+_acquire_versioned_slot_lease_mkdir_fallback() {
+    # PID-liveness-checked mkdir lock: used only when `flock` is unavailable.
+    # mkdir is atomic on POSIX filesystems, so two processes racing this can
+    # never both succeed; a lock directory left behind by a dead holder
+    # (crash) is detected via `kill -0` on its recorded pid and reclaimed.
+    local lock_dir="$1" pid_file holder_pid
+    pid_file="$lock_dir/pid"
+    if mkdir "$lock_dir" 2>/dev/null; then
+        printf '%s' "$$" > "$pid_file" 2>/dev/null || true
+        _VERSIONED_SLOT_LEASE_DIR="$lock_dir"
+        return 0
+    fi
+    holder_pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$holder_pid" ]] && kill -0 "$holder_pid" 2>/dev/null; then
+        return 1
+    fi
+    # Stale (holder dead, or unrecorded) -- reclaim.
+    rmdir "$lock_dir" 2>/dev/null || true
+    if mkdir "$lock_dir" 2>/dev/null; then
+        printf '%s' "$$" > "$pid_file" 2>/dev/null || true
+        _VERSIONED_SLOT_LEASE_DIR="$lock_dir"
+        return 0
+    fi
+    return 1
+}
+
 _acquire_versioned_slot_lease() {
     # Acquire an OS-level exclusive lock for building THIS version's slot,
-    # held for the remainder of this process's lifetime. This closes the
-    # check-then-act race `_versioned_slot_clean`'s liveness check alone
-    # cannot: two concurrent installer invocations could both observe a
-    # clean slot (neither has started its external build yet) and then both
-    # build into it (review finding on #5439). Returns 0 if acquired (or a
-    # no-op in legacy mode, or when `flock` isn't available on this platform
-    # -- e.g. stock macOS -- leaving the pre-existing, unguarded posture
-    # rather than failing installs that previously worked); 1 if another live
-    # process already holds it. Idempotent: a second call while already held
-    # is a no-op success.
+    # held for the remainder of this process's lifetime. A slot-clean
+    # liveness check alone is check-then-act: two concurrent installer
+    # invocations could both observe a clean slot (neither has started its
+    # external build yet) and then both build into it -- this lease is what
+    # actually serializes them (#5439). Returns 0 if acquired (or a no-op in
+    # legacy mode); 1 if another live process already holds it. Never
+    # silently succeeds when locking can't be verified -- falls back to a
+    # portable mkdir-based lock when `flock` is unavailable, rather than
+    # treating "couldn't lock" as "no contention". Idempotent: a second call
+    # while already held is a no-op success.
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    [[ -n "$_VERSIONED_SLOT_LEASE_FD" ]] && return 0
-    command -v flock >/dev/null 2>&1 || return 0
+    [[ -n "$_VERSIONED_SLOT_LEASE_FD" || -n "$_VERSIONED_SLOT_LEASE_DIR" ]] && return 0
     local lease_path
     lease_path="$(_versioned_slot_lease_path)"
-    exec {_VERSIONED_SLOT_LEASE_FD}>"$lease_path" || { _VERSIONED_SLOT_LEASE_FD=""; return 0; }
+    if ! command -v flock >/dev/null 2>&1; then
+        _acquire_versioned_slot_lease_mkdir_fallback "$lease_path.d"
+        return $?
+    fi
+    if ! exec {_VERSIONED_SLOT_LEASE_FD}>"$lease_path"; then
+        _VERSIONED_SLOT_LEASE_FD=""
+        return 1
+    fi
     if ! flock -n "$_VERSIONED_SLOT_LEASE_FD"; then
         exec {_VERSIONED_SLOT_LEASE_FD}>&- 2>/dev/null || true
         _VERSIONED_SLOT_LEASE_FD=""
@@ -877,6 +913,10 @@ _release_versioned_slot_lease() {
     if [[ -n "$_VERSIONED_SLOT_LEASE_FD" ]]; then
         exec {_VERSIONED_SLOT_LEASE_FD}>&- 2>/dev/null || true
         _VERSIONED_SLOT_LEASE_FD=""
+    fi
+    if [[ -n "$_VERSIONED_SLOT_LEASE_DIR" ]]; then
+        rmdir "$_VERSIONED_SLOT_LEASE_DIR" 2>/dev/null || true
+        _VERSIONED_SLOT_LEASE_DIR=""
     fi
 }
 
@@ -1138,9 +1178,7 @@ deploy_venv() {
     if ! _acquire_versioned_slot_lease; then
         # Another live process already holds the exclusive build lease for
         # this exact version -- it's actively building (or about to), so
-        # treat this exactly like a dirty slot and refuse to race it, rather
-        # than let two installers both pass the slot-clean check and then
-        # both build (#5439 review finding).
+        # treat this exactly like a dirty slot and refuse to race it.
         err "Another process is already building this runtime slot ($SRC_VERSION) -- refusing to race it. Re-run update once the other build finishes."
         return 1
     fi
