@@ -94,3 +94,20 @@ def test_set_pending_seed_reports_failure_on_unreadable_record(monkeypatch) -> N
     monkeypatch.setattr(tracking, "_RecordLock", lambda *a, **k: contextlib.nullcontext())
     monkeypatch.setattr(tracking, "load_record", broken)
     assert pending_seed.set_pending_seed(Path("wt.yaml"), "do it") is False
+
+
+def test_set_pending_seed_reports_failure_on_write_failure(monkeypatch) -> None:
+    """A `save_record` failure (disk full, permissions, exhausted
+    atomic-replace retries) must degrade to a False return -- never escape
+    and abort the caller's own resume flow, which only has a documented
+    True/False failure contract to follow."""
+    record = SimpleNamespace(pending_seed=None, pending_seed_revision=0)
+
+    def broken_save(rec, p):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(tracking, "_RecordLock", lambda *a, **k: contextlib.nullcontext())
+    monkeypatch.setattr(tracking, "load_record", lambda p: record)
+    monkeypatch.setattr(tracking, "save_record", broken_save)
+
+    assert pending_seed.set_pending_seed(Path("wt.yaml"), "do it") is False

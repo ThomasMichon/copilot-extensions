@@ -1218,26 +1218,47 @@ def test_run_launch_relocated_script_uses_base_flag_for_anchor_mode(
     assert "--worktree-id" not in argv
 
 
-def test_seed_already_claimed_in_only_checks_the_trailing_pair():
-    """A configured launch/profile argument earlier in ``plan.cmd`` could
-    coincidentally contain the literal ``--interactive`` token -- only the
-    TRAILING pair is ever the claimed seed (``embody_resume.with_seed`` is
-    the sole appender, and always appends it last), so an earlier
-    occurrence must never be mistaken for it."""
+def test_seed_already_claimed_in_trusts_only_explicit_metadata():
+    """A configured launch/profile argument can legitimately produce a
+    ``cmd`` that ALSO ends in ``--interactive <value>`` (e.g. a profile
+    that already supplies the flag) even when no seed was ever claimed --
+    so the trailing pair alone is not sufficient provenance. Only the
+    engine's own explicit ``seed_claimed`` metadata authorizes treating it
+    as the claimed seed."""
     from worktree_manager.relocated_launch import _seed_already_claimed_in
 
-    plan = type(
+    claimed_plan = type(
         "Plan", (), {
-            "cmd": ["copilot", "--interactive", "configured, not the seed",
-                    "--resume=sess1", "--interactive", "the real seed"],
+            "seed_claimed": True,
+            "cmd": ["copilot", "--resume=sess1", "--interactive", "the real seed"],
         },
     )()
-    assert _seed_already_claimed_in(plan) == "the real seed"
+    assert _seed_already_claimed_in(claimed_plan) == "the real seed"
 
-    no_seed_plan = type("Plan", (), {"cmd": ["copilot", "--resume=sess1"]})()
+    # Same trailing shape, but seed_claimed is False -- a configured
+    # argument coincidentally ending the same way must NOT be mistaken for
+    # a claimed seed.
+    unclaimed_plan = type(
+        "Plan", (), {
+            "seed_claimed": False,
+            "cmd": ["copilot", "--resume=sess1", "--interactive",
+                    "configured, not a seed"],
+        },
+    )()
+    assert _seed_already_claimed_in(unclaimed_plan) is None
+
+    # An older engine predating this field: absent entirely, defaults False.
+    no_metadata_plan = type(
+        "Plan", (), {"cmd": ["copilot", "--resume=sess1", "--interactive", "x"]},
+    )()
+    assert _seed_already_claimed_in(no_metadata_plan) is None
+
+    no_seed_plan = type(
+        "Plan", (), {"seed_claimed": True, "cmd": ["copilot", "--resume=sess1"]},
+    )()
     assert _seed_already_claimed_in(no_seed_plan) is None
 
-    empty_plan = type("Plan", (), {"cmd": []})()
+    empty_plan = type("Plan", (), {"seed_claimed": True, "cmd": []})()
     assert _seed_already_claimed_in(empty_plan) is None
 
 
@@ -1258,6 +1279,7 @@ def test_run_launch_relocated_script_forwards_already_claimed_seed(
         {
             "action": "exec", "exit_code": 0, "worktree_id": "resolved-id-1234",
             "cmd": ["copilot", "--resume=sess1", "--interactive", "do the thing"],
+            "seed_claimed": True,
         },
     )()
     script = tmp_path / "launch-session.ps1"

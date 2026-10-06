@@ -700,12 +700,37 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # function at all) reintroduces real double-delivery on every
     # subsequent successful resume instead of this narrow, infrequent loss
     # window.
-    if not getattr(state.args, "bare_resume", False):
+    #
+    # Live-mux parity with `resolve_launch_cli._resolve_resume_context`:
+    # the JSON path is the Picker's own real code path, and both launcher
+    # scripts (`launch-session.{sh,ps1}`) probe for an existing live mux
+    # session themselves BEFORE this `cmd` would ever run -- if one exists,
+    # they reattach it and never exec `cmd` at all, exactly the scenario
+    # the non-JSON path's own `verdict.mux_live` branch already guards.
+    # Without the identical check here, a seed claimed/embedded above would
+    # be silently discarded on every JSON-mode live-mux reattach, which is
+    # worse than the non-JSON path's own narrow, queued-but-delayed
+    # limitation -- here the seed was never queued at all.
+    try:
+        verdict = sessions.verify_worktree_active(record)
+    except Exception:
+        verdict = None
+    live_mux = verdict is not None and getattr(verdict, "mux_live", False)
+    seed_claimed = False
+    if not getattr(state.args, "bare_resume", False) and not live_mux:
         explicit_seed = getattr(state.args, "seed", None)
         claimed_seed = pending_seed_mod.claim_pending_seed(yaml_path)
         delivered_seed = explicit_seed or claimed_seed
         if delivered_seed:
             launch_cmd = embody_resume.with_seed(launch_cmd, delivered_seed)
+            seed_claimed = True
+    elif not getattr(state.args, "bare_resume", False) and live_mux:
+        explicit_seed = getattr(state.args, "seed", None)
+        if explicit_seed:
+            pending_seed_mod.set_pending_seed(yaml_path, explicit_seed)
+        # A persisted `pending_seed` (no explicit one given) is deliberately
+        # left untouched here too -- never claimed, so it stays queued for
+        # whatever next attach actually delivers it.
 
     launch = {
         "action": "exec",
@@ -715,6 +740,14 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         "worktree_id": record.worktree_id,
         "post_exit": True,
         "no_mux": True,
+        # Explicit provenance (review finding): a delegated caller (the
+        # Worktree Manager's relocated-launch re-invocation) must not GUESS
+        # whether `cmd`'s trailing `--interactive <value>` pair is the seed
+        # this call claimed, versus a configured launch/profile argument
+        # that coincidentally ends the same way -- `_build_launch_cmd` can
+        # legitimately produce either shape. True only when THIS call
+        # itself appended the seed via `embody_resume.with_seed` above.
+        "seed_claimed": seed_claimed,
     }
     if selection.assignment is not None:
         launch["profile_assignment"] = profile_assignment.metadata(selection.assignment)

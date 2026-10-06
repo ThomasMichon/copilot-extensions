@@ -527,6 +527,7 @@ class LaunchPlan:
     post_exit: bool
     no_mux: bool                # the *engine's* mux suppression (always set by --json)
     exit_code: int
+    seed_claimed: bool          # True only when THIS plan's `cmd` embeds a seed
     raw: dict
 
     @property
@@ -547,6 +548,12 @@ def launch_plan_from_dict(d: dict) -> LaunchPlan:
         post_exit=bool(d.get("post_exit")),
         no_mux=bool(d.get("no_mux")),
         exit_code=int(d.get("exit_code") or 0),
+        # Absent on an older engine that predates this field -- treated as
+        # unknown/false, which only means a delegated re-invocation (see
+        # relocated_launch._seed_already_claimed_in) conservatively forwards
+        # no seed rather than guessing from argv shape; it never queues a
+        # DOUBLE delivery, only a possible (pre-existing, version-skew) miss.
+        seed_claimed=bool(d.get("seed_claimed")),
         raw=d,
     )
 

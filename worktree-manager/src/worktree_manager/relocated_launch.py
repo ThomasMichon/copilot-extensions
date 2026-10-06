@@ -42,16 +42,23 @@ def _relocated_launch_script():
 
 def _seed_already_claimed_in(plan) -> str | None:
     """Recover a seed ``_resolve_for``'s own ``resolve --json`` call already
-    claimed/embedded into ``plan.cmd`` as a TRAILING ``--interactive
-    <value>`` pair -- covering BOTH an explicit ``--seed`` AND a persisted
-    ``pending_seed`` the engine claims (clears) unconditionally on every
-    resolve, regardless of whether this specific call supplied an explicit
-    one. Only the trailing pair is checked -- ``embody_resume.with_seed``
-    (the engine's sole appender) always appends it last, and a configured
-    launch/profile argument earlier in ``plan.cmd`` could otherwise contain
-    the same literal ``--interactive`` token, which a full scan would
-    mistake for the claimed seed and silently return instead. Returns
-    ``None`` when the trailing pair is not ``--interactive <value>``."""
+    claimed/embedded into ``plan.cmd`` -- covering BOTH an explicit
+    ``--seed`` AND a persisted ``pending_seed`` the engine claims (clears)
+    unconditionally on every resolve, regardless of whether this specific
+    call supplied an explicit one.
+
+    Trusts ONLY the engine's own explicit ``plan.seed_claimed`` metadata
+    (contract v1+) -- never inferred from ``cmd``'s own trailing argv shape:
+    ``_build_launch_cmd`` accepts arbitrary configured/profile
+    ``copilot_args``, so a seedless worktree can legitimately produce a
+    command that ALSO happens to end in ``--interactive <configured
+    value>`` (e.g. a profile that already supplies the flag), which a
+    trailing-pair heuristic would misidentify as the claimed seed. Returns
+    ``None`` when ``seed_claimed`` is false/absent (including an older
+    engine that predates this field -- a conservative miss, never a false
+    positive) or ``cmd`` doesn't actually end in an ``--interactive`` pair."""
+    if not getattr(plan, "seed_claimed", False):
+        return None
     cmd = list(getattr(plan, "cmd", None) or [])
     if len(cmd) >= 2 and cmd[-2] == "--interactive":
         return cmd[-1]

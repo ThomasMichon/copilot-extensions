@@ -184,6 +184,75 @@ def test_bare_resume_leaves_a_persisted_pending_seed_queued_in_json_mode(
     assert reloaded.pending_seed == "queued at creation"
 
 
+def test_live_mux_in_json_mode_queues_explicit_seed_instead_of_embedding_unused_cmd(
+    tmp_path: Path, monkeypatch, capfd,
+):
+    """Review finding: the JSON path (`_resolve_json_mode`) is the Picker's
+    own real code path, and both launcher scripts probe for an existing
+    live mux session themselves BEFORE this `cmd` would ever run -- if one
+    exists, they reattach it and never exec `cmd` at all. Without the same
+    `verdict.mux_live` detection the non-JSON path already has, a seed
+    claimed/embedded here would be silently discarded on every JSON-mode
+    live-mux reattach (worse than the non-JSON path's own queued-but-
+    delayed limitation -- here it was never queued at all). An explicit
+    seed must be queued via `set_pending_seed` instead, and `seed_claimed`
+    in the returned plan must be False (nothing was embedded)."""
+    from agent_worktrees import sessions as sessions_mod
+
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    monkeypatch.setattr(
+        sessions_mod, "verify_worktree_active",
+        lambda *_a, **_k: SimpleNamespace(mux_live=True, live_session_ids=["s1"]),
+    )
+
+    rc = resolve_cli.cmd_resolve(_args(seed="do the thing"))
+
+    assert rc == 0
+    payload = json.loads(capfd.readouterr().out)
+    assert "--interactive" not in payload["launch"]["cmd"]
+    assert payload["launch"]["seed_claimed"] is False
+    reloaded = tracking.load_record(tmp_path / "wt-a.yaml")
+    assert reloaded.pending_seed == "do the thing"
+
+
+def test_seed_claimed_is_true_only_when_this_call_actually_embeds_a_seed(
+    tmp_path: Path, monkeypatch, capfd,
+):
+    """Explicit provenance (review finding): a delegated caller must not
+    guess whether `cmd`'s own trailing argv is a claimed seed -- the
+    returned plan's `seed_claimed` field is the sole source of truth, true
+    only when `with_seed` actually ran in THIS call."""
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+
+    rc = resolve_cli.cmd_resolve(_args(seed="do the thing"))
+
+    assert rc == 0
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["launch"]["seed_claimed"] is True
+
+    tracking.create_new_record(
+        "wt-b", "worktree/wt-b", str(tmp_path / "wt-b"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    rc = resolve_cli.cmd_resolve(_args(worktree_id="wt-b", seed=None))
+
+    assert rc == 0
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["launch"]["seed_claimed"] is False
+
+
 def test_live_mux_resume_queues_explicit_seed_instead_of_embedding_unused_argv(
     tmp_path: Path, monkeypatch, capfd,
 ):

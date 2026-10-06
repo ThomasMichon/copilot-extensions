@@ -109,7 +109,11 @@ def set_pending_seed(path: Path, seed: str) -> bool:
     now, such as a live-mux reattach) that should take priority over
     whatever was queued before. Returns True only once the write is
     confirmed to have landed; a caller must not report the seed as queued
-    on a False return (lock contention -- the seed was NOT stored)."""
+    on a False return (lock contention, an unreadable record, or a write
+    failure -- disk full, permissions, exhausted atomic-replace retries --
+    all degrade to False rather than raising, so a caller's own resume
+    flow never aborts merely because this best-effort queue attempt
+    failed)."""
     try:
         with tracking._RecordLock(path, require_sidecar=True):
             try:
@@ -118,7 +122,10 @@ def set_pending_seed(path: Path, seed: str) -> bool:
                 return False
             record.pending_seed = seed
             record.pending_seed_revision = getattr(record, "pending_seed_revision", 0) + 1
-            tracking.save_record(record, path)
+            try:
+                tracking.save_record(record, path)
+            except Exception:
+                return False
             return True
     except TimeoutError:
         return False

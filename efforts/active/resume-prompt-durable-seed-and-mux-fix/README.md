@@ -504,3 +504,52 @@ _Pending._
     new `set_pending_seed` tests) and `worktree-manager`'s
     `test_production_picker_transplant.py`/`test_engine_client.py` (130
     tests) both pass with no regressions.
+- **2026-10-06** — The PR drifted behind `dev` while awaiting CI (an
+  apparent GitHub-side webhook anomaly left the `pull_request`-triggered
+  CI workflow run missing entirely for one push -- confirmed via a manual
+  `workflow_dispatch` full-matrix run, which passed cleanly including
+  `full - agent-worktrees`); `dev` had also advanced enough in the
+  meantime to produce a real merge conflict. Rebased cleanly (backup
+  branch taken first per `git-collaboration` convention; one trivial,
+  purely-additive conflict in `test_resolve_cli_seed_guard.py`, resolved
+  by keeping both sides' new tests) -- all 7 commits replayed without
+  further incident; full suites re-confirmed green post-rebase.
+  An eighth Copilot review pass (against the rebased branch) surfaced 3
+  more new Medium findings, all fixed:
+  - **A `set_pending_seed` write failure could abort the whole resume
+    command.** Its own `TimeoutError` handling didn't cover a
+    `tracking.save_record` failure (disk full, permissions, exhausted
+    atomic-replace retries) -- that exception propagated out of the
+    function entirely instead of degrading to the documented `False`
+    return. Wrapped `save_record` in its own try/except; new test
+    `test_set_pending_seed_reports_failure_on_write_failure`.
+  - **The JSON launch path (`_resolve_json_mode` -- the Picker's REAL code
+    path) had no live-mux detection at all.** Only the non-JSON
+    `_resolve_resume_context` path (interactive human CLI) called
+    `sessions.verify_worktree_active()`; the actually-used JSON path
+    claimed/embedded a seed unconditionally, so a live-mux reattach on
+    this path lost the seed ENTIRELY (not even queued) -- strictly worse
+    than the already-documented "queued but delayed" limitation. Added the
+    identical `verdict.mux_live` detection and `set_pending_seed` fallback
+    to `_resolve_json_mode`. New tests:
+    `test_live_mux_in_json_mode_queues_explicit_seed_instead_of_embedding_unused_cmd`,
+    `test_seed_claimed_is_true_only_when_this_call_actually_embeds_a_seed`.
+  - **The trailing-argv heuristic itself was still unsound.** Even
+    checking only the trailing pair (the sixth round's own fix), a
+    seedless worktree's configured/profile `copilot_args` can legitimately
+    produce a `cmd` that ALSO happens to end in `--interactive <value>`
+    (e.g. a profile that already supplies the flag) -- the relocated
+    launcher would then forward that configured value as `--seed` AND
+    separately reconstruct it itself, producing a duplicate
+    `--interactive` pair. Fixed properly this time: added explicit
+    `seed_claimed: bool` provenance to the JSON contract itself (`resolve
+    --json`'s own `launch` payload, `LaunchPlan`'s new field, and
+    `launch_plan_from_dict`'s parsing -- defaulting False for an older
+    engine predating the field, never a false positive), and
+    `_seed_already_claimed_in` now trusts ONLY that metadata, never
+    inferring from argv shape. Rewrote
+    `test_seed_already_claimed_in_only_checks_the_trailing_pair` ->
+    `test_seed_already_claimed_in_trusts_only_explicit_metadata`.
+  - Full re-run after all of the above: `agent-worktrees` keyword sweep
+    (223 tests) and the FULL `worktree-manager` suite (1707 tests, 13
+    skipped) both pass with no regressions.
