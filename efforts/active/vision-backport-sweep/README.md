@@ -139,30 +139,49 @@ Operator, end of a long multi-repo session:
 - [x] Ran the cutover/immutable-runtime slice of the `plugin-services`
       invariant audit (`immutable-versioned-runtime`,
       `register-once-cutover-on-update`, `zero-downtime-cutover`) against
-      every `agent-*` plugin's runtime-deploy path. Conformance table
-      (revised after review caught an initial over-generous first pass —
-      see Journal below):
+      every `agent-*` plugin's runtime-deploy path, scored against **two
+      separate questions per plugin**: does a same-version, content-changed
+      update (a) ever mutate the already-built slot in place
+      (`immutable-versioned-runtime`), and (b) interrupt a live daemon doing
+      so (`zero-downtime-cutover`/`register-once-cutover-on-update`,
+      applicable only where a daemon exists)? (Table revised twice after
+      review — see Journal: the first pass wrongly credited a versioned-slot
+      *build path* as conformance without checking this exact case; the
+      second wrongly credited lock-safe stop-before-rebuild as conformance,
+      when the invariant is violated by the in-place rewrite itself,
+      independent of whether it races a live process.)
 
-      | Plugin | Status | Evidence |
-      |---|---|---|
-      | agent-bridge | Conforms | `Test-SlotContentCurrent` short-circuits to a true no-op when content is unchanged; a genuinely-needed same-version rebuild explicitly downgrades the cutover to "classic stop-and-rebuild" and stops the daemon *before* touching the venv (`install.ps1:2734-2855`). Documents having already fixed this exact bug class once before (dotfiles#1612). |
-      | agent-index | Conforms | No-op when the slot is healthy and content-matching; when a rebuild targets the recorded `current-version`/`last-known-good` slot, it explicitly calls `Invoke-Stop` *before* removing/rebuilding it (`install.ps1:1352-1430`). |
-      | agent-dispatch | **Violates** | `#5356` (pre-existing, linked to this vision item in the prior slice): `Invoke-Update` calls `Install-Runtime` *before* `Retire-SupervisorProcesses`, so a same-version (dev-iteration) reinstall can collide with the live supervisor/coordinator's open file handles; plus an undetected stale `uv.exe` hazard. |
-      | agent-vault | **Violates** | `Invoke-Update` calls `Install-Runtime` (which can rebuild the active slot) *before* `Stop-VaultDaemonGraceful`, with no `agent-index`-style "is this the active slot" stop guard (`install.ps1:1092-1105`, `737-822`). Same bug class as `#5356`. Filed as `#5472`. |
-      | agent-codespaces | **Violates** | `Deploy-Venv`/`Deploy-Package` have no stop-if-active guard; the Connection Owner daemon is only synced via `Sync-ConnectionOwnerService` at the very end of `Invoke-Update` (`install.ps1:1507-1544`, `888-930`). Filed as `#5472`. |
-      | agent-worktrees | **Violates** | `Test-SlotAlreadyComplete` (the #2174 fix itself) only short-circuits the hash-match (nothing-changed) case; a same-version update with genuinely changed content falls through to `Deploy-Venv`/`Deploy-Package` with no daemon-stop guard — despite the function's own doc comment explicitly naming "a long-lived process such as the status-monitor daemon... may be running out of it" as exactly the risk (`install.ps1:1331-1356, 3829-3866`). Filed as `#5472`. |
-      | agent-mcp | Needs confirmation | Its zdd cutover explicitly only fires for "a genuinely live, differently-versioned daemon" (`init.ps1:736-787`), implying a same-version rebuild bypasses it — but the earlier venv-build step wasn't fully traced to confirm there is no guard there. Flagged in `#5472`, not asserted as a confirmed violation. |
-      | agent-logger | **Partial** | Versioned-slot build (`Invoke-VersionedSlotClean` + `New-SignedVenv`), but `update` never stops/restarts its registered Scheduled Task around a same-version rebuild — lower risk than the others (task runs briefly/periodically, not continuously), but a real gap. Filed as `#5468`. |
-      | agent-ssh, agent-pull-requests | N/A | Explicitly "CLI (no daemon)" — nothing to cut over. |
-      | agent-containers, agent-machines | N/A | Explicitly no-daemon CLI plugins (`init.ps1` comments: "a CLI plugin has no daemon holding the link"). |
+      | Plugin | Immutable-versioned-runtime | Zero-downtime-cutover | Evidence |
+      |---|---|---|---|
+      | **agent-pull-requests** | **Conforms** | N/A (no daemon) | The one plugin in the repo doing this correctly: refuses to rebuild a completed same-version slot whose content changed — "bump the plugin version instead of rebuilding an immutable slot in place" — and exits 1 even under `-Force` (`install.ps1:524-535`). **Reference pattern for every other plugin to port.** |
+      | agent-ssh | **Violates** | N/A (no daemon) | Unconditionally reinstalls the package into the existing `$VenvDir` whenever the venv already exists, with no same-version-content-changed refusal (`install.ps1:872-949`). |
+      | agent-containers | **Violates** | N/A (no daemon) | Same unconditional in-place reinstall shape (`init.ps1:648-758`). |
+      | agent-machines | **Violates** | N/A (no daemon) | Same unconditional in-place reinstall shape (`init.ps1:2164-2251`). |
+      | agent-bridge | **Violates** | **Violates** | `Test-SlotContentCurrent` only no-ops on an exact content match; a genuine same-version content change explicitly downgrades to "classic stop-and-rebuild" (`install.ps1:2813-2856`) — lock-safe (stops before rewriting, avoiding a crash/corruption race) but still an in-place rewrite of a built slot, and the stop-rebuild-start cycle is itself a no-service window. Not a reference implementation — a file-lock mitigation, not immutable-generation-plus-ZDD. |
+      | agent-index | **Violates** | **Violates** | Same shape: removes/rebuilds the active slot when its content doesn't match, stopping the service first (`install.ps1:1418-1431`), then unconditionally installs packages into it (`install.ps1:1492-1551`) — lock-safe, still an in-place rewrite + a no-service window. |
+      | agent-dispatch | **Violates** | **Violates** | `#5356` (pre-existing, linked to this vision item in the prior slice): `Invoke-Update` calls `Install-Runtime` *before* `Retire-SupervisorProcesses` — not even lock-safe, so this can crash/corrupt, not just interrupt. |
+      | agent-vault | **Violates** | **Violates** | `Invoke-Update` calls `Install-Runtime` (can rebuild the active slot) *before* `Stop-VaultDaemonGraceful`, with no `agent-pull-requests`-style refusal (`install.ps1:1092-1105`, `737-822`). Same not-even-lock-safe shape as `#5356`. Filed as `#5472`. |
+      | agent-codespaces | **Violates** | **Violates** | `Deploy-Venv`/`Deploy-Package` have no refusal or stop-if-active guard; the Connection Owner daemon is only synced via `Sync-ConnectionOwnerService` at the very end (`install.ps1:1507-1544`, `888-930`). Filed as `#5472`. |
+      | agent-worktrees | **Violates** | **Violates** | `Test-SlotAlreadyComplete` (the #2174 fix itself) only short-circuits the hash-match (nothing-changed) case; genuinely changed same-version content falls through to `Deploy-Venv`/`Deploy-Package` with no refusal or stop guard, despite the function's own comment naming the status-monitor daemon as exactly this risk (`install.ps1:1331-1356, 3829-3866`). Filed as `#5472`. |
+      | agent-mcp | **Violates** | **Violates** | Confirmed (not merely suspected): `init.ps1:612-708` unconditionally installs into the existing `$VenvDir`; the zdd cutover at `init.ps1:735-783` runs only afterward and explicitly skips an exact-version-match daemon, so a same-version content change mutates the active slot *before* any cutover runs at all. Filed as `#5472`. |
+      | agent-logger | **Violates** | **Violates (partial fix tracked)** | `Install-Package` rewrites the already-built same-version venv regardless (`install.ps1:1019-1055`). The previously-filed `#5468` only proposed stopping/restarting the Scheduled Task — that closes the lock-safety gap, **not** the immutability violation; `#5468` needs updating (or a companion issue) for the refuse-or-new-generation fix, same as everything else in this table. |
+
+      **Net finding:** almost the entire `agent-*` runtime-deploy ecosystem
+      violates `immutable-versioned-runtime` for a same-version,
+      content-changed update — differing only in whether the in-place
+      rewrite also races a live daemon (agent-dispatch/vault/codespaces/
+      worktrees/mcp: yes, unsafe) or is sequenced lock-safely first
+      (bridge/index: safe from crashing, but still non-immutable and not
+      zero-downtime). `agent-pull-requests` is the sole conforming
+      reference: refuse the rebuild and require a real version bump (or,
+      equivalently, build a genuinely distinct generation) rather than ever
+      rewriting a completed slot.
 
       No blind spot found requiring a fold-up into the `plugin-services`
-      invariant vision itself — the vision's existing
-      `immutable-versioned-runtime`/`register-once-cutover-on-update`
-      wording already states the correct contract precisely; the gap is
-      conformance (several plugins' own `Invoke-Update` not implementing
-      it for the same-version-changed-content case), not a missing or
-      imprecise invariant.
+      invariant vision itself — the vision's existing wording already states
+      the correct contract precisely ("once a version's venv is built it is
+      never edited in place"); the gap is conformance across nearly every
+      plugin, not a missing or imprecise invariant.
 - [ ] The *rest* of the `plugin-services` behaviors list (self-contained-
       runtime, single-instance-lease, work-coalescing-singleton, discoverable-
       local-endpoint, and the remaining ~20 invariants) is **not yet audited**
@@ -229,17 +248,43 @@ then rather than assuming either answer.
   *not* stop a live daemon before a same-version rebuild — that guard is
   per-plugin opt-in, and most plugins hadn't added it. Re-audited each
   plugin's actual same-version-changed-content path and corrected the
-  table: only `agent-bridge` and `agent-index` actually implement the
+  table: only `agent-bridge` and `agent-index` actually implement a
   stop-before-rebuild guard; `agent-vault`, `agent-codespaces`, and
   `agent-worktrees` (including the very `#2174` fix that originated this
-  whole pattern) are missing it — filed as a consolidated `#5472`, citing
-  agent-bridge/agent-index as the reference-correct pattern to port.
-  `agent-mcp` is flagged as needing confirmation rather than asserted,
-  since its earlier venv-build step wasn't fully traced.
+  whole pattern) are missing it — filed as a consolidated `#5472`, initially
+  (and, per the next round, wrongly) citing agent-bridge/agent-index as the
+  reference-correct pattern to port. `agent-mcp` was flagged as needing
+  confirmation rather than asserted, since its earlier venv-build step
+  wasn't fully traced.
+- **Review went a round deeper and corrected a second over-generous call**
+  ("Stop-before-rebuild still violates immutable runtime and zero-downtime
+  rules"): stopping a daemon before rewriting its active slot makes the
+  rewrite *lock-safe*, but the vision's `immutable-versioned-runtime`
+  invariant is "once a version's venv is built it is never edited in
+  place" — full stop. Lock-safe is not the same claim as immutable, and the
+  stop-rebuild-start cycle is itself a no-service window, so it ALSO
+  violates `zero-downtime-cutover`. Re-audited once more and found the
+  actual reference-correct plugin: **`agent-pull-requests`**, which refuses
+  to rebuild a completed same-version slot with changed content at all
+  ("bump the plugin version instead... exits 1 even under `-Force`") —
+  confirmed `agent-mcp` as a violation (not "needs confirmation") per the
+  reviewer's precise citations, and reclassified `agent-ssh`,
+  `agent-containers`, and `agent-machines` from blanket "N/A" to
+  **violates immutable-versioned-runtime** (no-daemon only makes the
+  *cutover* invariants N/A, not immutability itself — they unconditionally
+  reinstall into an existing slot with no refusal). Net: almost every
+  `agent-*` plugin violates `immutable-versioned-runtime` for this case;
+  `agent-pull-requests` is the one plugin to actually copy from. Updated
+  `#5472`'s framing to match (dropped the "port agent-bridge/agent-index"
+  fix suggestion, which review correctly identified as prescribing a
+  non-conforming pattern) and flagged that `#5468` (agent-logger) needs a
+  similar correction — its tracked fix only closes lock-safety, not
+  immutability.
 - Checked for an invariant-vision blind spot (Direction 1, upward fold):
   none found — the vision's existing wording already states the correct
-  contract precisely (a built slot is never edited in place); the gap is
-  conformance, not an imprecise or missing invariant.
+  contract precisely (a built slot is never edited in place, full stop,
+  not "edited in place unless lock-safe"); the gap is conformance across
+  nearly the entire ecosystem, not an imprecise or missing invariant.
 - **Not yet done:** the rest of `plugin-services`'s ~20+ other behaviors
   (self-contained-runtime, single-instance-lease, work-coalescing-singleton,
   discoverable-local-endpoint, etc.) were not audited this slice — only the
