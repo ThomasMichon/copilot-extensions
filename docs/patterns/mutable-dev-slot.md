@@ -219,14 +219,19 @@ correctness bug on top of the immutability violation.
   anti-pattern: same version string, genuinely different content), **refuse**
   — exit non-zero with a message naming the mismatch and pointing at `dev`/
   `dev-release` as the correct path for iterating without a version bump.
-  `agent-pull-requests`' installer (`install.ps1`/`install.sh`) already
-  implements the **refusal half** of this ("bump the version instead of
-  rebuilding an immutable slot in place") — copy that check, not its error
-  message, since neither installer yet points the caller at `dev`/
-  `dev-release` (it hasn't adopted that mechanism itself). A `--force`
-  override must not bypass this check; forcing a rebuild over a live,
-  completed slot is exactly what this guard exists to prevent, not an
-  escape hatch from it.
+  The hash **must cover every runtime install input** (the full source
+  tree an install actually consumes — `src/`, vendored libs, not just
+  `pyproject.toml` metadata), or a source-only change with unchanged
+  metadata silently takes the already-matches no-op path instead of this
+  refusal — a stale-slot bug, not a safe one. `agent-pull-requests`'
+  installer (`install.ps1`/`install.sh`) already implements the refusal
+  **control flow**, but its own `Get-PayloadHash`/`_payload_hash` only
+  hashes `pyproject.toml` files, not `src/` — copy the control flow, not
+  that narrower hash scope; `agent-pull-requests` itself needs the wider
+  digest and stays in Phase 3's rollout list for that fix, not held up as
+  already-complete. A `--force` override must not bypass this check;
+  forcing a rebuild over a live, completed slot is exactly what this guard
+  exists to prevent, not an escape hatch from it.
 
 This refusal is what actually closes the loop `dev` opened: without it, a
 contributor (or an impatient automation) can still reach for "just run
@@ -246,8 +251,7 @@ provably unhealthy by a direct check (an import smoke-test, a health
 endpoint, a corrupted trampoline).
 
 **This is not a license to delete and rebuild the same slot directory.**
-An earlier draft of this section said exactly that; it was wrong; keep
-reading rather than copying that shape. `immutable-versioned-runtime`
+`immutable-versioned-runtime`
 (`visions/plugin-services/README.md`'s *Features*) requires that "a new
 version is installed **beside** the old one... switching versions... is a
 selection, not a rewrite." Deleting `versions/<v>` and recreating a build
@@ -276,10 +280,11 @@ for every other cutover/repair path in this repo:
    still means what it said before the repair started. Health-gate the new
    build in isolation, exactly like an ordinary install. **That distinct
    identity must propagate everywhere a plain package version is otherwise
-   compared or recorded** — not just the directory name. At least two
-   existing plugins compare a running daemon's self-reported
-   `__version__`/`running-version.json` directly against `current-version`
-   to decide whether self-update should act
+   compared or recorded** — not just the directory name.
+   `agent-dispatch`'s `self_update` module compares a running daemon's
+   self-reported `__version__`/`running-version.json` directly against
+   `current-version` to decide whether it should act, from both its
+   coordinator and supervisor call paths
    (`plugins/agent-dispatch/src/agent_dispatch/runtime_version.py`,
    `self_update.py`): activating `1.2.3+repair1` while the process still
    reports plain `1.2.3` makes that comparison mismatch forever, so

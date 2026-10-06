@@ -138,11 +138,24 @@ for the full design.
       is the Phase 2 pilot, already wired for `dev`/`dev-release`, but per
       that same audit still needs the ordinary-installer refusal guard
       layered on top -- the two are independent, and wiring one does not
-      imply the other.) `agent-pull-requests` already has the refusal guard
-      but has not adopted `dev`/`dev-release`.
+      imply the other.) `agent-pull-requests` already has the refusal
+      **control flow** but needs its own `Get-PayloadHash`/`_payload_hash`
+      widened to cover the full runtime install input (currently only
+      `pyproject.toml` files, missing `src/` -- see
+      `docs/patterns/mutable-dev-slot.md`'s *Ordinary installers* section)
+      before it can be held up as done, and has not adopted
+      `dev`/`dev-release`.
 
 ## Validation Plan
 
+- [ ] **Phase 3, per adopting plugin, on both installer platforms
+      (`install.ps1` and `install.sh`):** a matching-content same-version
+      run is a true no-op (no rebuild, no reinstall); a changed-content
+      same-version run is refused even under `-Force`/`--force`; the
+      `dev`/`dev-release` cycle builds, activates, and then correctly
+      restores the prior `current-version`. Not satisfied by implementing
+      only the refusal guard or only `dev`/`dev-release` for a given
+      plugin -- both are required before checking that plugin off above.
 - [x] `python tools/run-plugin-tests.py agent-bridge -k dev` -- new
       dev-slot primitive tests pass.
 - [x] `python tools/run-plugin-tests.py agent-bridge` (full suite) -- no
@@ -168,17 +181,23 @@ for the full design.
   same-version, changed-content update -- the exact anti-pattern this
   effort's `dev`/`dev-release` mechanism exists to replace, still reachable
   because most plugins' ordinary paths don't *refuse* it (`agent-pull-requests`
-  is the one exception already carrying the refusal guard, just not the
-  `dev`/`dev-release` redirect). Added two new sections to
+  is the one exception already carrying the refusal control flow, though
+  review on that same PR found its own payload-hash scope too narrow --
+  `pyproject.toml` only, missing `src/` -- so it still needs a fix before
+  being complete, and it hasn't adopted the `dev`/`dev-release` redirect
+  either). Added two new sections to
   `docs/patterns/mutable-dev-slot.md` (*Ordinary installers: refuse, never
   silently mutate a numbered slot*, and *Repairing a broken numbered slot is
   a cutover, not a delete-and-rebuild* -- reworked after review correctly
   flagged that an earlier delete-and-rebuild-same-version draft of the
   latter still violated `immutable-versioned-runtime`'s rollback guarantee;
   it now reuses `graceful-daemon-cutover`'s existing serialize/promote-
-  before-retire/drain contract under a distinct generation identity instead)
-  and prioritized Phase 3's rollout list with the specific plugins that
-  audit identified.
+  before-retire/drain contract under a distinct generation identity, with
+  that identity required to propagate through any running-version
+  comparison too) and prioritized Phase 3's rollout list with the specific
+  plugins that audit identified, plus a new Phase 3 validation item
+  requiring both halves (refusal guard + `dev`/`dev-release`) per plugin
+  before checking it off.
 
 ### 2026-09-23 — Phase 1 landed
 - Core primitive, tests, GC protection, finalize warning hook, and design
