@@ -242,7 +242,4 @@ reviving a released lineage.
   recipe's standing `_STAGNATION_CLAUSE` charter language (already shipped,
   governing both `land=self` and `land=author` loops): embodied intent that
   predated this vision recording it as a named Behavior distinct from
-  `bounded-verdict-reliability`'s render-attempt budget. Prompted by a
-  downstream consumer (a private review-loop charter) narrowing its own
-  steering-card trigger to stop carding for plain author non-response and
-  rely on this recipe-level escalation instead.
+  `bounded-verdict-reliability`'s render-attempt budget.

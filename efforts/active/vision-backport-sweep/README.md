@@ -10,11 +10,8 @@
   not one item); scoped so far:
   `visions/plugins/agent-dispatch/tasks-pane-ux` §Concepts/the-suspended-task-waiter,
   `visions/plugins/agent-dispatch/reviewer` §Behaviors/stagnation-escalates,
-  `visions/plugin-services` §Behaviors/register-once-cutover-on-update
-- **Umbrella issue:** none yet filed in this repo (see Context — this effort
-  itself is the tracker for the sweep; per-gap issues are filed individually
-  and linked below as they're carved; `efforts/README.md`'s index Coordination
-  column lists this as "See effort" accordingly)
+  `visions/plugins/agent-dispatch` §Behaviors/inherits-runtime-service-invariants
+- **Umbrella issue:** `ThomasMichon/copilot-extensions#5456`
 - **Sub-issues:** `ThomasMichon/copilot-extensions#5356` (plugin-services
   conformance gap, pre-existing, now vision-linked) ·
   `ThomasMichon/copilot-extensions#5452` (tasks-pane-ux delegated/relay
@@ -103,16 +100,17 @@ Operator, end of a long multi-repo session:
       shipped, governs both `land=self`/`land=author`) as a new Behavior,
       `stagnation-escalates`, distinct from `bounded-verdict-reliability`'s
       render-attempt budget. Provenance entry added.
-- [x] `visions/plugin-services/README.md` — scoped first pass: confirmed the
-      vision already states the applicable invariants
-      (`register-once-cutover-on-update`, `immutable-versioned-runtime`) at
-      the right altitude, so no vision edit was needed (Direction 1 of the
-      audit: the invariants already guide the leaf correctly — the gap is
-      conformance, not vision coverage). Linked `#5356`
-      (agent-dispatch's `install.ps1` retires supervisor/coordinator
-      processes *after* the in-place reinstall rather than before, plus an
-      undetected stale `uv.exe` hazard) to this vision item via issue
-      comment — Direction 2 of the audit (does the subject conform?).
+- [x] `visions/plugin-services/README.md` + `visions/plugins/agent-dispatch/README.md` —
+      ran the Direction-1/Direction-2 invariant audit for agent-dispatch's
+      runtime: the invariant vision already stated
+      `register-once-cutover-on-update`/`immutable-versioned-runtime`
+      correctly, but the agent-dispatch (leaf) vision did not cite or
+      restate them — added `inherits-runtime-service-invariants` there to
+      fix that (Direction 1). Linked `#5356` (agent-dispatch's `install.ps1`
+      retires supervisor/coordinator processes *after* the in-place
+      reinstall rather than before, plus an undetected stale `uv.exe`
+      hazard) to both vision items as the Direction-2 conformance gap, via
+      issue comment and the new vision's own Provenance entry.
       **Not yet done:** the *full* invariant audit this vision calls for
       ("every `agent-*` plugin's `install.ps1`, not just the one subject you
       happened to find a bug in") — tracked as Phase 3 below, not assumed
@@ -169,15 +167,17 @@ then rather than assuming either answer.
 
 ### 2026-10-05 — Kickoff + Phase 1 slice
 - Effort created as the tracker for the operator's vision-backport +
-  material-refresh handoff directive.
+  material-refresh handoff directive; filed and claimed the umbrella issue
+  `#5456` for the sweep.
 - Opened a PR for Phase 1's three session-evidenced targets: folded back
   `#5400`'s run-waiter surfacing into the tasks-pane-ux vision (filing
   `#5452` for the documented delegated/relay implementation gap rather than
   describing it in the vision), folded back the reviewer recipe's standing
-  stagnation-escalation behavior into the reviewer vision, and scoped a first
-  pass of the plugin-services invariant audit (confirmed the vision already
-  covers the applicable invariants; linked the pre-existing `#5356` to it via
-  issue comment rather than editing the vision).
+  stagnation-escalation behavior into the reviewer vision, and ran the
+  Direction-1/Direction-2 invariant audit for agent-dispatch's runtime
+  (added `inherits-runtime-service-invariants` to the agent-dispatch vision,
+  since it hadn't cited the applicable `plugin-services` invariants; linked
+  the pre-existing `#5356` as the Direction-2 conformance gap).
 - The full invariant audit (Phase 3) and the wider vision sweep (Phase 2) are
   explicitly deferred to future sessions per the handoff's own sequencing
   note — this effort stays open across many slices.
