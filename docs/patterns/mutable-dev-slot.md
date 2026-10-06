@@ -274,7 +274,20 @@ for every other cutover/repair path in this repo:
    suffix on the version string (`<version>+repair1`), so the broken
    slot's identity is left completely untouched and `last-known-good`
    still means what it said before the repair started. Health-gate the new
-   build in isolation, exactly like an ordinary install.
+   build in isolation, exactly like an ordinary install. **That distinct
+   identity must propagate everywhere a plain package version is otherwise
+   compared or recorded** — not just the directory name. At least two
+   existing plugins compare a running daemon's self-reported
+   `__version__`/`running-version.json` directly against `current-version`
+   to decide whether self-update should act
+   (`plugins/agent-dispatch/src/agent_dispatch/runtime_version.py`,
+   `self_update.py`): activating `1.2.3+repair1` while the process still
+   reports plain `1.2.3` makes that comparison mismatch forever, so
+   self-update keeps treating an already-repaired daemon as stale, and
+   ownership/ops records lose track of which slot is actually live. The
+   generation suffix needs its own first-class field in whatever record
+   keeps that comparison (keeping the user-facing package version
+   unchanged), not an ad hoc string appended only to the directory name.
 4. **Promote before you retire, never the reverse**: once the replacement's
    health gate passes, atomically flip `current-version` (and any routing)
    to it. Only after that promotion is *confirmed* — not merely
