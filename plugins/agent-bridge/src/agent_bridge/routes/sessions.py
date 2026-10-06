@@ -1241,7 +1241,7 @@ async def get_events(
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     if isinstance(before, int):  # direct callers see unresolved Query defaults
         streaming_args = after is not None or controlled or transient
-        return events_before_page(mgr.db, session.session_id, before, limit, streaming_args)
+        return events_before_page(session, mgr.db, before, limit, streaming_args, continuity_id)
     controlled_caller_id = (
         _controlled_cursor_key(caller_id) if controlled else None
     )

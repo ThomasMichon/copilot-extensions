@@ -424,11 +424,33 @@ def test_other_session_events_are_ignored() -> None:
 
 @pytest.mark.parametrize(
     "params",
-    [None, "nope", [], {"type": "subagent.started", "agentId": "a", "data": "x"}],
+    [
+        None,
+        "nope",
+        [],
+        {"type": "subagent.started", "agentId": "a", "data": "x"},
+        # A lifecycle notification without a usable sessionId is never
+        # emitted into the current session.
+        {"type": "subagent.started", "agentId": "a", "data": {"toolCallId": "t"}},
+        {"sessionId": "", "type": "subagent.started", "agentId": "a",
+         "data": {"toolCallId": "t"}},
+        {"sessionId": None, "type": "subagent.started", "agentId": "a",
+         "data": {"toolCallId": "t"}},
+        {"sessionId": 7, "type": "subagent.started", "agentId": "a",
+         "data": {"toolCallId": "t"}},
+    ],
 )
-def test_malformed_params_never_raise(params) -> None:
-    client, _ = _client()
+def test_malformed_params_never_raise_or_emit(params) -> None:
+    client, events = _client()
     client._subagent_attr.handle_raw_event(params)
+    assert events == []
+
+
+def test_raw_events_before_session_id_is_known_are_ignored() -> None:
+    client, events = _client()
+    client._acp_session_id = None
+    _raw(client, "subagent.started", {"toolCallId": "t"}, agent_id="a")
+    assert events == []
 
 
 def test_replay_suppression_ignores_raw_events() -> None:

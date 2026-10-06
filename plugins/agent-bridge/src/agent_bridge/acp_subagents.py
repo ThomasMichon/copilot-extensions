@@ -266,7 +266,7 @@ class SubagentAttribution:
             return
         current = self._session_id()
         session_id = params.get("sessionId")
-        if session_id and current and session_id != current:
+        if not isinstance(session_id, str) or not session_id or session_id != current:
             return
         event_type = params.get("type")
         data = params.get("data")

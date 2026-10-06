@@ -93,9 +93,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
-          "sha256": "107774a8e44c3d5667a60b915a4035cbd6841f9d839ca5875f233c89951bccc6",
+          "sha256": "e7d6434f1dccfda93cc86a06091947f3355a6e82a2a12d6e03605b83d9bbb3b5",
           "semantic": false,
-          "non_semantic_reason": "Adds the before=/limit= backward JSON page to the events route (HTTP generation 23, gated by events_before_paging); the representative session-create wire shape is unchanged."
+          "non_semantic_reason": "Adds the before=/limit= backward JSON page (continuity-qualified, atomic with event-log rebuild) to the events route (HTTP generation 23, gated by events_before_paging); the representative session-create wire shape is unchanged."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",

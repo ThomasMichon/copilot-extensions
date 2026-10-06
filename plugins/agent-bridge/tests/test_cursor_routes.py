@@ -357,10 +357,14 @@ class TestRangeEndpoint:
 
 
 def _seed_numbered(app, count: int):
-    return _seed_session(app, events=[
+    from agent_bridge.events import EventLog
+
+    mgr = _seed_session(app, events=[
         {"id": i, "event": "agent_message", "data": {"text": str(i)}}
         for i in range(1, count + 1)
     ])
+    mgr.get_session("sess-1").event_log = EventLog.from_db(mgr.db, "sess-1")
+    return mgr
 
 
 class TestEventsBeforePaging:
@@ -398,7 +402,9 @@ class TestEventsBeforePaging:
         _seed_numbered(app, 3)
         url = "/api/v1/sessions/sess-1/events"
         body = client.get(url, params={"before": 1}).json()
-        assert body == {"session_id": "sess-1", "events": [], "has_more": False}
+        assert body["events"] == [] and body["has_more"] is False
+        assert body["session_id"] == "sess-1"
+        assert isinstance(body["continuity_id"], str)
         body = client.get(url, params={"before": 100}).json()
         assert [e["id"] for e in body["events"]] == [1, 2, 3]
         cur = client.get("/api/v1/sessions/sess-1/cursor")
@@ -420,6 +426,82 @@ class TestEventsBeforePaging:
             assert client.get(url, params=params).status_code == 422, params
         resp = client.get("/api/v1/sessions/nope/events", params={"before": 3})
         assert resp.status_code == 404
+
+    def test_stale_continuity_after_rebuild_is_rejected(self, client, app) -> None:
+        mgr = _seed_numbered(app, 6)
+        url = "/api/v1/sessions/sess-1/events"
+        first = client.get(url, params={"before": 7, "limit": 2}).json()
+        continuity = first["continuity_id"]
+        assert [e["id"] for e in first["events"]] == [5, 6]
+        page = client.get(
+            url, params={"before": 5, "limit": 2, "continuity_id": continuity}
+        )
+        assert page.status_code == 200
+        assert page.json()["continuity_id"] == continuity
+        # A resync rebuild renumbers history: the old cursor no longer
+        # addresses it, so the next page is refused instead of skipping or
+        # duplicating events.
+        mgr.get_session("sess-1").event_log.rebuild(
+            [("agent_message", {"text": f"r{i}"}) for i in range(1, 4)]
+        )
+        stale = client.get(
+            url, params={"before": 3, "limit": 2, "continuity_id": continuity}
+        )
+        assert stale.status_code == 409
+        detail = stale.json()["detail"]
+        assert detail["code"] == "cursor_invalidated"
+        assert detail["prior_continuity_id"] == continuity
+        assert detail["continuity_id"] not in (None, continuity)
+        restarted = client.get(url, params={"before": 100}).json()
+        assert restarted["continuity_id"] == detail["continuity_id"]
+        assert [e["data"]["text"] for e in restarted["events"]] == ["r1", "r2", "r3"]
+
+    def test_db_fallback_without_live_event_log(self, client, app) -> None:
+        _seed_session(app, events=[
+            {"id": i, "event": "agent_message", "data": {"text": str(i)}}
+            for i in range(1, 5)
+        ])
+        body = client.get(
+            "/api/v1/sessions/sess-1/events", params={"before": 5, "limit": 3}
+        ).json()
+        assert [e["id"] for e in body["events"]] == [2, 3, 4]
+        assert body["has_more"] is True
+        assert body["continuity_id"] is None
+
+
+def test_snapshot_before_is_atomic_with_concurrent_rebuild() -> None:
+    """A page read racing EventLog.rebuild() never sees a partial generation."""
+    import threading
+
+    from agent_bridge.events import EventLog
+
+    log = EventLog()
+    log.rebuild([("agent_message", {"gen": 0}) for _ in range(50)])
+    stop = threading.Event()
+
+    def rebuilder() -> None:
+        gen = 0
+        while not stop.is_set():
+            gen += 1
+            log.rebuild(
+                [("agent_message", {"gen": gen}) for _ in range(20 + gen % 60)]
+            )
+
+    worker = threading.Thread(target=rebuilder)
+    worker.start()
+    try:
+        for _ in range(2000):
+            _continuity, events, has_more = log.snapshot_before(1000, 15)
+            assert events, "a page of a non-empty log is never empty"
+            ids = [e.id for e in events]
+            assert ids == list(range(ids[0], ids[0] + len(ids)))
+            assert len({e.data["gen"] for e in events}) == 1
+            assert has_more is (ids[0] > 1)
+            # The page is the newest tail of one complete generation.
+            assert len(events) == 15
+    finally:
+        stop.set()
+        worker.join()
 
 
 class TestStatusEndpoint:

@@ -225,10 +225,17 @@ in the README for the consumer model.
 
 **Backward paging** (protocol version 23,
 `EVENTS_BEFORE_PAGING_PROTOCOL_VERSION`): `GET .../events?before=<id>&limit=<n>`
-is not a stream. It returns one JSON page `{session_id, events, has_more}` with
+is not a stream. It returns one JSON page
+`{session_id, continuity_id, events, has_more}` with
 the newest `limit` (default 200, max 1000) events whose id is `< before`, in
 ascending id order; page further back with `before=<events[0].id>` until
-`has_more` is false. It never moves a cursor and rejects (422) `after`,
+`has_more` is false. Each page is one atomic snapshot of the session's event
+log, so a concurrent resync rebuild can never yield a partial generation.
+`continuity_id` names the log generation the ids belong to: pass it back as
+`continuity_id=<value>` on the next page, and a resync that rebuilt the log in
+between answers 409 `cursor_invalidated` (restart paging from the newest
+events) instead of silently skipping or duplicating history. It never moves a
+cursor and rejects (422) `after`,
 `controlled`, or `transient`. Gate on the protocol version: an older daemon
 ignores `before` and opens the SSE stream instead.
 
