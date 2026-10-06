@@ -16,10 +16,14 @@
   conformance gap, pre-existing, now vision-linked) ·
   `ThomasMichon/copilot-extensions#5452` (tasks-pane-ux delegated/relay
   waiter-surfacing gap) ·
-  `ThomasMichon/copilot-extensions#5468` (agent-logger scheduled-task
-  cutover gap) ·
-  `ThomasMichon/copilot-extensions#5472` (agent-vault/agent-codespaces/
-  agent-worktrees same-version content-changed race, filed this slice)
+  `ThomasMichon/copilot-extensions#5468` (agent-logger: in-place
+  same-version rewrite, needs the refuse-or-new-generation fix) ·
+  `ThomasMichon/copilot-extensions#5472` (consolidated: every `agent-*`
+  plugin's immutable-versioned-runtime conformance gap for a same-version,
+  content-changed update — agent-vault/agent-codespaces/agent-worktrees/
+  agent-mcp's unsafe races, agent-bridge/agent-index's lock-safe-but-still-
+  non-conforming rewrite, and agent-ssh/agent-containers/agent-machines'
+  unconditional in-place reinstall; filed and expanded this slice)
 
 ## Guiding Intent
 
@@ -136,20 +140,17 @@ Operator, end of a long multi-repo session:
       upfront).
 
 ### Phase 3 — Full design/service-invariant audit
-- [x] Ran the cutover/immutable-runtime slice of the `plugin-services`
-      invariant audit (`immutable-versioned-runtime`,
-      `register-once-cutover-on-update`, `zero-downtime-cutover`) against
-      every `agent-*` plugin's runtime-deploy path, scored against **two
-      separate questions per plugin**: does a same-version, content-changed
-      update (a) ever mutate the already-built slot in place
+- [x] Ran a slice of the `plugin-services` invariant audit against every
+      `agent-*` plugin's runtime-deploy path, scored against **two separate
+      questions per plugin**: does a same-version, content-changed update
+      (a) ever mutate the already-built slot in place
       (`immutable-versioned-runtime`), and (b) interrupt a live daemon doing
-      so (`zero-downtime-cutover`/`register-once-cutover-on-update`,
-      applicable only where a daemon exists)? (Table revised twice after
-      review — see Journal: the first pass wrongly credited a versioned-slot
-      *build path* as conformance without checking this exact case; the
-      second wrongly credited lock-safe stop-before-rebuild as conformance,
-      when the invariant is violated by the in-place rewrite itself,
-      independent of whether it races a live process.)
+      so (`zero-downtime-cutover`, applicable only where a daemon exists)?
+      `register-once-cutover-on-update`'s own distinct requirement (the
+      supervisor registration staying bound to a stable launcher across an
+      update) is **not** evaluated here — narrowing this completed slice to
+      the two invariants the table actually scores, rather than claiming
+      broader coverage.
 
       | Plugin | Immutable-versioned-runtime | Zero-downtime-cutover | Evidence |
       |---|---|---|---|
@@ -164,7 +165,7 @@ Operator, end of a long multi-repo session:
       | agent-codespaces | **Violates** | **Violates** | `Deploy-Venv`/`Deploy-Package` have no refusal or stop-if-active guard; the Connection Owner daemon is only synced via `Sync-ConnectionOwnerService` at the very end (`install.ps1:1507-1544`, `888-930`). Filed as `#5472`. |
       | agent-worktrees | **Violates** | **Violates** | `Test-SlotAlreadyComplete` (the #2174 fix itself) only short-circuits the hash-match (nothing-changed) case; genuinely changed same-version content falls through to `Deploy-Venv`/`Deploy-Package` with no refusal or stop guard, despite the function's own comment naming the status-monitor daemon as exactly this risk (`install.ps1:1331-1356, 3829-3866`). Filed as `#5472`. |
       | agent-mcp | **Violates** | **Violates** | Confirmed (not merely suspected): `init.ps1:612-708` unconditionally installs into the existing `$VenvDir`; the zdd cutover at `init.ps1:735-783` runs only afterward and explicitly skips an exact-version-match daemon, so a same-version content change mutates the active slot *before* any cutover runs at all. Filed as `#5472`. |
-      | agent-logger | **Violates** | **Violates (partial fix tracked)** | `Install-Package` rewrites the already-built same-version venv regardless (`install.ps1:1019-1055`). The previously-filed `#5468` only proposed stopping/restarting the Scheduled Task — that closes the lock-safety gap, **not** the immutability violation; `#5468` needs updating (or a companion issue) for the refuse-or-new-generation fix, same as everything else in this table. |
+      | agent-logger | **Violates** | **Violates (partial fix tracked)** | `Install-Package` rewrites the already-built same-version venv regardless (`install.ps1:1019-1055`). The previously-filed `#5468` only proposed stopping/restarting the Scheduled Task — that closes the lock-safety gap, **not** the immutability violation; `#5468` is updated (see its own issue comment) to the refuse-or-new-generation fix, same as everything else in this table. |
 
       **Net finding:** almost the entire `agent-*` runtime-deploy ecosystem
       violates `immutable-versioned-runtime` for a same-version,
