@@ -1715,6 +1715,56 @@ def test_usable_manager_rejects_unrunnable_binstub(monkeypatch, tmp_path):
     assert m._usable_worktree_manager() is None
 
 
+def test_usable_manager_survives_one_transient_timeout(monkeypatch, tmp_path):
+    """A `--version` probe that times out once (a cold `uv run` resync under
+    load) must not be declared unusable outright -- retrying recovers a
+    genuinely healthy install instead of falsely reporting it uninstalled."""
+    command = _register_provider(tmp_path)
+    monkeypatch.setenv(m._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(_provider_registry_dir(tmp_path)))
+    calls = []
+
+    def flaky(cmd, **kw):
+        calls.append(cmd)
+        if len(calls) == 1:
+            raise m.subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+        return _fake_run(0)(cmd, **kw)
+
+    monkeypatch.setattr(m.subprocess, "run", flaky)
+    assert m._usable_worktree_manager() == command
+    assert len(calls) == 2
+
+
+def test_usable_manager_rejects_a_persistently_timing_out_binstub(monkeypatch, tmp_path):
+    """Every attempt timing out is still reported unusable, not retried forever."""
+    _register_provider(tmp_path)
+    monkeypatch.setenv(m._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(_provider_registry_dir(tmp_path)))
+    calls = []
+
+    def always_times_out(cmd, **kw):
+        calls.append(cmd)
+        raise m.subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+
+    monkeypatch.setattr(m.subprocess, "run", always_times_out)
+    assert m._usable_worktree_manager() is None
+    assert len(calls) == 2  # retried once, then gave up -- not an unbounded loop
+
+
+def test_usable_manager_does_not_retry_a_genuine_spawn_failure(monkeypatch, tmp_path):
+    """An `OSError` (missing/non-executable binstub) is never retried -- another
+    attempt cannot fix a file that isn't there, unlike a slow cold start."""
+    _register_provider(tmp_path)
+    monkeypatch.setenv(m._CONTROL_PLANE_PROVIDERS_DIR_ENV, str(_provider_registry_dir(tmp_path)))
+    calls = []
+
+    def boom(cmd, **kw):
+        calls.append(cmd)
+        raise OSError("cannot exec")
+
+    monkeypatch.setattr(m.subprocess, "run", boom)
+    assert m._usable_worktree_manager() is None
+    assert len(calls) == 1
+
+
 def test_usable_manager_discovers_synthetic_registered_provider(monkeypatch, tmp_path):
     command = _register_provider(
         tmp_path, provider="alt-manager", command=["/opt/alt-manager/bin/alt-manager"]
