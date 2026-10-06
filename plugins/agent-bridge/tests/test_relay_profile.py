@@ -392,3 +392,58 @@ def test_register_provider_relay_no_import_when_cli_unavailable():
         _register_provider_relay(b, "agent-codespaces")
     imp.assert_not_called()
     assert b.sources == [] and b.port is None and b.validator is None
+
+
+# --- #5405: registered provider whose seam is momentarily unavailable -------
+
+def _register_manifest(tmp_path, monkeypatch, name="agent-codespaces"):
+    d = tmp_path / "providers.d"
+    d.mkdir(exist_ok=True)
+    (d / f"{name}.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(d))
+
+
+def test_registered_provider_retries_until_profile_available(tmp_path, monkeypatch):
+    _register_manifest(tmp_path, monkeypatch)
+    store = tmp_path / "s.json"
+    _write_store(store, {"cs": "TOK"})
+    prof = {
+        "sources": ["git-credential"], "port": 1,
+        "azure_resources": ["r"], "gated_actions": ["get-azure-token"],
+        "token_store": str(store),
+    }
+    # Binstub missing for the first two probes (mid-update), then healthy.
+    which = iter([None, None, "/bin/agent-codespaces"])
+    sleeps: list[float] = []
+    b = _FakeBuilder()
+    with patch("shutil.which", side_effect=lambda _n: next(which)), \
+         patch("subprocess.run", return_value=_cp(0, json.dumps(prof))):
+        _register_provider_relay(b, "agent-codespaces", sleep=sleeps.append)
+    assert len(sleeps) == 2
+    assert b.port == 1 and isinstance(b.validator, FileTokenValidator)
+
+
+def test_registered_provider_warns_after_bounded_retries(tmp_path, monkeypatch, caplog):
+    _register_manifest(tmp_path, monkeypatch)
+    sleeps: list[float] = []
+    b = _FakeBuilder()
+    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
+         patch("subprocess.run", return_value=_cp(1, "", "mid-update")), \
+         caplog.at_level("WARNING", logger="agent-bridge"):
+        _register_provider_relay(b, "agent-codespaces", sleep=sleeps.append)
+    assert sleeps and sum(sleeps) <= 30
+    assert b.sources == [] and b.validator is None
+    assert any(
+        r.levelname == "WARNING" and "agent-codespaces" in r.getMessage()
+        and "service restart" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_unregistered_provider_does_not_retry():
+    sleeps: list[float] = []
+    b = _FakeBuilder()
+    with patch("shutil.which", return_value=None):
+        _register_provider_relay(b, "agent-codespaces", sleep=sleeps.append)
+    assert sleeps == []
+    assert b.sources == []

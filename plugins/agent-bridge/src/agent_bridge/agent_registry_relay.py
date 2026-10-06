@@ -7,6 +7,8 @@ import logging
 import secrets
 import shutil
 import subprocess
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 from agent_procutil import no_window_flags
@@ -168,9 +170,54 @@ def _relay_profile_via_cli(binstub: str) -> dict | None:
         return None
 
 
-def _register_provider_relay(builder, binstub: str) -> None:
-    """Register one provider's relay profile via its ``relay-profile`` CLI seam."""
+#: Backoff (seconds) between ``relay-profile`` retries for a provider that is
+#: registered in ``providers.d`` but whose CLI seam is momentarily unavailable
+#: (e.g. its runtime is mid-update during a bridge cutover). Bounded so a truly
+#: broken provider can't stall relay startup for long.
+_PROFILE_RETRY_DELAYS: tuple[float, ...] = (1.0, 2.0, 4.0, 8.0)
+
+
+def _provider_registered(binstub: str) -> bool:
+    """Whether ``binstub`` has a ``providers.d/<binstub>.json`` manifest."""
+    try:
+        from .provider_sources import providers_dir
+
+        return (providers_dir() / f"{binstub}.json").is_file()
+    except Exception:
+        return False
+
+
+def _register_provider_relay(
+    builder, binstub: str, *, sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Register one provider's relay profile via its ``relay-profile`` CLI seam.
+
+    A provider that is not installed contributes nothing (debug log). A provider
+    that *is* registered in ``providers.d`` but whose seam fails is retried with
+    bounded backoff; if it never answers, a WARNING is logged, because the relay
+    would otherwise run for its whole lifetime without that provider's token
+    gate and silently deny its gated actions.
+    """
     profile = _relay_profile_via_cli(binstub)
+    if profile is None and _provider_registered(binstub):
+        for delay in _PROFILE_RETRY_DELAYS:
+            log.info(
+                "%s relay-profile unavailable but provider is registered -- "
+                "retrying in %.0fs", binstub, delay,
+            )
+            sleep(delay)
+            profile = _relay_profile_via_cli(binstub)
+            if profile is not None:
+                break
+        if profile is None:
+            log.warning(
+                "%s is a registered bridge provider but its relay-profile is "
+                "unavailable; its credential-relay sources and token gate are "
+                "NOT active (gated actions such as get-azure-token will be "
+                "denied). Run `agent-bridge service restart` once %s is healthy.",
+                binstub, binstub,
+            )
+            return
     if profile is None:
         log.debug("%s relay-profile unavailable -- no relay sources", binstub)
         return
