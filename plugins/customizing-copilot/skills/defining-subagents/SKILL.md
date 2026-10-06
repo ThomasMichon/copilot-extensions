@@ -289,6 +289,43 @@ fallback below, which needs shell access to invoke the materialized fleet
 when the native catalog fails to register. Give an MCP-owning agent full
 tool access like any other.
 
+**Per-server `tools:` allow-lists default to `["*"]`, but this is a
+reliability-vs-least-privilege tradeoff, not a one-sided recommendation.**
+An `mcp-servers.<name>.tools` entry narrowed to specific tool names (e.g.
+`tools: ["foo_search", "foo_status"]`) is brittle in a way `["*"]` is not:
+the upstream MCP server's own tool catalog can add, rename, or retire tools
+between releases, entirely independent of this repo's release cycle -- a
+hand-maintained enumeration has no warning when it drifts out of sync with
+that catalog. When it drifts, the agent doesn't just lose the tools the
+list omits; a stale or misspelled entry can make the whole allow-list
+reject *every* name in it ("Unknown tool name in the tool allowlist: ..."),
+denying the agent that server's tools entirely by accident. This is not
+hypothetical: a real-world consuming repo had two agents hand-enumerating a
+single MCP server's tools (e.g. `tools: ["example_search",
+"example_status"]`); that list silently diverged from the server's actual
+tool catalog and broke MCP session startup for both agents.
+
+The description/system-prompt scoping argument cuts only one way, though:
+it explains why a narrow list is rarely needed for an *ordinary* read-mostly
+server, but it is not a substitute for one when the server's catalog can
+carry a genuinely high-privilege or destructive tool (an admin/delete/
+force-merge-class operation). `["*"]` auto-grants any *newly added* upstream
+tool the moment the server ships it, with zero review from this repo -- an
+explicit narrow list is the only mechanism that makes adding such a
+capability a reviewed, deliberate diff instead of a silent, automatic grant.
+Default to `["*"]` for the common case; choose a narrow, reviewed list
+instead when the upstream server's blast radius genuinely warrants gating
+new capabilities behind an explicit update, and accept the catalog-drift
+risk above as the cost of that confinement.
+
+When you do narrow the list for that reason, document it inline with a
+trailing `# mcp-tools-allowlist: allow <reason>` comment on the `tools:`
+line -- the same escape-hatch convention `check-headless-launch.py` uses for
+its own raw-flag exceptions. `reviewing-customizations`' scanner recognizes
+this marker and does not flag that entry; an un-annotated narrow list is
+always flagged, so "only expose the tools this agent needs" without a
+stated reason is not sufficient to suppress the finding.
+
 Every Task-capable agent -- including a coordinator that may spawn other agent
 types -- must include this literal, agent-specific line:
 
@@ -367,6 +404,17 @@ equivalence. An agent **fails** review if any applicable box is unchecked:
 - [ ] **Tools are not narrowed for anti-recursion.** `tools` is omitted or
       `["*"]` (or lists only *additive* MCP grants); it is **never** trimmed to
       "prevent recursion" — that cripples the agent, it doesn't protect it.
+- [ ] **Per-server `mcp-servers.<name>.tools` defaults to `["*"]`.** A named
+      allow-list drifts out of sync with the upstream server's own catalog
+      (additions/renames/retirements happen on the upstream's schedule, not
+      this repo's) and a stale/misspelled entry can reject the whole list,
+      silently denying the agent that server's tools entirely.
+      `reviewing-customizations` flags a narrowed per-server list as
+      `mcp-server-tools-allowlist` unless it carries a trailing
+      `# mcp-tools-allowlist: allow <reason>` comment -- narrowing is a
+      legitimate choice when the upstream server's blast radius warrants
+      gating new capabilities behind a reviewed update, but it must be
+      annotated, not silent.
 - [ ] **Tools are not narrowed to force MCP-only usage.** An MCP-owning agent's
       `tools` is not restricted to its MCP surface alone to compel MCP calls or
       block workarounds -- `agent-mcp`'s `materialize`/`call` subcommands are an

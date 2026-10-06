@@ -1,0 +1,9 @@
+{
+  "comment": "defining-subagents: guide against hand-enumerated per-MCP-server tool allow-lists; reviewing-customizations now flags a narrowed per-server tools list as mcp-server-tools-allowlist.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
