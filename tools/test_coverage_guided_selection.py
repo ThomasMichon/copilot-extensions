@@ -9,10 +9,11 @@ known-correct expectation, independent of any real pytest/coverage run.
 `test_collect_baseline_round_trips_against_a_real_plugin_suite` is the one
 real integration check: it runs `baseline.collect_baseline` against the
 `ai-attribution` plugin's own (small, fast) suite via an ephemeral
-`uv run --with coverage --with pytest-cov` subprocess, and asserts the
-round-trip produces internally consistent, real coverage/duration data --
-proving Phase 0's "spike coverage collection ... confirm the artifact it
-produces round-trips through the chosen storage/correlation mechanism"
+`uv run --with coverage` subprocess (`baseline.py` manages `coverage.Coverage`
+directly, not via `pytest-cov`), and asserts the round-trip produces
+internally consistent, real coverage/duration data -- proving Phase 0's
+"spike coverage collection ... confirm the artifact it produces round-trips
+through the chosen storage/correlation mechanism"
 checklist item against a real suite, not just synthetic data. It is
 deliberately **opt-in**: it self-skips unless `CGS_RUN_INTEGRATION_TEST=1`
 is set, since it spawns a real subprocess with network-dependent package
@@ -1128,6 +1129,164 @@ def test_collect_baseline_attributes_fixture_setup_and_teardown_coverage(
     assert any("test_uses_the_fixture" in t for t in attributed_tests), (
         "a line executed only during fixture setup/teardown must still be "
         f"attributed to the test using that fixture; got {attributed_tests!r}"
+    )
+
+
+def test_collect_baseline_attributes_a_conftest_setup_hook_to_the_right_test(
+    tmp_path: Path,
+) -> None:
+    # Regression test for pytest's own hook-ordering semantics:
+    # `_ContextSwitcher` switches context from a `pytest_runtest_protocol`
+    # wrapper -- one level above `pytest_runtest_setup` in the call
+    # hierarchy -- specifically *because* `tryfirst` cannot reliably win a
+    # tie at the setup-hook level: pluggy still calls same-priority
+    # implementations in reverse registration order, and this plugin is
+    # always registered before a project's own conftest.py plugins load,
+    # so a conftest's own `pytest_runtest_setup` wrapper -- even one that
+    # is itself `tryfirst` -- would still run its pre-yield body first
+    # and win that tie by registering later. Switching one level up
+    # sidesteps the tie instead of trying to win it: the context switch
+    # happens before the default implementation even begins running
+    # setup for anyone. Constructs two back-to-back tests plus a
+    # conftest-level, equally-`tryfirst` `pytest_runtest_setup`
+    # hookwrapper that executes a line only it ever reaches, and confirms
+    # that line is attributed to the test whose setup is actually running
+    # (the second test), never the one before it.
+    if os.environ.get("CGS_RUN_INTEGRATION_TEST") != "1":
+        pytest.skip(
+            "opt-in only: set CGS_RUN_INTEGRATION_TEST=1 to run the real "
+            "uv/coverage subprocess integration test"
+        )
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "__init__.py").write_text("")
+    (src_dir / "helper.py").write_text(
+        "def conftest_hook_only_line():\n"
+        "    return 'this line only ever runs from a conftest setup hook'\n"
+    )
+
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "conftest.py").write_text(
+        "import sys\n"
+        "sys.path.insert(0, str((__import__('pathlib').Path(__file__).parent.parent / 'src')))\n"
+        "import pytest\n"
+        "from helper import conftest_hook_only_line\n"
+        "\n\n"
+        "@pytest.hookimpl(wrapper=True, tryfirst=True)\n"
+        "def pytest_runtest_setup(item):\n"
+        "    conftest_hook_only_line()\n"
+        "    return (yield)\n"
+    )
+    (tests_dir / "test_ordering.py").write_text(
+        "def test_a():\n"
+        "    pass\n"
+        "\n\n"
+        "def test_b():\n"
+        "    pass\n"
+    )
+
+    result = baseline_mod.collect_baseline(
+        cwd=tmp_path,
+        test_path="tests",
+        cov_source="src",
+        plugin="conftest-hook-ordering-regression",
+        timeout_s=60.0,
+    )
+
+    helper_file = "src/helper.py"
+    assert helper_file in result["coverage"], "helper.py must be attributed at all"
+    attributed_tests = {
+        test_id
+        for tests in result["coverage"][helper_file].values()
+        for test_id in tests
+    }
+    assert any("test_b" in t for t in attributed_tests), (
+        "a conftest setup hookwrapper's own line, executed during test_b's "
+        "own setup, must be attributed to test_b -- without the context "
+        "switch happening one level up (pytest_runtest_protocol, not "
+        "pytest_runtest_setup), an equally-tryfirst conftest wrapper would "
+        "still win the tie (registered later) and run before the switch, "
+        "misattributing this line to the stale, still-previous-test "
+        f"context instead; got {attributed_tests!r}"
+    )
+
+
+def test_collect_baseline_ignores_a_project_configured_dynamic_context(
+    tmp_path: Path,
+) -> None:
+    # Regression test for a project-configured dynamic context: a downstream
+    # consumer's own .coveragerc/pyproject.toml can set
+    # `[run] dynamic_context = test_function`, which would otherwise make
+    # coverage.py switch contexts *on its own* during each test's call
+    # phase (and clear them on return), racing and corrupting the
+    # explicit, nodeid-based contexts `_ContextSwitcher` sets -- producing
+    # collected "test IDs" that are really coverage's own automatic
+    # context strings, absent from the json report and unusable as real
+    # pytest nodeids. `config_file=False` on the managed `Coverage()`
+    # instance exists precisely to prevent this: it never reads a
+    # project's own coverage configuration at all. Constructs a throwaway
+    # project with exactly that `.coveragerc` setting (plus
+    # `parallel = true`, covering the sibling data-suffix finding the same
+    # way) and confirms every attributed "test" is a real nodeid that
+    # actually appears in the baseline's own `tests` mapping -- never a
+    # bare automatic-context string coverage.py would have produced on
+    # its own.
+    if os.environ.get("CGS_RUN_INTEGRATION_TEST") != "1":
+        pytest.skip(
+            "opt-in only: set CGS_RUN_INTEGRATION_TEST=1 to run the real "
+            "uv/coverage subprocess integration test"
+        )
+
+    (tmp_path / ".coveragerc").write_text(
+        "[run]\nparallel = true\ndynamic_context = test_function\n"
+    )
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "__init__.py").write_text("")
+    (src_dir / "helper.py").write_text(
+        "def greet(name):\n"
+        "    return f'hello, {name}'\n"
+    )
+
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_greeter.py").write_text(
+        "import sys\n"
+        "sys.path.insert(0, str((__import__('pathlib').Path(__file__).parent.parent / 'src')))\n"
+        "from helper import greet\n"
+        "\n\n"
+        "def test_greet_alice():\n"
+        "    assert greet('alice') == 'hello, alice'\n"
+        "\n\n"
+        "def test_greet_bob():\n"
+        "    assert greet('bob') == 'hello, bob'\n"
+    )
+
+    result = baseline_mod.collect_baseline(
+        cwd=tmp_path,
+        test_path="tests",
+        cov_source="src",
+        plugin="dynamic-context-config-regression",
+        timeout_s=60.0,
+    )
+
+    real_nodeids = set(result["tests"])
+    assert real_nodeids, "expected at least the two constructed tests to round-trip"
+    attributed_tests = {
+        test_id
+        for per_line in result["coverage"].get("src/helper.py", {}).values()
+        for test_id in per_line
+    }
+    assert attributed_tests, "helper.py must be attributed to some test"
+    assert attributed_tests <= real_nodeids, (
+        "every attributed 'test' must be a real pytest nodeid present in "
+        "the baseline's own tests mapping -- a project's own "
+        "dynamic_context config must never leak its own automatic context "
+        f"strings into coverage attribution; got {attributed_tests!r} not "
+        f"all contained in {real_nodeids!r}"
     )
 
 

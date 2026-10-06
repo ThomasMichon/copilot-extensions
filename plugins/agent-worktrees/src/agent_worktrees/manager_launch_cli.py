@@ -101,24 +101,42 @@ def _launch_probe_env() -> dict[str, str]:
 
 def _probe_worktree_manager_version(
     command: list[str],
+    *,
+    attempts: int = 2,
+    timeout: float = 20.0,
 ) -> tuple[tuple[int, int, int, int] | None, subprocess.CompletedProcess[str] | None]:
-    """Run a fast ``--version`` probe and parse a comparable version tuple."""
-    try:
-        proc = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=15,
-            env=_launch_probe_env(),
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None, None
-    if proc.returncode != 0:
-        return None, proc
-    version = _parse_comparable_version(proc.stdout or "")
-    if version is None:
-        return None, proc
-    return version, proc
+    """Run a fast ``--version`` probe and parse a comparable version tuple.
+
+    Retries on a bare timeout only -- never on a genuine spawn failure (a
+    missing/non-executable binstub, which another attempt cannot fix). A cold
+    ``uv run`` resync (e.g. right after a self-update, or under heavy
+    concurrent load from other worktree/session activity on the same
+    machine) has been observed to take several seconds on its own, well
+    within an installed Manager's legitimate startup budget -- treating one
+    slow probe as conclusively "unusable" was too quick to call a real,
+    working install uninstalled/broken (the loud reinstall-from-scratch
+    guidance) when it was really just transient load.
+    """
+    for attempt in range(max(1, attempts)):
+        try:
+            proc = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=_launch_probe_env(),
+            )
+        except subprocess.TimeoutExpired:
+            continue
+        except (OSError, subprocess.SubprocessError):
+            return None, None
+        if proc.returncode != 0:
+            return None, proc
+        version = _parse_comparable_version(proc.stdout or "")
+        if version is None:
+            return None, proc
+        return version, proc
+    return None, None
 
 
 def _usable_worktree_manager() -> tuple[str, ...] | None:

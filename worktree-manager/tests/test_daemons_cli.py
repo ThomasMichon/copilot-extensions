@@ -72,6 +72,124 @@ def test_cmd_daemons_status_text_mode_flags_pre_upgrade_daemon_telemetry(monkeyp
     assert "telemetry unavailable (pre-upgrade daemon)" in out
 
 
+def test_cmd_daemons_mappings_json_prints_the_report(monkeypatch, capsys):
+    report = [
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "mux_session": "wt-1",
+            "live": True,
+            "attached_clients": 2,
+            "observed_at": "2026-09-25T00:00:00Z",
+        }
+    ]
+    monkeypatch.setattr(
+        "worktree_manager.daemons_status.mapping_statuses", lambda: report
+    )
+
+    rc = daemons_cli.cmd_daemons(["mappings", "--json"])
+
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == report
+
+
+def test_cmd_daemons_mappings_text_mode_reports_none_known(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "worktree_manager.daemons_status.mapping_statuses", lambda: []
+    )
+
+    rc = daemons_cli.cmd_daemons(["mappings"])
+
+    assert rc == 0
+    assert "no known mux-session mappings" in capsys.readouterr().out
+
+
+def test_cmd_daemons_mappings_text_mode_renders_live_marker_and_fields(monkeypatch, capsys):
+    report = [
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "mux_session": "wt-1",
+            "live": True,
+            "attached_clients": 2,
+            "observed_at": "2026-09-25T00:00:00Z",
+        },
+        {
+            "project": "proj",
+            "worktree_id": "wt-2",
+            "mux_session": "wt-2",
+            "live": False,
+            "attached_clients": 0,
+            "observed_at": "2026-09-25T00:00:00Z",
+        },
+    ]
+    monkeypatch.setattr(
+        "worktree_manager.daemons_status.mapping_statuses", lambda: report
+    )
+
+    rc = daemons_cli.cmd_daemons(["mappings"])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "* proj/wt-1" in out
+    assert "session wt-1" in out
+    assert "attached 2" in out
+    assert "  proj/wt-2" in out
+
+
+def test_cmd_daemons_mappings_qualifies_the_live_marker_as_registry_state(monkeypatch, capsys):
+    """The registry's ``live`` bit is not confirmed liveness -- a dead
+    session can retain ``live: true`` until the next real probe. The
+    legend must say so, not simply call the marker 'live'."""
+    report = [
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "mux_session": "wt-1",
+            "live": True,
+            "attached_clients": 1,
+            "observed_at": "2026-09-25T00:00:00Z",
+        }
+    ]
+    monkeypatch.setattr(
+        "worktree_manager.daemons_status.mapping_statuses", lambda: report
+    )
+
+    rc = daemons_cli.cmd_daemons(["mappings"])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "NOT confirmed liveness" in out
+
+
+def test_cmd_daemons_status_rejects_an_unsupported_option(monkeypatch, capsys):
+    called = []
+    monkeypatch.setattr(
+        "worktree_manager.daemons_status.daemon_statuses",
+        lambda: called.append(True) or [],
+    )
+
+    rc = daemons_cli.cmd_daemons(["status", "--jsoon"])
+
+    assert rc == 2
+    assert "unsupported option" in capsys.readouterr().out
+    assert not called
+
+
+def test_cmd_daemons_mappings_rejects_an_unsupported_option(monkeypatch, capsys):
+    called = []
+    monkeypatch.setattr(
+        "worktree_manager.daemons_status.mapping_statuses",
+        lambda: called.append(True) or [],
+    )
+
+    rc = daemons_cli.cmd_daemons(["mappings", "--jsoon"])
+
+    assert rc == 2
+    assert "unsupported option" in capsys.readouterr().out
+    assert not called
+
+
 def test_cmd_daemons_rejects_unknown_action():
     assert daemons_cli.cmd_daemons(["bogus"]) == 2
 
