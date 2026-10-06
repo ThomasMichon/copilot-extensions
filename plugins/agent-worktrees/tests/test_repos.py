@@ -1314,6 +1314,51 @@ def test_sync_repo_bare_anchor_skips_when_diverged(home: Path, tmp_path: Path):
     assert before == after
 
 
+def test_sync_repo_bare_anchor_mirror_refspec_cannot_clobber_diverged_ref(
+    home: Path, tmp_path: Path,
+):
+    """A bare anchor configured with a mirror-style ``+refs/*:refs/*`` fetch
+    refspec (as a mirror clone can carry) must not have its diverged branch
+    ref force-overwritten by the fetch itself before the ancestry/CAS checks
+    ever run -- the fetch must land in a private scratch ref, never directly
+    into ``refs/heads/<target>``."""
+    upstream = tmp_path / "upstream"
+    _init_repo(upstream, branch="main")
+    anchor = tmp_path / "anchor"
+    _bare_anchor_from_clone(upstream, anchor, branch="main")
+    _git(anchor, "config", "remote.origin.fetch", "+refs/*:refs/*")
+
+    local_tree = subprocess.run(
+        ["git", "-C", str(anchor), "rev-parse", "main^{tree}"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    local_commit = subprocess.run(
+        ["git", "-C", str(anchor), "commit-tree", local_tree, "-p", "main",
+         "-m", "local-only"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    _git(anchor, "update-ref", "refs/heads/main", local_commit)
+
+    (upstream / "NEW.md").write_text("more\n")
+    _git(upstream, "add", "-A")
+    _git(upstream, "commit", "-m", "second")
+
+    e = repos.RepoEntry(name="anchor-repo", repo_class="worktree",
+                        default_branch="main",
+                        paths={"windows": str(anchor)})
+    state, detail = repos.sync_repo(e, plat="windows")
+    after = subprocess.run(
+        ["git", "-C", str(anchor), "rev-parse", "main"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert state == "skipped"
+    assert "diverged" in detail
+    # The mirror refspec would have force-written refs/heads/main straight to
+    # the upstream's new commit via a plain `git fetch`; confirm the local
+    # commit survived instead, proving the fetch never touched it directly.
+    assert after == local_commit
+
+
 def _write_inrepo_default_branch(path: Path, branch: str, *, commit: bool = False) -> None:
     """Write the legacy in-repo config form ``<path>/.agent-worktrees/config.yaml``
     declaring ``default_branch``, matching how copilot-extensions itself
