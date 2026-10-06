@@ -91,7 +91,17 @@ class GiteaProvider:
         ]
         if payload is not None:
             args += ["-H", "Content-Type: application/json", "-d", json.dumps(payload)]
-        completed = self.runner(args, check=False, capture_output=True, text=True)
+        try:
+            completed = self.runner(
+                args, check=False, capture_output=True, text=True, timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            # TimeoutExpired retains and formats the complete argv, which
+            # includes the Authorization header -- never let that secret-
+            # bearing command metadata surface in a raised error.
+            raise RuntimeError(
+                "Gitea operation failed: request timed out after 120s"
+            ) from None
         if int(completed.returncode) != 0:
             raise RuntimeError(
                 f"Gitea operation failed: {str(completed.stderr or '').strip()}"
@@ -424,7 +434,13 @@ class GiteaProvider:
             label_id = self._label_id(repo, reservation["label"])
             self._call(
                 "DELETE", f"/repos/{repo}/issues/{issue.number}/labels/{label_id}",
-                ok=(200, 204),
+                # 404 means the label is already gone -- a concurrent
+                # release, or a retry after a first DELETE that actually
+                # succeeded but whose response was lost, can observe this
+                # after the marker is already `released`. The desired
+                # final state (no label) is already reached, so treat it
+                # as success rather than failing every such retry.
+                ok=(200, 204, 404),
             )
             # The scan above and this delete are not atomic with a
             # concurrent reserve(): a racing loop can add the label (a

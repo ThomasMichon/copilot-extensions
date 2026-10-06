@@ -134,23 +134,29 @@ def _mergeability(pull_request: Mapping[str, Any], status_rollup: str | None) ->
     if mergeable not in (True, False, None):
         raise GiteaPRObservationError(f"unrecognized Gitea mergeable value {mergeable!r}")
     if status_rollup is not None:
-        # A definitive check-status rollup is authoritative regardless of
-        # `mergeable`'s own ambiguity: Gitea's `mergeable` is a plain
-        # boolean (unlike GitHub's discriminating MERGEABLE/CONFLICTING/
-        # UNKNOWN tri-state) that also reports `false` while conflict-
-        # checking is still running, when that check errored, for draft
-        # PRs, and other non-conflict transient states -- so classify a
-        # known rollup state first, and only fall back to `mergeable`
-        # itself when there is no rollup to go on.
+        # A definitive BLOCKING check-status rollup (pending/failed) is
+        # authoritative regardless of `mergeable`'s own ambiguity: Gitea's
+        # `mergeable` is a plain boolean (unlike GitHub's discriminating
+        # MERGEABLE/CONFLICTING/UNKNOWN tri-state) that also reports
+        # `false` while conflict-checking is still running, when that
+        # check errored, for draft PRs, and other non-conflict transient
+        # states -- so classify a known blocking rollup state first.
+        # A CLEAN rollup, though, only proves the CHECKS passed -- it says
+        # nothing about a real merge conflict, so it must not override an
+        # explicit `mergeable: false`/`None`; only trust it when
+        # `mergeable` itself is definitively True.
         try:
-            return _COMMIT_STATUS_TO_MERGEABILITY[status_rollup]
+            classification = _COMMIT_STATUS_TO_MERGEABILITY[status_rollup]
         except KeyError:
             raise GiteaPRObservationError(
                 f"unrecognized Gitea combined commit status {status_rollup!r}"
             ) from None
-    if mergeable is True:
+        if classification != Mergeability.CLEAN or mergeable is True:
+            return classification
+    elif mergeable is True:
         return Mergeability.CLEAN
-    # `mergeable` is False or None with no rollup to disambiguate it --
+    # `mergeable` is False or None (with either no rollup to disambiguate
+    # it, or a CLEAN rollup that doesn't by itself prove mergeability) --
     # Gitea's own PullRequest.Mergeable() returns false for a real
     # conflict, a still-running/errored conflict check, a draft PR, and
     # other transient states alike, so with no discriminating signal
@@ -307,7 +313,17 @@ class GiteaPRAdapter:
             "-H", "Accept: application/json",
             "-w", "\n%{http_code}",
         ]
-        completed = self.runner(args, check=False, capture_output=True, text=True)
+        try:
+            completed = self.runner(
+                args, check=False, capture_output=True, text=True, timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            # TimeoutExpired retains and formats the complete argv, which
+            # includes the Authorization header -- never let that secret-
+            # bearing command metadata surface in a raised error.
+            raise RuntimeError(
+                "Gitea operation failed: request timed out after 120s"
+            ) from None
         if int(completed.returncode) != 0:
             raise RuntimeError(
                 f"Gitea operation failed: {str(completed.stderr or '').strip()}"

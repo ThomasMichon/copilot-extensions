@@ -11,6 +11,7 @@ Two layers, mirroring ``test_github_provider_adapter.py``'s own split:
 from __future__ import annotations
 
 import json
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -369,22 +370,32 @@ def test_mergeable_with_no_status_rollup_is_clean():
 @pytest.mark.parametrize(
     ("status_rollup", "expected"),
     [
-        ("success", Mergeability.CLEAN),
         ("pending", Mergeability.CHECKS_PENDING),
         ("failure", Mergeability.CHECKS_FAILED),
     ],
 )
-def test_status_rollup_takes_priority_over_an_ambiguous_mergeable_value(
+def test_blocking_status_rollup_takes_priority_over_an_ambiguous_mergeable_value(
     status_rollup, expected,
 ):
     """mergeable: false (or null) is ambiguous on its own -- but a
-    definitive check-status rollup is not, and must not be suppressed by
-    that ambiguity. A PR with real pending/failing checks must still
-    reach CHECKS_PENDING/CHECKS_FAILED even though `mergeable` itself
-    gives no useful signal."""
+    definitive BLOCKING check-status rollup is not, and must not be
+    suppressed by that ambiguity. A PR with real pending/failing checks
+    must still reach CHECKS_PENDING/CHECKS_FAILED even though `mergeable`
+    itself gives no useful signal."""
     for mergeable in (False, None):
         observation = observe_pr_state(_pr(mergeable=mergeable), status_rollup=status_rollup)
         assert observation.mergeability == expected
+
+
+@pytest.mark.parametrize("status_rollup", ["success", "skipped"])
+def test_clean_status_rollup_does_not_override_an_ambiguous_mergeable_value(status_rollup):
+    """A CLEAN rollup only proves the checks passed -- it says nothing
+    about a real merge conflict, so it must not override an explicit
+    `mergeable: false`/`None`. With `mergeable` not definitively True,
+    the result must stay UNKNOWN even though the checks are clean."""
+    for mergeable in (False, None):
+        observation = observe_pr_state(_pr(mergeable=mergeable), status_rollup=status_rollup)
+        assert observation.mergeability == Mergeability.UNKNOWN
 
 
 @pytest.mark.parametrize(
@@ -717,6 +728,25 @@ def test_curl_failure_raises(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Gitea operation failed"):
         adapter.fetch_pr("gitea.example.com/example/project", 1)
+
+
+def test_curl_timeout_raises_sanitized_error_without_the_argv(monkeypatch):
+    """A stalled Gitea request must not block the poll-path observation
+    cycle indefinitely -- the call is bounded -- and the raised error
+    must never surface the raw argv, which carries the Authorization
+    header."""
+    monkeypatch.setenv("GITEA_TOKEN", "super-secret-token")
+
+    def runner(args, **kwargs):
+        assert kwargs.get("timeout") == 120
+        raise subprocess.TimeoutExpired(cmd=args, timeout=120)
+
+    adapter = GiteaPRAdapter(
+        "review-bot", runner=runner, api_bases={"gitea.example.com": "https://gitea.example.com"},
+    )
+    with pytest.raises(RuntimeError, match="timed out") as exc_info:
+        adapter.fetch_pr("gitea.example.com/example/project", 1)
+    assert "super-secret-token" not in str(exc_info.value)
 
 
 def test_http_error_status_raises(monkeypatch):

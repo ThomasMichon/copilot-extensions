@@ -7,6 +7,7 @@ Mirrors ``test_repository_issue_loops.py``'s own ``GitHubProvider``/
 from __future__ import annotations
 
 import json
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -368,6 +369,41 @@ def test_release_re_adds_the_label_when_a_concurrent_reserve_races_the_delete(mo
     assert relabeled == [7]
 
 
+def test_release_treats_an_already_absent_label_as_success(monkeypatch):
+    """A concurrent release, or a retry after a first DELETE that
+    actually succeeded but whose response was lost, can see a 404 here
+    after the marker is already `released`. The desired final state (no
+    label) is already reached, so this must succeed rather than raising
+    and making every such retry fail."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+
+    def runner(args, **kwargs):
+        method = args[args.index("-X") + 1]
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status({"login": "issue-bot"}, 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status({"full_name": "example/project"}, 200)
+        if "/issues/1/comments?page=1" in url and method == "GET":
+            return _status([], 200)
+        if "/issues/1/comments?page=" in url and method == "GET":
+            return _status([], 200)
+        if url.endswith("/issues/1/comments") and method == "POST":
+            return _status({"id": 1}, 201)
+        if "/labels?page=1" in url and method == "GET":
+            return _status([{"id": 7, "name": "backlog-active"}], 200)
+        if "/labels?page=" in url and method == "GET":
+            return _status([], 200)
+        if url.endswith("/issues/1/labels/7") and method == "DELETE":
+            return _status({"message": "label does not exist"}, 404)
+        raise AssertionError(f"unexpected curl invocation: {method} {url}")
+
+    provider = _provider(runner)
+    issue = Issue(1, "t", "url", (), 0.0, 0.0)
+    reservation = {"loop": "backlog", "occurrence": 1, "label": "backlog-active"}
+    provider.release("example/project", issue, reservation, "done")
+
+
 def test_label_id_resolution_raises_when_label_absent(monkeypatch):
     monkeypatch.setenv("GITEA_TOKEN", "tok")
 
@@ -639,3 +675,19 @@ def test_curl_level_failure_raises(monkeypatch):
     )
     with pytest.raises(RuntimeError, match="Gitea operation failed"):
         provider.list_open_issues("example/project")
+
+
+def test_curl_timeout_raises_sanitized_error_without_the_argv(monkeypatch):
+    """A stalled Gitea connection must not block the resident backlog
+    loop indefinitely -- the call is bounded -- and the raised error must
+    never surface the raw argv, which carries the Authorization header."""
+    monkeypatch.setenv("GITEA_TOKEN", "super-secret-token")
+
+    def runner(args, **kwargs):
+        assert kwargs.get("timeout") == 120
+        raise subprocess.TimeoutExpired(cmd=args, timeout=120)
+
+    provider = _provider(runner)
+    with pytest.raises(RuntimeError, match="timed out") as exc_info:
+        provider.list_open_issues("example/project")
+    assert "super-secret-token" not in str(exc_info.value)
