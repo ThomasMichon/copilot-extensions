@@ -344,6 +344,70 @@ class TestResolveRootCodename:
             "cobalt-ember"
         )
 
+    def test_mid_computation_handoff_retries_against_the_new_chain(
+        self, tmp_path, monkeypatch,
+    ):
+        # A claim handoff can rewrite an ancestor's owner_ref under its OWN
+        # record lock, at any moment -- including between the pre-lock walk
+        # and the actual freeze write, which this freeze lock (scoped only
+        # to the LEAF's own sidecar) cannot itself prevent. Simulate that
+        # race happening DURING the publish-safety computation itself: the
+        # freeze must revalidate and retry against the NEW chain, never
+        # persist the stale snapshot.
+        _seed(tmp_path, monkeypatch, "harness-a", "wt-root-a",
+              codename="amber-thicket", codename_source="built-in")
+        _seed(tmp_path, monkeypatch, "harness-b", "wt-root-b",
+              codename="cobalt-ember", codename_source="built-in")
+        _seed(tmp_path, monkeypatch, "mid-repo", "wt-mid",
+              owner_ref="anomalous-potato/harness-a/wt-root-a#s1")
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/mid-repo/wt-mid#s2",
+        )
+        mid_dir = tmp_path / ".mid-repo" / "worktrees"
+        real_load_root_config = root_chain._load_root_config
+        call_count = {"n": 0}
+
+        def _racing_load_root_config(root_project):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                # The FIRST publish-gate config load for root-A races
+                # against a handoff that retargets the intermediate hop.
+                mid = tracking.load_record(mid_dir / "wt-mid.yaml")
+                mid.owner_ref = "anomalous-potato/harness-b/wt-root-b#s3"
+                tracking.save_record(mid, mid_dir / "wt-mid.yaml")
+            return real_load_root_config(root_project)
+
+        monkeypatch.setattr(
+            root_chain, "_load_root_config", _racing_load_root_config,
+        )
+        assert root_chain.resolve_root_codename(child, project="ext") == (
+            "cobalt-ember"
+        )
+        # The frozen decision reflects the FINAL (post-handoff) chain, not
+        # the stale pre-race one.
+        sidecar = tmp_path / ".ext" / "worktrees" / "wt-child.root-attribution.json"
+        assert "cobalt-ember" in sidecar.read_text()
+
+    def test_root_config_load_failure_fails_closed(
+        self, tmp_path, monkeypatch,
+    ):
+        # A transient failure to load the root's own config must NEVER be
+        # treated as the implicit "codename" default -- that would let an
+        # ALREADY-ASSIGNED built-in codename publish (and freeze) during
+        # exactly the window where the root's real policy (possibly
+        # `false`) can't be positively confirmed.
+        _seed(tmp_path, monkeypatch, "harness", "wt-root",
+              codename="amber-thicket", codename_source="built-in")
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        monkeypatch.setattr(
+            root_chain, "_load_root_config", lambda root_project: None,
+        )
+        assert root_chain.resolve_root_codename(child, project="ext") is None
+
     def test_root_anonymous_opt_out_blocks_publication(
         self, tmp_path, monkeypatch,
     ):

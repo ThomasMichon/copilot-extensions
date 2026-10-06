@@ -257,9 +257,15 @@ def _ensure_publishable_root_codename(
         return None
 
     root_config = _load_root_config(root_project)
-    root_prcfg = getattr(
-        getattr(root_config, "default_repo", None), "pr", None,
-    ) if root_config is not None else None
+    if root_config is None:
+        # Fail CLOSED: the root project's config couldn't be loaded (a
+        # transient read/parse failure, not a resolved policy). Treating
+        # this as the implicit "codename" default would let a root repo
+        # that actually configured `source_attribution: false` have its
+        # codename published and FROZEN during exactly that failure
+        # window. Never publish without a POSITIVELY resolved policy.
+        return None
+    root_prcfg = getattr(getattr(root_config, "default_repo", None), "pr", None)
     # Honor the ROOT repo's own actual attribution mode first -- never just
     # its `source_attribution_configured` opt-in flag (also True for an
     # EXPLICIT `source_attribution: false`). A root that has chosen the
@@ -271,10 +277,7 @@ def _ensure_publishable_root_codename(
     # here is strictly less revealing -- allowed unconditionally. Only
     # `"codename"` mode still needs the existing provenance/explicit check
     # below (a custom wordlist requires that repo's own explicit opt-in).
-    root_attribution = (
-        getattr(root_prcfg, "source_attribution", "codename")
-        if root_prcfg is not None else "codename"
-    )
+    root_attribution = getattr(root_prcfg, "source_attribution", "codename")
     if root_attribution not in ("codename", True):
         return None
     if root_attribution == "codename":
@@ -282,7 +285,7 @@ def _ensure_publishable_root_codename(
             codename_tracking.allocation_policy_kwargs_for_repo(root_config)[
                 "source_attribution_configured"
             ]
-        ) if root_config is not None else False
+        )
         if not attr.may_publish_codename(
             codename_source=root_record.codename_source,
             source_attribution_configured=explicit,
@@ -459,9 +462,41 @@ def resolve_root_codename(
         )
         if frozen:
             return frozen_codename
-        result = _compute()
-        _freeze_root(project, record.worktree_id, chain_key, result)
-        return result
+        # Bounded revalidate-before-freeze: a claim handoff can rewrite an
+        # ANCESTOR's owner_ref under ITS OWN record lock (not this freeze
+        # lock) at any moment, including between the walk above and this
+        # exact write -- this freeze lock only serializes writers of THIS
+        # worktree's own sidecar, never readers/writers of an ancestor's
+        # record. Re-walk and compare fingerprints immediately before
+        # freezing; a changed chain retries against the NEW snapshot
+        # rather than persisting a stale one. The tiny, fixed retry cap
+        # guards against looping forever under a pathological rapid-fire
+        # handoff; exhausting it returns the last computed result UNFROZEN
+        # (safe -- the next call simply redoes this).
+        cur_root, cur_root_project, cur_chain_key = root, root_project, chain_key
+        for _ in range(3):
+            result = _ensure_publishable_root_codename(
+                cur_root, cur_root_project, ensure=ensure,
+            )
+            revalidated = _walk_to_root(
+                record, project=resolved_project, this_machine=this_machine,
+            )
+            if revalidated is None:
+                return None
+            new_root, new_root_project, new_chain = revalidated
+            new_chain_key = _chain_identity_key(new_chain)
+            if new_chain_key == cur_chain_key:
+                if new_chain_key is not None:
+                    _freeze_root(
+                        project, record.worktree_id, new_chain_key, result,
+                    )
+                return result
+            if new_chain_key is None:
+                return result  # can no longer freeze at all; return as-is
+            cur_root, cur_root_project, cur_chain_key = (
+                new_root, new_root_project, new_chain_key,
+            )
+        return result  # exhausted retries; return last computed, unfrozen
 
 
 def root_codename_for_marker(record: tracking.WorktreeRecord, config) -> str | None:
