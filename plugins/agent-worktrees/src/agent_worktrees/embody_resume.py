@@ -33,6 +33,25 @@ def with_resume(launch_cmd, target: str | None) -> list[str]:
     return [*launch_cmd, f"--resume={target}"] if target else list(launch_cmd)
 
 
+def with_seed(launch_cmd, seed: str | None) -> list[str]:
+    """``launch_cmd`` with ``seed`` delivered as its next interactive turn
+    (unchanged when there is none).
+
+    Appends the **full** ``--interactive`` flag -- never the short ``-i``,
+    which PowerShell's own argument parser can intercept before it ever
+    reaches the exec'd ``copilot`` process on Windows. This makes the seed a
+    durable, explicit argument on the launched Copilot command line itself,
+    never an ambient side-channel (a worktree-record field typed in later
+    via mux send-keys): it works identically whether the launch is muxed or
+    ``--no-mux`` (there is no pane to target either way), and composes with
+    a separately-appended ``--resume={target}`` to resume history AND
+    execute the new prompt in the SAME process (verified live: `copilot
+    --resume=<id> --interactive "<prompt>"` resumes full history and
+    auto-executes the prompt as the next turn).
+    """
+    return [*launch_cmd, "--interactive", seed] if seed else list(launch_cmd)
+
+
 def live_head_refusal(target: str | None, worktree_id: str) -> str | None:
     """Why ``target`` must not be resumed in a new process: its Copilot is
     still running (outside this worktree's mux), or that can't be ruled out

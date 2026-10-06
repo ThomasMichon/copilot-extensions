@@ -860,6 +860,20 @@ def _create_worktree_core(
         profile=selection.profile,
         preflight=launch_preflight,
     )
+    # Durable seed delivery (resume-prompt-durable-seed-and-mux-fix): this
+    # plan's OWN `cmd` deliberately does NOT also embed `pending_seed` here
+    # -- `pending_seed` stays the single, unambiguous owner of "queued but
+    # not yet delivered." Embedding it in BOTH this plan's argv AND leaving
+    # it persisted would let a direct caller that execs this `cmd` deliver
+    # the prompt once, while the record still advertises it as
+    # undelivered -- a later `embody`/first real-launch fallback (or the
+    # Picker's own two-hop flow re-resolving by --worktree-id through
+    # `resolve_launch_cli._resolve_resume_context`, the mechanism's real
+    # delivery point) would then claim and redeliver the SAME prompt a
+    # second time. A direct caller that wants immediate, synchronous
+    # delivery should follow up with `resolve --worktree-id --seed` (or
+    # simply let the next real resume/attach claim it) rather than relying
+    # on this one-shot creation plan to also carry it.
     env = _apply_assignment_env(
         core._build_env(
             selection.profile,
