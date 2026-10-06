@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify delegation guidance: scale plan detail and check-in cadence to the assigned worker model's capability tier",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    }
+  ]
+}
