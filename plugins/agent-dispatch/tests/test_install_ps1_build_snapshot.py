@@ -849,20 +849,76 @@ def test_activate_force_overrides_the_cross_version_ordering_guard(tmp_path: Pat
     assert "SUPERSEDED:False" in result.stdout, result.stdout + result.stderr
 
 
+def _run_superseded_now_harness(
+    tmp_path: Path, *, src_version: str, current_active: str | None, activation_superseded: bool
+) -> subprocess.CompletedProcess[str]:
+    """Test-ActivationSupersededNow in isolation, with $script:ActivationSuperseded
+    pre-seeded directly (bypassing Invoke-VersionedActivate entirely) -- this
+    proves the function's OWN live-reread behavior, independent of whichever
+    path set that variable."""
+    install_dir = tmp_path / "install"
+    install_dir.mkdir(parents=True)
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        f'function Get-VersionedCurrent {{ return "{current_active or ""}" }}\n'
+        + _extract_function_block("Test-ActivationSupersededNow")
+        + "\n\n"
+        "$VersionedRuntime = $true\n"
+        f'$SrcVersion = "{src_version}"\n'
+        f"$script:ActivationSuperseded = ${'true' if activation_superseded else 'false'}\n"
+        "$result = Test-ActivationSupersededNow\n"
+        'Write-Output "RESULT:$result"\n'
+    )
+    return subprocess.run(
+        [_PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True,
+        text=True,
+        env=os.environ,
+        timeout=30,
+        check=True,
+    )
+
+
+def test_superseded_now_false_when_activation_won_and_still_current(tmp_path: Path) -> None:
+    result = _run_superseded_now_harness(
+        tmp_path, src_version="0.2.0-dev1", current_active="0.2.0-dev1", activation_superseded=False
+    )
+    assert "RESULT:False" in result.stdout, result.stdout + result.stderr
+
+
+def test_superseded_now_true_when_activation_itself_was_superseded(tmp_path: Path) -> None:
+    result = _run_superseded_now_harness(
+        tmp_path, src_version="0.2.0-dev1", current_active="0.2.0-dev2", activation_superseded=True
+    )
+    assert "RESULT:True" in result.stdout, result.stdout + result.stderr
+
+
+def test_superseded_now_true_when_won_activation_then_overtaken(tmp_path: Path) -> None:
+    """The round-15 review finding: this invocation can genuinely WIN its
+    own activation ($script:ActivationSuperseded stays False) and only
+    THEN be overtaken by a separate, newer build before a caller re-checks
+    -- Test-ActivationSupersededNow must catch this via a fresh
+    Get-VersionedCurrent read, not just replay the stale False snapshot."""
+    result = _run_superseded_now_harness(
+        tmp_path, src_version="0.2.0-dev1", current_active="0.2.0-dev2", activation_superseded=False
+    )
+    assert "RESULT:True" in result.stdout, result.stdout + result.stderr
+
+
 def test_install_runtime_aborts_remaining_publication_when_superseded() -> None:
     """A superseded invocation must not fall through to Write-Manifest,
     verification, PATH, or Register-PickerPivot -- all of which would
     publish/report through THIS invocation's own (older, losing)
     $VenvPython/$LinkPython build over the already-active newer one's.
     Structural check (a full venv build is too heavy here): the activation
-    call must be immediately followed by a $script:ActivationSuperseded
+    call must be immediately followed by a Test-ActivationSupersededNow
     check that returns before Write-Manifest, within the still-open
     try/finally that releases buildMutex."""
     text = _INSTALL_PS1.read_text(encoding="utf-8")
     idx = text.index("function Install-Runtime")
     body = text[idx : text.index("\nfunction Write-Manifest", idx)]
     activate_idx = body.index("if (-not (Invoke-VersionedActivate)) { exit 1 }")
-    guard_idx = body.index("$script:ActivationSuperseded", activate_idx)
+    guard_idx = body.index("Test-ActivationSupersededNow", activate_idx)
     return_idx = body.index("return", guard_idx)
     finally_idx = body.index("} finally {", activate_idx)
     assert guard_idx > activate_idx, "the supersession check must come after the activate call"
@@ -877,16 +933,30 @@ def test_invoke_update_aborts_cutover_when_superseded() -> None:
     Invoke-CoordinatorCutover/Confirm-CoordinatorRunning from its own
     (older, losing) $VenvPython/$LinkPython build -- that would cut the
     ALREADY-newer, already-active coordinator OVER to a stale one. Structural
-    check: the $script:ActivationSuperseded guard and its `return` must
-    appear between the Install-Runtime call and the cutover block."""
+    check: a Test-ActivationSupersededNow guard and its `return` must appear
+    between the Install-Runtime call and the cutover block, AND again
+    immediately before the actual Invoke-CoordinatorCutover call (the live
+    re-check closing the "won activation, then overtaken" window a
+    one-time post-activation snapshot alone cannot catch)."""
     text = _INSTALL_PS1.read_text(encoding="utf-8")
     idx = text.index("function Invoke-Update")
     body = text[idx : text.index("\nfunction Invoke-Start", idx)]
     install_idx = body.index("Install-Runtime")
-    guard_idx = body.index("$script:ActivationSuperseded", install_idx)
+    guard_idx = body.index("Test-ActivationSupersededNow", install_idx)
     return_idx = body.index("return", guard_idx)
     cutover_idx = body.index("Invoke-CoordinatorCutover")
     assert install_idx < guard_idx < return_idx < cutover_idx
+    # A SECOND guard, strictly between the first one and the actual cutover
+    # call -- the live re-check right at the point of action. Search for it
+    # starting AFTER the first guard's own `return` (not merely after the
+    # first guard's own index), since that guard's explanatory comment
+    # itself mentions "Test-ActivationSupersededNow" by name.
+    second_guard_idx = body.index("Test-ActivationSupersededNow", return_idx)
+    assert return_idx < second_guard_idx < cutover_idx, (
+        "a second, immediate Test-ActivationSupersededNow re-check must sit "
+        "directly before Invoke-CoordinatorCutover, not just once right after "
+        "Install-Runtime"
+    )
 
 
 def _run_version_lt(a: str, b: str) -> bool:

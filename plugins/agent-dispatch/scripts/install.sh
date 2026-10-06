@@ -389,16 +389,17 @@ _versioned_activate() {
     # owner PID is confirmed dead) so every platform gets REAL mutual
     # exclusion, not a best-effort no-op.
     #
-    # ACTIVATION_SUPERSEDED is the caller-visible signal that THIS ENTIRE
-    # invocation lost the race, not merely that its activate call was a
-    # no-op: _ensure_runtime and do_update both check it and abort their own
-    # remaining steps (manifest/verify/PATH/pivot; coordinator cutover)
-    # rather than proceeding as if this invocation's own
-    # VENV_PYTHON/LINK_PYTHON were the one that's actually live -- otherwise
-    # a superseded (older) invocation would still publish its own manifest
-    # over the newer one's, or drive _coordinator_cutover from its own stale
-    # build, rolling the live coordinator back even though activation itself
-    # was correctly skipped.
+    # ACTIVATION_SUPERSEDED is a POINT-IN-TIME signal set here, at the
+    # moment this call either skips or succeeds -- it is NOT, by itself, a
+    # sufficient guarantee for a caller that acts LATER (manifest write,
+    # coordinator cutover): this invocation can genuinely WIN its own
+    # activation (nothing newer was current yet), release this lock, and
+    # only THEN have a separate, slower-to-build newer version activate
+    # before this invocation reaches its own downstream action -- the lock
+    # here only serializes the compare-then-publish step itself, it cannot
+    # serialize everything a caller does afterward. Callers must re-validate
+    # LIVE immediately before acting via _activation_superseded_now (below)
+    # rather than trusting this variable alone.
     ACTIVATION_SUPERSEDED=0
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
@@ -460,6 +461,26 @@ _versioned_current() {
     [[ -x "$py" ]] || py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || { echo ""; return 0; }
     "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo ""
+}
+
+_activation_superseded_now() {
+    # True (0) iff THIS invocation should NOT proceed with its own
+    # downstream publication/cutover -- re-validated LIVE at the moment of
+    # the call, not merely a replay of _versioned_activate's own
+    # point-in-time ACTIVATION_SUPERSEDED snapshot. That snapshot alone is
+    # insufficient: this invocation can genuinely WIN its own (lock-
+    # protected) activation -- nothing newer was current yet -- release the
+    # lock, and only THEN have a separate, slower-to-build newer version
+    # activate before this invocation reaches _write_manifest or
+    # _coordinator_cutover. Re-reading _versioned_current here catches that
+    # window too: if the live current-version has since moved on to
+    # something other than this invocation's own SRC_VERSION, treat it as
+    # superseded regardless of how the earlier activation call itself went.
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 1
+    [[ "$ACTIVATION_SUPERSEDED" -eq 1 ]] && return 0
+    local now
+    now="$(_versioned_current)"
+    [[ -n "$now" && "$now" != "$SRC_VERSION" ]]
 }
 
 _versioned_gc() {
@@ -1035,10 +1056,14 @@ _ensure_runtime() {
         fi
         _versioned_mark_complete
         _versioned_activate || exit 1
-        if [[ "$ACTIVATION_SUPERSEDED" -eq 1 ]]; then
+        if _activation_superseded_now; then
             # This invocation's own build lost the cross-version activation
-            # race (see _versioned_activate's own comment): a newer build
-            # already activated while this one was still building.
+            # race -- either caught immediately by _versioned_activate
+            # itself, or discovered only now via the LIVE re-check inside
+            # _activation_superseded_now (this invocation could have WON its
+            # own activation and released the lock, only for a separate,
+            # slower-to-build newer version to activate afterward, before
+            # reaching this exact point -- see that function's own comment).
             # Everything below (manifest, verify, PATH, pivot, gc) resolves
             # or reports through THIS invocation's own VENV_PYTHON/
             # LINK_PYTHON -- publishing it now would overwrite the newer
@@ -1739,13 +1764,15 @@ do_stamp() {
 do_install() {
     echo ''; echo '=== agent-dispatch install ==='; echo ''
     _ensure_runtime
-    if [[ "$ACTIVATION_SUPERSEDED" -eq 1 ]]; then
-        # A concurrent, newer install already activated while this one was
-        # still building (see _versioned_activate's own comment).
-        # _install_service/_install_supervisor_service are themselves
-        # version-agnostic (they write generic, marker-resolving systemd
-        # units), but running them from this invocation's own (older,
-        # losing) build is still unnecessary -- nothing left to do.
+    if _activation_superseded_now; then
+        # A concurrent, newer install already activated -- either caught at
+        # _ensure_runtime's own return, or only now via the LIVE re-check
+        # (see _activation_superseded_now's own comment: this invocation
+        # could have WON its own activation and only been overtaken
+        # afterward). _install_service/_install_supervisor_service are
+        # themselves version-agnostic (they write generic, marker-resolving
+        # systemd units), but running them from this invocation's own
+        # (older, losing) build is still unnecessary -- nothing left to do.
         echo ''; echo '=== agent-dispatch install complete (superseded by a newer concurrent build) ==='
         return 0
     fi
@@ -1766,16 +1793,20 @@ do_update() {
     trap _clear_update_marker EXIT
     _downgrade_guard
     _ensure_runtime
-    if [[ "$ACTIVATION_SUPERSEDED" -eq 1 ]]; then
+    if _activation_superseded_now; then
         # This invocation's own build lost the cross-version activation race
-        # (see _versioned_activate's own comment): a newer concurrent
-        # update/install already activated while this one was still
-        # building. _coordinator_cutover below spawns the new coordinator
-        # from THIS invocation's own VENV_PYTHON/LINK_PYTHON -- proceeding
-        # would cut the ALREADY-newer, already-active coordinator OVER to
-        # this invocation's older build, a silent rollback. Nothing to
-        # update: the newer build's own update already did (or will do) the
-        # real cutover.
+        # -- either caught immediately inside _ensure_runtime, or only
+        # discovered HERE via the LIVE re-check (this invocation could have
+        # WON its own activation and released the lock, only for a newer
+        # version to activate before reaching this exact point -- see
+        # _activation_superseded_now's own comment for why a one-time
+        # snapshot right after activation is not sufficient).
+        # _coordinator_cutover below spawns the new coordinator from THIS
+        # invocation's own VENV_PYTHON/LINK_PYTHON -- proceeding would cut
+        # the ALREADY-newer, already-active coordinator OVER to this
+        # invocation's older build, a silent rollback. Nothing to update:
+        # the newer build's own update already did (or will do) the real
+        # cutover.
         _skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/unit refresh for this invocation'
         return 0
     fi
@@ -1787,6 +1818,14 @@ do_update() {
     # _install_service's SIGTERM-graceful `systemctl restart` (uvicorn drains
     # in-flight requests, so the invariant holds either way). The supervisor is a
     # SEPARATE unit -- never stopped here; it outlives the swap + re-adopts.
+    #
+    # One more LIVE re-check, immediately before the actual cutover decision:
+    # this is the exact seam the round-15 review finding named -- the
+    # smallest possible gap between validating and acting.
+    if _activation_superseded_now; then
+        _skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/unit refresh for this invocation'
+        return 0
+    fi
     if _coordinator_cutover; then
         _install_service --no-restart
     else
