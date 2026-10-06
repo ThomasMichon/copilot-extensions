@@ -80,6 +80,12 @@ class TestExistingFeaturePush:
         assert result["error"] == (
             "Failed to (re)push 'feature/change' to 'origin'.\n"
             "The remote branch advanced; rebase and retry.\n"
+            "This could be caused either by this worktree's own earlier "
+            "create-pr/push-changes rewrite of the PR branch or by another actor "
+            "updating the remote branch after your last fetch/observation. "
+            "Fetch/inspect the remote PR branch, reconcile any divergent local "
+            "PR history, then re-run "
+            "agent-worktrees create-pr.\n"
             "[rejected] non-fast-forward"
         )
 
@@ -446,6 +452,8 @@ class TestCreatePR:
         res = pr_ops.create_pr(wid, config, title="Add feature")
 
         assert res["success"] is True, res
+        assert res["squashed"] is True
+        assert "squashed 2 surviving commit(s) into one" in res["history_action"]
         assert res["state"] == "open"
         assert res["branch"] == "feature/add-feature-aaaa"
         assert res["provider"] == "gitea"
@@ -514,6 +522,166 @@ class TestCreatePR:
         assert _git("rev-parse", f"worktree/{wid}", cwd=wt_path) == first_head
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert len(rec.prs) == 1
+
+    def test_reused_open_pr_keeps_incremental_commits_unsquashed(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        first = pr_ops.create_pr(wid, config, title="Add feature")
+        assert first["success"], first
+        original_pr_head = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
+
+        anchor = Path(config.repos["ext"].anchor)
+        _git("checkout", "master", cwd=anchor)
+        (anchor / "upstream.txt").write_text("unrelated upstream advance\n")
+        _git("add", "-A", cwd=anchor)
+        _git("commit", "-m", "advance upstream", cwd=anchor)
+        _git("push", "origin", "master", cwd=anchor)
+
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "c.txt").write_text("feedback 1\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback 1", cwd=wt_path)
+        (wt_path / "d.txt").write_text("feedback 2\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback 2", cwd=wt_path)
+
+        rerun = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert rerun["success"] is True, rerun
+        assert rerun["rerun"] is True
+        assert rerun["squashed"] is False
+        assert "without re-squashing" in rerun["history_action"]
+        assert "without rebasing it onto newer upstream" in rerun["history_action"]
+        ahead = git_ops.get_commits_ahead(
+            "origin/feature/add-feature-aaaa", "origin/master", cwd=str(wt_path)
+        )
+        assert len(ahead) == 3
+        assert _git(
+            "merge-base", original_pr_head, "origin/feature/add-feature-aaaa",
+            cwd=wt_path,
+        ) == original_pr_head
+        subjects = _git(
+            "log", "--format=%s", "-n", "3", "origin/feature/add-feature-aaaa",
+            cwd=wt_path,
+        ).splitlines()
+        assert subjects == ["address feedback 2", "address feedback 1", "Add feature"]
+
+    def test_reused_open_pr_with_empty_base_sha_still_records_patch_id(self, pr_repo):
+        config, wid, wt_path, _ = pr_repo
+        first = pr_ops.create_pr(wid, config, title="Add feature")
+        assert first["success"], first
+
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.pr.base_sha = ""
+        tracking.save_record(rec)
+
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        rerun = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert rerun["success"] is True, rerun
+        assert rerun["rerun"] is True
+        assert rerun["patch_id"]
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        assert rec.pr.patch_id
+
+    def test_reused_open_pr_refuses_reuse_push_with_no_persisted_head_sha(self, pr_repo):
+        """#5298 follow-up: a legacy/manually-registered (`set-pr`) record can
+        have no persisted `head_sha` at all. Falling back to a plain bool
+        `--force-with-lease` there would adopt whatever this call's own
+        just-completed fetch recorded as the remote tip and force past it --
+        the same live-requery flaw the reuse-lease guard exists to close,
+        just one step removed. Refuse instead of guessing."""
+        config, wid, wt_path, _ = pr_repo
+        first = pr_ops.create_pr(wid, config, title="Add feature")
+        assert first["success"], first
+
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.pr.head_sha = ""
+        tracking.save_record(rec)
+
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        rerun = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert rerun["success"] is False
+        assert "No persisted expected tip" in rerun["error"]
+
+    def test_reused_open_pr_refuses_to_overwrite_divergent_remote_head(self, pr_repo):
+        config, wid, wt_path, remote_dir = pr_repo
+        first = pr_ops.create_pr(wid, config, title="Add feature")
+        assert first["success"], first
+
+        other = remote_dir.parent / "other-clone"
+        _git("clone", str(remote_dir), str(other), cwd=remote_dir.parent)
+        _git("config", "user.email", "other@example.com", cwd=other)
+        _git("config", "user.name", "Other", cwd=other)
+        _git(
+            "checkout", "-B", "feature/add-feature-aaaa",
+            "origin/feature/add-feature-aaaa", cwd=other,
+        )
+        (other / "remote.txt").write_text("other actor\n")
+        _git("add", "-A", cwd=other)
+        _git("commit", "-m", "remote update", cwd=other)
+        _git("push", "origin", "feature/add-feature-aaaa", cwd=other)
+        remote_head = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=other)
+
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "local.txt").write_text("local feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "local update", cwd=wt_path)
+
+        rerun = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert rerun["success"] is False
+        assert "another actor updating the remote branch" in rerun["error"]
+        assert _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path) == remote_head
+
+    def test_reused_open_pr_refuses_to_resurrect_deleted_remote_head(self, pr_repo, monkeypatch):
+        """#5298: a concurrently merged+auto-pruned PR branch must not be
+        silently recreated by a later create-pr call that still believes the
+        PR is open. A plain push would read "ref absent" as "create a new
+        branch" and happily resurrect it, reporting the merged PR as freshly
+        updated -- this must fail instead, leaving the branch deleted.
+
+        The earlier "second line of defense" (#1984) `remote_branch_state`
+        preflight would otherwise detect the same deletion first and mark the
+        PR terminal before the reuse-lease push is ever reached, making this
+        regression pass for the wrong reason. Patch that preflight to report
+        "present" so the test actually exercises the lease guard this PR adds,
+        with the real deletion still in place for the push itself to hit.
+        """
+        config, wid, wt_path, remote_dir = pr_repo
+        first = pr_ops.create_pr(wid, config, title="Add feature")
+        assert first["success"], first
+
+        # Simulate an external merge + auto-prune: the PR branch is deleted
+        # from the bare remote directly (as a host does on merge), while this
+        # worktree's own tracking record still believes the PR is open.
+        _git(
+            "push", "origin", "--delete", "feature/add-feature-aaaa",
+            cwd=wt_path,
+        )
+        monkeypatch.setattr(pr_ops.git_ops, "remote_branch_state", lambda *a, **k: "present")
+
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "local.txt").write_text("local feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "local update", cwd=wt_path)
+
+        rerun = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert rerun["success"] is False
+        ls_remote = _git(
+            "ls-remote", "--heads", "origin", "feature/add-feature-aaaa",
+            cwd=wt_path,
+        )
+        assert ls_remote == ""  # still deleted, not resurrected
 
     def test_branch_collision_error_suggests_explicit_distinguishing_suffix(self, pr_repo):
         config, wid, wt_path, _ = pr_repo
@@ -3058,12 +3226,18 @@ class TestPRFinalizeAndPush:
         assert ok is False
         assert "unpushed" in err
 
-    def test_push_changes_updates_feature_branch(self, pr_repo):
+    def test_push_changes_updates_feature_branch(self, pr_repo, capsys):
         from agent_worktrees import finalize as fin
         config, wid, wt_path, _remote_dir = pr_repo
         pr_ops.create_pr(wid, config, title="Add feature")
 
         before = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
+        anchor = Path(config.repos["ext"].anchor)
+        _git("checkout", "master", cwd=anchor)
+        (anchor / "upstream.txt").write_text("unrelated upstream advance\n")
+        _git("add", "-A", cwd=anchor)
+        _git("commit", "-m", "advance upstream", cwd=anchor)
+        _git("push", "origin", "master", cwd=anchor)
 
         # New feedback commit directly on the feature branch. create-pr returns
         # HEAD to the base branch (#1804), so check out the feature branch to
@@ -3075,14 +3249,57 @@ class TestPRFinalizeAndPush:
 
         ok = fin.push_changes(wid, config)
         assert ok is True
+        captured = capsys.readouterr()
+        combined = captured.out + captured.err
+        assert "Preserved the published PR tip" in combined
+        assert "incremental updates" in combined
 
         after = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path)
         assert after != before  # remote feature branch advanced
+        assert _git(
+            "merge-base", before, "origin/feature/add-feature-aaaa", cwd=wt_path,
+        ) == before
 
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         local_head = _git("rev-parse", "HEAD", cwd=wt_path)
         assert rec.pr.head_sha == local_head
         assert rec.pr.state == "open"
+
+    def test_push_changes_refuses_divergent_remote_feature_branch(self, pr_repo):
+        """push-changes' lease safety (#5298) was only integration-tested
+        through create_pr; add parametrized-in-spirit coverage for the
+        snapshot scheme too -- a divergent remote head must reject the push,
+        not force-overwrite it."""
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, remote_dir = pr_repo
+        first = pr_ops.create_pr(wid, config, title="Add feature")
+        assert first["success"], first
+
+        other = remote_dir.parent / "other-clone-push-changes"
+        _git("clone", str(remote_dir), str(other), cwd=remote_dir.parent)
+        _git("config", "user.email", "other@example.com", cwd=other)
+        _git("config", "user.name", "Other", cwd=other)
+        _git(
+            "checkout", "-B", "feature/add-feature-aaaa",
+            "origin/feature/add-feature-aaaa", cwd=other,
+        )
+        (other / "remote.txt").write_text("other actor\n")
+        _git("add", "-A", cwd=other)
+        _git("commit", "-m", "remote update", cwd=other)
+        _git("push", "origin", "feature/add-feature-aaaa", cwd=other)
+        remote_head = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=other)
+
+        _git("checkout", "feature/add-feature-aaaa", cwd=wt_path)
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        ok = fin.push_changes(wid, config)
+
+        assert ok is False
+        assert _git(
+            "rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path
+        ) == remote_head  # not overwritten
 
     def test_push_changes_is_blocked_by_a_real_client_side_pre_push_hook(self, pr_repo):
         """#3561: push() must not silently disable a repo's own release-guard
@@ -3877,6 +4094,12 @@ class TestPRFinalizeAndPush:
         # Refspec: HEAD stayed on the worktree branch; PR head is a remote ref.
         assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == f"worktree/{wid}"
         before = _git("rev-parse", "origin/pr/add-feature-aaaa", cwd=wt_path)
+        anchor = Path(config.repos["ext"].anchor)
+        _git("checkout", "master", cwd=anchor)
+        (anchor / "upstream.txt").write_text("unrelated upstream advance\n")
+        _git("add", "-A", cwd=anchor)
+        _git("commit", "-m", "advance upstream", cwd=anchor)
+        _git("push", "origin", "master", cwd=anchor)
 
         # A feedback commit lands directly on worktree/<id> -- no checkout needed.
         (wt_path / "c.txt").write_text("feedback\n")
@@ -3888,6 +4111,9 @@ class TestPRFinalizeAndPush:
 
         after = _git("rev-parse", "origin/pr/add-feature-aaaa", cwd=wt_path)
         assert after != before  # remote PR head advanced
+        assert _git(
+            "merge-base", before, "origin/pr/add-feature-aaaa", cwd=wt_path,
+        ) == before
         # HEAD never left the worktree branch; the head ref is its tip.
         assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=wt_path) == f"worktree/{wid}"
         assert _git("rev-parse", f"worktree/{wid}", cwd=wt_path) == \
@@ -3895,6 +4121,40 @@ class TestPRFinalizeAndPush:
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec.pr.head_sha == _git("rev-parse", "HEAD", cwd=wt_path)
         assert rec.pr.state == "open"
+
+    def test_push_changes_refspec_refuses_divergent_remote_head(self, pr_repo):
+        """Refspec-scheme counterpart of
+        test_push_changes_refuses_divergent_remote_feature_branch above (#5298)."""
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, remote_dir = pr_repo
+        config = self._refspec_config(config)
+        first = pr_ops.create_pr(wid, config, title="Add feature")
+        assert first["success"], first
+
+        other = remote_dir.parent / "other-clone-push-changes-refspec"
+        _git("clone", str(remote_dir), str(other), cwd=remote_dir.parent)
+        _git("config", "user.email", "other@example.com", cwd=other)
+        _git("config", "user.name", "Other", cwd=other)
+        _git(
+            "checkout", "-B", "pr/add-feature-aaaa", "origin/pr/add-feature-aaaa",
+            cwd=other,
+        )
+        (other / "remote.txt").write_text("other actor\n")
+        _git("add", "-A", cwd=other)
+        _git("commit", "-m", "remote update", cwd=other)
+        _git("push", "origin", "pr/add-feature-aaaa", cwd=other)
+        remote_head = _git("rev-parse", "origin/pr/add-feature-aaaa", cwd=other)
+
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        ok = fin.push_changes(wid, config)
+
+        assert ok is False
+        assert _git(
+            "rev-parse", "origin/pr/add-feature-aaaa", cwd=wt_path
+        ) == remote_head  # not overwritten
 
     def test_push_changes_refspec_rejects_wrong_branch(self, pr_repo):
         from agent_worktrees import finalize as fin
@@ -5284,6 +5544,24 @@ class TestCreatePRCLIPolicyError:
 
 
 class TestCreatePRCLIArgs:
+    def test_success_output_names_squash_action(self, pr_repo, monkeypatch, capfd):
+        config, wid, _wt_path, _ = pr_repo
+
+        monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
+        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: candidate)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
+
+        args = m.build_parser().parse_args([
+            "create-pr", wid, "--title", "Add feature",
+        ])
+
+        rc = m.cmd_create_pr(args)
+
+        captured = capfd.readouterr()
+        combined = captured.out + captured.err
+        assert rc == 0
+        assert "squashed 2 surviving commit(s) into one" in combined
+
     def test_topic_flag_is_parsed_and_forwarded(self, pr_repo, monkeypatch):
         config, wid, _wt_path, _ = pr_repo
         captured: dict[str, object] = {}

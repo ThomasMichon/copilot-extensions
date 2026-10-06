@@ -902,7 +902,14 @@ jobs:
     needs: discover
     if: needs.discover.outputs.heavy == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    # The job's shadow-mode coverage-guided-selection step is
+    # continue-on-error, but that only absorbs a step FAILURE, never a
+    # job-level timeout cancellation. Its runtime (collect-only + guard
+    # tests, plus the coverage-guided-selection git/API analysis) scales
+    # with diff size, so a larger PR diff can exceed a tight budget even
+    # with no real regression. Sized with headroom above the job's
+    # observed runtime rather than a bare minimum.
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:

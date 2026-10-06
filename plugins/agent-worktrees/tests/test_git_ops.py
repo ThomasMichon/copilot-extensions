@@ -798,6 +798,69 @@ class TestCrossAccountAuth:
         assert bool(res) is False
         assert res.retryable is True
 
+    def test_push_stale_info_failure_is_retryable(self):
+        res = go.PushResult(
+            ok=False,
+            stderr=" ! [rejected]        pr/head -> pr/head (stale info)\n"
+                   "error: failed to push some refs",
+        )
+        assert res.retryable is True
+
+    def test_push_with_lease_expect_refuses_when_not_ancestor(self, monkeypatch):
+        """#5298 follow-up: an expected-old-object lease only checks the
+        REMOTE still equals the expected SHA -- it says nothing about the
+        LOCAL side being pushed. A locally rebased/reset branch could
+        otherwise still satisfy the lease while silently dropping the
+        commits it claims to carry forward incrementally; refuse instead."""
+        monkeypatch.setattr(go, "is_branch_merged", lambda *a, **k: False)
+        git_calls = []
+        monkeypatch.setattr(go, "git", lambda *a, **k: git_calls.append(a) or types.SimpleNamespace(
+            returncode=1, stdout="", stderr=""))
+        res = go.push(
+            "origin", "pr/head", cwd=".", force_with_lease_expect="deadbeef",
+        )
+        assert bool(res) is False
+        assert "deadbeef" in res.stderr
+        assert "ancestor" in res.stderr
+        assert git_calls == []  # refused before ever attempting the push
+
+    def test_push_with_lease_expect_proceeds_when_ancestor(self, monkeypatch):
+        monkeypatch.setattr(go, "is_branch_merged", lambda *a, **k: True)
+        monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
+        git_calls = []
+
+        def fake_git(*args, **kwargs):
+            git_calls.append(args)
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(go, "git", fake_git)
+        res = go.push("origin", "pr/head", cwd=".", force_with_lease_expect="deadbeef")
+        assert bool(res) is True
+        assert any("--force-with-lease=pr/head:deadbeef" in a for a in git_calls[0])
+
+    def test_push_with_lease_expect_targets_refspec_dest(self, monkeypatch):
+        """``branch`` may be a ``src:dest`` refspec -- the lease must target
+        ``dest`` (what the remote actually sees) while the ancestry check
+        verifies ``src`` (what's actually being pushed)."""
+        seen = {}
+
+        def fake_is_branch_merged(expect, ref, *, cwd):
+            seen["expect"], seen["ref"] = expect, ref
+            return True
+
+        monkeypatch.setattr(go, "is_branch_merged", fake_is_branch_merged)
+        monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
+        git_calls = []
+        monkeypatch.setattr(go, "git", lambda *a, **k: git_calls.append(a) or types.SimpleNamespace(
+            returncode=0, stdout="", stderr=""))
+        res = go.push(
+            "origin", "worktree/x:refs/heads/pr/head", cwd=".",
+            force_with_lease_expect="deadbeef",
+        )
+        assert bool(res) is True
+        assert seen == {"expect": "deadbeef", "ref": "worktree/x"}
+        assert any("--force-with-lease=refs/heads/pr/head:deadbeef" in a for a in git_calls[0])
+
     def test_push_success_returns_truthy_no_stderr(self, monkeypatch):
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         monkeypatch.setattr(go, "git", lambda *a, **k: types.SimpleNamespace(

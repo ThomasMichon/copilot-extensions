@@ -635,6 +635,8 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             remote = result.get("remote", "")
             provider = result.get("provider", "")
             output.ok(f"Feature branch '{branch}' pushed to {remote}.")
+            if result.get("history_action"):
+                output.ok(str(result["history_action"]))
             if result.get("topic_note"):
                 output.warn(result["topic_note"])
             print(
