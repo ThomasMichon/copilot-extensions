@@ -1,0 +1,9 @@
+{
+  "comment": "Fix intermittent WinError 5 (Access is denied) flakes in managed-runtime cell publish/quarantine/unpublish by retrying transient Windows Defender-style file locks around os.replace().",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

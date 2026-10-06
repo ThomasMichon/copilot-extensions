@@ -25,8 +25,8 @@ from .managed_runtime import (
     _authority,
     _cache_authority,
     _canonical_digest,
-    _cell_path,
     _cell_key,
+    _cell_path,
     _ensure_safe_root,
     _hash_regular_file,
     _layout_version,
@@ -42,6 +42,7 @@ from .managed_runtime import (
     managed_runtime_root,
 )
 from .registrations import RegistrationError, validate_registration
+from .windows_replace_retry import replace_with_retry
 
 if TYPE_CHECKING:
     from .companion import ManagedLaunchSnapshot
@@ -330,7 +331,6 @@ class ManagedRuntimeRetention:
         clock: Callable[[], float] = time.time,
     ):
         from .companion import _process_exists, _process_group_exists, process_start_token
-
         self.root = (root if root is not None else managed_runtime_root()).expanduser().absolute()
         self.policy = policy
         self.domain_source = domain_source
@@ -1003,7 +1003,7 @@ class ManagedRuntimeRetention:
                     protected.add(cell)
                     continue
                 try:
-                    os.replace(cell, staging)
+                    replace_with_retry(cell, staging)
                 except FileNotFoundError:
                     continue  # a concurrent cleanup already reclaimed it
                 except OSError as exc:
