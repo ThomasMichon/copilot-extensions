@@ -366,6 +366,13 @@ whether the config lives at
 `.copilot-extensions/agent-codespaces/config.yaml` or the legacy
 repo-root `codespaces.yaml`.
 
+`files` and `on_connect` run on every provisioning connect: a full
+`agent-codespaces ssh` (not the minimal `--remote-cmd` diagnostic path),
+`agent-codespaces create`, and agent-bridge's `codespace:<name>` dispatch,
+which pulls them through `provision-command --codespace <name>`. `on_create`
+runs only from `agent-codespaces create`. Hooks are best-effort and run under a
+~30s budget, so start anything long-running in the background.
+
 ## Multi-Repo Adoption
 
 Multiple repos can be adopted; config merges in memory:

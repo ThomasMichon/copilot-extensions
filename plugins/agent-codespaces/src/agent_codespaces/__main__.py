@@ -784,8 +784,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "provision-command",
         help="Print the idempotent bash command that (re)installs the CodeSpace "
-        "relay/auth helpers (the dispatch-path provision step).",
-    )
+        "relay/auth helpers (the dispatch-path provision step); --codespace adds repo hooks.",
+    ).add_argument("--codespace", default=None)
     relay_env_p = sub.add_parser(
         "relay-launch-env",
         help="Print JSON {prelude, port} for a detached CodeSpace launch's "
@@ -994,7 +994,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "acp-model-flags":
             return _cmd_acp_model_flags()
         if args.command == "provision-command":
-            return _cmd_provision_command()
+            return _cmd_provision_command(args)
         if args.command == "relay-launch-env":
             return _cmd_relay_launch_env(args)
         if args.command == "namespace-list":
@@ -4634,21 +4634,13 @@ def _cmd_acp_model_flags() -> int:
     return 0
 
 
-def _cmd_provision_command() -> int:
-    """Print the CodeSpace relay/auth-helper provision command (#892 Inc 1).
-
-    The process-to-process seam agent-bridge's dispatch path shells out to
-    instead of importing ``agent_codespaces.codespace_assets`` in the bridge
-    venv -- so a fix to the provision command reaches the dispatch path from
-    agent-codespaces' OWN venv with no agent-bridge redeploy (the #733 class).
-    Prints the idempotent bash command to stdout.
-    """
-    from .codespace_assets import build_provision_command
+def _cmd_provision_command(args: argparse.Namespace | None = None) -> int:
+    """Print the CodeSpace provision command (#892 Inc 1): see provision.dispatch_provision_command."""
     from .config import load_merged_config
+    from .provision import dispatch_provision_command
 
     cfg = load_merged_config(include_cwd=False)
-    ado_host = getattr(cfg.credentials, "ado_host", None)
-    print(build_provision_command(ado_host=ado_host))
+    print(dispatch_provision_command(cfg, getattr(args, "codespace", None), _lookup_codespace_repo))
     return 0
 
 

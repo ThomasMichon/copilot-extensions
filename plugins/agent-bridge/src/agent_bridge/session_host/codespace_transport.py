@@ -60,6 +60,11 @@ class CodeSpaceTransport:
         self._connected = False
         self._home_dir: str | None = None
 
+    @property
+    def codespace_name(self) -> str:
+        """The CodeSpace this transport drives."""
+        return self._name
+
     async def _ensure(self) -> None:
         if not self._connected:
             await self._manager.ensure_connected(self._name, self._source, [])

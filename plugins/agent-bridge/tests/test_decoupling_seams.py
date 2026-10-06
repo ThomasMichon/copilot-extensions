@@ -46,6 +46,36 @@ def test_provision_command_none_when_no_binstub():
         assert spawner._resolve_provision_command() is None
 
 
+def test_provision_command_requests_repo_hooks_for_codespace():
+    # #5441: the dispatch path asks for the repo's provision hooks too.
+    ok = subprocess.CompletedProcess([], 0, "echo provision+hooks\n", "")
+    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
+         patch("subprocess.run", return_value=ok) as run:
+        assert spawner._resolve_provision_command("cs-1") == "echo provision+hooks\n"
+    assert run.call_args.args[0] == [
+        "/bin/agent-codespaces", "provision-command", "--codespace", "cs-1",
+    ]
+
+
+def test_provision_command_falls_back_when_codespace_flag_unsupported():
+    # An older agent-codespaces rejects --codespace (argparse exit 2): fall back
+    # to the bare command so the relay/auth-helper redeploy is never lost.
+    rejected = subprocess.CompletedProcess([], 2, "", "unrecognized arguments")
+    ok = subprocess.CompletedProcess([], 0, "echo provision\n", "")
+    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
+         patch("subprocess.run", side_effect=[rejected, ok]) as run:
+        assert spawner._resolve_provision_command("cs-1") == "echo provision\n"
+    assert [c.args[0][1:] for c in run.call_args_list] == [
+        ["provision-command", "--codespace", "cs-1"], ["provision-command"],
+    ]
+
+
+def test_codespace_transport_exposes_its_name():
+    from agent_bridge.session_host.codespace_transport import CodeSpaceTransport
+
+    assert CodeSpaceTransport("cs-1", manager=object(), source=object()).codespace_name == "cs-1"
+
+
 # --- _resolve_relay_launch_env (session_manager) -------------------------
 
 def test_relay_launch_env_prefers_cli_and_parses_json():

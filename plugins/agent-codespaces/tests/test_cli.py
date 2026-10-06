@@ -679,6 +679,16 @@ class TestDecouplingSeams:
         assert rc == 0
         assert capsys.readouterr().out.strip() == "echo provision"
 
+    def test_provision_command_codespace_flag_reaches_dispatch_builder(self, capsys):
+        with patch(
+            "agent_codespaces.provision.dispatch_provision_command",
+            return_value="echo relay\n( echo hooks )",
+        ) as m:
+            rc = main(["provision-command", "--codespace", "my-cs"])
+        assert rc == 0
+        assert m.call_args.args[1] == "my-cs"
+        assert "echo hooks" in capsys.readouterr().out
+
     def test_relay_launch_env_prints_json(self, capsys):
         import json as _json
 
