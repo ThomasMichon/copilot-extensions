@@ -193,6 +193,13 @@ repo ships none, so one repo's mesh never leaks into another. **Read-only** — 
 parses config, it does not probe; `ssh.ready` is the operator's declared state,
 so use `<catalog argv[0]> verify <alias>` to probe a host live.
 
+Run it (or `refresh-mesh`) through agent-worktrees' `<repo> ssh …` front door
+(`<repo> ssh mesh-status`) to pin "the calling repo" to the named `<repo>`'s own
+checkout regardless of the invoking shell's cwd -- agent-worktrees resolves and
+chdirs there itself before launching agent-ssh, and fails the invocation closed
+if `<repo>` doesn't resolve, rather than silently falling back to the caller's
+cwd.
+
 A cwd-gated `sessionStart` hook (`scripts/emit-mesh-pointer.*`) emits only a
 **succinct pointer** to this command when the repo has a `machines.yaml`, rather
 than injecting the whole table every session — run `mesh-status` on demand for
