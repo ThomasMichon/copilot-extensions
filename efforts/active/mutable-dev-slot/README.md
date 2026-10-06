@@ -119,10 +119,14 @@ for the full design.
 
 ### Phase 3 — Rollout to the remaining vendoring plugins
 
-- [ ] Repeat Phase 2's pilot shape for the other 11 plugins currently
+- [ ] Repeat Phase 2's pilot shape for the other 12 plugins currently
       vendoring `versioned_runtime.py` (see `tools/sync-versioned-runtime.py`'s
-      target list) as their own installers need it -- not a mandatory
-      blanket rollout on day one.
+      target list; 13 vendoring plugins total, `agent-codespaces` is the
+      one Phase 2 pilot) as their own installers need it -- not a mandatory
+      blanket rollout on day one. This includes `budget-guidance`, the one
+      vendoring plugin that isn't `agent-*` and so isn't named in the
+      audit-prioritized list below -- it's still owed this same rollout
+      under this generic bullet.
 - [ ] **Prioritize the plugins a separate invariant audit
       (`ThomasMichon/copilot-extensions#5472`, `#5468`,
       `efforts/active/vision-backport-sweep/`) found still silently

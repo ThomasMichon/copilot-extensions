@@ -211,9 +211,12 @@ correctness bug on top of the immutability violation.
 - If the target version's slot does not exist yet, build it — ordinary,
   unremarkable first install.
 - If the target version's slot exists, is marked complete, and its recorded
-  payload hash matches the current source tree, this is a true no-op:
-  activate it (or leave it active) and do nothing else — never re-run the
-  package install step "just in case."
+  payload hash matches the current source tree, this is a true no-op **for
+  the slot's own contents**: activate it (or leave it active) and skip the
+  venv/package (re)install — never re-run that step "just in case." Normal
+  out-of-slot reconciliation (binstubs, the deploy manifest, hook/service
+  registration) still runs exactly as it would on any other invocation;
+  this no-op narrows only the slot-rebuild step, not the whole installer.
 - If the target version's slot exists, is marked complete, but its payload
   hash does **not** match the current source tree (the dev-iteration
   anti-pattern: same version string, genuinely different content), **refuse**
@@ -229,9 +232,19 @@ correctness bug on top of the immutability violation.
   hashes `pyproject.toml` files, not `src/` — copy the control flow, not
   that narrower hash scope; `agent-pull-requests` itself needs the wider
   digest and stays in Phase 3's rollout list for that fix, not held up as
-  already-complete. A `--force` override must not bypass this check;
-  forcing a rebuild over a live, completed slot is exactly what this guard
-  exists to prevent, not an escape hatch from it.
+  already-complete. This refusal is the **target state for a plugin that
+  adopts this contract** — it is not yet universal, and today's operator
+  guidance (`docs/install-contract.md`, the
+  `diagnosing-copilot-extensions` skill) still directs a `--force`
+  rebuild as the recovery step for a stale/corrupt runtime on a
+  not-yet-adopting plugin. Once a plugin adopts the refusal, `--force`
+  must not bypass it for a content mismatch — `dev`/`dev-release` and the
+  generation-based repair path below are its intended replacements for
+  what that operator guidance currently reaches for `--force` to
+  accomplish, and that guidance needs reconciling (naming the adopting
+  plugins explicitly, or superseding the `--force` recommendation
+  entirely) as part of each plugin's own adoption, not asserted as already
+  true repo-wide by this doc alone.
 
 This refusal is what actually closes the loop `dev` opened: without it, a
 contributor (or an impatient automation) can still reach for "just run
@@ -266,33 +279,52 @@ for every other cutover/repair path in this repo:
 
 1. **Confirm the slot is genuinely broken** via a direct check (import
    smoke-test, signature/trampoline validation, a declared health probe) —
-   never assume brokenness from an absent marker alone; `toss_incomplete()`
-   already handles the markerless case, and is not what this section is
-   about.
+   never assume brokenness from an absent marker alone. This case is
+   explicitly **not** what `toss_incomplete()` already covers: that helper
+   skips whichever slot `current-version` currently selects, so an active,
+   live slot with a missing or invalid completion marker is exactly the
+   gap this repair path exists for, not a case already handled elsewhere.
 2. **Acquire the same exclusive cutover lease an ordinary update/promotion
    holds** before touching any generation state — a repair racing a
    concurrent installer run (or a second repair attempt) must not be
    possible, per *graceful-daemon-cutover*'s serialization rule.
 3. **Build the replacement under a distinct generation identity**, never
-   back into the broken slot's own directory — e.g. a repair-sequence
-   suffix on the version string (`<version>+repair1`), so the broken
-   slot's identity is left completely untouched and `last-known-good`
-   still means what it said before the repair started. Health-gate the new
-   build in isolation, exactly like an ordinary install. **That distinct
-   identity must propagate everywhere a plain package version is otherwise
-   compared or recorded** — not just the directory name.
-   `agent-dispatch`'s `self_update` module compares a running daemon's
-   self-reported `__version__`/`running-version.json` directly against
-   `current-version` to decide whether it should act, from both its
-   coordinator and supervisor call paths
-   (`plugins/agent-dispatch/src/agent_dispatch/runtime_version.py`,
-   `self_update.py`): activating `1.2.3+repair1` while the process still
-   reports plain `1.2.3` makes that comparison mismatch forever, so
-   self-update keeps treating an already-repaired daemon as stale, and
-   ownership/ops records lose track of which slot is actually live. The
-   generation suffix needs its own first-class field in whatever record
-   keeps that comparison (keeping the user-facing package version
-   unchanged), not an ad hoc string appended only to the directory name.
+   back into the broken slot's own directory, so the broken slot's
+   identity is left completely untouched and `last-known-good` still means
+   what it said before the repair started. Health-gate the new build in
+   isolation, exactly like an ordinary install. **That distinct identity
+   has two further obligations, not just "pick an unused name":**
+   - It must **sort correctly against every existing recovery resolver**.
+     A naive suffix like `<version>+repair1` is treated as an unsupported
+     string by `versioned_runtime._version_key`
+     (`libs/versioned-runtime/versioned_runtime.py:135-149`) and sorts
+     *after* every real release — a later genuine release (`9.0.0`) could
+     then lose to a stale repair generation during marker-loss recovery,
+     and plugin-local/shell resolvers may each order it differently still.
+     Whatever scheme a plugin picks must integrate with one shared,
+     already-existing ordering rather than inventing a representation
+     `_version_key` doesn't recognize.
+   - It must **propagate everywhere a plain package version is otherwise
+     compared or recorded**, not just the directory name.
+     `agent-dispatch`'s `self_update` module compares a running daemon's
+     self-reported `__version__`/`running-version.json` directly against
+     `current-version` to decide whether it should act, from both its
+     coordinator and supervisor call paths
+     (`plugins/agent-dispatch/src/agent_dispatch/runtime_version.py`,
+     `self_update.py`): activating a mismatched generation identity while
+     the process still reports the plain package version makes that
+     comparison mismatch forever, so self-update keeps treating an
+     already-repaired daemon as stale, and ownership/ops records lose
+     track of which slot is actually live. The generation identity needs
+     its own first-class field in whatever record keeps that comparison
+     (keeping the user-facing package version unchanged), not an ad hoc
+     string appended only to the directory name.
+
+   The exact representation that satisfies both obligations above is
+   implementation detail for whichever plugin needs this first — this
+   section fixes the *contract* (distinct identity, correctly ordered,
+   propagated through every comparison, promote-before-retire, same lease
+   as every other cutover), not the wiring.
 4. **Promote before you retire, never the reverse**: once the replacement's
    health gate passes, atomically flip `current-version` (and any routing)
    to it. Only after that promotion is *confirmed* — not merely
@@ -313,11 +345,7 @@ value is lost only because it was never a valid rollback target to begin
 with. Treat this as a rare, logged, operator-visible event (infrastructure
 self-repair, not silent-and-routine), distinct from both the ordinary
 install/update path above and from `dev`'s deliberately-mutable,
-claim-gated exception. The exact generation-naming scheme (`+repairN` or
-otherwise) and lease primitive are implementation detail for whichever
-plugin needs this first — this section fixes the *contract* (distinct
-identity, promote-before-retire, same lease as every other cutover), not
-the wiring.
+claim-gated exception.
 
 ## Rationale
 

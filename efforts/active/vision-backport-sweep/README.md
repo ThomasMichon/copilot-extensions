@@ -329,8 +329,9 @@ then rather than assuming either answer.
   the iteration side: `efforts/active/mutable-dev-slot/` (design doc
   `docs/patterns/mutable-dev-slot.md`) built a protected, claim-gated,
   genuinely mutable `versions/dev` slot per plugin — piloted on
-  `agent-codespaces`, not yet rolled out to the other 11 vendoring plugins
-  (its own Phase 3, previously unprioritized).
+  `agent-codespaces`, not yet rolled out to the other 12 vendoring plugins
+  (13 total, including the non-`agent-*` `budget-guidance`; its own
+  Phase 3, previously unprioritized).
 - Added the operator's corruption-repair instinct as a new doc section —
   but a first draft of it (stop, delete the whole slot, rebuild fresh at
   the *same* version) was itself flagged by that PR's own review as
