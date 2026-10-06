@@ -1192,7 +1192,16 @@ function New-PluginBuildSnapshot {
             # outright.
             if (Test-Path $snapDir) {
                 $snapStale = "$snapDir.stale-$PID"
-                Rename-Item -LiteralPath $snapDir -NewName (Split-Path -Leaf $snapStale) -ErrorAction SilentlyContinue
+                # Terminating (no -ErrorAction SilentlyContinue): if this
+                # rename fails (e.g. Windows still has $snapDir open), letting
+                # execution continue to Move-Item below would find $snapDir
+                # STILL present -- PowerShell then treats it as a destination
+                # CONTAINER and moves $snapTmp INSIDE it instead of replacing
+                # it, silently returning a root that lacks pyproject.toml at
+                # the expected path. Let this throw into the outer catch,
+                # which cleans up $snapTmp and -- on the -BestEffort path --
+                # correctly degrades to the live payload instead.
+                Rename-Item -LiteralPath $snapDir -NewName (Split-Path -Leaf $snapStale)
             }
             Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
             Get-ChildItem -LiteralPath (Split-Path -Parent $snapDir) -Directory -Filter "$(Split-Path -Leaf $snapDir).stale-*" -ErrorAction SilentlyContinue |
@@ -3574,7 +3583,17 @@ function Invoke-Update {
             # lock) cannot even START publishing its activation until this
             # invocation's cutover attempt has fully finished and released
             # it -- closing the window rather than merely narrowing it.
-            $cutoverMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir
+            #
+            # -TimeoutSeconds: the default (20s) comfortably covers a bare
+            # marker-publish, but this critical section now also spans a
+            # REAL Invoke-CoordinatorCutover call, whose own zdd.cutover
+            # defaults allow up to health_timeout(60s) + drain_timeout(300s)
+            # + 60s slack for its OWN internal cutover-lease wait (see
+            # zdd.cutover.CutoverOrchestrator.run's own lock_timeout
+            # default) -- a 420s worst case. A concurrent newer installer
+            # waiting on THIS lock must outlast that, not time out and fail
+            # outright during a normal long cutover.
+            $cutoverMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds 450
             try {
                 if (Test-ActivationSupersededNow) {
                     Write-Skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/task refresh for this invocation'

@@ -253,6 +253,53 @@ Write-Output "RESULT:$result"
     assert sorted(p.name for p in (install_dir / "snapshots").iterdir()) == ["0.1.0-dev1"]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows-only sharing-violation repro")
+def test_a_blocked_rename_aside_degrades_instead_of_nesting_the_snapshot(tmp_path: Path) -> None:
+    """If the rename-aside of an existing (invalid) $snapDir fails -- e.g.
+    Windows still has a file inside it open, exactly the ERROR_SHARING_
+    VIOLATION class this whole mechanism exists to avoid -- letting
+    execution continue to Move-Item would find $snapDir STILL present:
+    PowerShell then treats it as a destination CONTAINER and moves the temp
+    tree INSIDE it instead of replacing it, silently returning a root that
+    lacks pyproject.toml at the expected top level. The rename must be
+    terminating so the outer -BestEffort catch degrades correctly instead
+    of either of those silently-wrong outcomes."""
+    plugin_dir = _marketplace_plugin_dir(tmp_path)
+    install_dir = tmp_path / "install"
+    _seed_plugin_dir(plugin_dir)
+    snap_dir = install_dir / "snapshots" / "0.1.0-dev1"
+    (snap_dir / "junk").mkdir(parents=True)
+    locked_file = snap_dir / "junk" / "locked.txt"
+    locked_file.write_text("locked\n", encoding="utf-8")
+
+    # A plain Python file handle left open for this block's lifetime blocks
+    # a directory rename of $snapDir on Windows (confirmed empirically:
+    # IOException/ERROR_ACCESS_DENIED) -- simulating the exact class of
+    # open-handle failure this guards against.
+    handle = open(locked_file, "rb")
+    try:
+        extra = f"""
+$result = New-PluginBuildSnapshot -PluginDir "{plugin_dir}" -InstallDir "{install_dir}" -Version "0.1.0-dev1" -BestEffort
+Write-Output "RESULT:$result"
+"""
+        result = _run_harness(extra)
+    finally:
+        handle.close()
+
+    # -BestEffort must degrade to the live payload (not silently return a
+    # snapDir that got the temp tree nested one level too deep inside it).
+    assert "RESULT:" in result.stdout, result.stdout + result.stderr
+    returned = Path(result.stdout.split("RESULT:", 1)[1].strip().splitlines()[0])
+    assert returned == plugin_dir, (
+        f"expected -BestEffort degrade to the live payload, got {returned}"
+    )
+    # The stale snapshot dir must NOT have gained a nested temp-tree copy
+    # (the exact wrong outcome a non-terminating rename would produce: the
+    # real code's own `$snapTmp = "$snapDir.tmp-$PID"` ending up moved
+    # INSIDE the still-present $snapDir instead of replacing it).
+    assert list(snap_dir.glob("*.tmp-*")) == []
+
+
 def test_is_a_noop_when_plugin_dir_is_already_under_install_dir(tmp_path: Path) -> None:
     """Re-running from an already-made snapshot (the self-provisioning
     binstub's first-use `provision` dispatch runs install.ps1 FROM the
