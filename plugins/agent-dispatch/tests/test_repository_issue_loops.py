@@ -2140,10 +2140,9 @@ def test_forge_provider_for_threads_discovery_scope_to_azure_devops():
 
 
 def test_validate_config_accepts_gitea_provider_with_connection_fields():
-    """ThomasMichon/copilot-extensions#4825: GiteaProvider is now a real
-    adapter, so a well-formed gitea declaration validates cleanly (unlike
-    the stub era, which rejected it outright to avoid validating-then-
-    failing-forever on the first tick)."""
+    """A well-formed gitea declaration (provider, producer_login, and a
+    valid api_base) validates cleanly, with token_env defaulting to
+    GITEA_TOKEN when not given."""
     config = validate_config(
         _config(
             repo="example-org/example-project",

@@ -302,52 +302,18 @@ class GiteaProvider:
             payload={"body": body}, ok=(201,),
         )
 
-    def reserve(self, repo: str, issue: "Issue", reservation: dict[str, Any]) -> None:
-        # Resolve the label prerequisite (lookup + add) *before* writing the
-        # `reserved` marker comment. If the label is missing or the add fails,
-        # this raises before any marker exists, so discovery never sees a
-        # phantom reservation on an issue the caller never actually reserved.
-        self._verify_identity(repo, allow_cache=False)
-        label_id = self._label_id(repo, reservation["label"])
-        self._call(
-            "POST", f"/repos/{repo}/issues/{issue.number}/labels",
-            payload={"labels": [label_id]}, ok=(200, 201),
-        )
-        try:
-            self._comment(repo, issue, {**reservation, "issue": issue.number})
-        except Exception:
-            # The label is now live but the marker comment that is supposed
-            # to accompany it never landed. Best-effort roll the label back
-            # so a transient/permanent comment failure never leaks a
-            # labeled-but-unmarked reservation that discovery would then
-            # treat as reserved with no record of by whom/when/why.
-            try:
-                self._call(
-                    "DELETE", f"/repos/{repo}/issues/{issue.number}/labels/{label_id}",
-                    ok=(200, 204),
-                )
-            except Exception:
-                pass
-            raise
-
-    def claim(
-        self, repo: str, issue: "Issue", reservation: dict[str, Any], task_id: str
-    ) -> None:
-        self._comment(
-            repo, issue,
-            {**reservation, "issue": issue.number, "state": "claimed", "task_id": task_id},
-        )
-
-    def release(
-        self, repo: str, issue: "Issue", reservation: dict[str, Any], reason: str,
-    ) -> None:
+    def _other_active_reservation(
+        self, repo: str, issue: "Issue", reservation: dict[str, Any]
+    ) -> bool:
+        """True when some OTHER loop currently holds an active (reserved or
+        claimed) reservation on this issue for this same label. Reservations
+        deliberately race before coordinator election settles a winner, so a
+        rollback must never clear a label another loop's reservation still
+        depends on -- that would silently undo a winning reservation this
+        call never made."""
         from .repository_issue_loops import Issue as _Issue
         from .repository_issue_loops import _latest_reservations
 
-        self._comment(
-            repo, issue,
-            {**reservation, "issue": issue.number, "state": "released", "reason": reason},
-        )
         comments = self._all_comments(repo, issue.number)
         current = _Issue(
             number=issue.number, title=issue.title, url=issue.url, labels=issue.labels,
@@ -365,13 +331,70 @@ class GiteaProvider:
                 )
             ),
         )
-        other_active = any(
+        return any(
             value.get("state") in {"reserved", "claimed"}
             and value.get("loop") != reservation.get("loop")
             and value.get("label") == reservation.get("label")
             for value in _latest_reservations(current).values()
         )
-        if not other_active:
+
+    def reserve(self, repo: str, issue: "Issue", reservation: dict[str, Any]) -> None:
+        # Resolve the label prerequisite (lookup + add) *before* writing the
+        # `reserved` marker comment. If the label is missing or the add fails,
+        # this raises before any marker exists, so discovery never sees a
+        # phantom reservation on an issue the caller never actually reserved.
+        self._verify_identity(repo, allow_cache=False)
+        label_id = self._label_id(repo, reservation["label"])
+        current_issue = self._call("GET", f"/repos/{repo}/issues/{issue.number}", ok=(200,))
+        label_already_present = any(
+            isinstance(label, dict) and label.get("id") == label_id
+            for label in (current_issue.get("labels") or [])
+        )
+        self._call(
+            "POST", f"/repos/{repo}/issues/{issue.number}/labels",
+            payload={"labels": [label_id]}, ok=(200, 201),
+        )
+        try:
+            self._comment(repo, issue, {**reservation, "issue": issue.number})
+        except Exception:
+            # The label is now live but the marker comment that is supposed
+            # to accompany it never landed. Best-effort roll the label back
+            # so a transient/permanent comment failure never leaks a
+            # labeled-but-unmarked reservation that discovery would then
+            # treat as reserved with no record of by whom/when/why -- but
+            # ONLY when this call actually introduced the label and no
+            # other loop's own active reservation now depends on it.
+            # Reservations deliberately race before coordinator election,
+            # so a rollback must never silently clear another loop's
+            # winning reservation.
+            if not label_already_present and not self._other_active_reservation(
+                repo, issue, reservation
+            ):
+                try:
+                    self._call(
+                        "DELETE", f"/repos/{repo}/issues/{issue.number}/labels/{label_id}",
+                        ok=(200, 204),
+                    )
+                except Exception:
+                    pass
+            raise
+
+    def claim(
+        self, repo: str, issue: "Issue", reservation: dict[str, Any], task_id: str
+    ) -> None:
+        self._comment(
+            repo, issue,
+            {**reservation, "issue": issue.number, "state": "claimed", "task_id": task_id},
+        )
+
+    def release(
+        self, repo: str, issue: "Issue", reservation: dict[str, Any], reason: str,
+    ) -> None:
+        self._comment(
+            repo, issue,
+            {**reservation, "issue": issue.number, "state": "released", "reason": reason},
+        )
+        if not self._other_active_reservation(repo, issue, reservation):
             self._verify_identity(repo, allow_cache=False)
             label_id = self._label_id(repo, reservation["label"])
             self._call(

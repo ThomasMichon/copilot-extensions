@@ -226,6 +226,8 @@ def test_reservation_marker_roundtrips_through_comments(monkeypatch):
             return _status({"login": "issue-bot"}, 200)
         if url.endswith("/api/v1/repos/example/project"):
             return _status({"full_name": "example/project"}, 200)
+        if url.endswith("/issues/1") and method == "GET":
+            return _status({"labels": [{"id": i} for i in labels_on_issue]}, 200)
         if "/issues/1/comments?page=1" in url and method == "GET":
             if comment_body["value"] is None:
                 return _status([], 200)
@@ -352,6 +354,8 @@ def test_reserve_rolls_back_the_label_when_the_marker_comment_fails(monkeypatch)
             return _status({"login": "issue-bot"}, 200)
         if url.endswith("/api/v1/repos/example/project"):
             return _status({"full_name": "example/project"}, 200)
+        if url.endswith("/issues/1") and method == "GET":
+            return _status({"labels": []}, 200)
         if "/labels?page=1" in url and method == "GET":
             return _status([{"id": 7, "name": "backlog-active"}], 200)
         if "/labels?page=" in url and method == "GET":
@@ -375,6 +379,102 @@ def test_reserve_rolls_back_the_label_when_the_marker_comment_fails(monkeypatch)
             {"loop": "backlog", "occurrence": 1, "label": "backlog-active"},
         )
     assert deleted_label_ids == [7]
+
+
+def test_reserve_does_not_roll_back_a_label_that_was_already_present(monkeypatch):
+    """If the label was already applied to the issue before this reserve()
+    call (e.g. a prior attempt's own label add that then failed on the
+    comment step, or another loop having independently applied the same
+    label), this call never introduced it -- a rollback must not strip a
+    label it did not add itself."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+    deleted_label_ids = []
+
+    def runner(args, **kwargs):
+        method = args[args.index("-X") + 1]
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status({"login": "issue-bot"}, 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status({"full_name": "example/project"}, 200)
+        if url.endswith("/issues/1") and method == "GET":
+            return _status({"labels": [{"id": 7, "name": "backlog-active"}]}, 200)
+        if "/labels?page=1" in url and method == "GET":
+            return _status([{"id": 7, "name": "backlog-active"}], 200)
+        if "/labels?page=" in url and method == "GET":
+            return _status([], 200)
+        if url.endswith("/issues/1/labels") and method == "POST":
+            return _status([{"id": 7, "name": "backlog-active"}], 201)
+        if "/issues/1/comments?" in url and method == "GET":
+            return _status([], 200)
+        if url.endswith("/issues/1/comments") and method == "POST":
+            return _status("server error", 500)
+        if method == "DELETE":
+            raise AssertionError("must not delete a label this call did not add")
+        raise AssertionError(f"unexpected curl invocation: {method} {url}")
+
+    provider = _provider(runner)
+    issue = Issue(1, "t", "url", (), 0.0, 0.0)
+    with pytest.raises(RuntimeError, match="HTTP 500"):
+        provider.reserve(
+            "example/project", issue,
+            {"loop": "backlog", "occurrence": 1, "label": "backlog-active"},
+        )
+    assert deleted_label_ids == []
+
+
+def test_reserve_does_not_roll_back_a_label_another_loops_active_reservation_depends_on(
+    monkeypatch,
+):
+    """Reservations deliberately race before coordinator election settles a
+    winner. If another loop's own reservation (visible via its marker
+    comment) is currently 'reserved'/'claimed' on this same label, a
+    rollback must never silently clear it -- even though this call's own
+    label add just failed to be followed by a successful marker write."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+    from agent_dispatch.issue_loop_markers import _marker
+
+    other_loop_marker = _marker({
+        "loop": "other-loop", "occurrence": 1, "state": "reserved",
+        "at": 0, "label": "backlog-active", "issue": 1,
+    })
+
+    def runner(args, **kwargs):
+        method = args[args.index("-X") + 1]
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status({"login": "issue-bot"}, 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status({"full_name": "example/project"}, 200)
+        if url.endswith("/issues/1") and method == "GET":
+            return _status({"labels": []}, 200)
+        if "/labels?page=1" in url and method == "GET":
+            return _status([{"id": 7, "name": "backlog-active"}], 200)
+        if "/labels?page=" in url and method == "GET":
+            return _status([], 200)
+        if url.endswith("/issues/1/labels") and method == "POST":
+            return _status([{"id": 7, "name": "backlog-active"}], 201)
+        if "/issues/1/comments?page=1" in url and method == "GET":
+            return _status(
+                [{"id": 1, "body": other_loop_marker, "user": {"login": "issue-bot"}}], 200
+            )
+        if "/issues/1/comments?page=" in url and method == "GET":
+            return _status([], 200)
+        if url.endswith("/issues/1/comments") and method == "POST":
+            return _status("server error", 500)
+        if method == "DELETE":
+            raise AssertionError(
+                "must not clear another loop's active reservation label"
+            )
+        raise AssertionError(f"unexpected curl invocation: {method} {url}")
+
+    provider = _provider(runner)
+    issue = Issue(1, "t", "url", (), 0.0, 0.0)
+    with pytest.raises(RuntimeError, match="HTTP 500"):
+        provider.reserve(
+            "example/project", issue,
+            {"loop": "backlog", "occurrence": 1, "label": "backlog-active"},
+        )
 
 
 def test_http_error_status_raises(monkeypatch):
