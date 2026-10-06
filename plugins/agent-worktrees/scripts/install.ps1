@@ -2097,18 +2097,28 @@ function Deploy-Venv {
         if (-not $slotClean) {
             # "Still in use" is typically a transient Windows file-handle race
             # (a just-exited process hasn't released the slot yet) -- retry
-            # briefly rather than immediately falling through to a doomed
-            # signed-Python `--copies` attempt against the still-dirty
-            # $VenvDir, which would otherwise silently downgrade to an
-            # unsigned uv-built interpreter (#2413).
+            # briefly before giving up.
             for ($i = 0; $i -lt 3 -and -not $slotClean; $i++) {
                 Start-Sleep -Milliseconds 750
                 $slotClean = Invoke-VersionedSlotClean
             }
         }
+        if (-not $slotClean) {
+            # A still-dirty slot after retries means another process may
+            # genuinely own (or still be building into) $VenvDir right now.
+            # Building ANYTHING here -- signed or unsigned -- races that
+            # writer and risks a corrupted, partially-overlapping venv, which
+            # is a worse outcome than failing this deploy and leaving the
+            # previously-installed, working version in place untouched.
+            # Signing status is irrelevant to this hazard (#5416): refuse to
+            # write into a contended slot at all, rather than silently
+            # downgrading to an unsigned uv-built interpreter (#2413).
+            Write-ServiceErr "Runtime slot still in use after retries -- refusing to build into a possibly-contended slot: $VenvDir. This is a concurrent-writer safety guard, not a code-signing fallback. Re-run update once the prior process has exited."
+            return $false
+        }
         $signedBase = Get-SignedBasePython
         $created = $false
-        if ($signedBase -and $slotClean) {
+        if ($signedBase) {
             $result = Invoke-NativeCapture {
                 & $signedBase -m venv --copies $VenvDir
             }
@@ -2122,12 +2132,6 @@ function Deploy-Venv {
         if (-not $created) {
             if (-not $signedBase) {
                 Write-ServiceWarn "No signed system Python found -- using uv (unsigned). On Smart App Control machines, install python.org Python 3.11+ and re-run update."
-            } elseif (-not $slotClean) {
-                # Loud, not a soft warning: a signed Python IS available, but
-                # the stale slot couldn't be cleared, so this venv is being
-                # built UNSIGNED instead. Silently downgrading the SAC
-                # guarantee here is the exact failure mode of #2413.
-                Write-ServiceErr "Runtime slot still in use after retries -- building an UNSIGNED uv Python venv instead of the signed system Python. Smart App Control compatibility is NOT guaranteed for $VenvDir; re-run update once the prior process has exited."
             }
             # Run uv from a trusted CWD (SystemDrive root), never the profile
             # mount -- launching the WinGet uv.exe reparse shim with the profile

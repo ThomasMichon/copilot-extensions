@@ -344,14 +344,15 @@ def test_venv_install_invokes_resolved_uv_path():
 
 
 def test_slot_clean_reports_failure_instead_of_silently_downgrading_signed_venv():
-    """#2413 regression guard: a stale/still-in-use runtime slot must not
-    silently fall through to an unsigned uv-built venv when a signed system
-    Python is available. `Invoke-VersionedSlotClean` must surface success/
-    failure via its exit code, `Deploy-Venv` must retry before giving up, must
-    never attempt the signed `--copies` build against a slot it knows is still
-    dirty, and must escalate to a loud error (not a soft warning) when it ends
-    up on the unsigned uv path specifically because of unresolved slot
-    contention."""
+    """#5416 regression guard (supersedes the #2413 guard this test used to
+    cover): a stale/still-in-use runtime slot means another process may
+    genuinely own (or still be building into) $VenvDir right now, so
+    `Deploy-Venv` must refuse to build ANYTHING into it -- signed or
+    unsigned -- rather than racing that writer. `Invoke-VersionedSlotClean`
+    must surface success/failure via its exit code, `Deploy-Venv` must retry
+    before giving up, and must hard-fail (return $false, loud error) instead
+    of falling through to any venv build when the slot is still dirty after
+    retries."""
     installer = INSTALLER.read_text(encoding="utf-8")
     clean_fn = installer.split("function Invoke-VersionedSlotClean", 1)[1].split(
         "function Invoke-VersionedMarkComplete", 1
@@ -364,18 +365,21 @@ def test_slot_clean_reports_failure_instead_of_silently_downgrading_signed_venv(
     # instead of implicitly returning nothing (falsy $null) unconditionally.
     assert "return ($LASTEXITCODE -eq 0)" in clean_fn
 
-    # Deploy-Venv must capture that result, retry on failure, and gate the
-    # signed-Python build on the slot actually being clean.
+    # Deploy-Venv must capture that result and retry before giving up.
     assert "$slotClean = Invoke-VersionedSlotClean" in deploy_fn
     assert "for ($i = 0; $i -lt 3 -and -not $slotClean; $i++)" in deploy_fn
-    assert "if ($signedBase -and $slotClean) {" in deploy_fn
-    assert "if ($signedBase) {" not in deploy_fn
 
-    # The unsigned-uv-because-slot-was-dirty case must be a loud error, not a
-    # soft warning silently swallowed alongside the ordinary "no signed Python
-    # on this machine at all" case.
-    assert "} elseif (-not $slotClean) {" in deploy_fn
+    # A still-dirty slot after retries must hard-fail BEFORE any venv build
+    # is attempted -- never gate the signed build on `-and $slotClean` and
+    # then quietly fall through to an unsigned uv build anyway (the exact
+    # failure mode of #2413/#5416).
+    assert "if ($signedBase -and $slotClean) {" not in deploy_fn
+    assert "if ($signedBase) {" in deploy_fn
     assert 'Write-ServiceErr "Runtime slot still in use after retries' in deploy_fn
+    slot_dirty_branch = deploy_fn.split(
+        'Write-ServiceErr "Runtime slot still in use after retries', 1
+    )[1][:400]
+    assert "return $false" in slot_dirty_branch
 
 
 def test_deploy_venv_calls_uv_retry_helper():

@@ -833,7 +833,12 @@ _versioned_slot_clean() {
     local py
     py="$(_bootstrap_python)" || return 0
     [[ -n "$py" ]] || return 0
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
+    # Propagate the underlying python call's real exit code (never the
+    # trailing `sed`'s, and never force-succeed via `|| true`) -- callers
+    # must be able to tell a genuinely dirty/contended slot from a clean one
+    # (#5416).
+    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /'
+    return "${PIPESTATUS[0]}"
 }
 
 _versioned_mark_complete() {
@@ -1072,7 +1077,27 @@ PYEOF
 deploy_venv() {
     # Create venv via uv (--allow-existing handles re-install). Deps come from
     # pyproject at package install time -- no ad-hoc pyyaml here.
-    _versioned_slot_clean
+    local slot_clean=0
+    _versioned_slot_clean && slot_clean=1
+    if [[ "$slot_clean" -ne 1 ]]; then
+        # "Still in use" is typically a transient file-handle race (a just-
+        # exited process hasn't released the slot yet) -- retry briefly
+        # before giving up.
+        local _i
+        for _i in 1 2 3; do
+            sleep 0.75
+            _versioned_slot_clean && { slot_clean=1; break; }
+        done
+    fi
+    if [[ "$slot_clean" -ne 1 ]]; then
+        # A still-dirty slot after retries means another process may
+        # genuinely own (or still be building into) $VENV_DIR right now.
+        # Building into it here races that writer and risks a corrupted,
+        # partially-overlapping venv -- fail instead of racing it, leaving
+        # the previously-installed, working version in place (#5416).
+        err "Runtime slot still in use after retries -- refusing to build into a possibly-contended slot: $VENV_DIR. Re-run update once the prior process has exited."
+        return 1
+    fi
     if ! uv venv "$VENV_DIR" --python 3.11 --allow-existing 2>/dev/null; then
         if ! uv venv "$VENV_DIR" --allow-existing 2>/dev/null; then
             err "Failed to create venv at $VENV_DIR"
