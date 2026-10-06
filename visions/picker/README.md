@@ -322,9 +322,24 @@ promise holds under real fleet load, not only on an idle demo machine:
   keystroke's visible feedback does not strictly need yet is fetched off that
   loop and painted in when it arrives, not before.
 - **The Manager boots to its first interactive frame in well under 2s.**
-  Startup cost scales with what's installed, not with fleet size or a cold
-  provider's own startup cost (`§graceful-capability-scaling`'s scaling
-  promise applies to boot latency too, not only to feature surface).
+  Startup cost scales with what's installed and what's actually needed for
+  the first frame, not with fleet size, a cold provider's own startup cost
+  (`§graceful-capability-scaling`'s scaling promise applies to boot latency
+  too, not only to feature surface), or the total size of everything that
+  *could* be registered. Concretely, this rules out three recurring boot-cost
+  shapes as acceptable, regardless of how each is implemented: (1) **eager
+  resolution** — importing, parsing, or subprocess-verifying a module,
+  provider, or registered project before the first frame actually needs it,
+  rather than loading it on demand when a view or action first requires it;
+  (2) **over-resolving** — a blanket identity/root-verification sweep over
+  *every* installed plugin or *every* registered project on every boot,
+  instead of scoping that work to what the current boot path touches; and
+  (3) **monolithic cold-path modules** — a module large enough that
+  importing any one small piece of it drags in far more import-time work
+  than that piece needs, which defeats on-demand loading even when the call
+  site itself is disciplined about *when* it asks. Splitting such modules
+  along their actual usage boundaries is part of holding this budget, not a
+  separate code-health concern.
 - **An action menu opens in well under 1s.** Opening a row's action menu
   reflects cached/derived state immediately; an authoritative recheck may
   follow asynchronously but never gates the menu's appearance.
@@ -536,3 +551,19 @@ regression is something a test can catch before an operator does.
   operator notices the freeze — tracked going forward by the
   `picker-performance-and-responsiveness` effort, which closed that specific
   regression as its first phase and owns measuring/holding the budgets here.
+- **2026-10-05** — Extended `§Behaviors/responsive-by-budget`'s boot-budget
+  bullet with the three recurring cost shapes the effort's own Phase 4 kept
+  re-discovering, one call site at a time: eager (vs. on-demand) resolution,
+  over-resolving every installed/registered thing instead of scoping to what
+  the current boot path touches, and monolithic cold-path modules that make
+  even a disciplined call site drag in unrelated import-time work. Prompted
+  by that phase landing two successive narrow fixes (a redundant
+  marketplace-manifest re-parse, then redundant `git` subprocess calls during
+  project discovery) that each measurably removed their own cost in
+  isolation, yet left cold boot's measured wall-clock unmoved — because a
+  *third*, not-yet-profiled cost (Python's own module-import machinery
+  loading the full installed plugin set) was dominant the whole time and
+  neither fix touched it. Recorded as should-be principle rather than left
+  implicit, so a future fix in this space names which of the three shapes it
+  closes instead of repeating the same single-call-site pattern expecting a
+  different result.
