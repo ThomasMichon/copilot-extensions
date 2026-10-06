@@ -841,9 +841,14 @@ _payload_hash() {
 # or automatically by the OS the instant this process exits/crashes).
 _VERSIONED_SLOT_LEASE_FD=""
 # pid of the resident python helper holding a real fcntl.flock for us when
-# the `flock` CLI isn't available (e.g. stock macOS) -- see
-# _acquire_versioned_slot_lease_python_fallback.
+# the `flock` CLI isn't available (e.g. stock macOS), and the write-end fd
+# of the pipe feeding its stdin -- see
+# _acquire_versioned_slot_lease_python_fallback. The helper blocks reading
+# that stdin pipe for as long as this fd stays open; closing it (release)
+# is what lets the helper see EOF, exit, and have the kernel release its
+# flock.
 _VERSIONED_SLOT_LEASE_PY_PID=""
+_VERSIONED_SLOT_LEASE_PY_STDIN_FD=""
 
 _versioned_slot_lease_path() {
     printf '%s/.build-lease-%s.lock' "$INSTALL_DIR" "$SRC_VERSION"
@@ -860,42 +865,42 @@ _acquire_versioned_slot_lease_python_fallback() {
     # none of those races, and Python is already a hard dependency here
     # (versioned_runtime.py). A resident helper process holds the lock
     # (acquired non-blocking, so it fails fast like `flock -n`) and blocks
-    # reading its own stdin until closed; killing it (or this process
-    # exiting) closes that pipe and releases the lock exactly like closing
-    # the `flock` fd does on the primary path. Returns 0 (holder pid
-    # recorded in _VERSIONED_SLOT_LEASE_PY_PID) or 1.
-    local lock_file="$1" py ready_file waited=0 status
+    # reading its own stdin until EOF -- via `coproc`, so bash holds the
+    # WRITE end of that pipe open for exactly as long as the lease should
+    # be held (a plain background job redirected from `/dev/null` would
+    # hand the helper an immediate EOF and have it release right away,
+    # which this specifically avoids). Closing bash's held fd (release) or
+    # this process exiting for any reason closes the pipe, the helper sees
+    # EOF and exits, and the kernel releases its flock automatically.
+    # Returns 0 (helper pid + stdin fd recorded) or 1.
+    local lock_file="$1" py line
     py="$(_bootstrap_python)" || return 1
     [[ -n "$py" ]] || return 1
-    ready_file="$(mktemp 2>/dev/null)" || return 1
-    "$py" -c '
+    # shellcheck disable=SC2030,SC2031 # coproc's array/PID vars are
+    # intentionally process-local to this acquire call.
+    coproc _VERSIONED_LEASE_HELPER {
+        "$py" -c '
 import fcntl, sys
-path, ready_path = sys.argv[1], sys.argv[2]
-f = open(path, "a")
+f = open(sys.argv[1], "a")
 try:
     fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
 except OSError:
-    with open(ready_path, "w") as r:
-        r.write("LOCKED")
+    print("LOCKED", flush=True)
     sys.exit(1)
-with open(ready_path, "w") as r:
-    r.write("OK")
+print("OK", flush=True)
 sys.stdin.read()  # block until the parent closes our stdin (release)
-' "$lock_file" "$ready_file" < /dev/null &
-    _VERSIONED_SLOT_LEASE_PY_PID=$!
-    disown "$_VERSIONED_SLOT_LEASE_PY_PID" 2>/dev/null || true
-    while [[ ! -s "$ready_file" ]] && (( waited < 50 )); do
-        sleep 0.2 2>/dev/null || sleep 1
-        waited=$(( waited + 1 ))
-    done
-    status="$(cat "$ready_file" 2>/dev/null || true)"
-    rm -f "$ready_file" 2>/dev/null || true
-    if [[ "$status" == "OK" ]]; then
+' "$lock_file"
+    }
+    if ! IFS= read -r -u "${_VERSIONED_LEASE_HELPER[0]}" -t 10 line; then
+        line=""
+    fi
+    if [[ "$line" == "OK" ]]; then
+        _VERSIONED_SLOT_LEASE_PY_PID="$_VERSIONED_LEASE_HELPER_PID"
+        _VERSIONED_SLOT_LEASE_PY_STDIN_FD="${_VERSIONED_LEASE_HELPER[1]}"
         return 0
     fi
-    kill "$_VERSIONED_SLOT_LEASE_PY_PID" 2>/dev/null || true
-    wait "$_VERSIONED_SLOT_LEASE_PY_PID" 2>/dev/null || true
-    _VERSIONED_SLOT_LEASE_PY_PID=""
+    eval "exec ${_VERSIONED_LEASE_HELPER[1]}>&-" 2>/dev/null || true
+    wait "$_VERSIONED_LEASE_HELPER_PID" 2>/dev/null || true
     return 1
 }
 
@@ -939,10 +944,14 @@ _release_versioned_slot_lease() {
         _VERSIONED_SLOT_LEASE_FD=""
     fi
     if [[ -n "$_VERSIONED_SLOT_LEASE_PY_PID" ]]; then
-        # Killing the resident helper closes its stdin/exits it, which
-        # releases its fcntl.flock exactly like closing the `flock` fd
-        # does on the primary path above.
-        kill "$_VERSIONED_SLOT_LEASE_PY_PID" 2>/dev/null || true
+        # Closing bash's held write-end of the helper's stdin pipe is the
+        # release: the helper sees EOF on its blocking stdin.read(), exits,
+        # and the kernel releases its fcntl.flock automatically -- exactly
+        # like closing the `flock` fd does on the primary path above.
+        if [[ -n "$_VERSIONED_SLOT_LEASE_PY_STDIN_FD" ]]; then
+            eval "exec ${_VERSIONED_SLOT_LEASE_PY_STDIN_FD}>&-" 2>/dev/null || true
+            _VERSIONED_SLOT_LEASE_PY_STDIN_FD=""
+        fi
         wait "$_VERSIONED_SLOT_LEASE_PY_PID" 2>/dev/null || true
         _VERSIONED_SLOT_LEASE_PY_PID=""
     fi

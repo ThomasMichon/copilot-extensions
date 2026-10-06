@@ -216,14 +216,22 @@ def test_versioned_slot_lease_python_fallback_delegates_to_real_fcntl_flock():
     assert "sys.exit(1)" in fallback_body
     # The resident helper must hold the lock for exactly its own lifetime
     # (blocking on its own stdin until closed), not acquire-then-exit --
-    # an exited helper's fd closing is what releases the kernel lock.
+    # an exited helper's fd closing is what releases the kernel lock. It
+    # must be started via `coproc`: a plain background job whose stdin is
+    # redirected from `/dev/null` hands the helper an immediate EOF, so its
+    # `stdin.read()` returns at once and the lease releases right after
+    # acquisition instead of being held for the caller's lifetime.
+    assert "coproc _VERSIONED_LEASE_HELPER" in fallback_body
     assert "sys.stdin.read()" in fallback_body
     assert "_VERSIONED_SLOT_LEASE_PY_PID" in fallback_body
+    assert "_VERSIONED_SLOT_LEASE_PY_STDIN_FD" in fallback_body
 
-    # Release must kill the resident helper (closing its fd set / exiting
-    # it releases the kernel-held flock automatically) rather than needing
-    # any explicit lock-file cleanup.
-    assert 'kill "$_VERSIONED_SLOT_LEASE_PY_PID"' in release_body
+    # Release must close bash's held write-end of the helper's stdin pipe
+    # (letting the helper see EOF, exit, and have the kernel release its
+    # flock automatically) -- never just `kill` the helper directly, which
+    # would race the helper's own in-flight flock acquisition/teardown.
+    assert 'eval "exec ${_VERSIONED_SLOT_LEASE_PY_STDIN_FD}>&-"' in release_body
+    assert 'wait "$_VERSIONED_SLOT_LEASE_PY_PID"' in release_body
 
 
 @pytest.mark.skipif(
@@ -246,11 +254,15 @@ def test_versioned_slot_lease_python_fallback_enforces_real_cross_process_exclus
 set -uo pipefail
 _bootstrap_python() {{ command -v "{sys.executable}"; }}
 _VERSIONED_SLOT_LEASE_PY_PID=""
+_VERSIONED_SLOT_LEASE_PY_STDIN_FD=""
 {fallback_fn}
 }}
 _release_versioned_slot_lease_python_fallback() {{
     if [[ -n "$_VERSIONED_SLOT_LEASE_PY_PID" ]]; then
-        kill "$_VERSIONED_SLOT_LEASE_PY_PID" 2>/dev/null || true
+        if [[ -n "$_VERSIONED_SLOT_LEASE_PY_STDIN_FD" ]]; then
+            eval "exec ${{_VERSIONED_SLOT_LEASE_PY_STDIN_FD}}>&-" 2>/dev/null || true
+            _VERSIONED_SLOT_LEASE_PY_STDIN_FD=""
+        fi
         wait "$_VERSIONED_SLOT_LEASE_PY_PID" 2>/dev/null || true
         _VERSIONED_SLOT_LEASE_PY_PID=""
     fi
