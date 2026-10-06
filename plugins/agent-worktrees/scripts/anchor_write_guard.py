@@ -78,6 +78,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from registry_root import resolve_registry_root
 from anchor_shell_parser import (
+    git_branch_invocation_is_readonly as _git_branch_invocation_is_readonly,
     shell_command_substitutions as _shell_command_substitutions,
     shell_segments as _shell_segments,
 )
@@ -156,17 +157,6 @@ _GIT_TERMINAL_OPTIONS = frozenset({
     "-h", "--help", "-v", "--version", "--html-path", "--man-path",
     "--info-path", "--exec-path",
 })
-_GIT_BRANCH_SAFE_LONG_FLAG = re.compile(
-    r"""^(?:
-        --list|--all|--remotes|--verbose|--show-current|
-        --column(?:=\S+)?|--no-column|--ignore-case|--omit-empty|
-        --no-abbrev|--no-color|--color(?:=\S+)?|--sort=\S+|--format=\S+|
-        --abbrev=\S+|--points-at=\S+|--contains=\S+|--no-contains=\S+|
-        --merged(?:=\S+)?|--no-merged(?:=\S+)?
-    )$""",
-    re.IGNORECASE | re.VERBOSE,
-)
-_GIT_BRANCH_SAFE_SHORT_CLUSTER = re.compile(r"^-[varil]+$", re.IGNORECASE)
 # ``pull`` is the one write-sub verb with a narrow, precise exemption: this
 # guard's invariant is "no agent-authored content lands in the anchor" (a
 # stray commit, an edit that never goes through the worktree/PR flow) -- and
@@ -441,19 +431,6 @@ def _git_effective_ff_mode(args: list[str]) -> str | None:
         if lower in {"--ff", "--no-ff", "--ff-only"}:
             mode = lower
     return mode
-
-
-def _git_branch_invocation_is_readonly(args: list[str]) -> bool:
-    """Whether every branch argument is a known read-only flag."""
-    for token in args:
-        if not token:
-            continue
-        if _GIT_BRANCH_SAFE_LONG_FLAG.match(token):
-            continue
-        if _GIT_BRANCH_SAFE_SHORT_CLUSTER.match(token):
-            continue
-        return False
-    return True
 
 
 def _git_subcommand_is_write(subcommand: str | None) -> bool:

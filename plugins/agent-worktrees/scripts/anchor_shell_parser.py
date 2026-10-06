@@ -2,6 +2,30 @@
 
 from __future__ import annotations
 
+import re
+
+_GIT_BRANCH_SAFE_LONG_FLAG = re.compile(
+    r"""^(?:
+        --list|--all|--remotes|--verbose|--show-current|
+        --column(?:=\S+)?|--no-column|--ignore-case|--omit-empty|
+        --no-abbrev|--no-color|--color(?:=\S+)?|--sort=\S+|--format=\S+|
+        --abbrev=\S+|--points-at=\S+|--contains=\S+|--no-contains=\S+|
+        --merged(?:=\S+)?|--no-merged(?:=\S+)?
+    )$""",
+    re.IGNORECASE | re.VERBOSE,
+)
+_GIT_BRANCH_SAFE_SHORT_CLUSTER = re.compile(r"^-[varil]+$", re.IGNORECASE)
+
+
+def git_branch_invocation_is_readonly(args: list[str]) -> bool:
+    """Whether every branch argument is a known read-only flag."""
+    return all(
+        not token
+        or _GIT_BRANCH_SAFE_LONG_FLAG.match(token)
+        or _GIT_BRANCH_SAFE_SHORT_CLUSTER.match(token)
+        for token in args
+    )
+
 
 def shell_segments(cmd: str, tool: str) -> list[str]:
     lower_tool = tool.lower()
