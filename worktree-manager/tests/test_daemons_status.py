@@ -62,6 +62,7 @@ def test_daemon_statuses_marks_a_pre_upgrade_daemons_telemetry_unsupported(
         daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9555 ..."
     )
     monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid: True)
+    monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: "fixed-start-time")
     monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
     _FakeControlClient.responses = {9555: {"status": "ready"}}
     monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", _FakeControlClient)
@@ -106,6 +107,7 @@ def test_daemon_statuses_reports_active_reachable_and_unreachable(tmp_path: Path
         routing, "read_table", lambda config_dir: _active_table(pid=101, port=9101)
     )
     monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid: True)
+    monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: "fixed-start-time")
     _FakeControlClient.responses = {
         9101: {
             "status": "ready",
@@ -171,6 +173,80 @@ def test_daemon_statuses_marks_a_failed_health_request_unreachable(tmp_path: Pat
 
     assert statuses == [
         {"pid": 404, "port": 9404, "active": False, "status": "unreachable"}
+    ]
+
+
+def test_daemon_statuses_rejects_a_missing_start_time_as_unverified(
+    tmp_path: Path, monkeypatch
+):
+    """``process_start_time()`` returns ``None`` when identity lookup is
+    unavailable (e.g. macOS's POSIX path). Two ``None`` samples must never
+    compare equal to each other -- that would silently accept an unprovable
+    identity as "unchanged" and defeat the whole post-connection re-check,
+    letting a genuine PID-reuse race through as verified telemetry."""
+    root = tmp_path / "root"
+    root.mkdir()
+
+    monkeypatch.setattr(
+        daemons_status.mux_daemon_cutover, "_iter_mux_daemon_pids", lambda: {777}
+    )
+    monkeypatch.setattr(
+        daemons_status.mux_daemon_cutover,
+        "_pid_matches_root",
+        lambda pid, *, root: True,
+    )
+    monkeypatch.setattr(
+        daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9777 ..."
+    )
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid: True)
+    monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: None)
+    monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
+    _FakeControlClient.responses = {9777: {"status": "ready", "version": "0.1.0-dev1"}}
+    monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", _FakeControlClient)
+
+    statuses = daemons_status.daemon_statuses(root)
+
+    assert statuses[0]["status"] == "unverified-owner"
+
+
+def test_daemon_statuses_handles_a_revalidation_lookup_failure_without_aborting(
+    tmp_path: Path, monkeypatch
+):
+    """The post-health revalidation census/root-match calls can themselves
+    raise (the same subprocess calls underlying them can time out or fail
+    to start) -- a failure there must report this one candidate as
+    unverified rather than aborting the whole status report, leaving every
+    OTHER resident daemon unreported too."""
+    root = tmp_path / "root"
+    root.mkdir()
+
+    call_count = {"n": 0}
+
+    def _iter_pids():
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return {888}
+        raise OSError("census unavailable")
+
+    monkeypatch.setattr(daemons_status.mux_daemon_cutover, "_iter_mux_daemon_pids", _iter_pids)
+    monkeypatch.setattr(
+        daemons_status.mux_daemon_cutover,
+        "_pid_matches_root",
+        lambda pid, *, root: True,
+    )
+    monkeypatch.setattr(
+        daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9888 ..."
+    )
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid: True)
+    monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: "fixed-start-time")
+    monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
+    _FakeControlClient.responses = {9888: {"status": "ready", "version": "0.1.0-dev1"}}
+    monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", _FakeControlClient)
+
+    statuses = daemons_status.daemon_statuses(root)
+
+    assert statuses == [
+        {"pid": 888, "port": 9888, "active": False, "status": "unverified-owner"}
     ]
 
 

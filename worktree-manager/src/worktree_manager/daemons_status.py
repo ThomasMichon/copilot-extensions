@@ -232,11 +232,29 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
         # disclosing the token -- out of scope here since it touches every
         # ControlClient caller (drain/undrain/shutdown/adopt too), not just
         # this read-only surface; tracked as follow-on work under #5001.
+        try:
+            still_live = pid in mux_daemon_cutover._iter_mux_daemon_pids()
+            still_matches_root = still_live and mux_daemon_cutover._pid_matches_root(
+                pid, root=resolved_root
+            )
+            start_time_after = process_start_time(pid) if still_matches_root else None
+        except Exception:
+            still_live = still_matches_root = False
+            start_time_after = None
+        # A ``None`` start time (identity lookup unavailable on this
+        # platform, e.g. macOS's POSIX path) must never compare equal to
+        # another ``None`` -- that would silently accept an unprovable
+        # identity as "unchanged" and defeat this whole re-check. Both
+        # samples must be genuine, non-``None`` tokens that also match.
+        start_time_confirmed = (
+            start_time_before is not None
+            and start_time_after is not None
+            and start_time_before == start_time_after
+        )
         if (
-            pid not in mux_daemon_cutover._iter_mux_daemon_pids()
-            or not mux_daemon_cutover._pid_matches_root(pid, root=resolved_root)
+            not still_matches_root
+            or not start_time_confirmed
             or not _pid_owned_by_current_user(pid)
-            or process_start_time(pid) != start_time_before
         ):
             entry["status"] = "unverified-owner"
             results.append(entry)
