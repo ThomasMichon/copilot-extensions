@@ -33,7 +33,7 @@
   "plugins/agent-dispatch/src/agent_dispatch/managed_retention.py": 1018,
   "plugins/agent-dispatch/src/agent_dispatch/managed_runtime.py": 1603,
   "plugins/agent-dispatch/src/agent_dispatch/registrar_registry.py": 1007,
-  "plugins/agent-dispatch/src/agent_dispatch/repository_issue_loops.py": 1826,
+  "plugins/agent-dispatch/src/agent_dispatch/repository_issue_loops.py": 1835,
   "plugins/agent-dispatch/src/agent_dispatch/supervisor.py": 3780,
   "plugins/agent-dispatch/src/agent_dispatch/supervisor_daemon.py": 2206,
   "plugins/agent-index/scripts/cell-runtime.py": 5210,

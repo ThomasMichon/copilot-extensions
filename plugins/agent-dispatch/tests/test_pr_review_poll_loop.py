@@ -126,20 +126,38 @@ def test_build_provider_observer_routes_provider_tagged_store_keys(monkeypatch):
             calls.append(("azure-devops", repo, number, self.expected_login))
             return _observation("ado-diff")
 
+    class _Gitea:
+        def __init__(self, expected_login, runner=None, api_bases=None):
+            self.expected_login = expected_login
+            self.api_bases = api_bases
+
+        def observe(self, repo, number):
+            calls.append(("gitea", repo, number, self.expected_login, self.api_bases))
+            return _observation("gitea-diff")
+
     monkeypatch.setattr("agent_dispatch.pr_review_poll_loop.GitHubPRAdapter", _GitHub)
     monkeypatch.setattr("agent_dispatch.pr_review_poll_loop.AzureDevOpsPRAdapter", _AzureDevOps)
+    monkeypatch.setattr("agent_dispatch.pr_review_poll_loop.GiteaPRAdapter", _Gitea)
 
     observe = build_provider_observer(
-        {"github": "gh-bot", "azure-devops": "ado-bot"},
+        {"github": "gh-bot", "azure-devops": "ado-bot", "gitea": "gitea-bot"},
         runner=lambda *_args, **_kwargs: SimpleNamespace(),
+        gitea_api_bases={"gitea.example.com": "https://gitea.example.com"},
     )
 
     github = observe("example/project", 7)
     azure = observe("azure-devops:example-org/example-project/example-repo", 9)
+    gitea = observe("gitea:gitea.example.com/example-org/example-repo", 11)
 
     assert github.revision.diff_hash == "github-diff"
     assert azure.revision.diff_hash == "ado-diff"
+    assert gitea.revision.diff_hash == "gitea-diff"
     assert calls == [
         ("github", "example/project", 7, "gh-bot"),
         ("azure-devops", "example-org/example-project/example-repo", 9, "ado-bot"),
+        (
+            "gitea", "gitea.example.com/example-org/example-repo", 11, "gitea-bot",
+            {"gitea.example.com": "https://gitea.example.com"},
+        ),
     ]
+
