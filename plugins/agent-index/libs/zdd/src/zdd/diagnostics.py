@@ -299,12 +299,16 @@ def _candidate_map(candidates: list[DaemonCandidate]) -> dict[int, DaemonCandida
     }
 
 
-def _validated_owner(
+def _validated_lock_owner(
     ctx: DiagnosticContext,
     candidates: dict[int, DaemonCandidate],
-    table: dict | None,
+    lock_data: dict | None,
+    active_pid: int | None,
 ) -> tuple[dict[str, object] | None, str | None]:
-    lock_data = ctx.read_lock()
+    """The lock-file-based validation :func:`_validated_owner` used to be
+    the entirety of. Split out unchanged so the routing-table fallback
+    below can retry with a different, independent source of truth when
+    this one can't vouch for anyone."""
     if not ctx.lock_is_live(lock_data):
         return None, "no validated live owner"
     if not isinstance(lock_data, dict):
@@ -312,8 +316,6 @@ def _validated_owner(
     pid = lock_data.get("pid")
     if not isinstance(pid, int):
         return None, "lock missing owner pid"
-    active_raw = table.get("active") if isinstance(table, dict) else None
-    active_pid = active_raw.get("pid") if isinstance(active_raw, dict) else None
     if isinstance(active_pid, int) and active_pid != pid:
         return None, "lock owner disagrees with routed active pid"
     candidate = candidates.get(pid)
@@ -332,6 +334,53 @@ def _validated_owner(
             "start_time": recorded_start,
         },
     }, None
+
+
+def _validated_owner(
+    ctx: DiagnosticContext,
+    candidates: dict[int, DaemonCandidate],
+    table: dict | None,
+) -> tuple[dict[str, object] | None, str | None]:
+    active_raw = table.get("active") if isinstance(table, dict) else None
+    active_pid = active_raw.get("pid") if isinstance(active_raw, dict) else None
+
+    lock_data = ctx.read_lock()
+    owner, reason = _validated_lock_owner(ctx, candidates, lock_data, active_pid)
+    if owner is not None:
+        return owner, None
+
+    # Only fall back when the lock's own pid actively DISAGREES with the
+    # routing table -- exactly what an old generation stuck mid-retire
+    # (superseded but never relinquishing its own lock claim) looks like:
+    # a cutover already rewrote the table's "active" entry to the new
+    # generation, but the old one never got far enough to rewrite (or
+    # release) the lock file naming itself. Any OTHER validation failure
+    # (an unreadable/absent lock, a missing owner pid, an unprovable
+    # start-time token, a lock owner that isn't even in the fresh daemon
+    # census) is a genuine ambiguity this fallback must not paper over --
+    # it fails closed exactly as before. The routing table's "active"
+    # entry is this service's own single, generation-numbered source of
+    # truth for who is CURRENTLY being routed to; if a live, in-census
+    # candidate holds that exact pid right now, trust it rather than
+    # refuse to pick anyone in this one specific, provable-disagreement
+    # case -- otherwise a merely-slow-to-retire old generation
+    # permanently blocks every repair path that depends on a validated
+    # owner (not just this one: a daemon more than one generation behind
+    # is also invisible to `_inspect_superseded_generations`'s own
+    # active/previous-slot-only lookback, so without this fallback it has
+    # no path to ever being reaped at all).
+    if reason == "lock owner disagrees with routed active pid" and isinstance(
+        active_pid, int
+    ):
+        candidate = candidates.get(active_pid)
+        if candidate is not None:
+            return {
+                "pid": candidate.pid,
+                "start_time": candidate.start_time,
+                "lock": None,
+                "routed_active_pid": active_pid,
+            }, None
+    return None, reason
 
 
 def _describe_old_endpoint(record: dict) -> tuple[str, int] | None:

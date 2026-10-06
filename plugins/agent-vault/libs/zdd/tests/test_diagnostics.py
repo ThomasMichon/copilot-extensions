@@ -229,6 +229,69 @@ def test_audit_and_apply_reap_superseded_generation_without_touching_owner(tmp_p
     assert result["after"]["counts"]["total"] == 0
 
 
+def test_audit_and_apply_reap_duplicate_whose_lock_disagrees_with_routed_active(
+    tmp_path: Path,
+):
+    """picker-performance-and-responsiveness: a cutover already rewrote the
+    routing table's ``active`` entry to the new generation (pid 202), but
+    the OLD generation (pid 101) is slow/stuck mid-retire and never got as
+    far as rewriting -- or releasing -- the separate lock file, which
+    still names itself. Both are live, real daemon processes: a genuine
+    duplicate, not an ambiguous one. ``_validated_owner`` must trust the
+    routing table over the stale lock here, so `doctor` can still pick a
+    winner (the new generation) and reap the old one, instead of refusing
+    to vouch for anyone."""
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=101, version="1.0.0")
+    routing.publish_active(
+        tmp_path,
+        bind="127.0.0.1",
+        port=9282,
+        pid=202,
+        version="1.0.0",
+        demote_existing=True,
+    )
+    state = {
+        "lock": {"pid": 101, "start_time": "old"},
+        "live": {101: "old", 202: "new"},
+        "terminated": [],
+    }
+
+    report = diagnostics.audit_daemon_health(_ctx(tmp_path, state=state))
+    assert report["validated_owner"]["pid"] == 202
+    assert report["owner_validation_reason"] is None
+    assert report["counts"]["duplicate_resident"] == 1
+    finding = next(f for f in report["findings"] if f["kind"] == "duplicate_resident")
+    assert finding["repairable"] is True
+    assert [item["pid"] for item in finding["targets"]] == [101]
+
+    result = diagnostics.apply_daemon_health(_ctx(tmp_path, state=state))
+    assert state["live"] == {202: "new"}
+    assert state["terminated"] == [101]
+    assert result["after"]["counts"]["total"] == 0
+
+
+def test_routed_active_fallback_still_fails_closed_when_pid_is_not_live(
+    tmp_path: Path,
+):
+    """The routing-table fallback only trusts the table's claim when a
+    live, freshly-censused candidate actually holds that exact pid right
+    now -- a table naming a pid that isn't running at all must still fail
+    closed, exactly as before this fix, rather than fabricate an owner
+    nothing can back up."""
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=999, version="1.0.0")
+    state = {
+        "lock": {"pid": 101, "start_time": "old"},
+        "live": {101: "old"},
+        "terminated": [],
+    }
+
+    report = diagnostics.audit_daemon_health(_ctx(tmp_path, state=state))
+    assert report["validated_owner"] is None
+    assert report["owner_validation_reason"] == "lock owner disagrees with routed active pid"
+    # Only one live candidate at all here -- not a duplicate scenario.
+    assert report["counts"].get("duplicate_resident", 0) == 0
+
+
 def test_apply_blocks_duplicate_repair_without_validated_owner(tmp_path: Path):
     state = {
         "lock": {"pid": 999, "start_time": "missing-owner"},

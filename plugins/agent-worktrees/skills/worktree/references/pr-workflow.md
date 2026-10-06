@@ -16,6 +16,7 @@ rules.
 - Detecting PR mode + where PR config lives (machine-local vs in-repo)
 - Auto-complete/auto-merge is not a bypass -- prefer it, keep watching
 - Default conduct: drive every PR through to merge (waiting policy + sanctioned deviations)
+- Never assert what masked/redacted tool output literally contains
 - `create-pr` (auto-open, attribution marker, labels) -- for tracing a PR you
   didn't open, see [pr-attribution.md](pr-attribution.md) instead
 - Dispositions: keep-alive vs detach
@@ -203,6 +204,63 @@ In **direct mode** (the default), use the two-phase `push-changes` +
 `finalize` flow above. In **PR mode**, the flow becomes
 `create-pr -> [delegate PR creation] -> finalize`, and `push-changes` targets
 the *feature* branch instead of the default branch.
+
+### Never assert what masked/redacted tool output literally contains
+
+A host's content-exclusion or secret-redaction layer can replace sensitive-
+looking substrings (tokens, credentials, certain patterns) with a placeholder
+(e.g. a run of asterisks) before the content ever reaches the agent --
+invisibly, with no "denied"/error signal distinguishing it from genuinely
+trivial content. This differs from an outright denied tool call (which IS
+clearly signaled); here the call succeeds and returns content, just with some
+substrings swapped for a mask the agent cannot see through.
+
+**Never treat masked output as ground truth about what the real file
+contains.** A real incident this guidance is drawn from: an agent read a
+source line displaying a six-asterisk placeholder in an `Authorization`
+header call, assumed it was literal source text, and then filed a review
+reply and a GitHub issue making confident factual claims ("the code sends the
+literal string `******`") and asking the operator to fix it accordingly --
+when the masking was purely a display artifact of the agent's own tooling,
+and the agent had no actual way to know what the underlying bytes were.
+
+Telltale signs worth treating as a yellow flag before asserting anything
+about such content:
+- The same suspicious placeholder (asterisks, `[REDACTED]`, etc.) appears
+  verbatim and identically across multiple, otherwise-unrelated call sites or
+  files -- a real secret value would vary; a masking layer produces identical
+  output for every match.
+- The placeholder sits exactly where a credential, token, or secret-shaped
+  string would naturally go (e.g. an `Authorization` header value, a
+  `--token` argument, a connection string).
+
+When you notice this pattern:
+- Do not assert, in a commit message, PR comment, review reply, or filed
+  issue, what the real characters are or what the code "does" with them --
+  you only know what your own tooling displayed, not the real bytes.
+- If the real content's correctness genuinely matters (e.g. a review bot
+  flagged a possible bug at that exact line), say so honestly: name the
+  uncertainty, and ask a human (or a path without this masking) to verify
+  directly, rather than describing masked display text as if it were the
+  file's real content.
+- **Never edit the masked expression itself, or any syntax it depends on
+  (a wrapping quote, an `f`/`r`/`b` string prefix, an escape sequence) --
+  even a change that looks purely cosmetic can silently change what the
+  real, unseen bytes mean.** The hidden characters determine whether
+  surrounding syntax is load-bearing: an f-string prefix masked as
+  `f"******"` could be hiding a real `{token}` interpolation, and dropping
+  the prefix to "fix" an apparent lint complaint would silently disable
+  that interpolation -- a real mistake made while drafting this very
+  guidance, caught by a review bot before merge. Treat the masked span,
+  and anything syntactically coupled to it, as off-limits until an
+  unmasked path (a different tool, or a human with real access) confirms
+  what is actually safe to change. An edit well outside and independent of
+  the masked span is fine; one touching its boundary is not.
+- If you already filed something (an issue, a PR comment) based on a
+  masked-content assumption, correct it explicitly once you notice --
+  retract the specific factual claim, keep only what you can actually verify
+  (e.g. a real, unmasked CI diagnostic that independently flagged the same
+  line).
 
 ### Where PR config lives (machine-local vs in-repo)
 
