@@ -556,8 +556,38 @@ class PickerScreenRenderingMixin:
     # any segment ever gains its own pulse/spin dependency, add it here too --
     # this tuple is deliberately an allowlist, not inferred automatically.
     _PULSE_ONLY_SEGMENTS = ("nf-chrome", "nf-body-data")
+    # The segments whose rendered content can depend on `self.sel`/`wt_sel`
+    # moving within the Worktrees list body (zone "L") -- a pure in-list
+    # cursor move, the `_nav_dirty` cause set by
+    # `on_option_list_option_highlighted`. Audited empirically (a headless
+    # harness run diffing each segment's actual rendered content, not just
+    # static tracing) across two cases: (1) the real-world boot edge case,
+    # where the VERY FIRST navigation ever also flips `wt_sel` from empty to
+    # one item (`_wt_track_focus()`'s "selection follows focus" rule,
+    # #2258 P3-1) -- `nf-footer`'s `_focus_hint()` genuinely changes text
+    # for that one transition (`"Space: select"` -> `"Space: select/
+    # deselect"`); and (2) steady-state (every subsequent move), where
+    # `nf-footer` is provably unchanged (`wt_sel` already has exactly one
+    # item either way, and the "nsel" branch's text doesn't name the
+    # specific row). Rather than special-case the one-time transition,
+    # `nf-footer` stays in the always-refreshed set for this cause --
+    # correctness over the marginal cost of one cheap `Text` repaint.
+    # `nf-body-data` must still run (native cursor move + the focused row's
+    # own checkbox glyph, #2258 P3-1 again). `nf-body-sticky` (the pinned
+    # column/section header above the data body) was never part of this
+    # method's own refresh set in the first place, before OR after Phase 4 --
+    # `_PickerStickyHeader.set_lines()` manages its own repaint need via its
+    # own content-equality check, called from a separate path
+    # (`_update_sticky()`), so it is correctly absent here, not narrowed away.
+    # `nf-title`/`nf-pivots`/`nf-chrome`/`nf-machine`/`nf-buttons` were
+    # empirically confirmed unchanged (byte-identical rendered output) in
+    # both audited cases -- `build_chrome()`'s own `sel` usage only compares
+    # `sel == ("M", 0)`/`sel == ("BTN", 0)`, never the in-zone index, so an
+    # in-list move (`sel[0]` staying `"L"` throughout) can never flip either.
+    _NAV_SEGMENTS = ("nf-body-data", "nf-footer")
     _ALL_NF_SEGMENTS = ("nf-title", "nf-pivots", "nf-chrome", "nf-machine",
                          "nf-buttons", "nf-body-data", "nf-footer")
+    _CAUSE_SEGMENTS = {"pulse": _PULSE_ONLY_SEGMENTS, "nav": _NAV_SEGMENTS}
 
     def _refresh_nf_segments(self, cause: str | None = None) -> None:
         """Propagate a screen state change to the child segment/region widgets
@@ -568,12 +598,11 @@ class PickerScreenRenderingMixin:
         specific, audited refresh trigger (pivot-streaming-transport Phase 4)
         -- ``None`` (the default, used by every caller that doesn't pass a
         cause) refreshes every segment, identical to this method's behavior
-        before Phase 4. Only ``"pulse"`` is currently recognized; any other
-        value is treated the same as ``None`` (refresh everything) rather
-        than silently skipping segments for an un-audited cause.
+        before Phase 4. Only ``"pulse"``/``"nav"`` are currently recognized;
+        any other value is treated the same as ``None`` (refresh everything)
+        rather than silently skipping segments for an un-audited cause.
         """
-        seg_ids = (self._PULSE_ONLY_SEGMENTS if cause == "pulse"
-                   else self._ALL_NF_SEGMENTS)
+        seg_ids = self._CAUSE_SEGMENTS.get(cause, self._ALL_NF_SEGMENTS)
         for seg_id in seg_ids:
             try:
                 w = self.query_one(f"#{seg_id}")

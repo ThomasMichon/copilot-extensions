@@ -354,10 +354,23 @@ insufficient.)_
         other `refresh()` call site (all ~35 of them) is unchanged: no
         `cause` passed, every segment still refreshed, identical to
         pre-Phase-4 behavior.
-  - [ ] **Remaining causes (nav/reload/pivot-switch/etc.)** are NOT narrowed
+  - [x] **In-list nav cause, landed 2026-10-05**: `_tick()`'s `_nav_dirty`
+        branch (no busy state) now passes `cause="nav"`, narrowing to
+        `nf-body-data` + `nf-footer` — confirmed empirically (a headless
+        harness diffing each segment's actual rendered content across a real
+        nav move) rather than assumed from the Plan's own summary text,
+        which caught a real edge case the summary missed: `nf-footer`'s
+        `_focus_hint()` genuinely changes text on the one-time `wt_sel` 0->1
+        transition (`_wt_track_focus()`'s "selection follows focus" rule,
+        #2258 P3-1), so it stays in the refreshed set rather than being
+        narrowed away along with title/pivots/chrome/machine/buttons (all
+        empirically confirmed unchanged in both the edge case and
+        steady-state).
+  - [ ] **Remaining causes (reload/pivot-switch/etc.)** are NOT narrowed
         yet — every other `refresh()` call site still refreshes all 7
-        segments. A full per-site audit (36 call sites total) is deferred as
-        its own follow-up slice, not attempted in one unreviewed pass.
+        segments. A full per-site audit (~34 call sites remaining) is
+        deferred as its own follow-up slice, not attempted in one unreviewed
+        pass.
 
 ### Phase 5 — Group C: trust the resident monitor's fresh hint before rescanning
 ### Phase 5 — Group C: trust an affirmative fresh hint, never a negative one
@@ -1937,4 +1950,77 @@ tests exercise.
 **Next**: the remaining ~35 `refresh()` call sites (nav/reload/pivot-switch/
 etc.) stay fully unnarrowed, per the explicit scoping above -- their own
 per-cause audit is a separate future slice. Phase 5 remains fully unstarted.
+
+### 2026-10-05 — Phase 4: landed the in-list nav narrowing, and a reminder to verify empirically, not from the Plan's own summary text
+
+Picked the next highest-value cause: `_tick()`'s `_nav_dirty` branch (a pure
+in-list cursor move within the Worktrees list body, zone `"L"`), which fires
+on every arrow keypress.
+
+**Audit, done empirically this time, not just by static tracing:** wrote a
+throwaway headless-harness script that drives a real `_wt_track_focus()` +
+`_nav_dirty` nav move and diffs each of the 7 segments' actual rendered
+content before/after, rather than trusting the Plan's own summary ("a
+nav-only change only needs the sticky header + body-data"). This caught a
+real gap the summary missed: `nf-footer`'s `_focus_hint()` genuinely changes
+text on the **one-time** `wt_sel` 0->1 transition (`_wt_track_focus()`'s
+"selection follows focus" rule, #2258 P3-1, which collapses the multi-select
+to exactly the focused row on every list-focus move) -- `"Space: select"` ->
+`"Space: select/deselect"`. Steady-state (every move after the first) leaves
+`nf-footer` unchanged (`wt_sel` already has exactly one item either way, and
+the "nsel>0" branch's text doesn't name the specific row) -- but narrowing
+away a segment that's wrong exactly once, at boot, is still a correctness
+bug, not an acceptable approximation. `nf-footer` stays in the refreshed set
+for this cause. `nf-title`/`nf-pivots`/`nf-chrome`/`nf-machine`/`nf-buttons`
+were confirmed unchanged in both cases -- `build_chrome()`'s own `sel` usage
+only compares `sel == ("M", 0)`/`sel == ("BTN", 0)`, never an in-zone index,
+so an in-list move (`sel[0]` staying `"L"` throughout) can never flip either.
+
+**A second correction, found while building the test, not the fix itself:**
+the audit script's initial pass also flagged `nf-body-sticky` as changed --
+but that was a false signal from comparing `rich.console.Group` object
+identity (`_PickerStickyHeader.render()` builds a fresh `Group` every call
+regardless of content) rather than its actual lines. Comparing the real
+`_colhdr_line`/`_section_line` content directly showed no change in either
+audited case. More importantly: `nf-body-sticky` was **never part of
+`_refresh_nf_segments()`'s own 7-segment set in the first place**, before or
+after this change -- `_PickerStickyHeader.set_lines()` already manages its
+own repaint via its own content-equality check, called from a separate path
+(`_update_sticky()`). The nav segment set is therefore `{nf-body-data,
+nf-footer}`, not three segments -- correcting an error in this session's own
+first draft of the narrowing (and its first draft of the regression test,
+which initially asserted a `nf-body-sticky` entry that doesn't exist in
+`_ALL_NF_SEGMENTS` either, caught by a `KeyError` rather than a silent false
+pass).
+
+**A real debugging lesson, worth recording for the next cause's audit:** the
+first version of the regression test produced a confusing false failure
+(`nf-body-sticky` "missing" from the touched set) that looked exactly like a
+production bug, but was actually the test's own error compounding with a
+genuine timing hazard worth naming explicitly: `PickerScreen._tick()` is
+ALSO driven by a real, live, wall-clock `set_interval` timer throughout a
+`run_test()` session (not virtual/frozen time) -- any `await pilot.pause()`
+lets that real timer fire `_tick()` on its own schedule, interleaved with a
+test's own explicit `scr._tick()` calls. Debug prints placed inside
+`_refresh_nf_segments()` surfaced dozens of unrelated invocations from
+*during setup* before a single explicit test tick ever ran. The fix wasn't
+to fight the timer -- it's to never `await` between patching tracked
+widgets and the explicit `_tick()`/assertion that depends on them (asyncio
+only ever switches tasks at an `await` point, so a patch-then-synchronous-
+call sequence genuinely cannot race the background timer) -- documented
+directly in the regression test's own comment so the next cause's test
+doesn't rediscover this by surprise.
+
+**Validation**: added
+`test_tick_pure_nav_narrows_segment_refresh_to_body_and_footer` (mirrors the
+pulse test's structure) -- a pure nav tick, a steady-state second nav tick,
+and a competing-busy tick, asserting the narrowed/full segment sets
+respectively. Full `test_picker_tui.py` green (295/295) on one run; a second
+run surfaced 2 failures in the same already-documented `test_registered_
+pivot_*` modal-opening flake family (unrelated code path, already
+established as pre-existing and load-sensitive in the prior two journal
+entries).
+
+**Next**: the remaining ~34 `refresh()` call sites (reload/pivot-switch/
+etc.) stay fully unnarrowed. Phase 5 remains fully unstarted.
 
