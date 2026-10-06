@@ -505,11 +505,12 @@ def test_process_start_time_handles_a_failed_ps_fallback(monkeypatch):
 
 
 def test_mapping_statuses_reports_every_registry_entry_sorted(tmp_path: Path):
-    """Phase 1's attribution slice (copilot-extensions#5001): the mapping
-    registry is the one disk-backed source of "which worktrees/sessions are
-    attached" the issue names -- shared across every resident daemon for
-    this root, so this cannot (and does not attempt to) attribute an entry
-    to one specific daemon pid."""
+    """A preliminary registry listing for copilot-extensions#5001: the
+    mapping registry is the one disk-backed source of "which worktrees/
+    sessions are known" -- root-wide stored state, shared across every
+    resident daemon for this root, so this cannot (and does not attempt
+    to) attribute an entry to one specific daemon pid or live wire
+    connection."""
     from worktree_manager.mux_mapping_registry import MuxMappingRegistry, registry_path
 
     root = tmp_path / "root"
