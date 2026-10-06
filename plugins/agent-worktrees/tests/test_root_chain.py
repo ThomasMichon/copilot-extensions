@@ -482,12 +482,15 @@ class TestResolveRootCodename:
             "cobalt-ember"
         )
 
-    def test_legacy_record_without_creation_nonce_never_freezes(
+    def test_legacy_record_without_creation_nonce_is_backfilled_and_freezes(
         self, tmp_path, monkeypatch,
     ):
-        # A record predating `creation_nonce` can't be bound to a reliable
-        # identity -- it must simply never freeze (always computed live),
-        # rather than being treated as a permanently-matching empty key.
+        # A record predating `creation_nonce` must NOT be permanently
+        # excluded from the freeze guarantee -- that would silently reopen
+        # the retroactive-exposure gap freezing exists to close for every
+        # worktree that existed before this feature shipped. The nonce is
+        # backfilled lazily (same first-touch pattern as the codename
+        # itself) on first resolution, after which it freezes normally.
         _seed(tmp_path, monkeypatch, "harness", "wt-root",
               codename="amber-thicket", codename_source="built-in")
         child = _seed(
@@ -501,7 +504,36 @@ class TestResolveRootCodename:
             "amber-thicket"
         )
         sidecar = tdir / "wt-child.root-attribution.json"
-        assert not sidecar.exists()
+        assert sidecar.exists()
+        # The on-disk record's own nonce was backfilled too, not just an
+        # in-memory copy -- a later call (even a brand-new WorktreeRecord
+        # instance loaded fresh) sees the SAME nonce and the same freeze.
+        reloaded = tracking.load_record(tdir / "wt-child.yaml")
+        assert reloaded.creation_nonce
+
+    def test_legacy_root_without_creation_nonce_is_backfilled_too(
+        self, tmp_path, monkeypatch,
+    ):
+        # Backfill applies to EVERY hop touched during the walk, not just
+        # the leaf -- a legacy ROOT (or any intermediate ancestor) must
+        # also get a stable, persisted nonce.
+        _seed(tmp_path, monkeypatch, "harness", "wt-root",
+              codename="amber-thicket", codename_source="built-in")
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        root_dir = tmp_path / ".harness" / "worktrees"
+        root_rec = tracking.load_record(root_dir / "wt-root.yaml")
+        root_rec.creation_nonce = ""
+        tracking.save_record(root_rec, root_dir / "wt-root.yaml")
+        assert root_chain.resolve_root_codename(child, project="ext") == (
+            "amber-thicket"
+        )
+        reloaded_root = tracking.load_record(root_dir / "wt-root.yaml")
+        assert reloaded_root.creation_nonce
+        sidecar = tmp_path / ".ext" / "worktrees" / "wt-child.root-attribution.json"
+        assert sidecar.exists()
 
     def test_malformed_frozen_sidecar_is_never_trusted(
         self, tmp_path, monkeypatch,

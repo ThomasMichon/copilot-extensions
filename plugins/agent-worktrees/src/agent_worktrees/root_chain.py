@@ -78,14 +78,50 @@ def _hop_identity(
     project: str | None, record: tracking.WorktreeRecord,
 ) -> tuple[str | None, str, str, str] | None:
     """One hop's identity fingerprint: ``(project, worktree_id, owner_ref,
-    creation_nonce)``, or ``None`` when *record* predates ``creation_nonce``
-    (never backfilled -- such a hop can't be fingerprinted reliably at all,
-    so the WHOLE chain it's part of can't be frozen; every call recomputes
-    live, which is always safe, just less efficient).
+    creation_nonce)``, lazily BACKFILLING ``creation_nonce`` (under this
+    record's own tracking-record lock) when *record* predates that field --
+    the same first-touch backfill pattern
+    ``codename_tracking.ensure_codename`` already uses for the primary
+    codename. Without this, a legacy worktree (created before this field
+    existed) would NEVER satisfy the freeze guarantee -- every call would
+    permanently re-derive its root-publish decision from live config,
+    silently reopening the exact retroactive-exposure gap freezing exists
+    to close, for every worktree that predates this release. Returns
+    ``None`` only when the backfill itself fails (a lock contention or
+    write error -- best-effort, never raises; that hop simply can't freeze
+    THIS time, tried again next call).
     """
-    if not record.creation_nonce:
+    nonce = _ensure_creation_nonce(record, project)
+    if not nonce:
         return None
-    return (project, record.worktree_id, record.owner_ref or "", record.creation_nonce)
+    return (project, record.worktree_id, record.owner_ref or "", nonce)
+
+
+def _ensure_creation_nonce(
+    record: tracking.WorktreeRecord, project: str | None,
+) -> str:
+    """Return *record*'s ``creation_nonce``, backfilling it in place (under
+    this record's own tracking-record lock, re-reading to avoid a lost
+    update against a concurrent writer) if absent. Best-effort: any
+    failure degrades to returning whatever *record* already has (possibly
+    ``""``), never raises.
+    """
+    if record.creation_nonce:
+        return record.creation_nonce
+    import secrets
+    try:
+        path = cfg.project_dir(project) / "worktrees" / f"{record.worktree_id}.yaml"
+        with tracking._RecordLock(path, require_sidecar=True):
+            if not path.exists():
+                return ""  # reaped mid-check; never resurrect
+            current = tracking.load_record(path)
+            if not current.creation_nonce:
+                current.creation_nonce = secrets.token_hex(8)
+                tracking.save_record(current, path)
+            record.creation_nonce = current.creation_nonce
+    except Exception:
+        pass
+    return record.creation_nonce or ""
 
 
 def _chain_identity_key(
@@ -431,9 +467,12 @@ def resolve_root_codename(
         return _ensure_publishable_root_codename(root, root_project, ensure=ensure)
 
     if chain_key is None:
-        # Some hop predates `creation_nonce` -- can't be fingerprinted
-        # reliably, so the whole chain can't freeze. Compute fresh, no
-        # lock, no persistence, every time (safe, just less efficient).
+        # Some hop's creation_nonce backfill failed THIS call (a lock
+        # contention/write error, not a permanent "legacy" state -- see
+        # _ensure_creation_nonce) -- can't be fingerprinted reliably right
+        # now, so the whole chain can't freeze this time. Compute fresh, no
+        # lock, no persistence (safe, just less efficient; the next call
+        # retries the backfill).
         return _compute()
 
     if not ensure:
