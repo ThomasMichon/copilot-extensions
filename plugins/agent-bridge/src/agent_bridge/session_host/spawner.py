@@ -60,45 +60,38 @@ def _as_list(value: Any) -> list[Any]:
     return [value]
 
 
-def _resolve_provision_command() -> str | None:
-    """Resolve the CodeSpace relay/auth-helper provision command.
+def _resolve_provision_command(codespace: str = "") -> str | None:
+    """Resolve the CodeSpace provision command.
 
     Process-boundary **only** (#1643): shell out to the ``agent-codespaces``
     binstub (``provision-command``) so the command comes from agent-codespaces'
     **own** venv -- a fix there reaches the dispatch path with **no agent-bridge
-    redeploy** (retires the #733 class). There is **no** in-process
-    ``agent_codespaces`` import fallback: the daemon runs from its own isolated
-    venv where a provider package is neither importable nor on ``PATH``. Returns
-    the command string, or ``None`` when unavailable (binstub absent or the CLI
-    fails -- the caller skips the best-effort step).
+    redeploy** (retires the #733 class); no in-process import fallback. With
+    ``codespace`` set, ``--codespace <name>`` also carries the adopted repo's
+    provision hooks (#5441); an older agent-codespaces rejects that flag, so
+    fall back to the bare command and never lose the relay-helper redeploy.
+    Returns ``None`` when unavailable (the caller skips the best-effort step).
     """
     import shutil
     import subprocess
 
     binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
     if not binstub:
-        log.debug(
-            "agent-codespaces binstub absent -- skipping relay-helper redeploy "
-            "on the dispatch path"
-        )
+        log.debug("agent-codespaces binstub absent -- skipping provision on dispatch")
         return None
-    try:
-        r = subprocess.run(
-            [binstub, "provision-command"],
-            capture_output=True, text=True, timeout=15,
-            creationflags=no_window_flags(),
-        )
+    attempts = [["provision-command", "--codespace", codespace]] if codespace else []
+    for argv in [*attempts, ["provision-command"]]:
+        try:
+            r = subprocess.run(
+                [binstub, *argv], capture_output=True, text=True, timeout=15,
+                creationflags=no_window_flags(),
+            )
+        except Exception:
+            log.debug("agent-codespaces %s CLI failed", argv, exc_info=True)
+            continue
         if r.returncode == 0 and r.stdout.strip():
             return r.stdout
-        log.debug(
-            "agent-codespaces provision-command exited %s -- skipping "
-            "relay-helper redeploy", r.returncode,
-        )
-    except Exception:
-        log.debug(
-            "agent-codespaces provision-command CLI failed -- skipping "
-            "relay-helper redeploy", exc_info=True,
-        )
+        log.debug("agent-codespaces %s exited %s", argv, r.returncode)
     return None
 
 
@@ -445,15 +438,20 @@ class CodeSpaceSpawner:
         # (a failure here must never block the launch -- the launch's own auth
         # verification surfaces a genuinely broken relay).
         if self.boundary == "codespace":
-            provision_cmd = await asyncio.to_thread(_resolve_provision_command)
+            provision_cmd = await asyncio.to_thread(
+                _resolve_provision_command,
+                getattr(self._transport, "codespace_name", "") or "",
+            )
             if provision_cmd:
                 try:
-                    prov_rc, _pout, prov_err = await self._transport.run(
-                        provision_cmd, timeout=30.0,
-                    )
+                    # Over stdin when supported: with repo hooks the script
+                    # can exceed the Windows command-line limit as argv.
+                    run = getattr(self._transport, "run_script", self._transport.run)
+                    prov_rc, _pout, prov_err = await run(provision_cmd, timeout=30.0)
                     if prov_rc != 0:
                         log.warning(
-                            "CodeSpace relay-helper (re)deploy exited %s: %s",
+                            "CodeSpace provision (relay helpers + repo hooks) "
+                            "exited %s: %s",
                             prov_rc, (prov_err or "").strip(),
                         )
                 except Exception:

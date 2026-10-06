@@ -72,6 +72,7 @@ that pattern to this repository.
 | [Coverage-Guided CI Test Selection](active/coverage-guided-ci/README.md) | Draft | #4453 |
 | [Launch-Time Model/Effort/Context Preference Flags](active/launch-time-model-preference-flags/README.md) | Done; pending archive | #4776 |
 | [Picker New-Session Prompt + Registered-Pivot Composer](active/picker-new-session-prompt-and-composer/README.md) | Done; pending archive | See effort |
+| [Vision Backport Sweep](active/vision-backport-sweep/README.md) | Active | #5456 |
 
 
 ## Local conventions

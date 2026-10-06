@@ -6,7 +6,7 @@ import os
 
 from remote_login_shell import is_posix_login_shell, wrap_login_shell
 
-from . import config as cfg, output
+from . import config as cfg, machine_identity, output
 
 
 def _core():
@@ -47,7 +47,6 @@ def _load_remote_machines(
     if _in_ssh_session():
         return []
 
-    local_key = config.machine
     current_platform = cfg.detect_platform()
     result: list[tuple[cfg.MachineEntry, list[cfg.SSHEnvironment]]] = []
 
@@ -55,7 +54,13 @@ def _load_remote_machines(
         if not entry.ssh_ready or not entry.ssh_environments or not entry.copilot:
             continue
 
-        if key == local_key:
+        # Canonicalize before comparing -- `key` and `config.machine` can be
+        # different-but-equivalent spellings of the same machine (a
+        # machines.yaml key vs. its alias, or a raw COMPUTERNAME vs. the
+        # canonical alias set via the hostname-field decoupling). A naive
+        # `key == local_key` string check then wrongly treats "this
+        # machine" as a remote target.
+        if machine_identity.is_local_machine(key, config):
             # Local machine: only include other-platform environments
             other_envs = [e for e in entry.ssh_environments if e.name != current_platform]
             if other_envs:

@@ -979,6 +979,48 @@ async def test_codespace_dispatch_redeploys_auth_helpers(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_codespace_dispatch_sends_large_provision_script_over_stdin(monkeypatch):
+    """#5441: with repo hooks the provision script can exceed the Windows
+    command-line limit, so a transport offering ``run_script`` gets it over
+    stdin -- never as one SSH argv element."""
+    import shutil
+    import subprocess
+
+    _patch_common(monkeypatch)
+    big = "echo provision\n" + "# pad\n" * 8000  # > 30 KB
+    _real_which = shutil.which
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: (
+        "/bin/agent-codespaces" if name == "agent-codespaces" else _real_which(name, *a, **k)))
+    _real_run = subprocess.run
+    seen: list[list[str]] = []
+
+    def _fake_run(argv, *a, **k):
+        if isinstance(argv, (list, tuple)) and len(argv) >= 2 and argv[1] == "provision-command":
+            seen.append(list(argv))
+            return subprocess.CompletedProcess(list(argv), 0, big, "")
+        return _real_run(argv, *a, **k)
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    state = {"pid": 1, "child_pid": 2, "port": 51000,
+             "protocol_version": proto.PROTOCOL_VERSION}
+    t = _FakeTransport(state)
+    t.codespace_name = "cs-foo"
+    scripts: list[str] = []
+
+    async def run_script(script, *, timeout=60.0):
+        scripts.append(script)
+        return (0, "", "")
+
+    t.run_script = run_script
+    await sp.CodeSpaceSpawner(t, ready_timeout=5).spawn(
+        ["copilot", "--acp", "--stdio"], session_id="s3",
+    )
+    assert scripts == [big] and len(big) > 30_000
+    assert big not in t.runs
+    assert seen[0][1:] == ["provision-command", "--codespace", "cs-foo"]
+
+
+@pytest.mark.asyncio
 async def test_non_codespace_boundary_skips_helper_redeploy(monkeypatch):
     """The mesh (non-codespace) boundary must NOT run the codespace auth-helper
     (re)deploy -- it is codespace-specific (#733 T2)."""

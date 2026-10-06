@@ -157,9 +157,13 @@ def test_a_rejoin_updates_only_its_own_sessions_forwards():
 
 def test_a_record_from_before_forwards_were_kept_still_recalls_its_flags():
     path = lm._path("cs-1", TENANT)
-    path.parent.mkdir(parents=True)
+    # Lay the record down the way remember() would (private dirs, 0600 file), so
+    # _load's ownership checks pass under any umask -- e.g. 002, where a plain
+    # write_text leaves the file group-writable and _load rightly rejects it.
+    assert lm._record_dir(path, create=True)
     path.write_text(json.dumps({"tenant": TENANT, "session_id": "s1", "copilot_args": ["--x"], "driver": "o"}),
                     encoding="utf-8")
+    path.chmod(0o600)
     assert lm.apply("cs-1", TENANT, ["--resume=s1"], None)[2] == ["copilot_args", "driver"]
     assert lm.recall_forwards("cs-1", TENANT, ["--resume=s1"], []) == ([], False)
 

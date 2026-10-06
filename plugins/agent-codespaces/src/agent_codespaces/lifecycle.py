@@ -200,6 +200,42 @@ def account_for_codespace(name: str) -> str | None:
     return None
 
 
+def repository_for_codespace(name: str) -> str | None:
+    """The ``owner/repo`` CodeSpace ``name`` was created from, or None.
+
+    Targeted rather than listing-capped (``list_codespaces`` only sees the first
+    page): the persisted binding's repo first, then ``gh api
+    /user/codespaces/<name>`` as the owning account, and only then the listing.
+    Best-effort for every non-refusal failure.
+    """
+    validate_context()
+    from urllib.parse import quote
+
+    from . import account_binding, gh_account
+
+    repo = account_binding.bound_repo(name)
+    if repo:
+        return repo
+    try:
+        env = gh_account.env_for_account(account_binding.bound_account(name))
+        result = subprocess.run(
+            ["gh", "api", f"/user/codespaces/{quote(name, safe='')}",
+             "--jq", ".repository.full_name"],
+            capture_output=True, text=True, timeout=_STATUS_LOOKUP_TIMEOUT_SECONDS,
+            creationflags=_creation_flags(), env=env,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+        for cs in list_codespaces():
+            if cs.name == name:
+                return cs.repository or None
+    except ContextRefused:
+        raise
+    except Exception:
+        log.debug("Could not resolve repository for %s", name, exc_info=True)
+    return None
+
+
 #: The claim-provider registry's own default STATUS callback budget is 15s
 #: (``agent_worktrees.claim_providers._CALLBACK_TIMEOUT_SECONDS``), and
 #: ``get_codespace_status`` may try this per-account call SERIALLY across

@@ -5,7 +5,7 @@
 - **Scope:** leaf (a child of the
   [agent-dispatch](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-10-04
+- **Last revised:** 2026-10-05
 - **Reality docs:** [`docs/architecture.md`](../../../../docs/architecture.md) ·
   `plugins/agent-dispatch/` · `plugins/agent-worktrees/`
 
@@ -166,6 +166,21 @@ revision, last verdict, blocker owner, next expected actor, attempt-window
 state, worktree, and resumable session. Recommendations reflect whether the next
 move belongs to the submitter, reviewer, automation, or repository maintainer.
 
+### stagnation-escalates
+
+Hibernating until the next relevant update is the normal, silent-capacity-free
+wait — not every resume is a sign of trouble. But a reviewer that keeps
+resuming to find the same unresolved external state, nothing new to reply to,
+and no operator answer is stagnating, not merely waiting, and must not keep
+re-suspending indefinitely on that basis alone. After a small bounded number
+of such non-productive cycles, the reviewer stops and records a durable,
+input-requesting steering card naming exactly what is blocking it and what
+decision it needs — re-affirming (not silently repeating) that same card on
+a later non-productive wake so a delayed operator glance sees the current
+picture, not a stale one. This applies independently of the landing model: a
+`land=author` review waiting on the author is exactly this case, not a reason
+to card merely for ordinary unanswered waiting.
+
 ### settle-and-release
 
 Merge or deliberate abandonment records the review's terminal resolution,
@@ -223,3 +238,8 @@ reviving a released lineage.
   contributor's branch could not be updated. Existing prose already forbade
   editing a contributor's branch without authorization, but did not name
   outright PR replacement/closure as an equally forbidden outcome.
+- **2026-10-05** — Backported `stagnation-escalates` from the reviewer
+  recipe's standing `_STAGNATION_CLAUSE` charter language (already shipped,
+  governing both `land=self` and `land=author` loops): embodied intent that
+  predated this vision recording it as a named Behavior distinct from
+  `bounded-verdict-reliability`'s render-attempt budget.

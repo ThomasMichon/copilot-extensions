@@ -8,11 +8,32 @@ import subprocess
 from collections.abc import Callable
 
 from . import claimant
+from . import config as cfg
+from . import machine_identity
 from .lease_config import load_lease_settings
 from .lease_store import GitLeaseStore, LeaseConflict, LeaseLost, LeaseSnapshot
 
 _BUNDLE_FENCE_KIND = "claim-handoff"
 _REMOTE_ACCEPT_TIMEOUT = 15.0
+
+
+def same_machine(a: str, b: str) -> bool:
+    """Canonicalized same-machine comparison for two machine-ref strings.
+
+    A bare ``a == b`` wrongly treats "this machine" as remote whenever the
+    bundle's recorded machine spelling differs from the caller's current one
+    (a ``machines.yaml`` key vs. its alias, or a raw COMPUTERNAME vs. the
+    canonical alias) -- the exact class of bug that caused an unnecessary SSH
+    loopback for a same-machine accept. Falls back to the direct string
+    comparison (no worse than before) if the registry can't be loaded.
+    """
+    if a == b:
+        return True
+    try:
+        config = cfg.load_config()
+    except Exception:
+        return False
+    return machine_identity.is_local_machine(a, config) and machine_identity.is_local_machine(b, config)
 
 
 def acquire_bundle_fence(

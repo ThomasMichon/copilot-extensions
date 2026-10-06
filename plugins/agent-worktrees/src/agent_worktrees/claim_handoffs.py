@@ -17,13 +17,13 @@ from pathlib import Path
 
 import yaml
 
-from . import claim_history, tracking
-from . import config as cfg
+from . import claim_history, config as cfg, tracking
 from .claim_handoff_accept_support import (
     acquire_bundle_fence,
     load_accept_bundle,
     release_bundle_fence,
     remote_accept_source,
+    same_machine as _same_machine,
 )
 from .lease_config import load_lease_settings
 from .lease_store import GitLeaseStore, LeaseLost
@@ -718,7 +718,7 @@ def accept(
                 error_type=ClaimHandoffError)
         source_ref = _qualified_ref(bundle.source, "bundle source")
         consumer_ref = _qualified_ref(bundle.consumer, "bundle consumer")
-        if source_ref.machine == consumer_ref.machine:
+        if _same_machine(source_ref.machine, consumer_ref.machine):
             if bundle.state != "accepted":
                 bundle = accept_source(bundle_id, actor=actor)
             return _finish_accept_consumer_side(bundle, machine=machine)
@@ -736,7 +736,7 @@ def accept(
                     error_type=ClaimHandoffError)
             source_ref = _qualified_ref(bundle.source, "bundle source")
             if bundle.state != "accepted":
-                if source_ref.machine == machine:
+                if _same_machine(source_ref.machine, machine):
                     bundle = accept_source(bundle_id, actor=actor)
                 else:
                     bundle = remote_accept_source(

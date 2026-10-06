@@ -60,6 +60,11 @@ class CodeSpaceTransport:
         self._connected = False
         self._home_dir: str | None = None
 
+    @property
+    def codespace_name(self) -> str:
+        """The CodeSpace this transport drives."""
+        return self._name
+
     async def _ensure(self) -> None:
         if not self._connected:
             await self._manager.ensure_connected(self._name, self._source, [])
@@ -70,6 +75,20 @@ class CodeSpaceTransport:
     ) -> tuple[int, str, str]:
         await self._ensure()
         res = await self._manager.exec_command(self._name, command, timeout=timeout)
+        return (res.exit_code, res.stdout, res.stderr)
+
+    async def run_script(
+        self, script: str, *, timeout: float = 60.0,
+    ) -> tuple[int, str, str]:
+        """Run a bash script fed over stdin (``bash -s``), not argv.
+
+        For payloads too large for one SSH argv element: the provision command
+        can exceed the Windows ``CreateProcess`` command-line limit.
+        """
+        await self._ensure()
+        res = await self._manager.exec_command(
+            self._name, "bash -s", timeout=timeout, input_bytes=script.encode("utf-8"),
+        )
         return (res.exit_code, res.stdout, res.stderr)
 
     async def path_exists(self, remote_path: str) -> bool:
