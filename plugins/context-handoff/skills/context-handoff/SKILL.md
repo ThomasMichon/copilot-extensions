@@ -288,11 +288,14 @@ saved silently strands that information outside it:
    shell this session itself started and still owns: an async shell can be
    stopped directly (`stop_powershell` for a PowerShell-backed shell,
    `stop_bash` for a bash-backed one -- use whichever matches how it was
-   started); a background agent generally has no cancel primitive, so wait
-   for it to finish (or send it a closing message) instead of assuming a
-   stop call exists for it. Do not leave either running on the assumption
-   "the successor will notice" -- it inherits the worktree, not your task
-   list.
+   started); a background agent generally has no cancel primitive, so
+   **wait for it to actually finish** -- observe its completion via
+   `read_agent`, do not assume a sent closing message is equivalent. A
+   closing message can ask it to wrap up, but only an observed terminal
+   status means it is actually done; triggering while it is still running
+   is exactly the race this section exists to prevent. Do not leave either
+   running on the assumption "the successor will notice" -- it inherits
+   the worktree, not your task list.
 3. **Clear schedules you own, always.** Stop (`manage_schedule` `action:
    "stop"`) every schedule this session created -- with no exception for one
    the brief plans to ask the successor to re-arm. A stopped schedule can
