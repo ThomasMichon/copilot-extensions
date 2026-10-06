@@ -111,6 +111,8 @@ def mcp_server_tool_entries(frontmatter: str) -> list[tuple[str, str]]:
         stripped = line.strip()
 
         if pending_indent is not None:
+            if stripped.startswith("#") and indent > pending_indent:
+                continue  # a comment inside the pending sequence block
             seq_match = re.match(r"^-\s*(.+)$", stripped)
             if seq_match and indent > pending_indent:
                 pending_items.append(seq_match.group(1).strip())
@@ -423,11 +425,12 @@ def scan_agents(
                 token.lower()
                 for token in re.findall(r"[A-Za-z*][A-Za-z0-9_.*:/-]*", without_comments)
             }
-            if tokens and "*" not in tokens:
+            if "*" not in tokens:
+                rendered = ", ".join(sorted(tokens)) if tokens else "(none)"
                 add(
                     "mcp-server-tools-allowlist",
                     f"mcp-servers.{server_name}.tools is a hand-enumerated "
-                    f"list ({', '.join(sorted(tokens))}) instead of [\"*\"] "
+                    f"list ({rendered}) instead of [\"*\"] "
                     "-- the upstream server's own tool catalog can add, "
                     "rename, or retire tools independent of this repo's "
                     "release cycle, and a stale/misspelled entry can make "

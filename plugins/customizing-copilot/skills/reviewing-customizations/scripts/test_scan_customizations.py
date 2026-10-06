@@ -1668,6 +1668,68 @@ def test_mcp_server_block_sequence_tool_list_is_flagged(tmp_path: Path):
 
 
 @pytest.mark.guard
+def test_mcp_server_block_sequence_with_leading_comment_is_flagged(tmp_path: Path):
+    # A comment line before (or between) the sequence items must not cause
+    # the parser to flush the pending list early and lose the items that
+    # follow it.
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    tools:\n"
+        "      # a comment before the first item\n"
+        "      - example_read\n"
+        "      - example_write\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    findings = [f for f in report.findings if f.check == "mcp-server-tools-allowlist"]
+    assert len(findings) == 1
+    assert "example_read" in findings[0].message
+    assert "example_write" in findings[0].message
+
+
+@pytest.mark.guard
+def test_mcp_server_empty_tool_list_is_flagged(tmp_path: Path):
+    # An explicit empty allow-list grants zero tools -- strictly narrower
+    # than ["*"], so it must be flagged too, not treated as "nothing to see."
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    tools: []\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    findings = [f for f in report.findings if f.check == "mcp-server-tools-allowlist"]
+    assert len(findings) == 1
+
+
+@pytest.mark.guard
 def test_mcp_server_nested_env_key_is_not_mistaken_for_tools(tmp_path: Path):
     # A same-named key nested one level deeper than the server's own direct
     # fields (e.g. inside an `env:` mapping) must never be mistaken for the
