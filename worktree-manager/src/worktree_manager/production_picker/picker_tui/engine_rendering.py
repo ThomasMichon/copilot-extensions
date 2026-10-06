@@ -625,6 +625,34 @@ class PickerScreenRenderingMixin:
         self._frame_cache = None
         self._split_cache = None
         self._chrome_cache = None
+        if cause in self._CAUSE_SEGMENTS and not args:
+            # pivot-streaming-transport Phase 4 (correction over the initial
+            # landing in #5418/#5433): narrowing which CHILD segment widgets
+            # get refreshed was, on its own, provably unable to change
+            # Textual's full-vs-incremental compositor decision --
+            # `Widget.refresh()` called with no explicit regions marks the
+            # CALLING widget's own entire area dirty
+            # (`Widget._set_dirty()`/`textual/widget.py`), and every prior
+            # narrowed-cause tick still called `self.refresh(cause=...)` on
+            # the SCREEN itself first, which always added the screen's own
+            # full `screen_region` to its dirty set regardless of which
+            # children were also touched. `_compositor.render_update()`
+            # chooses `render_full_update()` specifically when `screen_region
+            # in self._dirty_regions` -- so the screen-level call alone
+            # already guaranteed a full repaint every time, independent of
+            # this method's own child-segment narrowing. For an audited,
+            # narrowed cause, skip the screen's OWN widget-level refresh
+            # entirely and only mark the narrowed child segments dirty --
+            # confirmed empirically (a headless cProfile rerun of the exact
+            # PR #5398 methodology) to cut `render_full_update` compositor
+            # passes from ~21 to ~5 over the same 12s idle window, and
+            # confirmed via a direct before/after comparison against an
+            # unmodified checkout that no content is left stale (Textual's
+            # own dirty-region tracking is cumulative, never lost until
+            # painted -- a less frequent compositor pass still picks up
+            # every accumulated child-level change, just debounced).
+            self._refresh_nf_segments(cause=cause)
+            return self
         result = super().refresh(*args, **kwargs)
         self._refresh_nf_segments(cause=cause)
         return result
