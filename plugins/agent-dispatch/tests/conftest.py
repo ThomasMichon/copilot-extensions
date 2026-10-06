@@ -37,6 +37,27 @@ def _isolate_discovery(monkeypatch, tmp_path):
     itself; this fixture runs first, so the test's ``setenv`` wins.
     """
     monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(tmp_path / "run"))
+    # Coordinator self-update is now default-ON in production (mirrors
+    # self-retire/the supervisor daemon's own already-default-on loop), but
+    # no coordinator test here ever anticipated an extra always-on background
+    # loop touching the `current-version` marker and potentially firing a
+    # self-triggered `deploy` subprocess during its own lifespan -- none of
+    # them set this var, since it never needed setting before. Disable it as
+    # part of this suite's own hermetic baseline; a test that specifically
+    # exercises the live self-update loop sets it explicitly in its own body,
+    # same as `AGENT_DISPATCH_SELF_RETIRE`/`AGENT_DISPATCH_ABANDONED_PASSIVE_REAP`
+    # already do above this fixture's defaults (last `setenv` wins).
+    monkeypatch.setenv("AGENT_DISPATCH_SELF_UPDATE", "0")
+    # Isolate every test from this (or any) machine's real installed
+    # service.env (read by `apply_service_env_overlay`, called from both
+    # `__main__.py`'s first-use bootstrap and `coordinator_cli.py`'s own
+    # cutover). A real machine's installed root can carry a genuine pinned
+    # `AGENT_DISPATCH_HOST`/token -- discovered via a cutover test silently
+    # getting this machine's actual production `AGENT_DISPATCH_HOST=
+    # 127.0.0.1` pin instead of the test's own monkeypatched host, clobbered
+    # by the overlay immediately before `_config.load_config()` ran. Point it
+    # at an empty tmp dir so the overlay always finds no file and no-ops.
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path / "install"))
     for var in (
         "AGENT_DISPATCH_ENDPOINT",
         "AGENT_DISPATCH_WINDOWS_RUN_DIR",

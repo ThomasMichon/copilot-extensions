@@ -281,6 +281,38 @@ def test_run_foreground_executes_then_nudges(capsys, monkeypatch):
     assert out["claim_released"] is None  # no agent-worktrees CLI -- degraded, not fatal
 
 
+def test_run_foreground_wait_runs_windowless(capsys, monkeypatch):
+    """The operator-supplied wait command (e.g. `agent-worktrees pr-watch
+    wait ...`) must never pop a visible console -- whether run directly in
+    the foreground or re-exec'd inside a detached `run --detach` waiter
+    (which calls this same non-detached path as its `waiter_child`). Without
+    ``creationflags=CREATE_NO_WINDOW``, a console-subsystem/batch-wrapped
+    command spawned from a window-less parent (the detached waiter) gets a
+    brand-new visible console window -- the accumulating headed cmd.exe
+    windows this regression guards against."""
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append({"cmd": cmd, "kwargs": kwargs})
+        return _FakeProc(0)
+
+    monkeypatch.setattr("agent_dispatch.__main__.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "agent_dispatch.execution_cli.no_window_kwargs",
+        lambda: {"creationflags": 0x08000000},
+    )
+    # Isolate the wait command's own call from any follow-on agent-bridge nudge
+    # subprocess call (a separate, already-covered concern).
+    monkeypatch.setattr("agent_dispatch.bridge.send_nudge", lambda wt, msg, **k: True)
+    rc = _cmd_run(
+        _args(["run", "--resume", "m/wt-1", "--", "agent-worktrees", "pr-watch", "42"])
+    )
+    assert rc == 0
+    assert calls[0]["cmd"] == ["agent-worktrees", "pr-watch", "42"]
+    assert calls[0]["kwargs"].get("creationflags") == 0x08000000
+
+
+
 def test_run_requires_a_command(capsys):
     rc = _cmd_run(_args(["run", "--resume", "m/wt-1"]))
     assert rc == 2
@@ -631,7 +663,7 @@ def test_waiter_child_reattempts_timeout_and_queues_finish(capsys, monkeypatch, 
 
     calls = []
 
-    def fake_run(argv, check=False):
+    def fake_run(argv, check=False, **_kwargs):
         calls.append(argv)
         class _Proc:
             returncode = 124 if len(calls) < 3 else 0
