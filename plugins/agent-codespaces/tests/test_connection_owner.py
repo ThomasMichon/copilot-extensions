@@ -519,10 +519,12 @@ def test_ensure_owner_running_is_noop_when_already_live(store, monkeypatch):
 def test_ensure_owner_running_spawns_and_waits_for_liveness(store, monkeypatch):
     calls = {"popen": 0}
     live_after_spawn = {"value": False}
+    seen_kwargs: dict = {}
 
     def fake_popen(argv, **kwargs):
         calls["popen"] += 1
         live_after_spawn["value"] = True
+        seen_kwargs.update(kwargs)
 
         class _Proc:
             pass
@@ -537,6 +539,9 @@ def test_ensure_owner_running_spawns_and_waits_for_liveness(store, monkeypatch):
     monkeypatch.setattr(owner.time, "sleep", lambda _s: None)
     assert owner.ensure_owner_running(types.SimpleNamespace(), spawn_timeout=1.0) is True
     assert calls["popen"] == 1
+    # Never the caller's ambient cwd -- this is a permanent-ish background
+    # daemon rooted at HOME instead.
+    assert seen_kwargs.get("cwd") == os.path.expanduser("~")
 
 
 def test_ensure_owner_running_returns_false_on_spawn_failure(store, monkeypatch):

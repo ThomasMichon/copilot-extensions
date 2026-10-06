@@ -134,12 +134,21 @@ def spawn_keeper(
     popen_kwargs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Spawn a detached keeper and return the state with its pid."""
+    # Never inherit the caller's cwd: a keeper is a long-running, detached
+    # daemon that may outlive the repo/worktree checkout its caller happened
+    # to be running from (service-lifecycle-supervision's "nothing pins the
+    # plugin payload" rule, generalized to every deletable checkout). It
+    # needs no files relative to any particular directory -- root it at
+    # HOME so a later `git worktree remove`/cleanup of the caller's checkout
+    # is never blocked by this process still holding that directory as its
+    # cwd.
     proc = popen(
         argv,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         env=env,
+        cwd=os.path.expanduser("~"),
         **(popen_kwargs or {}),
     )
     pid = int(proc.pid)

@@ -191,6 +191,11 @@ def _spawn_self_deploy(python_path: Any) -> None:
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
+        # Never the caller's ambient cwd -- fire-and-forget + detached means
+        # this process's actual lifetime is not bounded to this call, so it
+        # must not pin whatever repo/worktree checkout happened to be
+        # current when the self-update check fired.
+        "cwd": os.path.expanduser("~"),
     }
     kwargs.update(detached_kwargs(breakaway=True))
     subprocess.Popen(cmd, **kwargs)  # noqa: S603

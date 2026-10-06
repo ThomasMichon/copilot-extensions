@@ -357,6 +357,9 @@ def test_docker_broker_starts_in_hidden_console_daemon(monkeypatch, tmp_path):
     assert seen["args"][0] == docker_proxy.sys.executable
     assert seen["kwargs"]["startupinfo"] is launch_marker
     assert launch_options["breakaway"] is True
+    # Never the caller's ambient cwd -- this is a long-lived detached
+    # proxy daemon rooted at HOME instead.
+    assert seen["kwargs"]["cwd"] == docker_proxy.os.path.expanduser("~")
 
 
 @pytest.mark.parametrize("container,user", [

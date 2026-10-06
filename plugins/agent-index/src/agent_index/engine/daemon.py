@@ -126,12 +126,20 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _spawn(cmd: list[str], *, python: str) -> subprocess.Popen:
+def _spawn(cmd: list[str], *, python: str, home: Path) -> subprocess.Popen:
     kwargs: dict[str, object] = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
         "env": os.environ.copy(),
+        # Never the caller's ambient cwd: this is a long-lived, detached
+        # daemon that may outlive whatever repo/worktree checkout the
+        # caller happened to be running `agent-index engine start` from
+        # (service-lifecycle-supervision's "nothing pins the plugin
+        # payload" rule, generalized to every deletable checkout). Its own
+        # durable engine home is already a stable, versioned-runtime-
+        # independent location -- root it there.
+        "cwd": str(home),
     }
     kwargs["env"].update(windowless_python_env(python))
     kwargs.update(windowless_daemon_kwargs())
@@ -191,7 +199,7 @@ def start(home: Path | None = None, *, wait_timeout: float | None = None) -> str
             f"first (installer, or 'agent-index engine install')"
         )
 
-    proc = _spawn(engine_command(home), python=str(py))
+    proc = _spawn(engine_command(home), python=str(py), home=home)
     _write_pid(proc.pid, home)
 
     deadline = time.monotonic() + wait_timeout
