@@ -2198,7 +2198,17 @@ function Invoke-UvVenvWithRetry {
 }
 
 function Deploy-Venv {
-    <# Create venv and install pyyaml via uv. #>
+    <# Create venv and install pyyaml via uv.
+
+       $script:DeployVenvAlreadyComplete is reset here and set by the
+       lease-protected re-check below: a concurrent process may have
+       already finished building AND activating this exact slot while we
+       waited for the lease (#5439) -- the pre-lease
+       Test-SlotAlreadyComplete check every caller already does is a
+       check-then-act gap on its own. Callers must check this flag after
+       a $true return to tell "built fresh" apart from "already complete,
+       nothing to do" (and so skip Deploy-Package in the latter case). #>
+    $script:DeployVenvAlreadyComplete = $false
 
     # Acquire the exclusive build lease FIRST, before any slot inspection or
     # mutation below -- a competing installer could otherwise observe
@@ -2220,6 +2230,14 @@ function Deploy-Venv {
             Write-ServiceErr "Another process is already building this runtime slot ($SrcVersion) -- refusing to race it. Re-run update once the other build finishes."
         }
         return $false
+    }
+
+    # Re-check completeness NOW, under the just-acquired lease: see the
+    # $script:DeployVenvAlreadyComplete doc comment above for why the
+    # pre-lease check alone isn't enough.
+    if (Test-SlotAlreadyComplete) {
+        $script:DeployVenvAlreadyComplete = $true
+        return $true
     }
 
     # Validate the slot's liveness/cleanliness immediately after acquiring
@@ -2328,6 +2346,26 @@ prompt = .venv
 
     Write-ServiceOk "Venv ready"
     return $true
+}
+
+function Deploy-VenvAndPackage {
+    <# Shared by every call site that builds+installs the runtime. The
+       completeness check happens EXACTLY ONCE, inside Deploy-Venv itself,
+       under the lease it just acquired (#5439 review): a concurrent
+       process could finish building AND activating this exact slot in the
+       window between an outer, pre-lease check and actually acquiring the
+       lease, so a check made before the lease can never be authoritative
+       on its own. There is deliberately no second, OUTER pre-check as a
+       "fast path" either: Test-SlotAlreadyComplete hashes the full payload
+       tree, which is not cheap enough to pay twice on every call -- paying
+       it exactly once, protected, is simultaneously correct and no slower
+       than before. #>
+    if (-not (Deploy-Venv)) { exit 1 }
+    if ($script:DeployVenvAlreadyComplete) {
+        Write-ServiceSkipped "Slot $SrcVersion already complete and unchanged -- skipping venv/package (re)install"
+        return
+    }
+    if (-not (Deploy-Package)) { exit 1 }
 }
 
 function Deploy-Wrappers {
@@ -3594,12 +3632,7 @@ switch ($Action) {
         Ensure-UvIndex
         foreach ($dir in @($InstallDir, $BinDir, $LocalBin)) { Ensure-InstallDir $dir }
         if (-not (Deploy-RuntimeResolvers)) { exit 1 }
-        if (Test-SlotAlreadyComplete) {
-            Write-ServiceSkipped "Slot $SrcVersion already complete and unchanged -- skipping venv/package (re)install"
-        } else {
-            if (-not (Deploy-Venv)) { exit 1 }
-            if (-not (Deploy-Package)) { exit 1 }
-        }
+        Deploy-VenvAndPackage
         if (-not (Invoke-VersionedActivate)) { exit 1 }
         Deploy-GlobalBinstub
         Write-V3Manifest
@@ -3647,12 +3680,7 @@ switch ($Action) {
         }
 
         # -- Shared runtime (venv first: package install targets the venv) --
-        if (Test-SlotAlreadyComplete) {
-            Write-ServiceSkipped "Slot $SrcVersion already complete and unchanged -- skipping venv/package (re)install"
-        } else {
-            if (-not (Deploy-Venv)) { exit 1 }
-            if (-not (Deploy-Package)) { exit 1 }
-        }
+        Deploy-VenvAndPackage
         if (-not (Deploy-Wrappers)) { exit 1 }
         if ($ContextualInstall -and -not (Test-ContextGovernanceUnchanged)) {
             Write-ServiceErr 'Installation governance changed before runtime cutover'
@@ -3993,12 +4021,7 @@ switch ($Action) {
             foreach ($dir in @($InstallDir, $BinDir)) {
                 Ensure-InstallDir $dir
             }
-            if (Test-SlotAlreadyComplete) {
-                Write-ServiceSkipped "Slot $SrcVersion already complete and unchanged -- skipping venv/package (re)install"
-            } else {
-                if (-not (Deploy-Venv)) { exit 1 }
-                if (-not (Deploy-Package)) { exit 1 }
-            }
+            Deploy-VenvAndPackage
             if (-not (Deploy-Wrappers)) { exit 1 }
             if (-not (Test-ContextGovernanceUnchanged)) {
                 Write-ServiceErr 'Installation governance changed before runtime cutover'
@@ -4016,12 +4039,7 @@ switch ($Action) {
         }
 
         # -- Shared runtime (venv first: package install targets the venv) --
-        if (Test-SlotAlreadyComplete) {
-            Write-ServiceSkipped "Slot $SrcVersion already complete and unchanged -- skipping venv/package (re)install"
-        } else {
-            if (-not (Deploy-Venv)) { exit 1 }
-            if (-not (Deploy-Package)) { exit 1 }
-        }
+        Deploy-VenvAndPackage
         if (-not (Deploy-Wrappers)) { exit 1 }
         if (-not (Invoke-VersionedActivate)) { exit 1 }
         Deploy-CopilotPlugin

@@ -927,6 +927,7 @@ _acquire_versioned_slot_lease_mkdir_fallback() {
     # or false acquisition.
     local lock_file="$1"
     local lock_dir="${lock_file}.d" attempt holder_pid
+    local reclaim_dir="${lock_file}.reclaiming"
     for attempt in 1 2 3 4 5 6 7 8 9 10; do
         if mkdir "$lock_dir" 2>/dev/null; then
             printf '%s' "$$" > "$lock_dir/pid" 2>/dev/null || true
@@ -943,13 +944,34 @@ _acquire_versioned_slot_lease_mkdir_fallback() {
         fi
         holder_pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
         if [[ -n "$holder_pid" ]] && ! kill -0 "$holder_pid" 2>/dev/null; then
-            # Holder's process is dead -- reclaim. `rmdir` alone would
-            # silently no-op here: the directory is non-empty (it holds
-            # the "pid" marker file), so only a recursive removal actually
-            # clears it. If a concurrent reclaimer wins the next mkdir
-            # instead, ours simply fails again and we retry on the next
-            # loop iteration (bounded, not unbounded).
-            rm -rf "$lock_dir" 2>/dev/null || true
+            # Holder's process is dead -- reclaim. This is itself a
+            # second check-then-act gap: two contenders can both observe
+            # the SAME dead pid and both decide to reclaim, and a bare
+            # `rm -rf` + retry-`mkdir` sequence lets one of them wipe out
+            # the OTHER's freshly-created, perfectly valid lock (#5439
+            # review) -- both then believe they hold the lease.
+            #
+            # `mkdir` on a SEPARATE, short-lived sentinel directory is the
+            # atomic gate for "permission to reclaim": only ONE contender
+            # can ever win it at a time, so only one of them ever touches
+            # `lock_dir`. Re-reading the holder pid again AFTER winning the
+            # sentinel (not just trusting the read from before the
+            # sentinel) closes the remaining gap where the original holder
+            # released normally, or a third contender already reclaimed
+            # and republished, between our first read and winning the
+            # sentinel. The sentinel is held only for this brief
+            # read+remove, never left open-ended, so a crash mid-reclaim
+            # leaves at worst a permanently-stuck sentinel (reclaim simply
+            # never succeeds again for this slot) -- a safe failure mode,
+            # never the dangerous one (double acquisition).
+            if mkdir "$reclaim_dir" 2>/dev/null; then
+                local recheck_pid
+                recheck_pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+                if [[ -n "$recheck_pid" && "$recheck_pid" == "$holder_pid" ]] && ! kill -0 "$holder_pid" 2>/dev/null; then
+                    rm -rf "$lock_dir" 2>/dev/null || true
+                fi
+                rmdir "$reclaim_dir" 2>/dev/null || true
+            fi
             continue
         fi
         sleep 1
@@ -1467,6 +1489,18 @@ deploy_venv() {
         fi
         return 1
     fi
+    # Re-check completeness NOW, under the just-acquired lease: a concurrent
+    # process may have already finished building AND activating this exact
+    # slot while we were waiting for the lease (#5439) -- the pre-lease
+    # check every caller already does is a check-then-act gap on its own.
+    # Without this re-check we'd still act on our stale "incomplete, must
+    # build" observation and overwrite a slot that may already be the
+    # published, possibly-running one. Returns 2 (distinct from the 0
+    # success / 1 failure a caller already branches on) so a caller can
+    # skip `deploy_package` too -- there is genuinely nothing left to do.
+    if _test_slot_already_complete; then
+        return 2
+    fi
     local slot_clean=0
     _versioned_slot_clean && slot_clean=1
     if [[ "$slot_clean" -ne 1 ]]; then
@@ -1495,6 +1529,30 @@ deploy_venv() {
         fi
     fi
     ok "Venv created at $VENV_DIR"
+}
+
+_deploy_venv_and_package() {
+    # Shared by every call site that builds+installs the runtime. The
+    # completeness check happens EXACTLY ONCE, inside `deploy_venv` itself,
+    # under the lease it just acquired (#5439 review): a concurrent process
+    # could finish building AND activating this exact slot in the window
+    # between an outer, pre-lease check and actually acquiring the lease,
+    # so a check made before the lease can never be authoritative on its
+    # own -- it must be re-verified (or, as here, verified for the only
+    # time) under the lease's protection. There is deliberately no second,
+    # OUTER pre-check as a "fast path": `_test_slot_already_complete`
+    # hashes the full payload tree, which is NOT cheap enough to pay
+    # twice on every call (confirmed directly: real-world runs under
+    # ~15s for this payload) -- paying it exactly once, protected, is
+    # simultaneously correct and no slower than before.
+    deploy_venv
+    local rc=$?
+    if [[ "$rc" -eq 2 ]]; then
+        skipped "Slot $SRC_VERSION already complete and unchanged -- skipping venv/package (re)install"
+        return 0
+    fi
+    [[ "$rc" -eq 0 ]] || exit 1
+    deploy_package || exit 1
 }
 
 # --- self-provisioning helpers (runtime-self-provisioning pattern) -----------
@@ -2432,12 +2490,7 @@ case "$ACTION" in
         _ensure_uv_index
         mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$LOCAL_BIN"
         deploy_runtime_resolvers || exit 1
-        if _test_slot_already_complete; then
-            skipped "Slot $SRC_VERSION already complete and unchanged -- skipping venv/package (re)install"
-        else
-            deploy_venv || exit 1
-            deploy_package || exit 1
-        fi
+        _deploy_venv_and_package
         _versioned_activate || exit 1
         deploy_tool_binstub
         write_deploy_manifest
@@ -2486,12 +2539,7 @@ case "$ACTION" in
         fi
 
         # -- Shared runtime (venv first: package install targets the venv) --
-        if _test_slot_already_complete; then
-            skipped "Slot $SRC_VERSION already complete and unchanged -- skipping venv/package (re)install"
-        else
-            deploy_venv || exit 1
-            deploy_package || exit 1
-        fi
+        _deploy_venv_and_package
         deploy_wrappers || exit 1
         if $CONTEXTUAL_INSTALL && ! context_governance_unchanged; then
             err "Installation governance changed before runtime cutover"
@@ -2753,12 +2801,7 @@ case "$ACTION" in
             _ensure_uv || exit 1
             _ensure_uv_index
             mkdir -p "$INSTALL_DIR" "$BIN_DIR"
-            if _test_slot_already_complete; then
-                skipped "Slot $SRC_VERSION already complete and unchanged -- skipping venv/package (re)install"
-            else
-                deploy_venv || exit 1
-                deploy_package || exit 1
-            fi
+            _deploy_venv_and_package
             deploy_wrappers || exit 1
             if ! context_governance_unchanged; then
                 err "Installation governance changed before runtime cutover"
@@ -2777,12 +2820,7 @@ case "$ACTION" in
         fi
 
         # -- Shared runtime (venv first: package install targets the venv) --
-        if _test_slot_already_complete; then
-            skipped "Slot $SRC_VERSION already complete and unchanged -- skipping venv/package (re)install"
-        else
-            deploy_venv || exit 1
-            deploy_package || exit 1
-        fi
+        _deploy_venv_and_package
         deploy_wrappers || exit 1
         _versioned_activate || exit 1
         remove_legacy_scripts
