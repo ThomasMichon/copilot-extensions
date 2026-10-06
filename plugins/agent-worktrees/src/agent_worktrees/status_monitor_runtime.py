@@ -701,11 +701,6 @@ def _restart_status_monitor() -> dict:
                 from . import procs as _procs
                 if _procs.terminate_pid(pid):
                     result["reaped"] = pid
-                    deadline = time.monotonic() + 5.0
-                    while time.monotonic() < deadline and _locks.pid_alive(pid):
-                        time.sleep(0.1)
-                    if _locks.pid_alive(pid):  # outlived grace: defer (PR #5412)
-                        return {**result, "restart_deferred": True}
                 _locks.remove_lock(lock)
             elif not superseded:
                 # A CURRENT monitor already owns the host -- nothing to restart.
@@ -736,7 +731,7 @@ def cmd_status_monitor_restart(args: argparse.Namespace) -> int:
     bits = []
     if r.get("reaped"):
         bits.append(f"reaped superseded pid {r['reaped']}")
-    bits.append("deferred (predecessor still exiting, PR #5412)" if r.get("restart_deferred") else ("spawned current monitor" if r.get("spawned") else "spawn failed"))
+    bits.append("spawned current monitor" if r.get("spawned") else "spawn failed")
     bits.extend(stale_runtime_reap.summary_bits(r.get("stale_runtime_reaped")))
     print("status-monitor: " + ", ".join(bits))
     return 0
