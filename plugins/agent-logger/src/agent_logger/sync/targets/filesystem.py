@@ -17,7 +17,6 @@ import os
 import shutil
 import stat
 import time
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -37,7 +36,9 @@ from agent_logger.sync.provenance import (
     existing_rescue_snapshot_path,
     is_link_or_reparse,
     open_regular_no_follow,
+    rescue_session_key,
     rescue_snapshot_path,
+    short_unique_id,
 )
 from agent_logger.sync.provenance import (
     windows_extended_path as _windows_extended_path,
@@ -278,7 +279,7 @@ def _fsync_tree(root: Path) -> None:
 
 def _copy_replace(src: Path, dst: Path) -> None:
     """Copy one regular source without following links."""
-    temporary = dst.with_name(f".{dst.name}.{uuid.uuid4().hex}.tmp")
+    temporary = dst.with_name(f".{dst.name}.{short_unique_id()}.tmp")
     temporary_io = _windows_extended_path(temporary)
     try:
         try:
@@ -796,7 +797,7 @@ def _write_transaction_manifest(
     if len(encoded) > _MAX_TRANSACTION_MANIFEST_BYTES:
         raise OSError("replacement transaction manifest is too large")
     manifest = transaction / "manifest.json"
-    temporary = transaction / f".manifest.{uuid.uuid4().hex}.tmp"
+    temporary = transaction / f".manifest.{short_unique_id()}.tmp"
     try:
         _write_bytes_fsync(temporary, encoded)
         _durable_replace(temporary, manifest)
@@ -903,7 +904,7 @@ def _write_generation_epoch(dest: Path, value: str) -> None:
     ):
         raise OSError("invalid replacement generation value")
     path = dest / ".session-sync-generation"
-    temporary = dest / f".session-sync-generation.{uuid.uuid4().hex}.tmp"
+    temporary = dest / f".session-sync-generation.{short_unique_id()}.tmp"
     _write_bytes_fsync(temporary, value.encode("ascii"))
     try:
         _unlink_replace_target(path)
@@ -1017,7 +1018,7 @@ def _replace_selected_sessions(
     )
     _recover_active_transactions(replacement_root, dest)
     stale_cleanup_errors = _sweep_completed_transactions(replacement_root)
-    transaction = replacement_root / f"{uuid.uuid4().hex}.active"
+    transaction = replacement_root / f"{short_unique_id()}.active"
     staged_root = _ensure_relative_directory(
         replacement_root,
         Path(transaction.name) / "new",
@@ -1807,9 +1808,7 @@ class FilesystemTarget(Target):
                 if high_water is not None:
                     (high_water / f"{d.name}.json").unlink(missing_ok=True)
                 if snapshots is not None:
-                    snapshot_session = (
-                        snapshots / hashlib.sha256(d.name.encode()).hexdigest()
-                    )
+                    snapshot_session = snapshots / rescue_session_key(d.name)
                     _remove_path_checked(snapshot_session)
                 removed += 1
         return removed
