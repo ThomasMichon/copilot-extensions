@@ -1,0 +1,9 @@
+{
+  "comment": "spawning-headless-processes: document wsl.exe as a console-subsystem spawn target, add a verified PowerShell CREATE_NO_WINDOW + output-capture pattern",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    }
+  ]
+}
