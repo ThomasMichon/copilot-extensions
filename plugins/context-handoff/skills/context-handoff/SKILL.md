@@ -313,10 +313,13 @@ saved silently strands that information outside it:
    something running now.
 
 This still is not a reason to delay a context-pressure-driven handoff that
-must trigger immediately: if stopping something cleanly isn't safe to do in
-the time available, note in the brief that it was left running and why,
-exactly as the sync step above does for an unresolved conflict -- never
-silently omit it.
+must trigger immediately: if waiting out a background agent or stopping an
+async shell cleanly isn't safe to do in the time available, note in the
+brief that it was left running and why, exactly as the sync step above does
+for an unresolved conflict -- never silently omit it. This escape hatch
+covers agents/shells only, never schedules: stopping a `manage_schedule`
+entry is a single fast call with no cleanup risk, so step 3's "always" has
+no time-pressure exception.
 
 ## Efforts + handoffs
 
