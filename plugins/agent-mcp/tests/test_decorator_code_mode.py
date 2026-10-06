@@ -149,3 +149,53 @@ async def test_small_catalog_run_code_embeds_interface():
     resp = await run(dec, up, list_req())
     run_tool = next(t for t in resp["result"]["tools"] if t["name"] == "run_code")
     assert "interface Tools {" in run_tool["description"]
+
+
+async def test_run_node_passes_no_window_creationflags(monkeypatch):
+    # The Node-harness spawn must carry the standard Windows console-
+    # suppression flag (copilot-extensions#5425), regardless of whether a
+    # real `node` runtime is available on this runner -- stub `shutil.which`
+    # so `_handle_run`'s own runtime-presence check doesn't short-circuit
+    # before `_run_node` ever spawns anything.
+    from agent_mcp._exec import no_window_creationflags
+
+    monkeypatch.setattr(
+        "agent_mcp.decorators.code_mode.shutil.which",
+        lambda name: "/fake/node",
+    )
+
+    captured: dict = {}
+
+    class _FakeStdin:
+        def write(self, data):
+            pass
+
+        async def drain(self):
+            pass
+
+        def close(self):
+            pass
+
+    class _FakeProc:
+        def __init__(self):
+            self.stdin = _FakeStdin()
+            self.stdout = None  # short-circuits _run_node's read loop
+            self.returncode = 0
+
+        async def wait(self):
+            return 0
+
+    async def fake_exec(*argv, **kwargs):
+        captured["kwargs"] = kwargs
+        return _FakeProc()
+
+    monkeypatch.setattr(
+        "agent_mcp.decorators.code_mode.asyncio.create_subprocess_exec", fake_exec,
+    )
+
+    up = FakeUpstream(list(CATALOG))
+    dec = _code()
+    await run(dec, up, list_req())  # capture catalog
+    resp = await run(dec, up, call_req("run_code", {"code": "1"}))
+    assert resp["result"]["isError"] is True  # no "done" message -> error outcome
+    assert captured["kwargs"]["creationflags"] == no_window_creationflags()

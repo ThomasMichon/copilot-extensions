@@ -11,7 +11,9 @@ content block):
 * ``pick: [paths]``   -- keep only these dotted paths (nested shape preserved).
 * ``drop: [paths]``   -- remove these dotted paths.
 * ``command: [...]``  -- pipe the result JSON to a filter's stdin; its stdout
-  (parsed as JSON) replaces the result. The jq-style escape hatch.
+  (parsed as JSON) replaces the result. The jq-style escape hatch. Supports the
+  same ``${python}`` cross-platform-interpreter token as ``server.command`` /
+  ``auth.command`` (see :func:`agent_mcp._exec.expand_python_token`).
 
 Ops apply in order extract -> pick -> drop (or ``command`` alone). Multiple rules
 matching the same tool apply in sequence.
@@ -26,6 +28,9 @@ import logging
 import subprocess
 from typing import Any
 
+from agent_procutil import no_window_kwargs
+
+from .._exec import expand_python_token
 from ._catalog import tool_call_name
 from ._jsonutil import (
     MISSING,
@@ -45,7 +50,8 @@ class _TransformRule:
 
     def __init__(self, spec: dict) -> None:
         self.tool = str(spec.get("tool", "*"))
-        self.command = [str(c) for c in spec["command"]] if spec.get("command") else None
+        self.command = (expand_python_token([str(c) for c in spec["command"]])
+                        if spec.get("command") else None)
         self.extract = split_path(spec["extract"]) if spec.get("extract") else None
         self.pick = [str(p) for p in (spec.get("pick") or [])]
         self.drop = [split_path(p) for p in (spec.get("drop") or [])]
@@ -129,7 +135,8 @@ class TransformDecorator(Decorator):
         try:
             proc = await asyncio.to_thread(
                 subprocess.run, command, input=json.dumps(doc),
-                capture_output=True, text=True, timeout=self.command_timeout)
+                capture_output=True, text=True, timeout=self.command_timeout,
+                **no_window_kwargs())
         except (OSError, subprocess.SubprocessError) as exc:
             log.error("transform command failed: %s", exc)
             return doc
