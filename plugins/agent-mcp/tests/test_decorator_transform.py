@@ -100,9 +100,14 @@ async def test_command_filter_expands_python_token():
 
 
 async def test_command_filter_passes_no_window_creationflags(monkeypatch):
-    # The transform-command spawn must carry the standard Windows console-
-    # suppression flag (copilot-extensions#5425).
-    from agent_mcp._exec import no_window_creationflags
+    # The transform-command spawn must carry whatever agent_procutil.
+    # no_window_kwargs() returns (copilot-extensions#5425) -- stub it to a
+    # sentinel so this proves the production code actually calls it and
+    # merges its result in, rather than comparing against a value that is
+    # also `0`/absent off Windows and would pass identically even if the
+    # real `**no_window_kwargs()` call were deleted.
+    sentinel = {"creationflags": 0xFEEDFACE}
+    monkeypatch.setattr("agent_mcp.decorators.transform.no_window_kwargs", lambda: sentinel)
 
     captured: dict = {}
     real_run = __import__("subprocess").run
@@ -118,10 +123,7 @@ async def test_command_filter_passes_no_window_creationflags(monkeypatch):
     cmd = [sys.executable, "-c", "print('[1, 2]')"]
     dec = _transform(rules=[{"tool": "g", "command": cmd}])
     await run(dec, up, call_req("g"))
-    # no_window_kwargs() omits "creationflags" entirely off Windows (an empty
-    # {}); no_window_creationflags() always returns an int (0 off Windows).
-    # Compare against the same default so this holds on every platform.
-    assert captured["kwargs"].get("creationflags", 0) == no_window_creationflags()
+    assert captured["kwargs"].get("creationflags") == 0xFEEDFACE
 
 
 async def test_no_rule_match_passes_through():

@@ -215,9 +215,15 @@ async def test_command_summarizer_expands_python_token(tmp_path):
 
 
 async def test_command_summarizer_passes_no_window_creationflags(tmp_path, monkeypatch):
-    # The summary-command spawn must carry the standard Windows console-
-    # suppression flag (copilot-extensions#5425).
-    from agent_mcp._exec import no_window_creationflags
+    # The summary-command spawn must carry whatever agent_procutil.
+    # no_window_kwargs() returns (copilot-extensions#5425) -- stub it to a
+    # sentinel so this proves the production code actually calls it and
+    # merges its result in, rather than comparing against a value
+    # (`no_window_creationflags()`) that is also `0`/absent off Windows and
+    # would pass identically even if the real `**no_window_kwargs()` call
+    # were deleted.
+    sentinel = {"creationflags": 0xFEEDFACE}
+    monkeypatch.setattr("agent_mcp.decorators.storage.no_window_kwargs", lambda: sentinel)
 
     captured: dict = {}
     real_run = __import__("subprocess").run
@@ -234,11 +240,7 @@ async def test_command_summarizer_passes_no_window_creationflags(tmp_path, monke
     dec = _storage(tmp_path, rules=[
         {"tool": "g", "outputs": [{"path": "items", "summary": {"command": cmd}}]}])
     await run(dec, up, call_req("g"))
-    # Production uses no_window_kwargs(), which omits "creationflags" entirely
-    # off Windows (an empty {}); no_window_creationflags() instead always
-    # returns an int (0 off Windows). Compare against the same default so this
-    # assertion holds on every platform, not just Windows.
-    assert captured["kwargs"].get("creationflags", 0) == no_window_creationflags()
+    assert captured["kwargs"].get("creationflags") == 0xFEEDFACE
 
 
 async def test_rule_tool_glob_no_match_falls_back_to_blanket(tmp_path):
