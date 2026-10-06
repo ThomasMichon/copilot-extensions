@@ -101,7 +101,7 @@ def _current_user_sid() -> str | None:
     return sid or None
 
 
-def _pid_owned_by_current_user(pid: int) -> bool:
+def _pid_owned_by_current_user(pid: int, *, current_sid: str | None = "") -> bool:
     """Whether ``pid`` is owned by the OS account running this process.
 
     Required before sending the cutover control token to a recovered port:
@@ -111,6 +111,13 @@ def _pid_owned_by_current_user(pid: int) -> bool:
     bearer token. Only a verified same-owner process is ever probed; a
     candidate whose ownership can't be confirmed (including a failed or
     timed-out probe itself) is reported without a connection attempt.
+
+    ``current_sid`` (Windows only) lets a caller checking many pids in one
+    pass (:func:`daemon_statuses`) resolve the caller's own SID once and
+    reuse it, instead of re-spawning a PowerShell process per candidate.
+    The default sentinel (``""``, never a real SID) means "resolve it fresh
+    for this one call" -- so a direct caller never has to know about this
+    parameter at all.
     """
     if os.name == "nt":
         argv = [
@@ -129,11 +136,15 @@ def _pid_owned_by_current_user(pid: int) -> bool:
         except (subprocess.TimeoutExpired, OSError):
             return False
         owner_sid = (out.stdout or "").strip()
-        current_sid = _current_user_sid()
+        resolved_sid = current_sid if current_sid != "" else _current_user_sid()
         # Both sides are required to be genuinely non-empty: a failed
         # lookup on either side must never compare equal to another failed
         # lookup (two blank strings would otherwise match each other).
-        return bool(owner_sid) and bool(current_sid) and owner_sid.lower() == current_sid.lower()
+        return (
+            bool(owner_sid)
+            and bool(resolved_sid)
+            and owner_sid.lower() == resolved_sid.lower()
+        )
     proc_dir = Path(f"/proc/{pid}")
     if proc_dir.is_dir():
         try:
@@ -156,6 +167,40 @@ def _pid_owned_by_current_user(pid: int) -> bool:
         return False
 
 
+def _process_start_time(pid: int) -> str | None:
+    """``zdd.diagnostics.process_start_time()`` plus a local macOS/BSD
+    fallback for this module's own identity re-check.
+
+    The shared ``zdd`` helper only implements Windows (``GetProcessTimes``)
+    and Linux (``/proc/<pid>/stat``) -- it returns ``None`` on macOS and
+    other ``/proc``-less POSIX systems, which would otherwise make every
+    reachable daemon on those platforms permanently ``"unverified-owner"``
+    (a None/None pair is deliberately never treated as a match; see
+    ``daemon_statuses``'s own post-connection re-check). ``ps -o lstart=``
+    gives a stable, second-resolution start-time string on any BSD-flavored
+    ``ps`` (including macOS) -- not foolproof against a same-second PID
+    reuse, but strictly better than treating every macOS daemon as
+    unverifiable. Extending the shared ``zdd`` library itself with a real
+    macOS implementation is out of scope here (it has several other
+    consumers); this stays a local, narrowly-scoped supplement.
+    """
+    token = process_start_time(pid)
+    if token is not None or os.name == "nt" or Path(f"/proc/{pid}").is_dir():
+        return token
+    try:
+        out = subprocess.run(  # noqa: S603
+            ["ps", "-p", str(pid), "-o", "lstart="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    value = (out.stdout or "").strip()
+    return value or None
+
+
 def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
     """Enumerate every resident mux-daemon matched to ``root``.
 
@@ -176,6 +221,11 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
     active_endpoint = (
         routing.Endpoint.from_dict(active_raw) if isinstance(active_raw, dict) else None
     )
+    # Resolved once per call (Windows only; unused elsewhere) rather than
+    # once per candidate pid -- the caller's own SID never changes within a
+    # single daemon_statuses() pass, so re-spawning a PowerShell process per
+    # pid to re-derive it would be pure waste.
+    current_sid = _current_user_sid() if os.name == "nt" else None
 
     results: list[dict[str, Any]] = []
     for pid in sorted(mux_daemon_cutover._iter_mux_daemon_pids()):
@@ -202,13 +252,13 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
             entry["status"] = "unknown"
             results.append(entry)
             continue
-        if not _pid_owned_by_current_user(pid):
+        if not _pid_owned_by_current_user(pid, current_sid=current_sid):
             entry["status"] = "unverified-owner"
             results.append(entry)
             continue
         # Captured before connecting so the post-connection re-check below
         # can detect a same-pid replacement in the gap.
-        start_time_before = process_start_time(pid)
+        start_time_before = _process_start_time(pid)
         try:
             client = mux_daemon_cutover.ControlClient(
                 f"http://{routing.format_authority('127.0.0.1', port)}",
@@ -237,7 +287,7 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
             still_matches_root = still_live and mux_daemon_cutover._pid_matches_root(
                 pid, root=resolved_root
             )
-            start_time_after = process_start_time(pid) if still_matches_root else None
+            start_time_after = _process_start_time(pid) if still_matches_root else None
         except Exception:
             still_live = still_matches_root = False
             start_time_after = None
@@ -254,7 +304,7 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
         if (
             not still_matches_root
             or not start_time_confirmed
-            or not _pid_owned_by_current_user(pid)
+            or not _pid_owned_by_current_user(pid, current_sid=current_sid)
         ):
             entry["status"] = "unverified-owner"
             results.append(entry)

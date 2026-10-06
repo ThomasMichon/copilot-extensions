@@ -61,7 +61,7 @@ def test_daemon_statuses_marks_a_pre_upgrade_daemons_telemetry_unsupported(
     monkeypatch.setattr(
         daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9555 ..."
     )
-    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid: True)
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid, **kw: True)
     monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: "fixed-start-time")
     monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
     _FakeControlClient.responses = {9555: {"status": "ready"}}
@@ -106,7 +106,7 @@ def test_daemon_statuses_reports_active_reachable_and_unreachable(tmp_path: Path
     monkeypatch.setattr(
         routing, "read_table", lambda config_dir: _active_table(pid=101, port=9101)
     )
-    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid: True)
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid, **kw: True)
     monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: "fixed-start-time")
     _FakeControlClient.responses = {
         9101: {
@@ -164,7 +164,7 @@ def test_daemon_statuses_marks_a_failed_health_request_unreachable(tmp_path: Pat
     monkeypatch.setattr(
         daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9404 ..."
     )
-    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid: True)
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid, **kw: True)
     monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
     _FakeControlClient.responses = {}
     monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", _FakeControlClient)
@@ -198,7 +198,7 @@ def test_daemon_statuses_rejects_a_missing_start_time_as_unverified(
     monkeypatch.setattr(
         daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9777 ..."
     )
-    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid: True)
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid, **kw: True)
     monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: None)
     monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
     _FakeControlClient.responses = {9777: {"status": "ready", "version": "0.1.0-dev1"}}
@@ -237,7 +237,7 @@ def test_daemon_statuses_handles_a_revalidation_lookup_failure_without_aborting(
     monkeypatch.setattr(
         daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9888 ..."
     )
-    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid: True)
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid, **kw: True)
     monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: "fixed-start-time")
     monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
     _FakeControlClient.responses = {9888: {"status": "ready", "version": "0.1.0-dev1"}}
@@ -271,7 +271,7 @@ def test_daemon_statuses_requires_port_match_not_just_pid_for_active(
     monkeypatch.setattr(
         daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9999 ..."
     )
-    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid: True)
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid, **kw: True)
     # Routing table's active row still names pid 101, but on the OLD port
     # (9101) -- not the port this pid is actually listening on now (9999).
     monkeypatch.setattr(
@@ -308,7 +308,7 @@ def test_daemon_statuses_never_connects_to_a_candidate_with_unverified_owner(
     monkeypatch.setattr(
         daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9666 ..."
     )
-    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid: False)
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid, **kw: False)
     monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
 
     connected = []
@@ -428,4 +428,42 @@ def test_pid_owned_by_current_user_handles_a_timed_out_probe(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", _raise)
     assert daemons_status._pid_owned_by_current_user(123) is False
+
+
+def test_process_start_time_falls_back_to_ps_lstart_on_macos(monkeypatch):
+    """``zdd.diagnostics.process_start_time()`` only implements Windows and
+    Linux (``/proc``) -- on macOS (no ``/proc``, non-Windows) it returns
+    ``None``, which would make every reachable daemon there permanently
+    unverifiable. ``ps -o lstart=`` must supply a usable fallback token."""
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: None)
+    monkeypatch.setattr(daemons_status.Path, "is_dir", lambda self: False)
+
+    def _fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout="Mon Oct  6 00:00:00 2026\n")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    assert daemons_status._process_start_time(123) == "Mon Oct  6 00:00:00 2026"
+
+
+def test_process_start_time_prefers_the_shared_zdd_result_when_available(monkeypatch):
+    monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: "shared-token")
+    called = []
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: called.append(True) or 1 / 0
+    )
+    assert daemons_status._process_start_time(123) == "shared-token"
+    assert not called
+
+
+def test_process_start_time_handles_a_failed_ps_fallback(monkeypatch):
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: None)
+    monkeypatch.setattr(daemons_status.Path, "is_dir", lambda self: False)
+
+    def _raise(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, 5)
+
+    monkeypatch.setattr(subprocess, "run", _raise)
+    assert daemons_status._process_start_time(123) is None
 
