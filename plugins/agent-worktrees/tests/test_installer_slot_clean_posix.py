@@ -347,6 +347,33 @@ def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
     assert "_release_versioned_slot_lease" in activate_wrapper
 
 
+def test_versioned_slot_lease_has_an_unconditional_exit_trap():
+    """`_versioned_activate`'s release-on-every-outcome wrapper only ever
+    runs if control actually reaches it -- a build/package/governance
+    failure between acquiring the lease and reaching that wrapper calls
+    `exit 1` directly, bypassing it entirely and leaking the universal
+    mkdir gate (the flock/fcntl strengthening layers are kernel-
+    auto-released on process exit regardless, but the mkdir gate is not).
+    A single unconditional `trap ... EXIT`, registered once near the top
+    of the lease state declarations, is the only mechanism that covers
+    every exit path -- including ones the wrapper never sees -- without
+    double-releasing anything (`_release_versioned_slot_lease` is already
+    idempotent)."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+
+    assert "trap '_release_versioned_slot_lease' EXIT" in text
+    # Must be registered unconditionally (not inside a function or an
+    # `if`) so it fires regardless of which code path is ever reached.
+    trap_idx = text.index("trap '_release_versioned_slot_lease' EXIT")
+    # The trap line must sit at column 0 (top level), not indented inside
+    # a function/if body.
+    line_start = text.rfind("\n", 0, trap_idx) + 1
+    assert text[line_start:trap_idx] == "", (
+        "the EXIT trap must be registered at the top level (column 0), "
+        "unconditionally -- never inside a function or conditional block"
+    )
+
+
 def test_versioned_slot_lease_uses_flock_held_for_process_lifetime():
     """The lease primitive must be an OS-level `flock` held on an open fd
     (auto-released by the kernel on crash/exit -- never a PID-recorded
@@ -365,7 +392,7 @@ def test_versioned_slot_lease_uses_flock_held_for_process_lifetime():
         "dynamic fd allocation ({fd}) needs bash 4.1+ and fails to parse "
         "under stock macOS's bash 3.2 -- use a literal fd number instead"
     )
-    assert 'if { exec 8>"$lease_path"; } 2>/dev/null && flock -n 8 2>/dev/null; then' in acquire_body, (
+    assert 'if { exec 8>"$lease_path"; } 2>/dev/null; then' in acquire_body, (
         "a bare `exec 8>...` with no command makes `2>/dev/null` attached "
         "directly to it PERMANENT for the rest of the shell (silently "
         "nulling all subsequent stderr) -- it must be wrapped in a "
@@ -431,10 +458,17 @@ def test_versioned_slot_lease_shares_one_gate_regardless_of_flock_or_python_visi
     different, non-communicating lock and both build the same slot. Every
     acquisition path must therefore share exactly ONE gate
     (the mkdir-based one): flock/python are layered on top of an ALREADY-
-    HELD gate purely as an optional crash-safety strengthening, and a
-    failure to strengthen must never fail the overall acquisition (the
-    gate alone is already sufficient exclusivity) or be misreported as
-    contention."""
+    HELD gate purely as an optional crash-safety strengthening. A mere
+    failure to even ATTEMPT strengthening (fd-open failure, no bootstrap
+    python, FIFO-creation failure, ...) must never fail the overall
+    acquisition -- the gate alone is already sufficient exclusivity.
+    But an EXPLICIT refusal from the strengthening layer itself (flock
+    actually declining the lock, or the python fallback reporting
+    contention) is hard kernel-level evidence of a still-live holder --
+    e.g. a surviving CHILD of a crashed original holder that the gate's
+    own pid-liveness check can never see -- and MUST fail the overall
+    acquisition and release the gate rather than being silently
+    tolerated."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
     acquire_body = _function_body(text, "_acquire_versioned_slot_lease")
 
@@ -442,14 +476,29 @@ def test_versioned_slot_lease_shares_one_gate_regardless_of_flock_or_python_visi
     strengthen_body = acquire_body.split(
         "if ! _acquire_versioned_slot_lease_mkdir_fallback", 1
     )[1]
-    # Nothing in the strengthening section may itself `return 1` -- a
-    # failure to strengthen is not a failure to acquire.
-    assert "return 1" not in strengthen_body.split("if command -v flock", 1)[1], (
-        "the flock/python strengthening section must never fail the "
-        "overall acquisition -- the universal gate is already sufficient"
+    # An explicit flock refusal (the `else` of `if flock -n 8`) must
+    # release the gate and hard-fail.
+    assert '_VERSIONED_SLOT_LEASE_FAILURE_REASON="contention"' in strengthen_body
+    contention_branches = strengthen_body.split(
+        '_VERSIONED_SLOT_LEASE_FAILURE_REASON="contention"'
     )
+    assert len(contention_branches) >= 2, (
+        "the flock path must set FAILURE_REASON=contention on an explicit "
+        "refusal"
+    )
+    # Every such contention branch must release the gate and return 1 --
+    # never silently tolerated the way a mere machinery failure is. The
+    # release happens just BEFORE the reason is set on the flock path, and
+    # just AFTER on the python-fallback path, so check a window spanning
+    # both sides of the marker rather than assuming one fixed order.
+    for i in range(1, len(contention_branches)):
+        before = contention_branches[i - 1][-200:]
+        after = contention_branches[i][:200]
+        window = before + after
+        assert "_release_versioned_slot_lease_mkdir_fallback" in window
+        assert "return 1" in after
     assert (
-        '_acquire_versioned_slot_lease_python_fallback "$lease_path" >/dev/null 2>&1 || true'
+        '_acquire_versioned_slot_lease_python_fallback "$lease_path" >/dev/null 2>&1'
         in acquire_body
     )
 
@@ -626,13 +675,15 @@ def test_versioned_slot_lease_python_fallback_delegates_to_real_fcntl_flock():
     release_body = _function_body(text, "_release_versioned_slot_lease")
 
     assert "if command -v flock >/dev/null 2>&1; then" in acquire_body
-    no_flock_branch = acquire_body.split(
-        "if command -v flock >/dev/null 2>&1; then", 1
-    )[1][:1300]
-    assert "else" in no_flock_branch
-    assert "_acquire_versioned_slot_lease_python_fallback" in no_flock_branch.split(
-        "else", 1
-    )[1]
+    # The python fallback must be invoked from the OUTER else (paired with
+    # the top-level `if command -v flock`), not one of the narrower nested
+    # if/else blocks inside the flock branch itself -- match on the
+    # literal else-then-call sequence rather than slicing to a fixed
+    # length, which is brittle against the surrounding comments growing.
+    assert (
+        'else\n        _acquire_versioned_slot_lease_python_fallback "$lease_path"'
+        in acquire_body
+    )
 
     # A failed (non-blocking) flock attempt must propagate as a real
     # failure, never be swallowed into a false "acquired".

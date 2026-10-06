@@ -2351,7 +2351,7 @@ prompt = .venv
 function Deploy-VenvAndPackage {
     <# Shared by every call site that builds+installs the runtime. The
        completeness check happens EXACTLY ONCE, inside Deploy-Venv itself,
-       under the lease it just acquired (#5439 review): a concurrent
+       under the lease it just acquired (#5439): a concurrent
        process could finish building AND activating this exact slot in the
        window between an outer, pre-lease check and actually acquiring the
        lease, so a check made before the lease can never be authoritative

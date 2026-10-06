@@ -898,6 +898,21 @@ _VERSIONED_SLOT_LEASE_PY_STDIN_FD=""
 # _acquire_versioned_slot_lease_mkdir_fallback) -- used only when BOTH
 # `flock` and a bootstrap python are unavailable.
 _VERSIONED_SLOT_LEASE_MKDIR_DIR=""
+# An EXIT trap (registered once, unconditionally) is the only reliable way
+# to guarantee the lease is released on EVERY post-acquisition exit path --
+# a dirty-slot/uv/package build failure, a governance check failure, or any
+# other `exit 1` between acquiring the lease and reaching
+# `_versioned_activate`'s own release-on-every-outcome wrapper all bypass
+# that wrapper entirely (an `exit` terminates the whole script before the
+# caller's next line, let alone `_versioned_activate`, ever runs).
+# `_release_versioned_slot_lease` is already idempotent/safe to call with
+# nothing held, so registering it unconditionally here -- rather than only
+# once a lease is actually acquired -- is simplest and cannot double-release
+# anything. The flock/fcntl strengthening layers are released by the kernel
+# on process exit regardless; the universal mkdir gate has no such
+# auto-release, so without this trap a process that exits abnormally here
+# leaves it for a later contender's bounded stale-reclaim to clear instead.
+trap '_release_versioned_slot_lease' EXIT
 # Human-readable reason the most recent _acquire_versioned_slot_lease call
 # failed, so callers can tell genuine contention (another live process
 # already holds the lease) apart from a persistent lease-machinery failure
@@ -914,20 +929,20 @@ _versioned_slot_lease_path() {
 _acquire_versioned_slot_lease_mkdir_fallback() {
     # The UNIVERSAL cross-mode gate: every acquirer, regardless of whether
     # `flock`/python end up available to it, contends on this ONE `mkdir`
-    # first (#5439 review: two concurrent invocations with DIFFERENT
-    # flock/python visibility -- e.g. the full launcher's PATH vs. the
-    # confined first-use binstub's restricted PATH -- must not each
-    # silently pick a different, non-communicating lock primitive and both
-    # build the same slot). `flock`/fcntl are layered ON TOP of this gate
-    # purely as an optional crash-safety strengthening (see
-    # _acquire_versioned_slot_lease), never as an alternate gate of their
-    # own.
+    # first (#5439: two concurrent invocations with DIFFERENT flock/python
+    # visibility -- e.g. the full launcher's PATH vs. the confined
+    # first-use binstub's restricted PATH -- must not each silently pick a
+    # different, non-communicating lock primitive and both build the same
+    # slot). `flock`/fcntl are layered ON TOP of this gate purely as an
+    # optional crash-safety strengthening (see _acquire_versioned_slot_lease),
+    # never as an alternate gate of their own.
     #
     # `mkdir` is POSIX-atomic and needs neither `flock` nor python, making
     # it the correct universal primitive. This is a BOUNDED retry loop with
-    # a single, flat reclaim check -- not the unbounded chain of narrowing
-    # TOCTOU windows a nested sentinel-based dotlock produced in earlier
-    # review rounds. The happy path (no earlier attempt, no stale lock) is a
+    # a single, flat reclaim check -- not an unbounded chain of narrowing
+    # TOCTOU windows (a nested sentinel-based dotlock, where each reclaim
+    # tier needs its own staleness detection, is exactly that trap). The
+    # happy path (no earlier attempt, no stale lock) is a
     # single atomic `mkdir` with zero ambiguity; the only residual race is
     # "is the recorded holder still alive", and losing that race just means
     # looping and retrying (bounded by the loop), never a permanent deadlock
@@ -955,8 +970,8 @@ _acquire_versioned_slot_lease_mkdir_fallback() {
             # second check-then-act gap: two contenders can both observe
             # the SAME dead pid and both decide to reclaim, and a bare
             # `rm -rf` + retry-`mkdir` sequence lets one of them wipe out
-            # the OTHER's freshly-created, perfectly valid lock (#5439
-            # review) -- both then believe they hold the lease.
+            # the OTHER's freshly-created, perfectly valid lock (#5439) --
+            # both then believe they hold the lease.
             #
             # `mkdir` on a SEPARATE, short-lived sentinel directory is the
             # atomic gate for "permission to reclaim": only ONE contender
@@ -1174,13 +1189,44 @@ _acquire_versioned_slot_lease() {
         # just the exec's own potential error while still leaving fd 8
         # itself open in the current shell (groups run in-place, not a
         # subshell).
-        if { exec 8>"$lease_path"; } 2>/dev/null && flock -n 8 2>/dev/null; then
-            _VERSIONED_SLOT_LEASE_FD=8
-        else
-            exec 8>&- || true
+        if { exec 8>"$lease_path"; } 2>/dev/null; then
+            if flock -n 8 2>/dev/null; then
+                _VERSIONED_SLOT_LEASE_FD=8
+            else
+                # flock explicitly REFUSED: hard kernel evidence of a live
+                # writer, not a benign "couldn't strengthen". A surviving
+                # CHILD of a crashed original holder (e.g. a `uv`/package-
+                # install process that inherited this fd) can still hold
+                # the kernel lock even after our mkdir gate reclaim
+                # succeeded -- the gate's pid-liveness check only tracks
+                # the ORIGINAL holder's own pid, never any children it may
+                # have spawned. Silently proceeding here would build into
+                # a slot that process is still actively using. Release the
+                # gate we just took and fail closed rather than silently
+                # tolerating this the way a mere machinery failure is
+                # tolerated below.
+                exec 8>&- || true
+                _release_versioned_slot_lease_mkdir_fallback
+                _VERSIONED_SLOT_LEASE_FAILURE_REASON="contention"
+                return 1
+            fi
         fi
+        # The fd-open itself failing (couldn't even attempt flock) is
+        # tolerated -- the universal gate alone is already sufficient.
     else
-        _acquire_versioned_slot_lease_python_fallback "$lease_path" >/dev/null 2>&1 || true
+        _acquire_versioned_slot_lease_python_fallback "$lease_path" >/dev/null 2>&1
+        local fallback_rc=$?
+        if [[ "$fallback_rc" -eq 1 && "$_VERSIONED_SLOT_LEASE_FAILURE_REASON" == "contention" ]]; then
+            # Same hard-evidence case as the primary flock path above,
+            # reached via the no-flock resident-helper fallback instead.
+            _release_versioned_slot_lease_mkdir_fallback
+            return 1
+        fi
+        # Any OTHER fallback outcome (rc 2 no bootstrap python, or a
+        # machinery failure such as "couldn't create the FIFOs") is
+        # tolerated the same way a flock open failure is above -- the
+        # universal gate alone remains sufficient.
+        _VERSIONED_SLOT_LEASE_FAILURE_REASON=""
     fi
     return 0
 }
@@ -1541,7 +1587,7 @@ deploy_venv() {
 _deploy_venv_and_package() {
     # Shared by every call site that builds+installs the runtime. The
     # completeness check happens EXACTLY ONCE, inside `deploy_venv` itself,
-    # under the lease it just acquired (#5439 review): a concurrent process
+    # under the lease it just acquired (#5439): a concurrent process
     # could finish building AND activating this exact slot in the window
     # between an outer, pre-lease check and actually acquiring the lease,
     # so a check made before the lease can never be authoritative on its
