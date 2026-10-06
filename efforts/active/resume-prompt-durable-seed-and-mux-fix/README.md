@@ -255,21 +255,16 @@ is this effort's actual Phase 1 deliverable.)
       uses for its own restore-on-failure case) -- this requires touching
       `launch-session.{ps1,sh}` directly, which is why it's deferred here
       rather than attempted in Phase 1.
-- [x] **Deferred from Phase 1 (fifth review round) -- DONE:** a live-mux
-      reattach (`_resolve_resume_context`'s `verdict.mux_live` branch,
-      Phase 1) correctly QUEUES a seed instead of losing it, but did not
-      actually DELIVER it on that exact reattach -- only on the next fresh
-      launch/attach that reached it. Fixed by calling the ALREADY-EXISTING
-      `Invoke-SeedDeliverySafe`/`_aw_deliver_pending_seed` helper (the same
-      one the fresh-mux-create path already calls) from the "join existing
-      session" branch of `launch-session.{ps1,sh}` too -- the ONE
-      ground-truth point that actually knows a reattach, not a fresh
-      launch, is happening, and the helper is already a no-op when nothing
-      is queued. Neither script needed a new mechanism, only one more call
-      to the one that already existed. `test_launch_session_unwrap.py`'s
-      own drift guard (`test_launchers_deliver_pending_seed_only_on_fresh_
-      mux_create`, which had explicitly locked in the OLD, incomplete
-      behavior) renamed and rewritten to assert both call sites.
+- [x] A live-mux reattach (`_resolve_resume_context`'s `verdict.mux_live`
+      branch, Phase 1) correctly QUEUES a seed instead of losing it, and
+      now also DELIVERS it on that exact reattach, not only on a later
+      fresh launch/attach: `launch-session.{ps1,sh}`'s "join existing
+      session" branch -- the ONE ground-truth point that actually knows a
+      reattach, not a fresh launch, is happening -- calls the same
+      `Invoke-SeedDeliverySafe`/`_aw_deliver_pending_seed` helper the
+      fresh-mux-create path already calls (a no-op when nothing is
+      queued). `test_launch_session_unwrap.py`'s drift guard asserts both
+      call sites and their relative ordering.
 - [ ] **Deferred from Phase 1 (ninth review round):** `claim_pending_seed`
       cannot distinguish "nothing was pending" from "claim failed" (lock
       contention, an unreadable record) -- both return `None`. With an

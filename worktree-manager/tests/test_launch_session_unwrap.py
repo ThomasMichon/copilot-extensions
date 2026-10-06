@@ -172,23 +172,21 @@ def test_launchers_publish_managed_mux_observation_from_worktree_path():
 
 @pytest.mark.guard
 def test_launchers_deliver_pending_seed_on_both_create_and_join():
-    """picker-new-session-prompt-and-composer Phase A seam 2, revised by
-    resume-prompt-durable-seed-and-mux-fix Phase 3: the launcher hands the
-    pane command straight to `new-session`/`tmux new-session` -- Copilot
-    starts the instant the pane exists, so a queued `pending_seed` can only
-    ever be delivered by a SEPARATE `agent-worktrees embody --worktree-id`
-    call made right after that create succeeds (embody's own "already
-    embodies this worktree" resume branch claims + types it).
+    """The launcher hands the pane command straight to
+    `new-session`/`tmux new-session` -- Copilot starts the instant the pane
+    exists, so a queued `pending_seed` can only ever be delivered by a
+    SEPARATE `agent-worktrees embody --worktree-id` call made right after
+    (embody's own "already embodies this worktree" resume branch claims +
+    types it).
 
-    This ORIGINALLY fired only on the CREATE branch, on the assumption that
-    a JOIN (an already-live session) could never have a queued seed worth
-    delivering -- wrong whenever `resolve --json` (a separate, earlier
-    process) queues an explicit seed specifically BECAUSE it detected an
-    uncertain-or-live mux and deliberately did NOT embed it into the now-
-    discarded `cmd` (see resolve_cli.py's/resolve_launch_cli.py's own
-    `live_or_uncertain_mux`/`live_mux` gating). Without a JOIN-branch
-    delivery too, that queued seed was silently stranded. Fixed: BOTH
-    branches now call the same helper."""
+    Both the CREATE branch (a fresh mux session this launcher just stood
+    up) and the JOIN branch (an already-live session this launcher merely
+    reattaches to, never exec'ing its own freshly resolved `cmd`) must call
+    this helper: `resolve --json` (a separate, earlier process) can detect
+    an uncertain-or-live mux and deliberately queue an explicit seed rather
+    than embed it into that now-discarded `cmd` -- only a JOIN-branch
+    delivery reaches that queued seed on the actual reattach it was queued
+    for."""
     ps = _LAUNCH_PS1.read_text()
     sh = _LAUNCH_SCRIPT.read_text()
 
