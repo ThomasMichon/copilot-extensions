@@ -541,12 +541,40 @@ class PickerScreenRenderingMixin:
         yield _PickerStickyHeader(id="nf-body-sticky")
         yield _PickerNativeData(self, id="nf-body-data")
         yield _PickerSegment(self, "footer", id="nf-footer")
-    def _refresh_nf_segments(self) -> None:
+    # pivot-streaming-transport Phase 4: the only segments whose rendered
+    # content can depend on the purely-clock-driven cosmetic pulse
+    # (`self.pulse`, advanced in `_tick()`) -- audited against every consumer
+    # of `self.pulse`/`self.spin()` reachable from each segment's own
+    # `render()`: `nf-chrome`'s `_stats_row()` -> `status_text()` always
+    # includes a pulse-colored dot; `nf-body-data` already fast-paths a
+    # pulse-only repaint internally (#4719) but must still be invoked so that
+    # fast path runs. Every other segment (title/pivots/machine/buttons/
+    # footer) has no `pulse`/`spin()` dependency *unless* a concurrently-busy
+    # condition is also active -- and `cause="pulse"` is only ever passed by
+    # `_tick()`'s own branch that fires exactly when nothing else (no busy
+    # state, no pending nav) is also true, so that gap can't arise here. If
+    # any segment ever gains its own pulse/spin dependency, add it here too --
+    # this tuple is deliberately an allowlist, not inferred automatically.
+    _PULSE_ONLY_SEGMENTS = ("nf-chrome", "nf-body-data")
+    _ALL_NF_SEGMENTS = ("nf-title", "nf-pivots", "nf-chrome", "nf-machine",
+                         "nf-buttons", "nf-body-data", "nf-footer")
+
+    def _refresh_nf_segments(self, cause: str | None = None) -> None:
         """Propagate a screen state change to the child segment/region widgets
         (their ``render()`` reads back off this screen). The native OptionList
-        data body (#88 NF5-5) rebuilds its options on demand instead."""
-        for seg_id in ("nf-title", "nf-pivots", "nf-chrome", "nf-machine",
-                       "nf-buttons", "nf-body-data", "nf-footer"):
+        data body (#88 NF5-5) rebuilds its options on demand instead.
+
+        ``cause`` narrows which segments actually need re-rendering for a
+        specific, audited refresh trigger (pivot-streaming-transport Phase 4)
+        -- ``None`` (the default, used by every caller that doesn't pass a
+        cause) refreshes every segment, identical to this method's behavior
+        before Phase 4. Only ``"pulse"`` is currently recognized; any other
+        value is treated the same as ``None`` (refresh everything) rather
+        than silently skipping segments for an un-audited cause.
+        """
+        seg_ids = (self._PULSE_ONLY_SEGMENTS if cause == "pulse"
+                   else self._ALL_NF_SEGMENTS)
+        for seg_id in seg_ids:
             try:
                 w = self.query_one(f"#{seg_id}")
                 if isinstance(w, _PickerNativeData):
@@ -555,18 +583,21 @@ class PickerScreenRenderingMixin:
                     w.refresh()
             except Exception:
                 pass
-    def refresh(self, *args, **kwargs):
+    def refresh(self, *args, cause: str | None = None, **kwargs):
         # Keep the NF2 segment widgets in step with the screen: any state change
         # that refreshes the screen must re-render the child segments too (they
         # read off this screen). A no-op when the skeleton is disabled.
         # Bust the per-refresh render caches (#169) first: a refresh means the
         # screen state may have changed, so the memoized frame/split must be
         # recomputed once and then shared by every segment widget in this pass.
+        # ``cause`` is this screen's own keyword (Phase 4's segment narrowing,
+        # see ``_refresh_nf_segments``) -- it is never forwarded to Textual's
+        # own ``Widget.refresh()``, whose signature has no such parameter.
         self._frame_cache = None
         self._split_cache = None
         self._chrome_cache = None
         result = super().refresh(*args, **kwargs)
-        self._refresh_nf_segments()
+        self._refresh_nf_segments(cause=cause)
         return result
     def _border_row(self, W, arrow, active):
         """A separator line carrying a centered scroll arrow with a blank space

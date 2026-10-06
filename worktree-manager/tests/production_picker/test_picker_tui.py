@@ -10659,6 +10659,72 @@ def test_tick_services_deferred_nav_refresh():
     asyncio.run(run())
 
 
+def test_tick_pure_cosmetic_pulse_narrows_segment_refresh_to_chrome_and_body():
+    """pivot-streaming-transport Phase 4: a cosmetic-only idle tick (no busy
+    state, no pending nav -- the ``frame % 5 == 0`` branch firing alone) must
+    refresh ONLY the two segments that can actually depend on the clock-driven
+    pulse (``nf-chrome``'s pulsing status dot, ``nf-body-data``'s own internal
+    pulse fast-path, #4719) -- never the other five (title/pivots/machine/
+    buttons/footer), which have no pulse/spin dependency when nothing else is
+    busy. A tick that DOES have a competing busy/nav condition must still
+    refresh every segment, unchanged from before Phase 4."""
+    src = _fixture_source()
+    all_segments = ("nf-title", "nf-pivots", "nf-chrome", "nf-machine",
+                     "nf-buttons", "nf-body-data", "nf-footer")
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+
+            widgets = {seg_id: scr.query_one(f"#{seg_id}") for seg_id in all_segments}
+            touched = set()
+
+            def _make_tracker(seg_id, widget, attr):
+                original = getattr(widget, attr)
+
+                def _tracked(*a, **k):
+                    touched.add(seg_id)
+                    return original(*a, **k)
+                return _tracked
+
+            def _patch_all():
+                for seg_id, widget in widgets.items():
+                    attr = "refresh_data" if seg_id == "nf-body-data" else "refresh"
+                    monkeypatch_targets.append((widget, attr, getattr(widget, attr)))
+                    object.__setattr__(widget, attr, _make_tracker(seg_id, widget, attr))
+
+            monkeypatch_targets = []
+            _patch_all()
+            try:
+                # Pure cosmetic pulse: no busy condition, no pending nav, only
+                # the periodic frame%5==0 branch can fire.
+                scr._busy_label = None
+                scr._nav_dirty = False
+                scr.frame = 4  # next _tick() increments to 5 -> frame % 5 == 0
+                touched.clear()
+                scr._tick()
+                assert touched == {"nf-chrome", "nf-body-data"}, (
+                    f"pure pulse tick touched unexpected segments: {touched}")
+
+                # A competing nav condition on the SAME cadence boundary must
+                # still refresh every segment -- the narrowing never applies
+                # when anything else triggered the tick's refresh too.
+                scr._nav_dirty = True
+                scr.frame = 9
+                touched.clear()
+                scr._tick()
+                assert touched == set(all_segments), (
+                    f"nav-driven tick unexpectedly narrowed segments: {touched}")
+            finally:
+                for widget, attr, original in monkeypatch_targets:
+                    object.__setattr__(widget, attr, original)
+
+    asyncio.run(run())
+
+
 def test_registered_pivot_grouped_columns_and_task_correlation(tmp_path, monkeypatch):
     """A grouped, account-scoped columns pivot: rows render under a
     section header, and the claiming worktree id is correlated to the owning
