@@ -133,7 +133,7 @@ listing follow-up ideas or questions, the flow is different:
 - **ask the user** whether to continue via handoff,
 - only after a brief yes (for example, "sure"), **quiesce owned background
   work** (same rule as above -- only correct once the user has actually
-  agreed to hand off), then **sync the worktree** (same rule as above,
+  agreed to hand off), then **sync the worktree** (same rule as above),
   then **always recompose and re-save** the baton -- even if the sync and
   quiescing both looked like a no-op, since a WIP commit, a failed sync, or
   a stopped background task's results still change what the successor needs

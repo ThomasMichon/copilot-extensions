@@ -334,7 +334,7 @@ test("quiescing owned background work is required before composing, in every sur
   assertOrdered(
     genDesc,
     "quiesce owned background work",
-    "ALWAYS call",
+    "THEN call",
     "generate_handoff_prompt's description must quiesce before its re-run instruction",
   );
   assertOrdered(
@@ -343,6 +343,12 @@ test("quiescing owned background work is required before composing, in every sur
     "THEN sync the worktree",
     "generate_handoff_prompt's description must quiesce before syncing",
   );
+  // The rerun instruction must be explicitly bounded (ONE MORE TIME, not a
+  // loop) and self-terminating, so a second invocation reading this same
+  // text doesn't conclude it must call generate_handoff_prompt a third time.
+  assert.match(genDesc, /ONE MORE TIME/);
+  assert.match(genDesc, /do not call it a third time/i);
+  assert.match(genDesc, /stop re-running it/i);
 
   // The generated save_handoff_prompt tool response mentions quiescing in
   // BOTH branches (context-pressure direct-trigger, and turn-end
