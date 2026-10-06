@@ -1,0 +1,9 @@
+{
+  "comment": "pivot-streaming-transport Phase 4: fix narrowed refresh causes to actually skip the screen-level full-region dirty mark",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

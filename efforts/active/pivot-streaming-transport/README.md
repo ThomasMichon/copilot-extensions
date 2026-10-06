@@ -514,6 +514,18 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
       switch), plus confirmation (via the same real-timer profiling method
       used 2026-09-30) that Textual's compositor now chooses incremental
       updates for the common cosmetic-tick case.
+      — **Partially satisfied, 2026-10-05:** pulse + nav both have dedicated
+      regression tests (`test_tick_pure_cosmetic_pulse_narrows_segment_
+      refresh_to_chrome_and_body`, `test_tick_pure_nav_narrows_segment_
+      refresh_to_body_and_footer`, `test_tick_narrowed_cause_never_marks_
+      the_whole_screen_region_dirty`), and the profiling re-confirmation is
+      done for the cosmetic-tick case — though the actual outcome is
+      *stronger* than "incremental instead of full": most narrowed ticks now
+      trigger no compositor pass at all (`render_full_update` 21->5 over the
+      same window; `render_update` stays at 0 throughout, confirmed not to
+      leave content stale). Reload and pivot-switch causes remain fully
+      un-audited and un-tested — this item stays open until they're covered
+      too.
 - [ ] **Phase 5:** the same live-timed before/after methodology as the
       `cfg.load_config()` fix, run against a worktree with a genuinely fresh
       affirmative hint; a regression test proving (a) the scan is skipped only
@@ -2023,4 +2035,87 @@ entries).
 
 **Next**: the remaining ~34 `refresh()` call sites (reload/pivot-switch/
 etc.) stay fully unnarrowed. Phase 5 remains fully unstarted.
+
+### 2026-10-05 — Phase 4: correcting #5418/#5433 -- the segment narrowing alone never actually changed Textual's repaint behavior
+
+Picked up intending to audit the next `refresh()` cause (reload/pivot-switch)
+directly -- but paused first to do the Validation Plan's own explicit, still-
+unmet requirement for the two causes already narrowed: "confirmation (via the
+same real-timer profiling method used 2026-09-30) that Textual's compositor
+now chooses incremental updates." Re-ran the exact PR #5398 profiling
+methodology against the already-landed pulse+nav narrowing (#5418, #5433).
+**Result: still 21-22 `render_full_update` calls, still ZERO `render_update`
+calls, over the same 12s window -- completely unchanged from before either
+PR landed.** The two prior PRs' own stated goal (reduce compositor work) was
+never actually achieved; only the Python-side widget-touch count went down.
+
+**Root cause, traced into Textual's own source (`_compositor.py`,
+`widget.py`):** `_compositor.render_update()` chooses `render_full_update()`
+specifically when `screen_region in self._dirty_regions` -- the screen's own
+FULL region, not a union of children's regions. `Widget.refresh()` called
+with no explicit `*regions` argument marks the CALLING widget's own entire
+area dirty (`Widget._set_dirty()`: "If no regions are added, then the entire
+widget will be considered dirty" -> `self._dirty_regions.add(outer_size.
+region)`). Every narrowed-cause tick still called `self.refresh(cause=...)`
+on the SCREEN itself first (`PickerScreen.refresh()`'s own body), which
+unconditionally forwards to `super().refresh(*args, **kwargs)` with zero
+`args` -- marking the screen's own full `screen_region` dirty regardless of
+which CHILD segment widgets were also touched afterward. The two prior PRs'
+narrowing only ever affected the child-level calls; the parent screen-level
+call alone already guaranteed a full repaint every single time, making the
+child narrowing provably moot for the one thing it was meant to achieve.
+
+**The actual fix**: for an audited, narrowed cause (`cause in
+self._CAUSE_SEGMENTS`), `PickerScreen.refresh()` now skips its own
+screen-level `super().refresh()` call entirely and goes straight to
+`_refresh_nf_segments(cause=...)` -- marking only the narrowed child
+segments' own (small) regions dirty, never the screen's full region. An
+unnarrowed/unaudited cause (`cause=None`, every pre-Phase-4 call site)
+is completely unchanged: still calls `super().refresh()`, still marks the
+whole screen dirty, identical to before Phase 4 ever started.
+
+**Re-validated with the same methodology, this time showing a real effect**:
+`render_full_update` compositor passes dropped from ~21 to **5** over the
+identical 12s/300-row window -- a ~75% reduction in actual compositor work,
+not just Python-side widget-touch count. (`render_update`, the incremental
+path, still shows zero calls -- the 16 ticks that no longer trigger ANY
+compositor pass at all is an even better outcome than "incremental instead
+of full," since Textual's own dirty-region tracking is cumulative and
+doesn't lose anything in between: whatever a later compositor pass does
+still catches up the full accumulated state.)
+
+**Correctness verification, not just "tests still pass":** before trusting
+this, confirmed directly (not assumed) that skipping the screen-level
+refresh doesn't leave content silently stale. Checked the screen's own
+compositor-composited output (`scr._compositor.render_strips()`, the literal
+display path, not an isolated widget `render()` call) across a dozen real
+narrowed-cause ticks with real `pilot.pause()`s in between -- the pulse dot's
+composited color came back identical in every tick (`#98e024 on #1e1e1e`
+regardless of `self.pulse`'s 0/1 value). This looked alarming at first, but
+re-running the exact same check against an unmodified (stashed) baseline
+checkout produced the IDENTICAL result -- confirming this non-alternation is
+a pre-existing styling characteristic (`C_PULSE = ["green", "bold
+bright_green"]`, apparently resolving to the same truecolor hex in this
+terminal theme), not a regression introduced by this change. Also confirmed
+no permanent dirty-flag leak: a widget's own dirty bookkeeping cleared after
+every real event-loop pause, with no accumulation across ticks.
+
+**Validation**: added
+`test_tick_narrowed_cause_never_marks_the_whole_screen_region_dirty` --
+directly asserts the screen's own `outer_size.region` is absent from
+`scr._dirty_regions` after a narrowed pulse/nav tick, and present after an
+unnarrowed busy tick (the exact mechanism this fix changes, asserted
+directly rather than only inferred from compositor call counts). Full
+`test_picker_tui.py` green (296/296) on one run; a second run's 2 failures
+are the same already-documented pre-existing modal-opening flake family.
+
+**Process note**: three separate throwaway scratch scripts were written,
+run, and deleted during this investigation (a re-profile, a dirty-flag
+probe, and a compositor-strip visual check) -- none committed, consistent
+with this session's scratch-space discipline.
+
+**Next**: the remaining ~34 `refresh()` call sites (reload/pivot-switch/
+etc.) still stay fully unnarrowed -- and now that this correction is in,
+narrowing any of them going forward will actually achieve its intended
+effect. Phase 5 remains fully unstarted.
 

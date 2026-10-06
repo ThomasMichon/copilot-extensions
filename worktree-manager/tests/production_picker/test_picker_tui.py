@@ -10727,6 +10727,68 @@ def test_tick_pure_cosmetic_pulse_narrows_segment_refresh_to_chrome_and_body():
     asyncio.run(run())
 
 
+def test_tick_narrowed_cause_never_marks_the_whole_screen_region_dirty():
+    """pivot-streaming-transport Phase 4 (correction over #5418/#5433):
+    narrowing WHICH child segment widgets get refreshed is, on its own,
+    provably unable to change Textual's full-vs-incremental compositor
+    choice -- ``Widget.refresh()`` called with no explicit regions marks the
+    CALLING widget's own entire area dirty (``Widget._set_dirty()``), and
+    the calling widget for a bare ``self.refresh(cause=...)`` is the SCREEN
+    itself. ``_compositor.render_update()`` chooses ``render_full_update()``
+    specifically when the screen's own full region is in its dirty set, so a
+    screen-level refresh call alone already forces a full repaint regardless
+    of which children were also touched. This test proves the actual fix:
+    for an audited narrowed cause, the screen's own full region is NEVER
+    added to its dirty set -- only a busy/unaudited (``cause=None``) refresh
+    adds it, exactly like before Phase 4."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            full_region = scr.outer_size.region
+
+            # Pure cosmetic pulse (narrowed): the screen's own region must
+            # NEVER be added to its dirty set.
+            scr._dirty_regions.clear()
+            scr._busy_label = None
+            scr._nav_dirty = False
+            scr.frame = 4
+            scr._tick()
+            assert full_region not in scr._dirty_regions, (
+                "a narrowed pulse tick marked the whole screen region dirty "
+                "-- this defeats the entire Phase 4 narrowing (Textual's "
+                "render_update() would still choose a full repaint)")
+
+            # Pure nav (narrowed): same guarantee.
+            scr._dirty_regions.clear()
+            scr.sel = ("L", 1)
+            scr._wt_track_focus()
+            scr._nav_dirty = True
+            scr.frame = 1
+            scr._tick()
+            assert full_region not in scr._dirty_regions, (
+                "a narrowed nav tick marked the whole screen region dirty")
+
+            # A competing busy condition (unnarrowed, cause=None) MUST still
+            # mark the whole screen dirty -- this guarantee only narrows
+            # audited causes, never the general case.
+            scr._dirty_regions.clear()
+            scr._busy_label = "doing a thing"
+            scr._nav_dirty = False
+            scr.frame = 2
+            scr._tick()
+            assert full_region in scr._dirty_regions, (
+                "a busy (unnarrowed) tick failed to mark the whole screen "
+                "dirty -- this would be an unrelated regression in the "
+                "ordinary, non-narrowed refresh path")
+
+    asyncio.run(run())
+
+
 def test_tick_pure_nav_narrows_segment_refresh_to_body_and_footer():
     """pivot-streaming-transport Phase 4: a pure in-list nav tick (``_nav_
     dirty`` set, no busy condition) must refresh ONLY ``nf-body-data`` and
