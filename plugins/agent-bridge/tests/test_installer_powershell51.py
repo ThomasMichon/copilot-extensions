@@ -267,10 +267,11 @@ def test_powershell_51_stamp_succeeds(tmp_path: Path):
     nested_ssh_manager = (snapshot / "libs" / "ssh-manager" / "pyproject.toml").read_text(encoding="utf-8")
     nested_plugin_activation = (snapshot / "libs" / "plugin-activation" / "pyproject.toml").read_text(encoding="utf-8")
     assert 'agent-procutil = { path = "../agent-procutil" }' in nested_ssh_manager
-    assert "editable = true" not in nested_ssh_manager
+    assert 'agent-procutil = { path = "../agent-procutil", editable = true }' not in nested_ssh_manager
     assert 'agent-dropin-registry = { path = "../dropin-registry" }' in nested_plugin_activation
     assert 'agent-plugin-resolve = { path = "../plugin-resolve" }' in nested_plugin_activation
-    assert "editable = true" not in nested_plugin_activation
+    assert 'agent-dropin-registry = { path = "../dropin-registry", editable = true }' not in nested_plugin_activation
+    assert 'agent-plugin-resolve = { path = "../plugin-resolve", editable = true }' not in nested_plugin_activation
     assert ". (Join-Path $PSScriptRoot 'installer-engine.ps1')" in (
         snapshot / "scripts" / "install.ps1"
     ).read_text(encoding="utf-8")
