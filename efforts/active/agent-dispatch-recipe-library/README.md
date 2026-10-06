@@ -4,9 +4,9 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`)
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-09-30
-- **Status:** Active (Phase 9 done; the Phase 2 Gitea backlog
-  ([#4825](https://github.com/ThomasMichon/copilot-extensions/issues/4825))
-  and reviewer follow-ons both landed 2026-10-05; only Phase 3's own
+- **Status:** Active (Phase 9 done; Phase 2 -- the Gitea backlog provider
+  and reviewer adapter -- is now fully closed, merged via PR #5414
+  2026-10-06 after 20 rounds of automated review; only Phase 3's own
   tracked single-emitter-primitive follow-on slice remains)
 - **Vision:** `visions/plugins/agent-dispatch/README.md` (§*The recipe*)
   advances *loop-recipes* from "four fixed archetypes, hand-declared per
@@ -496,6 +496,74 @@ below — read it before starting any Phase 3 work).
 _Pending review._
 
 ## Journal
+
+### 2026-10-06 — PR #5414 merged: Gitea backlog + reviewer adapters, rounds 7-20 of automated review
+PR #5414 (`pr/agent-dispatch-real-gitea-backlog-review-ee03`) carried the
+real Gitea backlog (`gitea_provider.py`) and reviewer (`gitea_pr_provider.py`)
+adapters the entry below describes through its first six review rounds.
+This session drove it the rest of the way through 14 more automated review
+rounds (7-20) to a clean merge -- **squash-merged into `dev`.** Every round's
+finding was fixed, regression-tested, and live re-validated against a fresh
+disposable Gitea scratch repo (created via the admin identity, `cjohnson`
+added as collaborator for the actual adapter-under-test calls, deleted after
+each round) before the next push, per this repo's own validation policy.
+Highlights by round (full detail in session history/PR diff):
+
+- **7:** `reserve()` wrote its `reserved` marker before the label existed --
+  reordered so the label is resolved first.
+- **8:** `forge.api_base` (and `GiteaPRAdapter.api_bases`) only checked
+  non-emptiness, accepting a non-URL/credentialed/query-string value;
+  added `normalize_gitea_api_base()`. Also closed a stale-doc gap in
+  `docs/repository-issue-loop-adoption.md`'s forge schema table.
+- **9:** `reserve()`'s label-then-comment write had no rollback on a
+  comment-write failure, and the GitHub-mirrored `mergeable: false`
+  handling didn't account for Gitea's own draft-PR quirk.
+- **10:** the round-9 rollback could clear another loop's own active
+  reservation during the pre-election race window; added
+  `_other_active_reservation`/later generalized to
+  `_active_reservation_depends_on_label`.
+- **11:** `fetch_pr()` grouped an entire review's inline comments as one
+  thread, letting one resolved conversation mask another unresolved one
+  in the same review; partitioned by `(path, position)`. Also fixed the
+  same unpaginated-review-comments quirk `_all_comments` already worked
+  around on the backlog side.
+- **12:** `_label_id()` cached a missing-label result forever; evicted on
+  miss. `_mergeability()` still risked CONFLICTED for pending/errored/WIP
+  PRs; simplified. The round-9/10 rollback didn't protect against an
+  indeterminate transport failure where this loop's own write actually
+  landed.
+- **13:** `_mergeability()` suppressed a real pending/failing check
+  rollup behind an ambiguous `mergeable` value; reordered to check the
+  rollup first. `release()`'s own check-then-delete was itself racy;
+  added a post-delete re-scan/compensation.
+- **14:** a CLEAN rollup alone shouldn't override an explicit
+  `mergeable: false`. Both Gitea subprocess transports had no timeout
+  (added 120s + sanitized `TimeoutExpired`). `release()`'s label DELETE
+  didn't tolerate an already-404 label (idempotent retry).
+- **15:** `reserve()`'s own label could be raced away by a concurrent
+  release() between its label-add and marker-write; added a post-marker
+  re-assert. Gitea's `warning` commit-status was mismapped to
+  CHECKS_FAILED (should be pending, matching this repo's own production
+  `agent-worktrees` Gitea adapter).
+- **16:** the API token traveled as a literal curl argv element (visible
+  to same-host `/proc` inspection) in both transports; switched to
+  reading the Authorization header via stdin (`-H @-`).
+- **17:** a re-requested reviewer's `REQUEST_REVIEW` row couldn't
+  supersede that reviewer's own stale verdict, so a re-request after
+  changes stayed reported as the old `CHANGES_REQUESTED`.
+- **18:** the approval reducer ignored Gitea's own `official` field (an
+  unofficial review could flip the aggregate) and dropped team-only
+  pending review requests (no `user`, only `team`) to `NONE` instead of
+  `PENDING`.
+- **19:** the final canonical-state reduction checked
+  `CHANGES_REQUESTED`/`APPROVED` but never `PENDING`, so an outstanding
+  re-request on one reviewer lost to another reviewer's stale approval.
+- **20:** clean -- no new findings; merged.
+
+Phase 2 (both the Gitea backlog provider and the Gitea PR/reviewer
+adapter) is now **fully closed**. Phase 3's own tracked single-emitter-
+primitive slice remains explicitly out of this scope and stays open,
+to be picked up or spun off separately.
 
 ### 2026-10-05 — Phase 2 close-out: real Gitea backlog + reviewer adapters (done)
 Picked up `ThomasMichon/copilot-extensions#4825` and Phase 2's sibling
