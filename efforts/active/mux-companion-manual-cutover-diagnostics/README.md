@@ -148,6 +148,30 @@ view highlighting whether resolved head matches the just-resumed session).
 
 ## Journal
 
+### 2026-10-05 — Predecessor-retire root cause found and fixed (mux-bind-relay follow-up)
+Live-driving this effort's own two Validation Plan items (operator ask,
+chained from the mux-bind-relay effort) surfaced the actual predecessor-
+retire bug: a full claim -> spawn-successor -> consume cycle correctly
+transitioned `resolved_head_session` to the new session, but the
+predecessor's pane was never retired, and `handoffs-check --execute` found
+nothing to retire. Root cause: `handoff-core.mjs`'s `promoteSuccessorHead`
+(called by BOTH `consumeFileHandoff` and `consumeDispatchHandoffTask` on
+every successful consume) never passed the real handoff token through to
+`agent-worktrees link-succession`. Without `--handoff-token`,
+`tracking_lifecycle.link_succession`'s own `"handed-off"` branch invents a
+synthetic `manual-<N>` placeholder token instead -- and `open_handoff`'s own
+"cancel any other pending handoff for this predecessor" rule fires when that
+placeholder is opened, silently cancelling the REAL handoff entry as a side
+effect. A cancelled entry is never `linked`, so
+`_pending_handoff_retire_requests`'s own `state != "cancelled"` filter
+permanently excludes it from ever being retired -- the predecessor pane sits
+there forever, correctly superseded in spirit (head already moved) but never
+cleaned up. Fixed by threading the real token (`taskId`/`record.id`) through
+`safePromoteHead` -> `promoteSuccessorHead` -> `--handoff-token`. Added
+regression tests (promoteSuccessorHead now asserts the flag reaches the CLI
+call; the no-token shape stays unaffected) -- 103/103 in
+`handoff-core.test.mjs`.
+
 ### 2026-09-27 — Kickoff
 - Effort created out of live operator feedback on the Phase 8 (read-only
   pending-handoff headline) slice of `worktrees-pivot-ux-overhaul`. Original
