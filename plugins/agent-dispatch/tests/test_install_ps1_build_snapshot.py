@@ -894,11 +894,11 @@ def test_superseded_now_true_when_activation_itself_was_superseded(tmp_path: Pat
 
 
 def test_superseded_now_true_when_won_activation_then_overtaken(tmp_path: Path) -> None:
-    """The round-15 review finding: this invocation can genuinely WIN its
-    own activation ($script:ActivationSuperseded stays False) and only
-    THEN be overtaken by a separate, newer build before a caller re-checks
-    -- Test-ActivationSupersededNow must catch this via a fresh
-    Get-VersionedCurrent read, not just replay the stale False snapshot."""
+    """This invocation can genuinely WIN its own activation
+    ($script:ActivationSuperseded stays False) and only THEN be overtaken by
+    a separate, newer build before a caller re-checks -- Test-
+    ActivationSupersededNow must catch this via a fresh Get-VersionedCurrent
+    read, not just replay the stale False snapshot."""
     result = _run_superseded_now_harness(
         tmp_path, src_version="0.2.0-dev1", current_active="0.2.0-dev2", activation_superseded=False
     )

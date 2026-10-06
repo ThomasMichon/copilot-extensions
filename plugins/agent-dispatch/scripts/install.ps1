@@ -3559,8 +3559,9 @@ function Invoke-Update {
         $didCutover = $false
         if (Test-CoordinatorHealthy) {
             # One more LIVE re-check, immediately before the actual cutover
-            # decision: the exact seam the round-15 review finding named --
-            # the smallest possible gap between validating and acting.
+            # decision -- the smallest possible gap between validating and
+            # acting, closing the window where this invocation won its own
+            # activation but was overtaken before reaching this call.
             if (Test-ActivationSupersededNow) {
                 Write-Skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/task refresh for this invocation'
                 return

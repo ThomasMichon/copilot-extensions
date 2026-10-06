@@ -427,13 +427,28 @@ _versioned_activate() {
             owner="$(readlink "$_activate_lock_link" 2>/dev/null || true)"
             if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
                 sleep 1
-            elif [[ "$(readlink "$_activate_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
-                # Re-verify the link is still the SAME stale value observed
-                # above before removing it (TOCTOU-safe reap): another
-                # process could have reaped and replaced it between the two
-                # readlink calls, and a blind rm -f would then delete that
-                # new, live lock instead.
-                rm -f "$_activate_lock_link"
+            elif ln -s "$$" "$_activate_lock_link.reap" 2>/dev/null; then
+                # A plain readlink-then-rm is a TOCTOU race: another process
+                # could reap the same stale link and create its own live one
+                # between the two readlink calls, and this rm -f would then
+                # delete THAT live lock. A PID-bearing symlink (NOT a bare
+                # `mkdir`) as a SEPARATE reap mutex is atomic AND
+                # self-healing (mirrors plugins/agent-machines/scripts/
+                # init.sh's stamp lock): only the process that wins this
+                # `ln -s .reap` may remove the main lock, and only after
+                # re-verifying it is still the SAME stale value observed
+                # above.
+                if [[ "$(readlink "$_activate_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
+                    rm -f "$_activate_lock_link"
+                fi
+                rm -f "$_activate_lock_link.reap"
+            elif [[ "$(readlink "$_activate_lock_link.reap" 2>/dev/null || true)" =~ ^[0-9]+$ ]] &&
+                 ! kill -0 "$(readlink "$_activate_lock_link.reap" 2>/dev/null)" 2>/dev/null; then
+                # The reap mutex itself is stale (its owner died mid-reap) --
+                # reclaim it so the main lock can never wedge permanently.
+                rm -f "$_activate_lock_link.reap" 2>/dev/null || true
+            else
+                sleep 0.1
             fi
         done
     fi
@@ -1819,9 +1834,10 @@ do_update() {
     # in-flight requests, so the invariant holds either way). The supervisor is a
     # SEPARATE unit -- never stopped here; it outlives the swap + re-adopts.
     #
-    # One more LIVE re-check, immediately before the actual cutover decision:
-    # this is the exact seam the round-15 review finding named -- the
-    # smallest possible gap between validating and acting.
+    # One more LIVE re-check, immediately before the actual cutover decision
+    # -- the smallest possible gap between validating and acting, closing
+    # the window where this invocation won its own activation but was
+    # overtaken before reaching this call.
     if _activation_superseded_now; then
         _skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/unit refresh for this invocation'
         return 0
