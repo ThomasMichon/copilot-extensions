@@ -14,12 +14,12 @@ actually EXECUTES the extracted function under `pwsh` to prove the snapshot
 is really created (and really skipped when already safe), not just that the
 source text looks right.
 
-Portfolio note (round 12 review): this module's own default collection is
-intentionally kept to a single-pwsh-process-per-test smoke contract (each
-test invokes one `pwsh` subprocess and asserts its result) -- the cheapest
-tier that still exercises the REAL extracted PowerShell, not a
-reimplementation. The two tests that deliberately race MULTIPLE concurrent
-`pwsh` processes against the same named mutex
+Portfolio note: this module's own default collection is intentionally kept
+to a single-pwsh-process-per-test smoke contract (each test invokes one
+`pwsh` subprocess and asserts its result) -- the cheapest tier that still
+exercises the REAL extracted PowerShell, not a reimplementation. The two
+tests that deliberately race MULTIPLE concurrent `pwsh` processes against
+the same named mutex
 (test_concurrent_publishers_never_corrupt_or_lose_the_snapshot,
 test_reusing_an_already_valid_snapshot_never_blocks_behind_a_long_held_build_lock)
 are genuinely repeated-process, timing-sensitive coverage -- real assurance,

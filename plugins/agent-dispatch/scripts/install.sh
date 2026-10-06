@@ -369,14 +369,51 @@ _versioned_activate() {
     # legacy mode. On POSIX a rename tolerates the daemons' open files, and
     # _install_service / _install_supervisor_service `systemctl restart` onto the
     # new slot, so no stop is needed.
+    #
+    # Cross-version ordering guard (parity with install.ps1's
+    # Invoke-VersionedActivate): two concurrent POSIX installs for DIFFERENT
+    # versions can legitimately build fully in parallel (nothing here
+    # serializes the build itself), so a slower, older-version invocation
+    # could still reach this activate call AFTER a faster, newer-version
+    # invocation already activated -- silently regressing current-version.
+    # versioned_runtime.py's own `activate` performs no version comparison of
+    # its own, so the guard lives here, under a global (version-independent)
+    # flock so the compare-then-publish sequence is atomic against another
+    # concurrent activate call.
+    #
+    # ACTIVATION_SUPERSEDED is the caller-visible signal that THIS ENTIRE
+    # invocation lost the race, not merely that its activate call was a
+    # no-op: _ensure_runtime and do_update both check it and abort their own
+    # remaining steps (manifest/verify/PATH/pivot; coordinator cutover)
+    # rather than proceeding as if this invocation's own
+    # VENV_PYTHON/LINK_PYTHON were the one that's actually live -- otherwise
+    # a superseded (older) invocation would still publish its own manifest
+    # over the newer one's, or drive _coordinator_cutover from its own stale
+    # build, rolling the live coordinator back even though activation itself
+    # was correctly skipped.
+    ACTIVATION_SUPERSEDED=0
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
+    local lock="$INSTALL_DIR/.activate.lock"
+    mkdir -p "$INSTALL_DIR"
+    exec 8>"$lock"
+    command -v flock >/dev/null 2>&1 && flock 8
+    local current_active
+    current_active="$(_versioned_current)"
+    if [[ -n "$current_active" ]] && _version_lt "$SRC_VERSION" "$current_active" && [[ "$FORCE" -ne 1 ]]; then
+        _skip "Not activating: source $SRC_VERSION is older than already-active $current_active (a newer build activated first; --force to override)"
+        ACTIVATION_SUPERSEDED=1
+        exec 8>&-
+        return 0
+    fi
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
         _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
+        exec 8>&-
         return 1
     fi
+    exec 8>&-
     _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
 }
 
@@ -962,6 +999,19 @@ _ensure_runtime() {
         fi
         _versioned_mark_complete
         _versioned_activate || exit 1
+        if [[ "$ACTIVATION_SUPERSEDED" -eq 1 ]]; then
+            # This invocation's own build lost the cross-version activation
+            # race (see _versioned_activate's own comment): a newer build
+            # already activated while this one was still building.
+            # Everything below (manifest, verify, PATH, pivot, gc) resolves
+            # or reports through THIS invocation's own VENV_PYTHON/
+            # LINK_PYTHON -- publishing it now would overwrite the newer
+            # build's already-correct manifest with this older build's
+            # stale one. Stop here; the already-active newer slot remains
+            # fully installed and untouched.
+            _skip "Build $SRC_VERSION superseded by a newer concurrent build -- skipping remaining publication (manifest, verification, PATH, pivot) for this invocation"
+            return 0
+        fi
     fi
 
     _write_manifest
@@ -1653,6 +1703,16 @@ do_stamp() {
 do_install() {
     echo ''; echo '=== agent-dispatch install ==='; echo ''
     _ensure_runtime
+    if [[ "$ACTIVATION_SUPERSEDED" -eq 1 ]]; then
+        # A concurrent, newer install already activated while this one was
+        # still building (see _versioned_activate's own comment).
+        # _install_service/_install_supervisor_service are themselves
+        # version-agnostic (they write generic, marker-resolving systemd
+        # units), but running them from this invocation's own (older,
+        # losing) build is still unnecessary -- nothing left to do.
+        echo ''; echo '=== agent-dispatch install complete (superseded by a newer concurrent build) ==='
+        return 0
+    fi
     _install_service
     _install_supervisor_service
     echo ''; echo '=== agent-dispatch install complete ==='
@@ -1670,6 +1730,19 @@ do_update() {
     trap _clear_update_marker EXIT
     _downgrade_guard
     _ensure_runtime
+    if [[ "$ACTIVATION_SUPERSEDED" -eq 1 ]]; then
+        # This invocation's own build lost the cross-version activation race
+        # (see _versioned_activate's own comment): a newer concurrent
+        # update/install already activated while this one was still
+        # building. _coordinator_cutover below spawns the new coordinator
+        # from THIS invocation's own VENV_PYTHON/LINK_PYTHON -- proceeding
+        # would cut the ALREADY-newer, already-active coordinator OVER to
+        # this invocation's older build, a silent rollback. Nothing to
+        # update: the newer build's own update already did (or will do) the
+        # real cutover.
+        _skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/unit refresh for this invocation'
+        return 0
+    fi
     # Thread B (parity with install.ps1): a version update must never kill an
     # in-flight claim. _ensure_runtime built + activated the new slot WITHOUT
     # stopping the daemon; now, if a live Thread-B coordinator is serving, cut it
