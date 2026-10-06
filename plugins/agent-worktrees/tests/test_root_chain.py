@@ -316,9 +316,10 @@ class TestResolveRootCodename:
     def test_worktree_id_reuse_invalidates_a_stale_sidecar(
         self, tmp_path, monkeypatch,
     ):
-        # A recreated worktree (same id, a fresh `started_at`) must never
-        # inherit a predecessor's frozen root decision from an orphaned
-        # sidecar the tracking-record deletion path didn't clean up.
+        # A recreated worktree (same id, a fresh `creation_nonce`) must
+        # never inherit a predecessor's frozen root decision from an
+        # orphaned sidecar the tracking-record deletion path didn't clean
+        # up -- even if it happens to land in the same wall-clock second.
         _seed(tmp_path, monkeypatch, "harness", "wt-root",
               codename="amber-thicket", codename_source="built-in")
         _seed(tmp_path, monkeypatch, "other-harness", "wt-other-root",
@@ -330,23 +331,39 @@ class TestResolveRootCodename:
         assert root_chain.resolve_root_codename(child, project="ext") == (
             "amber-thicket"
         )
-        # The worktree id is reaped and recreated with a different origin,
+        # The worktree id is reaped and recreated (a genuinely fresh
+        # `creation_nonce`, regardless of timing) with a different origin,
         # but the OLD sidecar was never removed (what this invalidation
         # protects against even without explicit cleanup wiring).
         recreated = _seed(
             tmp_path, monkeypatch, "ext", "wt-child",
             owner_ref="anomalous-potato/other-harness/wt-other-root#s9",
         )
-        # Force a distinct `started_at` deterministically (two `_seed` calls
-        # in quick succession could otherwise land in the same wall-clock
-        # second, since `_now_iso` has only second-level resolution).
-        tdir = tmp_path / ".ext" / "worktrees"
-        recreated.started_at = "2099-01-01T00:00:00"
-        tracking.save_record(recreated, tdir / "wt-child.yaml")
-        assert recreated.started_at != child.started_at
+        assert recreated.creation_nonce != child.creation_nonce
         assert root_chain.resolve_root_codename(recreated, project="ext") == (
             "cobalt-ember"
         )
+
+    def test_legacy_record_without_creation_nonce_never_freezes(
+        self, tmp_path, monkeypatch,
+    ):
+        # A record predating `creation_nonce` can't be bound to a reliable
+        # identity -- it must simply never freeze (always computed live),
+        # rather than being treated as a permanently-matching empty key.
+        _seed(tmp_path, monkeypatch, "harness", "wt-root",
+              codename="amber-thicket", codename_source="built-in")
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        tdir = tmp_path / ".ext" / "worktrees"
+        child.creation_nonce = ""
+        tracking.save_record(child, tdir / "wt-child.yaml")
+        assert root_chain.resolve_root_codename(child, project="ext") == (
+            "amber-thicket"
+        )
+        sidecar = tdir / "wt-child.root-attribution.json"
+        assert not sidecar.exists()
 
     def test_malformed_frozen_sidecar_is_never_trusted(
         self, tmp_path, monkeypatch,
@@ -419,10 +436,10 @@ class TestResolveRootCodename:
             # Another process wins the race and freezes first, bound to
             # the SAME identity this call will itself compute.
             import json
-            owner_ref, started_at = root_chain._freeze_identity(child)
+            owner_ref, creation_nonce = root_chain._freeze_identity(child)
             sidecar.write_text(json.dumps({
                 "root_codename": "winner-codename",
-                "owner_ref": owner_ref, "started_at": started_at,
+                "owner_ref": owner_ref, "creation_nonce": creation_nonce,
             }))
             return real_load_config(*a, **k)
 

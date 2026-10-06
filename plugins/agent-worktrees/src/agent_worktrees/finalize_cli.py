@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import secrets
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -732,6 +733,7 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
             title_asserted=capped is not None,
             status="active" if args.title_only else "complete",
             completed_at=None if args.title_only else datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            creation_nonce=secrets.token_hex(8),
         )
         tracking.save_record(record, yaml_path)
     else:
