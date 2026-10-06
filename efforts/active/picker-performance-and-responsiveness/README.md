@@ -644,3 +644,24 @@ bump per lib and a changefile per fanned-out consumer plugin, the same
 discipline Phase 4's plugin-activation fix already established this
 session.
 
+**Landed and verified live** (PR #5411, merged after 5 CI reruns -- the
+only failing check across all of them was the experimental, explicitly
+`continue-on-error`/"shadow, non-blocking" coverage-guided-selection step
+hitting its own job's tight 6-minute timeout, consistently at ~6m15-30s,
+never a real test failure; all 150 real `agent-worktrees` tests passed
+every single run. A pre-existing CI fragility -- this PR's large fanout
+changefile count did not touch that step's own code -- not something to
+chase further in this effort). `worktree-manager update` on the same
+diagnosis machine (0.5.7-dev3 -> 0.5.8-dev1) deployed the real fix;
+`agent-worktrees doctor --fix --apply-daemon-health` then genuinely
+reaped a live duplicate daemon (`pid 63356 -> terminated
+(windows-verified-handle)`), and a follow-up `doctor` run reported
+`Resident daemon health: no abnormal cutover findings` -- clean. Note:
+this fix prevents *future* orphaned launch trees and lets `doctor` reap
+*future* duplicate daemons; it does not retroactively clean up the ~26
+already-orphaned mux-daemon/Picker processes already piled up on this
+specific shared machine from before the fix was deployed -- untangling
+which of those are genuinely dead versus still serving another live
+session's active work is a separate, higher-risk task on a shared
+machine, not undertaken here.
+
