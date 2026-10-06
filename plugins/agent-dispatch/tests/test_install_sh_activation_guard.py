@@ -219,6 +219,28 @@ def test_do_update_holds_cutover_lock_through_the_real_cutover_call() -> None:
     assert cutover_call_idx < install_service_idx < unlock_idx
 
 
+@pytest.mark.guard
+def test_ensure_runtime_rechecks_stamped_version_before_publishing() -> None:
+    """_activation_superseded_now only re-reads current-version, which
+    do_stamp never touches (stamping deliberately defers activation). A
+    newer concurrent stamp can therefore publish a newer stamped-version
+    plus its own binstub/manifest/pivot entirely unnoticed by that check,
+    and an older _ensure_runtime invocation -- having already passed its
+    own activation -- would otherwise overwrite that newer launcher
+    surface with its own stale one. Structural check: a second guard
+    comparing SRC_VERSION against stamped-version must sit strictly
+    between the _activation_superseded_now check and the real
+    deploy_binstub call, still inside the same publish lock."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    idx = text.index("_ensure_runtime() {")
+    body = text[idx : text.index("\ndo_stamp() {", idx)]
+    first_guard_idx = body.index("_activation_superseded_now")
+    stamped_check_idx = body.index('"$INSTALL_DIR/stamped-version"', first_guard_idx)
+    version_lt_idx = body.index("_version_lt", stamped_check_idx)
+    deploy_idx = body.index("deploy_binstub", version_lt_idx)
+    assert first_guard_idx < stamped_check_idx < version_lt_idx < deploy_idx
+
+
 def _run_do_stamp_harness(
     tmp_path: Path,
     *,

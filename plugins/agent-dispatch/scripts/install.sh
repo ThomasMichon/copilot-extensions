@@ -1184,6 +1184,26 @@ _ensure_runtime() {
             _unlock_publish
             return 0
         fi
+        # Dual-authority re-check, mirroring do_stamp's own guard but for
+        # the OPPOSITE direction: _activation_superseded_now above only
+        # re-reads current-version, which do_stamp never touches (stamping
+        # deliberately defers activation). A newer concurrent stamp can
+        # therefore publish a newer stamped-version plus its own
+        # binstub/manifest/pivot entirely unnoticed by the check above, and
+        # this older install -- having already passed its own activation --
+        # would otherwise overwrite that newer launcher surface with its
+        # own stale one. Read stamped-version directly (no interpreter
+        # needed) UNDER this same lock so this observes the true latest
+        # stamp, not a stale snapshot.
+        local publish_stamped_version=""
+        if [[ -f "$INSTALL_DIR/stamped-version" ]]; then
+            publish_stamped_version="$(cat "$INSTALL_DIR/stamped-version" 2>/dev/null || true)"
+        fi
+        if [[ -n "$publish_stamped_version" ]] && _version_lt "$SRC_VERSION" "$publish_stamped_version" && [[ "$FORCE" -ne 1 ]]; then
+            _skip "Not publishing: source $SRC_VERSION is older than already-stamped $publish_stamped_version (a newer stamp published first; --force to override)"
+            _unlock_publish
+            return 0
+        fi
         deploy_binstub
         _write_manifest
         # _register_pivot ALSO writes shared, version-sensitive content

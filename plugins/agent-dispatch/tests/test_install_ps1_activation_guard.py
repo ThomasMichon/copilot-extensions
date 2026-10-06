@@ -262,6 +262,29 @@ def test_install_runtime_aborts_remaining_publication_when_superseded() -> None:
 
 
 @pytest.mark.guard
+def test_install_runtime_rechecks_stamped_version_before_publishing() -> None:
+    """Test-ActivationSupersededNow only re-reads current-version, which
+    Invoke-Stamp never touches (stamping deliberately defers activation).
+    A newer concurrent stamp can therefore publish a newer stamped-version
+    plus its own binstub/manifest/pivot entirely unnoticed by that check,
+    and an older Install-Runtime invocation -- having already passed its
+    own activation -- would otherwise overwrite that newer launcher
+    surface with its own stale one. Structural check: a second guard
+    comparing $SrcVersion against stamped-version must sit strictly
+    between the Test-ActivationSupersededNow check and the real
+    Deploy-SelfProvisioningBinstub call, still inside the same publishMutex
+    lock."""
+    text = _INSTALL_PS1.read_text(encoding="utf-8")
+    idx = text.index("function Install-Runtime")
+    body = text[idx : text.index("\nfunction Write-Manifest", idx)]
+    first_guard_idx = body.index("Test-ActivationSupersededNow")
+    stamped_check_idx = body.index("'stamped-version'", first_guard_idx)
+    version_lt_idx = body.index("Test-VersionLt", stamped_check_idx)
+    deploy_idx = body.index("Deploy-SelfProvisioningBinstub", version_lt_idx)
+    assert first_guard_idx < stamped_check_idx < version_lt_idx < deploy_idx
+
+
+@pytest.mark.guard
 def test_invoke_update_aborts_cutover_when_superseded() -> None:
     """A superseded `update` invocation must not drive
     Invoke-CoordinatorCutover/Confirm-CoordinatorRunning from its own

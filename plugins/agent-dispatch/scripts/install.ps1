@@ -1822,6 +1822,28 @@ function Install-Runtime {
                 Write-Skip "Build $SrcVersion superseded by a newer concurrent build -- skipping remaining publication (manifest, verification, PATH, pivot) for this invocation"
                 return
             }
+            # Dual-authority re-check, mirroring Invoke-Stamp's own guard
+            # (round 22) but for the OPPOSITE direction: Test-ActivationSupersededNow
+            # above only re-reads current-version, which a STAMP action never
+            # touches (stamping deliberately defers activation). A newer
+            # concurrent stamp can therefore publish a newer stamped-version
+            # plus its own binstub/manifest/pivot entirely unnoticed by the
+            # check above, and this older install -- having already passed
+            # its own activation -- would otherwise overwrite that newer
+            # launcher surface with its own stale one. Read stamped-version
+            # directly (no interpreter needed, same marker-read pattern as
+            # Invoke-Stamp's own dual-authority guard) UNDER this same lock
+            # so this observes the true latest stamp, not a stale snapshot.
+            $publishStampedVersion = $null
+            $publishStampedVersionPath = Join-Path $InstallDir 'stamped-version'
+            if (Test-Path $publishStampedVersionPath) {
+                $publishStampedVersion = (Get-Content -Path $publishStampedVersionPath -Raw -ErrorAction SilentlyContinue)
+                if ($publishStampedVersion) { $publishStampedVersion = $publishStampedVersion.Trim() }
+            }
+            if ($publishStampedVersion -and (Test-VersionLt -A $SrcVersion -B $publishStampedVersion) -and -not $Force) {
+                Write-Skip "Not publishing: source $SrcVersion is older than already-stamped $publishStampedVersion (a newer stamp published first; -Force to override)"
+                return
+            }
             Deploy-SelfProvisioningBinstub
             Write-Manifest
             # Register-PickerPivot ALSO writes shared, version-sensitive
