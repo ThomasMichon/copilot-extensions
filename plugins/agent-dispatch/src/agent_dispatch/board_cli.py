@@ -603,7 +603,7 @@ def _fetch_run_waiters_direct(endpoint: str | None = None) -> dict[str, dict]:
         request = urllib.request.Request(f"{endpoint}/run-waiters")
         token = os.environ.get("AGENT_DISPATCH_TOKEN")
         if token:
-            request.add_header("Authorization", f"******")
+            request.add_header("Authorization", "******")
         with urllib.request.urlopen(request, timeout=3) as response:
             return json.loads(response.read().decode("utf-8"))
     except Exception:

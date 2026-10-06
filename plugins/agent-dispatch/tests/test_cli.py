@@ -2870,12 +2870,12 @@ def test_unexclude_cli(monkeypatch):
     monkeypatch.setattr(__main__, "_owner_from_identity", lambda args: None)
 
     args = build_parser().parse_args(
-        ["unexclude", "t1", "--exclude", "machine:tmichon-cloud2", "--actor", "alice"]
+        ["unexclude", "t1", "--exclude", "machine:example-host", "--actor", "alice"]
     )
     assert args.func(args) == 0
     assert seen["clear_exclude"] == {
         "task_id": "t1",
-        "exclude": "machine:tmichon-cloud2",
+        "exclude": "machine:example-host",
         "actor": "alice",
         "expected_status": None,
     }
