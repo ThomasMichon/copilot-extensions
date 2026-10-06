@@ -383,7 +383,9 @@ exclusive** — before deciding which (if either) to execute:
 
 - [ ] **(a) "Widen the pipe": a custom ACP extension payload.** The real
       `agent-client-protocol` package (Zed's ACP, what `copilot --acp --stdio`
-      speaks; vendored via the `acp` Python package agent-bridge depends on)
+      speaks; an ordinary installed pip dependency of `agent-bridge`'s —
+      `plugins/agent-bridge/pyproject.toml`'s `agent-client-protocol>=0.12.0,<1`
+      — not vendored source)
       already has a genuine, spec-level vendor-extension mechanism that goes
       unused here today:
       - every ACP message type carries an optional `_meta` field
