@@ -2,7 +2,8 @@
 
 - **Slug:** `vision-backport-sweep`
 - **Repo:** copilot-extensions
-- **Branch(es):** `effort/vision-backport-sweep`
+- **Branch(es):** per-slice (each session/slice opens its own PR branch; no
+  shared long-lived branch — see Coordination)
 - **Created:** 2026-10-05
 - **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** `visions/README.md` (the whole index — a repo-wide sweep,
@@ -15,7 +16,9 @@
   and linked below as they're carved; `efforts/README.md`'s index Coordination
   column lists this as "See effort" accordingly)
 - **Sub-issues:** `ThomasMichon/copilot-extensions#5356` (plugin-services
-  conformance gap, pre-existing, now vision-linked)
+  conformance gap, pre-existing, now vision-linked) ·
+  `ThomasMichon/copilot-extensions#5452` (tasks-pane-ux delegated/relay
+  waiter-surfacing gap, newly filed this slice)
 
 ## Guiding Intent
 
@@ -31,8 +34,9 @@ vision→reality delta (a north-star-ahead item, or an invariant
 nonconformance) into a GitHub issue citing the vision item, grouped here.
 
 This is explicitly a **multi-session, multi-stretch** effort — this repo's
-29-vision index is too large for one sitting. Land one coherent slice per
-session (one vision reconciled + its deltas carved) and hand off the rest.
+vision index (`visions/README.md`) is too large for one sitting. Land one
+coherent slice per session (one vision reconciled + its deltas carved) and
+hand off the rest.
 
 A companion, independent stream — refreshing stale user-facing docs,
 README capability claims, and Picker preview screenshots/images — is tracked
@@ -88,9 +92,12 @@ Operator, end of a long multi-repo session:
 ### Phase 1 — The three session-evidenced targets (cheapest/most-certain first)
 - [x] `visions/plugins/agent-dispatch/tasks-pane-ux/README.md` — fold back the
       run-waiter Tasks-board/Claims surfacing from `#5400` as a new Concepts &
-      Components subsection ("The suspended-task waiter"), naming the
-      documented delegated-cross-machine/relay-subscribe gap as the open
-      additive edge. Provenance entry added.
+      Components subsection ("The suspended-task waiter"), stated as pure
+      should-be (every board path surfaces the waiter). The documented
+      delegated-cross-machine/relay-subscribe implementation gap is **not**
+      enumerated in the vision; it is tracked as
+      `ThomasMichon/copilot-extensions#5452`, filed against this vision item.
+      Provenance entry added.
 - [x] `visions/plugins/agent-dispatch/reviewer/README.md` — fold back the
       recipe's standing `_STAGNATION_CLAUSE` charter behavior (already
       shipped, governs both `land=self`/`land=author`) as a new Behavior,
@@ -164,12 +171,13 @@ then rather than assuming either answer.
 - Effort created as the tracker for the operator's vision-backport +
   material-refresh handoff directive.
 - Landed Phase 1's three session-evidenced targets in one PR: folded back
-  `#5400`'s run-waiter surfacing into the tasks-pane-ux vision, folded back
-  the reviewer recipe's standing stagnation-escalation behavior into the
-  reviewer vision, and scoped a first pass of the plugin-services invariant
-  audit (confirmed the vision already covers the applicable invariants;
-  linked the pre-existing `#5356` to it via issue comment rather than editing
-  the vision).
+  `#5400`'s run-waiter surfacing into the tasks-pane-ux vision (filing
+  `#5452` for the documented delegated/relay implementation gap rather than
+  describing it in the vision), folded back the reviewer recipe's standing
+  stagnation-escalation behavior into the reviewer vision, and scoped a first
+  pass of the plugin-services invariant audit (confirmed the vision already
+  covers the applicable invariants; linked the pre-existing `#5356` to it via
+  issue comment rather than editing the vision).
 - The full invariant audit (Phase 3) and the wider vision sweep (Phase 2) are
   explicitly deferred to future sessions per the handoff's own sequencing
   note — this effort stays open across many slices.
