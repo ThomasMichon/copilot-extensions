@@ -1054,13 +1054,13 @@ does **not** quietly undo it.
 The supervisor/coordinator singleton is itself a plugin-services runtime
 subject to that vision's cross-cutting contract — it does not get a
 bespoke install/update story. Updating the supervisor's own payload is
-**zero-downtime** for in-flight supervised work: the running singleton is
-drained and retired (*register-once-cutover-on-update*) before, never
-after, an in-place reinstall touches its active runtime slot, and the
-on-disk runtime stays **immutable-versioned** (*immutable-versioned-runtime*)
-rather than overwritten under a live process's open file handles. This is
-inherited from [plugin-services](../../plugin-services/README.md), not
-restated as a parallel contract.
+**zero-downtime** for in-flight supervised work: an update installs the new
+immutable runtime generation **beside** the running one — never mutating the
+active generation's files in place — then uses *zero-downtime-cutover* to
+drain and hand off supervised work to the new generation before the old one
+retires (*register-once-cutover-on-update*). This is inherited from
+[plugin-services](../../plugin-services/README.md), not restated as a
+parallel contract.
 
 ## Non-Goals / Boundaries
 
@@ -1140,8 +1140,7 @@ restated as a parallel contract.
   of the `backporting-visions` design/service-invariant audit found this
   vision did not cite or restate the applicable `plugin-services` invariants
   (*register-once-cutover-on-update*, *immutable-versioned-runtime*) for the
-  supervisor/coordinator's own runtime. A conformance gap against them is
-  tracked at `ThomasMichon/copilot-extensions#5356`.
+  supervisor/coordinator's own runtime.
 - **2026-10-02** — Added *extend-any-declaration*: generalizes the
   plugin-shipped `extends:` mechanism (which today only resolves against a
   small set of named, plugin-shipped recipes, with scalar-only override
