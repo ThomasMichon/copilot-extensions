@@ -76,6 +76,9 @@ def test_status_monitor_proceeds_when_lease_is_won(monkeypatch, tmp_path):
         def acquire(self) -> None:
             acquired.append(True)
 
+        def release(self) -> None:
+            pass
+
     monkeypatch.setattr(single_instance_lease, "SingleInstance", _AlwaysWins)
     write_calls: list = []
     monkeypatch.setattr(m.locks, "write_lock", lambda *a, **kw: write_calls.append((a, kw)))
@@ -98,7 +101,7 @@ def test_status_monitor_proceeds_when_lease_is_won(monkeypatch, tmp_path):
     args = argparse.Namespace(interval=15, passive=False, control_port=None)
     with pytest.raises(RuntimeError, match="reached the resident loop"):
         m.cmd_status_monitor(args)
-    assert acquired == [True]
+    assert acquired == [True, True], "must acquire the shared startup claim, then the perpetual ownership lease"
     assert len(write_calls) == 1
     assert write_calls[0][0][0] == m._monitor_lock_path(), "wrote the real monitor lock path"
 
@@ -183,8 +186,8 @@ def test_status_monitor_muxless_replacement_bypasses_the_incumbent_lease(monkeyp
     mux-capable candidate take over from a still-resident muxless owner via
     the existing soft self-retire/supersession polling -- not the main
     ownership lease (which the incumbent still holds). This candidate must
-    skip THAT lease, but still serialize against other replacement
-    candidates via the separate, short-lived replacement claim."""
+    skip THAT lease, but still serialize against other starters (ordinary
+    or replacement alike) via the shared, short-lived startup claim."""
     import shutil
 
     # A different live pid than this test process, recording `mux: false` --
@@ -220,8 +223,8 @@ def test_status_monitor_muxless_replacement_bypasses_the_incumbent_lease(monkeyp
     args = argparse.Namespace(interval=15, passive=False, control_port=None, mux="psmux")
     with pytest.raises(RuntimeError, match="reached the resident loop"):
         m.cmd_status_monitor(args)
-    assert constructed == ["status-monitor-replacement-claim.lock"], (
-        "must contest only the dedicated replacement claim, never the incumbent's ownership lease"
+    assert constructed == ["status-monitor-startup-claim.lock"], (
+        "must contest only the shared startup claim, never the incumbent's ownership lease"
     )
 
 
@@ -232,8 +235,12 @@ def test_status_monitor_superseded_runtime_replacement_bypasses_the_incumbent_le
     second, deliberate, already-permitted replacement case
     (`_other_current_monitor()`'s own `runtime_superseded` check) -- this
     candidate must skip the incumbent's ownership lease, for the same
-    reason as above, while still serializing against peer replacement
-    candidates via the dedicated claim."""
+    reason as above, while still serializing against other starters via
+    the shared startup claim. Also a regression for a Medium-severity
+    finding on a prior revision of this test: it recorded the constructed
+    lock name but never asserted it, so a buggy implementation that
+    acquired the incumbent's ownership lease here instead would have
+    passed silently."""
     other_owner = {"pid": os.getpid() + 1, "prefix": "/old-runtime", "mux": True}
     monkeypatch.setattr(m.locks, "read_lock", lambda *_a, **_kw: other_owner)
     monkeypatch.setattr(m.locks, "lock_is_live", lambda *_a, **_kw: True)
@@ -261,14 +268,17 @@ def test_status_monitor_superseded_runtime_replacement_bypasses_the_incumbent_le
     args = argparse.Namespace(interval=15, passive=False, control_port=None)
     with pytest.raises(RuntimeError, match="reached the resident loop"):
         m.cmd_status_monitor(args)
+    assert constructed == ["status-monitor-startup-claim.lock"], (
+        "must contest only the shared startup claim, never the incumbent's ownership lease"
+    )
 
 
 def test_status_monitor_replacement_candidates_are_serialized_against_each_other(monkeypatch, tmp_path):
     """Regression for a High-severity review finding (PR #5412): the
     incumbent bypass must not itself reopen a TOCTOU gap between PEER
-    replacement candidates. Losing the dedicated replacement claim (a
-    sibling candidate already holds it) must return before the lock-file
-    write, exactly like losing the ordinary ownership lease does."""
+    replacement candidates. Losing the shared startup claim (a sibling
+    candidate already holds it) must return before the lock-file write,
+    exactly like losing the ordinary ownership lease does."""
     other_owner = {"pid": os.getpid() + 1, "prefix": "/other-owner", "mux": False}
     monkeypatch.setattr(m.locks, "read_lock", lambda *_a, **_kw: other_owner)
     monkeypatch.setattr(m.locks, "lock_is_live", lambda *_a, **_kw: True)
@@ -282,7 +292,7 @@ def test_status_monitor_replacement_candidates_are_serialized_against_each_other
             pass
 
         def acquire(self) -> None:
-            raise single_instance_lease.AlreadyRunningError(tmp_path / "status-monitor-replacement-claim.lock", 999)
+            raise single_instance_lease.AlreadyRunningError(tmp_path / "status-monitor-startup-claim.lock", 999)
 
     monkeypatch.setattr(single_instance_lease, "SingleInstance", _AlreadyHeld)
     write_calls: list = []
@@ -291,6 +301,47 @@ def test_status_monitor_replacement_candidates_are_serialized_against_each_other
     args = argparse.Namespace(interval=15, passive=False, control_port=None, mux="psmux")
     assert m.cmd_status_monitor(args) == 0
     assert write_calls == [], "a losing replacement candidate must return before the lock-file write"
+
+
+def test_status_monitor_startup_claim_is_shared_between_ordinary_and_replacement_starters(monkeypatch):
+    """Regression for a High-severity review finding (PR #5412): an
+    ordinary starter (no live owner at all) and a replacement starter (a
+    live, replaceable incumbent) used to contest two DIFFERENT lock names,
+    so if the incumbent a replacement candidate classified against exited
+    (and its metadata went stale) before that candidate published, a
+    second, ordinary-starting candidate reading "no live owner" could
+    acquire the OTHER lock name with no mutex between them -- an
+    incumbent-exit interleaving. Both starters must now contest the SAME
+    shared startup-claim name, so whichever one is mid-classification
+    always blocks the other, regardless of which path either takes."""
+    constructed: list[str] = []
+
+    class _RecordLockName:
+        def __init__(self, *_a, lock_name=None, **_kw) -> None:
+            constructed.append(lock_name)
+
+        def acquire(self) -> None:
+            pass
+
+        def release(self) -> None:
+            pass
+
+    monkeypatch.setattr(single_instance_lease, "SingleInstance", _RecordLockName)
+    monkeypatch.setattr(m.locks, "read_lock", lambda *_a, **_kw: None)
+    monkeypatch.setattr(m.locks, "lock_is_live", lambda *_a, **_kw: False)
+
+    def _raise_to_exit_before_the_loop(*_a, **_kw):
+        raise RuntimeError("reached the resident loop -- test stops here by design")
+
+    monkeypatch.setattr(session_catalog, "ResidentSessionReconciler", _raise_to_exit_before_the_loop)
+
+    args = argparse.Namespace(interval=15, passive=False, control_port=None)
+    with pytest.raises(RuntimeError, match="reached the resident loop"):
+        m.cmd_status_monitor(args)
+    # Ordinary path (no live owner at all): the shared startup claim first,
+    # then the perpetual ownership lease -- the SAME shared claim name the
+    # two replacement tests above assert for their own (different) path.
+    assert constructed == ["status-monitor-startup-claim.lock", "status-monitor-singleton.lock"]
 
 
 def test_resident_lifecycle_requests_wait_for_their_deadline():

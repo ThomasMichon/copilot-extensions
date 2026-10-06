@@ -256,7 +256,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     # the successor before retiring the predecessor), not a change scoped
     # to this file -- tracked separately (review findings, PR #5412).
     _OWNERSHIP_LEASE_NAME = "status-monitor-singleton.lock"
-    _REPLACEMENT_CLAIM_NAME = "status-monitor-replacement-claim.lock"
+    _STARTUP_CLAIM_NAME = "status-monitor-startup-claim.lock"
 
     def _acquire_lease(lock_name: str):
         """Acquire a named atomic exclusivity lease, or return ``None`` if
@@ -301,39 +301,38 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         op = existing.get("prefix")
         return bool(op and runtime_superseded(prefix=op))
 
-    # The incumbent bypass above must not itself become a new TOCTOU gap: if
-    # two candidates both read the same live, replaceable (muxless or
-    # superseded) owner before either publishes, both would skip
-    # `_OWNERSHIP_LEASE_NAME` (held by the still-resident incumbent, so
-    # neither replacement candidate could acquire it anyway) and both pass
-    # `_other_current_monitor()`, duplicating exactly the bug this PR
-    # exists to fix -- just scoped to the replacement case (review finding,
-    # PR #5412). A SEPARATE, dedicated claim serializes replacement
-    # candidates against EACH OTHER (never against the incumbent, which
-    # legitimately still holds `_OWNERSHIP_LEASE_NAME` for its own
-    # lifetime): acquire it, re-read ownership under it (`_other_current_
-    # monitor()` does a fresh read), publish, then release -- a short-lived
-    # claim, not held for the life of the process like the ownership lease.
+    # A hard-lease (ordinary) starter and a bypass (replacement) starter
+    # used to contest two DIFFERENT lock names, which reopened a gap: if
+    # the still-live incumbent a replacement candidate classified against
+    # then exits (and its metadata goes stale) before that candidate
+    # publishes, a second, ordinary-starting candidate can read "no live
+    # owner," acquire `_OWNERSHIP_LEASE_NAME` (nobody holds it either), and
+    # both candidates then race `_other_current_monitor()` + the write with
+    # no shared mutex between them (review finding, PR #5412). A SINGLE
+    # shared startup claim now wraps classification-through-publication for
+    # EVERY non-passive starter, ordinary or replacement alike, so only one
+    # starting candidate of either kind is ever inside that critical
+    # section at a time -- closing the incumbent-exit interleaving. It is
+    # short-lived (held only through the write, then released), unlike
+    # `_OWNERSHIP_LEASE_NAME` (held for the life of the process once an
+    # ordinary starter wins it, exactly as before).
     _lease = None
-    _replacement_claim = None
     if not passive_mode:
-        if _existing_owner_replacement_permitted():
-            _replacement_claim = _acquire_lease(_REPLACEMENT_CLAIM_NAME)
-            if _replacement_claim is None:
+        _startup_claim = _acquire_lease(_STARTUP_CLAIM_NAME)
+        if _startup_claim is None:
+            return 0
+        try:
+            if not _existing_owner_replacement_permitted():
+                _lease = _acquire_ownership_lease()
+                if _lease is None:
+                    return 0
+            if _other_current_monitor():
                 return 0
-        else:
-            _lease = _acquire_ownership_lease()
-            if _lease is None:
-                return 0
-
-    if _other_current_monitor():
-        if _replacement_claim is not None:
-            _replacement_claim.release()
+            _locks.write_lock(lock, extra={"prefix": my_prefix, "mux": bool(mux_bin)})
+        finally:
+            _startup_claim.release()
+    elif _other_current_monitor():
         return 0
-    if not passive_mode:
-        _locks.write_lock(lock, extra={"prefix": my_prefix, "mux": bool(mux_bin)})
-    if _replacement_claim is not None:
-        _replacement_claim.release()
 
     ctx_done: set[str] = set()
 
