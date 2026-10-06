@@ -802,21 +802,37 @@ _bootstrap_python() {
     # (symlink-resolved) paths rather than the LINK_DIR/VENV_DIR variable
     # strings: `.venv` can physically resolve into the target slot
     # mid-migration even when the two variables hold different literal
-    # strings.
-    local exclude_venv_dir="${1:-}" use_link_python=1
-    if [[ "$exclude_venv_dir" == "exclude-venv-dir" ]] && [[ -d "$LINK_DIR" ]] && [[ -d "$VENV_DIR" ]]; then
-        local link_real venv_real
-        link_real="$(cd "$LINK_DIR" 2>/dev/null && pwd -P)"
+    # strings. This exclusion covers EVERY candidate, including the
+    # python3/python PATH fallback below -- not just the explicit
+    # $LINK_DIR/bin/python candidate -- since an installer launched with
+    # the target venv's own bin/ on PATH could otherwise still resolve
+    # straight back into $VENV_DIR and defeat the whole exclusion.
+    local exclude_venv_dir="${1:-}" use_link_python=1 venv_real=""
+    if [[ "$exclude_venv_dir" == "exclude-venv-dir" ]] && [[ -d "$VENV_DIR" ]]; then
         venv_real="$(cd "$VENV_DIR" 2>/dev/null && pwd -P)"
-        [[ -n "$link_real" && "$link_real" == "$venv_real" ]] && use_link_python=0
+        if [[ -d "$LINK_DIR" ]]; then
+            local link_real
+            link_real="$(cd "$LINK_DIR" 2>/dev/null && pwd -P)"
+            [[ -n "$link_real" && -n "$venv_real" && "$link_real" == "$venv_real" ]] && use_link_python=0
+        fi
     fi
     if [[ "$use_link_python" == 1 ]] && [[ -x "$LINK_DIR/bin/python" ]]; then
         echo "$LINK_DIR/bin/python"
         return 0
     fi
-    local __c
+    local __c __resolved __resolved_bin_real
     for __c in python3 python; do
-        if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
+        command -v "$__c" >/dev/null 2>&1 || continue
+        __resolved="$(command -v "$__c")"
+        if [[ -n "$venv_real" ]]; then
+            # The executable resolved via PATH lives in $VENV_DIR's bin/
+            # (one level under the directory venv_real points at), not AT
+            # venv_real itself -- compare with a prefix match, not equality.
+            __resolved_bin_real="$(cd "$(dirname "$__resolved")" 2>/dev/null && pwd -P)"
+            [[ -n "$__resolved_bin_real" && "$__resolved_bin_real" == "$venv_real"/* ]] && continue
+        fi
+        echo "$__resolved"
+        return 0
     done
     return 1
 }
@@ -903,19 +919,36 @@ _acquire_versioned_slot_lease_python_fallback() {
     # back via a blocking `read` (no polling): it unblocks the instant the
     # helper opens its own write end.
     #
-    # Returns 0 (helper pid + keep-alive fd recorded) or 1.
+    # Returns 0 (helper pid + keep-alive fd recorded), 1 (lock held by
+    # another process), or 2 (no bootstrap python resolvable at all --
+    # distinct from 1 so the caller can treat a fresh, nothing-installed-
+    # yet machine differently from genuine contention).
     local lock_file="$1" py tmp_dir in_fifo out_fifo pid line
     # exclude-venv-dir: this helper process holds the lease/flock, but it
     # still runs an actual python.exe -- if that interpreter were resolved
     # from inside $VENV_DIR, the helper itself would show up as "a live
     # process running from this slot" the next time _versioned_slot_clean
     # censuses it, same as the direct census call above.
-    py="$(_bootstrap_python exclude-venv-dir)" || return 1
-    [[ -n "$py" ]] || return 1
+    py="$(_bootstrap_python exclude-venv-dir)" || return 2
+    [[ -n "$py" ]] || return 2
     tmp_dir="$(mktemp -d 2>/dev/null)" || return 1
     in_fifo="$tmp_dir/in"
     out_fifo="$tmp_dir/out"
     if ! mkfifo "$in_fifo" "$out_fifo" 2>/dev/null; then
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    # Open OUR OWN read-write fd on out_fifo FIRST, before the helper ever
+    # starts. A read-write open of a FIFO never blocks (unlike a read-only
+    # open, which waits for a writer) -- so the `read -t 10` below is
+    # bounded by its own timeout even if the helper never reaches the
+    # point of opening its write end at all (e.g. python itself fails to
+    # start, or `import fcntl` raises before `out = open(...)` runs). Without
+    # this, `read ... <"$out_fifo"` would perform its OWN blocking
+    # read-only open before `read`'s timeout ever started counting, and a
+    # helper that never starts would hang the installer forever.
+    if ! exec 7<>"$out_fifo"; then
         rm -rf "$tmp_dir"
         return 1
     fi
@@ -941,15 +974,17 @@ sys.stdin.read()  # block until the parent closes fd 9 (release)
     # (guarded by the caller), so fd 9 can't collide with another live
     # lease in this same process.
     if ! exec 9>"$in_fifo"; then
+        exec 7>&- 2>/dev/null || true
         rm -rf "$tmp_dir"
         kill "$pid" 2>/dev/null || true
         wait "$pid" 2>/dev/null || true
         return 1
     fi
 
-    if ! IFS= read -r -t 10 line <"$out_fifo"; then
+    if ! IFS= read -r -t 10 -u 7 line; then
         line=""
     fi
+    exec 7>&- 2>/dev/null || true
     rm -rf "$tmp_dir"
 
     if [[ "$line" == "OK" ]]; then
@@ -970,10 +1005,21 @@ _acquire_versioned_slot_lease() {
     # invocations could both observe a clean slot (neither has started its
     # external build yet) and then both build into it -- this lease is what
     # actually serializes them (#5439). Returns 0 if acquired (or a no-op in
-    # legacy mode); 1 if another live process already holds it. Never
-    # silently succeeds when locking can't be verified -- falls back to a
-    # real fcntl.flock via a resident Python helper when the `flock` CLI is
-    # unavailable, rather than treating "couldn't lock" as "no contention".
+    # legacy mode); 1 if another live process already holds it, or the
+    # lease machinery itself is unusable (e.g. the lease file/FIFOs
+    # couldn't be created). Never silently succeeds when locking can't be
+    # verified -- falls back to a real fcntl.flock via a resident Python
+    # helper when the `flock` CLI is unavailable, rather than treating
+    # "couldn't lock" as "no contention". The ONE deliberate exception: a
+    # brand-new machine with neither `flock` NOR any bootstrap python yet
+    # (the exact case `uv venv` itself exists to solve, since uv can
+    # provision a Python with no system interpreter present at all) can
+    # never acquire ANY lease here -- hard-failing would mean a fresh
+    # install can never complete on such a host. That narrow case degrades
+    # to "no lease" with a loud warning rather than aborting: a first-ever
+    # install has no prior version to race against in the first place, so
+    # the actual hazard this lease defends against doesn't yet exist there
+    # either. Genuine contention (lock already held) still hard-fails.
     # Idempotent: a second call while already held is a no-op success.
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     [[ -n "$_VERSIONED_SLOT_LEASE_FD" || -n "$_VERSIONED_SLOT_LEASE_PY_PID" ]] && return 0
@@ -981,7 +1027,12 @@ _acquire_versioned_slot_lease() {
     lease_path="$(_versioned_slot_lease_path)"
     if ! command -v flock >/dev/null 2>&1; then
         _acquire_versioned_slot_lease_python_fallback "$lease_path"
-        return $?
+        local rc=$?
+        if [[ "$rc" -eq 2 ]]; then
+            warn "No flock and no bootstrap python available -- proceeding without an exclusive build lease (expected only on a brand-new machine's first install)."
+            return 0
+        fi
+        return "$rc"
     fi
     # A literal fd number is required here (not the dynamic `{fd}`
     # allocation syntax, bash 4.1+): this function runs at most once per

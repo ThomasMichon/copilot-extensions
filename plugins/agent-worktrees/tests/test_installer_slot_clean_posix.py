@@ -59,6 +59,17 @@ _BASH = _resolve_bash()
 _HAS_FCNTL = importlib.util.find_spec("fcntl") is not None
 
 
+def _bash_path(p: Path) -> str:
+    """A path suitable for embedding in a colon-delimited `PATH` string
+    under Git Bash: a literal `C:/Users/...` (plain `.as_posix()`) breaks
+    PATH-splitting because bash treats the drive letter's `:` as a PATH
+    separator too. MSYS2's own `/c/Users/...` form has no such colon."""
+    posix = p.as_posix()
+    if len(posix) >= 2 and posix[1] == ":" and posix[0].isalpha():
+        return f"/{posix[0].lower()}{posix[2:]}"
+    return posix
+
+
 def _function_body(text: str, name: str) -> str:
     """Extract a top-level `name() { ... }` function body (first match),
     assuming the closing brace is on its own line (this file's convention)."""
@@ -116,7 +127,7 @@ def test_bootstrap_python_excludes_the_target_slot_even_when_link_dir_resolves_i
     assert 'exclude_venv_dir="${1:-}"' in body
     assert 'link_real="$(cd "$LINK_DIR" 2>/dev/null && pwd -P)"' in body
     assert 'venv_real="$(cd "$VENV_DIR" 2>/dev/null && pwd -P)"' in body
-    assert '[[ -n "$link_real" && "$link_real" == "$venv_real" ]]' in body
+    assert '"$link_real" == "$venv_real"' in body
 
     # The lease's own resident helper must also be excluded -- it runs an
     # actual interpreter and would show up in the very census it's trying
@@ -159,7 +170,7 @@ def test_bootstrap_python_exclude_venv_dir_behavioral(tmp_path: Path):
 set -uo pipefail
 LINK_DIR="{link_dir.as_posix()}"
 VENV_DIR="{venv_dir.as_posix()}"
-PATH="{fallback_bin.as_posix()}:$PATH"
+PATH="{_bash_path(fallback_bin)}:$PATH"
 {fn_body}
 }}
 _bootstrap_python exclude-venv-dir
@@ -173,9 +184,64 @@ _bootstrap_python exclude-venv-dir
         )
         assert r.returncode == 0, f"harness failed: {r.stdout} {r.stderr}"
         result = r.stdout.strip()
-        assert result == str(fallback_python), (
+        assert result == _bash_path(fallback_python), (
             "_bootstrap_python exclude-venv-dir must never select the "
             f"target slot's own interpreter; got {result!r}"
+        )
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
+def test_bootstrap_python_exclude_venv_dir_filters_the_path_fallback_too(
+    tmp_path: Path,
+):
+    """`exclude-venv-dir` must reject the `python3`/`python` PATH fallback
+    too, not just the explicit `$LINK_DIR/bin/python` candidate: if an
+    installer is launched with the target venv's own `bin/` on PATH (e.g.
+    an activated venv), `command -v python3` would otherwise resolve
+    straight back into `$VENV_DIR` and defeat the whole exclusion."""
+    venv_dir = tmp_path / "versions" / "1.0.0"
+    (venv_dir / "bin").mkdir(parents=True)
+    excluded_python = venv_dir / "bin" / "python3"
+    excluded_python.write_text("#!/bin/sh\necho excluded\n")
+    excluded_python.chmod(0o755)
+
+    fallback_bin = tmp_path / "fallback-bin"
+    fallback_bin.mkdir()
+    # Named "python" (not "python3"): `command -v NAME` only ever returns
+    # the FIRST PATH match for that exact name -- once the loop's "python3"
+    # iteration finds and excludes the venv's own copy, it moves on to try
+    # the NEXT candidate NAME ("python"), not a second PATH match for
+    # "python3". This fallback deliberately occupies that second slot.
+    fallback_python = fallback_bin / "python"
+    fallback_python.write_text("#!/bin/sh\necho fallback-python\n")
+    fallback_python.chmod(0o755)
+
+    link_dir = tmp_path / "nonexistent-link"  # no bin/python here at all
+
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    fn_body = _function_body(text, "_bootstrap_python")
+
+    harness = f"""
+set -uo pipefail
+LINK_DIR="{link_dir.as_posix()}"
+VENV_DIR="{venv_dir.as_posix()}"
+PATH="{_bash_path(venv_dir)}/bin:{_bash_path(fallback_bin)}:$PATH"
+{fn_body}
+}}
+_bootstrap_python exclude-venv-dir
+"""
+    with tempfile.TemporaryDirectory() as td:
+        harness_path = Path(td) / "harness.sh"
+        harness_path.write_text(harness, encoding="utf-8")
+        r = subprocess.run(
+            [_BASH, str(harness_path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert r.returncode == 0, f"harness failed: {r.stdout} {r.stderr}"
+        result = r.stdout.strip()
+        assert result == _bash_path(fallback_python), (
+            "_bootstrap_python exclude-venv-dir must reject a PATH "
+            f"fallback resolving into $VENV_DIR; got {result!r}"
         )
 
 
@@ -263,6 +329,61 @@ def test_versioned_slot_lease_uses_flock_held_for_process_lifetime():
     assert "exec 8>&-" in release_body
 
 
+def test_versioned_slot_lease_degrades_without_hard_failing_on_a_brand_new_machine():
+    """A brand-new machine with neither `flock` NOR any bootstrap python
+    yet (uv itself can provision a Python with no system interpreter
+    present at all -- that's the whole point of `uv venv`) must still be
+    able to complete a FIRST install: hard-failing here would mean the
+    installer can never get off the ground on such a host. That narrow
+    case (fallback rc 2, distinct from rc 1 genuine lock contention)
+    degrades to "no lease" with a loud `warn`, never a silent one -- a
+    first-ever install has no prior version to race against yet either,
+    so the hazard this lease defends against doesn't exist there."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    acquire_body = _function_body(text, "_acquire_versioned_slot_lease")
+    fallback_body = _function_body(
+        text, "_acquire_versioned_slot_lease_python_fallback"
+    )
+
+    assert 'py="$(_bootstrap_python exclude-venv-dir)" || return 2' in fallback_body
+
+    no_flock_branch = acquire_body.split(
+        "if ! command -v flock >/dev/null 2>&1; then", 1
+    )[1][:400]
+    assert 'if [[ "$rc" -eq 2 ]]; then' in no_flock_branch
+    assert "warn " in no_flock_branch
+    assert "return 0" in no_flock_branch.split('if [[ "$rc" -eq 2 ]]; then', 1)[1][:200]
+
+
+def test_versioned_slot_lease_python_fallback_bounds_the_status_read_even_if_the_helper_never_starts():
+    """The `-t 10` timeout on the status read must cover the ENTIRE wait,
+    including the FIFO's own open -- not just the `read` builtin after it.
+    A plain `read -t 10 line <"$out_fifo"` performs a blocking read-ONLY
+    open of the FIFO as part of setting up that redirection, before `read`
+    or its timeout ever starts: if the helper never reaches the point of
+    opening its own write end (e.g. python itself fails to start before
+    `import fcntl`/`open(...)` runs), that open blocks forever and the
+    timeout never gets a chance to fire. Opening a read-WRITE fd on the
+    same FIFO first (which never blocks, since it isn't waiting for a
+    writer) and reading from that already-open fd is what actually bounds
+    the wait."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    fallback_body = _function_body(
+        text, "_acquire_versioned_slot_lease_python_fallback"
+    )
+
+    assert 'exec 7<>"$out_fifo"' in fallback_body
+    read_idx = fallback_body.index("IFS= read -r -t 10")
+    open_idx = fallback_body.index('exec 7<>"$out_fifo"')
+    assert open_idx < read_idx, (
+        "the read-write fd on out_fifo must be opened BEFORE the helper "
+        "is launched, so the subsequent bounded read never performs its "
+        "own blocking read-only open"
+    )
+    assert "read -r -t 10 -u 7 line" in fallback_body
+    assert '<"$out_fifo"' not in fallback_body.split("IFS= read -r -t 10", 1)[1][:30]
+
+
 def test_versioned_slot_lease_python_fallback_delegates_to_real_fcntl_flock():
     """A hand-rolled dotlock protocol (create-if-absent, detect-and-reclaim
     stale owners, ...) is an unbounded chain of narrowing TOCTOU windows --
@@ -286,16 +407,25 @@ def test_versioned_slot_lease_python_fallback_delegates_to_real_fcntl_flock():
     assert "if ! command -v flock >/dev/null 2>&1; then" in acquire_body
     no_flock_branch = acquire_body.split(
         "if ! command -v flock >/dev/null 2>&1; then", 1
-    )[1][:200]
+    )[1][:400]
     assert "_acquire_versioned_slot_lease_python_fallback" in no_flock_branch
-    assert "return 0" not in no_flock_branch, (
+    # A brand-new machine with neither `flock` NOR any bootstrap python is
+    # the one deliberate exception (rc 2): uv itself can still provision a
+    # Python with no system interpreter present, and a first-ever install
+    # has no prior version to race against -- that specific rc degrades to
+    # "no lease" with a loud warning rather than hardcoding success for
+    # every outcome.
+    assert 'if [[ "$rc" -eq 2 ]]; then' in no_flock_branch
+    assert "return 0" not in no_flock_branch.split('if [[ "$rc" -eq 2 ]]; then', 1)[0], (
         "the no-flock branch must defer to the python fallback's own "
-        "return code, never hardcode success"
+        "return code (except the dedicated rc-2 bootstrap case), never "
+        "hardcode success"
     )
 
-    # No bootstrap python resolvable at all must fail closed, not silently
-    # succeed.
-    assert 'py="$(_bootstrap_python exclude-venv-dir)" || return 1' in fallback_body
+    # No bootstrap python resolvable at all must be distinguishable (rc 2)
+    # from genuine lock contention (rc 1) -- never silently succeed either
+    # way.
+    assert 'py="$(_bootstrap_python exclude-venv-dir)" || return 2' in fallback_body
     assert "fcntl.flock" in fallback_body
     assert "LOCK_EX | fcntl.LOCK_NB" in fallback_body
     # A failed (non-blocking) flock attempt must propagate as a real
