@@ -7,7 +7,8 @@
 - **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Umbrella issue:** none yet filed in this repo (see Context — this effort
   itself is the tracker for the sweep; per-gap issues are filed individually
-  and linked below as they're carved)
+  and linked below as they're carved; `efforts/README.md`'s index Coordination
+  column lists this as "See effort" accordingly)
 - **Sub-issues:** `ThomasMichon/copilot-extensions#5356` (plugin-services
   conformance gap, pre-existing, now vision-linked)
 
@@ -47,7 +48,7 @@ worktree.
   same session. The operator flagged these as concrete, session-evidenced
   vision-backport candidates and asked for the broader sweep to be scoped and
   sequenced across sessions rather than attempted at once.
-- **Governing skill:** [`backporting-visions`](../../../visions/skills/backporting-visions/SKILL.md)
+- **Governing skill:** [`backporting-visions`](../../../plugins/visions/skills/backporting-visions/SKILL.md)
   (specializes `envisioning`) — read its superset discipline and
   design/service-invariant audit sections before reconciling any further
   vision.
