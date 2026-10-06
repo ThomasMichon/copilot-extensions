@@ -40,7 +40,10 @@ def test_first_use_installer_captures_python_probes_and_bootstraps_uv():
     )
     update = _function_source(installer, "Invoke-Update", "\n# -- Dispatch")
 
-    assert ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')" in installer
+    assert (
+        ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')" in installer
+        or ". (Join-Path $PSScriptRoot 'installer-engine.ps1')" in installer
+    )
     assert "$exitCode = 1" in native_capture
     assert "} catch {" in native_capture
     assert "$env:AGENT_BRIDGE_UV_BOOTSTRAP_URL" in bridge_ensure_uv
@@ -257,6 +260,10 @@ def test_powershell_51_stamp_succeeds(tmp_path: Path):
     assert (snapshot / "scripts" / "installer-engine.sh").is_file()
     assert (snapshot / "scripts" / "install.ps1").is_file()
     assert (snapshot / "scripts" / "install.sh").is_file()
+    pyproject = (snapshot / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'agent-ssh-manager = { path = "libs/ssh-manager" }' in pyproject
+    assert 'agent-procutil = { path = "libs/agent-procutil" }' in pyproject
+    assert 'agent-ssh-manager = { path = "../../libs/ssh-manager", editable = true }' not in pyproject
     assert ". (Join-Path $PSScriptRoot 'installer-engine.ps1')" in (
         snapshot / "scripts" / "install.ps1"
     ).read_text(encoding="utf-8")

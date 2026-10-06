@@ -1940,6 +1940,29 @@ function Materialize-SnapshotVendoredLibs {
         Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue
         Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
     }
+
+    $snapshotPyproject = Join-Path $SnapshotDir 'pyproject.toml'
+    if (Test-Path -LiteralPath $snapshotPyproject) {
+        $pyprojectText = [System.IO.File]::ReadAllText($snapshotPyproject)
+        $rewrites = [ordered]@{
+            'agent-ssh-manager'          = 'ssh-manager'
+            'agent-credential-relay'     = 'credential-relay'
+            'agent-zdd'                  = 'zdd'
+            'agent-single-instance-lease'= 'single-instance-lease'
+            'agent-config-migrate'       = 'config-migrate'
+            'agent-plugin-resolve'       = 'plugin-resolve'
+            'agent-procutil'             = 'agent-procutil'
+            'agent-dropin-registry'      = 'dropin-registry'
+            'agent-plugin-activation'    = 'plugin-activation'
+            'agent-remote-login-shell'   = 'remote-login-shell'
+        }
+        foreach ($entry in $rewrites.GetEnumerator()) {
+            $oldLine = '{0} = {{ path = "../../libs/{1}", editable = true }}' -f $entry.Key, $entry.Value
+            $newLine = '{0} = {{ path = "libs/{1}" }}' -f $entry.Key, $entry.Value
+            $pyprojectText = $pyprojectText.Replace($oldLine, $newLine)
+        }
+        [System.IO.File]::WriteAllText($snapshotPyproject, $pyprojectText, $utf8NoBom)
+    }
 }
 
 function Materialize-SnapshotInstallerEngine {
