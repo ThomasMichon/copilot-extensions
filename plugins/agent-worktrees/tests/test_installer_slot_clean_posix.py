@@ -12,9 +12,11 @@ adapted for install.sh's bash implementation.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -45,6 +47,16 @@ def _resolve_bash() -> str | None:
     )
     return shutil.which("bash", path=filtered)
 _BASH = _resolve_bash()
+
+# The no-`flock` fallback delegates to Python's `fcntl.flock` -- a POSIX-only
+# stdlib module absent from native Windows Python (even under Git Bash,
+# whose bash is POSIX but whose `python`/`python3` on PATH is typically a
+# native Windows build). This fallback is only ever exercised in PRODUCTION
+# on a genuine POSIX host lacking the `flock` CLI (e.g. stock macOS) --
+# never on Windows, which uses install.ps1's own signed/uv venv path
+# entirely and never touches install.sh at all. Gate the real behavioral
+# test accordingly rather than skipping on `_BASH is None` alone.
+_HAS_FCNTL = importlib.util.find_spec("fcntl") is not None
 
 
 def _function_body(text: str, name: str) -> str:
@@ -164,248 +176,121 @@ def test_versioned_slot_lease_uses_flock_held_for_process_lifetime():
     assert "exec {_VERSIONED_SLOT_LEASE_FD}>&-" in release_body
 
 
-def test_versioned_slot_lease_noclobber_fallback_fails_closed_without_flock():
-    """When `flock` isn't available (e.g. stock macOS), the lease must fall
-    back to a portable, PID-liveness-checked lock -- never silently succeed
-    (fail-open) just because the preferred primitive is missing, which
-    would let every lockless host build the same slot unlocked. Ownership
-    (the holder's pid) must already be fully committed to disk at the
-    instant the lock file becomes visible under its final name -- via
-    write-to-temp-then-`ln` (atomic hard-link creation), never a
-    create-then-write-into-place sequence (even `set -C; echo $$ > file`
-    is NOT atomic for this: the O_CREAT|O_EXCL open and the PID write are
-    two separate syscalls, leaving a window where a contender sees an
-    empty, apparently-unowned file and misreads it as stale)."""
+def test_versioned_slot_lease_python_fallback_delegates_to_real_fcntl_flock():
+    """A hand-rolled dotlock protocol (create-if-absent, detect-and-reclaim
+    stale owners, ...) hit an unbounded chain of narrowing TOCTOU windows
+    across several rounds of review -- every userspace "is it safe to
+    reclaim?" check is itself a second check-then-act race one level down,
+    which is exactly the class of problem flock/fcntl exist to solve. When
+    the `flock` CLI is unavailable (e.g. stock macOS), the fallback must
+    delegate to Python's `fcntl.flock` instead -- the SAME real kernel
+    advisory lock the primary path uses, via a resident helper process
+    whose lifetime holds the lock (never a separate marker file requiring
+    explicit, crash-unsafe cleanup) -- rather than reinventing the
+    primitive in shell. Python is already a hard dependency here
+    (versioned_runtime.py), so this introduces no new dependency."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
     acquire_body = _function_body(text, "_acquire_versioned_slot_lease")
     fallback_body = _function_body(
-        text, "_acquire_versioned_slot_lease_noclobber_fallback"
+        text, "_acquire_versioned_slot_lease_python_fallback"
     )
-    publish_body = _function_body(text, "_try_publish_versioned_slot_lease")
+    release_body = _function_body(text, "_release_versioned_slot_lease")
 
     assert "if ! command -v flock >/dev/null 2>&1; then" in acquire_body
     no_flock_branch = acquire_body.split(
         "if ! command -v flock >/dev/null 2>&1; then", 1
     )[1][:200]
-    assert "_acquire_versioned_slot_lease_noclobber_fallback" in no_flock_branch
+    assert "_acquire_versioned_slot_lease_python_fallback" in no_flock_branch
     assert "return 0" not in no_flock_branch, (
-        "the no-flock branch must defer to the mkdir fallback's own return "
-        "code, never hardcode success"
+        "the no-flock branch must defer to the python fallback's own "
+        "return code, never hardcode success"
     )
 
-    assert "_try_publish_versioned_slot_lease" in fallback_body
-    assert "_reclaim_versioned_slot_lease" in fallback_body
-    assert 'kill -0 "$holder_pid"' in fallback_body
-    assert 'printf \'%s\' "$$" > "$tmp_file"' in publish_body
-    assert 'ln "$tmp_file" "$lock_file"' in publish_body
+    # No bootstrap python resolvable at all must fail closed, not silently
+    # succeed.
+    assert 'py="$(_bootstrap_python)" || return 1' in fallback_body
+    assert "fcntl.flock" in fallback_body
+    assert "LOCK_EX | fcntl.LOCK_NB" in fallback_body
+    # A failed (non-blocking) flock attempt must propagate as a real
+    # failure, never be swallowed into a false "acquired".
+    assert "sys.exit(1)" in fallback_body
+    # The resident helper must hold the lock for exactly its own lifetime
+    # (blocking on its own stdin until closed), not acquire-then-exit --
+    # an exited helper's fd closing is what releases the kernel lock.
+    assert "sys.stdin.read()" in fallback_body
+    assert "_VERSIONED_SLOT_LEASE_PY_PID" in fallback_body
+
+    # Release must kill the resident helper (closing its fd set / exiting
+    # it releases the kernel-held flock automatically) rather than needing
+    # any explicit lock-file cleanup.
+    assert 'kill "$_VERSIONED_SLOT_LEASE_PY_PID"' in release_body
 
 
-def test_versioned_slot_lease_reclaim_is_itself_serialized():
-    """The stale-lock reclaim sequence (remove, then republish) is TWO
-    separate steps -- without mutual exclusion around the whole sequence,
-    two concurrent reclaimers could both observe the SAME stale lock, both
-    unlink it, and each believe it alone now owns the lock it just
-    recreated (an unconditional `rm` doesn't verify it's removing the
-    entry it just inspected). `_reclaim_versioned_slot_lease` must guard
-    this with a SECOND, fixed-name atomic `ln`-based sentinel so only one
-    process at a time may ever be mid-reclaim for a given lock, and must
-    re-verify staleness after winning that sentinel (another process may
-    have already reclaimed and republished the lock as live first)."""
+@pytest.mark.skipif(
+    _BASH is None or not _HAS_FCNTL,
+    reason="bash or a POSIX (fcntl-capable) python is unavailable -- this "
+    "fallback is production-reachable only on a genuine POSIX host",
+)
+def test_versioned_slot_lease_python_fallback_enforces_real_cross_process_exclusion():
+    """Behavioral (not just textual) regression guard: a second, genuinely
+    independent attempt must be refused while the first resident helper
+    holds the real OS-level flock, and a later attempt must succeed once
+    the first is released -- proving this is backed by the kernel's own
+    advisory lock, not a textual contract."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
-    reclaim_body = _function_body(text, "_reclaim_versioned_slot_lease")
-
-    assert 'sentinel="${lock_file}.reclaiming"' in reclaim_body
-    assert 'ln "$tmp_sentinel" "$sentinel"' in reclaim_body
-    # Losing the sentinel race must back off, never force past it.
-    sentinel_fail_branch = reclaim_body.split(
-        'if ! ln "$tmp_sentinel" "$sentinel" 2>/dev/null; then', 1
-    )[1].split("\n    fi\n", 1)[0]
-    assert "return 1" in sentinel_fail_branch
-    # Staleness must be re-checked AFTER winning the sentinel, not assumed
-    # from the caller's earlier (now possibly stale) observation.
-    assert reclaim_body.index('ln "$tmp_sentinel" "$sentinel"') < reclaim_body.index(
-        'kill -0 "$holder_pid"'
+    fallback_fn = _function_body(
+        text, "_acquire_versioned_slot_lease_python_fallback"
     )
-    # The sentinel must always be released, on both the reclaim-succeeded
-    # and reclaim-lost-the-race-after-all paths -- i.e. after the
-    # re-verification branch, not nested only inside it.
-    release_idx = reclaim_body.rindex('rm -f "$sentinel" 2>/dev/null || true')
-    reverify_idx = reclaim_body.index('kill -0 "$holder_pid"')
-    assert release_idx > reverify_idx
-
-
-def test_versioned_slot_lease_reclaim_sentinel_recovers_from_a_crashed_reclaimer():
-    """A reclaim sentinel can ONLY be left behind by a reclaimer that died
-    mid-critical-section (a window normally microseconds long) -- if
-    nothing ever recovered it, every future installer would lose the
-    sentinel `ln` forever and the slot would become permanently
-    unbuildable. Recovery must check the sentinel OWNER'S pid liveness
-    FIRST and treat that as authoritative: a live holder can be
-    legitimately SUSPENDED (process stop signal, VM pause, laptop sleep)
-    for well over any age threshold and then resume still inside this
-    exact critical section, so age alone must never override a
-    confirmed-alive pid -- it is only the last-resort signal when no
-    owner pid can be determined at all. Recovery must also never retry
-    the sentinel `ln` within the SAME call (which would just move the
-    exact same TOCTOU this guards against down one more level) -- only
-    clear the way for a LATER, fresh call's own atomic `ln`."""
-    text = _INSTALL_SH.read_text(encoding="utf-8")
-    reclaim_body = _function_body(text, "_reclaim_versioned_slot_lease")
-    age_check_body = _function_body(text, "_versioned_lock_is_stale_by_age")
-
-    sentinel_fail_branch = reclaim_body.split(
-        'if ! ln "$tmp_sentinel" "$sentinel" 2>/dev/null; then', 1
-    )[1].split("\n        return 1\n    fi\n", 1)[0]
-    # PID liveness must be checked -- and must return 1 (never steal)
-    # when the recorded owner is still alive -- BEFORE age is ever
-    # consulted.
-    live_idx = sentinel_fail_branch.index('kill -0 "$sentinel_pid"')
-    age_idx = sentinel_fail_branch.index("_versioned_lock_is_stale_by_age")
-    assert live_idx < age_idx
-    live_branch = sentinel_fail_branch[live_idx:age_idx]
-    assert "return 1" in live_branch
-    assert "_VERSIONED_RECLAIM_SENTINEL_MAX_AGE_SECONDS" in sentinel_fail_branch
-    assert 'rm -f "$sentinel"' in sentinel_fail_branch
-    # It must never retry _try_publish_versioned_slot_lease (or re-attempt
-    # the sentinel ln) within this same call -- clearing a dead/aged-out
-    # sentinel only clears the way for a LATER attempt (the caller's
-    # existing retry loop), never a nested re-race here.
-    assert "_try_publish_versioned_slot_lease" not in sentinel_fail_branch
-    assert 'ln "$tmp_sentinel" "$sentinel"' not in sentinel_fail_branch
-
-    assert "stat -c %Y" in age_check_body
-    assert "stat -f %m" in age_check_body
-    # A read failure must never be treated as "stale" -- only a
-    # successfully-determined, sufficiently old mtime is.
-    assert '[[ -n "$mtime" ]] || return 1' in age_check_body
-
-
-@pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
-def test_versioned_slot_lease_reclaim_grants_exactly_one_winner_under_real_contention():
-    """Behavioral (not just textual) regression guard for the stale-lock
-    reclaim path specifically: seed a lock file recording a DEAD pid (a
-    crashed prior holder), then launch many real, concurrently-forked bash
-    subshells that all observe it as stale and race to reclaim it, and
-    assert exactly one of them ever reports success."""
-    text = _INSTALL_SH.read_text(encoding="utf-8")
-    publish_fn = _function_body(text, "_try_publish_versioned_slot_lease")
-    reclaim_fn = _function_body(text, "_reclaim_versioned_slot_lease")
-    age_check_fn = _function_body(text, "_versioned_lock_is_stale_by_age")
 
     harness = f"""
 set -uo pipefail
-{publish_fn}
-}}
-{reclaim_fn}
-}}
-{age_check_fn}
-}}
-_VERSIONED_RECLAIM_SENTINEL_MAX_AGE_SECONDS=120
-
-lock_file="$1"
-out_file="$2"
-# Seed a STALE lock recording a pid that is CERTAINLY dead: spawn a
-# throwaway child, let it exit, then reuse its now-dead pid (999999 is not
-# reliably invalid -- Linux permits a pid_max above it) so every racer
-# below deterministically takes the reclaim path, not the fresh-acquire
-# path.
-sh -c 'exit 0' &
-_dead_pid=$!
-wait "$_dead_pid" 2>/dev/null || true
-echo "$_dead_pid" > "$lock_file"
-
-_racer() {{
-    if _reclaim_versioned_slot_lease "$lock_file"; then
-        echo "WIN $BASHPID" >> "$out_file"
-        sleep 2
-    fi
-}}
-for _i in $(seq 1 30); do
-    _racer &
-done
-wait
-"""
-    with tempfile.TemporaryDirectory() as td:
-        harness_path = Path(td) / "harness.sh"
-        harness_path.write_text(harness, encoding="utf-8")
-        lock_file = str(Path(td) / "race.lock")
-        out_file = Path(td) / "winners.txt"
-        out_file.write_text("")
-
-        r = subprocess.run(
-            [_BASH, str(harness_path), lock_file, str(out_file)],
-            capture_output=True, text=True, timeout=30,
-        )
-        assert r.returncode == 0, f"harness failed: {r.stdout} {r.stderr}"
-
-        winners = [
-            line for line in out_file.read_text().splitlines() if line.strip()
-        ]
-        assert len(winners) == 1, (
-            f"expected exactly one winner of the stale-lock reclaim race, "
-            f"got {len(winners)}: {winners}"
-        )
-
-
-@pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
-def test_versioned_slot_lease_fallback_grants_exactly_one_winner_under_real_contention():
-    """Behavioral (not just textual) regression guard for the no-`flock`
-    fallback: launch many real, concurrently-forked OS processes (bash
-    background subshells -- genuine `fork()`s, not a simulation) racing to
-    acquire the SAME fresh lock via the extracted
-    `_try_publish_versioned_slot_lease` / `_acquire_versioned_slot_lease_
-    noclobber_fallback` functions, and assert exactly one of them ever
-    reports success -- proving the write-to-temp-then-`ln` protocol is a
-    real atomic exclusion primitive, not merely a textual contract.
-
-    All racers run as background jobs of ONE bash invocation (rather than
-    each spawned as its own independent `bash.exe` process) deliberately:
-    cross-process `kill -0` liveness checks between independently-launched
-    MSYS2/Git-Bash instances on Windows proved unreliable in practice (each
-    separately-invoked `bash.exe` builds its own local pid-mapping table,
-    so one instance's `kill -0 <pid>` can false-negative on a pid a
-    genuinely-still-running sibling `bash.exe` reported as its own `$$`) --
-    a Windows test-environment artifact of that specific case, not a
-    property of the real target platforms (native Linux/macOS, where `$$`
-    and `kill -0` operate on real, globally-consistent kernel pids with no
-    such per-process table). Background subshells of one bash process are
-    still genuine, independently-scheduled forked processes -- they just
-    share that one process's pid-table scope, which is exactly what makes
-    the liveness check reliable here without masking the real exclusion
-    property under test."""
-    text = _INSTALL_SH.read_text(encoding="utf-8")
-    publish_fn = _function_body(text, "_try_publish_versioned_slot_lease")
-    fallback_fn = _function_body(text, "_acquire_versioned_slot_lease_noclobber_fallback")
-
-    harness = f"""
-set -uo pipefail
-{publish_fn}
-}}
+_bootstrap_python() {{ command -v "{sys.executable}"; }}
+_VERSIONED_SLOT_LEASE_PY_PID=""
 {fallback_fn}
 }}
+_release_versioned_slot_lease_python_fallback() {{
+    if [[ -n "$_VERSIONED_SLOT_LEASE_PY_PID" ]]; then
+        kill "$_VERSIONED_SLOT_LEASE_PY_PID" 2>/dev/null || true
+        wait "$_VERSIONED_SLOT_LEASE_PY_PID" 2>/dev/null || true
+        _VERSIONED_SLOT_LEASE_PY_PID=""
+    fi
+}}
 
 lock_file="$1"
 out_file="$2"
-_racer() {{
-    if _acquire_versioned_slot_lease_noclobber_fallback "$lock_file"; then
-        echo "WIN $BASHPID" >> "$out_file"
-        # Hold the lock briefly, like a real build would -- a winner that
-        # exits instantly would let a later racer correctly reclaim it as
-        # crash-abandoned (a DIFFERENT, also-correct property), which
-        # would mask whether genuinely concurrent attempts are excluded.
-        sleep 2
+
+if _acquire_versioned_slot_lease_python_fallback "$lock_file"; then
+    echo "FIRST=OK" >> "$out_file"
+else
+    echo "FIRST=FAIL" >> "$out_file"
+fi
+
+(
+    _VERSIONED_SLOT_LEASE_PY_PID=""
+    if _acquire_versioned_slot_lease_python_fallback "$lock_file"; then
+        echo "SECOND=OK" >> "$out_file"
+    else
+        echo "SECOND=REFUSED" >> "$out_file"
     fi
-}}
-for _i in $(seq 1 30); do
-    _racer &
-done
-wait
+)
+
+_release_versioned_slot_lease_python_fallback
+sleep 0.5
+
+(
+    _VERSIONED_SLOT_LEASE_PY_PID=""
+    if _acquire_versioned_slot_lease_python_fallback "$lock_file"; then
+        echo "THIRD=OK" >> "$out_file"
+    else
+        echo "THIRD=FAIL" >> "$out_file"
+    fi
+)
 """
     with tempfile.TemporaryDirectory() as td:
         harness_path = Path(td) / "harness.sh"
         harness_path.write_text(harness, encoding="utf-8")
-        lock_file = str(Path(td) / "race.lock")
-        out_file = Path(td) / "winners.txt"
+        lock_file = str(Path(td) / "lease.lock")
+        out_file = Path(td) / "events.txt"
         out_file.write_text("")
 
         r = subprocess.run(
@@ -414,11 +299,7 @@ wait
         )
         assert r.returncode == 0, f"harness failed: {r.stdout} {r.stderr}"
 
-        winners = [
+        events = [
             line for line in out_file.read_text().splitlines() if line.strip()
         ]
-        assert len(winners) == 1, (
-            f"expected exactly one winner of the lock race, got {len(winners)}: "
-            f"{winners}"
-        )
-
+        assert events == ["FIRST=OK", "SECOND=REFUSED", "THIRD=OK"], events

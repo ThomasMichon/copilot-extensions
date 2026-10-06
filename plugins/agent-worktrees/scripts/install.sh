@@ -840,133 +840,63 @@ _payload_hash() {
 # by _acquire_versioned_slot_lease; cleared by _release_versioned_slot_lease,
 # or automatically by the OS the instant this process exits/crashes).
 _VERSIONED_SLOT_LEASE_FD=""
-# Fallback lock FILE when `flock` isn't available (e.g. stock macOS) -- a
-# PID-liveness-checked `noclobber` lock instead.
-_VERSIONED_SLOT_LEASE_FILE=""
+# pid of the resident python helper holding a real fcntl.flock for us when
+# the `flock` CLI isn't available (e.g. stock macOS) -- see
+# _acquire_versioned_slot_lease_python_fallback.
+_VERSIONED_SLOT_LEASE_PY_PID=""
 
 _versioned_slot_lease_path() {
     printf '%s/.build-lease-%s.lock' "$INSTALL_DIR" "$SRC_VERSION"
 }
 
-_try_publish_versioned_slot_lease() {
-    # Atomically CREATE a lock file whose content (the holder's pid) is
-    # already fully committed at the instant it becomes visible under its
-    # final name -- the classic Unix lockfile idiom. `ln` only ever creates
-    # a new directory entry pointing at EXISTING, already-fully-written
-    # data; it never truncates-then-fills a file in place the way shell
-    # redirection does (even under `set -C`, `> file` first O_CREAT|O_EXCL
-    # opens an EMPTY file, and the PID write is a separate syscall after --
-    # a contender reading in that window sees an empty, apparently-ownerless
-    # file and misreads it as stale). Fails (EEXIST, atomically) if the
-    # target already exists; the loser never has the winner's data
-    # half-visible. Returns 0 and sets _VERSIONED_SLOT_LEASE_FILE on success.
-    local lock_file="$1" tmp_file
-    tmp_file="${lock_file}.tmp.$$"
-    printf '%s' "$$" > "$tmp_file" 2>/dev/null || { rm -f "$tmp_file" 2>/dev/null; return 1; }
-    if ln "$tmp_file" "$lock_file" 2>/dev/null; then
-        rm -f "$tmp_file" 2>/dev/null || true
-        _VERSIONED_SLOT_LEASE_FILE="$lock_file"
+_acquire_versioned_slot_lease_python_fallback() {
+    # Used only when the `flock` CLI is unavailable. Hand-rolling a dotlock
+    # protocol in pure shell (create-if-absent, detect-and-reclaim stale
+    # owners, ...) runs into the exact class of TOCTOU race flock/fcntl
+    # exist specifically to avoid -- every userspace "is it safe to
+    # reclaim?" check is itself a second check-then-act window one level
+    # down, however narrow. Delegate to Python's fcntl.flock instead: the
+    # SAME real kernel advisory lock the `flock` CLI path above uses, with
+    # none of those races, and Python is already a hard dependency here
+    # (versioned_runtime.py). A resident helper process holds the lock
+    # (acquired non-blocking, so it fails fast like `flock -n`) and blocks
+    # reading its own stdin until closed; killing it (or this process
+    # exiting) closes that pipe and releases the lock exactly like closing
+    # the `flock` fd does on the primary path. Returns 0 (holder pid
+    # recorded in _VERSIONED_SLOT_LEASE_PY_PID) or 1.
+    local lock_file="$1" py ready_file waited=0 status
+    py="$(_bootstrap_python)" || return 1
+    [[ -n "$py" ]] || return 1
+    ready_file="$(mktemp 2>/dev/null)" || return 1
+    "$py" -c '
+import fcntl, sys
+path, ready_path = sys.argv[1], sys.argv[2]
+f = open(path, "a")
+try:
+    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except OSError:
+    with open(ready_path, "w") as r:
+        r.write("LOCKED")
+    sys.exit(1)
+with open(ready_path, "w") as r:
+    r.write("OK")
+sys.stdin.read()  # block until the parent closes our stdin (release)
+' "$lock_file" "$ready_file" < /dev/null &
+    _VERSIONED_SLOT_LEASE_PY_PID=$!
+    disown "$_VERSIONED_SLOT_LEASE_PY_PID" 2>/dev/null || true
+    while [[ ! -s "$ready_file" ]] && (( waited < 50 )); do
+        sleep 0.2 2>/dev/null || sleep 1
+        waited=$(( waited + 1 ))
+    done
+    status="$(cat "$ready_file" 2>/dev/null || true)"
+    rm -f "$ready_file" 2>/dev/null || true
+    if [[ "$status" == "OK" ]]; then
         return 0
     fi
-    rm -f "$tmp_file" 2>/dev/null || true
+    kill "$_VERSIONED_SLOT_LEASE_PY_PID" 2>/dev/null || true
+    wait "$_VERSIONED_SLOT_LEASE_PY_PID" 2>/dev/null || true
+    _VERSIONED_SLOT_LEASE_PY_PID=""
     return 1
-}
-
-_acquire_versioned_slot_lease_noclobber_fallback() {
-    # PID-liveness-checked lock: used only when `flock` is unavailable. A
-    # lock file left behind by a dead holder (crash) is detected via
-    # `kill -0` on its recorded pid and reclaimed; any failure to commit
-    # ownership -- including a persistent one, e.g. a read-only directory --
-    # falls through to the final `return 1` rather than reporting success.
-    local lock_file="$1" holder_pid
-    if _try_publish_versioned_slot_lease "$lock_file"; then
-        return 0
-    fi
-    holder_pid="$(cat "$lock_file" 2>/dev/null || true)"
-    if [[ -n "$holder_pid" ]] && kill -0 "$holder_pid" 2>/dev/null; then
-        return 1
-    fi
-    # Stale (holder dead, or unrecorded) -- reclaim via a SERIALIZED
-    # critical section (see _reclaim_versioned_slot_lease): removing a
-    # stale lock and republishing it are two separate steps, so without
-    # mutual exclusion around that whole sequence, two concurrent
-    # reclaimers could both observe the SAME stale entry, both unlink it,
-    # and each believe it alone now owns the lock it just recreated.
-    _reclaim_versioned_slot_lease "$lock_file"
-}
-
-_reclaim_versioned_slot_lease() {
-    # Exclusively perform the remove-then-republish sequence for a lock
-    # file already confirmed stale by the caller. Guarded by a SECOND,
-    # fixed-name `ln` lock (a nested critical section keyed off this exact
-    # lock_file) so only one process at a time may ever be mid-reclaim for
-    # it: losing this sentinel race means another process is already
-    # reclaiming (or just did), so we back off (return 1) rather than
-    # racing its own unlink+republish -- the caller's existing retry loop
-    # will see the lock settled (live or freshly reclaimed) next attempt,
-    # instead of this process also unlinking what that other reclaimer may
-    # have already republished as its own live lock.
-    local lock_file="$1" sentinel="${lock_file}.reclaiming" tmp_sentinel holder_pid sentinel_pid result=1
-    tmp_sentinel="${sentinel}.tmp.$$"
-    printf '%s' "$$" > "$tmp_sentinel" 2>/dev/null || { rm -f "$tmp_sentinel" 2>/dev/null; return 1; }
-    if ! ln "$tmp_sentinel" "$sentinel" 2>/dev/null; then
-        rm -f "$tmp_sentinel" 2>/dev/null || true
-        # PID liveness is authoritative, not age alone: a live holder can
-        # be legitimately SUSPENDED (process stop signal, VM pause, laptop
-        # sleep) for well over the age threshold and then resume still
-        # inside this exact critical section -- `kill -0` still succeeds
-        # for a suspended-but-alive process, so checking it first (instead
-        # of just the file's mtime) means we never steal a lease that is
-        # merely old but still genuinely held.
-        sentinel_pid="$(cat "$sentinel" 2>/dev/null || true)"
-        if [[ -n "$sentinel_pid" ]]; then
-            if kill -0 "$sentinel_pid" 2>/dev/null; then
-                return 1
-            fi
-            # Confirmed-dead owner -- clear it so a LATER, FRESH call's own
-            # `ln` (never a retry within this same call) can recreate it;
-            # `ln`'s atomicity is what keeps that recreation race-free, the
-            # same guarantee a fresh (non-reclaim) acquisition relies on.
-            rm -f "$sentinel" 2>/dev/null || true
-        elif _versioned_lock_is_stale_by_age "$sentinel" "$_VERSIONED_RECLAIM_SENTINEL_MAX_AGE_SECONDS"; then
-            # Age is only the LAST-RESORT signal, used solely when no
-            # owner pid can be determined at all (e.g. a corrupted or
-            # empty sentinel) -- it must never override a confirmed-alive
-            # pid above.
-            rm -f "$sentinel" 2>/dev/null || true
-        fi
-        return 1
-    fi
-    rm -f "$tmp_sentinel" 2>/dev/null || true
-    # Now the sole reclaimer. Re-verify the lock is STILL stale -- another
-    # process may have already reclaimed and republished it as live before
-    # we won the sentinel above.
-    holder_pid="$(cat "$lock_file" 2>/dev/null || true)"
-    if [[ -z "$holder_pid" ]] || ! kill -0 "$holder_pid" 2>/dev/null; then
-        rm -f "$lock_file" 2>/dev/null || true
-        if _try_publish_versioned_slot_lease "$lock_file"; then
-            result=0
-        fi
-    fi
-    rm -f "$sentinel" 2>/dev/null || true
-    return "$result"
-}
-
-# Last-resort backstop ONLY for a sentinel whose owner pid can't be
-# determined at all (corrupted/empty content) -- PID liveness above is
-# always checked first and is authoritative whenever available.
-_VERSIONED_RECLAIM_SENTINEL_MAX_AGE_SECONDS=120
-
-_versioned_lock_is_stale_by_age() {
-    # True iff $1 exists and is at least $2 seconds old. Portable across
-    # GNU (`stat -c %Y`) and BSD/macOS (`stat -f %m`) stat flavors. Returns
-    # false (not stale) if the age can't be determined at all -- never
-    # assume staleness from a read failure.
-    local path="$1" max_age="$2" mtime now
-    mtime="$(stat -c %Y "$path" 2>/dev/null || stat -f %m "$path" 2>/dev/null || true)"
-    [[ -n "$mtime" ]] || return 1
-    now="$(date +%s)"
-    (( now - mtime >= max_age ))
 }
 
 _acquire_versioned_slot_lease() {
@@ -978,15 +908,15 @@ _acquire_versioned_slot_lease() {
     # actually serializes them (#5439). Returns 0 if acquired (or a no-op in
     # legacy mode); 1 if another live process already holds it. Never
     # silently succeeds when locking can't be verified -- falls back to a
-    # portable noclobber-based lock when `flock` is unavailable, rather than
-    # treating "couldn't lock" as "no contention". Idempotent: a second call
-    # while already held is a no-op success.
+    # real fcntl.flock via a resident Python helper when the `flock` CLI is
+    # unavailable, rather than treating "couldn't lock" as "no contention".
+    # Idempotent: a second call while already held is a no-op success.
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    [[ -n "$_VERSIONED_SLOT_LEASE_FD" || -n "$_VERSIONED_SLOT_LEASE_FILE" ]] && return 0
+    [[ -n "$_VERSIONED_SLOT_LEASE_FD" || -n "$_VERSIONED_SLOT_LEASE_PY_PID" ]] && return 0
     local lease_path
     lease_path="$(_versioned_slot_lease_path)"
     if ! command -v flock >/dev/null 2>&1; then
-        _acquire_versioned_slot_lease_noclobber_fallback "$lease_path"
+        _acquire_versioned_slot_lease_python_fallback "$lease_path"
         return $?
     fi
     if ! exec {_VERSIONED_SLOT_LEASE_FD}>"$lease_path"; then
@@ -1008,9 +938,13 @@ _release_versioned_slot_lease() {
         exec {_VERSIONED_SLOT_LEASE_FD}>&- 2>/dev/null || true
         _VERSIONED_SLOT_LEASE_FD=""
     fi
-    if [[ -n "$_VERSIONED_SLOT_LEASE_FILE" ]]; then
-        rm -f "$_VERSIONED_SLOT_LEASE_FILE" 2>/dev/null || true
-        _VERSIONED_SLOT_LEASE_FILE=""
+    if [[ -n "$_VERSIONED_SLOT_LEASE_PY_PID" ]]; then
+        # Killing the resident helper closes its stdin/exits it, which
+        # releases its fcntl.flock exactly like closing the `flock` fd
+        # does on the primary path above.
+        kill "$_VERSIONED_SLOT_LEASE_PY_PID" 2>/dev/null || true
+        wait "$_VERSIONED_SLOT_LEASE_PY_PID" 2>/dev/null || true
+        _VERSIONED_SLOT_LEASE_PY_PID=""
     fi
 }
 
