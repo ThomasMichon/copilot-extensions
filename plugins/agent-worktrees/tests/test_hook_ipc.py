@@ -343,6 +343,11 @@ def test_session_start_old_runtime_uses_legacy_compatibility(
     (runtime / "current-version").write_text(
         "1.5.3-dev744", encoding="utf-8"
     )
+    # No external update driver on this (real or test) machine's PATH -- the
+    # legacy-fallback path under test only applies absent one; see the
+    # worktree-manager-active counterpart test below for the opposite case.
+    monkeypatch.setattr(hook_client.shutil, "which", lambda name: None)
+    monkeypatch.delenv("WORKTREE_MANAGER_ROOT", raising=False)
     seen = {}
 
     def legacy(payload):
@@ -369,6 +374,54 @@ def test_session_start_old_runtime_uses_legacy_compatibility(
         "additionalContext": "legacy"
     }
     assert seen["sessionId"] == "session-1"
+
+
+def test_session_start_old_runtime_skips_legacy_when_worktree_manager_active(
+    monkeypatch, tmp_path
+):
+    """A stale runtime must not trigger this hook's own legacy reconcile
+    fallback (which can shell out to a full installer build) when an external
+    driver like worktree-manager already owns update/reconcile duties --
+    otherwise every session start redundantly races its own install attempt
+    against the same runtime slot."""
+    runtime = tmp_path / ".agent-worktrees"
+    python = runtime / "versions" / "1.5.3-dev744" / (
+        "Scripts/python.exe" if sys.platform == "win32" else "bin/python"
+    )
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    (python.parents[1] / ".install-complete.json").write_text(
+        json.dumps({"version": "1.5.3-dev744"}),
+        encoding="utf-8",
+    )
+    (runtime / "current-version").write_text(
+        "1.5.3-dev744", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        hook_client.shutil, "which",
+        lambda name: "/usr/bin/worktree-manager" if name == "worktree-manager" else None,
+    )
+    monkeypatch.setattr(
+        hook_client, "_fallback_legacy_session_start",
+        lambda payload: pytest.fail(
+            "must not fall back to the legacy reconcile path when an "
+            "external update driver is active"
+        ),
+    )
+    monkeypatch.setattr(
+        hook_client.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("old runtime must not be invoked"),
+    )
+    payload = {
+        "sessionId": "session-1",
+        "cwd": str(tmp_path),
+        "_agentWorktrees": {
+            "pluginVersion": "1.5.3-dev745",
+            "environment": {},
+        },
+    }
+    assert hook_client._fallback_session_start(payload, tmp_path) == {}
 
 
 def test_session_start_enriches_payload_with_session_environment(
@@ -1471,7 +1524,7 @@ def test_migrate_legacy_marketplace_overrides_retires_marker(tmp_path):
         json.dumps(
             {
                 "extraKnownMarketplaces": {
-                    "odsp-web-harness": {
+                    "example-knowledge-repo": {
                         "source": {
                             "source": "directory",
                             "path": "C:\\stale\\anchor\\.ai",
@@ -1482,7 +1535,7 @@ def test_migrate_legacy_marketplace_overrides_retires_marker(tmp_path):
                 "_agentWorktreesMarketplaceOverrides": {
                     "version": 1,
                     "marketplaces": {
-                        "odsp-web-harness": {
+                        "example-knowledge-repo": {
                             "source": {
                                 "source": "directory",
                                 "path": "C:\\stale\\anchor\\.ai",
@@ -1499,7 +1552,7 @@ def test_migrate_legacy_marketplace_overrides_retires_marker(tmp_path):
 
     result = json.loads(settings_local.read_text(encoding="utf-8"))
     assert "_agentWorktreesMarketplaceOverrides" not in result
-    assert "odsp-web-harness" not in result.get("extraKnownMarketplaces", {})
+    assert "example-knowledge-repo" not in result.get("extraKnownMarketplaces", {})
     assert result["extraKnownMarketplaces"]["operator-own"] == unrelated_value
 
 
@@ -1511,11 +1564,11 @@ def test_migrate_legacy_marketplace_overrides_preserves_operator_edit(tmp_path):
     settings_local.write_text(
         json.dumps(
             {
-                "extraKnownMarketplaces": {"odsp-web-harness": edited_value},
+                "extraKnownMarketplaces": {"example-knowledge-repo": edited_value},
                 "_agentWorktreesMarketplaceOverrides": {
                     "version": 1,
                     "marketplaces": {
-                        "odsp-web-harness": {
+                        "example-knowledge-repo": {
                             "source": {
                                 "source": "directory",
                                 "path": "C:\\stale\\anchor\\.ai",
@@ -1535,7 +1588,7 @@ def test_migrate_legacy_marketplace_overrides_preserves_operator_edit(tmp_path):
     # The operator changed this value after the marker was written, so the
     # migration must not clobber it -- only exactly-unmodified marker-owned
     # values are retired.
-    assert result["extraKnownMarketplaces"]["odsp-web-harness"] == edited_value
+    assert result["extraKnownMarketplaces"]["example-knowledge-repo"] == edited_value
 
 
 def test_migrate_legacy_marketplace_overrides_no_marker_is_noop(tmp_path):

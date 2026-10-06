@@ -649,6 +649,34 @@ def _fallback_legacy_session_start(payload: dict) -> dict:
     return result
 
 
+def _external_update_driver_active() -> bool:
+    """True when an external control-plane driver (worktree-manager, or any
+    future equivalent) already owns plugin update/reconcile duties on this
+    machine.
+
+    A stale-runtime sessionStart would otherwise fall back to this hook's own
+    legacy reconcile scripts (bootstrap-check et al.), which can themselves
+    shell out to a full installer build. When N sessions start at once, each
+    independently taking that fallback races N redundant installer attempts
+    against the same runtime slot -- the actual trigger behind a confirmed
+    install-watchdog cascade (see the issue this guards against). An external
+    driver already reconciling the runtime on its own schedule makes that
+    fallback both redundant and actively harmful, so this hook must get out of
+    its way entirely rather than piling another concurrent attempt on top.
+
+    Deliberately a cheap PATH presence check, not a full health/version probe
+    (that belongs to the Picker handoff path in manager_launch_cli.py) -- this
+    hook only needs to know whether a driver EXISTS, not whether it currently
+    passes every compatibility gate.
+    """
+    if shutil.which("worktree-manager"):
+        return True
+    configured = os.environ.get("WORKTREE_MANAGER_ROOT", "").strip()
+    if configured and Path(configured).expanduser().exists():
+        return True
+    return False
+
+
 def _fallback_session_start(payload: dict, home: Path) -> dict:
     contextual = bool(os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "").strip())
     python = _runtime_python(home)
@@ -668,6 +696,8 @@ def _fallback_session_start(payload: dict, home: Path) -> dict:
         and payload_version
         and _version_key(runtime_version) < _version_key(payload_version)
     ):
+        if _external_update_driver_active():
+            return {}
         return {} if contextual else _fallback_legacy_session_start(payload)
     try:
         environment = os.environ.copy()
