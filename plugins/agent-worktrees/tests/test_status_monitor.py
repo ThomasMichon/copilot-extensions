@@ -176,6 +176,44 @@ def test_status_monitor_lease_does_not_collide_with_metadata_file(tmp_path):
         lease.release()
 
 
+def test_status_monitor_muxless_replacement_bypasses_the_lease(monkeypatch):
+    """Regression for a High-severity review finding (PR #5412): a
+    pre-existing, already-tested replacement path
+    (`test_ensure_replaces_muxless_owner_when_mux_is_available`) lets a
+    mux-capable candidate take over from a still-resident muxless owner via
+    the existing soft self-retire/supersession polling -- not this atomic
+    lease. An existing live lock recording `mux: false`, with a mux binary
+    now available, must skip lease acquisition entirely so the replacement
+    can proceed exactly as before this gate was introduced."""
+    import shutil
+
+    # A different live pid than this test process, recording `mux: false` --
+    # mirrors `_other_current_monitor`'s own fixture style (patch read_lock/
+    # lock_is_live directly) rather than a real lock file, since a real
+    # write_lock() call stamps the CURRENT pid, which `_other_current_
+    # monitor`'s own `pid == os.getpid()` short-circuit (correctly) treats
+    # as "my own", not "another owner".
+    other_owner = {"pid": os.getpid() + 1, "prefix": "/other-owner", "mux": False}
+    monkeypatch.setattr(m.locks, "read_lock", lambda *_a, **_kw: other_owner)
+    monkeypatch.setattr(m.locks, "lock_is_live", lambda *_a, **_kw: True)
+    monkeypatch.setattr(shutil, "which", lambda name: "psmux" if name == "psmux" else None)
+
+    class _MustNotBeConstructed:
+        def __init__(self, *_a, **_kw) -> None:
+            raise AssertionError("muxless-replacement path must never contest the lease")
+
+    monkeypatch.setattr(single_instance_lease, "SingleInstance", _MustNotBeConstructed)
+
+    def _raise_to_exit_before_the_loop(*_a, **_kw):
+        raise RuntimeError("reached the resident loop -- test stops here by design")
+
+    monkeypatch.setattr(session_catalog, "ResidentSessionReconciler", _raise_to_exit_before_the_loop)
+
+    args = argparse.Namespace(interval=15, passive=False, control_port=None, mux="psmux")
+    with pytest.raises(RuntimeError, match="reached the resident loop"):
+        m.cmd_status_monitor(args)
+
+
 def test_resident_lifecycle_requests_wait_for_their_deadline():
     assert m._resident_hook_lock_timeout("sessionStart", 4.75) == 3.75
     assert m._resident_hook_lock_timeout("sessionStart", 0.75) == 0.0

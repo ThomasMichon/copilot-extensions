@@ -17,17 +17,6 @@ from . import config as cfg
 #: block a shutdown indefinitely (2026-09-26 PR review finding).
 _TRACKING_WRITE_SHUTDOWN_GRACE_S = 10.0
 
-#: Bounded grace period the promotion control action waits to acquire the
-#: ownership lease still held by its predecessor. A cutover publishes the
-#: new (passive-spawned) monitor as active BEFORE retiring the old one
-#: (`docs/patterns/graceful-daemon-cutover.md`'s publish-then-retire
-#: sequencing), so promotion can briefly race a predecessor that is still
-#: alive and holding the lease -- a real, expected overlap, not a genuine
-#: duplicate. The predecessor's own shutdown is just a process exit (the
-#: lease auto-releases the instant it does), so this only needs to cover
-#: that brief in-flight window, not anything open-ended.
-_PROMOTION_LEASE_GRACE_S = 10.0
-
 #: Same bounded-grace discipline, applied to the self-retire path itself.
 #: Once this daemon observes a live, strictly-newer generation has taken over
 #: (self_retire.is_superseded), it stops admitting new work and should exit
@@ -245,41 +234,60 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     # strands the held flock on the OLD inode, silently defeating the gate
     # for the next contender that opens the replacement (review finding,
     # PR #5412).
+    #
+    # Scope: this gate protects only an ORDINARY cold start (the reported
+    # bug -- a burst of session-lifecycle hooks each independently deciding
+    # to spawn, with no existing owner or an existing non-superseding one).
+    # It deliberately does NOT extend to the cutover/promotion lifecycle
+    # (`_handle_control("promote")`, route-driven activation in the
+    # resident loop) -- that lifecycle relies on a genuinely different,
+    # soft (eventually-consistent, deliberately-overlapping) ownership
+    # model via self-retire/supersession polling, not a hard mutual-
+    # exclusion claim, and retrofitting one there surfaced multiple real
+    # correctness bugs under review (concurrent promote-handler races, a
+    # predecessor/successor overlap window far longer than any reasonable
+    # bounded wait, muxless-owner replacement never completing) that need
+    # their own careful design, not a quick extension of this gate. See
+    # the tracking issue for that follow-up.
     _OWNERSHIP_LEASE_NAME = "status-monitor-singleton.lock"
 
-    def _acquire_ownership_lease(*, wait_s: float = 0.0):
-        """Acquire the atomic exclusivity lease, optionally retrying for up
-        to ``wait_s`` seconds. Returns the held lease, or ``None`` if it
-        could not be acquired within the budget (immediately, when
-        ``wait_s`` is 0). A nonzero ``wait_s`` exists only for the
-        promotion path below: a cutover's publish-then-retire sequencing
-        (`docs/patterns/graceful-daemon-cutover.md`) means a newly-promoted
-        successor can briefly race its still-live predecessor for this same
-        lease -- a real, expected overlap, not a genuine duplicate -- so
-        promotion gets a bounded grace period for that predecessor's
-        in-flight shutdown to complete and release it, instead of either
-        failing promotion outright or (far worse) silently skipping the
-        lease and reintroducing the exact race this gate exists to close.
-        """
+    def _acquire_ownership_lease():
+        """Acquire the atomic exclusivity lease, or return ``None`` if
+        another live process already holds it."""
         from single_instance_lease import AlreadyRunningError, SingleInstance
 
-        deadline = time.monotonic() + wait_s
-        while True:
-            lease = SingleInstance(
-                status_monitor_runtime._aw_runtime_home(),
-                service="status-monitor",
-                lock_name=_OWNERSHIP_LEASE_NAME,
-            )
-            try:
-                lease.acquire()
-                return lease
-            except AlreadyRunningError:
-                if time.monotonic() >= deadline:
-                    return None
-                time.sleep(0.2)
+        lease = SingleInstance(
+            status_monitor_runtime._aw_runtime_home(),
+            service="status-monitor",
+            lock_name=_OWNERSHIP_LEASE_NAME,
+        )
+        try:
+            lease.acquire()
+            return lease
+        except AlreadyRunningError:
+            return None
+
+    def _muxless_replacement_in_progress() -> bool:
+        """Mirrors `_other_current_monitor()`'s own mux exception: an
+        existing live owner recorded `mux: false` and this candidate has a
+        mux binary available. That is a deliberate, already-tested
+        replacement path (`test_ensure_replaces_muxless_owner_when_mux_is_
+        available`) resolved via the existing soft self-retire/supersession
+        polling, not this atomic lease -- contesting the lease here would
+        block the replacement from ever completing (review finding,
+        PR #5412), since the still-resident muxless owner legitimately
+        holds it until it notices supersession on its own."""
+        existing = _locks.read_lock(lock)
+        return bool(
+            _locks.lock_is_live(existing)
+            and isinstance(existing, dict)
+            and existing.get("pid") != os.getpid()
+            and existing.get("mux") is False
+            and mux_bin
+        )
 
     _lease = None
-    if not passive_mode:
+    if not passive_mode and not _muxless_replacement_in_progress():
         _lease = _acquire_ownership_lease()
         if _lease is None:
             return 0
@@ -603,7 +611,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     max_empty_strikes = 3
 
     def _handle_control(action: str, payload: dict) -> dict:
-        nonlocal admission_closed, published_lock, _lease
+        nonlocal admission_closed, published_lock
         if action == "health":
             return {
                 "status": "draining" if admission_closed else "ready",
@@ -611,19 +619,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 "pid": os.getpid(),
             }
         if action == "promote":
-            if _lease is None:
-                # Started passive (per graceful-daemon-cutover etiquette: a
-                # passive instance must not seize shared singletons until
-                # promoted) and has never held the lease -- acquire it now,
-                # tolerating the predecessor's brief in-flight shutdown.
-                _lease = _acquire_ownership_lease(wait_s=_PROMOTION_LEASE_GRACE_S)
-                if _lease is None:
-                    return {
-                        "adopted": False,
-                        "error": "could not acquire the ownership lease -- a "
-                        "predecessor appears to still be live past the "
-                        "promotion grace period",
-                    }
             with state_lock:
                 _cleanup_retired_request_surfaces()
                 published_lock = True
