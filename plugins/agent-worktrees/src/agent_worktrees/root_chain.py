@@ -56,13 +56,28 @@ def _load_frozen_root(project: str | None, worktree_id: str) -> tuple[bool, str 
     resolution was persisted (``codename`` may legitimately be ``None`` --
     "frozen: this worktree has no publishable root"). ``(False, None)``
     means never resolved/frozen yet -- a fresh walk is needed.
+
+    A non-``None`` deserialized value is validated with the same
+    :func:`agent_worktrees.codename.is_valid_handle` gate every OTHER
+    codename interpolated into the marker goes through: this sidecar is a
+    plain JSON file, not a validated tracking record, and a malformed or
+    hand-edited one must never publish arbitrary text (including a stray
+    ``-->``) straight into the HTML comment. An invalid value degrades to
+    "never frozen" so the normal provenance path re-runs and re-freezes a
+    clean result, rather than being treated as a frozen ``None``.
     """
     try:
         path = _freeze_path(project, worktree_id)
         if not path.exists():
             return False, None
         data = json.loads(path.read_text())
-        return True, data.get("root_codename")
+        codename = data.get("root_codename")
+        if codename is None:
+            return True, None
+        from . import codename as codename_mod
+        if isinstance(codename, str) and codename_mod.is_valid_handle(codename):
+            return True, codename
+        return False, None
     except Exception:
         return False, None
 

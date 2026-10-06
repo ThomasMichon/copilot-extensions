@@ -239,6 +239,29 @@ class TestResolveRootCodename:
         _PROJECT_CONFIGS["harness"] = _cfg(source_attribution_configured=True)
         assert root_chain.resolve_root_codename(child, project="ext") is None
 
+    def test_malformed_frozen_sidecar_is_never_trusted(
+        self, tmp_path, monkeypatch,
+    ):
+        # A hand-edited/corrupted sidecar must never be interpolated
+        # straight into the HTML marker -- an invalid value degrades to
+        # "never frozen" so the normal (validated) provenance path re-runs.
+        _seed(tmp_path, monkeypatch, "harness", "wt-root",
+              codename="amber-thicket", codename_source="built-in")
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        sidecar = tmp_path / ".ext" / "worktrees" / "wt-child.root-attribution.json"
+        sidecar.write_text('{"root_codename": "not valid --> injected"}')
+        assert root_chain.resolve_root_codename(child, project="ext") == (
+            "amber-thicket"
+        )
+        # The re-resolution also re-freezes a CLEAN value for next time.
+        assert "amber-thicket" in sidecar.read_text()
+        assert "-->" not in sidecar.read_text().replace(
+            '"root_codename": "amber-thicket"', ""
+        )
+
     def test_ensure_false_peek_never_freezes_a_premature_decision(
         self, tmp_path, monkeypatch,
     ):
