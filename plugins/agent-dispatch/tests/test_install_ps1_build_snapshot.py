@@ -465,6 +465,27 @@ Write-Output "OUTER-RELEASED"
     assert "OUTER-RELEASED" in result.stdout, result.stdout + result.stderr
 
 
+def test_version_scoped_locks_for_different_versions_do_not_block_each_other(tmp_path: Path) -> None:
+    """Install-Runtime's build lock is scoped by $InstallDir + $Version
+    specifically so a wedged build for one version can never block an
+    unrelated install of a DIFFERENT, newer version. Proves the two
+    resulting mutex names are genuinely independent: holding the lock for
+    version A does not prevent acquiring the lock for version B, even with
+    a short timeout that would otherwise expose any accidental shared key."""
+    install_dir = tmp_path / "install"
+
+    extra = f"""
+$lockA = Enter-PluginSnapshotLock -InstallDir "{install_dir}" -Version "0.1.0-dev1"
+# If this used the SAME mutex as lockA, a 2s timeout would make this throw.
+$lockB = Enter-PluginSnapshotLock -InstallDir "{install_dir}" -Version "0.2.0-dev1" -TimeoutSeconds 2
+Write-Output "BOTH-INDEPENDENT-LOCKS-ACQUIRED"
+[void]$lockB.ReleaseMutex(); $lockB.Dispose()
+[void]$lockA.ReleaseMutex(); $lockA.Dispose()
+"""
+    result = _run_lock_harness(extra)
+    assert "BOTH-INDEPENDENT-LOCKS-ACQUIRED" in result.stdout, result.stdout + result.stderr
+
+
 def test_publish_file_atomically_creates_a_new_file(tmp_path: Path) -> None:
     target = tmp_path / "install" / "payload-dir"
     target.parent.mkdir(parents=True)
@@ -586,6 +607,43 @@ def test_stamp_force_overrides_the_version_ordering_guard(tmp_path: Path) -> Non
     )
     assert marker.read_text(encoding="utf-8") == "0.2.0-dev1", result.stdout + result.stderr
     assert deployed.exists()
+
+
+def _run_version_lt(a: str, b: str) -> bool:
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        + _extract_function_block("Get-VerTuple")
+        + "\n\n"
+        + _extract_function_block("Test-VersionLt")
+        + "\n\n"
+        f'if (Test-VersionLt -A "{a}" -B "{b}") {{ Write-Output "LT:true" }} else {{ Write-Output "LT:false" }}\n'
+    )
+    result = subprocess.run(
+        [_PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True,
+        text=True,
+        env=os.environ,
+        timeout=30,
+        check=True,
+    )
+    assert "LT:" in result.stdout, result.stdout + result.stderr
+    return "LT:true" in result.stdout
+
+
+def test_a_finished_release_is_not_older_than_its_own_dev_prereleases() -> None:
+    """Regression: a missing tuple component used to default to 0, making
+    "0.2.0" sort as OLDER than "0.2.0-dev1" -- a finished release must
+    outrank every devN pre-release build of the same prefix, or
+    Invoke-Stamp's version-ordering guard would wrongly skip a legitimate
+    dev-to-release promotion."""
+    assert _run_version_lt("0.2.0", "0.2.0-dev1") is False
+    assert _run_version_lt("0.2.0-dev1", "0.2.0") is True
+
+
+def test_version_lt_still_compares_differing_prefixes_correctly() -> None:
+    assert _run_version_lt("0.1.9-dev5", "0.2.0-dev1") is True
+    assert _run_version_lt("0.2.0-dev1", "0.1.9-dev5") is False
+    assert _run_version_lt("0.2.0", "0.2.0") is False
 
 
 

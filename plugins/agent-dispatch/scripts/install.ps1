@@ -676,8 +676,18 @@ function Test-VersionLt {
     $ta = Get-VerTuple $A; $tb = Get-VerTuple $B
     $n = [Math]::Max($ta.Count, $tb.Count)
     for ($i = 0; $i -lt $n; $i++) {
-        $x = if ($i -lt $ta.Count) { $ta[$i] } else { 0 }
-        $y = if ($i -lt $tb.Count) { $tb[$i] } else { 0 }
+        $aHas = $i -lt $ta.Count
+        $bHas = $i -lt $tb.Count
+        # A version that ran out of components here (e.g. "0.2.0" vs
+        # "0.2.0-dev1") is the finished release; a release outranks any
+        # devN pre-release build of the same prefix -- mirrors
+        # install.sh's own _version_lt (#377's same false-positive class:
+        # treating a missing component as 0 here would make "0.2.0" sort
+        # as OLDER than "0.2.0-dev1", silently blocking a legitimate
+        # dev-to-release promotion).
+        if (-not $aHas) { return $false }
+        if (-not $bHas) { return $true }
+        $x = $ta[$i]; $y = $tb[$i]
         if ($x -lt $y) { return $true }
         if ($x -gt $y) { return $false }
     }
@@ -879,37 +889,55 @@ function Publish-FileAtomically {
 function Enter-PluginSnapshotLock {
     <# Serializes a critical section against concurrent invocations (two
        near-simultaneous install/stamp actions) under one named mutex keyed
-       by $InstallDir -- mirrors agent-machines' own Enter-StampLock
+       by $InstallDir (and, for the build-lifecycle scope, $Version too) --
+       mirrors agent-machines' own Enter-StampLock
        (plugins/agent-machines/scripts/init.ps1) in a distinct namespace.
 
-       Two call-site scopes share this one lock (same key, thread-affine
-       reentrant):
-       - New-PluginBuildSnapshot's own (short) check/copy/publish sequence.
-         Without it, two callers could both observe no valid snapshot, each
-         finish their own temp copy, and the LATER publisher's rename-aside
-         step would retire the snapshot the EARLIER caller already returned
-         and may still be actively building from.
-       - Install-Runtime's WIDER span from snapshot resolution through the
-         end of the actual package install. Without this outer scope, two
-         same-version callers could both take the (correct, intentional)
-         snapshot-reuse fast path and then concurrently scrub/rebuild
-         PEP 517 artifacts (build/, *.egg-info) under the SAME shared
-         $BuildSrcDir, each potentially deleting the other's in-progress
-         build output.
+       Two DISTINCT locks share this one implementation (different keys,
+       each independently thread-affine reentrant within its own scope):
 
-       -TimeoutSeconds defaults to 20s (comfortably covers the short
-       snapshot-only scope); Install-Runtime's own wider acquisition passes
-       a much larger value, since a real venv+package build this lock can
-       now span takes ~30-120s on its own (see Deploy-SelfProvisioningBinstub's
-       own first-use provisioning estimate) -- the default would almost
-       certainly time out under any genuinely concurrent build otherwise. #>
+       - VERSION-SCOPED (pass -Version): New-PluginBuildSnapshot's own
+         (short) check/copy/publish sequence, and Install-Runtime's WIDER
+         span from snapshot resolution through the end of the actual
+         package install, both keyed by $InstallDir + $Version together.
+         Without the first, two callers could both observe no valid
+         snapshot, each finish their own temp copy, and the LATER
+         publisher's rename-aside step would retire the snapshot the
+         EARLIER caller already returned and may still be actively
+         building from. Without the second, two same-version callers could
+         both take the snapshot-reuse fast path and then concurrently
+         scrub/rebuild PEP 517 artifacts (build/, *.egg-info) under the
+         SAME shared $BuildSrcDir. Scoping this lock BY VERSION (not just
+         $InstallDir) is deliberate: a wedged build backend for one
+         version -- the exact failure mode this whole mechanism tolerates
+         -- must never block an unrelated install of a DIFFERENT,
+         newer version from acquiring its own independent lock.
+
+       - GLOBAL, $InstallDir-only (omit -Version): Invoke-Stamp's own
+         outer span covering BOTH marker publications. This one genuinely
+         needs cross-version visibility -- its whole purpose is comparing
+         against whatever stamped-version is CURRENTLY published,
+         regardless of which version last held it, to stop a
+         delayed/preempted OLDER stamp from overwriting a NEWER one's
+         markers. This span is always short (file writes only, no venv/uv
+         build work), so cross-version contention here is a non-issue.
+
+       -TimeoutSeconds defaults to 20s (comfortably covers both the short
+       snapshot-only and marker-publication scopes); Install-Runtime's own
+       wider, version-scoped acquisition passes a much larger value, since
+       a real venv+package build this lock can now span takes ~30-120s on
+       its own (see Deploy-SelfProvisioningBinstub's own first-use
+       provisioning estimate) -- the default would almost certainly time
+       out under any genuinely concurrent SAME-version build otherwise. #>
     param(
         [Parameter(Mandatory)][string]$InstallDir,
+        [string]$Version,
         [int]$TimeoutSeconds = 20
     )
+    $key = if ($Version) { "$($InstallDir.ToLowerInvariant())|$Version" } else { $InstallDir.ToLowerInvariant() }
     $hash = [BitConverter]::ToString(
         [Security.Cryptography.SHA256]::Create().ComputeHash(
-            [Text.Encoding]::UTF8.GetBytes($InstallDir.ToLowerInvariant())
+            [Text.Encoding]::UTF8.GetBytes($key)
         )
     ).Replace('-', '').Substring(0, 24)
     $mutexName = if ($env:OS -eq 'Windows_NT') {
@@ -1027,7 +1055,7 @@ function New-PluginBuildSnapshot {
         # Enter-PluginSnapshotLock's own docstring for the exact race this
         # closes). A lock-acquisition timeout flows through this same catch,
         # so -BestEffort still governs whether that degrades gracefully.
-        $snapMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir
+        $snapMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -Version $Version
         try {
             if (-not (Test-Path $InstallDir)) { New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null }
             $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $Version
@@ -1242,19 +1270,22 @@ function Install-Runtime {
     # -BestEffort: a failed snapshot here only means building from the live
     # payload again (the prior, only-ever behavior) -- not fatal.
     #
-    # The OUTER lock below (same $InstallDir key New-PluginBuildSnapshot's
-    # own inner acquisition reenters harmlessly) spans snapshot resolution
-    # through the end of the actual package install: two same-version
-    # callers both taking the snapshot-reuse fast path would otherwise
-    # concurrently scrub/rebuild PEP 517 artifacts (build/, *.egg-info)
-    # under the SAME shared $BuildSrcDir, each able to delete the other's
-    # in-progress build output. A real build can run ~30-120s on its own
-    # (see Deploy-SelfProvisioningBinstub's own first-use estimate), so this
+    # The OUTER lock below (same $InstallDir + $SrcVersion key
+    # New-PluginBuildSnapshot's own inner acquisition reenters harmlessly)
+    # spans snapshot resolution through the end of the actual package
+    # install: two same-version callers both taking the snapshot-reuse fast
+    # path would otherwise concurrently scrub/rebuild PEP 517 artifacts
+    # (build/, *.egg-info) under the SAME shared $BuildSrcDir, each able to
+    # delete the other's in-progress build output. Scoped BY VERSION (not
+    # just $InstallDir): a wedged build backend for one version must never
+    # block an unrelated, newer-version install's own independent lock. A
+    # real build can run ~30-120s on its own (see
+    # Deploy-SelfProvisioningBinstub's own first-use estimate), so this
     # acquisition passes a much longer timeout than the short snapshot-only
     # default -- `exit` (used throughout the build steps below on failure)
     # still runs this `finally`, confirmed: PowerShell unwinds pending
     # `finally` blocks before an `exit` actually terminates the process.
-    $buildMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds 180
+    $buildMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -Version $SrcVersion -TimeoutSeconds 180
     try {
     $BuildSrcDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion -BestEffort
 
