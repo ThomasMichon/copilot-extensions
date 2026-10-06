@@ -848,6 +848,55 @@ test("promoteSuccessorHead links succession over the expected predecessor head",
   ]);
 });
 
+test("promoteSuccessorHead passes the real handoff token through to link-succession", () => {
+  // Regression (predecessor-retire gap, mux-companion-manual-cutover-
+  // diagnostics): without --handoff-token, link_succession's own
+  // "handed-off" branch invents a synthetic `manual-<N>` placeholder token
+  // instead of linking the real handoff -- opening that placeholder
+  // silently cancels the real entry as a side effect (open_handoff's own
+  // "cancel sibling pending for this predecessor" rule), stranding it at
+  // state=cancelled forever: never linked, therefore never eligible for
+  // predecessor-pane retirement. The real token must reach the CLI call.
+  const calls = [];
+  const execute = (bin, argv, opts) => {
+    calls.push({ bin, argv, opts });
+    if (argv[0] === "head-session") {
+      return JSON.stringify({ tracked: true, head_session: "predecessor-x" });
+    }
+    if (argv[0] === "link-succession") return JSON.stringify({ ok: true });
+    throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
+  };
+  const result = promoteSuccessorHead(
+    "C:\\repo", "wt-1", "predecessor-x", "successor-x", execute, "the-real-token",
+  );
+  assert.equal(result.promoted, true);
+  const linkCall = calls.find((c) => c.argv[0] === "link-succession");
+  assert.ok(linkCall, "expected a link-succession call");
+  assert.deepEqual(linkCall.argv, [
+    "link-succession",
+    "--worktree", "wt-1",
+    "--predecessor", "predecessor-x",
+    "--successor", "successor-x",
+    "--predecessor-state", "handed-off",
+    "--json",
+    "--handoff-token", "the-real-token",
+  ]);
+});
+
+test("promoteSuccessorHead omits --handoff-token when none was given (no regression on the no-token shape)", () => {
+  const calls = [];
+  const execute = (bin, argv) => {
+    calls.push(argv);
+    if (argv[0] === "head-session") {
+      return JSON.stringify({ tracked: true, head_session: "predecessor-x" });
+    }
+    return JSON.stringify({ ok: true });
+  };
+  promoteSuccessorHead("C:\\repo", "wt-1", "predecessor-x", "successor-x", execute);
+  const linkCall = calls.find((argv) => argv[0] === "link-succession");
+  assert.ok(!linkCall.includes("--handoff-token"));
+});
+
 test("promoteSuccessorHead is a no-op when this session is already the recorded head", () => {
   const calls = [];
   const execute = (bin, argv) => {
@@ -961,7 +1010,7 @@ test("file-backed consume promotes the successor session to worktree head (best-
     assert.equal(consumed.ok, true);
     assert.deepEqual(
       promoteCalls,
-      [["C:\\repo", "wt-promo-1", "predecessor-promo", "successor-promo"]],
+      [["C:\\repo", "wt-promo-1", "predecessor-promo", "successor-promo", undefined, "handoff-promo-1"]],
     );
   });
 });
@@ -1032,7 +1081,7 @@ test("task-backed consume promotes the successor session to worktree head using 
       promoteCalls,
       [[
         "C:\\repo", "wt-task-promo", "predecessor-task-promo",
-        "successor-task-promo",
+        "successor-task-promo", undefined, "task-promo-1",
       ]],
     );
   } finally {
