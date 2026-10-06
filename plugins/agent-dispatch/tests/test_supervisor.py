@@ -6860,6 +6860,68 @@ def test_reconcile_reserving_worktree_confirmed_absent_but_owner_claimed_stays_r
     assert q.get_reservation(reservation.key).state == SpawnState.RESERVING
 
 
+def test_reconcile_reserving_worktree_replaced_between_probe_and_release_is_fenced(
+    q, client, monkeypatch
+):
+    """``request_spawn_release``'s atomic worktree-mismatch check only fires
+    when the probed worktree is passed through -- fence the release to the
+    exact worktree that was actually confirmed absent, since
+    ``record_spawn_worktree`` may replace a ``reserving`` reservation's
+    worktree between the probe and the subsequent release call. The real
+    ``DispatchClient`` surfaces this server-side mismatch as a
+    ``DispatchError`` (an HTTP error response); emulate that translation
+    here since the in-process ``QueueBackedClient`` test double calls the
+    queue directly and would otherwise let the underlying ``TaskError``
+    propagate uncaught."""
+    task = q.create("ordinary")
+    reservation, _ = q.reserve_spawn(task.id, reserved_by="supervisor-test")
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-original",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    original_release = client.request_spawn_release
+
+    def translating_release(*args, **kwargs):
+        try:
+            return original_release(*args, **kwargs)
+        except Exception as exc:  # the queue's own TaskError
+            raise DispatchError(409, str(exc)) from exc
+
+    monkeypatch.setattr(client, "request_spawn_release", translating_release)
+
+    def present_fn(_wt, _project):
+        # Simulate a concurrent replacement landing between the probe and
+        # the subsequent release call.
+        q.record_spawn_worktree(
+            reservation.key,
+            "wt-replaced",
+            ownership="created",
+            creating_host="host-a",
+            driver="agent-dispatch",
+        )
+        return False
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        supervisor_id="supervisor-test",
+        verdict_fn=lambda *_args: tracking.UNKNOWN,
+        worktree_directory_present_fn=present_fn,
+        nudge=False,
+    )
+
+
+    assert sup.reconcile_reserving() == 0
+    unchanged = q.get_reservation(reservation.key)
+    assert unchanged.state == SpawnState.RESERVING
+    assert unchanged.worktree == "wt-replaced"
+
+
 @pytest.mark.parametrize(
     ("session_handle", "body_kind"),
     [

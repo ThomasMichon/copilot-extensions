@@ -1007,7 +1007,9 @@ class Supervisor:
             present = None
         return present is False
 
-    def _fail_unresolved_reserving(self, res: dict, reason: str) -> bool:
+    def _fail_unresolved_reserving(
+        self, res: dict, reason: str, *, worktree: str | None = None
+    ) -> bool:
         """Release a ``reserving`` reservation whose worktree is positively
         confirmed absent (see :meth:`_reserving_worktree_confirmed_absent`)
         so a fresh attempt may be reserved (confirmed live, 2026-10-05: a
@@ -1016,6 +1018,12 @@ class Supervisor:
         the GONE/LIVE tri-state's own "never treat ignorance as death"
         safety guarantee meant no sweep ever revisited it, holding the
         task's ``exclusive_key`` reservation slot indefinitely).
+
+        ``worktree`` -- the exact worktree whose absence was actually probed
+        -- fences ``request_spawn_release``'s atomic mismatch check against
+        ``record_spawn_worktree`` replacing the reservation's worktree
+        between the probe and this call (the reservation stays ``reserving``
+        throughout, so that race is live, not theoretical).
         """
         try:
             age = time.time() - float(res.get("reserved_at") or 0)
@@ -1028,6 +1036,7 @@ class Supervisor:
                     res["key"],
                     detail=detail,
                     disposition="failed",
+                    worktree=worktree,
                 )
             else:
                 self.client.fail_spawn(res["key"], detail=detail)
@@ -1205,6 +1214,7 @@ class Supervisor:
                         "reserved worktree confirmed absent from the local "
                         "agent-worktrees registry while its owner liveness "
                         "stayed unknown",
+                        worktree=worktree,
                     ):
                         reconciled += 1
                 continue
