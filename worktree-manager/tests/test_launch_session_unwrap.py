@@ -194,9 +194,8 @@ def test_launchers_deliver_pending_seed_on_both_create_and_join():
     assert "function Invoke-SeedDeliverySafe" in ps
     assert "'embody', '--worktree-id', $WorktreeId, '--json'" in ps
     assert ps.count("Invoke-SeedDeliverySafe $plan.worktree_id") == 2
-    # ... called once in the JOIN branch (before its attach), and once more
-    # strictly between the CREATE branch's own setup-log marker and its
-    # nested-create early-exit.
+    # ... called once in the JOIN branch, and once more strictly between the
+    # CREATE branch's own setup-log marker and its nested-create early-exit.
     join_idx = ps.index('Write-Host "Joining existing session: $sessName"')
     create_branch_idx = ps.index('Write-SetupLog "psmux: creating session $sessName"')
     join_seed_call_idx = ps.index("Invoke-SeedDeliverySafe $plan.worktree_id")
@@ -208,6 +207,17 @@ def test_launchers_deliver_pending_seed_on_both_create_and_join():
     )
     assert join_idx < join_seed_call_idx < create_branch_idx
     assert create_branch_idx < create_seed_call_idx < nested_exit_idx
+    # Both branches must deliver the seed BEFORE their own `$nested`
+    # early-exit (a nested launch -- already running inside a mux pane --
+    # never attaches at all, only reports and exits) -- a queued seed must
+    # still reach the already-running pane regardless of whether THIS
+    # invocation attaches to it. `Reset-SshConptyViewport` is the first call
+    # strictly AFTER each branch's own nested-exit check (both branches
+    # call it exactly once, only on the non-nested path).
+    join_viewport_idx = ps.index("Reset-SshConptyViewport", join_seed_call_idx)
+    create_viewport_idx = ps.index("Reset-SshConptyViewport", create_seed_call_idx)
+    assert join_seed_call_idx < join_viewport_idx < create_branch_idx
+    assert create_seed_call_idx < create_viewport_idx
 
     # bash: the mirrored helper function ...
     assert "_aw_deliver_pending_seed() {" in sh

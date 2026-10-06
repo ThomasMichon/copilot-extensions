@@ -265,25 +265,24 @@ is this effort's actual Phase 1 deliverable.)
       fresh-mux-create path already calls (a no-op when nothing is
       queued). `test_launch_session_unwrap.py`'s drift guard asserts both
       call sites and their relative ordering.
-- [ ] **Deferred from Phase 1 (ninth review round):** `claim_pending_seed`
-      cannot distinguish "nothing was pending" from "claim failed" (lock
-      contention, an unreadable record) -- both return `None`. With an
-      explicit seed supplied, the current code proceeds with the explicit
-      value regardless, silently leaving an old, undelivered `pending_seed`
-      queued if the claim genuinely failed rather than finding nothing --
-      that stale prompt can then surface as an unexpected turn on a LATER
-      resume. Needs a richer return contract (e.g. a small result object
-      distinguishing "empty" / "claimed" / "claim-failed") threaded through
-      every existing call site, not a narrow single-file fix -- real design
-      surgery, scoped here rather than rushed.
-- [ ] **Deferred from Phase 1 (ninth review round):** `_RecordLock.__enter__`
-      creating/opening its sidecar file can itself raise `OSError`/
-      `PermissionError`, which currently escapes `pending_seed`'s own
-      documented "degrade to False, never raise" contract in
-      `claim_pending_seed`/`set_pending_seed`/`restore_pending_seed` alike.
-      A pre-existing lock-primitive gap (not introduced by this effort),
-      but worth hardening alongside the claim-ambiguity item above since
-      both touch the same call sites.
+- [ ] `claim_pending_seed` cannot distinguish "nothing was pending" from
+      "claim failed" (lock contention, an unreadable record) -- both
+      return `None`. With an explicit seed supplied, the current code
+      proceeds with the explicit value regardless, silently leaving an
+      old, undelivered `pending_seed` queued if the claim genuinely failed
+      rather than finding nothing -- that stale prompt can then surface as
+      an unexpected turn on a LATER resume. Needs a richer return contract
+      (e.g. a small result object distinguishing "empty" / "claimed" /
+      "claim-failed") threaded through every existing call site, not a
+      narrow single-file fix -- real design surgery, scoped here rather
+      than rushed.
+- [ ] `_RecordLock.__enter__` creating/opening its sidecar file can itself
+      raise `OSError`/`PermissionError`, which currently escapes
+      `pending_seed`'s own documented "degrade to False, never raise"
+      contract in `claim_pending_seed`/`set_pending_seed`/
+      `restore_pending_seed` alike. A pre-existing lock-primitive gap (not
+      introduced by this effort), but worth hardening alongside the
+      claim-ambiguity item above since both touch the same call sites.
 
 ## Validation Plan
 
@@ -714,3 +713,30 @@ _Pending._
   reruns with no code changes between them -- this machine's own known
   resource-contention flakiness, not a regression from this slice's
   2-line-per-script change).
+- **2026-10-06** — Opened PR #5514 for this slice; a first Copilot review
+  round asked for the usual review-provenance cleanup in the new
+  docstring/plan-item text (fixed) plus a Documentation-impact statement
+  (already present in the PR body). A SECOND round then caught a real,
+  narrower bug in the fix itself, in its own overview summary: the
+  Windows (`launch-session.ps1`) JOIN branch's PRE-EXISTING `$nested`
+  early-exit (true when this launcher is itself already running inside a
+  mux pane -- it just reports the session exists and exits, rather than
+  attaching from within a pane) sat ABOVE where this slice's new
+  `Invoke-SeedDeliverySafe` call landed, so a nested JOIN never reached
+  it at all -- the exact asymmetry this slice exists to close, just
+  relocated into a code path this slice's own first pass didn't
+  reproduce. The sibling CREATE branch already called
+  `Invoke-SeedDeliverySafe` BEFORE its own `$nested` check; fixed by
+  matching that same ordering in the JOIN branch (move the nested
+  early-exit to after shared setup + seed delivery, printing the
+  nested-specific message inline instead of exiting immediately).
+  `launch-session.sh` has no equivalent `$nested` concept for its own
+  JOIN branch, so bash was never affected. Rewrote the drift guard to
+  assert seed delivery precedes each branch's own nested-exit check (via
+  each branch's single `Reset-SshConptyViewport` call, which both
+  scripts place immediately after their own nested check). Re-ran the
+  full 34-test `launch_session`/`launch_passthrough`/`launch_scripts`
+  sweep: still passing. Also removed "(ninth review round)" provenance
+  from the two still-open Phase 3 backlog items above, generalizing the
+  same timeless-documentation principle the review applied to the fixed
+  item.

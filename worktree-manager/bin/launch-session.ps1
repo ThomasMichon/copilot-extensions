@@ -1696,11 +1696,10 @@ if (-not $noMux) {
     if ($LASTEXITCODE -eq 0) {
         if ($nested) {
             Write-Host "Session already exists: $sessName (open a new terminal to join)"
-            exit 0
+        } else {
+            Write-Host "Joining existing session: $sessName"
         }
-        Write-Host "Joining existing session: $sessName"
         Write-ActivityLog -Event 'mux_attached' -WorktreeId $plan.worktree_id -Fields @('mux=join')
-        Reset-SshConptyViewport
         # Re-stamp per-session options on (re)connect so a long-lived session
         # picks up the current bar without us owning the global config.
         Set-AwSessionOptionsSafe $sessName
@@ -1723,7 +1722,18 @@ if (-not $noMux) {
         # session creation below already does -- `Invoke-SeedDeliverySafe`
         # is a no-op when nothing is queued. Dispatched detached (see its
         # own definition above), so it cannot delay the attach below.
+        #
+        # Called BEFORE the `$nested` early-exit right below (mirroring the
+        # CREATE branch's own ordering): a nested launch (already running
+        # inside a mux pane) never attaches here at all -- it only reports
+        # the session exists and exits -- but a queued seed must still be
+        # delivered into the ALREADY-RUNNING pane regardless of whether
+        # THIS invocation attaches to it.
         Invoke-SeedDeliverySafe $plan.worktree_id
+        if ($nested) {
+            exit 0
+        }
+        Reset-SshConptyViewport
         # Write last_session immediately before attach: the 3.3.6 attach
         # regression reads that file instead of honoring -t, so this must
         # remain the final psmux-affecting action before attach.
