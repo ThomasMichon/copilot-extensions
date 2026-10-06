@@ -191,6 +191,25 @@ completions can sit safely until reviewed. For emitter-driven tasks whose
 evaluator already auto-confirms, this card simply never has anything to show:
 nothing sits completed-and-unconfirmed long enough to need it.
 
+### The suspended-task waiter — naming the actual blocker, not just "no live session"
+
+A suspended task with a detached, confirmed-live waiter (`agent-dispatch run
+--detach --resume ... --task ...`) is not idle — it is actively blocked on a
+specific, named external condition (a PR watch, a build, another task). The
+pane does not reduce that to a bare "suspended — no live session" badge: the
+Tasks table's suspended-row activity phrase, and the companion Claims system's
+`claim-status` detail (reached from either the dispatch-task claim provider or
+the Worktree Status card's claims viewer), both surface the waiter's exact
+blocking-wait command — "waiting: `<command>`" — whenever one is attached,
+degrading silently to the plain suspended badge when none is. This reuses one
+shared waiter lookup rather than each surface inventing its own, so a waiter
+recorded from either angle reads the same way, in keeping with the
+cross-link and shared-artifacts discipline above. A board path that cannot yet
+thread the waiter through (a delegated cross-machine or relay/subscribe view)
+degrades to the plain badge rather than guessing or silently claiming
+coverage it doesn't have — closing that gap is additive future work, not a
+reason to withhold the capability from the paths that already support it.
+
 ### Registrars configuration — the master pause, made visible
 
 `agent_dispatch.overrides` already implements a durable, user-level
@@ -236,3 +255,11 @@ schema.
   `worktree-manager/src/worktree_manager/production_picker/picker_tui/pivots.py` ·
   `plugins/agent-dispatch/src/agent_dispatch/` ·
   [`efforts/active/agent-dispatch-tasks-pane-ux-overhaul/README.md`](../../../../efforts/active/agent-dispatch-tasks-pane-ux-overhaul/README.md)
+
+## Provenance
+
+- **2026-10-05** — Backported "The suspended-task waiter" from
+  `ThomasMichon/copilot-extensions#5400` (merged): the board/claims
+  waiter-surfacing capability already shipped ahead of this vision recording
+  it. The PR's own documented delegated-cross-machine/relay-subscribe gap is
+  folded in as the still-open additive edge, not silently dropped.
