@@ -884,12 +884,24 @@ worktree-manager.
       `plugins/agent-bridge/src/agent_bridge/service_process_cli.py`'s
       `_kill_pid` (bare `taskkill`/`os.kill`, no identity-bound termination)
       called after a separate `_pid_is_agent_bridge` identity check — the
-      same check-then-bare-kill window, not yet remediated. Likely also
-      fixable with a freshly-captured `process_start_time` token rather
-      than the breadcrumb schema change (review feedback, PR #5473), but
-      that fix itself is not yet done. Left open on #5006, which now
-      records this specific remaining site rather than claiming none
-      exist; the audit was still not exhaustive across every plugin.
+      same check-then-bare-kill window. The audit was still not exhaustive
+      across every plugin.
+- [x] **PID-reuse-safe termination (agent-bridge `_kill_pid` site).** Fixed
+      the remaining site the 2026-10-05 audit above found:
+      `_kill_pid` now routes through
+      `zdd.diagnostics.terminate_pid_if_identity` with a
+      `process_start_time` token captured immediately before the kill,
+      mirroring `_terminate_mux_daemon_pid`'s design exactly — identity
+      *mismatch* (pid reuse) skips the kill entirely; an unavailable
+      identity primitive (e.g. non-Linux POSIX with no `pidfd_open`) falls
+      back to the prior unconditional signal/`taskkill`, preserving this
+      function's existing guarantee on those platforms rather than
+      silently losing kill capability there. `_kill_pid` has several
+      callers (`_service_stop`'s victim loop, `_force_kill_agent_bridge_tree`'s
+      Windows path); fixing it in the one shared function covers all of
+      them, not just the specific `_service_stop` call site the audit
+      named. Closes [#5006](https://github.com/ThomasMichon/copilot-extensions/issues/5006)
+      fully (no further known sites).
 - **Background daemon rotation.** Resident per-version mux-daemons
       accumulate indefinitely: `activate_after_update()`'s cutover is only
       attempted opportunistically (at whichever session's `self_update()`
@@ -1133,6 +1145,24 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-06** — Claimed and landed Phase 7's remaining #5006 site:
+  `plugins/agent-bridge/src/agent_bridge/service_process_cli.py`'s
+  `_kill_pid` now routes through `zdd.diagnostics
+  .terminate_pid_if_identity` with a freshly-captured `process_start_time`
+  token, mirroring `worktree_manager.mux_daemon_cutover
+  ._terminate_mux_daemon_pid`'s #5060 design exactly (identity mismatch
+  skips the kill; an unavailable identity primitive falls back to the
+  prior unconditional signal/`taskkill` rather than regressing kill
+  capability on platforms without `pidfd_open`). Fixed in the single
+  shared `_kill_pid` function rather than only its `_service_stop` call
+  site, so every caller benefits. Added `test_kill_pid_identity.py`
+  covering all three outcomes directly. PR: pending. Full `agent-bridge`
+  suite run locally: 3099 passed, 2 unrelated pre-existing timing flakes
+  (`test_host_index_claims.py`, `test_local_cache_refresh.py`, both
+  process-timing assertions unrelated to this change); `test_session_host.py`
+  hits a pre-existing pytest-capture `OSError: Bad file descriptor`
+  teardown issue on this machine even run alone, unrelated to this diff
+  (no session-host code touched).
 - **2026-10-06** — Landed a preliminary, non-attributing registry listing
   for #5001's Phase 1 attribution slice: `worktree-manager daemons
   mappings [--json]` (PR

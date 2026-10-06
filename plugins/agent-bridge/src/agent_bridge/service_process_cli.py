@@ -172,8 +172,42 @@ def _pid_on_port(port: int) -> int | None:
 
 
 def _kill_pid(pid: int) -> None:
+    """Terminate *pid*, routed through an identity-bound OS object when
+    the platform supports it.
+
+    Every current caller already re-verifies ``_pid_is_agent_bridge(pid)``
+    (a cmdline-substring check) immediately beforehand, but that check and
+    the kill itself used to be two separate calls -- a window in which the
+    OS could reuse *pid* for an unrelated process remained, exactly the
+    hazard copilot-extensions#5006 tracks (already closed for
+    ``worktree_manager.mux_daemon_cutover``'s analogous call site via
+    #5060). This captures a fresh process-start-time identity token
+    immediately before the kill and asks the OS to terminate through a
+    handle (Windows) or pidfd (Linux) bound to that exact
+    ``(pid, start_time)`` pair -- via ``zdd.diagnostics
+    .terminate_pid_if_identity`` -- so a pid the OS has since reused for an
+    unrelated process can never be signaled in the verified process's
+    place.
+
+    Falls back to the legacy PID-only kill when the platform has no
+    identity-bound termination primitive available (e.g. non-Linux POSIX
+    without ``pidfd_open``) or a start-time token could not be captured at
+    all, preserving this function's prior unconditional-kill behavior on
+    those platforms. The only outcome that intentionally skips the kill
+    entirely is a genuine identity *mismatch*: the fresh re-check
+    disagreeing with the token captured just before termination -- the one
+    case that actually indicates pid reuse.
+    """
     import signal as _signal
     import subprocess as sp
+
+    from zdd import diagnostics
+
+    start_time = diagnostics.process_start_time(pid)
+    if start_time is not None:
+        result = diagnostics.terminate_pid_if_identity(pid, start_time)
+        if result.get("identity_verified") or "mismatch" in str(result.get("method", "")):
+            return
 
     if sys.platform == "win32":
         sp.run(["taskkill", "/PID", str(pid), "/F", "/T"], capture_output=True, text=True)
@@ -723,18 +757,14 @@ def _service_stop() -> None:
         # stale pid-file/port/lock entry whose pid has since been reused by
         # an unrelated process must never be killed.
         #
-        # This narrows, but does not fully close, the identity hazard:
-        # `_pid_is_agent_bridge` is a cmdline-substring check, and a tiny
-        # window remains between it and `_kill_pid`'s own signal. Fully
-        # closing that would mean routing every victim through an
-        # OS-object-bound termination (e.g. `zdd.diagnostics.
-        # terminate_pid_if_identity`'s pidfd-based path) -- a real,
-        # available pattern, deliberately NOT adopted here: it changes
-        # this shared production function's behavior on every platform and
-        # caller (not just this clean-room drill), including its own
-        # existing test coverage's mocking seam, and is a separate,
-        # more invasive hardening this PR's scope does not extend to.
-        # Tracked as a known residual, not silently claimed closed.
+        # `_pid_is_agent_bridge` is a cmdline-substring check, and `_kill_pid`
+        # itself now closes the remaining window to its own signal: it
+        # re-verifies identity through an OS-object-bound termination
+        # (`zdd.diagnostics.terminate_pid_if_identity`) using a start-time
+        # token captured immediately before the kill, falling back to a
+        # bare signal only where that primitive is unavailable on this
+        # platform (never on an actual identity mismatch). Closes
+        # copilot-extensions#5006 for this call site.
         if not core._pid_is_agent_bridge(victim):
             continue
         core._kill_pid(victim)
