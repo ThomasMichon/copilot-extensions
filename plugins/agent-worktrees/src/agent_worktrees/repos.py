@@ -38,7 +38,7 @@ from pathlib import Path
 
 import yaml
 
-from . import git_ops, output, registry_paths
+from . import bare_anchor_sync, git_ops, output, registry_paths
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -1394,7 +1394,9 @@ def sync_repo(entry: RepoEntry, plat: str | None = None) -> tuple[str, str]:
     checkout is clean but sitting on a *different* branch than the declared
     one (e.g. a stale clone left on GitHub's advertised HEAD instead of the
     repo's actual contribution branch), this switches it back rather than
-    permanently skipping every future sync.
+    permanently skipping every future sync. A **bare** anchor (no work tree
+    of its own) delegates to :func:`bare_anchor_sync.sync_bare_anchor`
+    instead, since plain ``git status``/``git merge --ff-only`` require one.
     """
     plat = plat or _current_platform()
     path = entry.local_path(plat)
@@ -1402,6 +1404,8 @@ def sync_repo(entry: RepoEntry, plat: str | None = None) -> tuple[str, str]:
         return ("missing", "not checked out")
     branch = inrepo_declared_default_branch(path) or entry.default_branch
     try:
+        if _git(path, "rev-parse", "--is-bare-repository").stdout.strip() == "true":
+            return bare_anchor_sync.sync_bare_anchor(path, branch)
         if _git(path, "status", "--porcelain").stdout.strip():
             return ("skipped", "working tree dirty")
         current = _git(path, "branch", "--show-current").stdout.strip()
