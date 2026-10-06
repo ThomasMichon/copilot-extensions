@@ -216,7 +216,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     # before any of them committed a write, and each surviving duplicate then
     # ran indefinitely until a periodic re-check happened to notice a sibling
     # -- observed in the wild as 100+ live `status-monitor` processes eating
-    # double-digit percent CPU (aperture-labs#8036 follow-up). A
+    # double-digit percent CPU. A
     # :class:`single_instance_lease.SingleInstance` (the same proven,
     # OS-level flock/msvcrt primitive already used for the `classify`
     # coalescing lock and the cutover orchestrator elsewhere in this plugin)
@@ -235,20 +235,29 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     # for the next contender that opens the replacement (review finding,
     # PR #5412).
     #
-    # Scope: this gate protects only an ORDINARY cold start (the reported
-    # bug -- a burst of session-lifecycle hooks each independently deciding
-    # to spawn, with no existing owner or an existing non-superseding one).
-    # It deliberately does NOT extend to the cutover/promotion lifecycle
-    # (`_handle_control("promote")`, route-driven activation in the
-    # resident loop) -- that lifecycle relies on a genuinely different,
-    # soft (eventually-consistent, deliberately-overlapping) ownership
-    # model via self-retire/supersession polling, not a hard mutual-
-    # exclusion claim, and retrofitting one there surfaced multiple real
-    # correctness bugs under review (concurrent promote-handler races, a
+    # Scope: a HARD, blocking claim (failure to acquire returns immediately,
+    # no retry) applies only at an ORDINARY cold start (the reported bug --
+    # a burst of session-lifecycle hooks each independently deciding to
+    # spawn, with no existing owner or an existing non-superseding one).
+    # The cutover/promotion lifecycle (`_handle_control("promote")`,
+    # route-driven activation in the resident loop) still attempts the SAME
+    # lease (`_best_effort_claim_lease()` below) so every activation path
+    # exercises it, but treats failure as non-fatal there: that lifecycle
+    # relies on a genuinely different, soft (eventually-consistent,
+    # deliberately-overlapping) ownership model via self-retire/
+    # supersession polling, not a hard mutual-exclusion claim -- a
+    # predecessor's publish-then-retire cutover sequencing
+    # (`docs/patterns/graceful-daemon-cutover.md`) can legitimately still
+    # hold the lease far longer than any bounded wait would tolerate, and a
+    # retry/wait loop there surfaced multiple real correctness bugs under
+    # review (concurrent promote-handler races nulling out a held lease, a
     # predecessor/successor overlap window far longer than any reasonable
-    # bounded wait, muxless-owner replacement never completing) that need
-    # their own careful design, not a quick extension of this gate. See
-    # the tracking issue for that follow-up.
+    # bounded wait, muxless-owner replacement never completing). A
+    # duplicate-spawn race -- the bug the hard cold-start claim protects
+    # against -- cannot happen at these transition points: each is reached
+    # by only one already-elected process (the cutover orchestrator's
+    # single routing decision, or its one explicit `promote` RPC), never a
+    # burst of independently-deciding new processes.
     _OWNERSHIP_LEASE_NAME = "status-monitor-singleton.lock"
 
     def _acquire_ownership_lease():
@@ -267,30 +276,48 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         except AlreadyRunningError:
             return None
 
-    def _muxless_replacement_in_progress() -> bool:
-        """Mirrors `_other_current_monitor()`'s own mux exception: an
-        existing live owner recorded `mux: false` and this candidate has a
-        mux binary available. That is a deliberate, already-tested
-        replacement path (`test_ensure_replaces_muxless_owner_when_mux_is_
-        available`) resolved via the existing soft self-retire/supersession
-        polling, not this atomic lease -- contesting the lease here would
-        block the replacement from ever completing (review finding,
-        PR #5412), since the still-resident muxless owner legitimately
-        holds it until it notices supersession on its own."""
+    def _existing_owner_replacement_permitted() -> bool:
+        """True exactly when `_other_current_monitor()` would already treat
+        an existing live, different-pid owner's claim as non-blocking -- the
+        mux exception (a muxless owner being replaced by a mux-capable
+        candidate) or a superseded-runtime takeover (an older-runtime owner
+        being replaced by a newer one). Both are deliberate, already-tested
+        replacement paths (`test_ensure_replaces_muxless_owner_when_mux_is_
+        available`, the `runtime_superseded` takeover `_other_current_
+        monitor()` itself permits) resolved via the existing soft self-
+        retire/supersession polling, not this atomic lease -- contesting
+        the lease in either case would block the replacement from ever
+        completing, since the still-resident prior owner legitimately
+        holds it until it notices supersession on its own (review findings,
+        PR #5412)."""
         existing = _locks.read_lock(lock)
-        return bool(
-            _locks.lock_is_live(existing)
-            and isinstance(existing, dict)
-            and existing.get("pid") != os.getpid()
-            and existing.get("mux") is False
-            and mux_bin
-        )
+        if not (_locks.lock_is_live(existing) and isinstance(existing, dict)):
+            return False
+        if existing.get("pid") == os.getpid():
+            return False
+        if existing.get("mux") is False and mux_bin:
+            return True
+        op = existing.get("prefix")
+        return bool(op and runtime_superseded(prefix=op))
 
     _lease = None
-    if not passive_mode and not _muxless_replacement_in_progress():
+    if not passive_mode and not _existing_owner_replacement_permitted():
         _lease = _acquire_ownership_lease()
         if _lease is None:
             return 0
+
+    def _best_effort_claim_lease() -> None:
+        """Attempt the same lease at a cutover/promotion transition point
+        (`_handle_control("promote")`, route-driven activation) so every
+        activation path exercises it, matching `_existing_owner_
+        replacement_permitted()`'s own sibling check -- but UNLIKE the
+        cold-start gate above, a failed attempt here is never fatal: see
+        the Scope note above `_OWNERSHIP_LEASE_NAME` for why that's safe.
+        No-op once this process already holds the lease (idempotent;
+        callers may invoke it on every transition, not just the first)."""
+        nonlocal _lease
+        if _lease is None:
+            _lease = _acquire_ownership_lease()
 
     if _other_current_monitor():
         return 0
@@ -621,6 +648,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if action == "promote":
             with state_lock:
                 _cleanup_retired_request_surfaces()
+                _best_effort_claim_lease()
                 published_lock = True
                 _start_request_surfaces()
                 _locks.write_lock(lock, extra=_lock_extra())
@@ -673,6 +701,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             if active_generation is not None and not published_lock:
                 with state_lock:
                     if not published_lock:
+                        _best_effort_claim_lease()
                         published_lock = True
                         _start_request_surfaces()
                         _locks.write_lock(lock, extra=_lock_extra())

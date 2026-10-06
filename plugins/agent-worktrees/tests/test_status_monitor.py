@@ -41,11 +41,11 @@ def test_status_monitor_registered():
 
 
 def test_status_monitor_exits_immediately_when_lease_already_held(monkeypatch, tmp_path):
-    """The atomic exclusivity gate (aperture-labs#8036 follow-up) must run
-    BEFORE the existing lock-file liveness check, and losing the race must
-    return before any lock-file write or further setup -- a losing caller
-    exits in microseconds instead of running on as an undetected duplicate
-    until some later periodic re-check happens to notice a sibling."""
+    """The atomic exclusivity gate must run BEFORE the existing lock-file
+    liveness check, and losing the race must return before any lock-file
+    write or further setup -- a losing caller exits in microseconds instead
+    of running on as an undetected duplicate until some later periodic
+    re-check happens to notice a sibling."""
 
     class _AlwaysHeld:
         def __init__(self, *_a, **_kw) -> None:
@@ -210,6 +210,36 @@ def test_status_monitor_muxless_replacement_bypasses_the_lease(monkeypatch):
     monkeypatch.setattr(session_catalog, "ResidentSessionReconciler", _raise_to_exit_before_the_loop)
 
     args = argparse.Namespace(interval=15, passive=False, control_port=None, mux="psmux")
+    with pytest.raises(RuntimeError, match="reached the resident loop"):
+        m.cmd_status_monitor(args)
+
+
+def test_status_monitor_superseded_runtime_replacement_bypasses_the_lease(monkeypatch):
+    """Regression for a Medium-severity review finding (PR #5412): the
+    bypass must mirror BOTH of `_other_current_monitor()`'s exceptions, not
+    only the mux one. A live owner on a superseded (older) runtime is a
+    second, deliberate, already-permitted replacement case
+    (`_other_current_monitor()`'s own `runtime_superseded` check) -- the
+    lease must not contest it either, for the same reason: the still-
+    resident prior owner holds it until it notices supersession on its
+    own."""
+    other_owner = {"pid": os.getpid() + 1, "prefix": "/old-runtime", "mux": True}
+    monkeypatch.setattr(m.locks, "read_lock", lambda *_a, **_kw: other_owner)
+    monkeypatch.setattr(m.locks, "lock_is_live", lambda *_a, **_kw: True)
+    monkeypatch.setattr(m, "_runtime_superseded", lambda **_kw: True)
+
+    class _MustNotBeConstructed:
+        def __init__(self, *_a, **_kw) -> None:
+            raise AssertionError("superseded-runtime replacement path must never contest the lease")
+
+    monkeypatch.setattr(single_instance_lease, "SingleInstance", _MustNotBeConstructed)
+
+    def _raise_to_exit_before_the_loop(*_a, **_kw):
+        raise RuntimeError("reached the resident loop -- test stops here by design")
+
+    monkeypatch.setattr(session_catalog, "ResidentSessionReconciler", _raise_to_exit_before_the_loop)
+
+    args = argparse.Namespace(interval=15, passive=False, control_port=None)
     with pytest.raises(RuntimeError, match="reached the resident loop"):
         m.cmd_status_monitor(args)
 
