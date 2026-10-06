@@ -578,12 +578,16 @@ def test_every_global_activation_lock_acquisition_shares_one_timeout() -> None:
     turn. Every acquisition of this specific mutex must therefore use the
     SAME shared timeout variable."""
     text = _INSTALL_PS1.read_text(encoding="utf-8")
-    # Every acquisition of the GLOBAL (no -Version) mutex, across the whole
-    # file -- deliberately excludes Enter-PluginSnapshotLock's own
-    # definition and any VERSION-scoped acquisition (which pass -Version
-    # and are independent, differently-keyed mutexes by design).
+    # Every REAL acquisition (assignment call site) of the GLOBAL (no
+    # -Version) mutex, across the whole file -- requires a `$var = `
+    # prefix so this only matches genuine call sites, never the
+    # explanatory comment a few lines above $script:GlobalActivationLockTimeoutSeconds's
+    # own definition, which mentions this exact call shape in prose
+    # (and, lacking a real -TimeoutSeconds argument at all, would
+    # otherwise need its own carve-out that could just as easily hide a
+    # genuine one-off-timeout bug).
     global_acquisitions = re.findall(
-        r"Enter-PluginSnapshotLock -InstallDir \$InstallDir(?! -Version)[^\n]*",
+        r"\$\w+ = Enter-PluginSnapshotLock -InstallDir \$InstallDir(?! -Version)[^\n]*",
         text,
     )
     assert len(global_acquisitions) >= 3, (
@@ -591,9 +595,9 @@ def test_every_global_activation_lock_acquisition_shares_one_timeout() -> None:
         f"{global_acquisitions}"
     )
     for line in global_acquisitions:
-        assert "$script:GlobalActivationLockTimeoutSeconds" in line or "-TimeoutSeconds" not in line, (
+        assert "$script:GlobalActivationLockTimeoutSeconds" in line, (
             f"every global-lock acquisition must use the shared timeout variable, not a "
-            f"one-off literal: {line!r}"
+            f"one-off literal or the 20s default: {line!r}"
         )
 
 
