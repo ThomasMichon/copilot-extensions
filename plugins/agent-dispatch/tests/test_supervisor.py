@@ -6729,14 +6729,13 @@ def test_reconcile_reserving_worktree_confirmed_absent_fails(q, client):
     """Regression for a confirmed field incident (PR #8133, 2026-10-05): a
     worktree-backed reservation whose target worktree never materialized on
     disk at all left ``verdict_fn`` unable to ever resolve to ``live`` or
-    ``gone`` -- it stayed ``unknown`` forever, and (per Copilot's review on
-    copilot-extensions#5489) a bare elapsed-time bound cannot safely treat
-    that as permission to release, since ``UNKNOWN`` also covers an ordinary
-    resolver timeout where the original worker may still be live. Only a
-    **positive** absence signal -- the local ``agent-worktrees`` registry
-    confirming the directory itself never existed, the same escalation
-    :meth:`release_requested_bodies` already uses for this identical gap --
-    may release it, never elapsed time alone.
+    ``gone`` -- it stayed ``unknown`` forever, and a bare elapsed-time bound
+    cannot safely treat that as permission to release, since ``UNKNOWN`` also
+    covers an ordinary resolver timeout where the original worker may still
+    be live. Only a **positive** absence signal -- the local
+    ``agent-worktrees`` registry confirming the directory itself never
+    existed, the same escalation :meth:`release_requested_bodies` already
+    uses for this identical gap -- may release it, never elapsed time alone.
     """
     task = q.create("ordinary")
     reservation, _ = q.reserve_spawn(task.id, reserved_by="supervisor-test")
@@ -6821,6 +6820,39 @@ def test_reconcile_reserving_worktree_unknown_verdict_on_foreign_host_stays_rese
         worktree_directory_present_fn=lambda _wt, _project: pytest.fail(
             "must never probe a worktree created on a different host"
         ),
+        nudge=False,
+    )
+
+    assert sup.reconcile_reserving() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.RESERVING
+
+
+def test_reconcile_reserving_worktree_confirmed_absent_but_owner_claimed_stays_reserved(
+    q, client
+):
+    """A task may already carry a captured owner/session even while its OWN
+    reservation still sits ``reserving`` (e.g. a suspended task's own owner
+    survives into a fresh re-reservation) -- confirmed absence of the
+    worktree directory must never release a reservation whose task already
+    has a live owner captured."""
+    task = q.create("ordinary")
+    reservation, _ = q.reserve_spawn(task.id, reserved_by="supervisor-test")
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-confirmed-absent-but-owned",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
+    q.claim_one("some-owner", task_id=task.id)
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        machine="host-a",
+        supervisor_id="supervisor-test",
+        verdict_fn=lambda *_args: tracking.UNKNOWN,
+        worktree_directory_present_fn=lambda _wt, _project: False,
         nudge=False,
     )
 

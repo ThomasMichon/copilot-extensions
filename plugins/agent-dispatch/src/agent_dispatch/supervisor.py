@@ -965,7 +965,7 @@ class Supervisor:
 
         Mirrors the identical, already-reviewed escalation
         :meth:`release_requested_bodies` already uses for exactly this tri-
-        state gap (Copilot review, PR copilot-extensions#5489, 2026-10-06):
+        state gap (confirmed 2026-10-06, reviewed live):
         a bare timeout cannot safely convert ``UNKNOWN`` into permission to
         release, because ``UNKNOWN`` also covers an ordinary resolver
         timeout/transient probe failure, not just genuine absence -- the
@@ -986,6 +986,8 @@ class Supervisor:
         """
         if (
             res.get("session_handle")
+            or task.get("owner") is not None
+            or task.get("owner_session_id") is not None
             or res.get("worktree") != worktree
             or res.get("worktree_ownership") != "created"
             or not isinstance(res.get("creating_host"), str)

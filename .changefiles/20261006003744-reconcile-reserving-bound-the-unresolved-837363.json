@@ -1,5 +1,5 @@
 {
-  "comment": "reconcile_reserving(): bound the unresolved-liveness (UNKNOWN-forever) gap across the worktree-verdict, local-body, and script-body branches with the same reserving_timeout escalation already used by sibling branches",
+  "comment": "reconcile_reserving(): release a worktree-backed reservation stuck at an UNKNOWN liveness verdict only once the local agent-worktrees registry positively confirms the worktree directory never materialized (never on elapsed time alone)",
   "changes": [
     {
       "plugin": "agent-dispatch",
