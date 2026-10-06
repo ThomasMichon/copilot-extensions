@@ -77,6 +77,11 @@ def test_adapter_rejects_empty_api_bases_explicitly():
         GiteaPRAdapter("review-bot", api_bases={})
 
 
+def test_adapter_rejects_an_api_base_that_normalizes_to_empty():
+    with pytest.raises(ValueError, match="api_bases"):
+        GiteaPRAdapter("review-bot", api_bases={"gitea.example.com": "/"})
+
+
 def test_fetch_pr_refuses_a_key_outside_the_configured_mapping(monkeypatch):
     """A payload_ref's key is caller-supplied data, not a trusted
     credential authority -- a ref naming an unconfigured key must never
@@ -268,7 +273,10 @@ def test_fresh_review_still_counts_alongside_a_stale_one():
     assert observation.approval_status == ApprovalStatus.APPROVED
 
 
-def test_dismissed_review_comments_are_not_blocking(monkeypatch):
+def test_dismissed_review_comments_are_still_fetched_and_can_block(monkeypatch):
+    """Dismissal invalidates only the review's own verdict -- Gitea tracks
+    comment resolution independently per comment, so a dismissed review's
+    still-unresolved inline feedback must keep blocking."""
     monkeypatch.setenv("GITEA_TOKEN", "tok")
 
     def runner(args, **kwargs):
@@ -285,8 +293,10 @@ def test_dismissed_review_comments_are_not_blocking(monkeypatch):
             )
         if "/pulls/7/reviews?page=" in url:
             return _status(json.dumps([]), 200)
-        if "/reviews/1/comments" in url:
-            raise AssertionError("a dismissed review's comments must not be fetched")
+        if "/reviews/1/comments?page=1" in url:
+            return _status(json.dumps([{"id": 1, "body": "still open"}]), 200)
+        if "/reviews/1/comments?page=" in url:
+            return _status(json.dumps([]), 200)
         if "/commits/head-sha/status" in url:
             return _status(json.dumps({"state": "success", "total_count": 1}), 200)
         if url.endswith("/git/commits/head-sha"):
@@ -297,7 +307,8 @@ def test_dismissed_review_comments_are_not_blocking(monkeypatch):
         "review-bot", runner=runner, api_bases={"gitea.example.com": "https://gitea.example.com"},
     )
     observation = adapter.observe("gitea.example.com/example/project", 7)
-    assert HoldReason.BLOCKING_THREADS not in observation.holds
+    assert observation.approval_status == ApprovalStatus.NONE  # dismissed: no verdict
+    assert HoldReason.BLOCKING_THREADS in observation.holds  # but comments still checked
 
 
 def test_unrecognized_review_state_raises():

@@ -48,6 +48,18 @@ def validate_gitea_connection(
             "string (the Gitea instance base URL) when forge.provider is "
             "'gitea'"
         )
+    # Normalize BEFORE validating the final shape: a value that only
+    # *looks* non-empty before trimming (surrounding whitespace, or a bare
+    # "/" that rstrip("/") would otherwise collapse to "") must never slip
+    # through as accepted and then fail forever on the adapter's first
+    # real request.
+    normalized_base = api_base.strip().rstrip("/")
+    if not normalized_base:
+        raise RegistrarError(
+            "repository-issue-loop forge.api_base: expected a non-empty "
+            "string (the Gitea instance base URL) when forge.provider is "
+            "'gitea'"
+        )
     if token_env is None:
         token_env = DEFAULT_GITEA_TOKEN_ENV
     elif not isinstance(token_env, str) or not token_env.strip():
@@ -55,4 +67,6 @@ def validate_gitea_connection(
             "repository-issue-loop forge.token_env: expected a non-empty "
             "string (an environment variable name)"
         )
-    return {"api_base": api_base.rstrip("/"), "token_env": token_env}
+    else:
+        token_env = token_env.strip()
+    return {"api_base": normalized_base, "token_env": token_env}

@@ -58,14 +58,14 @@ class GiteaProvider:
     ):
         if not expected_login:
             raise ValueError("expected_login must be non-empty")
-        if not api_base:
+        if not api_base or not api_base.strip() or not api_base.strip().rstrip("/"):
             raise ValueError(
                 "GiteaProvider requires api_base (the Gitea instance base URL)"
             )
         self.expected_login = expected_login
         self.runner = runner
-        self.api_base = api_base.rstrip("/")
-        self.token_env = token_env or DEFAULT_GITEA_TOKEN_ENV
+        self.api_base = api_base.strip().rstrip("/")
+        self.token_env = (token_env.strip() if token_env else None) or DEFAULT_GITEA_TOKEN_ENV
         self._verified_repos: set[str] = set()
         self._label_ids: dict[str, dict[str, int]] = {}
 

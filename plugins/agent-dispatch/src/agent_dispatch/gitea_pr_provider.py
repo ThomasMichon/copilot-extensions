@@ -263,8 +263,17 @@ class GiteaPRAdapter:
             )
         self.expected_login = expected_login
         self.runner = runner
-        self.api_bases = {key.casefold(): base.rstrip("/") for key, base in api_bases.items()}
-        self.token_env = token_env or DEFAULT_GITEA_TOKEN_ENV
+        self.api_bases = {
+            key.strip().casefold(): base.strip().rstrip("/")
+            for key, base in api_bases.items()
+        }
+        if not all(self.api_bases.values()):
+            raise ValueError(
+                "GiteaPRAdapter api_bases: every configured base URL must "
+                "be non-empty after normalization (a bare '/' or "
+                "whitespace-only value is not a usable base)"
+            )
+        self.token_env = (token_env.strip() if token_env else None) or DEFAULT_GITEA_TOKEN_ENV
         self._verified_repos: set[str] = set()
 
     def _token(self) -> str:
@@ -396,8 +405,12 @@ class GiteaPRAdapter:
         reviews = self._all_reviews(api_base, owner, name, number)
         review_comment_groups: list[list[dict[str, Any]]] = []
         for review in reviews:
-            if review.get("dismissed") or review.get("stale"):
-                continue  # a dismissed/stale review's inline comments don't block either.
+            # Dismissal/staleness invalidates only the review's own verdict
+            # (handled in _approval_status) -- it does NOT resolve that
+            # review's inline comments, which Gitea tracks independently
+            # per comment. Fetching and classifying them here is still
+            # required, or still-unresolved feedback silently stops
+            # blocking.
             review_id = review.get("id")
             if not isinstance(review_id, int):
                 continue

@@ -2198,6 +2198,53 @@ def test_validate_config_normalizes_gitea_api_base_trailing_slash():
     assert config["forge"]["api_base"] == "https://gitea.example.com"
 
 
+def test_validate_config_normalizes_gitea_api_base_surrounding_whitespace():
+    config = validate_config(
+        _config(
+            repo="example-org/example-project",
+            forge={
+                "provider": "gitea",
+                "producer_login": "issue-bot",
+                "api_base": "  https://gitea.example.com/  ",
+            },
+        )
+    )
+    assert config["forge"]["api_base"] == "https://gitea.example.com"
+
+
+def test_validate_config_rejects_gitea_api_base_that_normalizes_to_empty():
+    """A bare '/' (or whitespace-only value) looks non-empty before
+    normalization but collapses to '' after stripping and trimming the
+    trailing slash -- it must be rejected outright, not accepted and left
+    to fail forever on the adapter's first real request."""
+    with pytest.raises(RegistrarError, match="forge.api_base"):
+        validate_config(
+            _config(
+                repo="example-org/example-project",
+                forge={
+                    "provider": "gitea",
+                    "producer_login": "issue-bot",
+                    "api_base": "/",
+                },
+            )
+        )
+
+
+def test_validate_config_normalizes_gitea_token_env_whitespace():
+    config = validate_config(
+        _config(
+            repo="example-org/example-project",
+            forge={
+                "provider": "gitea",
+                "producer_login": "issue-bot",
+                "api_base": "https://gitea.example.com",
+                "token_env": "  MY_TOKEN  ",
+            },
+        )
+    )
+    assert config["forge"]["token_env"] == "MY_TOKEN"
+
+
 def test_validate_config_accepts_custom_gitea_token_env():
     config = validate_config(
         _config(
