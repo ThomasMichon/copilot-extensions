@@ -435,20 +435,24 @@ def _run_lock_harness(extra_script: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_snapshot_lock_is_reentrant_on_the_same_thread(tmp_path: Path) -> None:
-    """Invoke-Stamp holds an OUTER Enter-PluginSnapshotLock across both
-    snapshot creation AND marker publication, while New-PluginBuildSnapshot
-    (which it calls) takes its OWN inner lock with the same $InstallDir key
-    -- this is only deadlock-free because named-mutex ownership is
-    thread-affine (a second WaitOne from the SAME thread re-enters rather
-    than blocking on itself). Proves that assumption directly: two nested
-    acquisitions for the same install dir, from the same thread/process,
-    both succeed without blocking, and the inner release leaves the outer
+    """Install-Runtime holds an OUTER, version-scoped Enter-PluginSnapshotLock
+    spanning its full build+install+activate sequence, while
+    New-PluginBuildSnapshot (which it calls) takes its OWN inner lock with
+    the SAME $InstallDir + $Version key -- this is only deadlock-free
+    because named-mutex ownership is thread-affine (a second WaitOne from
+    the SAME thread re-enters rather than blocking on itself). (Invoke-Stamp
+    no longer nests this way: it acquires its version-scoped and global
+    locks strictly sequentially, precisely to avoid an AB-BA deadlock
+    against this real nested pair -- see Invoke-Stamp's own docstring.)
+    Proves the reentrancy assumption directly: two nested acquisitions for
+    the same install dir AND version, from the same thread/process, both
+    succeed without blocking, and the inner release leaves the outer
     acquisition still held."""
     install_dir = tmp_path / "install"
 
     extra = f"""
-$outer = Enter-PluginSnapshotLock -InstallDir "{install_dir}"
-$inner = Enter-PluginSnapshotLock -InstallDir "{install_dir}"
+$outer = Enter-PluginSnapshotLock -InstallDir "{install_dir}" -Version "0.1.0-dev1"
+$inner = Enter-PluginSnapshotLock -InstallDir "{install_dir}" -Version "0.1.0-dev1"
 Write-Output "BOTH-ACQUIRED"
 [void]$inner.ReleaseMutex()
 $inner.Dispose()
@@ -541,7 +545,16 @@ Write-Output "ELAPSED_MS:$($sw.ElapsedMilliseconds)"
 """
         result = _run_harness(extra)
     finally:
-        holder.communicate(timeout=60)
+        # Only the LOCK needs to stay held for the duration of the call
+        # under test above -- once that call has returned (proving it
+        # never actually blocked on the lock), there is nothing left to
+        # verify by waiting out the holder's own sleep too. Killing it
+        # outright (an abandoned-mutex release, same as a crashed process)
+        # keeps this test's actual runtime close to the fast-path call's own
+        # elapsed time rather than padding every run with the holder's full
+        # hold duration.
+        holder.kill()
+        holder.communicate(timeout=10)
 
     returned = Path(result.stdout.split("RESULT:", 1)[1].strip().splitlines()[0])
     elapsed_ms = int(result.stdout.split("ELAPSED_MS:", 1)[1].strip().splitlines()[0])
@@ -721,6 +734,7 @@ def _run_activate_harness(
         f'$LinkPython = "{fake_python}"\n'
         "$result = Invoke-VersionedActivate\n"
         'Write-Output "RETURNED:$result"\n'
+        'Write-Output "SUPERSEDED:$script:ActivationSuperseded"\n'
     )
     # Written to and run as a real .ps1 FILE (not -Command): $PSScriptRoot
     # is an automatic, per-scope variable PowerShell rebinds to "" inside
@@ -747,6 +761,7 @@ def test_activate_proceeds_normally_with_no_prior_active_version(tmp_path: Path)
     result, activated = _run_activate_harness(tmp_path, src_version="0.2.0-dev1", current_active=None)
     assert "RETURNED:True" in result.stdout, result.stdout + result.stderr
     assert activated.exists()
+    assert "SUPERSEDED:False" in result.stdout, result.stdout + result.stderr
 
 
 def test_activate_proceeds_when_newer_than_currently_active(tmp_path: Path) -> None:
@@ -755,6 +770,7 @@ def test_activate_proceeds_when_newer_than_currently_active(tmp_path: Path) -> N
     )
     assert "RETURNED:True" in result.stdout, result.stdout + result.stderr
     assert activated.exists()
+    assert "SUPERSEDED:False" in result.stdout, result.stdout + result.stderr
 
 
 def test_activate_skips_when_older_than_currently_active(tmp_path: Path) -> None:
@@ -765,13 +781,21 @@ def test_activate_skips_when_older_than_currently_active(tmp_path: Path) -> None
     build itself. The cross-version ordering guard inside
     Invoke-VersionedActivate must catch this at the one point where it
     matters (the actual activate/publish call) and skip rather than
-    silently regress `current-version`."""
+    silently regress `current-version`.
+
+    Skipping the marker write is not, on its own, enough: $script:
+    ActivationSuperseded must also come back true, so Install-Runtime and
+    Invoke-Update can each abort their own remaining steps (manifest/
+    verify/PATH/pivot; coordinator cutover) for THIS invocation instead of
+    publishing or cutting over from this invocation's own now-stale
+    $VenvPython/$LinkPython build."""
     result, activated = _run_activate_harness(
         tmp_path, src_version="0.2.0-dev1", current_active="0.2.0-dev2"
     )
     assert "Not activating" in result.stdout, result.stdout + result.stderr
     assert "RETURNED:True" in result.stdout, result.stdout + result.stderr
     assert not activated.exists()
+    assert "SUPERSEDED:True" in result.stdout, result.stdout + result.stderr
 
 
 def test_activate_force_overrides_the_cross_version_ordering_guard(tmp_path: Path) -> None:
@@ -780,6 +804,47 @@ def test_activate_force_overrides_the_cross_version_ordering_guard(tmp_path: Pat
     )
     assert "RETURNED:True" in result.stdout, result.stdout + result.stderr
     assert activated.exists()
+    assert "SUPERSEDED:False" in result.stdout, result.stdout + result.stderr
+
+
+def test_install_runtime_aborts_remaining_publication_when_superseded() -> None:
+    """A superseded invocation must not fall through to Write-Manifest,
+    verification, PATH, or Register-PickerPivot -- all of which would
+    publish/report through THIS invocation's own (older, losing)
+    $VenvPython/$LinkPython build over the already-active newer one's.
+    Structural check (a full venv build is too heavy here): the activation
+    call must be immediately followed by a $script:ActivationSuperseded
+    check that returns before Write-Manifest, within the still-open
+    try/finally that releases buildMutex."""
+    text = _INSTALL_PS1.read_text(encoding="utf-8")
+    idx = text.index("function Install-Runtime")
+    body = text[idx : text.index("\nfunction Write-Manifest", idx)]
+    activate_idx = body.index("if (-not (Invoke-VersionedActivate)) { exit 1 }")
+    guard_idx = body.index("$script:ActivationSuperseded", activate_idx)
+    return_idx = body.index("return", guard_idx)
+    finally_idx = body.index("} finally {", activate_idx)
+    assert guard_idx > activate_idx, "the supersession check must come after the activate call"
+    assert return_idx < finally_idx, (
+        "the supersession check must return before the buildMutex-release finally block "
+        "(while still inside the try, so the mutex is still released normally)"
+    )
+
+
+def test_invoke_update_aborts_cutover_when_superseded() -> None:
+    """A superseded `update` invocation must not drive
+    Invoke-CoordinatorCutover/Confirm-CoordinatorRunning from its own
+    (older, losing) $VenvPython/$LinkPython build -- that would cut the
+    ALREADY-newer, already-active coordinator OVER to a stale one. Structural
+    check: the $script:ActivationSuperseded guard and its `return` must
+    appear between the Install-Runtime call and the cutover block."""
+    text = _INSTALL_PS1.read_text(encoding="utf-8")
+    idx = text.index("function Invoke-Update")
+    body = text[idx : text.index("\nfunction Invoke-Start", idx)]
+    install_idx = body.index("Install-Runtime")
+    guard_idx = body.index("$script:ActivationSuperseded", install_idx)
+    return_idx = body.index("return", guard_idx)
+    cutover_idx = body.index("Invoke-CoordinatorCutover")
+    assert install_idx < guard_idx < return_idx < cutover_idx
 
 
 def _run_version_lt(a: str, b: str) -> bool:

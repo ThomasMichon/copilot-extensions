@@ -490,13 +490,26 @@ function Invoke-VersionedActivate {
        same Test-VersionLt comparison, same -Force/AGENT_DISPATCH_ALLOW_DOWNGRADE
        override for a deliberate rollback) -- read the currently-active version
        INSIDE the lock so this observes the true latest publish, not a stale
-       snapshot read before acquiring it. #>
+       snapshot read before acquiring it.
+
+       Skipping the marker write alone is NOT enough: $script:ActivationSuperseded
+       is the caller-visible signal that THIS ENTIRE invocation lost the race, not
+       merely that its activate call was a no-op. Install-Runtime and Invoke-Update
+       both check it and abort their own remaining steps (manifest/verify/PATH/
+       pivot; coordinator cutover) rather than proceeding as if this invocation's
+       own $VenvPython/$LinkPython were the one that's actually live -- otherwise a
+       superseded (older) invocation would still publish its own manifest over the
+       newer one's, or drive `Invoke-CoordinatorCutover`/`Confirm-CoordinatorRunning`
+       from its own stale build, rolling back or misreporting the coordinator even
+       though activation itself was correctly skipped. #>
+    $script:ActivationSuperseded = $false
     if (-not $VersionedRuntime) { return $true }
     $activateMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir
     try {
         $currentActive = Get-VersionedCurrent
         if ($currentActive -and (Test-VersionLt -A $SrcVersion -B $currentActive) -and -not $Force) {
             Write-Skip "Not activating: source $SrcVersion is older than already-active $currentActive (a newer build activated first; -Force to override)"
+            $script:ActivationSuperseded = $true
             return $true
         }
         $legacyVenv = Join-Path $InstallDir '.venv'
@@ -1655,6 +1668,20 @@ function Install-Runtime {
         }
         Invoke-VersionedMarkComplete
         if (-not (Invoke-VersionedActivate)) { exit 1 }
+        if ($script:ActivationSuperseded) {
+            # This invocation's own build lost the cross-version activation
+            # race (see Invoke-VersionedActivate's own docstring): a newer
+            # build already activated while this one was still building.
+            # Everything below (manifest, verify, PATH, pivot, gc) resolves
+            # or reports through THIS invocation's own $VenvPython/$LinkPython
+            # -- publishing it now would overwrite the newer build's already-
+            # correct manifest with this older build's stale one. Stop here;
+            # the already-active newer slot remains fully installed and
+            # untouched. The buildMutex is still released normally via the
+            # enclosing `finally` below.
+            Write-Skip "Build $SrcVersion superseded by a newer concurrent build -- skipping remaining publication (manifest, verification, PATH, pivot) for this invocation"
+            return
+        }
     }
     } finally {
         # Held through the health gate, completion marker, AND activation
@@ -3380,6 +3407,19 @@ function Invoke-Stamp {
 function Invoke-Install {
     Write-Host ''; Write-Host '=== agent-dispatch install ===' -ForegroundColor Cyan; Write-Host ''
     Install-Runtime
+    if ($script:ActivationSuperseded) {
+        # A concurrent, newer install already activated while this one was
+        # still building (see Invoke-VersionedActivate's docstring).
+        # Install-CoordinatorTask/Install-SupervisorTask are themselves
+        # version-agnostic (they register generic, marker-resolving
+        # launchers), but Confirm-CoordinatorRunning compares the running
+        # coordinator's reported version against THIS invocation's own
+        # (older, losing) $VenvPython build -- proceeding would misreport a
+        # perfectly healthy, already-newer coordinator as serving a stale
+        # build. Nothing else to do for this invocation.
+        Write-Host ''; Write-Host '=== agent-dispatch install complete (superseded by a newer concurrent build) ===' -ForegroundColor Cyan
+        return
+    }
     Install-CoordinatorTask
     Remove-CoordinatorFirewallRule
     Install-SupervisorTask
@@ -3443,6 +3483,19 @@ function Invoke-Update {
     try {
     Invoke-DowngradeGuard
     Install-Runtime
+    if ($script:ActivationSuperseded) {
+        # This invocation's own build lost the cross-version activation race
+        # (see Invoke-VersionedActivate's docstring): a newer concurrent
+        # `update`/`install` already activated while this one was still
+        # building. The cutover logic below spawns the new coordinator from
+        # THIS invocation's own $VenvPython/$LinkPython -- proceeding would
+        # cut the ALREADY-newer, already-active coordinator OVER to this
+        # invocation's older build, a silent rollback. Nothing to update:
+        # the newer build's own update already did (or will do) the real
+        # cutover.
+        Write-Skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/task refresh for this invocation'
+        return
+    }
     # Thread B (graceful daemon cutover): a version update must NEVER kill
     # in-flight, non-resumable work. Install-Runtime built + activated the new
     # slot WITHOUT stopping the running daemon; now, if a live coordinator is
