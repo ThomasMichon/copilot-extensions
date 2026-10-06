@@ -375,6 +375,21 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         output.err(message)
         return 2
 
+    if requested_seed and getattr(state.args, "bare_resume", False):
+        # Review finding (PR #5442): bare-resume deliberately skips seed
+        # injection in BOTH resume code paths (it launches Copilot in HOME
+        # with no --resume at all, to dodge a cwd-start bug -- there is no
+        # resumed conversation, and arguably no well-defined "worktree
+        # session," for the seed to join). Without this guard, a caller
+        # combining --bare-resume with --seed got a silent, confusing
+        # partial success: the command exits 0 but the prompt is quietly
+        # dropped. Reject the combination explicitly instead.
+        message = "--seed is not supported together with --bare-resume."
+        if state.use_json:
+            return output._json_error(message)
+        output.err(message)
+        return 2
+
     if (
         state.use_new
         and not state.use_json
@@ -657,6 +672,28 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # under the existing race-safe write-guard so `agent-worktrees embody`'s
     # own fallback claim-and-send-keys delivery never finds it again and
     # double-delivers the same turn.
+    #
+    # Known, accepted scope boundary (review finding, PR #5442): claiming
+    # happens here, at PLAN-BUILD time -- before the external launcher
+    # (launch-session.{ps1,sh}) has actually exec'd this `cmd`. That script
+    # still performs its own update/preflight work and (for a muxed launch)
+    # mux-session creation AFTER this process already returned; a failure
+    # there, before `cmd` ever starts, loses the claimed seed with no
+    # restore. Deliberately not solved here: a true fix needs the launcher
+    # itself to report "I failed before exec" back through
+    # `pending_seed.restore_pending_seed` (the exact primitive `embody`'s
+    # own mux-pane delivery already uses for its own post-attempt restore),
+    # which means teaching the launcher scripts about this contract --
+    # explicitly out of this phase's scope (tracked as a Phase 3 follow-up
+    # in this effort's own README). Accepted because `resolve` already
+    # performs several other irreversible side effects before returning
+    # (`mark_resumed`/`save_record`, activity logging) with the same
+    # "the external launcher might still fail after this" exposure, so this
+    # is a known risk class for this function, not a new one introduced
+    # here, and the alternative (never clearing a pending seed from this
+    # function at all) reintroduces real double-delivery on every
+    # subsequent successful resume instead of this narrow, infrequent loss
+    # window.
     explicit_seed = getattr(state.args, "seed", None)
     claimed_seed = pending_seed_mod.claim_pending_seed(yaml_path)
     delivered_seed = explicit_seed or claimed_seed

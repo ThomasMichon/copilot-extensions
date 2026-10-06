@@ -239,6 +239,17 @@ is this effort's actual Phase 1 deliverable.)
       no-op for the Picker's own flow, kept only for a genuinely
       out-of-band attach? Confirm with a live trace before touching the
       script; do not remove a safety-net fallback on an assumption.
+- [ ] **Deferred from Phase 1's review (PR #5442):** `_resolve_json_mode`/
+      `_resolve_resume_context` claim (clear) a persisted `pending_seed` at
+      PLAN-BUILD time, before the external launcher script has actually
+      exec'd the returned command -- a failure in that script before exec
+      (its own update/preflight work, or mux-session creation) loses the
+      seed with no restore. Teach the launcher scripts to report "failed
+      before exec" back through `pending_seed.restore_pending_seed` (the
+      same primitive `embody`'s own post-attempt mux-pane delivery already
+      uses for its own restore-on-failure case) -- this requires touching
+      `launch-session.{ps1,sh}` directly, which is why it's deferred here
+      rather than attempted in Phase 1.
 
 ## Validation Plan
 
@@ -275,3 +286,45 @@ _Pending._
   false positive (PR #4854), not pane-id uniqueness (already fixed by PR
   #2890, well before the original spike). Filed umbrella issue #5415. Next:
   land Phase 1's PR, then pick up Phase 2 (the actual Picker UI).
+- **2026-10-05** — PR #5442 (Phase 1) opened against `dev`; Copilot code
+  review returned 6 findings (4 Medium, 2 Low), all addressed in the same
+  session:
+  - **Bare-resume + `--seed` silently discarded the prompt.** Fixed with an
+    explicit rejection guard in `cmd_resolve` (shared by both the JSON and
+    non-JSON resume dispatch paths), plus two new tests
+    (`test_resolve_worktree_id_with_bare_resume_and_seed_is_rejected_json`,
+    and a paired "no seed, unaffected" case).
+  - **`worktree_creation._create_worktree_core` embedded the seed in its own
+    plan WHILE ALSO leaving `pending_seed` persisted** -- a genuine
+    double-delivery risk for a direct `resolve --new --json`/`create`-then-
+    exec caller (unlike the Picker's own two-hop flow, which re-resolves by
+    `--worktree-id` and so only ever reaches the already-claim-guarded
+    Phase 1 resume path once). Fixed by reverting
+    `_create_worktree_core` to NOT embed the seed at all -- it now only
+    persists `pending_seed`, matching its pre-Phase-1 behavior exactly;
+    `test_worktree_creation_seed.py` rewritten to assert the no-embed
+    behavior.
+  - **Premature `pending_seed` consumption** (claimed/cleared at
+    plan-build time in both `_resolve_json_mode` and
+    `_resolve_resume_context`, before the external launcher
+    (`launch-session.{ps1,sh}`) has actually exec'd the command) --
+    evaluated at length; **accepted as a documented, narrow Phase-3-deferred
+    limitation** rather than fixed in Phase 1. A true fix needs the launcher
+    scripts themselves to report "failed before exec" back through
+    `pending_seed.restore_pending_seed` (the same primitive `embody`'s own
+    post-attempt mux-pane delivery already uses), which means teaching the
+    launcher scripts a new contract -- explicitly out of this phase's scope
+    (folded into Phase 3's own send-keys-fallback evaluation above). The
+    alternative (never clearing here) reintroduces real double-delivery on
+    every subsequent resume instead of this narrow, infrequent loss window;
+    `resolve` already performs other irreversible side effects
+    (`mark_resumed`/`save_record`, activity logging) with the identical
+    "external launcher might still fail after this" exposure, so this isn't
+    a new risk class. Documented inline at both claim sites in
+    `resolve_cli.py` and `resolve_launch_cli.py`.
+  - **Changefile requested `minor`**; repo policy defaults to `patch` absent
+    explicit maintainer direction -- fixed.
+  - **PR description needed the Documentation-impact statement copied in
+    directly** (not just referenced via this README) -- fixed.
+  - 213 tests across the full seed/resolve/worktree_creation/handoff-cutover
+    keyword sweep pass with no regressions after all fixes.

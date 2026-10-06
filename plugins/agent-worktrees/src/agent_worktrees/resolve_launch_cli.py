@@ -518,15 +518,26 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     # durably as a `--interactive` argument on the Copilot command line
     # itself, never a mux pane send-keys side-channel -- works identically
     # muxed or `--no-mux` since there is no pane to target either way.
-    # Excluded for `bare_resume`, matching its existing minimal/manual
-    # "no auto-resume, run /resume yourself" contract -- injecting a seed
-    # there is out of scope for this change. An explicit `--seed` on THIS
-    # call wins; either way, any record-persisted `pending_seed` (queued at
-    # creation time by `resolve --new --seed`, for the Picker's own
-    # two-hop new-worktree flow, which re-resolves by --worktree-id here)
-    # is claimed (cleared) under the existing race-safe write-guard so
-    # `agent-worktrees embody`'s own fallback claim-and-send-keys delivery
-    # never finds it again and double-delivers the same turn.
+    # `bare_resume` + `--seed` is rejected earlier, in `cmd_resolve` (shared
+    # by both the JSON and this non-JSON dispatch path), matching
+    # `bare_resume`'s existing minimal/manual "no auto-resume, run /resume
+    # yourself" contract -- there is no resumed conversation, and arguably
+    # no well-defined "worktree session," for a seed to join -- so this
+    # branch only ever runs with a seed when `bare_resume` is already False.
+    # An explicit `--seed` on THIS call wins; either way, any
+    # record-persisted `pending_seed` (queued at creation time by
+    # `resolve --new --seed`, for the Picker's own two-hop new-worktree
+    # flow, which re-resolves by --worktree-id here) is claimed (cleared)
+    # under the existing race-safe write-guard so `agent-worktrees embody`'s
+    # own fallback claim-and-send-keys delivery never finds it again and
+    # double-delivers the same turn.
+    #
+    # Known, accepted scope boundary (review finding, PR #5442): claiming
+    # happens here, at PLAN-BUILD time -- before the external launcher
+    # (launch-session.{ps1,sh}) has actually exec'd this `launch_cmd`. See
+    # the identical note at `resolve_cli.py`'s own claim site for the full
+    # rationale; this is the same accepted, narrow, Phase-3-deferred risk,
+    # not a new one introduced by this sibling non-JSON path.
     explicit_seed = getattr(args, "seed", None)
     delivered_seed = explicit_seed
     if not bare_resume:

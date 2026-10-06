@@ -159,3 +159,42 @@ def test_resolve_base_with_seed_is_still_rejected_json(capfd):
     assert rc != 0
     out = json.loads(capfd.readouterr().out)
     assert "seed" in out.get("error", "").lower()
+
+
+def test_resolve_worktree_id_with_bare_resume_and_seed_is_rejected_json(capfd):
+    """Review finding (PR #5442): --bare-resume launches Copilot in HOME
+    with no --resume at all (dodging a cwd-start bug) -- there is no
+    resumed conversation, and arguably no well-defined worktree session,
+    for a seed to join. Without this guard the combination used to exit 0
+    while silently discarding the prompt; it must now be rejected
+    explicitly, the same as --base and a remote --machine target."""
+    rc = resolve_cli.cmd_resolve(
+        _args(
+            new_worktree=False, worktree_id="some-wt", seed="do the thing",
+            machine=None, bare_resume=True,
+        )
+    )
+
+    assert rc != 0
+    out = json.loads(capfd.readouterr().out)
+    assert "seed" in out.get("error", "").lower()
+    assert "bare" in out.get("error", "").lower()
+
+
+def test_resolve_worktree_id_with_bare_resume_and_no_seed_is_unaffected(capfd):
+    """The new bare-resume guard must only fire when --seed is actually
+    requested -- an ordinary --bare-resume call (no --seed) must proceed
+    past the guard untouched."""
+    rc = resolve_cli.cmd_resolve(
+        _args(
+            new_worktree=False, worktree_id="some-wt", seed=None,
+            machine=None, bare_resume=True,
+        )
+    )
+
+    # Past the seed guard entirely -- fails for an unrelated reason (no
+    # such tracked worktree in this test's environment), never the
+    # "--bare-resume" rejection this guard owns.
+    assert rc != 0
+    out = json.loads(capfd.readouterr().out)
+    assert "bare" not in out.get("error", "").lower()
