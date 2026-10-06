@@ -131,22 +131,23 @@ _DRIVER_SCRIPT = textwrap.dedent(
             # phase-level split -- this baseline only ever needed "which
             # test" per line, never phase-level granularity.
             #
-            # `tryfirst=True` alone is not sufficient: it only orders
-            # non-wrapper implementations relative to each other, while a
-            # hookwrapper (a conftest's own `pytest_runtest_setup` can be
-            # one) always runs its pre-yield body outermost, before any
-            # ordinary implementation regardless of priority. Making this
-            # itself a `tryfirst` hookwrapper puts it outside every
-            # ordinary implementation *and* every other wrapper, so the
-            # context switch always lands before any downstream setup
-            # code -- hook or hookwrapper -- can execute and get
-            # misattributed to the previous test (or no test at all).
-            # This plugin is registered via `pytest.main(..., plugins=
-            # [...])`, before a project's own conftest.py plugins load,
-            # so registration order alone would otherwise run a
-            # downstream conftest's own setup code first.
+            # Hooked on `pytest_runtest_protocol`, not
+            # `pytest_runtest_setup`: `tryfirst` only breaks ties among
+            # implementations of the *same* hook, and pluggy still calls
+            # same-priority implementations in reverse registration
+            # order -- since this plugin is always registered before a
+            # project's own conftest.py plugins load, a conftest's own
+            # `pytest_runtest_setup` wrapper (even one that is itself
+            # `tryfirst`) would still run its pre-yield body first and
+            # win the tie, because it was registered later.
+            # `pytest_runtest_protocol` wraps the *entire* per-item
+            # protocol (setup, call, and teardown together) one level
+            # higher in the call hierarchy -- as a `tryfirst` wrapper
+            # here, the context switch happens before the default
+            # implementation even begins running setup, sidestepping the
+            # tie entirely rather than trying to win it.
             @pytest.hookimpl(wrapper=True, tryfirst=True)
-            def pytest_runtest_setup(self, item):
+            def pytest_runtest_protocol(self, item, nextitem):
                 cov = coverage.Coverage.current()
                 if cov is not None:
                     cov.switch_context(item.nodeid)
@@ -176,16 +177,26 @@ _DRIVER_SCRIPT = textwrap.dedent(
         # than narrowing it. Validated against the real downstream suite
         # that surfaced this: fully clean and reproducible across three
         # separate runs, where the pytest-cov-driven version failed on
-        # almost every attempt. `data_suffix=False` is explicit, not
-        # relied-on-as-default: passing `data_file` alone does not
-        # override a *project-configured* `parallel = true` (or
-        # `concurrency = multiprocessing`) that a downstream consumer's
-        # own .coveragerc/pyproject.toml may set for its own reasons --
-        # `coverage.Coverage()` still reads that config and would
-        # re-enable a generated suffix, silently reintroducing the exact
-        # race this fix exists to close.
+        # almost every attempt. `config_file=False` is required, not
+        # cosmetic: a downstream consumer's own .coveragerc/pyproject.toml
+        # can set `[run] dynamic_context = test_function`, which makes
+        # coverage.py switch contexts *on its own* during each test's
+        # call phase and clear them on return -- racing and corrupting
+        # the explicit, nodeid-based contexts `_ContextSwitcher` sets
+        # above, producing collected "test IDs" that are really
+        # coverage's own automatic context strings, absent from the json
+        # report and unusable as real pytest nodeids. The same project
+        # config could also still re-enable data-file suffixing via
+        # `parallel = true`/`concurrency = multiprocessing`, which
+        # `data_suffix=False` guards directly but `config_file=False`
+        # closes at the root: this collector owns its own coverage
+        # configuration completely, never blending in whatever a
+        # downstream project's own coverage config happens to set.
         cov = coverage.Coverage(
-            data_file=cov_data_file, source=[cov_source], data_suffix=False
+            data_file=cov_data_file,
+            source=[cov_source],
+            data_suffix=False,
+            config_file=False,
         )
         cov.start()
         cov.save()  # force schema creation now, single-threaded
