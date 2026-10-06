@@ -325,3 +325,45 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
             entry["telemetry"] = "unsupported"
         results.append(entry)
     return results
+
+
+def mapping_statuses(root: Path | None = None) -> list[dict[str, Any]]:
+    """Every live mux-session mapping this root's Manager knows about.
+
+    The issue's own Phase 1 scope names this alongside the per-daemon
+    identity/health list above: "(via ``mux_daemon.get_mapping``) which
+    worktrees/sessions are attached and whether each is currently busy."
+    The mapping registry (``mux_mapping_registry.MuxMappingRegistry``) is
+    disk-backed and shared by every resident daemon for this root -- it is
+    NOT owned by one specific pid, so this cannot (and does not attempt to)
+    attribute a mapping to a specific daemon process; it reports the same
+    ground truth ``worktree-manager mux-daemon status`` already surfaces
+    per-entry (``mux_daemon.get_mapping``'s own data model), just enumerated
+    for every mapping at once via the registry's ``snapshot()`` rather than
+    one lookup at a time.
+
+    No per-mapping ``busy`` field exists: the registry tracks only
+    ``live``/``attached_clients`` (whether/how many mux-session attachments
+    are currently known), never a per-worktree activity/busy concept --
+    that notion exists only at the per-DAEMON level (this module's
+    ``daemon_statuses()``'s own ``busy``, reflecting that process's active
+    control-wire handlers), which cannot be attributed back to one specific
+    mapping either (see the same limitation noted on the daemon list).
+    """
+    from .mux_mapping_registry import MuxMappingRegistry, registry_path
+
+    resolved_root = root if root is not None else default_root()
+    registry = MuxMappingRegistry(registry_path(resolved_root))
+    results: list[dict[str, Any]] = []
+    for (project, worktree_id), entry in sorted(registry.snapshot().items()):
+        results.append(
+            {
+                "project": project,
+                "worktree_id": worktree_id,
+                "mux_session": entry.get("mux_session"),
+                "live": bool(entry.get("live")),
+                "attached_clients": entry.get("attached_clients", 0),
+                "observed_at": entry.get("observed_at"),
+            }
+        )
+    return results

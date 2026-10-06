@@ -1,0 +1,9 @@
+{
+  "comment": "daemons mappings: Phase 1 attribution slice (#5001) -- surfaces every known mux-session mapping (project/worktree_id/mux_session/live/attached_clients) from the shared registry, read-only",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
