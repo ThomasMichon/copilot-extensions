@@ -193,6 +193,62 @@ def test_compute_error_is_raised_to_every_joiner():
         server.close()
 
 
+def test_close_admission_rejects_new_requests_with_reason_but_keeps_socket_usable():
+    """``close_admission`` is the single-shot-caller admission-discipline
+    contract: a new (never-before-admitted) request must be rejected with
+    the structured ``reason`` immediately, without affecting an execution
+    already admitted -- unlike ``close()``, this never tears down the
+    listening socket itself (not exercised here -- see the hook_ipc parallel
+    test for the full wire round trip), so a caller reaching this server
+    still gets a real, distinguishable response rather than a connection
+    failure.
+    """
+    gate = threading.Event()
+
+    def compute(kind, payload):
+        gate.wait(timeout=2)
+        return {"ok": True}
+
+    server = CoalescingServer(compute, linger_seconds=0.1)
+    try:
+        owner_result = {}
+
+        def owner():
+            owner_result["r"] = server.handle_request("k", "in-flight", {}, time.time() + 5)
+
+        t = threading.Thread(target=owner)
+        t.start()
+        time.sleep(0.1)  # let the owner be admitted before admission closes
+
+        server.close_admission("superseded")
+
+        # Already-admitted execution is unaffected.
+        gate.set()
+        t.join(timeout=2)
+        assert owner_result["r"] == {"ok": True}
+
+        # A genuinely new request is rejected immediately, with the reason.
+        with pytest.raises(Unavailable) as excinfo:
+            server.handle_request("k", "brand-new", {}, time.time() + 5)
+        assert excinfo.value.reason == "superseded"
+    finally:
+        server.close()
+
+
+def test_open_admission_reverses_close_admission_on_a_still_live_server():
+    server = _make_server()
+    try:
+        server.close_admission("superseded")
+        with pytest.raises(Unavailable):
+            server.handle_request("k", "rejected", {}, time.time() + 5)
+
+        server.open_admission()
+        result = server.handle_request("k", "accepted", {"n": 1}, time.time() + 5)
+        assert result == {"kind": "k", "n": 1}
+    finally:
+        server.close()
+
+
 def test_refcount_linger_fires_only_after_last_release():
     idle = threading.Event()
     server = _make_server(on_idle=idle.set)
