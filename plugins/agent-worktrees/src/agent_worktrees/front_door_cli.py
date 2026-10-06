@@ -81,6 +81,39 @@ _CORE_SLUGS = frozenset(
 # and can't argparse-error on it).
 _PROJECT_ARG_SLUGS = frozenset({"bridge", "codespaces"})
 
+# Slugs the router pins to the resolved project's checkout by chdir'ing the
+# child process, rather than forwarding ``--project`` for the sibling to
+# resolve itself (#2426 candidate 2). ``ssh`` is below ``agent-worktrees`` in
+# the plugin-stack tier (docs/patterns/a-la-carte-independence.md), so it must
+# never reach upward to resolve a project name itself; agent-worktrees already
+# owns that registry, so the router resolves it and hands the child an
+# already-correct cwd. Scoped per-verb, not per-slug: only ``mesh-status``/
+# ``refresh-mesh`` resolve ``machines.yaml`` by ascending from cwd -- every
+# other ``ssh`` verb (``emit-profile``, ``doctor``, ``verify``, ``explore``,
+# ``restore-host``, ``copilot-config``) either takes its own explicit paths
+# (relative to the caller's actual cwd, which chdir'ing would silently break)
+# or operates on machine-global state with no project concept at all, so it
+# must stay a plain cwd-preserving alias -- including never failing closed on
+# an unresolvable project, since those verbs don't need one. An unresolvable
+# project fails *only* a matched verb's routed call closed, rather than
+# silently running it against the caller's original cwd.
+_PROJECT_CHDIR_VERBS: dict[str, frozenset[str]] = {
+    "ssh": frozenset({"mesh-status", "refresh-mesh"}),
+}
+
+
+def _chdir_verb_for(slug: str, rest: list[str]) -> str | None:
+    """Return the first non-flag token in ``rest`` iff it is a verb that
+    ``slug`` chdir-pins (see ``_PROJECT_CHDIR_VERBS``), else ``None``."""
+    verbs = _PROJECT_CHDIR_VERBS.get(slug)
+    if not verbs:
+        return None
+    for tok in rest:
+        if tok.startswith("-"):
+            continue
+        return tok if tok in verbs else None
+    return None
+
 
 def _installed_sibling_slugs() -> set[str]:
     """Discover ``<slug>`` for every installed ``agent-<slug>`` binstub in
@@ -147,6 +180,19 @@ def _sibling_binstub(slug: str) -> Path | None:
     return cand if cand.exists() else None
 
 
+def _resolve_project_checkout(project: str) -> Path | None:
+    """Resolve ``project``'s checkout path from agent-worktrees' own repo
+    registry (in-process -- agent-worktrees owns this registry, so it never
+    needs to shell out to itself). Returns ``None`` if unresolved."""
+    from . import repos
+
+    path = repos.resolve_path(project)
+    if not path:
+        return None
+    candidate = Path(path)
+    return candidate if candidate.is_dir() else None
+
+
 def _route_to_sibling_plugin(slug: str, project: str | None, rest: list[str]) -> int:
     """Re-dispatch ``<repo> <slug> …`` to the ``agent-<slug>`` binstub,
     project-pinned when a project is known. Returns the child's exit code."""
@@ -162,7 +208,29 @@ def _route_to_sibling_plugin(slug: str, project: str | None, rest: list[str]) ->
         return 1
     forwarded: list[str] = []
     child_env = os.environ.copy()
-    if project:
+    cwd: str | None = None
+    chdir_verb = _chdir_verb_for(slug, rest) if project else None
+    if chdir_verb is not None:
+        # Resolve and chdir the child process ourselves (agent-worktrees owns
+        # the repo registry) rather than forwarding --project for a lower-tier
+        # sibling to resolve itself -- see _PROJECT_CHDIR_VERBS. Fail the
+        # routed call closed on an unresolvable project instead of silently
+        # running it against the caller's original cwd (the wrong-project
+        # behavior this routing exists to prevent). Every other ``slug`` verb
+        # falls through below as a plain cwd-preserving alias.
+        resolved = _core_helper(
+            "_resolve_project_checkout", _resolve_project_checkout
+        )(project)
+        if resolved is None:
+            print(
+                f"  \u2717 --project {project!r}: no checkout found for "
+                f"'{slug} {chdir_verb}' to run against.",
+                file=sys.stderr,
+            )
+            return 1
+        cwd = str(resolved)
+        child_env.pop("AGENT_WORKTREES_PROJECT_ROUTED", None)
+    elif project and slug in _PROJECT_ARG_SLUGS:
         forwarded += ["--project", project]
         child_env["AGENT_WORKTREES_PROJECT_ROUTED"] = "1"
     else:
@@ -173,7 +241,7 @@ def _route_to_sibling_plugin(slug: str, project: str | None, rest: list[str]) ->
         cmd = [pwsh, "-NoProfile", "-NoLogo", "-File", str(stub), *forwarded]
     else:
         cmd = [str(stub), *forwarded]
-    return subprocess.run(cmd, env=child_env).returncode
+    return subprocess.run(cmd, env=child_env, cwd=cwd).returncode
 
 
 def _safe_cwd() -> Path | None:
