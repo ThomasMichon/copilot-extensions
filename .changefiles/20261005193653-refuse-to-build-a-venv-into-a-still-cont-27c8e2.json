@@ -1,0 +1,9 @@
+{
+  "comment": "Refuse to build a venv into a still-contended runtime slot (signed or unsigned) instead of racing a concurrent writer; propagate the bash slot-clean exit code instead of forcing success",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
