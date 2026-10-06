@@ -38,10 +38,10 @@ vision index (`visions/README.md`) is too large for one sitting. Land one
 coherent slice per session (one vision reconciled + its deltas carved) and
 hand off the rest.
 
-A companion, independent stream — refreshing stale user-facing docs,
-README capability claims, and Picker preview screenshots/images — is tracked
-separately (see `user-facing-material-refresh` effort, or TBD if it folds
-in here instead; not yet decided, see Open Questions).
+A companion, independent concern — refreshing stale user-facing docs,
+README capability claims, and Picker preview screenshots/images — is not yet
+tracked anywhere; whether it becomes its own effort or a later phase of this
+one is still undecided (see Phase 4 and Proposal below).
 
 ## Participants
 
@@ -170,7 +170,7 @@ then rather than assuming either answer.
 ### 2026-10-05 — Kickoff + Phase 1 slice
 - Effort created as the tracker for the operator's vision-backport +
   material-refresh handoff directive.
-- Landed Phase 1's three session-evidenced targets in one PR: folded back
+- Opened a PR for Phase 1's three session-evidenced targets: folded back
   `#5400`'s run-waiter surfacing into the tasks-pane-ux vision (filing
   `#5452` for the documented delegated/relay implementation gap rather than
   describing it in the vision), folded back the reviewer recipe's standing
