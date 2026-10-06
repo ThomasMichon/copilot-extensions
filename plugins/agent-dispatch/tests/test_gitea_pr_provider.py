@@ -190,6 +190,31 @@ def test_later_review_from_same_reviewer_supersedes_earlier_one():
     assert observation.approval_status == ApprovalStatus.APPROVED
 
 
+def test_later_comment_only_review_does_not_erase_an_earlier_verdict():
+    """Gitea keeps an approval/rejection as the official verdict until
+    another *verdict-bearing* review changes it -- a later COMMENT-only
+    review from the same reviewer must not erase it."""
+    observation = observe_pr_state(
+        _pr(),
+        reviews=[
+            _review(state="REQUEST_CHANGES", review_id=1, login="alice"),
+            _review(state="COMMENT", review_id=2, login="alice"),
+        ],
+    )
+    assert observation.approval_status == ApprovalStatus.CHANGES_REQUESTED
+
+
+def test_later_comment_only_review_does_not_erase_an_earlier_approval():
+    observation = observe_pr_state(
+        _pr(),
+        reviews=[
+            _review(state="APPROVED", review_id=1, login="alice"),
+            _review(state="COMMENT", review_id=2, login="alice"),
+        ],
+    )
+    assert observation.approval_status == ApprovalStatus.APPROVED
+
+
 def test_comment_only_review_maps_to_pending():
     observation = observe_pr_state(_pr(), reviews=[_review(state="COMMENT", review_id=1)])
     assert observation.approval_status == ApprovalStatus.PENDING
@@ -254,10 +279,12 @@ def test_dismissed_review_comments_are_not_blocking(monkeypatch):
             return _status(json.dumps({"full_name": "example/project"}), 200)
         if url.endswith("/pulls/7"):
             return _status(json.dumps(_pr(number=7)), 200)
-        if "/pulls/7/reviews?" in url:
+        if "/pulls/7/reviews?page=1" in url:
             return _status(
                 json.dumps([_review(state="REQUEST_CHANGES", review_id=1, dismissed=True)]), 200
             )
+        if "/pulls/7/reviews?page=" in url:
+            return _status(json.dumps([]), 200)
         if "/reviews/1/comments" in url:
             raise AssertionError("a dismissed review's comments must not be fetched")
         if "/commits/head-sha/status" in url:
@@ -336,15 +363,43 @@ def test_wip_title_is_a_hold():
 
 
 def test_unresolved_review_comment_is_blocking():
-    observation = observe_pr_state(_pr(), review_comments=[{"id": 1, "body": "fix this"}])
+    observation = observe_pr_state(
+        _pr(), review_comment_groups=[[{"id": 1, "body": "fix this"}]]
+    )
     assert HoldReason.BLOCKING_THREADS in observation.holds
 
 
 def test_resolved_review_comment_is_not_blocking():
     observation = observe_pr_state(
-        _pr(), review_comments=[{"id": 1, "body": "fixed", "resolver": {"login": "bob"}}]
+        _pr(),
+        review_comment_groups=[[{"id": 1, "body": "fixed", "resolver": {"login": "bob"}}]],
     )
     assert HoldReason.BLOCKING_THREADS not in observation.holds
+
+
+def test_resolved_thread_with_unresolved_reply_is_not_blocking():
+    """Gitea records the resolver on a resolved thread's root comment while
+    replies stay unset -- a group is resolved if ANY comment in it carries
+    one, not only its first/root comment."""
+    observation = observe_pr_state(
+        _pr(),
+        review_comment_groups=[[
+            {"id": 1, "body": "root", "resolver": {"login": "bob"}},
+            {"id": 2, "body": "reply", "resolver": None},
+        ]],
+    )
+    assert HoldReason.BLOCKING_THREADS not in observation.holds
+
+
+def test_one_unresolved_group_blocks_even_with_another_resolved():
+    observation = observe_pr_state(
+        _pr(),
+        review_comment_groups=[
+            [{"id": 1, "body": "resolved", "resolver": {"login": "bob"}}],
+            [{"id": 2, "body": "still open"}],
+        ],
+    )
+    assert HoldReason.BLOCKING_THREADS in observation.holds
 
 
 def test_no_holds_is_an_empty_frozenset():
@@ -453,7 +508,7 @@ def test_fetch_pr_unwraps_nested_commit_detail_for_last_commit_at(monkeypatch):
     adapter = GiteaPRAdapter("review-bot", runner=runner, api_bases={"gitea.example.com": "https://gitea.example.com"})
     raw = adapter.fetch_pr("gitea.example.com/example/project", 7)
     observation = observe_pr_state(
-        raw["pull_request"], raw["reviews"], raw["review_comments"], raw["status_rollup"],
+        raw["pull_request"], raw["reviews"], raw["review_comment_groups"], raw["status_rollup"],
     )
     assert observation.last_commit_at is not None
 
@@ -548,8 +603,10 @@ def test_observe_fetches_and_classifies_in_one_call(monkeypatch):
             return _status(json.dumps({"full_name": "example/project"}), 200)
         if url.endswith("/pulls/7"):
             return _status(json.dumps(_pr(number=7)), 200)
-        if "/pulls/7/reviews?" in url:
+        if "/pulls/7/reviews?page=1" in url:
             return _status(json.dumps([_review(state="APPROVED", review_id=1)]), 200)
+        if "/pulls/7/reviews?page=" in url:
+            return _status(json.dumps([]), 200)
         if "/reviews/1/comments" in url:
             return _status(json.dumps([]), 200)
         if "/commits/head-sha/status" in url:
@@ -592,6 +649,8 @@ def test_fetch_pr_paginates_past_a_full_first_page_of_reviews(monkeypatch):
                 json.dumps([_review(state="REQUEST_CHANGES", review_id=51, login="late-reviewer")]),
                 200,
             )
+        if "/pulls/7/reviews?page=" in url:
+            return _status(json.dumps([]), 200)
         if "/reviews/" in url and "/comments" in url:
             return _status(json.dumps([]), 200)
         if "/commits/head-sha/status" in url:
@@ -626,8 +685,9 @@ def test_all_reviews_raises_past_the_bounded_scan(monkeypatch):
 
 
 def test_fetch_pr_paginates_past_a_full_first_page_of_review_comments(monkeypatch):
-    """A review with more inline comments than one page must not have an
-    unresolved comment on a later page silently clear BLOCKING_THREADS."""
+    """A review's own resolving comment can sit on a later page than the
+    first (unresolved) replies -- without pagination, the thread would
+    incorrectly stay reported as blocking forever once resolved."""
     monkeypatch.setenv("GITEA_TOKEN", "tok")
 
     def runner(args, **kwargs):
@@ -638,17 +698,19 @@ def test_fetch_pr_paginates_past_a_full_first_page_of_review_comments(monkeypatc
             return _status(json.dumps({"full_name": "example/project"}), 200)
         if url.endswith("/pulls/7"):
             return _status(json.dumps(_pr(number=7)), 200)
-        if "/pulls/7/reviews?" in url:
+        if "/pulls/7/reviews?page=1" in url:
             return _status(json.dumps([_review(state="COMMENT", review_id=1)]), 200)
+        if "/pulls/7/reviews?page=" in url:
+            return _status(json.dumps([]), 200)
         if "/reviews/1/comments?page=1" in url:
             return _status(
-                json.dumps(
-                    [{"id": n, "resolver": {"login": "x"}} for n in range(1, 51)]
-                ),
+                json.dumps([{"id": n, "resolver": None} for n in range(1, 51)]),
                 200,
             )
         if "/reviews/1/comments?page=2" in url:
-            return _status(json.dumps([{"id": 51, "resolver": None}]), 200)
+            return _status(json.dumps([{"id": 51, "resolver": {"login": "x"}}]), 200)
+        if "/reviews/1/comments?page=" in url:
+            return _status(json.dumps([]), 200)
         if "/commits/head-sha/status" in url:
             return _status(json.dumps({"state": "success", "total_count": 1}), 200)
         if url.endswith("/git/commits/head-sha"):
@@ -659,7 +721,10 @@ def test_fetch_pr_paginates_past_a_full_first_page_of_review_comments(monkeypatc
         "review-bot", runner=runner, api_bases={"gitea.example.com": "https://gitea.example.com"},
     )
     observation = adapter.observe("gitea.example.com/example/project", 7)
-    assert HoldReason.BLOCKING_THREADS in observation.holds
+    # The resolving comment lives on page 2 -- only reachable thanks to
+    # pagination -- so the thread must correctly report resolved, not
+    # blocking.
+    assert HoldReason.BLOCKING_THREADS not in observation.holds
 
 
 def test_all_review_comments_raises_past_the_bounded_scan(monkeypatch):

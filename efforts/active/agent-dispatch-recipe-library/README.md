@@ -273,12 +273,12 @@ not new engines either. The `extends:` model (Phase 3) and provider adapters
       `<key>` is an opaque authority key (conventionally the instance
       hostname, but never resolved as one) looked up in a configured,
       non-empty `api_bases` mapping (`<key>` -> the instance's real,
-      possibly path-hosted, base URL) -- the ref is never trusted directly
-      as a credential authority or turned into a URL (a post-review
-      hardening pass on this same slice: the first cut did derive
-      `https://<key>` directly, which both leaked credentials to an
-      arbitrary ref-named host and broke path-hosted instances; both are
-      fixed in the landed adapter). Validated against a real Gitea PR (not
+      possibly path-hosted, base URL). The ref's `<key>` is never trusted
+      directly as a credential authority or turned into a URL: an
+      unconfigured key is refused before any request, and a path-hosted
+      instance (e.g. `https://h/gitea`) is queried at its real configured
+      base rather than a bare reconstructed origin. Validated against a
+      real Gitea PR (not
       unit tests alone): approval-status aggregation (latest review per
       reviewer, `REQUEST_CHANGES` observed correctly), blocking-thread
       detection (an unresolved inline review comment), and mergeability

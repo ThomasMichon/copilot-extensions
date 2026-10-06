@@ -82,12 +82,19 @@ def _approval_status(reviews: list[Mapping[str, Any]]) -> ApprovalStatus:
     """Reduce Gitea's per-review list to one aggregate decision.
 
     Gitea has no server-computed aggregate like GitHub's ``reviewDecision``
-    -- only the latest review *per reviewer* counts (an earlier
-    ``REQUEST_CHANGES`` superseded by that same reviewer's later
+    -- only the latest *verdict-bearing* review **per reviewer** counts (an
+    earlier ``REQUEST_CHANGES`` superseded by that same reviewer's later
     ``APPROVED`` must not still block), mirroring how GitHub's own
     ``reviewDecision`` already discards a dismissed/superseded review.
+    A ``COMMENT``/``PENDING`` review carries no verdict of its own and must
+    never supersede that reviewer's last real verdict -- Gitea keeps an
+    approval/rejection as the official decision until another *verdict-
+    bearing* review changes it, so a later comment-only review is tracked
+    only far enough to know a review exists at all (for the all-comments,
+    no-verdicts-yet ``PENDING`` case below).
     """
-    latest_by_reviewer: dict[str, Mapping[str, Any]] = {}
+    verdict_by_reviewer: dict[str, tuple[int, str]] = {}
+    reviewers_with_any_review: set[str] = set()
     for review in reviews:
         if review.get("dismissed") or review.get("stale"):
             # A dismissed verdict must not still block/approve; a stale one
@@ -104,17 +111,20 @@ def _approval_status(reviews: list[Mapping[str, Any]]) -> ApprovalStatus:
         reviewer = str((review.get("user") or {}).get("login") or "")
         if not reviewer:
             continue
-        existing = latest_by_reviewer.get(reviewer)
-        if existing is None or int(review.get("id") or 0) >= int(existing.get("id") or 0):
-            latest_by_reviewer[reviewer] = review
-    canonical = {
-        _REVIEW_STATE_TO_APPROVAL[r["state"]] for r in latest_by_reviewer.values()
-    }
+        reviewers_with_any_review.add(reviewer)
+        canonical = _REVIEW_STATE_TO_APPROVAL[state]
+        if canonical not in ("APPROVED", "CHANGES_REQUESTED"):
+            continue  # COMMENT: feedback, not a verdict -- never supersedes one.
+        review_id = int(review.get("id") or 0)
+        existing = verdict_by_reviewer.get(reviewer)
+        if existing is None or review_id >= existing[0]:
+            verdict_by_reviewer[reviewer] = (review_id, canonical)
+    canonical = {state for _rid, state in verdict_by_reviewer.values()}
     if "CHANGES_REQUESTED" in canonical:
         return ApprovalStatus.CHANGES_REQUESTED
     if "APPROVED" in canonical:
         return ApprovalStatus.APPROVED
-    if canonical:
+    if reviewers_with_any_review:
         return ApprovalStatus.PENDING
     return ApprovalStatus.NONE
 
@@ -138,7 +148,8 @@ def _mergeability(pull_request: Mapping[str, Any], status_rollup: str | None) ->
 
 
 def _holds(
-    pull_request: Mapping[str, Any], review_comments: list[Mapping[str, Any]]
+    pull_request: Mapping[str, Any],
+    review_comment_groups: list[list[Mapping[str, Any]]],
 ) -> frozenset[HoldReason]:
     holds: set[HoldReason] = set()
     if pull_request.get("draft") or pull_request.get("is_draft"):
@@ -150,7 +161,16 @@ def _holds(
     )
     if _has_wip_marker(title, labels):
         holds.add(HoldReason.WIP)
-    if any(not comment.get("resolver") for comment in review_comments):
+    # Each group is one review's own thread of comments. Gitea records the
+    # resolver on a resolved thread's root comment while replies stay
+    # unset, so a group is resolved when ANY of its comments carries one --
+    # the same reading agent_worktrees.providers.gitea.get_comment_threads
+    # already uses for the identical field.
+    if any(
+        not any(comment.get("resolver") for comment in group)
+        for group in review_comment_groups
+        if group
+    ):
         holds.add(HoldReason.BLOCKING_THREADS)
     return frozenset(holds)
 
@@ -158,19 +178,22 @@ def _holds(
 def observe_pr_state(
     pull_request: Mapping[str, Any],
     reviews: list[Mapping[str, Any]] | None = None,
-    review_comments: list[Mapping[str, Any]] | None = None,
+    review_comment_groups: list[list[Mapping[str, Any]]] | None = None,
     status_rollup: str | None = None,
 ) -> PRObservation:
     """Classify one raw Gitea PR payload against the declared provider
     machine. Pure: no network, no transport call.
 
-    ``reviews`` is the raw ``/pulls/{index}/reviews`` list; ``review_comments``
-    is the flat list of inline review comments across every review (each
-    carrying a ``resolver`` field when resolved, Gitea's own read-side
-    convention -- see ``agent_worktrees.providers.gitea.get_comment_threads``'s
-    identical reading of the same field); ``status_rollup`` is the combined
-    commit-status state (``"success"``/``"pending"``/``"warning"``/
-    ``"failure"``/``"error"``, or ``None`` when no statuses are configured).
+    ``reviews`` is the raw ``/pulls/{index}/reviews`` list;
+    ``review_comment_groups`` is one inline-comment thread per review (each
+    comment carrying a ``resolver`` field when resolved, Gitea's own
+    read-side convention -- see ``agent_worktrees.providers.gitea.
+    get_comment_threads``'s identical reading of the same field); a thread
+    is resolved when any comment in its own group carries one, since Gitea
+    records the resolver on a thread's root comment while replies stay
+    unset. ``status_rollup`` is the combined commit-status state
+    (``"success"``/``"pending"``/``"warning"``/``"failure"``/``"error"``/
+    ``"skipped"``, or ``None`` when no statuses are configured).
     """
     number = pull_request.get("number")
     if not isinstance(number, int):
@@ -185,7 +208,7 @@ def observe_pr_state(
         number=number,
         approval_status=_approval_status(list(reviews or ())),
         mergeability=_mergeability(pull_request, status_rollup),
-        holds=_holds(pull_request, list(review_comments or ())),
+        holds=_holds(pull_request, list(review_comment_groups or ())),
         revision=Revision(diff_hash=head_sha, base_sha=base_sha),
         last_commit_at=_last_commit_at(pull_request),
     )
@@ -306,7 +329,10 @@ class GiteaPRAdapter:
         once a PR accumulates more reviews than one page -- ``_approval_status``
         would then classify against a stale/incomplete verdict, and the
         dropped reviews' own inline comments would never be checked for
-        :data:`HoldReason.BLOCKING_THREADS` either.
+        :data:`HoldReason.BLOCKING_THREADS` either. Stops on a genuinely
+        **empty** page, not merely a short one -- a Gitea server may clamp
+        ``limit`` below the requested value, and a short-but-nonempty page
+        would then be mistaken for the last one.
         """
         reviews: list[dict[str, Any]] = []
         for _page_index in range(_MAX_REVIEW_PAGES):
@@ -316,12 +342,12 @@ class GiteaPRAdapter:
                 f"/repos/{owner}/{name}/pulls/{number}/reviews"
                 f"?page={page}&limit={_REVIEW_PAGE_SIZE}",
             ) or []
-            reviews.extend(rows)
-            if len(rows) < _REVIEW_PAGE_SIZE:
+            if not rows:
                 return reviews
+            reviews.extend(rows)
         raise RuntimeError(
             f"Gitea review listing for {owner}/{name}#{number} exceeded the "
-            f"bounded {_MAX_REVIEW_PAGES * _REVIEW_PAGE_SIZE}-review scan"
+            f"bounded {_MAX_REVIEW_PAGES} pages"
         )
 
     def _all_review_comments(
@@ -331,7 +357,9 @@ class GiteaPRAdapter:
 
         A single unpaginated page can hide an unresolved comment sitting on
         a later page, silently clearing :data:`HoldReason.BLOCKING_THREADS`
-        for a review that still has open feedback.
+        for a review that still has open feedback. Stops on a genuinely
+        empty page, for the same server-clamped-``limit`` reason
+        :meth:`_all_reviews` does.
         """
         comments: list[dict[str, Any]] = []
         for _page_index in range(_MAX_REVIEW_PAGES):
@@ -341,9 +369,9 @@ class GiteaPRAdapter:
                 f"/repos/{owner}/{name}/pulls/{number}/reviews/{review_id}/comments"
                 f"?page={page}&limit={_REVIEW_PAGE_SIZE}",
             ) or []
-            comments.extend(rows)
-            if len(rows) < _REVIEW_PAGE_SIZE:
+            if not rows:
                 return comments
+            comments.extend(rows)
         raise RuntimeError(
             f"Gitea review-comment listing for {owner}/{name}#{number} review "
             f"{review_id} exceeded the bounded "
@@ -366,16 +394,16 @@ class GiteaPRAdapter:
         if not isinstance(pull_request, Mapping):
             raise RuntimeError(f"Gitea PR fetch returned nothing for {repo}#{number}")
         reviews = self._all_reviews(api_base, owner, name, number)
-        review_comments: list[dict[str, Any]] = []
+        review_comment_groups: list[list[dict[str, Any]]] = []
         for review in reviews:
             if review.get("dismissed") or review.get("stale"):
                 continue  # a dismissed/stale review's inline comments don't block either.
             review_id = review.get("id")
             if not isinstance(review_id, int):
                 continue
-            review_comments.extend(
-                self._all_review_comments(api_base, owner, name, number, review_id)
-            )
+            group = self._all_review_comments(api_base, owner, name, number, review_id)
+            if group:
+                review_comment_groups.append(group)
         head_sha = (pull_request.get("head") or {}).get("sha")
         status_rollup = None
         if isinstance(head_sha, str) and head_sha:
@@ -407,7 +435,7 @@ class GiteaPRAdapter:
         return {
             "pull_request": dict(pull_request),
             "reviews": reviews,
-            "review_comments": review_comments,
+            "review_comment_groups": review_comment_groups,
             "status_rollup": status_rollup,
         }
 
@@ -415,5 +443,6 @@ class GiteaPRAdapter:
         """Fetch and classify ``repo``/``number`` in one call."""
         raw = self.fetch_pr(repo, number)
         return observe_pr_state(
-            raw["pull_request"], raw["reviews"], raw["review_comments"], raw["status_rollup"],
+            raw["pull_request"], raw["reviews"], raw["review_comment_groups"],
+            raw["status_rollup"],
         )

@@ -156,12 +156,12 @@ class GiteaProvider:
                 f"/repos/{repo}/issues/{number}/comments"
                 f"?page={page}&limit={_ISSUE_PAGE_SIZE}",
             ) or []
-            comments.extend(rows)
-            if len(rows) < _ISSUE_PAGE_SIZE:
+            if not rows:
                 return comments
+            comments.extend(rows)
         raise RuntimeError(
             f"Gitea comment listing for {repo}#{number} exceeded the bounded "
-            f"{_MAX_ISSUE_PAGES * _ISSUE_PAGE_SIZE}-comment scan"
+            f"{_MAX_ISSUE_PAGES} pages"
         )
 
     # -- label id resolution ---------------------------------------------
@@ -176,14 +176,13 @@ class GiteaProvider:
             rows = self._call(
                 "GET", f"/repos/{repo}/labels?page={page}&limit={_ISSUE_PAGE_SIZE}"
             ) or []
-            for row in rows:
-                labels[str(row["name"])] = int(row["id"])
-            if len(rows) < _ISSUE_PAGE_SIZE:
+            if not rows:
                 self._label_ids[repo] = labels
                 return labels
+            for row in rows:
+                labels[str(row["name"])] = int(row["id"])
         raise RuntimeError(
-            f"Gitea label listing exceeded the bounded "
-            f"{_MAX_LABEL_PAGES * _ISSUE_PAGE_SIZE}-label scan"
+            f"Gitea label listing exceeded the bounded {_MAX_LABEL_PAGES} pages"
         )
 
     def _label_id(self, repo: str, label: str) -> int:
@@ -210,6 +209,8 @@ class GiteaProvider:
                 f"/repos/{repo}/issues?state=open&type=issues"
                 f"&page={page}&limit={_ISSUE_PAGE_SIZE}",
             ) or []
+            if not rows:
+                return issues
             for row in rows:
                 if row.get("pull_request") is not None:
                     continue  # belt-and-suspenders: type=issues already excludes PRs.
@@ -241,8 +242,6 @@ class GiteaProvider:
                         reservations=reservations,
                     )
                 )
-            if len(rows) < _ISSUE_PAGE_SIZE:
-                return issues
         raise RuntimeError(
             "Gitea issue discovery exceeded the bounded "
             f"{_MAX_ISSUE_PAGES * _ISSUE_PAGE_SIZE}-issue scan"

@@ -117,6 +117,8 @@ def test_list_open_issues_paginates_until_a_short_page(monkeypatch):
             return _status([_issue_row(n) for n in range(1, 51)], 200)
         if "page=2" in url:
             return _status([_issue_row(51)], 200)
+        if "page=3" in url:
+            return _status([], 200)
         if "/comments" in url:
             return _status([], 200)
         raise AssertionError(f"unexpected curl invocation: {url}")
@@ -158,6 +160,8 @@ def test_all_comments_paginates_past_a_full_first_page(monkeypatch):
             return _status(
                 [{"id": 51, "body": marker, "user": {"login": "issue-bot"}}], 200
             )
+        if "/issues/1/comments?page=" in url:
+            return _status([], 200)
         raise AssertionError(f"unexpected curl invocation: {url}")
 
     (issue,) = _provider(runner).list_open_issues("example/project")
@@ -195,13 +199,15 @@ def test_reservation_marker_roundtrips_through_comments(monkeypatch):
             return _status({"login": "issue-bot"}, 200)
         if url.endswith("/api/v1/repos/example/project"):
             return _status({"full_name": "example/project"}, 200)
-        if "/issues/1/comments?" in url and method == "GET":
+        if "/issues/1/comments?page=1" in url and method == "GET":
             if comment_body["value"] is None:
                 return _status([], 200)
             return _status(
                 [{"id": 99, "body": comment_body["value"], "user": {"login": "issue-bot"}}],
                 200,
             )
+        if "/issues/1/comments?page=" in url and method == "GET":
+            return _status([], 200)
         if url.endswith("/issues/1/comments") and method == "POST":
             payload = json.loads(args[args.index("-d") + 1])
             comment_body["value"] = payload["body"]
@@ -210,8 +216,10 @@ def test_reservation_marker_roundtrips_through_comments(monkeypatch):
             payload = json.loads(args[args.index("-d") + 1])
             comment_body["value"] = payload["body"]
             return _status({"id": 99}, 200)
-        if "/repos/example/project/labels?" in url and method == "GET":
+        if "/repos/example/project/labels?page=1" in url and method == "GET":
             return _status([{"id": 5, "name": "backlog-active"}], 200)
+        if "/repos/example/project/labels?" in url and method == "GET":
+            return _status([], 200)
         if url.endswith("/issues/1/labels") and method == "POST":
             labels_on_issue.add(5)
             return _status({}, 200)
@@ -253,10 +261,12 @@ def test_release_keeps_label_when_another_loop_is_still_active(monkeypatch):
             return _status({"login": "issue-bot"}, 200)
         if url.endswith("/api/v1/repos/example/project"):
             return _status({"full_name": "example/project"}, 200)
-        if "/issues/1/comments?" in url and method == "GET":
+        if "/issues/1/comments?page=1" in url and method == "GET":
             return _status(
                 [{"id": 1, "body": f"x\n\n{other_marker}", "user": {"login": "issue-bot"}}], 200
             )
+        if "/issues/1/comments?page=" in url and method == "GET":
+            return _status([], 200)
         if url.endswith("/issues/1/comments") and method == "POST":
             return _status({"id": 2}, 201)
         if "/issues/comments/" in url and method == "PATCH":
