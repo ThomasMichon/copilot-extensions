@@ -218,12 +218,12 @@ view highlighting whether resolved head matches the just-resumed session).
 
 ## Journal
 
-### 2026-10-06 (later) — Live-tested the quiesce step itself; closed the effort's last two Validation Plan items
+### 2026-10-06 (later) — Live-tested the quiesce step itself; closed its two quiesce-specific Validation Plan items
 Continuing the same day's work after PR #5491 merged: picked up the two
-remaining Validation Plan items (owned background task / owned schedule
-present at handoff time). Rather than simulate these, exercised the actual
-new skill requirement live, in this very session, immediately before
-composing this handoff:
+remaining quiesce-specific Validation Plan items (owned background task /
+owned schedule present at handoff time). Rather than simulate these,
+exercised the actual new skill requirement live, in this very session,
+immediately before composing this handoff:
 - Started a real background `task` agent (a 5-minute sleep-then-report job)
   and a real `manage_schedule` entry (10-minute interval) to stand in for
   genuinely owned background work.
@@ -233,10 +233,11 @@ composing this handoff:
   message treated as sufficient) and stopped the schedule unconditionally
   (`manage_schedule action: stop`, no re-arm requested since it was a test
   artifact with no successor-side purpose).
-- Both Validation Plan items and Step 5's own follow-up checkbox are now
-  checked -- this effort's Validation Plan is fully green, pending only the
-  two operator-only Companion-button live-tests (Validation Plan items 1-2),
-  which remain open since they need the operator's own hands-on worktree.
+- Both quiesce-specific Validation Plan items and Step 5's own follow-up
+  checkbox are now checked. Validation Plan items 1-2 (the operator's own
+  hands-on Companion-button live-tests) remain open and unaffected by this
+  leg -- they need the operator's own worktree/session, not something a
+  session can close on its own.
 
 ### 2026-10-06 — Live re-validated the #5455 fix; triaged 2 stray claims; new quiesce-before-trigger skill step
 Picked up via handoff (task `5bad80aac0b7435ea0b3585944d5025a`), whose two
