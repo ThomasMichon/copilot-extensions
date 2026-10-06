@@ -3262,13 +3262,21 @@ function Invoke-Stamp {
         Publish-FileAtomically -Path (Join-Path $InstallDir 'payload-dir') -Content $snapDir -Encoding $utf8NoBom
         Publish-FileAtomically -Path $stampedVersionMarker -Content $SrcVersion -Encoding $utf8NoBom
         Write-Ok "Snapshot: $snapDir"
+        # Deployed INSIDE the lock (mirrors agent-machines' own stamp,
+        # plugins/agent-machines/scripts/init.ps1:2061-2065): otherwise an
+        # older, delayed invocation could resume AFTER a newer one already
+        # published AND deployed, then overwrite the resolver/binstub files
+        # from its own (older) $PSScriptRoot -- pairing fresh markers with a
+        # stale launcher surface, the exact same ordering hazard the
+        # version guard above exists to prevent for the markers themselves.
+        Deploy-SelfProvisioningBinstub
+        Write-Ok 'Stamped: agent-dispatch binstub on PATH; runtime provisions on first use.'
     } finally {
         [void]$stampMutex.ReleaseMutex()
         $stampMutex.Dispose()
     }
-    Deploy-SelfProvisioningBinstub
-    Write-Ok 'Stamped: agent-dispatch binstub on PATH; runtime provisions on first use.'
 }
+
 
 function Invoke-Install {
     Write-Host ''; Write-Host '=== agent-dispatch install ===' -ForegroundColor Cyan; Write-Host ''

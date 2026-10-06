@@ -497,17 +497,21 @@ def _run_stamp_harness(
     src_version: str,
     existing_stamped_version: str | None,
     force: bool = False,
-) -> tuple[subprocess.CompletedProcess[str], Path]:
+) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """Invoke-Stamp's version-ordering guard, with everything it depends on
     OTHER than Test-VersionLt/Enter-PluginSnapshotLock/Publish-FileAtomically
-    stubbed out (a real snapshot build and binstub deploy are irrelevant to
-    the guard itself and heavy to construct here)."""
+    stubbed out (a real snapshot build is irrelevant to the guard itself and
+    heavy to construct here). The Deploy-SelfProvisioningBinstub stub writes
+    a marker file instead of a plain no-op, so a test can prove whether it
+    ran (and thus whether it ran INSIDE the lock, before a guard-triggered
+    early return)."""
     install_dir = tmp_path / "install"
     install_dir.mkdir(parents=True)
     plugin_dir = _marketplace_plugin_dir(tmp_path)
     _seed_plugin_dir(plugin_dir)
     if existing_stamped_version is not None:
         (install_dir / "stamped-version").write_text(existing_stamped_version, encoding="utf-8")
+    deployed_marker = tmp_path / "binstub-deployed"
 
     script = (
         "$ErrorActionPreference = 'Stop'\n"
@@ -517,7 +521,7 @@ def _run_stamp_harness(
         "function Write-Fail { param($m) Write-Host \"FAIL: $m\" }\n"
         # Stubbed: irrelevant to the version-ordering guard under test.
         "function New-PluginBuildSnapshot { param($PluginDir, $InstallDir, $Version) return Join-Path $InstallDir \"snapshots/$Version\" }\n"
-        "function Deploy-SelfProvisioningBinstub { }\n"
+        f'function Deploy-SelfProvisioningBinstub {{ Set-Content -Path "{deployed_marker}" -Value "deployed" }}\n'
         + _extract_function_block("Get-VerTuple")
         + "\n\n"
         + _extract_function_block("Test-VersionLt")
@@ -543,37 +547,45 @@ def _run_stamp_harness(
         timeout=30,
         check=True,
     )
-    return result, install_dir / "stamped-version"
+    return result, install_dir / "stamped-version", deployed_marker
 
 
 def test_stamp_publishes_normally_with_no_prior_stamped_version(tmp_path: Path) -> None:
-    result, marker = _run_stamp_harness(tmp_path, src_version="0.2.0-dev1", existing_stamped_version=None)
+    result, marker, deployed = _run_stamp_harness(
+        tmp_path, src_version="0.2.0-dev1", existing_stamped_version=None
+    )
     assert marker.read_text(encoding="utf-8") == "0.2.0-dev1", result.stdout + result.stderr
+    assert deployed.exists()
 
 
 def test_stamp_publishes_normally_when_newer_than_current(tmp_path: Path) -> None:
-    result, marker = _run_stamp_harness(
+    result, marker, deployed = _run_stamp_harness(
         tmp_path, src_version="0.2.0-dev2", existing_stamped_version="0.2.0-dev1"
     )
     assert marker.read_text(encoding="utf-8") == "0.2.0-dev2", result.stdout + result.stderr
+    assert deployed.exists()
 
 
 def test_stamp_skips_publishing_when_older_than_current(tmp_path: Path) -> None:
     """A delayed/preempted older-version stamp acquiring the lock AFTER a
-    newer one already published must not overwrite the newer markers --
-    the mutex only serializes writes, it doesn't guarantee arrival order."""
-    result, marker = _run_stamp_harness(
+    newer one already published must not overwrite the newer markers, OR
+    redeploy its own (older) binstub/resolver files over the newer
+    invocation's already-deployed ones -- the mutex only serializes writes,
+    it doesn't guarantee arrival order."""
+    result, marker, deployed = _run_stamp_harness(
         tmp_path, src_version="0.2.0-dev1", existing_stamped_version="0.2.0-dev2"
     )
     assert "Not publishing" in result.stdout, result.stdout + result.stderr
+    assert not deployed.exists()
     assert marker.read_text(encoding="utf-8") == "0.2.0-dev2"
 
 
 def test_stamp_force_overrides_the_version_ordering_guard(tmp_path: Path) -> None:
-    result, marker = _run_stamp_harness(
+    result, marker, deployed = _run_stamp_harness(
         tmp_path, src_version="0.2.0-dev1", existing_stamped_version="0.2.0-dev2", force=True
     )
     assert marker.read_text(encoding="utf-8") == "0.2.0-dev1", result.stdout + result.stderr
+    assert deployed.exists()
 
 
 
