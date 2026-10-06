@@ -131,33 +131,32 @@ def _approval_status(reviews: list[Mapping[str, Any]]) -> ApprovalStatus:
 
 def _mergeability(pull_request: Mapping[str, Any], status_rollup: str | None) -> Mergeability:
     mergeable = pull_request.get("mergeable")
-    if mergeable is False:
-        # Gitea's `mergeable` is a plain boolean, unlike GitHub's
-        # discriminating MERGEABLE/CONFLICTING/UNKNOWN tri-state: `false`
-        # is also reported while conflict-checking is still running, when
-        # that check errored, for draft PRs, and for other non-conflict
-        # transient states -- Gitea's own PullRequest.Mergeable() method
-        # returns false for all of these, not only a real conflict.
-        # Treating it as CONFLICTED would drive the state machine into
-        # conflict/self-repair handling for a PR that may have no real
-        # conflict at all (its DRAFT/WIP hold, handled separately by
-        # _holds(), already covers those cases). With no discriminating
-        # signal available from Gitea's REST API, UNKNOWN is the only safe
-        # classification until a later observation reports true/false more
-        # definitively.
-        return Mergeability.UNKNOWN
-    if mergeable is None:
-        return Mergeability.UNKNOWN
-    if mergeable is not True:
+    if mergeable not in (True, False, None):
         raise GiteaPRObservationError(f"unrecognized Gitea mergeable value {mergeable!r}")
-    if status_rollup is None:
+    if status_rollup is not None:
+        # A definitive check-status rollup is authoritative regardless of
+        # `mergeable`'s own ambiguity: Gitea's `mergeable` is a plain
+        # boolean (unlike GitHub's discriminating MERGEABLE/CONFLICTING/
+        # UNKNOWN tri-state) that also reports `false` while conflict-
+        # checking is still running, when that check errored, for draft
+        # PRs, and other non-conflict transient states -- so classify a
+        # known rollup state first, and only fall back to `mergeable`
+        # itself when there is no rollup to go on.
+        try:
+            return _COMMIT_STATUS_TO_MERGEABILITY[status_rollup]
+        except KeyError:
+            raise GiteaPRObservationError(
+                f"unrecognized Gitea combined commit status {status_rollup!r}"
+            ) from None
+    if mergeable is True:
         return Mergeability.CLEAN
-    try:
-        return _COMMIT_STATUS_TO_MERGEABILITY[status_rollup]
-    except KeyError:
-        raise GiteaPRObservationError(
-            f"unrecognized Gitea combined commit status {status_rollup!r}"
-        ) from None
+    # `mergeable` is False or None with no rollup to disambiguate it --
+    # Gitea's own PullRequest.Mergeable() returns false for a real
+    # conflict, a still-running/errored conflict check, a draft PR, and
+    # other transient states alike, so with no discriminating signal
+    # available, UNKNOWN is the only safe classification (DRAFT/WIP holds,
+    # handled separately by _holds(), already cover those specific cases).
+    return Mergeability.UNKNOWN
 
 
 def _is_draft(pull_request: Mapping[str, Any]) -> bool:

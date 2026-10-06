@@ -370,6 +370,27 @@ def test_mergeable_with_no_status_rollup_is_clean():
     ("status_rollup", "expected"),
     [
         ("success", Mergeability.CLEAN),
+        ("pending", Mergeability.CHECKS_PENDING),
+        ("failure", Mergeability.CHECKS_FAILED),
+    ],
+)
+def test_status_rollup_takes_priority_over_an_ambiguous_mergeable_value(
+    status_rollup, expected,
+):
+    """mergeable: false (or null) is ambiguous on its own -- but a
+    definitive check-status rollup is not, and must not be suppressed by
+    that ambiguity. A PR with real pending/failing checks must still
+    reach CHECKS_PENDING/CHECKS_FAILED even though `mergeable` itself
+    gives no useful signal."""
+    for mergeable in (False, None):
+        observation = observe_pr_state(_pr(mergeable=mergeable), status_rollup=status_rollup)
+        assert observation.mergeability == expected
+
+
+@pytest.mark.parametrize(
+    ("status_rollup", "expected"),
+    [
+        ("success", Mergeability.CLEAN),
         ("skipped", Mergeability.CLEAN),
         ("pending", Mergeability.CHECKS_PENDING),
         ("warning", Mergeability.CHECKS_FAILED),

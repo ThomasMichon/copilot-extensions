@@ -426,3 +426,19 @@ class GiteaProvider:
                 "DELETE", f"/repos/{repo}/issues/{issue.number}/labels/{label_id}",
                 ok=(200, 204),
             )
+            # The scan above and this delete are not atomic with a
+            # concurrent reserve(): a racing loop can add the label (a
+            # no-op, since it was already present) and not yet have
+            # written its own marker at the moment of that scan --
+            # reserve-before-election overlap is expected, so this is a
+            # real, not hypothetical, window. Re-scan once more right
+            # after deleting; if a reservation now appears active on this
+            # same label, the race was hit -- re-add the label so that
+            # reservation's marker is never left without it.
+            if self._active_reservation_depends_on_label(
+                repo, issue, reservation, exclude_own_loop=True
+            ):
+                self._call(
+                    "POST", f"/repos/{repo}/issues/{issue.number}/labels",
+                    payload={"labels": [label_id]}, ok=(200, 201),
+                )

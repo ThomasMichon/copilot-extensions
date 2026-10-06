@@ -310,6 +310,64 @@ def test_release_keeps_label_when_another_loop_is_still_active(monkeypatch):
     provider.release("example/project", issue, reservation, "done")
 
 
+def test_release_re_adds_the_label_when_a_concurrent_reserve_races_the_delete(monkeypatch):
+    """release()'s check-then-delete is not atomic with a concurrent
+    reserve(): a racing loop can add the label (a no-op, already present)
+    and not yet have written its own marker at the moment of release()'s
+    pre-delete scan -- reserve-before-election overlap is expected, so
+    this is a real race window. If a re-scan right after the delete shows
+    a new active reservation on this same label, the label must be
+    re-added so that reservation's marker is never left without it."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+    from agent_dispatch.issue_loop_markers import _marker
+
+    racing_marker = _marker({
+        "loop": "racing-loop", "occurrence": 1, "state": "reserved",
+        "at": 0, "label": "backlog-active", "issue": 1,
+    })
+    comment_scan_calls = {"count": 0}
+    relabeled = []
+
+    def runner(args, **kwargs):
+        method = args[args.index("-X") + 1]
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status({"login": "issue-bot"}, 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status({"full_name": "example/project"}, 200)
+        if "/issues/1/comments?page=1" in url and method == "GET":
+            comment_scan_calls["count"] += 1
+            if comment_scan_calls["count"] < 3:
+                # _find_own_loop_comment (write) and the pre-delete scan:
+                # nothing active from anyone else yet.
+                return _status([], 200)
+            # The post-delete re-scan: the racing loop's marker has now
+            # landed.
+            return _status(
+                [{"id": 9, "body": racing_marker, "user": {"login": "issue-bot"}}], 200
+            )
+        if "/issues/1/comments?page=" in url and method == "GET":
+            return _status([], 200)
+        if url.endswith("/issues/1/comments") and method == "POST":
+            return _status({"id": 2}, 201)
+        if "/labels?page=1" in url and method == "GET":
+            return _status([{"id": 7, "name": "backlog-active"}], 200)
+        if "/labels?page=" in url and method == "GET":
+            return _status([], 200)
+        if url.endswith("/issues/1/labels") and method == "POST":
+            relabeled.append(7)
+            return _status([{"id": 7, "name": "backlog-active"}], 201)
+        if url.endswith("/issues/1/labels/7") and method == "DELETE":
+            return _status("", 204)
+        raise AssertionError(f"unexpected curl invocation: {method} {url}")
+
+    provider = _provider(runner)
+    issue = Issue(1, "t", "url", (), 0.0, 0.0)
+    reservation = {"loop": "backlog", "occurrence": 1, "label": "backlog-active"}
+    provider.release("example/project", issue, reservation, "done")
+    assert relabeled == [7]
+
+
 def test_label_id_resolution_raises_when_label_absent(monkeypatch):
     monkeypatch.setenv("GITEA_TOKEN", "tok")
 
