@@ -28,6 +28,18 @@ _PWSH = shutil.which("pwsh")
 
 pytestmark = pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
 
+_run_pwsh_race_tests = os.environ.get("AGENT_DISPATCH_RUN_PWSH_RACE_TESTS") == "1"
+_skip_pwsh_race = pytest.mark.skipif(
+    not _run_pwsh_race_tests,
+    reason=(
+        "multi-process pwsh ordering-race test -- opt in with "
+        "AGENT_DISPATCH_RUN_PWSH_RACE_TESTS=1 (deliberately excluded from the "
+        "default/required-CI smoke contract; mirrors "
+        "test_install_ps1_build_snapshot.py's own opt-in for the same class "
+        "of real-subprocess integration coverage)"
+    ),
+)
+
 
 def _extract_function_block(name: str) -> str:
     """Extract one `function <name> { ... }` block by brace-counting from
@@ -247,6 +259,149 @@ def test_activate_force_overrides_the_stamped_version_guard(tmp_path: Path) -> N
     assert "RETURNED:True" in result.stdout, result.stdout + result.stderr
     assert activated.exists()
     assert "SUPERSEDED:False" in result.stdout, result.stdout + result.stderr
+
+
+def _activation_race_script(
+    *, install_dir: Path, src_version: str, fake_python: Path, delay_ms: int
+) -> str:
+    """Unlike _run_activate_harness's canned Get-VersionedCurrent stub,
+    this one dynamically re-reads a REAL current-version marker file on
+    every call -- so a genuinely separate, concurrently-running process's
+    real write is what this process's own in-lock comparison observes,
+    not a value fixed in advance by the test. `delay_ms` sleeps BEFORE
+    entering Invoke-VersionedActivate at all (not inside the lock) --
+    purely to make which process reaches the real race window first
+    deterministic across runs, without making the OUTCOME itself
+    nondeterministic (the guard logic under test is what decides the
+    outcome, not timing)."""
+    current_version_marker = install_dir / "current-version"
+    return (
+        "$ErrorActionPreference = 'Stop'\n"
+        "function Write-Ok { param($m) Write-Host \"OK: $m\" }\n"
+        "function Write-Warn { param($m) Write-Host \"WARN: $m\" }\n"
+        "function Write-Skip { param($m) Write-Host \"SKIP: $m\" }\n"
+        "function Write-Fail { param($m) Write-Host \"FAIL: $m\" }\n"
+        "function Write-Step { param($m) Write-Host \"STEP: $m\" }\n"
+        "function Test-VenvIsLink { param($p) return $false }\n"
+        "function Get-VersionedCurrent {\n"
+        f'    if (Test-Path "{current_version_marker}") {{\n'
+        f'        return (Get-Content -Path "{current_version_marker}" -Raw -ErrorAction SilentlyContinue).Trim()\n'
+        "    }\n"
+        '    return ""\n'
+        "}\n"
+        + _extract_function_block("Get-VerTuple")
+        + "\n\n"
+        + _extract_function_block("Test-VersionLt")
+        + "\n\n"
+        + _extract_function_block("Enter-PluginSnapshotLock")
+        + "\n\n"
+        + _extract_function_block("Invoke-VersionedActivate")
+        + "\n\n"
+        "$VersionedRuntime = $true\n"
+        f'$InstallDir = "{install_dir}"\n'
+        f'$SrcVersion = "{src_version}"\n'
+        "$Force = $false\n"
+        f'$VenvPython = "{fake_python}"\n'
+        f'$LinkPython = "{fake_python}"\n'
+        f"Start-Sleep -Milliseconds {delay_ms}\n"
+        "$result = Invoke-VersionedActivate\n"
+        'Write-Output "RETURNED:$result"\n'
+        'Write-Output "SUPERSEDED:$script:ActivationSuperseded"\n'
+    )
+
+
+@_skip_pwsh_race
+def test_two_real_processes_racing_different_versions_never_let_the_older_one_win(
+    tmp_path: Path,
+) -> None:
+    """Every other test in this module proves the guard logic via a
+    serial, pre-seeded single-process harness. This is the genuine
+    multi-process regression the guard logic actually exists for: TWO
+    REAL, SEPARATE `pwsh` processes contend for the SAME
+    Enter-PluginSnapshotLock global lock and the SAME install_dir,
+    racing Invoke-VersionedActivate for two DIFFERENT versions -- the
+    newer one (0.2.0-dev2, no artificial delay) and an older one
+    (0.1.0-dev1, started at the same time but sleeping briefly before
+    entering its own activation call so it deterministically reaches the
+    real race window second, i.e. "finishes last"). Proves the older
+    process's activation is genuinely skipped against a REAL concurrent
+    write from a REAL separate process -- not a value the test fixed in
+    advance -- and that it never republishes/overwrites current-version
+    with its own stale build."""
+    install_dir = tmp_path / "install"
+    install_dir.mkdir(parents=True)
+
+    def _make_fake_python(label: str) -> tuple[Path, Path]:
+        activated_marker = tmp_path / f"activated-{label}"
+        if os.name == "nt":
+            fake_python = tmp_path / f"fake-python-{label}.cmd"
+            fake_python.write_text(
+                "@echo off\r\n"
+                f'echo activated>"{activated_marker}"\r\n'
+                f'echo %7>"{install_dir / "current-version"}"\r\n'
+                "exit /b 0\r\n",
+                encoding="utf-8",
+            )
+        else:
+            fake_python = tmp_path / f"fake-python-{label}.sh"
+            fake_python.write_text(
+                "#!/bin/sh\n"
+                f'echo activated > "{activated_marker}"\n'
+                f'echo "$7" > "{install_dir / "current-version"}"\n'
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o755)
+        return fake_python, activated_marker
+
+    fake_python_newer, activated_newer = _make_fake_python("newer")
+    fake_python_older, activated_older = _make_fake_python("older")
+
+    script_newer = _activation_race_script(
+        install_dir=install_dir, src_version="0.2.0-dev2", fake_python=fake_python_newer, delay_ms=0
+    )
+    script_older = _activation_race_script(
+        install_dir=install_dir, src_version="0.1.0-dev1", fake_python=fake_python_older, delay_ms=800
+    )
+    script_path_newer = tmp_path / "harness-newer.ps1"
+    script_path_older = tmp_path / "harness-older.ps1"
+    script_path_newer.write_text(script_newer, encoding="utf-8")
+    script_path_older.write_text(script_older, encoding="utf-8")
+
+    proc_newer = subprocess.Popen(
+        [_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script_path_newer)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=os.environ,
+    )
+    proc_older = subprocess.Popen(
+        [_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script_path_older)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=os.environ,
+    )
+    stdout_newer, stderr_newer = proc_newer.communicate(timeout=30)
+    stdout_older, stderr_older = proc_older.communicate(timeout=30)
+
+    assert proc_newer.returncode == 0, stdout_newer + stderr_newer
+    assert proc_older.returncode == 0, stdout_older + stderr_older
+
+    assert "RETURNED:True" in stdout_newer, stdout_newer + stderr_newer
+    assert "SUPERSEDED:False" in stdout_newer, stdout_newer + stderr_newer
+    assert activated_newer.exists()
+
+    assert "Not activating" in stdout_older, stdout_older + stderr_older
+    assert "RETURNED:True" in stdout_older, stdout_older + stderr_older
+    assert "SUPERSEDED:True" in stdout_older, stdout_older + stderr_older
+    assert not activated_older.exists(), (
+        "the older process must never reach its own real activation call at all"
+    )
+
+    # The newer process's real write is what persists -- the older process
+    # never overwrote it with its own stale version.
+    assert (install_dir / "current-version").read_text(encoding="utf-8").strip() == "0.2.0-dev2"
 
 
 def _run_superseded_now_harness(
