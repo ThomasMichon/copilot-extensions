@@ -34,6 +34,7 @@ explicitly in a local dev loop or a path-gated/manual CI lane, not by default.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -1012,16 +1013,55 @@ def test_invoke_update_aborts_cutover_when_superseded() -> None:
         "Install-Runtime"
     )
     # The cutover mutex must be ACQUIRED before the second guard and only
-    # RELEASED after the real cutover call -- i.e. it wraps both.
+    # RELEASED after the real cutover call AND the coordinator task
+    # reconciliation that follows (Install-CoordinatorTask, the fallback
+    # Confirm-CoordinatorRunning) -- not released right after
+    # Invoke-CoordinatorCutover itself. Releasing it any earlier still lets
+    # a newer invocation activate and complete its own cutover in the gap
+    # before THIS invocation reaches Install-CoordinatorTask, whose
+    # existing-task path could stop/restart the task the newer cutover just
+    # promoted.
     lock_acquire_idx = body.index("$cutoverMutex = Enter-PluginSnapshotLock")
+    install_task_idx = body.index("Install-CoordinatorTask -NoStart:$didCutover", cutover_idx)
     lock_release_idx = body.index("$cutoverMutex.ReleaseMutex()")
     assert lock_acquire_idx < second_guard_idx, (
         "the cutover mutex must be acquired BEFORE the second live re-check"
     )
-    assert cutover_idx < lock_release_idx, (
+    assert cutover_idx < install_task_idx < lock_release_idx, (
         "the cutover mutex must still be held THROUGH the real "
-        "Invoke-CoordinatorCutover call, not released before it"
+        "Invoke-CoordinatorCutover call AND the coordinator task "
+        "reconciliation that follows, not released in between"
     )
+
+
+def test_every_global_activation_lock_acquisition_shares_one_timeout() -> None:
+    """Invoke-VersionedActivate, Invoke-Stamp, and Invoke-Update's cutover
+    span all acquire the IDENTICAL global (version-independent)
+    Enter-PluginSnapshotLock -InstallDir $InstallDir mutex -- the OS lock is
+    keyed by name, not by call site, so they are really one shared lock, not
+    three independent ones. A caller using a SHORTER timeout than another
+    caller might legitimately hold it would throw "Timed out waiting..."
+    during a perfectly normal long cutover instead of simply waiting its
+    turn. Every acquisition of this specific mutex must therefore use the
+    SAME shared timeout variable."""
+    text = _INSTALL_PS1.read_text(encoding="utf-8")
+    # Every acquisition of the GLOBAL (no -Version) mutex, across the whole
+    # file -- deliberately excludes Enter-PluginSnapshotLock's own
+    # definition and any VERSION-scoped acquisition (which pass -Version
+    # and are independent, differently-keyed mutexes by design).
+    global_acquisitions = re.findall(
+        r"Enter-PluginSnapshotLock -InstallDir \$InstallDir(?! -Version)[^\n]*",
+        text,
+    )
+    assert len(global_acquisitions) >= 3, (
+        f"expected at least 3 global-lock acquisitions, found {len(global_acquisitions)}: "
+        f"{global_acquisitions}"
+    )
+    for line in global_acquisitions:
+        assert "$script:GlobalActivationLockTimeoutSeconds" in line or "-TimeoutSeconds" not in line, (
+            f"every global-lock acquisition must use the shared timeout variable, not a "
+            f"one-off literal: {line!r}"
+        )
 
 
 def _run_version_lt(a: str, b: str) -> bool:

@@ -197,7 +197,9 @@ def test_do_update_holds_cutover_lock_through_the_real_cutover_call() -> None:
     own stale build. Holding this lock across the whole span means a newer
     invocation's own _versioned_activate call (needing this identical lock)
     cannot even start publishing its activation until this invocation's
-    cutover attempt has fully finished and released it."""
+    ENTIRE cutover attempt AND the unit reconciliation that completes it
+    (_install_service) has fully finished and released it -- not merely
+    through _coordinator_cutover itself."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
     idx = text.index("do_update() {")
     body = text[idx : text.index("\ndo_start() {", idx)]
@@ -207,9 +209,10 @@ def test_do_update_holds_cutover_lock_through_the_real_cutover_call() -> None:
     # The real call site (the `if` test), not the function definition.
     cutover_call_idx = body.index("if _coordinator_cutover; then")
     second_guard_idx = body.index("_activation_superseded_now", lock_acquire_idx)
-    unlock_before_cutover_idx = body.index("_unlock_cutover", cutover_call_idx)
+    install_service_idx = body.index("_install_service", cutover_call_idx)
+    unlock_idx = body.index("_unlock_cutover", install_service_idx)
     assert ensure_idx < first_guard_idx < lock_acquire_idx < second_guard_idx < cutover_call_idx
-    # _unlock_cutover must be called INSIDE each branch of the
-    # `if _coordinator_cutover; then ... else ... fi`, i.e. AFTER
-    # _coordinator_cutover has already run to completion -- not before it.
-    assert unlock_before_cutover_idx > cutover_call_idx
+    # _unlock_cutover must come AFTER _install_service has already run --
+    # the lock must span the real cutover call AND the unit reconciliation
+    # that completes the fallback, not be released in between.
+    assert cutover_call_idx < install_service_idx < unlock_idx

@@ -441,6 +441,18 @@ $SrcVersion       = $null
 # called, and this would otherwise stay a genuinely UNSET variable that
 # Set-StrictMode -Version 2.0 throws on at the very first read.
 $script:ActivationSuperseded = $false
+# Shared timeout for every acquisition of the GLOBAL (version-independent)
+# Enter-PluginSnapshotLock -InstallDir $InstallDir mutex -- Invoke-
+# VersionedActivate's own marker-publish, Invoke-Stamp's marker-publish, and
+# Invoke-Update's cutover/coordinator-reconciliation span all contend on this
+# IDENTICAL named mutex. Whichever one of them can legitimately hold it
+# LONGEST (a real Invoke-CoordinatorCutover call: zdd.cutover's own
+# health_timeout(60s) + drain_timeout(300s) + 60s internal lease-wait slack
+# -- see Invoke-CoordinatorCutover's own call site) sets the floor every
+# OTHER caller's own timeout must meet -- a shorter one would throw "Timed
+# out waiting..." during a perfectly normal long cutover instead of simply
+# waiting its turn, since they all share one mutex, not independent locks.
+$script:GlobalActivationLockTimeoutSeconds = 450
 if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VERSIONED retired)
     $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyprojForVer) {
@@ -525,7 +537,7 @@ function Invoke-VersionedActivate {
        overtaken). #>
     $script:ActivationSuperseded = $false
     if (-not $VersionedRuntime) { return $true }
-    $activateMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir
+    $activateMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
     try {
         $currentActive = Get-VersionedCurrent
         if ($currentActive -and (Test-VersionLt -A $SrcVersion -B $currentActive) -and -not $Force) {
@@ -3413,7 +3425,7 @@ function Invoke-Stamp {
     # markers AFTER a newer one already finished, pointing
     # payload-dir/stamped-version at stale content, or leaving the two
     # markers naming different versions.
-    $stampMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir
+    $stampMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
     try {
         # Version-ordering guard, UNDER this same lock: the mutex only
         # serializes overlapping writes, it does not guarantee ARRIVAL
@@ -3566,39 +3578,34 @@ function Invoke-Update {
     # exists to cut over from, or the cutover cannot run.
     if (-not $NoService) {
         $didCutover = $false
-        if (Test-CoordinatorHealthy) {
-            # Hold the SAME global (version-independent) lock
-            # Invoke-VersionedActivate itself uses to publish current-version,
-            # across BOTH the live re-check AND the entire cutover call below
-            # -- not just the re-check alone. A re-check immediately before
-            # calling Invoke-CoordinatorCutover still leaves a gap: this
-            # invocation's own cutover subprocess has its own internal
-            # cross-version cutover lease, and a NEWER invocation could
-            # activate and complete its ENTIRE cutover while this (older)
-            # invocation is merely queued waiting on that internal lease --
-            # once it finally acquires it, it would route the coordinator
-            # back to this invocation's own stale build. Holding this lock
-            # across the whole span means a newer invocation's own
-            # Invoke-VersionedActivate call (which needs this identical
-            # lock) cannot even START publishing its activation until this
-            # invocation's cutover attempt has fully finished and released
-            # it -- closing the window rather than merely narrowing it.
-            #
-            # -TimeoutSeconds: the default (20s) comfortably covers a bare
-            # marker-publish, but this critical section now also spans a
-            # REAL Invoke-CoordinatorCutover call, whose own zdd.cutover
-            # defaults allow up to health_timeout(60s) + drain_timeout(300s)
-            # + 60s slack for its OWN internal cutover-lease wait (see
-            # zdd.cutover.CutoverOrchestrator.run's own lock_timeout
-            # default) -- a 420s worst case. A concurrent newer installer
-            # waiting on THIS lock must outlast that, not time out and fail
-            # outright during a normal long cutover.
-            $cutoverMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds 450
-            try {
-                if (Test-ActivationSupersededNow) {
-                    Write-Skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/task refresh for this invocation'
-                    return
-                }
+        # Hold the SAME global (version-independent) lock
+        # Invoke-VersionedActivate itself uses to publish current-version,
+        # across the ENTIRE coordinator reconciliation sequence below -- the
+        # live re-check, the cutover attempt itself, AND the task
+        # reconciliation that follows (Install-CoordinatorTask, the
+        # fallback Confirm-CoordinatorRunning start) -- not merely through
+        # Invoke-CoordinatorCutover. Releasing it any earlier still leaves a
+        # race: once this invocation's own cutover attempt returns (with
+        # $didCutover possibly still $false), a NEWER invocation could
+        # activate and complete its OWN cutover in the gap before this one
+        # reaches Install-CoordinatorTask -- whose existing-task path stops
+        # and restarts the task, potentially disrupting or duplicating the
+        # coordinator the newer cutover just promoted. A newer invocation's
+        # own Invoke-VersionedActivate call (needing this identical lock)
+        # cannot even start publishing its activation until this
+        # invocation's ENTIRE reconciliation sequence has finished and
+        # released it -- closing the window rather than merely narrowing
+        # it. -TimeoutSeconds uses the shared floor every caller of this
+        # identical mutex must honor (see $script:GlobalActivationLockTimeoutSeconds's
+        # own docstring): a real Invoke-CoordinatorCutover call can legitimately
+        # hold it for up to ~420s.
+        $cutoverMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
+        try {
+            if (Test-ActivationSupersededNow) {
+                Write-Skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/task refresh for this invocation'
+                return
+            }
+            if (Test-CoordinatorHealthy) {
                 if (Test-CoordinatorRouted) {
                     # A Thread-B coordinator (routed, /drain seam) -> graceful cutover.
                     $didCutover = Invoke-CoordinatorCutover
@@ -3611,17 +3618,17 @@ function Invoke-Update {
                         Write-Step "Stopped $stopped pre-cutover coordinator process(es) -- one-time transition to graceful cutover"
                     }
                 }
-            } finally {
-                [void]$cutoverMutex.ReleaseMutex()
-                $cutoverMutex.Dispose()
             }
+            Remove-CoordinatorFirewallRule
+            # Refresh the boot task definition either way; -NoStart avoids launching a
+            # SECOND coordinator when the cutover already brought the new one up.
+            Install-CoordinatorTask -NoStart:$didCutover
+            Install-SupervisorTask
+            if (-not $didCutover) { Confirm-CoordinatorRunning }
+        } finally {
+            [void]$cutoverMutex.ReleaseMutex()
+            $cutoverMutex.Dispose()
         }
-        Remove-CoordinatorFirewallRule
-        # Refresh the boot task definition either way; -NoStart avoids launching a
-        # SECOND coordinator when the cutover already brought the new one up.
-        Install-CoordinatorTask -NoStart:$didCutover
-        Install-SupervisorTask
-        if (-not $didCutover) { Confirm-CoordinatorRunning }
     } else {
         Install-CoordinatorTask
         Install-SupervisorTask

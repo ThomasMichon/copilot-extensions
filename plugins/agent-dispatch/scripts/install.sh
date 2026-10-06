@@ -1887,14 +1887,24 @@ do_update() {
         _unlock_cutover
         return 0
     fi
+    # _unlock_cutover is deliberately deferred until AFTER _install_service
+    # has fully run (not released right after _coordinator_cutover itself):
+    # releasing it earlier still leaves a race -- a newer invocation could
+    # activate and complete ITS OWN cutover in the gap before this
+    # invocation reaches _install_service, whose existing-unit path does a
+    # `systemctl restart` using THIS invocation's own stale $VENV_PYTHON,
+    # rolling the coordinator back or starting a second instance. A newer
+    # invocation's own _versioned_activate call (needing this identical
+    # lock) cannot even start publishing until this invocation's ENTIRE
+    # cutover/fallback action -- cutover attempt AND the unit reconciliation
+    # that completes it -- has fully finished and released it.
     if _coordinator_cutover; then
-        _unlock_cutover
         _install_service --no-restart
     else
-        _unlock_cutover
         _install_service
     fi
     _install_supervisor_service
+    _unlock_cutover
     echo ''; echo '=== agent-dispatch update complete ==='
 }
 
