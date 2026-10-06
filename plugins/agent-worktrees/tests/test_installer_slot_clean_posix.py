@@ -507,10 +507,14 @@ def test_versioned_slot_lease_shares_one_gate_regardless_of_flock_or_python_visi
 def test_versioned_slot_lease_mkdir_fallback_behavioral(tmp_path: Path):
     """Behavioral (not just textual) regression guard: a concurrent second
     acquire must be refused while the first holds the mkdir-based lock, a
-    later acquire must succeed once released, AND a lock abandoned by a
-    dead process (stale pid marker) must be reclaimed rather than
-    deadlocking forever -- proving the bounded retry/reclaim loop actually
-    works, not just that its source text looks right."""
+    later acquire must succeed once released, a lock abandoned by a dead
+    process (stale pid marker) must be reclaimed rather than deadlocking
+    forever, AND a reclaim SENTINEL abandoned mid-reclaim by its own dead
+    process (a crash between winning the sentinel and clearing it) must
+    likewise be recoverable rather than permanently wedging every future
+    contender for this slot -- proving the bounded retry/reclaim loop,
+    including its own crash-recovery, actually works, not just that its
+    source text looks right."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
     acquire_fn = _function_body(
         text, "_acquire_versioned_slot_lease_mkdir_fallback"
@@ -576,6 +580,31 @@ printf '%s' "$dead_pid" > "${{lock_file}}.d/pid"
         echo "RECLAIM=FAIL"
     fi
 )
+
+echo "--- stale lock AND a reclaim sentinel abandoned by a killed reclaimer ---"
+rm -rf "${{lock_file}}.d" "${{lock_file}}.reclaiming"
+mkdir "${{lock_file}}.d"
+( : ) &
+dead_pid=$!
+wait "$dead_pid"
+printf '%s' "$dead_pid" > "${{lock_file}}.d/pid"
+# Simulate a PRIOR reclaimer that won the sentinel then was killed before
+# it could clear it (the exact crash window the HIGH finding named) -- the
+# sentinel is left behind with ITS OWN now-dead pid recorded inside.
+mkdir "${{lock_file}}.reclaiming"
+( : ) &
+dead_reclaimer_pid=$!
+wait "$dead_reclaimer_pid"
+printf '%s' "$dead_reclaimer_pid" > "${{lock_file}}.reclaiming/pid"
+(
+    _VERSIONED_SLOT_LEASE_MKDIR_DIR=""
+    if _acquire_versioned_slot_lease_mkdir_fallback "$lock_file"; then
+        echo "SENTINEL_RECLAIM=OK"
+        _release_versioned_slot_lease_mkdir_fallback
+    else
+        echo "SENTINEL_RECLAIM=FAIL"
+    fi
+)
 """
     with tempfile.TemporaryDirectory() as td:
         harness_path = Path(td) / "harness.sh"
@@ -589,6 +618,7 @@ printf '%s' "$dead_pid" > "${{lock_file}}.d/pid"
         events = [line for line in r.stdout.splitlines() if "=" in line]
         assert events == [
             "FIRST=OK", "SECOND=REFUSED", "THIRD=OK", "RECLAIM=OK",
+            "SENTINEL_RECLAIM=OK",
         ], events
 
 

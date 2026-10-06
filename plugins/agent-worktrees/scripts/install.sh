@@ -938,15 +938,19 @@ _acquire_versioned_slot_lease_mkdir_fallback() {
     # never as an alternate gate of their own.
     #
     # `mkdir` is POSIX-atomic and needs neither `flock` nor python, making
-    # it the correct universal primitive. This is a BOUNDED retry loop with
-    # a single, flat reclaim check -- not an unbounded chain of narrowing
-    # TOCTOU windows (a nested sentinel-based dotlock, where each reclaim
-    # tier needs its own staleness detection, is exactly that trap). The
-    # happy path (no earlier attempt, no stale lock) is a
-    # single atomic `mkdir` with zero ambiguity; the only residual race is
-    # "is the recorded holder still alive", and losing that race just means
-    # looping and retrying (bounded by the loop), never a permanent deadlock
-    # or false acquisition.
+    # it the correct universal primitive. This is a BOUNDED retry loop: the
+    # reclaim sentinel below adds exactly ONE extra, FLAT identity-bound
+    # staleness check of its own (never a deeper, recursive chain of
+    # sentinels guarding sentinels) so that a crash mid-reclaim can still
+    # be recovered from, rather than an unbounded chain of narrowing TOCTOU
+    # windows (a nested dotlock where each reclaim tier needs its OWN new
+    # staleness primitive is exactly that trap -- this reuses the same
+    # pid-liveness primitive one level down instead of inventing a new
+    # one). The happy path (no earlier attempt, no stale lock) is a single
+    # atomic `mkdir` with zero ambiguity; the only residual race is "is the
+    # recorded holder still alive", and losing that race just means
+    # looping and retrying (bounded by the loop), never a permanent
+    # deadlock or false acquisition.
     local lock_file="$1"
     local lock_dir="${lock_file}.d" attempt holder_pid
     local reclaim_dir="${lock_file}.reclaiming"
@@ -981,18 +985,41 @@ _acquire_versioned_slot_lease_mkdir_fallback() {
             # sentinel) closes the remaining gap where the original holder
             # released normally, or a third contender already reclaimed
             # and republished, between our first read and winning the
-            # sentinel. The sentinel is held only for this brief
-            # read+remove, never left open-ended, so a crash mid-reclaim
-            # leaves at worst a permanently-stuck sentinel (reclaim simply
-            # never succeeds again for this slot) -- a safe failure mode,
-            # never the dangerous one (double acquisition).
+            # sentinel. The sentinel itself records ITS OWN pid the instant
+            # it's created, the same way `lock_dir` does -- so if THIS
+            # process is killed mid-reclaim (after winning the sentinel but
+            # before clearing it), a later contender can apply the exact
+            # same identity-bound staleness test to the sentinel as it does
+            # to the main lock: a recorded pid that's provably dead means
+            # genuinely safe to clear, never a guess. This is what makes
+            # the sentinel itself crash-recoverable rather than a
+            # permanent, un-reclaimable deadlock the one time it matters.
             if mkdir "$reclaim_dir" 2>/dev/null; then
+                printf '%s' "$$" > "$reclaim_dir/pid" 2>/dev/null || true
                 local recheck_pid
                 recheck_pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
                 if [[ -n "$recheck_pid" && "$recheck_pid" == "$holder_pid" ]] && ! kill -0 "$holder_pid" 2>/dev/null; then
                     rm -rf "$lock_dir" 2>/dev/null || true
                 fi
-                rmdir "$reclaim_dir" 2>/dev/null || true
+                rm -rf "$reclaim_dir" 2>/dev/null || true
+            else
+                # Someone else already holds the sentinel -- either a live
+                # concurrent reclaimer (normal, just retry next loop
+                # iteration) or one that was killed between creating it and
+                # clearing it. Apply the SAME identity-bound test used for
+                # the main lock above: only ever clear it when its
+                # recorded pid is read successfully and that process is
+                # provably dead, never on a guess (an empty/missing pid
+                # read -- e.g. the reclaimer was killed in the sliver of
+                # time between winning the sentinel and writing its own
+                # pid into it -- is treated as "can't yet prove it's
+                # stale", not as license to clear it; the bounded retry
+                # loop keeps revisiting it on the next iteration instead).
+                local reclaim_holder_pid
+                reclaim_holder_pid="$(cat "$reclaim_dir/pid" 2>/dev/null || true)"
+                if [[ -n "$reclaim_holder_pid" ]] && ! kill -0 "$reclaim_holder_pid" 2>/dev/null; then
+                    rm -rf "$reclaim_dir" 2>/dev/null || true
+                fi
             fi
             continue
         fi
