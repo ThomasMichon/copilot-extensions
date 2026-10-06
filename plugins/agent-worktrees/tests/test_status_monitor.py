@@ -3087,12 +3087,43 @@ def test_restart_waits_for_terminated_predecessor_to_actually_exit(monkeypatch):
 
     r = m._restart_status_monitor()
     assert r["reaped"] == 4242
-    assert alive_checks["n"] == 3, "must keep polling until the pid is actually gone"
+    assert alive_checks["n"] == 4, "must keep polling, then re-check once more before deciding"
     assert len(sleeps) == 2, "must sleep between each still-alive check"
-    assert order == ["pid_alive#1", "pid_alive#2", "pid_alive#3", "spawn"], (
+    assert order == ["pid_alive#1", "pid_alive#2", "pid_alive#3", "pid_alive#4", "spawn"], (
         "must only spawn the successor AFTER confirming the predecessor actually exited"
     )
     assert r["spawned"] is True
+    assert not r.get("restart_deferred")
+
+
+def test_restart_defers_instead_of_spawning_against_a_still_held_lease(monkeypatch):
+    """Regression for a High-severity review finding (PR #5412): if the
+    predecessor outlives the bounded exit grace period, spawning anyway
+    would race its still-held lease -- the successor could lose, correctly
+    back off, while this caller still reports `spawned: True`, leaving no
+    monitor running at all once the predecessor eventually exits. Must
+    defer instead: never remove the live owner's metadata, never spawn."""
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    import agent_worktrees.status_monitor_runtime as smr
+
+    spawned, reaped, removed = _wire_restart(
+        monkeypatch, lock_data={"pid": 4242, "prefix": "/old/slot"}, live=True, superseded=True
+    )
+    monkeypatch.setattr(smr.locks, "pid_alive", lambda pid: True)  # never exits in time
+    monkeypatch.setattr(smr.time, "sleep", lambda s: None)
+    clock = {"t": 0.0}
+
+    def _monotonic():
+        clock["t"] += 1.0
+        return clock["t"]
+
+    monkeypatch.setattr(smr.time, "monotonic", _monotonic)
+
+    r = m._restart_status_monitor()
+    assert r["restart_deferred"] is True
+    assert r["spawned"] is False, "must never falsely report a successful spawn"
+    assert removed["n"] == 0, "must never clear the live owner's metadata while deferring"
+    assert spawned["argv"] is None, "must never spawn a successor against a still-held lease"
 
 
 def test_restart_leaves_current_monitor_alone(monkeypatch):
