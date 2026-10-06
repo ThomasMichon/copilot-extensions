@@ -12,10 +12,17 @@ Windows, a naive spawn of a console-subsystem program (`cmd.exe`,
 `powershell.exe`, `pwsh.exe`, console `python.exe`, `node.exe`, `git.exe`,
 `ssh.exe`) allocates a fresh terminal window per invocation even when the
 parent itself is headless; `-WindowStyle Hidden` alone does not suppress it.
-Route every spawn through the language- and OS-correct headless mechanism
-(`CREATE_NO_WINDOW` / `windowsHide: true` / a GUI-subsystem interpreter /
-`nohup`+redirected stdio, per the exact table in the paired skill) instead of
-a bare `Start-Process`, `os.system`, or unflagged `child_process.spawn`. Prefer
+`wsl.exe` is the same class even though it reads as a "bridge" rather than a
+console program -- a bare `wsl.exe -d <distro> -- <command>` still allocates
+its own window per call. Route every spawn through the language- and
+OS-correct headless mechanism (`CREATE_NO_WINDOW` / `windowsHide: true` / a
+GUI-subsystem interpreter / `nohup`+redirected stdio, per the exact table in
+the paired skill) instead of a bare `Start-Process`, `os.system`, or unflagged
+`child_process.spawn`. When the caller needs captured output (not just
+suppression), `conhost.exe --headless` does not pipe stdout/stderr back --
+use `CREATE_NO_WINDOW` (Python) or `[System.Diagnostics.ProcessStartInfo]`
+with `CreateNoWindow = $true` + `RedirectStandardOutput`/`RedirectStandardError`
+(PowerShell) instead. Prefer
 routing to an existing local API/runtime over spawning a process at all.
 Before starting a long-lived, repeating, or backgrounded process, invoke the
 `spawning-headless-processes` skill to select the correct primitive for the
