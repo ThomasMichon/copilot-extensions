@@ -243,10 +243,19 @@ When you notice this pattern:
   uncertainty, and ask a human (or a path without this masking) to verify
   directly, rather than describing masked display text as if it were the
   file's real content.
-- A content-preserving edit (e.g. removing an extraneous language-syntax
-  wrapper around the masked literal, without changing the underlying value)
-  is still safe to make -- the risk is specifically in asserting facts about
-  what the masked value *is* or *does*, not in editing around it.
+- **Never edit the masked expression itself, or any syntax it depends on
+  (a wrapping quote, an `f`/`r`/`b` string prefix, an escape sequence) --
+  even a change that looks purely cosmetic can silently change what the
+  real, unseen bytes mean.** The hidden characters determine whether
+  surrounding syntax is load-bearing: an f-string prefix masked as
+  `f"******"` could be hiding a real `{token}` interpolation, and dropping
+  the prefix to "fix" an apparent lint complaint would silently disable
+  that interpolation -- a real mistake made while drafting this very
+  guidance, caught by a review bot before merge. Treat the masked span,
+  and anything syntactically coupled to it, as off-limits until an
+  unmasked path (a different tool, or a human with real access) confirms
+  what is actually safe to change. An edit well outside and independent of
+  the masked span is fine; one touching its boundary is not.
 - If you already filed something (an issue, a PR comment) based on a
   masked-content assumption, correct it explicitly once you notice --
   retract the specific factual claim, keep only what you can actually verify
