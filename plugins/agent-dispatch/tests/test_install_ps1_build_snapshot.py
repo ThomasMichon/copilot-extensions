@@ -953,6 +953,7 @@ def test_superseded_now_true_when_won_activation_then_overtaken(tmp_path: Path) 
     assert "RESULT:True" in result.stdout, result.stdout + result.stderr
 
 
+@pytest.mark.guard
 def test_install_runtime_aborts_remaining_publication_when_superseded() -> None:
     """A superseded invocation must not fall through to Write-Manifest,
     verification, PATH, or Register-PickerPivot -- all of which would
@@ -976,6 +977,7 @@ def test_install_runtime_aborts_remaining_publication_when_superseded() -> None:
     )
 
 
+@pytest.mark.guard
 def test_invoke_update_aborts_cutover_when_superseded() -> None:
     """A superseded `update` invocation must not drive
     Invoke-CoordinatorCutover/Confirm-CoordinatorRunning from its own
@@ -1034,6 +1036,7 @@ def test_invoke_update_aborts_cutover_when_superseded() -> None:
     )
 
 
+@pytest.mark.guard
 def test_every_global_activation_lock_acquisition_shares_one_timeout() -> None:
     """Invoke-VersionedActivate, Invoke-Stamp, and Invoke-Update's cutover
     span all acquire the IDENTICAL global (version-independent)

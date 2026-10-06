@@ -185,6 +185,7 @@ def test_activate_force_overrides_the_cross_version_ordering_guard(tmp_path: Pat
     assert "SUPERSEDED:0" in result.stdout, result.stdout + result.stderr
 
 
+@pytest.mark.guard
 def test_do_update_holds_cutover_lock_through_the_real_cutover_call() -> None:
     """Structural check: do_update must hold the SAME global
     (.activate.lock) lock _versioned_activate itself uses, across BOTH the

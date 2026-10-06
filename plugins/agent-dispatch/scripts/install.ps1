@@ -77,6 +77,21 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
+# Raise the shared self-stage watchdog's deadline for THIS plugin specifically,
+# via the exact per-plugin override hook the byte-identical
+# install-contract:v4 self-stage block already reads
+# ($__wdEnvVar = "<PLUGIN>_INSTALL_DEADLINE_SEC") -- deliberately set OUTSIDE
+# that block (never edit its literal "480" default: tools/check-install-
+# contract.py enforces it byte-identical across every plugin's own copy).
+# agent-dispatch specifically can legitimately spend 30-120s building PLUS up
+# to ~450s waiting on its own cross-version activation/cutover lock
+# ($script:GlobalActivationLockTimeoutSeconds, set further below) -- a genuine
+# ~570s worst case the shared 480s default would kill mid-wait, terminating a
+# perfectly healthy newer install. An operator's own explicit override (env
+# var already set before this script runs) always wins -- only supply a
+# default when none is present.
+if (-not $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC) { $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC = '650' }
+
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
     param(
@@ -194,17 +209,8 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
                 # the next run's pid-guarded reap cleans it; its half-built slot
                 # has no completion marker, so it is tossed + rebuilt (retry).
                 # Deadline: <NAME>_INSTALL_DEADLINE_SEC, else
-                # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 650s (agent-dispatch-
-                # specific, raised from the generic 480s this boilerplate uses
-                # in every other plugin's own install.ps1 copy): this plugin's
-                # own cross-version activation/cutover lock
-                # ($script:GlobalActivationLockTimeoutSeconds) can legitimately
-                # make Install-Runtime wait up to ~450s for a concurrent
-                # invocation's real cutover to finish, ON TOP OF this
-                # invocation's own 30-120s build -- a genuine worst case near
-                # 570s that the generic 480s default would kill mid-wait,
-                # terminating a perfectly healthy newer install. <=0 disables.
-                $__wdDeadline = 650
+                # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
+                $__wdDeadline = 480
                 $__wdEnvVar = (($__selfStageName -replace '[^A-Za-z0-9]+', '_').ToUpper()) + '_INSTALL_DEADLINE_SEC'
                 $__wdRaw = [Environment]::GetEnvironmentVariable($__wdEnvVar)
                 if (-not $__wdRaw) { $__wdRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
