@@ -97,9 +97,13 @@ def _spawn_detached_waiter(spec: Any) -> dict:
     waiter that outlives this process, so the kicking worker can be torn down
     while a cheap OS-level process owns the wait and fires the resume."""
     from . import hibernation
-    from .procutil import windowless_daemon_kwargs
+    from .procutil import resolve_own_runtime_python, windowless_daemon_kwargs
 
-    python = sys.executable
+    # Never bare `sys.executable` -- see resolve_own_runtime_python's own
+    # docstring for the production incident a self-relaunch site trusting the
+    # running interpreter instead of the canonically-resolved current-version
+    # slot already caused.
+    python = resolve_own_runtime_python()
     argv = hibernation.detached_run_argv(
         spec,
         python=python,

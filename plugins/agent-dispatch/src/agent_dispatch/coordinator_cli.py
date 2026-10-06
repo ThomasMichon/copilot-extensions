@@ -366,7 +366,17 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
     def spawn_passive(port: int):
         from agent_procutil import windowless_daemon_kwargs
 
-        python = _sys.executable
+        from .procutil import resolve_own_runtime_python
+
+        # Never bare `_sys.executable`: a self-relaunch site must target the
+        # canonically-resolved current-version slot, not whatever interpreter
+        # happened to be running this process -- see
+        # resolve_own_runtime_python's own docstring for the production
+        # incident this exact divergence already caused (a live coordinator
+        # parenting a full duplicate tree under the system Python instead of
+        # the versioned slot). A detached child inherits whatever its parent
+        # resolved, so this divergence compounds down the whole spawn tree.
+        python = resolve_own_runtime_python()
         cmd = [
             python,
             "-m",
