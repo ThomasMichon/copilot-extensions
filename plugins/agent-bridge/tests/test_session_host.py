@@ -999,7 +999,16 @@ def test_launch_session_host_timeout_kills_hung_process(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(
-    sys.platform == "win32", reason="POSIX process-group semantics only",
+    not sys.platform.startswith("linux"),
+    reason=(
+        "exercises the real zdd.diagnostics.process_start_time identity "
+        "backend, which only exists on Linux (/proc) -- on macOS/other "
+        "POSIX _kill_host_process_tree's identity guard correctly refuses "
+        "to killpg with no baseline, which would fail this specific "
+        "end-to-end assertion (and leak the grandchild) despite being the "
+        "intended, safe behavior there; see TestKillHostProcessTreeIdentityGuard "
+        "below for the (mocked, platform-independent) guard-logic coverage"
+    ),
 )
 def test_kill_host_process_tree_kills_whole_posix_group(tmp_path, monkeypatch):
     """``_kill_host_process_tree`` must reach an already-spawned grandchild
