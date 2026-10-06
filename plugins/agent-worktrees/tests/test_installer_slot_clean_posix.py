@@ -317,7 +317,13 @@ def test_versioned_slot_lease_uses_flock_held_for_process_lifetime():
         "dynamic fd allocation ({fd}) needs bash 4.1+ and fails to parse "
         "under stock macOS's bash 3.2 -- use a literal fd number instead"
     )
-    assert 'exec 8>"$lease_path" 2>/dev/null && flock -n 8 2>/dev/null' in acquire_body
+    assert 'if { exec 8>"$lease_path"; } 2>/dev/null && flock -n 8 2>/dev/null; then' in acquire_body, (
+        "a bare `exec 8>...` with no command makes `2>/dev/null` attached "
+        "directly to it PERMANENT for the rest of the shell (silently "
+        "nulling all subsequent stderr) -- it must be wrapped in a "
+        "`{ ...; }` group so the stderr suppression is scoped to just "
+        "this exec's own potential failure message"
+    )
     assert "{_VERSIONED_SLOT_LEASE_FD}" not in release_body
     assert "exec 8>&-" in release_body
 
@@ -568,7 +574,7 @@ def test_versioned_slot_lease_python_fallback_delegates_to_real_fcntl_flock():
     assert "if command -v flock >/dev/null 2>&1; then" in acquire_body
     no_flock_branch = acquire_body.split(
         "if command -v flock >/dev/null 2>&1; then", 1
-    )[1][:700]
+    )[1][:1300]
     assert "else" in no_flock_branch
     assert "_acquire_versioned_slot_lease_python_fallback" in no_flock_branch.split(
         "else", 1

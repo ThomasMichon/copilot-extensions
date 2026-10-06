@@ -1060,7 +1060,7 @@ sys.stdin.read()  # block until the parent closes fd 9 (release)
     # (guarded by the caller), so fd 9 can't collide with another live
     # lease in this same process.
     if ! exec 9>"$in_fifo"; then
-        exec 7>&- 2>/dev/null || true
+        exec 7>&- || true
         rm -rf "$tmp_dir"
         kill "$pid" 2>/dev/null || true
         wait "$pid" 2>/dev/null || true
@@ -1071,7 +1071,7 @@ sys.stdin.read()  # block until the parent closes fd 9 (release)
     if ! IFS= read -r -t 10 -u 7 line; then
         line=""
     fi
-    exec 7>&- 2>/dev/null || true
+    exec 7>&- || true
     rm -rf "$tmp_dir"
 
     if [[ "$line" == "OK" ]]; then
@@ -1079,7 +1079,7 @@ sys.stdin.read()  # block until the parent closes fd 9 (release)
         _VERSIONED_SLOT_LEASE_PY_STDIN_FD=9
         return 0
     fi
-    exec 9>&- 2>/dev/null || true
+    exec 9>&- || true
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
     if [[ "$line" == "LOCKED" ]]; then
@@ -1134,11 +1134,21 @@ _acquire_versioned_slot_lease() {
         # A literal fd number is required here (not the dynamic `{fd}`
         # allocation syntax, bash 4.1+): this function runs at most once
         # per process lifetime (guarded above), so fd 8 can't collide with
-        # another live lease in this same process.
-        if exec 8>"$lease_path" 2>/dev/null && flock -n 8 2>/dev/null; then
+        # another live lease in this same process. The bare `exec 8>...`
+        # MUST be wrapped in a `{ ...; }` group before attaching its own
+        # `2>/dev/null`: a bare exec with no command makes EVERY listed
+        # redirection permanent for the rest of this shell (the exact
+        # footgun documented in bin/agent-worktrees) -- attaching
+        # `2>/dev/null` directly to it would silently null ALL subsequent
+        # stderr for the rest of the install, not just this exec's own
+        # failure message. The group scopes the stderr suppression to
+        # just the exec's own potential error while still leaving fd 8
+        # itself open in the current shell (groups run in-place, not a
+        # subshell).
+        if { exec 8>"$lease_path"; } 2>/dev/null && flock -n 8 2>/dev/null; then
             _VERSIONED_SLOT_LEASE_FD=8
         else
-            exec 8>&- 2>/dev/null || true
+            exec 8>&- || true
         fi
     else
         _acquire_versioned_slot_lease_python_fallback "$lease_path" >/dev/null 2>&1 || true
@@ -1155,7 +1165,7 @@ _release_versioned_slot_lease() {
     # window where the gate is gone but a strengthening layer still is (or
     # vice versa in a way that matters).
     if [[ -n "$_VERSIONED_SLOT_LEASE_FD" ]]; then
-        exec 8>&- 2>/dev/null || true
+        exec 8>&- || true
         _VERSIONED_SLOT_LEASE_FD=""
     fi
     if [[ -n "$_VERSIONED_SLOT_LEASE_PY_PID" ]]; then
