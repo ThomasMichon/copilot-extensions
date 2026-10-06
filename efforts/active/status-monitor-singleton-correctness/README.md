@@ -14,11 +14,14 @@ Realize Vision
 [`plugins/agent-worktrees/status-monitor-singleton`](../../../visions/plugins/agent-worktrees/status-monitor-singleton/README.md):
 at every instant, including mid-transition, at most one resident
 `status-monitor` process is actively serving per host, and no transition
-ever leaves an unbounded zero-coverage window. PR #5412 already closed the
-ordinary-cold-start case (the originally reported bug: a burst of concurrent
-cold starts producing 100+ duplicate residents). This effort closes the two
-remaining transitions the vision names as not yet meeting that standard:
-the promotion/cutover handoff and the restart (auto-update) seam.
+ever leaves an unbounded zero-coverage window. PR #5412 (open, not yet
+merged as of this writing) closes the ordinary-cold-start case (the
+originally reported bug: a burst of concurrent cold starts producing 100+
+duplicate residents); this effort's Phase 1 work must not start until #5412
+has actually merged, since it is the foundational guarantee the rest of the
+lifecycle builds on. Once merged, this effort closes the two remaining
+transitions the vision names as not yet meeting that standard: the
+promotion/cutover handoff and the restart (auto-update) seam.
 
 ## Participants
 
@@ -76,6 +79,13 @@ sweep.
 _(All items below are agent-recommended decomposition of the operator's
 stated outcome, not separately operator-specified line items.)_
 
+### Phase 0 — Prerequisite: PR #5412 merged (_agent-recommended_)
+- [ ] Confirm PR #5412 ("status-monitor: close a TOCTOU race in the
+  single-instance guard") has merged to `dev` before starting Phase 1
+  design work. Phase 1 builds on the ordinary-cold-start lease that PR
+  introduces; starting Phase 1 before it merges risks building on code
+  that could still change under review.
+
 ### Phase 1 — Restart-seam exclusivity (#5512)
 - [ ] Design the restart seam's exit-aware wait + identity-scoped cleanup
   per the vision's `exit-awareness-not-existence-checking` and
@@ -121,10 +131,10 @@ time.
   promoted; existing cutover/control-server test suite stays green.
 - [ ] After both phases merge: re-read Vision
   `status-monitor-singleton`'s Behaviors section and confirm each one now
-  holds for all four named transitions (cold start already did; replacement
-  piggybacks on cold start's lease and is unchanged by this effort; restart
-  and promotion/cutover are the two this effort closes) — record that
-  confirmation in the Journal rather than assuming it.
+  holds for all four named transitions (cold start, once #5412 merges;
+  replacement piggybacks on cold start's lease and is unchanged by this
+  effort; restart and promotion/cutover are the two this effort closes) —
+  record that confirmation in the Journal rather than assuming it.
 
 ## Proposal
 
