@@ -198,6 +198,45 @@ async def test_command_summarizer(tmp_path):
     assert doc["items"]["summary"] == {"n": 4}
 
 
+async def test_command_summarizer_expands_python_token(tmp_path):
+    # ``${python}`` in a `summary.command` resolves to agent-mcp's own
+    # interpreter, the same cross-platform token `server.command`/
+    # `auth.command` already support.
+    items = [1, 2, 3]
+    up = FakeUpstream([tool("g")],
+                      handlers={"g": lambda a: _json_result({"items": items})})
+    cmd = ["${python}", "-c",
+           "import sys, json; d = json.load(sys.stdin); print(json.dumps({'n': len(d)}))"]
+    dec = _storage(tmp_path, rules=[
+        {"tool": "g", "outputs": [{"path": "items", "summary": {"command": cmd}}]}])
+    resp = await run(dec, up, call_req("g"))
+    doc = json.loads(resp["result"]["content"][0]["text"])
+    assert doc["items"]["summary"] == {"n": 3}
+
+
+async def test_command_summarizer_passes_no_window_creationflags(tmp_path, monkeypatch):
+    # The summary-command spawn must carry the standard Windows console-
+    # suppression flag (copilot-extensions#5425).
+    from agent_mcp._exec import no_window_creationflags
+
+    captured: dict = {}
+    real_run = __import__("subprocess").run
+
+    def fake_run(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr("agent_mcp.decorators.storage.subprocess.run", fake_run)
+
+    up = FakeUpstream([tool("g")],
+                      handlers={"g": lambda a: _json_result({"items": [1, 2]})})
+    cmd = [sys.executable, "-c", "import sys, json; print(json.dumps({'n': 2}))"]
+    dec = _storage(tmp_path, rules=[
+        {"tool": "g", "outputs": [{"path": "items", "summary": {"command": cmd}}]}])
+    await run(dec, up, call_req("g"))
+    assert captured["kwargs"].get("creationflags") == no_window_creationflags()
+
+
 async def test_rule_tool_glob_no_match_falls_back_to_blanket(tmp_path):
     big = "y" * 5000
     up = FakeUpstream([tool("other")],

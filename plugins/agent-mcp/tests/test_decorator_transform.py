@@ -86,6 +86,41 @@ async def test_command_filter():
     assert json.loads(resp["result"]["content"][0]["text"]) == 4
 
 
+async def test_command_filter_expands_python_token():
+    # ``${python}`` in a transform `command` resolves to agent-mcp's own
+    # interpreter, the same cross-platform token `server.command`/
+    # `auth.command` already support.
+    up = FakeUpstream([tool("g")],
+                      handlers={"g": lambda a: _json_result({"value": [1, 2, 3]})})
+    cmd = ["${python}", "-c",
+           "import sys, json; d = json.load(sys.stdin); print(json.dumps(len(d['value'])))"]
+    dec = _transform(rules=[{"tool": "g", "command": cmd}])
+    resp = await run(dec, up, call_req("g"))
+    assert json.loads(resp["result"]["content"][0]["text"]) == 3
+
+
+async def test_command_filter_passes_no_window_creationflags(monkeypatch):
+    # The transform-command spawn must carry the standard Windows console-
+    # suppression flag (copilot-extensions#5425).
+    from agent_mcp._exec import no_window_creationflags
+
+    captured: dict = {}
+    real_run = __import__("subprocess").run
+
+    def fake_run(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr("agent_mcp.decorators.transform.subprocess.run", fake_run)
+
+    up = FakeUpstream([tool("g")],
+                      handlers={"g": lambda a: _json_result({"value": [1, 2]})})
+    cmd = [sys.executable, "-c", "print('[1, 2]')"]
+    dec = _transform(rules=[{"tool": "g", "command": cmd}])
+    await run(dec, up, call_req("g"))
+    assert captured["kwargs"].get("creationflags") == no_window_creationflags()
+
+
 async def test_no_rule_match_passes_through():
     up = FakeUpstream([tool("other")],
                       handlers={"other": lambda a: _json_result({"value": [1]})})

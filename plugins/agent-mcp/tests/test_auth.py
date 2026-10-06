@@ -111,7 +111,7 @@ class _FakeProc:
         self._stderr = stderr
         self.returncode = returncode
 
-    async def communicate(self):
+    async def communicate(self, input=None):
         return self._stdout, self._stderr
 
 
@@ -589,6 +589,57 @@ async def test_command_success_skips_repair(tmp_path):
     }))
     assert await inj.child_env() == {"API_KEY": "ok"}
     assert not rcalls.exists()  # repair never runs when the mint succeeds
+
+
+# -- Windows no-window creationflags on the mint/repair spawns ---------------
+
+async def test_command_mint_passes_no_window_creationflags(monkeypatch):
+    # The mint spawn must carry the standard Windows console-suppression flag
+    # (copilot-extensions#5425) -- captured via the same fake_exec monkeypatch
+    # pattern used for EntraInjector above, since asserting on a REAL spawn's
+    # creationflags isn't directly observable from Python.
+    from agent_mcp._exec import no_window_creationflags
+
+    captured: dict = {}
+
+    async def fake_exec(*argv, **kwargs):
+        captured["kwargs"] = kwargs
+        return _FakeProc(b"token=abc\n", b"", 0)
+
+    monkeypatch.setattr("agent_mcp.auth.injectors.asyncio.create_subprocess_exec", fake_exec)
+
+    inj = build_injector(_command_cfg({
+        "command": _py("print('token=abc')"),
+        "target_env": "API_KEY",
+    }))
+    assert await inj.child_env() == {"API_KEY": "abc"}
+    assert captured["kwargs"]["creationflags"] == no_window_creationflags()
+
+
+async def test_command_repair_passes_no_window_creationflags(monkeypatch):
+    # Same flag requirement on the separate `auth.repair` spawn path.
+    from agent_mcp._exec import no_window_creationflags
+
+    captured: list[dict] = []
+
+    async def fake_exec(*argv, **kwargs):
+        captured.append(kwargs)
+        if argv and argv[0] == "definitely-not-a-real-cmd-xyz":
+            raise FileNotFoundError(argv[0])  # mint hard-fails -> triggers repair
+        return _FakeProc(b"", b"", 0)
+
+    monkeypatch.setattr("agent_mcp.auth.injectors.asyncio.create_subprocess_exec", fake_exec)
+
+    inj = build_injector(_command_cfg({
+        "command": ["definitely-not-a-real-cmd-xyz"],
+        "repair": ["definitely-fine"],
+        "target_env": "API_KEY",
+    }))
+    await inj.child_env()
+    # The mint attempt(s) raise before create_subprocess_exec returns, but the
+    # call itself is still captured; the repair spawn is the other argv.
+    assert len(captured) >= 2
+    assert all(kw.get("creationflags") == no_window_creationflags() for kw in captured)
 
 
 # -- composite (multi-secret) injector --------------------------------------
