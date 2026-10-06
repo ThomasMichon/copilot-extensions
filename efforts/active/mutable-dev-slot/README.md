@@ -152,14 +152,22 @@ for the full design.
 
 ## Validation Plan
 
-- [ ] **Phase 3, per adopting plugin, on both installer platforms
-      (`install.ps1` and `install.sh`):** a matching-content same-version
-      run is a true no-op (no rebuild, no reinstall); a changed-content
-      same-version run is refused even under `-Force`/`--force`; the
+- [ ] **Phase 3, per adopting plugin, on both installer entrypoints
+      (`install.ps1`/`install.sh` for most of the list; `init.ps1`/`init.sh`
+      for `agent-mcp`, `agent-containers`, and `agent-machines`):** a
+      matching-content same-version run is a true no-op (no rebuild, no
+      reinstall, normal out-of-slot reconciliation still runs); a
+      changed-content same-version run is refused even under
+      `-Force`/`--force`; a direct-health-check failure (not merely a
+      content mismatch) cuts over to a distinct, correctly-propagated
+      generation per *Repairing a broken numbered slot*'s contract, rather
+      than falling back to the old `--force` rebuild-in-place recovery; the
       `dev`/`dev-release` cycle builds, activates, and then correctly
       restores the prior `current-version`. Not satisfied by implementing
-      only the refusal guard or only `dev`/`dev-release` for a given
-      plugin -- both are required before checking that plugin off above.
+      only some of these for a given plugin -- the refusal guard, the
+      distinct-generation repair path (and its operator-guidance
+      reconciliation), and `dev`/`dev-release` are all required before
+      checking that plugin off above.
 - [x] `python tools/run-plugin-tests.py agent-bridge -k dev` -- new
       dev-slot primitive tests pass.
 - [x] `python tools/run-plugin-tests.py agent-bridge` (full suite) -- no
