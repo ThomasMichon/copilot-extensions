@@ -15,7 +15,6 @@ import os
 import socket as _socket
 import subprocess as _subprocess
 import sys
-import sys as _sys
 import time
 import urllib.request as _urllib
 from typing import Any
