@@ -129,21 +129,23 @@ def _approval_status(reviews: list[Mapping[str, Any]]) -> ApprovalStatus:
     return ApprovalStatus.NONE
 
 
-def _mergeability(
-    pull_request: Mapping[str, Any], status_rollup: str | None, *, is_draft: bool
-) -> Mergeability:
+def _mergeability(pull_request: Mapping[str, Any], status_rollup: str | None) -> Mergeability:
     mergeable = pull_request.get("mergeable")
     if mergeable is False:
-        # Gitea can report `mergeable: false` for a draft PR even when it
-        # has no real merge conflict -- draft status alone is enough to
-        # make Gitea withhold a clean mergeability verdict. Classifying
-        # that as CONFLICTED would incorrectly trigger conflict-handling
-        # behavior on top of the separate DRAFT hold; UNKNOWN preserves
-        # the hold alone until Gitea can report actual mergeability (once
-        # the PR is marked ready).
-        if is_draft:
-            return Mergeability.UNKNOWN
-        return Mergeability.CONFLICTED
+        # Gitea's `mergeable` is a plain boolean, unlike GitHub's
+        # discriminating MERGEABLE/CONFLICTING/UNKNOWN tri-state: `false`
+        # is also reported while conflict-checking is still running, when
+        # that check errored, for draft PRs, and for other non-conflict
+        # transient states -- Gitea's own PullRequest.Mergeable() method
+        # returns false for all of these, not only a real conflict.
+        # Treating it as CONFLICTED would drive the state machine into
+        # conflict/self-repair handling for a PR that may have no real
+        # conflict at all (its DRAFT/WIP hold, handled separately by
+        # _holds(), already covers those cases). With no discriminating
+        # signal available from Gitea's REST API, UNKNOWN is the only safe
+        # classification until a later observation reports true/false more
+        # definitively.
+        return Mergeability.UNKNOWN
     if mergeable is None:
         return Mergeability.UNKNOWN
     if mergeable is not True:
@@ -222,9 +224,7 @@ def observe_pr_state(
     return PRObservation(
         number=number,
         approval_status=_approval_status(list(reviews or ())),
-        mergeability=_mergeability(
-            pull_request, status_rollup, is_draft=_is_draft(pull_request)
-        ),
+        mergeability=_mergeability(pull_request, status_rollup),
         holds=_holds(pull_request, list(review_comment_groups or ())),
         revision=Revision(diff_hash=head_sha, base_sha=base_sha),
         last_commit_at=_last_commit_at(pull_request),

@@ -338,6 +338,40 @@ def test_label_id_resolution_raises_when_label_absent(monkeypatch):
         )
 
 
+def test_label_id_resolution_re_fetches_after_a_miss_instead_of_caching_forever(monkeypatch):
+    """A missing-label error tells an operator to create the label -- but
+    caching the (incomplete) lookup would make every later retry in this
+    same resident process reuse the stale mapping and keep failing even
+    after the label is created, until restart. The cache must be evicted
+    on a miss so the next retry re-fetches."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+    label_list_calls = {"count": 0}
+
+    def runner(args, **kwargs):
+        method = args[args.index("-X") + 1]
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status({"login": "issue-bot"}, 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status({"full_name": "example/project"}, 200)
+        if "/labels?page=1" in url and method == "GET":
+            label_list_calls["count"] += 1
+            if label_list_calls["count"] == 1:
+                return _status([], 200)  # first lookup: label does not exist yet
+            return _status([{"id": 9, "name": "backlog-active"}], 200)  # now it does
+        if "/labels?page=" in url and method == "GET":
+            return _status([], 200)
+        raise AssertionError(f"unexpected curl invocation: {method} {url}")
+
+    provider = _provider(runner)
+    with pytest.raises(RuntimeError, match="no label named"):
+        provider._label_id("example/project", "backlog-active")
+    # Without eviction, this second call would reuse the first (empty)
+    # cached mapping and raise again despite the label now existing.
+    assert provider._label_id("example/project", "backlog-active") == 9
+    assert label_list_calls["count"] == 2
+
+
 def test_reserve_rolls_back_the_label_when_the_marker_comment_fails(monkeypatch):
     """The label add can succeed and then the marker-comment write can
     fail (transiently or permanently). Left alone, that leaves a labeled
@@ -471,6 +505,62 @@ def test_reserve_does_not_roll_back_a_label_another_loops_active_reservation_dep
     provider = _provider(runner)
     issue = Issue(1, "t", "url", (), 0.0, 0.0)
     with pytest.raises(RuntimeError, match="HTTP 500"):
+        provider.reserve(
+            "example/project", issue,
+            {"loop": "backlog", "occurrence": 1, "label": "backlog-active"},
+        )
+
+
+def test_reserve_does_not_roll_back_when_its_own_marker_write_actually_landed(monkeypatch):
+    """A comment-write transport error is indeterminate: Gitea may commit
+    the POST before the client observes a timeout/error. If a fresh scan
+    shows THIS loop's own marker now active (the write actually
+    succeeded despite the exception), the label it depends on must
+    survive -- rollback must not strip a trusted active marker of its
+    required label just because the exception that reported the write's
+    outcome was unreliable."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+    from agent_dispatch.issue_loop_markers import _marker
+
+    own_marker = _marker({
+        "loop": "backlog", "occurrence": 1, "state": "reserved",
+        "at": 0, "label": "backlog-active", "issue": 1,
+    })
+
+    def runner(args, **kwargs):
+        method = args[args.index("-X") + 1]
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status({"login": "issue-bot"}, 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status({"full_name": "example/project"}, 200)
+        if url.endswith("/issues/1") and method == "GET":
+            return _status({"labels": []}, 200)
+        if "/labels?page=1" in url and method == "GET":
+            return _status([{"id": 7, "name": "backlog-active"}], 200)
+        if "/labels?page=" in url and method == "GET":
+            return _status([], 200)
+        if url.endswith("/issues/1/labels") and method == "POST":
+            return _status([{"id": 7, "name": "backlog-active"}], 201)
+        if "/issues/1/comments?page=1" in url and method == "GET":
+            # The scan AFTER the "failed" write shows this loop's own
+            # marker already active -- the POST actually landed.
+            return _status(
+                [{"id": 1, "body": own_marker, "user": {"login": "issue-bot"}}], 200
+            )
+        if "/issues/1/comments?page=" in url and method == "GET":
+            return _status([], 200)
+        if "/issues/comments/1" in url and method == "PATCH":
+            raise RuntimeError("curl: operation timed out")
+        if method == "DELETE":
+            raise AssertionError(
+                "must not clear this loop's own now-active reservation label"
+            )
+        raise AssertionError(f"unexpected curl invocation: {method} {url}")
+
+    provider = _provider(runner)
+    issue = Issue(1, "t", "url", (), 0.0, 0.0)
+    with pytest.raises(RuntimeError, match="timed out"):
         provider.reserve(
             "example/project", issue,
             {"loop": "backlog", "occurrence": 1, "label": "backlog-active"},

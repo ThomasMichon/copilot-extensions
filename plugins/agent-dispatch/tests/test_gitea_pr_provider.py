@@ -338,17 +338,19 @@ def test_unrecognized_review_state_raises():
 # --- observe_pr_state: mergeability dimension -----------------------------
 
 
-def test_not_mergeable_is_conflicted():
+def test_not_mergeable_is_unknown_not_conflicted():
+    """Gitea's `mergeable` is a plain boolean, unlike GitHub's
+    discriminating MERGEABLE/CONFLICTING/UNKNOWN tri-state: Gitea also
+    reports `false` while conflict-checking is still running, when that
+    check errored, and for draft/WIP PRs -- not only for a real conflict.
+    With no discriminating signal available, UNKNOWN is the only safe
+    classification; DRAFT/WIP holds (handled separately by _holds())
+    still cover those cases on their own."""
     observation = observe_pr_state(_pr(mergeable=False))
-    assert observation.mergeability == Mergeability.CONFLICTED
+    assert observation.mergeability == Mergeability.UNKNOWN
 
 
 def test_not_mergeable_draft_is_unknown_not_conflicted():
-    """Gitea can report `mergeable: false` for a draft PR with no real
-    merge conflict -- draft status alone is enough for Gitea to withhold
-    a clean verdict. Classifying that as CONFLICTED would incorrectly
-    trigger conflict-handling on top of the separate DRAFT hold; UNKNOWN
-    preserves the hold alone until Gitea can report real mergeability."""
     observation = observe_pr_state(_pr(mergeable=False, draft=True))
     assert observation.mergeability == Mergeability.UNKNOWN
     assert HoldReason.DRAFT in observation.holds

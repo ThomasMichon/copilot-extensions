@@ -204,6 +204,12 @@ class GiteaProvider:
         labels = self._labels_by_name(repo)
         label_id = labels.get(label)
         if label_id is None:
+            # The missing-label error below tells an operator to create it
+            # -- but caching the (incomplete) lookup would make every later
+            # retry in this same resident process reuse the stale mapping
+            # and keep failing even after the label is created, until
+            # restart. Evict so the next retry re-fetches from Gitea.
+            self._label_ids.pop(repo, None)
             raise RuntimeError(
                 f"Gitea repository {repo!r} has no label named {label!r} "
                 "(create it first; this adapter does not create labels)"
@@ -302,15 +308,30 @@ class GiteaProvider:
             payload={"body": body}, ok=(201,),
         )
 
-    def _other_active_reservation(
-        self, repo: str, issue: "Issue", reservation: dict[str, Any]
+    def _active_reservation_depends_on_label(
+        self,
+        repo: str,
+        issue: "Issue",
+        reservation: dict[str, Any],
+        *,
+        exclude_own_loop: bool,
     ) -> bool:
-        """True when some OTHER loop currently holds an active (reserved or
-        claimed) reservation on this issue for this same label. Reservations
-        deliberately race before coordinator election settles a winner, so a
-        rollback must never clear a label another loop's reservation still
-        depends on -- that would silently undo a winning reservation this
-        call never made."""
+        """True when some active (reserved or claimed) reservation on this
+        same label currently exists, per a fresh comment scan.
+
+        With ``exclude_own_loop=True`` (``release()``'s use), only another
+        loop's reservation counts -- release() is always called by the
+        label's own current holder finishing its own cycle, so comparing
+        against itself would be meaningless.
+
+        With ``exclude_own_loop=False`` (``reserve()``'s rollback use), THIS
+        loop's own marker counts too: a comment-write transport failure is
+        indeterminate -- Gitea may have committed the POST before the
+        client observed a timeout/error -- so a fresh scan can show this
+        same loop's own marker as genuinely active despite the exception.
+        Rolling back in that case would strip the label out from under a
+        trusted reservation marker that is now live and depends on it.
+        """
         from .repository_issue_loops import Issue as _Issue
         from .repository_issue_loops import _latest_reservations
 
@@ -333,8 +354,8 @@ class GiteaProvider:
         )
         return any(
             value.get("state") in {"reserved", "claimed"}
-            and value.get("loop") != reservation.get("loop")
             and value.get("label") == reservation.get("label")
+            and (not exclude_own_loop or value.get("loop") != reservation.get("loop"))
             for value in _latest_reservations(current).values()
         )
 
@@ -358,17 +379,19 @@ class GiteaProvider:
             self._comment(repo, issue, {**reservation, "issue": issue.number})
         except Exception:
             # The label is now live but the marker comment that is supposed
-            # to accompany it never landed. Best-effort roll the label back
-            # so a transient/permanent comment failure never leaks a
-            # labeled-but-unmarked reservation that discovery would then
-            # treat as reserved with no record of by whom/when/why -- but
-            # ONLY when this call actually introduced the label and no
-            # other loop's own active reservation now depends on it.
-            # Reservations deliberately race before coordinator election,
-            # so a rollback must never silently clear another loop's
-            # winning reservation.
-            if not label_already_present and not self._other_active_reservation(
-                repo, issue, reservation
+            # to accompany it never landed -- or so it appears: the write
+            # is a transport call, and the exception is indeterminate
+            # (Gitea may have committed it before the client observed a
+            # timeout/error). Best-effort roll the label back so a
+            # genuinely failed write never leaks a labeled-but-unmarked
+            # reservation -- but ONLY when this call actually introduced
+            # the label AND no active reservation (any loop, including this
+            # one -- a possibly-succeeded write of our own) now depends on
+            # it. Reservations deliberately race before coordinator
+            # election, so a rollback must never silently clear a winning
+            # reservation, whoever holds it.
+            if not label_already_present and not self._active_reservation_depends_on_label(
+                repo, issue, reservation, exclude_own_loop=False
             ):
                 try:
                     self._call(
@@ -394,7 +417,9 @@ class GiteaProvider:
             repo, issue,
             {**reservation, "issue": issue.number, "state": "released", "reason": reason},
         )
-        if not self._other_active_reservation(repo, issue, reservation):
+        if not self._active_reservation_depends_on_label(
+            repo, issue, reservation, exclude_own_loop=True
+        ):
             self._verify_identity(repo, allow_cache=False)
             label_id = self._label_id(repo, reservation["label"])
             self._call(
