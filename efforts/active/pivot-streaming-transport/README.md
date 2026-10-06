@@ -332,7 +332,7 @@ insufficient.)_
       Plan gate is actually about.
 
 ### Phase 4 — Segment-level React-esque diffing in the Picker's own render path
-- [ ] Profile `_refresh_nf_segments()` (`engine_rendering.py`) against a
+- [x] Profile `_refresh_nf_segments()` (`engine_rendering.py`) against a
       representative session to confirm (per the 2026-09-30 investigation)
       that it correlates with Textual's compositor choosing a full
       (non-incremental) repaint.
@@ -1813,3 +1813,49 @@ work is now just **Phase 4** and **Phase 5** (3c stays deliberately
 deferred). Picking up **Phase 4** next (profiling `_refresh_nf_segments()` in
 the Picker, per the Plan's own ordering) since Phase 5 depends on no
 unresolved prerequisite either, and Phase 4 is listed first.
+
+### 2026-10-05 — Phase 4 profiling: root cause #3 fully confirmed with hard numbers
+
+Reused the 2026-09-30 investigation's exact methodology (a headless
+`PickerApp.run_test()` harness, a synthetic 300-row source, `cProfile` around
+a real-timer-driven -- not `pilot.pause()`-virtual-clock -- 12s idle window
+with zero navigation/input) to confirm root cause #3 rather than trust its
+original "strongly suggesting" framing. Result: over that 12s idle window (10
+idle pulse ticks at the default cadence, driving ~21-22 real Textual
+compositor refresh passes), **every single compositor refresh went through
+`_compositor_refresh` -> `render_full_update` (the full, non-incremental
+repaint path); `render_update` (the incremental path) was called **zero**
+times** -- not "mostly," literally never, across the entire window. Those
+~21 full-repaint passes accounted for ~4.65s of the ~13.3s profiled wall
+time (the dominant cost in the whole run), traced directly to
+`PickerScreen.refresh()` -> `_refresh_nf_segments()` -> unconditionally
+calling `.refresh()`/`.refresh_data()` on all 7 segment widgets
+(`nf-title`/`nf-pivots`/`nf-chrome`/`nf-machine`/`nf-buttons`/`nf-body-data`/
+`nf-footer`) on every tick, confirmed by `_refresh_nf_segments()` and
+`refresh_data()` each showing ~1.3s of cumulative time directly on the
+profile (not merely co-located with the compositor cost -- the call graph
+puts them immediately upstream of it, each `PickerScreen.refresh()` call
+driving one `_refresh_nf_segments()` pass that marks every segment widget
+dirty before the next compositor tick runs). This is root cause #3,
+confirmed, not merely correlated.
+
+**Scoping the narrowing fix (next slice, not done this slice):** enumerated
+every `self.refresh()`/`scr.refresh()` call site across the Picker engine --
+**36 sites** across `engine.py`, `engine_loading.py`, `engine_pivots.py`,
+`engine_pivot_actions.py`, `engine_regions.py`, `engine_runtime.py`
+(including the idle-tick `_tick()` itself), `engine_worker_actions.py`,
+`steering.py`, and `capture.py`. A correct, safe narrowing needs each call
+site classified by which segment(s) its own state change can actually affect
+(the cosmetic pulse tick only needs `nf-chrome`'s `status_text()`; a
+nav-only change needs the sticky header + `nf-body-data`; a pivot switch
+plausibly needs all 7) -- verified against the existing invariant at
+`refresh()`'s own call site ("any state change that refreshes the screen
+must re-render the child segments too") and its current test coverage,
+**not** assumed from each call site's apparent purpose alone, since several
+sites already have one-line comments whose accuracy hasn't been audited
+against what the segment widgets actually read. This is real design work,
+not a mechanical change -- scoped as Phase 4's own next slice, following the
+same measure-first, design-before-code discipline Phase 3 (and the
+2026-09-30 investigation itself) already set as this effort's norm, rather
+than attempting an unaudited 36-site refactor in one unreviewed pass.
+
