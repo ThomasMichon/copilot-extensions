@@ -175,9 +175,101 @@ def test_versioned_slot_lease_noclobber_fallback_fails_closed_without_flock():
     )
 
     assert "_try_publish_versioned_slot_lease" in fallback_body
+    assert "_reclaim_versioned_slot_lease" in fallback_body
     assert 'kill -0 "$holder_pid"' in fallback_body
     assert 'printf \'%s\' "$$" > "$tmp_file"' in publish_body
     assert 'ln "$tmp_file" "$lock_file"' in publish_body
+
+
+def test_versioned_slot_lease_reclaim_is_itself_serialized():
+    """The stale-lock reclaim sequence (remove, then republish) is TWO
+    separate steps -- without mutual exclusion around the whole sequence,
+    two concurrent reclaimers could both observe the SAME stale lock, both
+    unlink it, and each believe it alone now owns the lock it just
+    recreated (an unconditional `rm` doesn't verify it's removing the
+    entry it just inspected). `_reclaim_versioned_slot_lease` must guard
+    this with a SECOND, fixed-name atomic `ln`-based sentinel so only one
+    process at a time may ever be mid-reclaim for a given lock, and must
+    re-verify staleness after winning that sentinel (another process may
+    have already reclaimed and republished the lock as live first)."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    reclaim_body = _function_body(text, "_reclaim_versioned_slot_lease")
+
+    assert 'sentinel="${lock_file}.reclaiming"' in reclaim_body
+    assert 'ln "$tmp_sentinel" "$sentinel"' in reclaim_body
+    # Losing the sentinel race must back off, never force past it.
+    sentinel_fail_branch = reclaim_body.split(
+        'if ! ln "$tmp_sentinel" "$sentinel" 2>/dev/null; then', 1
+    )[1][:200]
+    assert "return 1" in sentinel_fail_branch
+    # Staleness must be re-checked AFTER winning the sentinel, not assumed
+    # from the caller's earlier (now possibly stale) observation.
+    assert reclaim_body.index('ln "$tmp_sentinel" "$sentinel"') < reclaim_body.index(
+        'kill -0 "$holder_pid"'
+    )
+    # The sentinel must always be released, on both the reclaim-succeeded
+    # and reclaim-lost-the-race-after-all paths -- i.e. after the
+    # re-verification branch, not nested only inside it.
+    release_idx = reclaim_body.rindex('rm -f "$sentinel" 2>/dev/null || true')
+    reverify_idx = reclaim_body.index('kill -0 "$holder_pid"')
+    assert release_idx > reverify_idx
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
+def test_versioned_slot_lease_reclaim_grants_exactly_one_winner_under_real_contention():
+    """Behavioral (not just textual) regression guard for the stale-lock
+    reclaim path specifically: seed a lock file recording a DEAD pid (a
+    crashed prior holder), then launch many real, concurrently-forked bash
+    subshells that all observe it as stale and race to reclaim it, and
+    assert exactly one of them ever reports success."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    publish_fn = _function_body(text, "_try_publish_versioned_slot_lease")
+    reclaim_fn = _function_body(text, "_reclaim_versioned_slot_lease")
+
+    harness = f"""
+set -uo pipefail
+{publish_fn}
+}}
+{reclaim_fn}
+}}
+
+lock_file="$1"
+out_file="$2"
+# Seed a STALE lock (a pid that is certainly not alive) so every racer
+# below takes the reclaim path, not the fresh-acquire path.
+echo "999999" > "$lock_file"
+
+_racer() {{
+    if _reclaim_versioned_slot_lease "$lock_file"; then
+        echo "WIN $BASHPID" >> "$out_file"
+        sleep 2
+    fi
+}}
+for _i in $(seq 1 30); do
+    _racer &
+done
+wait
+"""
+    with tempfile.TemporaryDirectory() as td:
+        harness_path = Path(td) / "harness.sh"
+        harness_path.write_text(harness, encoding="utf-8")
+        lock_file = str(Path(td) / "race.lock")
+        out_file = Path(td) / "winners.txt"
+        out_file.write_text("")
+
+        r = subprocess.run(
+            [_BASH, str(harness_path), lock_file, str(out_file)],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert r.returncode == 0, f"harness failed: {r.stdout} {r.stderr}"
+
+        winners = [
+            line for line in out_file.read_text().splitlines() if line.strip()
+        ]
+        assert len(winners) == 1, (
+            f"expected exactly one winner of the stale-lock reclaim race, "
+            f"got {len(winners)}: {winners}"
+        )
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash is unavailable")

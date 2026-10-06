@@ -886,16 +886,46 @@ _acquire_versioned_slot_lease_noclobber_fallback() {
     if [[ -n "$holder_pid" ]] && kill -0 "$holder_pid" 2>/dev/null; then
         return 1
     fi
-    # Stale (holder dead, or unrecorded) -- reclaim. If another process wins
-    # this same race, its atomic `ln` below succeeds and ours correctly
-    # fails (that process's pid is now the legitimately-recorded owner) --
-    # there is no window in which both can believe they hold it, since `ln`
-    # itself is the single atomic decision point.
-    rm -f "$lock_file" 2>/dev/null || true
-    if _try_publish_versioned_slot_lease "$lock_file"; then
-        return 0
+    # Stale (holder dead, or unrecorded) -- reclaim via a SERIALIZED
+    # critical section (see _reclaim_versioned_slot_lease): removing a
+    # stale lock and republishing it are two separate steps, so without
+    # mutual exclusion around that whole sequence, two concurrent
+    # reclaimers could both observe the SAME stale entry, both unlink it,
+    # and each believe it alone now owns the lock it just recreated.
+    _reclaim_versioned_slot_lease "$lock_file"
+}
+
+_reclaim_versioned_slot_lease() {
+    # Exclusively perform the remove-then-republish sequence for a lock
+    # file already confirmed stale by the caller. Guarded by a SECOND,
+    # fixed-name `ln` lock (a nested critical section keyed off this exact
+    # lock_file) so only one process at a time may ever be mid-reclaim for
+    # it: losing this sentinel race means another process is already
+    # reclaiming (or just did), so we back off (return 1) rather than
+    # racing its own unlink+republish -- the caller's existing retry loop
+    # will see the lock settled (live or freshly reclaimed) next attempt,
+    # instead of this process also unlinking what that other reclaimer may
+    # have already republished as its own live lock.
+    local lock_file="$1" sentinel="${lock_file}.reclaiming" tmp_sentinel holder_pid result=1
+    tmp_sentinel="${sentinel}.tmp.$$"
+    printf '%s' "$$" > "$tmp_sentinel" 2>/dev/null || { rm -f "$tmp_sentinel" 2>/dev/null; return 1; }
+    if ! ln "$tmp_sentinel" "$sentinel" 2>/dev/null; then
+        rm -f "$tmp_sentinel" 2>/dev/null || true
+        return 1
     fi
-    return 1
+    rm -f "$tmp_sentinel" 2>/dev/null || true
+    # Now the sole reclaimer. Re-verify the lock is STILL stale -- another
+    # process may have already reclaimed and republished it as live before
+    # we won the sentinel above.
+    holder_pid="$(cat "$lock_file" 2>/dev/null || true)"
+    if [[ -z "$holder_pid" ]] || ! kill -0 "$holder_pid" 2>/dev/null; then
+        rm -f "$lock_file" 2>/dev/null || true
+        if _try_publish_versioned_slot_lease "$lock_file"; then
+            result=0
+        fi
+    fi
+    rm -f "$sentinel" 2>/dev/null || true
+    return "$result"
 }
 
 _acquire_versioned_slot_lease() {
