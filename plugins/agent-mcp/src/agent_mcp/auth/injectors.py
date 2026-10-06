@@ -357,6 +357,7 @@ class CommandInjector(TokenInjector):
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                creationflags=no_window_creationflags(),  # Windows: no console window
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(input=self._stdin()), timeout=self._timeout,
@@ -398,6 +399,7 @@ class CommandInjector(TokenInjector):
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                creationflags=no_window_creationflags(),  # Windows: no console window
             )
             _, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=self._repair_timeout,

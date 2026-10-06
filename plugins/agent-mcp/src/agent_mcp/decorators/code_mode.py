@@ -20,7 +20,7 @@ import logging
 import shutil
 from pathlib import Path
 
-from .._exec import resolve_argv
+from .._exec import no_window_creationflags, resolve_argv
 from ._catalog import fetch_all_tools, render_tools_interface, tool_call_args, tool_call_name
 from .base import BridgeContext, Decorator, Next, error_response, result_response
 
@@ -212,6 +212,7 @@ class CodeModeDecorator(Decorator):
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            creationflags=no_window_creationflags(),  # Windows: no console window
         )
         try:
             names = [t.get("name") for t in self._catalog if t.get("name")]
