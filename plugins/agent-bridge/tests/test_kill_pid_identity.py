@@ -1,21 +1,21 @@
 """``_kill_pid`` must route through an identity-bound OS object when possible.
 
-Regression/hardening: closes copilot-extensions#5006 for ``service_process_cli``'s
-``_kill_pid`` -- the check-then-bare-kill window between a caller's
-``_pid_is_agent_bridge`` re-verification and the actual signal/``taskkill`` could
-let a pid the OS has since reused for an unrelated process be killed in the
-verified process's place. Mirrors ``worktree_manager.mux_daemon_cutover``'s
-analogous fix (#5060): capture a fresh ``process_start_time`` token immediately
--- before any other check -- and terminate through
-``zdd.diagnostics.terminate_pid_if_identity``, which performs its own final
-re-verification right at the kill.
+Regression/hardening: closes copilot-extensions#5006 for
+``_kill_pid_identity``'s ``_kill_pid`` -- the check-then-bare-kill window
+between a caller's ``_pid_is_agent_bridge`` re-verification and the actual
+signal/``taskkill`` could let a pid the OS has since reused for an unrelated
+process be killed in the verified process's place. Mirrors
+``worktree_manager.mux_daemon_cutover``'s analogous fix (#5060): capture a
+fresh ``process_start_time`` token immediately -- before any other check --
+and terminate through ``zdd.diagnostics.terminate_pid_if_identity``, which
+performs its own final re-verification right at the kill.
 """
 
 from __future__ import annotations
 
 import signal
 
-import agent_bridge.service_process_cli as m
+import agent_bridge._kill_pid_identity as m
 from zdd import diagnostics
 
 
