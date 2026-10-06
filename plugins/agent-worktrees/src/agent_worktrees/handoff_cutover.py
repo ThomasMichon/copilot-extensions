@@ -30,6 +30,7 @@ import hashlib
 import os
 import time
 from pathlib import Path
+from lazy_cli_dispatch import self_override as _self_override
 
 from . import (
     activity,
@@ -88,8 +89,7 @@ def _resolve_handoff_cutover_target(
     # Stage D: session_binding_cli is cluster-free.
     from . import session_binding_cli as _session_binding_cli
 
-    _activate_session_binding = core._self_override(
-        "_activate_session_binding", _session_binding_cli._activate_session_binding)
+    _activate_session_binding = _self_override(vars(core), "_activate_session_binding", _session_binding_cli._activate_session_binding)
 
     config = None
     if raw_id:
@@ -152,9 +152,9 @@ def _handoff_cutover_spawn_result(
     # Stage D: resolve_launch_cli is cluster-free.
     from . import resolve_launch_cli as _resolve_launch_cli
 
-    _apply_assignment_env = core._self_override("_apply_assignment_env", _resolve_launch_cli._apply_assignment_env)
-    _reflect_assignment = core._self_override("_reflect_assignment", _resolve_launch_cli._reflect_assignment)
-    _launch_profile_selection = core._self_override("_launch_profile_selection", _resolve_launch_cli._launch_profile_selection)
+    _apply_assignment_env = _self_override(vars(core), "_apply_assignment_env", _resolve_launch_cli._apply_assignment_env)
+    _reflect_assignment = _self_override(vars(core), "_reflect_assignment", _resolve_launch_cli._reflect_assignment)
+    _launch_profile_selection = _self_override(vars(core), "_launch_profile_selection", _resolve_launch_cli._launch_profile_selection)
 
     seed = getattr(args, "seed", None)
     if not seed:
@@ -515,8 +515,8 @@ def _handoff_cutover_retry_result(
     # Stage D: status_monitor_runtime is cluster-free.
     from . import status_monitor_runtime as _smr
 
-    _monitor_session_state_handoff_path = core._self_override("_monitor_session_state_handoff_path", _smr._monitor_session_state_handoff_path)
-    _monitor_read_session_state_handoff = core._self_override("_monitor_read_session_state_handoff", _smr._monitor_read_session_state_handoff)
+    _monitor_session_state_handoff_path = _self_override(vars(core), "_monitor_session_state_handoff_path", _smr._monitor_session_state_handoff_path)
+    _monitor_read_session_state_handoff = _self_override(vars(core), "_monitor_read_session_state_handoff", _smr._monitor_read_session_state_handoff)
 
     session_id = getattr(args, "session_id", None)
     rc, resolved = core._resolve_handoff_cutover_target(
@@ -687,7 +687,7 @@ def _maybe_emit_stage_13(
     from . import status_monitor_runtime as _smr
 
     core = _core()
-    _monitor_handoff_claim_root = core._self_override("_monitor_handoff_claim_root", _smr._monitor_handoff_claim_root)
+    _monitor_handoff_claim_root = _self_override(vars(core), "_monitor_handoff_claim_root", _smr._monitor_handoff_claim_root)
 
     claim_path = _monitor_handoff_claim_root() / "stage13" / f"{digest}.json"
     try:

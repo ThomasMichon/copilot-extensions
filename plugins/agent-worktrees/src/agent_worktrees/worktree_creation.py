@@ -30,6 +30,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from lazy_cli_dispatch import self_override as _self_override
+
 from . import (
     activity,
     codename_tracking,
@@ -377,7 +379,7 @@ def _journal_owner_reciprocal_claim(
     # Stage D: real implementation lives in claims_cli (cluster-free).
     from . import claims_cli as _claims_cli
 
-    _resolve_owner_ref_record_path = core._self_override("_resolve_owner_ref_record_path", _claims_cli._resolve_owner_ref_record_path)
+    _resolve_owner_ref_record_path = _self_override(vars(core), "_resolve_owner_ref_record_path", _claims_cli._resolve_owner_ref_record_path)
 
     try:
         owner_path, _owner_wt, _err = _resolve_owner_ref_record_path(owner_ref, config,)
@@ -526,14 +528,14 @@ def _create_worktree_core(
     from . import resolve_launch_cli as _resolve_launch_cli
     from . import worktree_ops_cli as _worktree_ops_cli
 
-    _coordination_readiness_for_owner_ref = core._self_override("_coordination_readiness_for_owner_ref", _claims_cli._coordination_readiness_for_owner_ref)
-    CoordinationReadinessFailure = core._self_override("CoordinationReadinessFailure", _claims_cli.CoordinationReadinessFailure)
-    _resolve_owner_ref_record_path = core._self_override("_resolve_owner_ref_record_path", _claims_cli._resolve_owner_ref_record_path)
-    _validate_profile_assignment_config = core._self_override("_validate_profile_assignment_config", _resolve_launch_cli._validate_profile_assignment_config)
-    _apply_assignment_env = core._self_override("_apply_assignment_env", _resolve_launch_cli._apply_assignment_env)
-    _launch_profile_selection = core._self_override("_launch_profile_selection", _resolve_launch_cli._launch_profile_selection)
-    _reflect_assignment = core._self_override("_reflect_assignment", _resolve_launch_cli._reflect_assignment)
-    _slugify = core._self_override("_slugify", _worktree_ops_cli._slugify)
+    _coordination_readiness_for_owner_ref = _self_override(vars(core), "_coordination_readiness_for_owner_ref", _claims_cli._coordination_readiness_for_owner_ref)
+    CoordinationReadinessFailure = _self_override(vars(core), "CoordinationReadinessFailure", _claims_cli.CoordinationReadinessFailure)
+    _resolve_owner_ref_record_path = _self_override(vars(core), "_resolve_owner_ref_record_path", _claims_cli._resolve_owner_ref_record_path)
+    _validate_profile_assignment_config = _self_override(vars(core), "_validate_profile_assignment_config", _resolve_launch_cli._validate_profile_assignment_config)
+    _apply_assignment_env = _self_override(vars(core), "_apply_assignment_env", _resolve_launch_cli._apply_assignment_env)
+    _launch_profile_selection = _self_override(vars(core), "_launch_profile_selection", _resolve_launch_cli._launch_profile_selection)
+    _reflect_assignment = _self_override(vars(core), "_reflect_assignment", _resolve_launch_cli._reflect_assignment)
+    _slugify = _self_override(vars(core), "_slugify", _worktree_ops_cli._slugify)
 
     repo = config.default_repo
     if kind != "system" and getattr(repo, "knowledge_only", False):

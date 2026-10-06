@@ -1,0 +1,9 @@
+{
+  "comment": "compatibility-root-decoupling: migrate _self_override's 16 external call sites off the __main__ compat root onto the shared lazy_cli_dispatch.self_override directly",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
