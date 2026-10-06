@@ -104,13 +104,16 @@ Operator, end of a long multi-repo session:
       ran the Direction-1/Direction-2 invariant audit for agent-dispatch's
       runtime: the invariant vision already stated
       `register-once-cutover-on-update`/`immutable-versioned-runtime`
-      correctly, but the agent-dispatch (leaf) vision did not cite or
+      correctly, but the agent-dispatch (branch) vision did not cite or
       restate them — added `inherits-runtime-service-invariants` there to
-      fix that (Direction 1). Linked `#5356` (agent-dispatch's `install.ps1`
+      fix that (Direction 1; its own Provenance entry records why, with no
+      issue reference, per the vision-history-only convention). Direction 2
+      (does the subject conform?) is `#5356` (agent-dispatch's `install.ps1`
       retires supervisor/coordinator processes *after* the in-place
       reinstall rather than before, plus an undetected stale `uv.exe`
-      hazard) to both vision items as the Direction-2 conformance gap, via
-      issue comment and the new vision's own Provenance entry.
+      hazard) — linked to the `plugin-services` invariants directly via an
+      issue comment, since that's the vision layer the conformance check is
+      against.
       **Not yet done:** the *full* invariant audit this vision calls for
       ("every `agent-*` plugin's `install.ps1`, not just the one subject you
       happened to find a bug in") — tracked as Phase 3 below, not assumed

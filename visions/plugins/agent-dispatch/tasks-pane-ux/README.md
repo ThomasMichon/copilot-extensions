@@ -196,17 +196,18 @@ nothing sits completed-and-unconfirmed long enough to need it.
 A suspended task with a detached, confirmed-live waiter (`agent-dispatch run
 --detach --resume ... --task ...`) is not idle — it is actively blocked on a
 specific, named external condition (a PR watch, a build, another task). The
-Tasks table's suspended-row activity phrase surfaces the waiter's exact
-blocking-wait command — "waiting: `<command>`" — whenever one is attached,
-falling back to the plain suspended badge when none is. The companion Claims
-system's `claim-status` detail (reached from either the dispatch-task claim
-provider or the Worktree Status card's claims viewer) surfaces that same
-waiter command for a suspended task's claim whenever one is attached, instead
-of leaving the detail bare with no indication of what it's actually blocked
-on. Both surfaces read the one durable waiter record, so a waiter recorded
-from either angle reads the same way, in keeping with the cross-link and
-shared-artifacts discipline above — regardless of which board path (local,
-delegated cross-machine, or relay/subscribe) is rendering it.
+Tasks table's suspended-row activity phrase identifies the waiter's
+blocking-wait command — "waiting: `<command>`" (compacted to fit the row) —
+whenever one is attached, falling back to the plain suspended badge when
+none is. The companion Claims system's `claim-status` detail (reached from
+either the dispatch-task claim provider or the Worktree Status card's claims
+viewer) surfaces that same waiter command **in full** for a suspended task's
+claim whenever one is attached, instead of leaving the detail bare with no
+indication of what it's actually blocked on. Both surfaces read the one
+durable waiter record, so a waiter recorded from either angle reads the same
+underlying command, in keeping with the cross-link and shared-artifacts
+discipline above — regardless of which board path (local, delegated
+cross-machine, or relay/subscribe) is rendering it.
 
 ### Registrars configuration — the master pause, made visible
 
