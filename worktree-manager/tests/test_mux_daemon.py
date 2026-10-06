@@ -1304,8 +1304,19 @@ def test_resident_monitor_restart_republishes_live_mapping_to_new_generation(tmp
         first.close()
         if second is not None:
             second.close()
-        thread.join(timeout=5)
+        # Generous relative to the nominal ~0.6s budget
+        # (60 iterations * 0.01s poll): on a heavily loaded machine, each
+        # iteration's real wall-clock cost (registry/lock I/O, OS
+        # scheduling contention) can run well past the poll interval --
+        # a tight join timeout here was observed to leave the thread still
+        # running past a 5s wait, turning a slow-but-healthy daemon loop
+        # into a flaky `KeyError: 'rc'` instead of a clear timeout signal.
+        thread.join(timeout=20)
 
+    assert thread.is_alive() is False, (
+        "daemon thread did not finish within the join timeout -- "
+        "see this test's own comment on machine-load sensitivity"
+    )
     assert daemon_result["rc"] == 0
 
 
@@ -1541,6 +1552,40 @@ def test_health_excludes_every_concurrently_in_flight_control_request(tmp_path):
         runtime.server._on_request_finished()
         runtime.server._on_request_finished()
         runtime.shutdown()
+
+
+def test_health_requests_use_a_unique_key_to_avoid_coalescing(tmp_path, monkeypatch):
+    """``ControlClient.health()`` must never coalesce with another
+    concurrent health request: ``CoalescingServer`` joins any two calls
+    sharing the same ``(kind, key)`` into a single ``_compute`` execution,
+    which would mean only ONE of two truly concurrent wire-level health
+    probes actually increments ``_control_requests_in_flight`` -- exactly
+    the double-counting bug this key uniqueness avoids. Confirm each call
+    gets its own, never-repeated key."""
+    seen_keys: list[str] = []
+
+    def _fake_request(self, kind, payload=None, *, key="control"):
+        seen_keys.append(key)
+        return {}
+
+    monkeypatch.setattr(mux_daemon.mux_daemon_cutover.ControlClient, "_request", _fake_request)
+    # Stub the token loader (not the file system): __init__ would otherwise
+    # read/create a real token file at the given root, which this test's
+    # mocked _request never needs and which can fail on a host where that
+    # path isn't writable.
+    monkeypatch.setattr(
+        mux_daemon.mux_daemon_cutover, "load_or_create_control_token", lambda root=None: "tok"
+    )
+    client = mux_daemon.mux_daemon_cutover.ControlClient("http://127.0.0.1:1", root=tmp_path)
+
+    client.health()
+    client.health()
+
+    assert len(seen_keys) == 2
+    assert seen_keys[0] != seen_keys[1]
+    assert all(
+        key.startswith(mux_daemon.mux_daemon_cutover.health_kind()) for key in seen_keys
+    )
 
 
 def test_scrub_session_credentials_is_case_insensitive():
