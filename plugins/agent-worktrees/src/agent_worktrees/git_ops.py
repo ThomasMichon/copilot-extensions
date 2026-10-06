@@ -891,48 +891,23 @@ def push(
 ) -> PushResult:
     """Push a branch to remote. Returns a :class:`PushResult` (truthy on success).
 
-    Auto-authenticates when the remote is owned by a different ``gh`` account
-    than the active one, without persisting a token in ``.git/config`` (#29).
+    Auto-authenticates when the remote is owned by a different ``gh`` account than the active one,
+    without persisting a token in ``.git/config`` (#29). *force_with_lease_expect*, when given,
+    takes precedence with an expected-old-object lease (``--force-with-lease=<dest-ref>:<expect>``)
+    so a divergent/deleted remote fails atomically (#5298/#5300); ``branch`` may be ``src:dest``.
 
-    When *force_with_lease* is True, push with ``--force-with-lease`` -- used
-    by the PR workflow to update a feature branch whose history was rewritten
-    by the rebase chain, without clobbering unrelated remote updates.
+    The result carries git's ``stderr`` and a ``retryable`` classification so a caller's retry loop
+    can surface the real error (a pre-push hook decline, an auth 403, a protected-branch block) and
+    fail fast instead of masking every failure as a generic "rejected" and retrying a doomed push
+    (#993). Bounded by ``timeout`` (:mod:`push_timeout`); a stall kills the whole process tree.
 
-    *force_with_lease_expect*, when given, builds an **expected-old-object**
-    lease -- ``--force-with-lease=<dest-ref>:<expect>`` -- instead of the plain
-    (locally-tracked) form. This is the atomic guard an *incremental* PR-branch
-    update needs (#5300/#5298 follow-up): a caller who deliberately did NOT
-    rebase/force the branch still wants the push to behave like an ordinary
-    fast-forward, EXCEPT it must refuse -- rather than silently recreate -- a
-    branch the remote deleted out from under it (e.g. the PR merged and its
-    head was auto-pruned between this call's own fetch and this push; a plain
-    ``git push`` treats an absent destination ref as "create a new branch" and
-    happily resurrects it, incorrectly leaving the caller believing a merged
-    PR was just updated). Passing the exact SHA this call observed as the
-    branch's current remote tip makes the push fail closed on ANY mismatch --
-    divergence (someone else pushed) or disappearance (deleted) alike --
-    without this call needing a second, non-atomic existence check of its own.
-    *force_with_lease_expect* takes precedence over a bare *force_with_lease*
-    when both are given (the common pattern: pass the latter as a fallback
-    default of ``True`` for callers that may not always have an expected SHA).
-    ``branch`` may be a plain name or a ``src:dest`` refspec; the lease always
-    targets ``dest`` (or ``branch`` itself when there is no ``:``).
-
-    The result carries git's ``stderr`` and a ``retryable`` classification so a
-    caller's retry loop can surface the real error (a pre-push hook decline, an
-    auth 403, a protected-branch block) and fail fast instead of masking every
-    failure as a generic "rejected" and retrying a doomed push (#993).
-    Bounded by ``timeout`` (:mod:`push_timeout`); a stall kills the whole process tree.
-
-    Unlike ``rebase``, this is NEVER given ``no_hooks=True`` (#3561): a real
-    pre-push release guard must be allowed to block a non-compliant push.
-    Worktree-originated callers wrap this with ``hooks.allow_pr_push()``.
+    Unlike ``rebase``, this is NEVER given ``no_hooks=True`` (#3561): a real pre-push release guard
+    must be allowed to block a non-compliant push. Worktree-originated callers wrap this with
+    ``hooks.allow_pr_push()``.
     """
-    if force_with_lease_expect is not None:
-        dest_ref = branch.split(":", 1)[1] if ":" in branch else branch
-        extra = [f"--force-with-lease={dest_ref}:{force_with_lease_expect}"]
-    else:
-        extra = ["--force-with-lease"] if force_with_lease else []
+    extra = ([f"--force-with-lease={branch.rsplit(':', 1)[-1]}:{force_with_lease_expect}"]
+             if force_with_lease_expect is not None else
+             ["--force-with-lease"] if force_with_lease else [])
     auth_args = _auth_config_args(remote, cwd=cwd)
     # Retry without an injected auth override on failure (#900).
     attempts = [auth_args, []] if auth_args else [[]]

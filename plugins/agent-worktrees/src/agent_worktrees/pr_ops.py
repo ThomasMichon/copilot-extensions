@@ -960,34 +960,19 @@ def create_pr(
     )
     use_refspec = prcfg.head_scheme == "refspec" and not parallel_snapshot
 
+    # Reuse-lease guard (#5298): see push_diagnostics.reuse_lease_expect.
+    lease_expect = push_diagnostics.reuse_lease_expect(target_pr, active) if reusing else ""
+
     if use_refspec:
         # Refspec mode (#1815): keep the squashed work ON worktree/<id> and push
         # it directly to the PR head ref. No local feature branch, no checkout
         # dance; HEAD never leaves wt_branch, and wt_branch is NOT reset to
         # upstream -- it legitimately sits ahead of master while the PR is open
         # (a later `git sync` fast-forwards it clean on merge).
-        #
-        # Reusing an already-open PR (#5298): lease the push against the
-        # branch's LAST-OBSERVED published tip (``target_pr``/``active``'s
-        # ``head_sha`` from before this call, not a live re-query -- a fresh
-        # ``ls-remote`` would just read back whatever is there right now and
-        # trivially "match", defeating the guard). Any mismatch between that
-        # remembered tip and the remote's actual current state -- divergence
-        # (another actor pushed something else) OR disappearance (the PR
-        # merged and its head was auto-pruned) -- fails the push atomically
-        # instead of a plain push either silently overwriting foreign commits
-        # or resurrecting a deleted branch.
-        lease_expect = ""
-        if reusing:
-            lease_expect = (
-                (target_pr.head_sha if target_pr is not None else "")
-                or (active.head_sha if active is not None else "")
-            )
         with hooks.allow_pr_push():
             pushed = git_ops.push(
                 publish_remote, f"{wt_branch}:refs/heads/{feature_branch}",
-                cwd=worktree_path,
-                force_with_lease_expect=(lease_expect or None),
+                cwd=worktree_path, force_with_lease_expect=(lease_expect or None),
                 force_with_lease=reusing,
             )
         if not pushed:
@@ -1021,21 +1006,10 @@ def create_pr(
         # No checkout dance: `git push` publishes the named local ref while HEAD
         # stays on worktree/<id>.
         git_ops.git("branch", "-f", feature_branch, "HEAD", cwd=worktree_path, check=False)
-        # Same reuse-lease guard as the refspec branch above (#5298): lease
-        # against the branch's last-OBSERVED published tip, never a live
-        # re-query (see the matching comment above for why that would
-        # trivially self-match and defeat the guard).
-        lease_expect = ""
-        if reusing:
-            lease_expect = (
-                (target_pr.head_sha if target_pr is not None else "")
-                or (active.head_sha if active is not None else "")
-            )
         with hooks.allow_pr_push():
             pushed = git_ops.push(
                 publish_remote, feature_branch, cwd=worktree_path,
-                force_with_lease_expect=(lease_expect or None),
-                force_with_lease=reusing,
+                force_with_lease_expect=(lease_expect or None), force_with_lease=reusing,
             )
         if not pushed:
             return {**base, "error": push_diagnostics.create_pr_push_error(
@@ -2533,38 +2507,18 @@ def _push_existing_feature(
     # reading HEAD would record the wrong commit. Invoked from the legacy
     # on-feature-branch path these are identical.
     head_sha = _rev(feature_branch, cwd=worktree_path)
-    # Determine (read-only, pre-push) whether a non-terminal PRRecord already
-    # tracks this exact branch -- i.e. whether this push is reusing a
-    # previously-published head rather than creating a brand-new one. A
-    # *terminal* PR for this branch (merged/closed externally, e.g. via the
-    # auto-merge label) does not count as live tracking here either (#1336);
-    # the actual record mutation/creation below still runs post-push, this
-    # only decides whether the push itself needs the reuse lease guard.
-    existing_target = (
-        next(
-            (p for p in record.prs
-             if p.branch == feature_branch and not tracking._pr_is_terminal(p)),
-            None,
-        )
-        if record is not None else None
+    # Non-terminal PRRecord (#1336) for this branch, if any -- leases the
+    # reuse push below (#5298); `target` is (re)built post-push below.
+    existing_target = next(
+        (p for p in (record.prs if record is not None else [])
+         if p.branch == feature_branch and not tracking._pr_is_terminal(p)),
+        None,
     )
-    # Reuse-lease guard (#5298): a plain push to a branch we believe is
-    # already tracked/live, but that the remote happens to have diverged or
-    # been deleted out from under us (e.g. a concurrent merge auto-pruned it),
-    # would otherwise either silently overwrite foreign commits or -- read by
-    # git as "create a new branch" when absent -- resurrect a deleted one.
-    # Lease against the branch's LAST-OBSERVED published tip (this record's
-    # own prior ``head_sha``, not a live re-query -- re-querying would just
-    # read back whatever is there right now and trivially "match", defeating
-    # the guard) so either mismatch fails the push atomically. A brand-new
-    # branch (no existing tracked record) has nothing to protect yet, so it
-    # keeps the unleased plain push that lets git create it.
-    lease_expect = existing_target.head_sha if existing_target is not None else ""
+    lease_expect = push_diagnostics.reuse_lease_expect(existing_target)
     with hooks.allow_pr_push():
         pushed = git_ops.push(
             remote, feature_branch, cwd=worktree_path,
-            force_with_lease_expect=(lease_expect or None),
-            force_with_lease=(existing_target is not None),
+            force_with_lease_expect=(lease_expect or None), force_with_lease=(existing_target is not None),
         )
     if not pushed:
         error = f"Failed to (re)push '{feature_branch}' to '{remote}'."

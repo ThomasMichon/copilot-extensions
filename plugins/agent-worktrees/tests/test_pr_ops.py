@@ -5446,7 +5446,7 @@ class TestCreatePRCLIArgs:
 
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
         monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: candidate)
-        monkeypatch.setattr(m, "_resolve_worktree_id", lambda candidate: candidate)
+        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
 
         args = m.build_parser().parse_args([
             "create-pr", wid, "--title", "Add feature",

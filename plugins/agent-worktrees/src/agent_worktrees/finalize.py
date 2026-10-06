@@ -847,13 +847,9 @@ def _push_changes_pr(
                 "branch", "-f", feature, "HEAD", cwd=worktree_path, check=False
             )
 
-        # push-changes always updates an already-published PR head -- lease the
-        # push against its LAST-OBSERVED tip (#5298), never a live re-query
-        # (which would just read back whatever is there right now and
-        # trivially "match", defeating the guard). A mismatch -- the remote
-        # diverged, or the PR merged and its head was auto-pruned -- fails the
-        # push atomically instead of a plain push silently overwriting
-        # foreign commits or resurrecting a deleted branch.
+        # push-changes always updates an already-published PR head -- lease
+        # the push against its LAST-OBSERVED tip, never a live re-query
+        # (#5298; see pr_ops.create_pr's matching guard for the rationale).
         lease_expect = pushed_pr.head_sha if pushed_pr is not None else ""
         with hooks.allow_pr_push():
             pushed = git_ops.push(
@@ -1003,9 +999,7 @@ def _push_changes_pr_refspec(
         if record.repo:
             tracking.record_repo_fetch_confirmed(record.repo)
 
-        # Same reuse-lease guard as `_push_changes_pr` above (#5298): lease
-        # against the LAST-OBSERVED tip, never a live re-query (see the
-        # matching comment above for why that would trivially self-match).
+        # Same reuse-lease guard as `_push_changes_pr` above (#5298).
         lease_expect = pushed_pr.head_sha if pushed_pr is not None else ""
         with hooks.allow_pr_push():
             pushed = git_ops.push(

@@ -3,6 +3,27 @@
 from __future__ import annotations
 
 
+def reuse_lease_expect(*records: object) -> str:
+    """First non-empty ``head_sha`` among optional PR-record-like objects.
+
+    The reuse-lease guard (#5298) for every reuse/incremental PR-branch push
+    (create-pr's reuse path, its re-run fast path, and push-changes) leases
+    against the branch's LAST-OBSERVED published tip -- never a live
+    re-query, which would just read back whatever is there right now and
+    trivially "match", defeating the guard. A mismatch between that
+    remembered tip and the remote's actual current state (divergence, or
+    disappearance e.g. a merge auto-pruning the branch) then fails the push
+    atomically instead of silently overwriting foreign commits or
+    resurrecting a deleted branch. Pass the caller's known PRRecord(s), most
+    specific first; ``None`` entries (an untracked/fresh branch) are skipped.
+    """
+    for record in records:
+        head_sha = getattr(record, "head_sha", "") if record is not None else ""
+        if head_sha:
+            return head_sha
+    return ""
+
+
 def pr_branch_non_fast_forward_hint(*, retry_command: str) -> str:
     """Balanced attribution for a retryable PR-branch push rejection."""
     return (
