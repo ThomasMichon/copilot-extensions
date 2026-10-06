@@ -471,7 +471,19 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     except Exception as exc:
         return output._json_error(str(exc))
 
-    if state.requested_machine:
+    # Self-targeting (--machine <this machine's own name>) must behave like
+    # --machine was never passed -- exactly as the interactive/non-JSON path
+    # already does (its own `state.requested_machine != config.machine` guard
+    # a few lines up, before calling `_try_machine_handoff`). Without this
+    # check, `_emit_remote_plan_for_env` below looks the name up in
+    # machines.yaml with no local-machine awareness at all (unlike
+    # `_load_remote_machines`, which the interactive path's "Other Machines"
+    # menu is built from) and happily emits a real "ssh <this box>" handoff
+    # plan for a caller already running on it -- confirmed live: an
+    # `agent-worktrees copilot`/Worktree Manager flow invoked with this
+    # machine's own alias round-tripped through SSH back to itself instead of
+    # resolving locally.
+    if state.requested_machine and state.requested_machine != getattr(config, "machine", None):
         remote_args: list[str] = []
         if state.use_base:
             remote_args.append("--base")
