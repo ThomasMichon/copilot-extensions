@@ -426,6 +426,12 @@ def test_versioned_slot_lease_mkdir_fallback_behavioral(tmp_path: Path):
 set -uo pipefail
 _VERSIONED_SLOT_LEASE_MKDIR_DIR=""
 _VERSIONED_SLOT_LEASE_FAILURE_REASON=""
+# Override `sleep` for this isolated harness only: the production retry
+# loop's `sleep 1` between attempts is correct for a real installer run,
+# but would add ~10s of real wall-clock time to this guard test for every
+# refused acquisition -- the bounded retry/reclaim behavior under test
+# doesn't depend on that delay actually elapsing.
+sleep() {{ :; }}
 {acquire_fn}
 }}
 {release_fn}
