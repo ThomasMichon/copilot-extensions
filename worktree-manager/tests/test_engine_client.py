@@ -1090,15 +1090,14 @@ def test_resolve_bare_resume_retry_preserves_seed(monkeypatch):
 
 
 def test_resolve_bare_resume_plus_seed_rejection_is_not_treated_as_skew(monkeypatch):
-    """resume-prompt-durable-seed-and-mux-fix review finding: the engine's
-    own deliberate ``--seed is not supported together with --bare-resume``
-    rejection mentions the literal substring ``--bare-resume`` in its error
-    text, same as a genuine version-skew "unrecognized arguments" error
-    would -- but it is NOT an unsupported-flag signal, and must not trigger
-    the compatibility-fallback retry. Retrying would silently convert this
-    rejected combination into an ordinary seeded (non-bare) resume instead
-    of surfacing the engine's real error, exactly the semantic the
-    rejection exists to prevent."""
+    """The engine's own deliberate ``--seed is not supported together with
+    --bare-resume`` rejection mentions the literal substring
+    ``--bare-resume`` in its error text, same as a genuine version-skew
+    "unrecognized arguments" error would -- but it is NOT an
+    unsupported-flag signal, and must not trigger the compatibility-fallback
+    retry. Retrying would silently convert this rejected combination into
+    an ordinary seeded (non-bare) resume instead of surfacing the engine's
+    real error, exactly the semantic the rejection exists to prevent."""
     calls = []
 
     def handler(cmd, kw):

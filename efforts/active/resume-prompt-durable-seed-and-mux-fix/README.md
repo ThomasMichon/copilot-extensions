@@ -470,3 +470,37 @@ _Pending._
     `agent-worktrees`).
   - Full `worktree-manager` suite (1693 tests) and the `agent-worktrees`
     keyword sweep (215 tests) both pass with no regressions.
+- **2026-10-06** — A sixth Copilot review pass found real implementation
+  bugs in the fifth round's own fixes (not new architectural gaps), plus
+  more review-provenance nits:
+  - **`_seed_already_claimed_in` scanned the WHOLE argv, not just the
+    trailing pair (Medium).** A configured launch/profile argument earlier
+    in `plan.cmd` could coincidentally contain the literal `--interactive`
+    token, and the full scan would mistake it for the claimed seed,
+    silently substituting the wrong value. `embody_resume.with_seed` is
+    the sole appender and always appends its pair LAST, so fixed to check
+    only `cmd[-2:]`. New unit test
+    `test_seed_already_claimed_in_only_checks_the_trailing_pair` (direct,
+    plus a no-seed and an empty-cmd case).
+  - **Live-mux seed queuing used the wrong primitive and didn't verify
+    success (Medium, "Previously missed" from the fifth round -- flagged
+    once that round's own fix had landed).** `restore_pending_seed` is a
+    rollback primitive that deliberately never overwrites an EXISTING
+    queued seed (correct for its own restore-on-failure use case) -- using
+    it here meant a genuinely new explicit seed silently lost to an older
+    stale one already queued, and the fifth round's fix also printed
+    "queued" unconditionally, even on a `False` (lock-contention) return
+    where nothing was actually stored. Added a new, distinct primitive,
+    `pending_seed.set_pending_seed` (atomic, unconditional overwrite,
+    returns success), and switched the live-mux call site to it, checking
+    the return value before printing success vs. an explicit "could not
+    queue" message. New tests: `test_set_pending_seed_overwrites_an_existing_one`,
+    `test_set_pending_seed_reports_failure_on_lock_contention`,
+    `test_set_pending_seed_reports_failure_on_unreadable_record`.
+  - **Review-provenance nits (Low, x2):** removed "review finding"/"review
+    process" language from two more test docstrings
+    (`test_engine_client.py`, `test_production_picker_transplant.py`).
+  - Full re-run: `agent-worktrees` keyword sweep (218 tests, +3 from the
+    new `set_pending_seed` tests) and `worktree-manager`'s
+    `test_production_picker_transplant.py`/`test_engine_client.py` (130
+    tests) both pass with no regressions.

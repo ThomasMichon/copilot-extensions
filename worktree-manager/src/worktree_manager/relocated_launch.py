@@ -42,15 +42,19 @@ def _relocated_launch_script():
 
 def _seed_already_claimed_in(plan) -> str | None:
     """Recover a seed ``_resolve_for``'s own ``resolve --json`` call already
-    claimed/embedded into ``plan.cmd`` as ``--interactive <value>`` --
-    covering BOTH an explicit ``--seed`` AND a persisted ``pending_seed``
-    the engine claims (clears) unconditionally on every resolve, regardless
-    of whether this specific call supplied an explicit one. Returns ``None``
-    when no ``--interactive`` argument is present."""
+    claimed/embedded into ``plan.cmd`` as a TRAILING ``--interactive
+    <value>`` pair -- covering BOTH an explicit ``--seed`` AND a persisted
+    ``pending_seed`` the engine claims (clears) unconditionally on every
+    resolve, regardless of whether this specific call supplied an explicit
+    one. Only the trailing pair is checked -- ``embody_resume.with_seed``
+    (the engine's sole appender) always appends it last, and a configured
+    launch/profile argument earlier in ``plan.cmd`` could otherwise contain
+    the same literal ``--interactive`` token, which a full scan would
+    mistake for the claimed seed and silently return instead. Returns
+    ``None`` when the trailing pair is not ``--interactive <value>``."""
     cmd = list(getattr(plan, "cmd", None) or [])
-    for index, token in enumerate(cmd[:-1]):
-        if token == "--interactive":
-            return cmd[index + 1]
+    if len(cmd) >= 2 and cmd[-2] == "--interactive":
+        return cmd[-1]
     return None
 
 

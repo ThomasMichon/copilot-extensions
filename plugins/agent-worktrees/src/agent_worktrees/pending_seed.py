@@ -96,3 +96,29 @@ def restore_pending_seed(path: Path, seed: str) -> bool:
             if attempt < 2:
                 time.sleep(1.0)
     return False
+
+
+def set_pending_seed(path: Path, seed: str) -> bool:
+    """Atomically QUEUE ``seed`` as this record's ``pending_seed``,
+    unconditionally replacing any existing one -- unlike
+    ``restore_pending_seed`` (a rollback primitive that deliberately never
+    overwrites an existing queued seed, since that one may itself be an
+    unconfirmed-delivery restore worth preserving), this is for a caller
+    enqueuing a genuinely NEW, never-yet-claimed seed (e.g. an explicit
+    ``--seed`` typed for a resume that cannot deliver synchronously right
+    now, such as a live-mux reattach) that should take priority over
+    whatever was queued before. Returns True only once the write is
+    confirmed to have landed; a caller must not report the seed as queued
+    on a False return (lock contention -- the seed was NOT stored)."""
+    try:
+        with tracking._RecordLock(path, require_sidecar=True):
+            try:
+                record = tracking.load_record(path)
+            except Exception:
+                return False
+            record.pending_seed = seed
+            record.pending_seed_revision = getattr(record, "pending_seed_revision", 0) + 1
+            tracking.save_record(record, path)
+            return True
+    except TimeoutError:
+        return False

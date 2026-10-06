@@ -50,3 +50,47 @@ def test_an_unreadable_record_reports_the_seed_lost(monkeypatch) -> None:
     monkeypatch.setattr(tracking, "_RecordLock", lambda *a, **k: contextlib.nullcontext())
     monkeypatch.setattr(tracking, "load_record", broken)
     assert pending_seed.settle_claim(Path("wt.yaml"), "do it", _NEVER_TYPED)["seed_lost"] is True
+
+
+def test_set_pending_seed_overwrites_an_existing_one(monkeypatch) -> None:
+    """Unlike ``restore_pending_seed`` (a rollback primitive that never
+    overwrites), ``set_pending_seed`` is for enqueuing a genuinely NEW seed
+    that must take priority over whatever was queued before (e.g. a live
+    mux reattach's explicit --seed outranking a stale leftover one)."""
+    record = SimpleNamespace(pending_seed="stale old seed", pending_seed_revision=3)
+    saved: list[str] = []
+    monkeypatch.setattr(tracking, "_RecordLock", lambda *a, **k: contextlib.nullcontext())
+    monkeypatch.setattr(tracking, "load_record", lambda p: record)
+    monkeypatch.setattr(tracking, "save_record", lambda rec, p: saved.append(rec.pending_seed))
+
+    assert pending_seed.set_pending_seed(Path("wt.yaml"), "the new seed") is True
+
+    assert saved == ["the new seed"]
+    assert record.pending_seed_revision == 4
+
+
+def test_set_pending_seed_reports_failure_on_lock_contention(monkeypatch) -> None:
+    """A False return must mean the seed was NOT stored -- a caller must not
+    report it as queued on this outcome."""
+
+    class Busy:
+        def __init__(self, *a, **k) -> None:
+            pass
+
+        def __enter__(self):
+            raise TimeoutError("sidecar busy")
+
+        def __exit__(self, *a) -> bool:
+            return False
+
+    monkeypatch.setattr(tracking, "_RecordLock", Busy)
+    assert pending_seed.set_pending_seed(Path("wt.yaml"), "do it") is False
+
+
+def test_set_pending_seed_reports_failure_on_unreadable_record(monkeypatch) -> None:
+    def broken(p):
+        raise ValueError("corrupt record")
+
+    monkeypatch.setattr(tracking, "_RecordLock", lambda *a, **k: contextlib.nullcontext())
+    monkeypatch.setattr(tracking, "load_record", broken)
+    assert pending_seed.set_pending_seed(Path("wt.yaml"), "do it") is False

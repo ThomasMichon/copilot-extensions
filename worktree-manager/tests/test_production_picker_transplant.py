@@ -1218,13 +1218,35 @@ def test_run_launch_relocated_script_uses_base_flag_for_anchor_mode(
     assert "--worktree-id" not in argv
 
 
+def test_seed_already_claimed_in_only_checks_the_trailing_pair():
+    """A configured launch/profile argument earlier in ``plan.cmd`` could
+    coincidentally contain the literal ``--interactive`` token -- only the
+    TRAILING pair is ever the claimed seed (``embody_resume.with_seed`` is
+    the sole appender, and always appends it last), so an earlier
+    occurrence must never be mistaken for it."""
+    from worktree_manager.relocated_launch import _seed_already_claimed_in
+
+    plan = type(
+        "Plan", (), {
+            "cmd": ["copilot", "--interactive", "configured, not the seed",
+                    "--resume=sess1", "--interactive", "the real seed"],
+        },
+    )()
+    assert _seed_already_claimed_in(plan) == "the real seed"
+
+    no_seed_plan = type("Plan", (), {"cmd": ["copilot", "--resume=sess1"]})()
+    assert _seed_already_claimed_in(no_seed_plan) is None
+
+    empty_plan = type("Plan", (), {"cmd": []})()
+    assert _seed_already_claimed_in(empty_plan) is None
+
+
 def test_run_launch_relocated_script_forwards_already_claimed_seed(
     monkeypatch, tmp_path,
 ):
-    """resume-prompt-durable-seed-and-mux-fix review finding: the relocated
-    script re-resolves the launch plan ITSELF rather than reusing
-    ``plan.cmd`` -- so a seed the earlier ``_resolve_for`` call already
-    claimed (persisted ``pending_seed`` cleared) and embedded as
+    """The relocated script re-resolves the launch plan ITSELF rather than
+    reusing ``plan.cmd`` -- so a seed the earlier ``_resolve_for`` call
+    already claimed (persisted ``pending_seed`` cleared) and embedded as
     ``--interactive <seed>`` into that now-discarded ``plan.cmd`` must be
     recovered and forwarded as ``--seed`` to this re-invocation, or it is
     silently lost (claimed once, delivered never)."""

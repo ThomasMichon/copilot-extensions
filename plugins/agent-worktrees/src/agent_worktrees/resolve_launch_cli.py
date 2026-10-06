@@ -564,11 +564,22 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             launch_cmd = embody_resume.with_seed(launch_cmd, delivered_seed)
             print("   Seeding first turn once ready.")
     elif not bare_resume and live_mux and explicit_seed:
-        pending_seed_mod.restore_pending_seed(record.yaml_path, explicit_seed)
-        print(
-            "   Live mux session found -- queuing the seed for delivery "
-            "on reattach instead of this unused launch command."
-        )
+        # `set_pending_seed` (never `restore_pending_seed`, a rollback
+        # primitive that deliberately never overwrites an existing queued
+        # seed): this is a genuinely NEW, never-yet-claimed explicit seed
+        # that must take priority over whatever was queued before, and its
+        # success must be confirmed before reporting it as queued -- a
+        # False return (lock contention) means the seed was NOT stored.
+        if pending_seed_mod.set_pending_seed(record.yaml_path, explicit_seed):
+            print(
+                "   Live mux session found -- queuing the seed for delivery "
+                "on reattach instead of this unused launch command."
+            )
+        else:
+            print(
+                "   Live mux session found -- could not queue the seed for "
+                "later delivery (contention); it has been dropped."
+            )
 
     print()
 
