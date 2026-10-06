@@ -66,6 +66,9 @@ def cmd_daemons(rest: list[str]) -> int:
         print()
         print("  (* = live; a mapping is shared across every resident daemon")
         print("   for this root, not attributable to one specific pid)")
+        print("  (attached_clients reflects only what a register() caller supplied --")
+        print("   today's shipped launch scripts never populate it, so it reads 0")
+        print("   even for a genuinely attached session; preliminary listing only)")
         return 0
     print(f"error: unknown daemons action {action!r}")
     return 2

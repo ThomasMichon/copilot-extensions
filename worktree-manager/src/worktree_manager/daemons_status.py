@@ -330,21 +330,36 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
 def mapping_statuses(root: Path | None = None) -> list[dict[str, Any]]:
     """Every mux-session mapping this root's Manager has ever registered.
 
-    The issue's own Phase 1 scope names this alongside the per-daemon
-    identity/health list above: "(via ``mux_daemon.get_mapping``) which
-    worktrees/sessions are attached and whether each is currently busy."
-    The mapping registry (``mux_mapping_registry.MuxMappingRegistry``) is
-    disk-backed and shared by every resident daemon for this root -- it is
-    NOT owned by one specific pid, so this cannot (and does not attempt to)
-    attribute a mapping to a specific daemon process; it reports the same
-    ground truth ``worktree-manager mux-daemon status`` already surfaces
-    per-entry (``mux_daemon.get_mapping``'s own data model), just enumerated
-    for every mapping at once via the registry's ``snapshot()`` rather than
-    one lookup at a time.
+    This is a PRELIMINARY registry-listing command, not the issue's full
+    Phase 1 "attribution slice" -- it does not, and cannot, correlate a
+    live wire connection to a specific project/worktree_id/mux_session
+    identity or that connection's own busy state (no client_id encoding
+    caller identity exists anywhere in the current wire protocol; see
+    ``daemon_statuses()``'s own scope note for the same limitation applied
+    to per-daemon load). What it DOES give, read straight from the
+    Manager's own disk-backed registry (``mux_mapping_registry.
+    MuxMappingRegistry.snapshot()`` -- shared across every resident daemon
+    for this root, not owned by one specific pid): which mappings the
+    Manager has ever registered, each one's own ``live`` flag, and its
+    registry-tracked ``attached_clients`` count.
 
-    This is NOT filtered to currently-live mappings: ``snapshot()`` also
-    returns tombstoned entries (``live: False``), which the registry keeps
-    indefinitely by design (see ``MuxMappingRegistry.remove()``'s own
+    **Known, real limitation in ``attached_clients`` today:** this field is
+    only ever as accurate as whatever a ``register()`` caller actually
+    populates. Both shipped launch paths
+    (``bin/launch-session.sh``/``.ps1``) never pass ``--attached-clients``
+    at all, so normalization (``_normalize_mapping_entry``) defaults it to
+    ``0`` for every real mapping registered today, and nothing refreshes it
+    afterward (status-monitor applies only ever touch
+    ``last_status_rendered_at``). This function reports that value exactly
+    as stored -- it does not invent, estimate, or silently correct it. A
+    genuinely live, actively-attached session can therefore show
+    ``attached_clients: 0`` in production right now; fixing that is
+    separate, tracked follow-on work (populating/refreshing the field at
+    its real source), not something this read-only listing can paper over.
+
+    This is NOT filtered to currently-live mappings either: ``snapshot()``
+    also returns tombstoned entries (``live: False``), which the registry
+    keeps indefinitely by design (see ``MuxMappingRegistry.remove()``'s own
     docstring for why -- a tombstone fences a monotonic revision guard, not
     something safe to drop). Each entry's own ``live`` field is exactly how
     a caller tells the two apart; this function never filters it away.
