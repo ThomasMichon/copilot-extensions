@@ -86,24 +86,6 @@ function Invoke-AwPsmuxPassthrough {
     try { & $muxBin source-file -t $Session $fragment 2>&1 | Out-Null } catch {}
 }
 
-# Set-AwPsmuxServerPriority <session-name>
-#
-# Interim mitigation for psmux#608 (https://github.com/psmux/psmux/issues/608):
-# a multiplexer server starved at Normal priority on a loaded box drops/lags
-# keystrokes. Upstream now defaults to `set -g priority above-normal` for its
-# own server + client processes, but that fix postdates our installed (WinGet)
-# psmux build -- `psmux show-options -g` has no `priority` option yet. Until a
-# release ships with it, bump the server ourselves.
-#
-# Finds THIS session's psmux server by command line (`server -s <session>`),
-# the same ownership-proving pattern Stop-AwOwnedPsmuxSession uses for cleanup
-# -- never by parsing $env:TMUX, whose field order is easy to get backwards
-# (psmux's own docs/integration.md: the first field embeds the server PID, the
-# second is a TCP port, not a pid -- the reverse of vanilla tmux). Matching on
-# the actual `server -s <session>` arguments is unambiguous and immune to that
-# confusion. Best-effort and session-scoped: a failure (or lack of rights,
-# e.g. hitting another user's server on a shared box) never blocks the launch
-# and never touches any process outside this one session's own server.
 function Set-AwPsmuxServerPriority {
     param([string]$Session)
     if ([string]::IsNullOrWhiteSpace($Session)) { return }
@@ -124,4 +106,58 @@ function Set-AwPsmuxServerPriority {
             } catch {}
         }
     } catch {}
+}
+
+# Get-AwMuxCompanionKeybindFragment -ManagerRoot <path>
+#
+# Build (pure, no side effects, no mux dependency) the root-key-table
+# directive that delivers the Mux Companion (visions/mux-companion
+# §mux-bind-keybind-relay): Ctrl+K opens the popup.
+#
+# `uv run --quiet --project <ManagerRoot> -m worktree_manager companion`
+# mirrors launch-session.ps1's own Invoke-ManagedMuxRegister invocation
+# pattern -- resolves the Companion from its own project root directly, no
+# separately-published `worktree-manager` binstub needed. `display-popup -E`
+# closes the popup the instant the Companion process exits (it is a normal
+# TUI app that exits on 'q'/Ctrl+C), so no separate dismiss wiring is needed.
+#
+# NOTE: a clickable status-right region (§mux-bind-clickable-status-region)
+# was prototyped alongside this but is NOT included here -- empirically
+# confirmed (mux-bind-relay effort Journal) that sourcing a
+# `MouseDown1Status` bind-key directive on this psmux build (3.3.5) silently
+# CORRUPTS the session's entire root key table, wiping out this very Ctrl+K
+# binding too (reproduced 3x; a plain re-sourced C-k-only fragment is stable
+# across repeated application). Deferred until that is root-caused on a psmux
+# build that doesn't exhibit it -- shipping it anyway would silently break
+# the one keybind already proven to work.
+#
+# Separated from the side-effecting Invoke-AwMuxCompanionBind below
+# specifically so its exact text is unit-testable without a live mux server
+# (mux-bind-relay effort, Step 1).
+function Get-AwMuxCompanionKeybindFragment {
+    param([Parameter(Mandatory)][string]$ManagerRoot)
+    $popupCmd = "uv run --quiet --project \`"$ManagerRoot\`" -m worktree_manager companion"
+    "bind-key -T root C-k display-popup -E -w 80% -h 80% `"$popupCmd`""
+}
+
+# Invoke-AwMuxCompanionBind <session-name> <manager-root>
+#
+# Apply Get-AwMuxCompanionKeybindFragment's directives to ONE session's psmux
+# server via `source-file` (the same no-op-on-command-line constraint
+# Invoke-AwPsmuxPassthrough documents applies here too). Call this AFTER
+# Invoke-AwPsmuxPassthrough at every call site -- passthrough's own
+# `unbind-key -a -T root` would otherwise wipe this binding if applied first.
+# Best-effort: a failure never blocks the launch.
+function Invoke-AwMuxCompanionBind {
+    param([string]$Session, [string]$ManagerRoot)
+    if ([string]::IsNullOrWhiteSpace($Session)) { return }
+    if ([string]::IsNullOrWhiteSpace($ManagerRoot)) { return }
+    if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) { return }
+    $muxBin = if ($script:AwPsmuxBin) { $script:AwPsmuxBin } else { 'psmux' }
+    $tmpFile = [System.IO.Path]::GetTempFileName()
+    try {
+        Set-Content -LiteralPath $tmpFile -Value (Get-AwMuxCompanionKeybindFragment -ManagerRoot $ManagerRoot) -Encoding ascii
+        & $muxBin source-file -t $Session $tmpFile 2>&1 | Out-Null
+    } catch {}
+    finally { Remove-Item -LiteralPath $tmpFile -ErrorAction SilentlyContinue }
 }

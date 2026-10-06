@@ -240,6 +240,56 @@ def test_windows_launcher_applies_psmux_passthrough_per_session():
     assert ps.count("Invoke-AwPsmuxPassthroughSafe $sessName") >= 2
 
 
+def test_windows_launcher_applies_companion_keybind_after_passthrough():
+    """mux-bind-relay: the Mux Companion's Ctrl+K popup bind must be applied
+    at both create and join (same two call sites as the passthrough fragment),
+    and strictly AFTER Invoke-AwPsmuxPassthroughSafe at each one -- passthrough's
+    own `unbind-key -a -T root` would otherwise silently wipe the Companion
+    binding if applied first."""
+    import re
+
+    ps = _LAUNCH_PS1.read_text()
+    assert "function Invoke-AwMuxCompanionBindSafe" in ps
+    assert ps.count("Invoke-AwMuxCompanionBindSafe $sessName") >= 2
+    # Ordering: every passthrough call site must be followed (not necessarily
+    # immediately, but before the next passthrough call) by a companion-bind
+    # call -- checked pairwise by call-site index.
+    passthrough_idxs = [m.start() for m in re.finditer(r"Invoke-AwPsmuxPassthroughSafe \$sessName", ps)]
+    companion_idxs = [m.start() for m in re.finditer(r"Invoke-AwMuxCompanionBindSafe \$sessName", ps)]
+    assert len(passthrough_idxs) == len(companion_idxs) >= 2
+    for p_idx, c_idx in zip(passthrough_idxs, companion_idxs):
+        assert c_idx > p_idx, (
+            "Invoke-AwMuxCompanionBindSafe must come after its paired "
+            "Invoke-AwPsmuxPassthroughSafe call"
+        )
+
+
+def test_companion_keybind_fragment_builds_the_popup_command():
+    """mux-bind-relay Step 1: the generated root-table directive must bind
+    Ctrl+K to a `display-popup` that resolves the Companion via `uv run`
+    against the caller-supplied ManagerRoot, mirroring
+    Invoke-ManagedMuxRegister's own invocation pattern (no separately-
+    published `worktree-manager` binstub needed) -- and must NOT (yet) bind
+    any MouseDown1Status/mouse-click directive: empirically confirmed
+    (mux-bind-relay effort Journal) that sourcing one on this psmux build
+    corrupts the session's entire root key table, silently wiping the Ctrl+K
+    binding too."""
+    so = (_BIN / "session-options.ps1").read_text()
+    assert "function Get-AwMuxCompanionKeybindFragment" in so
+    assert "function Invoke-AwMuxCompanionBind" in so
+    assert "bind-key -T root C-k display-popup" in so
+    assert "uv run --quiet --project" in so
+    assert "-m worktree_manager companion" in so
+    assert "source-file -t $Session" in so
+    # The corruption finding: no mouse-click directive ships (yet) in any
+    # executable line (comments may reference it to explain why it's absent).
+    code = [
+        ln for ln in so.splitlines()
+        if ln.strip() and not ln.lstrip().startswith("#")
+    ]
+    assert not any("MouseDown1Status" in ln for ln in code)
+
+
 def test_session_options_source_files_passthrough_fragment():
     so = (_BIN / "session-options.ps1").read_text()
     assert "function Invoke-AwPsmuxPassthrough" in so
