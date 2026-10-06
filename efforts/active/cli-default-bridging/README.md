@@ -280,11 +280,19 @@ and ordering before Phase 0 work begins.)_
       exit, bypassing JS exit handlers entirely — confirmed via the
       extension's own per-process debug log showing
       `disposition=stopped-normally` alongside a dead pid and a still-present
-      descriptor). This is a materially different guarantee than Linux
-      provides (where clean-room's SIGTERM-cleanup phase passes 10/10).
-      Bounded, not severed: `bin/list-sessions.mjs`'s dead-pid liveness check
-      reaps the orphaned descriptor immediately on the next run (no need to
-      wait out the heartbeat window) — confirmed. Filed as
+      descriptor). **Precision correction (review-caught):** clean-room's
+      own SIGTERM-cleanup phase signals the extension's pid *directly*, not
+      via a normal CLI-exit path (the scenario never submits a prompt, so
+      there is no natural session end to test against) — so that 10/10 PASS
+      establishes only that **direct-SIGTERM cleanup** works on Linux, not
+      that an ordinary `copilot -p` session's own CLI-driven exit cleans up
+      gracefully there either. Whether Linux's normal CLI-exit teardown path
+      behaves differently from Windows' is genuinely **unverified**, not
+      confirmed-fine — a real open question, left for whoever next revisits
+      this, rather than assumed in either direction.
+      Bounded, not severed regardless: `bin/list-sessions.mjs`'s dead-pid
+      liveness check reaps the orphaned descriptor immediately on the next
+      run (no need to wait out the heartbeat window) — confirmed. Filed as
       [#5427](https://github.com/ThomasMichon/copilot-extensions/issues/5427)
       for a documentation update (Fleet Hygiene section) and a possible
       Windows-specific mitigation; not re-litigated here since it doesn't
@@ -778,8 +786,14 @@ Windows having no real POSIX-signal equivalent for a graceful remote
 shutdown request (`Stop-Process`/`ChildProcess#kill()` map to
 `TerminateProcess`, which never lets JS handlers run) — but it means even
 the CLI's own *normal* end-of-session teardown of the extension subprocess
-behaves like an unhandled kill on this platform, not like the clean exit
-Linux provides (where clean-room's own SIGTERM-cleanup phase passes 10/10).
+behaves like an unhandled kill on this platform. **Precision correction
+(caught in PR review):** clean-room's own SIGTERM-cleanup phase signals the
+extension's own pid *directly*, not via the CLI's normal session-exit path
+(that scenario never submits a prompt, so there's no natural session end to
+compare against) — so it only establishes that **direct-SIGTERM cleanup**
+works on Linux, not that an ordinary CLI-driven session exit does too.
+Whether Linux's own normal-exit teardown differs from Windows' here is
+genuinely unverified, not confirmed either way.
 Reproduced twice (different session ids, different pids) to rule out a
 fluke before concluding anything.
 
