@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import logging
 import shlex
+from collections.abc import Callable
 from pathlib import Path
 
 from .config import DOTFILES_DIR, ProvisionConfig, ProvisionFile
@@ -207,3 +208,36 @@ def build_provision_command(
         return None
 
     return "; ".join(parts)
+
+
+def dispatch_provision_command(
+    cfg, codespace: str | None, lookup_repo: Callable[[str], str | None],
+) -> str:
+    """The provision command agent-bridge's dispatch path runs on a CodeSpace.
+
+    The process-to-process seam (``agent-codespaces provision-command``) the
+    bridge shells out to instead of importing this package, so a fix here
+    reaches the dispatch path with no bridge redeploy (the #733 class). Always
+    starts with the relay/auth-helper (re)install. With ``codespace`` set, the
+    adopted repo's provision hooks (global + ``repos.<repo>.provision`` files
+    and ``on_connect``, never ``on_create``) follow in their own subshell, so a
+    bridge dispatch applies the same hooks ``agent-codespaces ssh`` does
+    (#5441). Hook resolution is best-effort: on any failure the relay command
+    is returned on its own.
+    """
+    from .codespace_assets import build_provision_command as build_relay_command
+
+    command = build_relay_command(ado_host=getattr(cfg.credentials, "ado_host", None))
+    if not codespace:
+        return command
+    try:
+        repo = None
+        if any(rc.provision for rc in cfg.repos.values()):
+            repo = lookup_repo(codespace)
+        hooks = build_provision_command(cfg.provision_for_repo(repo))
+    except Exception:
+        log.warning("Could not resolve repo provision hooks for %s", codespace, exc_info=True)
+        return command
+    if not hooks:
+        return command
+    return f"{command.rstrip()}\n( {hooks} )\n"

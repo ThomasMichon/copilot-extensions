@@ -31,6 +31,7 @@ import subprocess
 from pathlib import Path
 
 from . import config as cfg
+from . import machine_identity
 from . import tracking
 
 #: Escape hatch: set truthy to disable cross-machine SSH probing entirely, so a
@@ -229,12 +230,18 @@ def resolve_claimant_alive(
     parsed = tracking.parse_claim_ref(owner_ref)
     if parsed is None:
         return None
-    try:
-        this_machine = cfg.load_config().machine
-    except Exception:
-        this_machine = None
-    same_machine = not (
-        parsed.machine and this_machine and parsed.machine != this_machine)
+    if not parsed.machine:
+        same_machine = True
+    else:
+        try:
+            config = cfg.load_config()
+        except Exception:
+            # Can't resolve local identity -- fail open to local, matching
+            # the prior behavior of treating an unresolvable this_machine
+            # as "same machine" rather than risking an SSH probe.
+            same_machine = True
+        else:
+            same_machine = machine_identity.is_local_machine(parsed.machine, config)
     if same_machine:
         return local_claimant_alive(owner_ref)
     if not allow_remote or os.environ.get(_NO_REMOTE_ENV):

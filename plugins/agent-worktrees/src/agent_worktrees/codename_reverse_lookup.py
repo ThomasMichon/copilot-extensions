@@ -46,6 +46,7 @@ from dataclasses import dataclass
 
 from . import claimant
 from . import config as cfg
+from . import machine_identity
 
 #: Escape hatch: set truthy to disable the cross-machine SSH scan entirely
 #: (mirrors ``claimant.py``'s ``AGENT_WORKTREES_NO_REMOTE_CLAIMANT``), so a
@@ -98,7 +99,12 @@ def _known_machine_keys(*, exclude: str | None) -> list[str]:
         return []
     keys = []
     for key, entry in entries.items():
-        if exclude and key == exclude:
+        # Canonicalize before excluding -- a naive `key == exclude` string
+        # check misses the local machine whenever it's spelled differently
+        # than `exclude` (e.g. a machines.yaml key vs. its alias, or a raw
+        # COMPUTERNAME vs. the canonical alias), silently keeping it in the
+        # cross-machine SSH scan and probing this very machine over SSH.
+        if exclude and machine_identity.is_local_machine(key, config):
             continue
         if not getattr(entry, "copilot", True) or not entry.ssh_ready:
             continue
@@ -150,7 +156,19 @@ def _probe_machine(
     Every failure mode -- unresolvable machine, ssh error, timeout,
     unparseable/negative response -- degrades to ``None`` (no match), never
     raises. Mirrors ``claimant.py``'s ``_remote_claimant_alive`` shape.
+
+    Defense in depth: refuses to SSH when *machine_key* actually resolves to
+    THIS machine (canonicalized via :func:`machine_identity.is_local_machine`,
+    not a bare
+    string comparison) even when called directly rather than through
+    :func:`resolve_codename_cross_machine`'s already-filtered scan.
     """
+    try:
+        config = cfg.load_config()
+    except Exception:
+        config = None
+    if config is not None and machine_identity.is_local_machine(machine_key, config):
+        return None
     resolved = claimant.resolve_machine_ssh(machine_key)
     if resolved is None:
         return None

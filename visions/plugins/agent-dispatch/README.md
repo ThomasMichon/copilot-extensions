@@ -7,7 +7,7 @@
 - **Scope:** branch (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-09-25
+- **Last revised:** 2026-10-05
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -1050,6 +1050,18 @@ should run* converging on the declarations, while an override is a human's
 declaration notwithstanding — and, crucially, a later re-sync of the declaration
 does **not** quietly undo it.
 
+### inherits-runtime-service-invariants
+The supervisor/coordinator singleton is itself a plugin-services runtime
+subject to that vision's cross-cutting contract — it does not get a
+bespoke install/update story. Updating the supervisor's own payload is
+**zero-downtime** for in-flight supervised work: an update installs the new
+immutable runtime generation **beside** the running one — never mutating the
+active generation's files in place — then uses *zero-downtime-cutover* to
+drain and hand off supervised work to the new generation before the old one
+retires (*register-once-cutover-on-update*). This is inherited from
+[plugin-services](../../plugin-services/README.md), not restated as a
+parallel contract.
+
 ## Non-Goals / Boundaries
 
 - **Not the live-conversation layer.** Driving or messaging a running agent
@@ -1081,6 +1093,9 @@ does **not** quietly undo it.
 
 - Parent vision: [agent-fabric](../../agent-fabric/README.md) — §Concepts/
   *agent-dispatch — the delegation layer*.
+- Cross-cutting invariant vision: [plugin-services](../../plugin-services/README.md) —
+  the design/service contract *inherits-runtime-service-invariants* carries
+  for the supervisor/coordinator's own install/update lifecycle.
 - Child leaf: [reviewer loops](reviewer/README.md) — the cooperative reviewer
   archetype's identity, verdict, reuse, and reliability contract.
 - Child leaf: [repository-issue-loops](repository-issue-loop/README.md) — the
@@ -1121,6 +1136,11 @@ does **not** quietly undo it.
 
 ## Provenance
 
+- **2026-10-05** — Added *inherits-runtime-service-invariants*: Direction 1
+  of the `backporting-visions` design/service-invariant audit found this
+  vision did not cite or restate the applicable `plugin-services` invariants
+  (*register-once-cutover-on-update*, *immutable-versioned-runtime*) for the
+  supervisor/coordinator's own runtime.
 - **2026-10-02** — Added *extend-any-declaration*: generalizes the
   plugin-shipped `extends:` mechanism (which today only resolves against a
   small set of named, plugin-shipped recipes, with scalar-only override
