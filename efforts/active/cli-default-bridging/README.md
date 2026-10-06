@@ -245,7 +245,7 @@ and ordering before Phase 0 work begins.)_
       machine is a now-reachable fifth venue candidate alongside the four
       named validation tracks; fold it into "a local machine" or add it
       explicitly when scoping this item.)
-      **Container done** (clean-room, this session):
+      **Container done** (clean-room, prior session):
       `tools/clean-room/scenarios/agent-remote-driver-solo/` drives a real
       live `copilot` session end-to-end in a disposable, fresh-machine
       container with ONLY this plugin installed (no agent-worktrees/
@@ -264,14 +264,43 @@ and ordering before Phase 0 work begins.)_
       extension-bearing plugins, e.g. `agent-worktrees`' own
       `copilot-extensions-setup` skill) — this plugin's own README never
       said so. Fixed in `plugins/agent-remote-driver/README.md`'s *Install*
-      and troubleshooting sections. **Still open: local machine (bare host,
-      non-container) and a CodeSpace venue.** The container run is a
-      genuine, harder-than-average proof of the plugin's own standalone
-      claim, but it is not itself a substitute for the other two named
-      venues — a disposable Docker container is not "a local machine," and
-      `agent-codespaces`' `codespacePlugins` injection seam is untested
-      here. Left as the remaining items before this checklist entry fully
-      closes.
+      and troubleshooting sections.
+      **Local machine done** (this session, real bare Windows host — not a
+      container): installed `agent-remote-driver@copilot-extensions` from
+      the real public marketplace (`main` branch, post-promotion) into this
+      machine's own `~/.copilot/settings.json`, then ran a real `copilot -p`
+      session with no `--plugin-dir` staging. Confirmed: discovery
+      descriptor written, `/health` and `/send` answer over loopback with
+      the descriptor's bearer token, `bin/list-sessions.mjs --json` lists
+      the live session. A genuine, reproduced-twice **Windows-specific gap**
+      surfaced and was NOT silently absorbed: a normal, successful session
+      exit does not trigger the extension's `process.on("exit", ...)`
+      cleanup on Windows (the host CLI's own child-process teardown appears
+      to use a forceful `TerminateProcess`-equivalent kill even on a clean
+      exit, bypassing JS exit handlers entirely — confirmed via the
+      extension's own per-process debug log showing
+      `disposition=stopped-normally` alongside a dead pid and a still-present
+      descriptor). **Note:** clean-room's own SIGTERM-cleanup phase signals
+      the extension's pid *directly*, not
+      via a normal CLI-exit path (the scenario never submits a prompt, so
+      there is no natural session end to test against) — so that 10/10 PASS
+      establishes only that **direct-SIGTERM cleanup** works on Linux, not
+      that an ordinary `copilot -p` session's own CLI-driven exit cleans up
+      gracefully there either. Whether Linux's normal CLI-exit teardown path
+      behaves differently from Windows' is genuinely **unverified**, not
+      confirmed-fine — a real open question, left for whoever next revisits
+      this, rather than assumed in either direction.
+      Bounded, not severed regardless: `bin/list-sessions.mjs`'s dead-pid
+      liveness check reaps the orphaned descriptor immediately on the next
+      run (no need to wait out the heartbeat window) — confirmed. Filed as
+      [#5427](https://github.com/ThomasMichon/copilot-extensions/issues/5427)
+      for a documentation update (Fleet Hygiene section) and a possible
+      Windows-specific mitigation; not re-litigated here since it doesn't
+      block this checklist item (launch-time presence + the full HTTP
+      surface were the thing being proven, and both hold).
+      **Still open: a CodeSpace venue** — `agent-codespaces`' own
+      `codespacePlugins` injection seam remains untested. Left as the one
+      remaining item before this checklist entry fully closes.
 
 ### Phase 2 — Driver exclusivity arbitration for mux-hosted sessions
 
@@ -729,3 +758,65 @@ in the container.
 
 Phase 2 (driver-exclusivity arbitration) has not been started; `effort-focus`
 should be re-bound to its exact heading before that work begins.
+
+### 2026-10-05 (cont'd) — Phase 1 local-machine validation (real bare Windows host)
+
+Picked up Phase 1's remaining "local machine" leg. `main` had been promoted
+past the agent-remote-driver merge commit in the interim (confirmed via
+`git show origin/main:plugins/agent-remote-driver/plugin.json`), so this was
+a genuine public-marketplace install — no `--plugin-dir` staging, no local
+worktree mount, just `copilot plugin install agent-remote-driver@copilot-extensions`
+against the real `ThomasMichon/copilot-extensions` marketplace from this
+operator's own `~/.copilot/settings.json` (backed up first, restored after).
+
+Confirmed working end-to-end on this real Windows host: a live `copilot -p`
+session writes its discovery descriptor; `/health` and `/send` answer over
+loopback with the descriptor's bearer token; `bin/list-sessions.mjs --json`
+lists the live session correctly. This closes the launch-time-presence
+proof the checklist item actually asks for.
+
+**A real, reproduced-twice Windows-specific gap surfaced and was not
+papered over:** a normal, successful session exit does NOT trigger the
+extension's `process.on("exit", cleanupDescriptor)` handler on Windows —
+confirmed via the extension's own per-process debug log
+(`=== exit code=1 disposition=stopped-normally ===`) alongside a
+`Get-Process -Id <pid>` confirming the process was actually dead while its
+descriptor file remained on disk. This is architecturally consistent with
+Windows having no real POSIX-signal equivalent for a graceful remote
+shutdown request (`Stop-Process`/`ChildProcess#kill()` map to
+`TerminateProcess`, which never lets JS handlers run) — but it means even
+the CLI's own *normal* end-of-session teardown of the extension subprocess
+behaves like an unhandled kill on this platform. **Precision correction
+(caught in PR review):** clean-room's own SIGTERM-cleanup phase signals the
+extension's own pid *directly*, not via the CLI's normal session-exit path
+(that scenario never submits a prompt, so there's no natural session end to
+compare against) — so it only establishes that **direct-SIGTERM cleanup**
+works on Linux, not that an ordinary CLI-driven session exit does too.
+Whether Linux's own normal-exit teardown differs from Windows' here is
+genuinely unverified, not confirmed either way.
+Reproduced twice (different session ids, different pids) to rule out a
+fluke before concluding anything.
+
+Checked whether this breaks the plugin's own stated self-healing contract:
+it does not. `bin/list-sessions.mjs --json`, run immediately after
+reproducing the gap, swept the orphaned descriptor away right away — its
+dead-pid liveness check doesn't wait out the heartbeat window, so the
+practical exposure window is just "until the next session starts or
+`list-sessions` runs," not indefinite. Filed
+[#5427](https://github.com/ThomasMichon/copilot-extensions/issues/5427)
+with full repro evidence and a recommended doc update (the Fleet Hygiene
+section should carry this platform caveat) rather than silently absorbing
+or re-fixing it inline — the likely root cause (the host CLI's own
+process-teardown mechanics) may not be something this plugin's code can
+control at all, so it needs its own scoped investigation rather than a
+rushed fix bundled into this validation pass.
+
+Restored the operator's `~/.copilot/settings.json` to its pre-test state
+(plugin payload remains installed on disk but disabled, harmless) and
+cleaned up the scratch test directories — no persistent side effect left
+on this machine from the validation itself, only the (desired) issue filed
+and the effort doc updated.
+
+**Phase 1 checklist status:** local machine + container both done; **only
+a CodeSpace venue remains** before this item closes. Phase 2
+(driver-exclusivity arbitration) still has not been started.
