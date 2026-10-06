@@ -48,14 +48,27 @@ def _resolve_commit(repo_root: Path, ref: str) -> str:
     import subprocess
 
     try:
-        from ancestor_resolution import scrubbed_git_env
+        from ancestor_resolution import scrubbed_git_env, _GIT_TIMEOUT_S
     except ModuleNotFoundError:
-        from tools.coverage_guided_selection.ancestor_resolution import scrubbed_git_env
+        from tools.coverage_guided_selection.ancestor_resolution import (
+            scrubbed_git_env,
+            _GIT_TIMEOUT_S,
+        )
 
-    proc = subprocess.run(
-        ["git", "rev-parse", ref], cwd=repo_root, capture_output=True, text=True,
-        check=False, env=scrubbed_git_env(),
-    )
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", ref], cwd=repo_root, capture_output=True, text=True,
+            check=False, env=scrubbed_git_env(), timeout=_GIT_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as exc:
+        # See ThomasMichon/copilot-extensions#5340: an un-timed subprocess
+        # call here hung until the CI job's own wall-clock timeout killed
+        # it, defeating this step's `continue-on-error: true`. Raising
+        # here is caught by `build_decision_payload`'s own broad except
+        # and reported as a fast `mode: "error"` decision instead.
+        raise RuntimeError(
+            f"git rev-parse {ref} timed out after {_GIT_TIMEOUT_S}s"
+        ) from exc
     if proc.returncode != 0:
         raise RuntimeError(f"git rev-parse {ref} failed: {proc.stderr.strip()}")
     return proc.stdout.strip()

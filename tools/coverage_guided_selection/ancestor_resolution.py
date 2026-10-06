@@ -98,15 +98,30 @@ def scrubbed_git_env() -> dict[str, str]:
     return env
 
 
+#: Every `git` plumbing call in this module is a cheap, local metadata
+#: lookup (rev-parse, merge-base) with no network I/O -- it should return in
+#: well under a second. A bound is applied anyway so a pathological repo
+#: state (e.g. a lock contention or a genuinely corrupt object) degrades to
+#: a clear, fast `AncestorResolutionError` instead of hanging until an
+#: *external* wall-clock timeout (a CI job's own timeout-minutes) kills the
+#: whole process -- see ThomasMichon/copilot-extensions#5340.
+_GIT_TIMEOUT_S = 30.0
+
+
 class AncestorResolutionError(RuntimeError):
     """Raised when git plumbing needed for resolution fails unexpectedly."""
 
 
 def _git(args: list[str], *, cwd: Path) -> str:
-    proc = subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=False,
-        env=scrubbed_git_env(),
-    )
+    try:
+        proc = subprocess.run(
+            ["git", *args], cwd=cwd, capture_output=True, text=True, check=False,
+            env=scrubbed_git_env(), timeout=_GIT_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AncestorResolutionError(
+            f"git {' '.join(args)} timed out after {_GIT_TIMEOUT_S}s"
+        ) from exc
     if proc.returncode != 0:
         raise AncestorResolutionError(
             f"git {' '.join(args)} failed (exit {proc.returncode}): "
@@ -122,11 +137,16 @@ def is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
     else (128, a missing/unreachable commit) is a genuine plumbing failure
     this surfaces loudly rather than silently treating as "no".
     """
-    proc = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
-        cwd=repo_root, capture_output=True, text=True, check=False,
-        env=scrubbed_git_env(),
-    )
+    try:
+        proc = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+            cwd=repo_root, capture_output=True, text=True, check=False,
+            env=scrubbed_git_env(), timeout=_GIT_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AncestorResolutionError(
+            f"git merge-base --is-ancestor timed out after {_GIT_TIMEOUT_S}s"
+        ) from exc
     if proc.returncode not in (0, 1):
         raise AncestorResolutionError(
             "git merge-base --is-ancestor failed unexpectedly "
