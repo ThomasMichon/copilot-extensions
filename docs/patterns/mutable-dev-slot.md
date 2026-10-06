@@ -335,7 +335,15 @@ for every other cutover/repair path in this repo:
    immediately before removing it (its owner/lock/routing agreement may
    have changed between step 1's detection and this action) rather than
    trusting a stale snapshot — if nothing was ever live on it, this
-   collapses to an immediate, uneventful removal.
+   collapses to an immediate, uneventful removal. **The target is
+   confirmed unhealthy, so its control endpoint may not be able to close
+   admission or complete an ordinary drain at all.** When the broken slot
+   is unreachable for a clean drain, follow *graceful-daemon-cutover*'s own
+   fallback exactly: commit forward on the confirmed promotion (already
+   satisfied by step 4) within a bounded, logged timeout rather than
+   blocking repair indefinitely on a drain that may never complete, and
+   never route anything back to the known-broken slot regardless of how
+   its retirement concludes.
 
 Because the replacement is built under its own distinct identity and
 promoted before the broken slot is ever touched, this satisfies

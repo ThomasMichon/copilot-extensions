@@ -204,12 +204,15 @@ for the full design.
   flagged that an earlier delete-and-rebuild-same-version draft of the
   latter still violated `immutable-versioned-runtime`'s rollback guarantee;
   it now reuses `graceful-daemon-cutover`'s existing serialize/promote-
-  before-retire/drain contract under a distinct generation identity, with
-  that identity required to propagate through any running-version
-  comparison too) and prioritized Phase 3's rollout list with the specific
-  plugins that audit identified, plus a new Phase 3 validation item
-  requiring both halves (refusal guard + `dev`/`dev-release`) per plugin
-  before checking it off.
+  before-retire/drain contract (plus its commit-forward fallback for a
+  repair target too unhealthy to drain cleanly) under a distinct
+  generation identity, with that identity required to propagate through
+  any running-version comparison too) and prioritized Phase 3's rollout
+  list with the specific plugins that audit identified, plus a new Phase 3
+  validation item requiring all three pieces (refusal guard,
+  distinct-generation repair path with its operator-guidance
+  reconciliation, and `dev`/`dev-release`) per plugin before checking it
+  off.
 
 ### 2026-09-23 — Phase 1 landed
 - Core primitive, tests, GC protection, finalize warning hook, and design
