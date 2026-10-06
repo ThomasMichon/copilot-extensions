@@ -2790,6 +2790,52 @@ def test_cli_consume_completes_and_prints_payload(server_url, client, monkeypatc
     assert client.get(tid)["status"] == Status.COMPLETED
 
 
+def test_cli_consume_refuses_superseded_handoff(server_url, client, monkeypatch, capsys):
+    """A handoff abandoned because a newer one superseded it is refused (exit
+    3), not delivered: a successor seeded with the stale baton must stand down
+    instead of running the old brief alongside the newer handoff's successor."""
+    import argparse
+
+    from agent_dispatch import __main__
+    from tests._helpers import TEST_REPO
+
+    task = client.create(
+        "handoff",
+        proposed=True,
+        labels=["handoff"],
+        target_worktree="wt-1",
+        payload_inline="STALE-BRIEF",
+        repo=TEST_REPO,
+    )
+    tid = task["id"]
+    client.abandon(
+        tid, permitted=True, reason="superseded by a newer handoff for this worktree"
+    )
+
+    monkeypatch.setattr(__main__, "_client", lambda args: DispatchClient(server_url))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: TEST_REPO)
+    args = argparse.Namespace(
+        task_id=tid,
+        worker_id=None,
+        machine="m1",
+        worktree="wt-1",
+        repo=None,
+        result_ref=None,
+        url=None,
+        token=None,
+    )
+
+    assert __main__._cmd_consume(args) == 3
+    captured = capsys.readouterr()
+    out = captured.out
+    assert "retired (abandoned)" in out
+    assert "wt-1" in out
+    assert "STALE-BRIEF" not in out
+    # context-handoff surfaces stderr first when consume fails.
+    assert "retired" in captured.err and "do not act" in captured.err
+    assert client.get(tid)["status"] == Status.ABANDONED
+
+
 # -- satellite presence registry ---------------------------------------------
 
 
