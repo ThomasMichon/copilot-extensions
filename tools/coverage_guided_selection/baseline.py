@@ -131,21 +131,26 @@ _DRIVER_SCRIPT = textwrap.dedent(
             # phase-level split -- this baseline only ever needed "which
             # test" per line, never phase-level granularity.
             #
-            # `tryfirst=True` is required, not cosmetic (review finding):
-            # this plugin is registered via `pytest.main(..., plugins=
-            # [...])` before a project's own conftest.py plugins load.
-            # Pluggy calls same-hook implementations in reverse
-            # registration order by default, so a downstream conftest's
-            # own `pytest_runtest_setup` hookimpl (if one exists) would
-            # otherwise run *before* this switch and get its source lines
-            # attributed to the previous test (or no test at all). The
-            # old pytest-cov context plugin never had this risk -- it
-            # registered at session start, after every conftest.
-            @pytest.hookimpl(tryfirst=True)
+            # `tryfirst=True` alone is not sufficient: it only orders
+            # non-wrapper implementations relative to each other, while a
+            # hookwrapper (a conftest's own `pytest_runtest_setup` can be
+            # one) always runs its pre-yield body outermost, before any
+            # ordinary implementation regardless of priority. Making this
+            # itself a `tryfirst` hookwrapper puts it outside every
+            # ordinary implementation *and* every other wrapper, so the
+            # context switch always lands before any downstream setup
+            # code -- hook or hookwrapper -- can execute and get
+            # misattributed to the previous test (or no test at all).
+            # This plugin is registered via `pytest.main(..., plugins=
+            # [...])`, before a project's own conftest.py plugins load,
+            # so registration order alone would otherwise run a
+            # downstream conftest's own setup code first.
+            @pytest.hookimpl(wrapper=True, tryfirst=True)
             def pytest_runtest_setup(self, item):
                 cov = coverage.Coverage.current()
                 if cov is not None:
                     cov.switch_context(item.nodeid)
+                return (yield)
 
         # Managed directly via the `coverage` API rather than
         # pytest-cov's own `--cov=`/`--cov-context=test` CLI options --
@@ -178,8 +183,7 @@ _DRIVER_SCRIPT = textwrap.dedent(
         # own .coveragerc/pyproject.toml may set for its own reasons --
         # `coverage.Coverage()` still reads that config and would
         # re-enable a generated suffix, silently reintroducing the exact
-        # race this fix exists to close (flagged in review; see
-        # ThomasMichon/copilot-extensions#5471).
+        # race this fix exists to close.
         cov = coverage.Coverage(
             data_file=cov_data_file, source=[cov_source], data_suffix=False
         )

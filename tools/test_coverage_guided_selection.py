@@ -1135,19 +1135,21 @@ def test_collect_baseline_attributes_fixture_setup_and_teardown_coverage(
 def test_collect_baseline_attributes_a_conftest_setup_hook_to_the_right_test(
     tmp_path: Path,
 ) -> None:
-    # Regression test for a review finding on this same fix
-    # (ThomasMichon/copilot-extensions#5471): `_ContextSwitcher` is
-    # registered via `pytest.main(..., plugins=[...])`, which happens
-    # *before* a project's own conftest.py plugins are loaded. Pluggy
-    # calls same-hook implementations in reverse registration order by
-    # default, so without `tryfirst=True` a conftest's own
-    # `pytest_runtest_setup` hookimpl (not a fixture -- an actual hook,
-    # rarer but real) would run *before* our context switch and get its
-    # own source lines attributed to the *previous* test. Constructs two
-    # back-to-back tests plus a conftest-level `pytest_runtest_setup` hook
-    # that executes a line only it ever reaches, and confirms that line is
-    # attributed to the test whose setup is actually running (the second
-    # test), never the one before it.
+    # Regression test for pytest's own hook-ordering semantics:
+    # `_ContextSwitcher`'s hook is registered via `pytest.main(...,
+    # plugins=[...])`, which happens *before* a project's own conftest.py
+    # plugins are loaded. Pluggy calls same-hook implementations in
+    # reverse registration order by default, and a hookwrapper always
+    # runs its pre-yield body outermost regardless of priority -- so
+    # without the context switch itself being a `tryfirst` hookwrapper, a
+    # conftest's own `pytest_runtest_setup` implementation (an ordinary
+    # hookimpl or a hookwrapper; not a fixture) could run *before* the
+    # switch and get its own source lines attributed to the *previous*
+    # test. Constructs two back-to-back tests plus a conftest-level
+    # `pytest_runtest_setup` hookwrapper that executes a line only it
+    # ever reaches, and confirms that line is attributed to the test
+    # whose setup is actually running (the second test), never the one
+    # before it.
     if os.environ.get("CGS_RUN_INTEGRATION_TEST") != "1":
         pytest.skip(
             "opt-in only: set CGS_RUN_INTEGRATION_TEST=1 to run the real "
@@ -1167,10 +1169,13 @@ def test_collect_baseline_attributes_a_conftest_setup_hook_to_the_right_test(
     (tests_dir / "conftest.py").write_text(
         "import sys\n"
         "sys.path.insert(0, str((__import__('pathlib').Path(__file__).parent.parent / 'src')))\n"
+        "import pytest\n"
         "from helper import conftest_hook_only_line\n"
         "\n\n"
+        "@pytest.hookimpl(wrapper=True)\n"
         "def pytest_runtest_setup(item):\n"
         "    conftest_hook_only_line()\n"
+        "    return (yield)\n"
     )
     (tests_dir / "test_ordering.py").write_text(
         "def test_a():\n"
@@ -1196,12 +1201,12 @@ def test_collect_baseline_attributes_a_conftest_setup_hook_to_the_right_test(
         for test_id in tests
     }
     assert any("test_b" in t for t in attributed_tests), (
-        "a conftest setup hook's own line, executed during test_b's own "
-        "setup, must be attributed to test_b -- without `tryfirst=True` "
-        "on the context switcher, the conftest hook (registered later, "
-        "so called earlier under pluggy's default LIFO order) would run "
-        "before the switch and get misattributed to the stale, still-"
-        f"previous-test context instead; got {attributed_tests!r}"
+        "a conftest setup hookwrapper's own line, executed during test_b's "
+        "own setup, must be attributed to test_b -- without the context "
+        "switcher itself being a tryfirst hookwrapper, the conftest "
+        "wrapper's pre-yield body would run before the switch and get "
+        "misattributed to the stale, still-previous-test context "
+        f"instead; got {attributed_tests!r}"
     )
 
 
