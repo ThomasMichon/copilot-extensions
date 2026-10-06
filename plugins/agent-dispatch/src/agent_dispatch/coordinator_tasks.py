@@ -267,11 +267,32 @@ def _task_dict(task: Task) -> dict:
     return asdict(task)
 
 
+def _run_waiter_summary(queue: TaskQueue, task_id: str) -> dict | None:
+    """The active `run --detach` waiter for a task, trimmed to what a
+    caller (the Tasks board, a claim-status callback, `agent-dispatch show`)
+    actually needs to explain *why* a suspended task is suspended: the exact
+    blocking-wait command, when it was armed, and its state. Returns ``None``
+    when no waiter is currently active (including for a task that was never
+    suspended via `run --detach` at all -- e.g. a plain operator suspend)."""
+    waiter = queue.get_active_run_waiter(task_id)
+    if waiter is None:
+        return None
+    return {
+        "command": waiter["command"],
+        "state": waiter["state"],
+        "created_at": waiter["created_at"],
+        "updated_at": waiter["updated_at"],
+    }
+
+
 def _task_with_spawn_dict(queue: TaskQueue, task: Task) -> dict:
     result = asdict(task)
     latest = queue.latest_reservation(task.id)
     if latest is not None:
         result["spawn_reservation"] = asdict(latest)
+    run_waiter = _run_waiter_summary(queue, task.id)
+    if run_waiter is not None:
+        result["run_waiter"] = run_waiter
     return result
 
 
@@ -475,6 +496,23 @@ def register_task_routes(
             limit=limit,
         )
         return [_bulk_task_dict(t) for t in tasks]
+
+    @app.get("/run-waiters")
+    def list_run_waiters() -> dict[str, dict]:
+        """Every currently-active `run --detach` waiter, keyed by task id --
+        a single bulk lookup so a board/list consumer can explain *why* each
+        suspended task is suspended (the exact blocking-wait command) without
+        an N+1 per-task query. Trimmed the same way :func:`_run_waiter_summary`
+        trims the single-task shape, for one consistent wire shape either way."""
+        return {
+            waiter["task_id"]: {
+                "command": waiter["command"],
+                "state": waiter["state"],
+                "created_at": waiter["created_at"],
+                "updated_at": waiter["updated_at"],
+            }
+            for waiter in queue.list_active_run_waiters()
+        }
 
     @app.get("/tasks/mine")
     def mine(machine: str, worktree: str, repo: str | None = None) -> dict:

@@ -843,6 +843,90 @@ def test_register_run_waiter_publishes_bus_event(api):
     )
 
 
+def test_get_task_surfaces_active_run_waiter(api):
+    """2026-10-05: `GET /tasks/{id}` must expose the exact blocking-wait
+    command of an active `run --detach` waiter (the Tasks board/claim-status
+    enrichment both read this field), and must NOT carry a `run_waiter` key
+    at all once no waiter is active -- a bare, never-suspended task predates
+    this feature just as cleanly as one whose waiter already retired."""
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    assert "run_waiter" not in api.get(f"/tasks/{tid}").json()
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    api.post(
+        f"/tasks/{tid}/owner-session",
+        json={"worker_id": "w1", "owner_session_id": "session-1"},
+    )
+    command = ["agent-worktrees", "pr-watch", "wait", "o/r", "570"]
+    prepared = api.post(
+        f"/tasks/{tid}/run-waiter/register",
+        json={
+            "worker_id": "w1",
+            "reason": "waiting on author",
+            "host": "host-1",
+            "resume_worktree": "wt-1",
+            "command": command,
+        },
+    ).json()
+    # Still just "preparing" -- not yet confirmed alive, so not surfaced.
+    assert "run_waiter" not in api.get(f"/tasks/{tid}").json()
+    armed = api.post(
+        f"/tasks/{tid}/run-waiter/arm",
+        json={
+            "generation": prepared["generation"],
+            "pid": 4242,
+            "host": "host-1",
+            "start_token": "tok-1",
+        },
+    )
+    assert armed.status_code == 200
+    task = api.get(f"/tasks/{tid}").json()
+    assert task["run_waiter"]["command"] == command
+    assert task["run_waiter"]["state"] == "active"
+
+
+def test_bulk_run_waiters_endpoint_keys_by_task_id(api):
+    """2026-10-05: `GET /run-waiters` is the Tasks board's single bulk
+    lookup (no N+1 per-row query) -- every currently-active waiter, keyed by
+    task id, with the same trimmed shape `GET /tasks/{id}`'s `run_waiter`
+    field carries."""
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    assert api.get("/run-waiters").json() == {}
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    api.post(
+        f"/tasks/{tid}/owner-session",
+        json={"worker_id": "w1", "owner_session_id": "session-1"},
+    )
+    command = ["agent-worktrees", "pr-watch", "wait", "o/r", "570"]
+    prepared = api.post(
+        f"/tasks/{tid}/run-waiter/register",
+        json={
+            "worker_id": "w1",
+            "reason": "waiting on author",
+            "host": "host-1",
+            "resume_worktree": "wt-1",
+            "command": command,
+        },
+    ).json()
+    # Still just "preparing" -- the bulk endpoint only lists active waiters.
+    assert api.get("/run-waiters").json() == {}
+    api.post(
+        f"/tasks/{tid}/run-waiter/arm",
+        json={
+            "generation": prepared["generation"],
+            "pid": 4242,
+            "host": "host-1",
+            "start_token": "tok-1",
+        },
+    )
+    waiters = api.get("/run-waiters").json()
+    assert set(waiters) == {tid}
+    assert waiters[tid]["command"] == command
+    assert waiters[tid]["state"] == "active"
+
+
+
 def test_complete_over_http_triggers_immediate_whole_goal_verification(api, tmp_path):
     script = tmp_path / "eval.py"
     script.write_text(

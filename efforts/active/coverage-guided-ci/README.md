@@ -373,14 +373,32 @@ risk wedging everything").
         -- legacy `setuptools bdist_wheel`'s two-phase build (`build\lib\...`
         then copy into `build\bdist.win-amd64\wheel\.\...`) pushes the full
         path (snapshot dir + this relative build path) past Windows'
-        260-char `MAX_PATH`. **Needs an operator design call, not a quick
-        fix** -- the two realistic options have real trade-offs: (a)
-        enabling Windows long-path support in the installer's own
-        invocation (narrow, but Python's automatic `LongPathsEnabled`
-        honoring still depends on a machine-level registry policy no
-        installer can assume is set), or (b) shortening the snapshot
-        directory structure. Moving these vendored libs off legacy
-        `bdist_wheel` is a bigger, separate undertaking.
+        260-char `MAX_PATH`. **The operator-chosen "long-path opt-in"
+        direction was attempted 2026-10-05 and reverted -- see Journal for
+        the full empirical trail.** Confirmed NOT viable without further
+        work: neither a `\\?\`-prefixed argument nor the machine-wide
+        `LongPathsEnabled` registry policy helps (the former is stripped
+        by `uv` before the build backend sees it; the latter can't be
+        assumed set), and a short-named NTFS junction -- while it DOES fix
+        a clean, hand-built repro -- runs into a cascade of real
+        environment obstacles under this plugin's actual test/containment
+        setup: vendored libs' own sibling `[tool.uv.sources]` path
+        dependencies break unless ALL of them are junctioned through one
+        shared ancestor (not each lib independently); TEMP/TMP/
+        LOCALAPPDATA/USERPROFILE are all deliberately overridden to an
+        equally-deep root by both the real containment wrapper and this
+        plugin's own test-level isolation, so there is no env-derived
+        anchor point immune to that; `[Environment]::GetFolderPath(...)`
+        bypasses the override under Windows PowerShell 5.1 but NOT under
+        PowerShell 7/.NET Core (which `install.ps1` prefers); and a fixed
+        system path like `C:\Windows\Temp` can be created but not reliably
+        *deleted* again on this (EDR/policy-governed) machine. Remaining
+        realistic options: (b) shortening the snapshot directory
+        structure (the operator's non-preferred option, still available),
+        or a smaller-scoped version of (a) that accepts a known gap (e.g.
+        detect-and-warn rather than silently attempt a workaround).
+        Moving these vendored libs off legacy `bdist_wheel` remains a
+        bigger, separate undertaking.
       - [ ] **`test_chronicle.py`'s 3 failures** (`test_scan_uses_generic_provenance_when_origin_sidecar_is_absent`,
         `test_newer_rescue_capture_is_a_distinct_chronicle_unit`,
         `test_scan_validated_provenance_overrides_conflicting_origin`) and
@@ -505,6 +523,78 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-05 — Phase 3.5: MAX_PATH "long-path opt-in" attempted and reverted
+Operator picked "have the installer/test harness opt into Windows
+long-path support where it can" over shortening `provenance.py`'s
+content-addressed hash directories. Empirical trail, in order:
+
+1. **`\\?\`-prefixed argument to `uv pip install`**: does NOT work --
+   confirmed by direct repro (a deliberately 197-char-deep copy of
+   `libs/config-migrate`, built via `uv pip install --no-build-isolation`).
+   `uv` resolves/normalizes the source path (visible in its own `file:///`
+   URL in the error) before invoking the Python build backend, so
+   setuptools never sees the prefix.
+2. **A short-named NTFS directory junction** pointing at the deep source
+   DOES fix the clean repro above (confirmed: `uv pip install` exit 0
+   through a `C:\clg-j1`-style junction, vs. exit 1 without one). Moved to
+   wiring this into `libs/installer-engine/installer-engine.ps1` +
+   `plugins/agent-logger/scripts/install.ps1`.
+3. **First real obstacle**: junctioning each vendored lib's own leaf
+   directory independently broke `agent-plugin-activation`'s relative
+   `[tool.uv.sources]` dependency on its sibling `agent-dropin-registry`
+   (`../dropin-registry` no longer resolved once that one lib's build
+   source was moved to an unrelated junction elsewhere). Fixed by
+   junctioning ONE shared ancestor instead, re-expressing every
+   individual build source as a subpath of that single junction
+   (preserves sibling relative positions).
+4. **Second obstacle**: the junction's own location, originally
+   `Join-Path $env:TEMP ...`, is exactly as deep as the problem itself --
+   both the real containment wrapper (`run_contained`) and this plugin's
+   own `test_install_binstub.py::_isolated_install_env` deliberately
+   override `TEMP`/`TMP` (and, in the test's case, `HOME`/`USERPROFILE`/
+   `LOCALAPPDATA` too) to an equally-nested root, for good
+   isolation reasons that have nothing to do with this fix. A
+   `Join-Path $env:TEMP ...` junction is just as deep as what it's meant
+   to route around.
+5. **Third obstacle**: switched the junction anchor to
+   `[Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)`,
+   confirmed empirically to bypass the env-var override **under Windows
+   PowerShell 5.1** -- but **not** under PowerShell 7 (`pwsh`), which
+   `install.ps1` prefers (`shutil.which("pwsh") or shutil.which
+  ("powershell")`): .NET Core's implementation reads the `LOCALAPPDATA`
+   env var directly, unlike classic .NET Framework's native
+   `SHGetKnownFolderPath` call. Confirmed by direct `pwsh` vs
+   `powershell.exe` comparison on this host.
+6. **Fourth obstacle**: tried a fixed, environment-independent system
+   path (`C:\Windows\Temp`) instead. Can create a directory there as a
+   non-admin user, but **cannot reliably delete it again** on this
+   (EDR/policy-governed) machine -- `Remove-Item` on a dir this session
+   just created itself fails with "Access is denied" despite the ACL
+   showing this user has `FullControl`, consistent with a
+   tamper-protection filter driver rather than an NTFS permission gap.
+   Leaving junctions behind as residue defeats the fix's own hygiene.
+7. Re-ran the full fix against `python tools/run-plugin-tests.py
+   agent-logger -k "test_install_binstub or test_chronicle or
+   test_rescue_sync or test_scaffold"` (the real target scenario, not just
+   the one unit test): still failed the original 5 MAX_PATH tests, AND
+   introduced 2 new failures (`test_installers_install_every_pyproject_vendored_lib_before_no_deps`,
+   `test_installers_install_plugin_activation_after_its_own_transitive_deps`)
+   whose own assertions evidently depend on `install.ps1`'s exact
+   pre-refactor structure.
+
+**Reverted both files** (`libs/installer-engine/installer-engine.ps1`,
+`plugins/agent-logger/scripts/install.ps1`) rather than land something
+that trades 5 known failures for 5+ new ones. This is a genuinely harder
+problem than it looked: steps 3-6 are a real, useful record of why each
+"obvious" variant of the long-path-opt-in idea doesn't hold up in THIS
+plugin's actual environment -- a future attempt should read this before
+re-trying `\\?\`, a bare `$env:TEMP`-anchored junction, or
+`GetFolderPath` again. The remaining realistic paths are: shortening
+`provenance.py`'s own hash-based directory names (the operator's
+non-preferred option, now with a fuller picture of why the alternative
+didn't pan out), or a narrower version of the opt-in idea scoped to just
+detecting-and-warning rather than silently routing around the limit.
 
 ### 2026-10-05 — Phase 3.5: agent-logger's test_scaffold.py fixed; MAX_PATH family confirmed, needs a design call
 Continued from the root-cause pass above. Fixed and **landed PR #5383**:
