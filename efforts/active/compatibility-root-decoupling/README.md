@@ -31,7 +31,7 @@ through it anymore.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| lambda-core | Drives the migration slices, opens/lands each per-name PR | local worktree, independent per-slice PRs |
+| operator's facility host | Drives the migration slices, opens/lands each per-name PR | local worktree, independent per-slice PRs |
 
 ## Coordination
 
@@ -39,8 +39,8 @@ through it anymore.
   each migration slice (one or a small batch of names) is its own PR
   against `dev`, opened from its own worktree, reviewed and merged
   independently before the next slice starts.
-- **Host (owns PRs):** lambda-core (sole participant; single-agent effort,
-  no delegation currently in play).
+- **Host (owns PRs):** the operator's facility host (sole participant;
+  single-agent effort, no delegation currently in play).
 - **Handoff:** none required while single-participant. If a future slice
   is delegated to another participant, record the assignment here before
   dispatching and follow the standard `agent-worktrees:git-collaboration`
