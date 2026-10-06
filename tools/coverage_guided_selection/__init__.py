@@ -11,8 +11,9 @@ Four pieces, each independently testable:
 
 - `baseline`: collects a portable JSON baseline (test -> covered lines,
   test -> wall-clock cost) from a real pytest + `coverage.py` dynamic-context
-  run, via an ephemeral `uv run --with coverage --with pytest-cov` subprocess
-  so this package itself carries no new ambient dependency.
+  run, via an ephemeral `uv run --with coverage` subprocess (managing
+  `coverage.Coverage` directly rather than via `pytest-cov`) so this
+  package itself carries no new ambient dependency.
 - `selection`: pure-stdlib diff-scoped selection -- given a baseline and a set
   of changed (file, line) pairs, returns the covering tests, or names which
   changed lines forced a fallback (no baseline entry, or a baseline entry

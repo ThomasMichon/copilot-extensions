@@ -130,6 +130,18 @@ _DRIVER_SCRIPT = textwrap.dedent(
             # call + teardown under the same context) rather than a
             # phase-level split -- this baseline only ever needed "which
             # test" per line, never phase-level granularity.
+            #
+            # `tryfirst=True` is required, not cosmetic (review finding):
+            # this plugin is registered via `pytest.main(..., plugins=
+            # [...])` before a project's own conftest.py plugins load.
+            # Pluggy calls same-hook implementations in reverse
+            # registration order by default, so a downstream conftest's
+            # own `pytest_runtest_setup` hookimpl (if one exists) would
+            # otherwise run *before* this switch and get its source lines
+            # attributed to the previous test (or no test at all). The
+            # old pytest-cov context plugin never had this risk -- it
+            # registered at session start, after every conftest.
+            @pytest.hookimpl(tryfirst=True)
             def pytest_runtest_setup(self, item):
                 cov = coverage.Coverage.current()
                 if cov is not None:
