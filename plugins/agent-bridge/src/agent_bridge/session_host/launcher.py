@@ -29,6 +29,7 @@ import asyncio
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -99,6 +100,15 @@ class _CrashTailCapture:
             # Stream closed/invalid underneath us (process reaped, etc.) --
             # whatever was captured so far is still usable.
             pass
+        finally:
+            # Own closing this fd: a successful launch's HostHandle.proc
+            # keeps the Popen object (and so this stream) alive for the
+            # host's full lifetime otherwise, leaking a frontend file
+            # descriptor per launch.
+            try:
+                stream.close()
+            except OSError:
+                pass
 
     def tail_text(self) -> str:
         """The captured bytes decoded as text, most recent last."""
@@ -128,6 +138,30 @@ def host_spawn_kwargs() -> dict[str, Any]:
     on POSIX it gets its own session.
     """
     return windowless_daemon_kwargs(breakaway=True)
+
+
+def _kill_host_process_tree(proc: subprocess.Popen) -> None:
+    """Kill a spawned-but-never-ready host, reaching its whole tree on POSIX.
+
+    :func:`host_spawn_kwargs` gives the host ``start_new_session=True`` (its
+    own process group, ``proc.pid`` doubling as the group id) -- except
+    under :func:`contained_test_mode`, where that is suppressed so the
+    repository test supervisor retains ownership of the process group, and
+    ``os.killpg`` here would reach *its* group instead. ``PR_SET_PDEATHSIG``
+    (tying an already-spawned copilot child to its host, see
+    ``osutil.child_preexec``) is Linux-only -- on macOS/other POSIX there is
+    no equivalent, so killing only the host's own pid can orphan a child it
+    already spawned before the timeout; ``os.killpg`` reaches the whole
+    group in one call. Windows has no equivalent process-group concept
+    here; ``proc.kill()`` (``TerminateProcess``) is used directly.
+    """
+    if sys.platform != "win32" and not contained_test_mode():
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+            return
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    proc.kill()
 
 
 @dataclass
@@ -243,9 +277,10 @@ def launch_session_host(
         time.sleep(0.05)
 
     # The host neither became ready nor exited within the deadline -- stop
-    # waiting on it rather than leaking a hung process, an unbounded-lifetime
-    # daemon thread, and its pipe file descriptor.
-    proc.kill()
+    # waiting on it rather than leaking a hung process (and anything it
+    # already spawned), an unbounded-lifetime daemon thread, and its pipe
+    # file descriptor.
+    _kill_host_process_tree(proc)
     try:
         proc.wait(timeout=5.0)
     except subprocess.TimeoutExpired:

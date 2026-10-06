@@ -842,6 +842,23 @@ def test_crash_tail_capture_decodes_output():
     assert tail.tail_text() == "hello from the crashed process\n"
 
 
+def test_crash_tail_capture_closes_stream_on_eof():
+    """The drain thread must close its own stream once it reaches EOF, or
+    a successful launch (whose HostHandle keeps the Popen object, and so
+    this stream, alive for the host's full lifetime) leaks a frontend file
+    descriptor per launch (#5487 review)."""
+    r, w = os.pipe()
+    stream = os.fdopen(r, "rb")
+    launcher._CrashTailCapture(stream)
+    os.close(w)
+
+    for _ in range(50):
+        if stream.closed:
+            break
+        time.sleep(0.02)
+    assert stream.closed
+
+
 def test_crash_tail_capture_is_bounded():
     r, w = os.pipe()
     stream = os.fdopen(r, "rb")
@@ -978,6 +995,56 @@ def test_launch_session_host_timeout_kills_hung_process(tmp_path, monkeypatch):
             break
         time.sleep(0.05)
     assert proc.poll() is not None, "hung host process was not killed"
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX process-group semantics only",
+)
+def test_kill_host_process_tree_kills_whole_posix_group(tmp_path, monkeypatch):
+    """``_kill_host_process_tree`` must reach an already-spawned grandchild
+    too, not just the host pid -- ``PR_SET_PDEATHSIG`` (used elsewhere to tie
+    a copilot child to its host) is Linux-only, so macOS/other POSIX would
+    orphan that child if only the host pid were killed (#5487 review)."""
+    marker = tmp_path / "grandchild-pid.txt"
+    script = tmp_path / "group_probe.py"
+    script.write_text(
+        "import subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', "
+        "'import time; time.sleep(30)'])\n"
+        f"with open({str(marker)!r}, 'w') as f:\n"
+        "    f.write(str(child.pid))\n"
+        "time.sleep(30)\n"
+    )
+    # start_new_session=True mirrors host_spawn_kwargs()'s real POSIX
+    # behavior (proc.pid doubling as the process group id) -- set up
+    # directly here since contained_test_mode() suppresses it for the
+    # actual launch path under the test supervisor.
+    proc = subprocess.Popen(
+        [sys.executable, str(script)], start_new_session=True,
+    )
+    try:
+        for _ in range(100):
+            if marker.exists() and marker.read_text().strip():
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("grandchild never reported its pid")
+        child_pid = int(marker.read_text().strip())
+
+        monkeypatch.setattr(launcher, "contained_test_mode", lambda: False)
+        launcher._kill_host_process_tree(proc)
+        proc.wait(timeout=5)
+
+        for _ in range(100):
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("grandchild survived the process-group kill")
+    finally:
+        proc.kill()
 
 
 def test_detach_stdio_from_frontend_closes_frontend_pipe(tmp_path):
