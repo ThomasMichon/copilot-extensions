@@ -120,6 +120,60 @@ def test_concurrent_clients_share_one_coalesced_execution_over_the_wire():
         server.close()
 
 
+def test_close_admission_sends_structured_reason_over_the_wire_not_a_bare_refusal():
+    """The single-shot-caller admission-discipline contract end to end: once
+    ``close_admission`` has been called, a real TCP client still completes a
+    round trip (the socket stays open) and receives an explicit
+    ``{"fallback": true, "reason": ...}`` -- distinguishable from an ordinary
+    deadline-exceeded fallback (``reason`` absent) -- rather than a bare
+    connection-refused.
+    """
+    server = CoalescingServer(lambda kind, payload: {"ok": True}, linger_seconds=0.2)
+    server.start()
+    try:
+        host, port, token = _endpoint(server)
+        server.close_admission("superseded")
+
+        try:
+            client.request(
+                host, port, token, kind="k", key="rejected", payload={},
+                request_deadline_s=1.0,
+            )
+            raise AssertionError("expected DaemonUnavailable for a closed-admission request")
+        except client.DaemonUnavailable as exc:
+            assert "superseded" in str(exc)
+    finally:
+        server.close()
+
+
+def test_call_with_fallback_re_resolves_after_a_superseded_rejection():
+    """A structured ``reason`` rejection still falls through to the
+    caller's ``fallback()`` just like any other miss -- the distinguishing
+    behavior (re-resolving rendezvous on the *next* call rather than
+    retrying this same now-draining endpoint) lives in each consumer's own
+    ``dial`` callback, which ``call_with_fallback`` always re-invokes fresh
+    on every call; this test only pins that the reason does not change the
+    always-falls-through contract.
+    """
+    server = CoalescingServer(lambda kind, payload: {"ok": True}, linger_seconds=0.2)
+    server.start()
+    try:
+        host, port, token = _endpoint(server)
+        server.close_admission("superseded")
+
+        result = client.call_with_fallback(
+            dial=lambda: (host, port, token),
+            boot=None,
+            boot_wait_s=0.2,
+            kind="k", key="rejected", payload={},
+            request_deadline_s=1.0,
+            fallback=lambda: {"from": "fallback"},
+        )
+        assert result == {"from": "fallback"}
+    finally:
+        server.close()
+
+
 def test_wrong_token_is_ignored_not_crashed():
     server = CoalescingServer(lambda kind, payload: {"ok": True}, linger_seconds=0.2)
     server.start()

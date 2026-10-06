@@ -351,7 +351,7 @@ Concretely:
 - [x] Wire the new sync tool's `--check` into `tools/check-install-contract.py`
       and/or CI (`guards + lint`), matching how `versioned_runtime.py`
       byte-identity is already enforced.
-- [ ] Convert `agent-bridge`'s `install.ps1`/`install.sh` to source the vendored
+- [x] Convert `agent-bridge`'s `install.ps1`/`install.sh` to source the vendored
       engine + a per-service config block, as the reference conversion.
       Validate with `agent-bridge`'s existing test suite
       (`test_install_sre_retry.py`, `test_install_venv_corruption_retry.py`,
@@ -359,11 +359,13 @@ Concretely:
       extract functions from the vendored engine file instead of `install.ps1`
       directly (or the engine file needs its own equivalent test suite that
       plugin tests then just reference/import).
-      **Not done — deliberately reordered** (see the Design decision above):
-      `agent-pull-requests` (new, no daemon, no existing users) became the
-      first real pilot conversion instead, to de-risk the engine's shape
-      before touching a live production daemon. `agent-bridge`'s conversion
-      remains open follow-through, unchanged in scope.
+      **Done 2026-10-05:** after the low-risk `agent-pull-requests` pilot and
+      the `agent-logger`/`agent-vault`/`agent-ssh` second-mover legs proved
+      the canonical-reference wrapper shape, `agent-bridge` itself now adopts
+      that same shared-engine form. The PowerShell/Linux retry regressions now
+      read the shared engine for the truly shared helpers, while the
+      bridge-specific build-artifact scrub / vendored-lib staging /
+      service-lifecycle logic remains in the wrapper.
 - [x] PR this phase; get it through the automated review gate; merge; deploy
       + verify **`agent-pull-requests`** (the reordered pilot) before starting
       Phase 2 / `agent-bridge`'s conversion.
@@ -1139,3 +1141,66 @@ appropriately larger/riskier for one sitting):
   Python env, and explicit subprocess timeouts. No fixture touched a real
   `~/.ssh` or real SSH key material; every provision/snapshot path ran entirely
   inside temp-rooted test homes.
+
+### 2026-10-05 — `agent-bridge` adopted the shared installer engine
+
+- Converted `plugins/agent-bridge/scripts/install.ps1` and
+  `plugins/agent-bridge/scripts/install.sh` to the canonical-reference wrapper
+  form: both now source
+  `libs/installer-engine/installer-engine.{sh,ps1}` directly on `dev`, and
+  `tools/installer_engine_ref.py` now registers `agent-bridge` as an adopter so
+  `tools/sync-installer-engine.py --check` enforces that form.
+- Removed the wrapper-local copies of the clearly shared helper bodies:
+  PowerShell now uses shared `Invoke-NativeCapture`, `Test-IsSreModuleMismatch`,
+  `Test-IsVenvCorruption`, `Invoke-UvVenvResilient`, `Ensure-Uv`,
+  `New-SignedVenv`, and `Write-DeployManifest`; POSIX now uses shared
+  `test_is_sre_module_mismatch`, `test_is_venv_corruption`,
+  `invoke_uv_venv_resilient`, `ensure_uv`, and `write_deploy_manifest`.
+  Genuinely bridge-specific logic stayed local: the build-artifact scrub
+  wrapper around `uv pip install`, the bridge-specific uv bootstrap override
+  path (`AGENT_BRIDGE_UV_BOOTSTRAP_*`), the large daemon lifecycle / draining /
+  ZDD cutover flow, sibling-plugin installs, and the PowerShell stamped-snapshot
+  materialization that now copies both the canonical installer-engine pair and
+  the resolved vendored libs into the published snapshot before first-use
+  provisioning can consume it.
+- Installer-adjacent regression coverage now follows the same split as the
+  other adopters: the generic retry/venv-corruption tests extract their bodies
+  from `libs/installer-engine/installer-engine.{ps1,sh}`, while the
+  bridge-specific build-artifact scrub tests keep exercising the local wrapper.
+- **Line-count / corpus result:** wrapper-only installer lines shrank from
+  `install.sh` 2392 -> 2204 (-188) and `install.ps1` 3211 -> 3139 (-72), for a
+  combined wrapper drop of 5603 -> 5343 (**-260**). The canonical engine stayed
+  flat at `installer-engine.sh` 403 lines and `installer-engine.ps1` 478 lines,
+  so the combined agent-bridge + shared-engine corpus dropped from 6484 ->
+  6224 (**-260**). This leg genuinely shrank the corpus; it did not merely move
+  the same bytes elsewhere.
+- Validation completed here:
+  - `python3 tools/sync-vendored-libs.py --check`
+  - `python3 tools/sync-installer-engine.py --check`
+  - `python3 tools/check-vendored-libs-sync.py`
+  - `python3 tools/check-install-contract.py`
+  - `python3 tools/check-version-consistency.py`
+  - `python3 tools/check-module-size.py`
+  - `python3 tools/check-docs-consistency.py`
+  - `python3 tools/check-changefile-presence.py --base origin/dev`
+  - initial full suite once, before edits:
+    `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-bridge --reinstall --admission-wait 540`
+    -> baseline PASS for the main suite (`625 passed, 1 skipped`) plus the
+    same long-standing transient warning-only failure later re-seen in the
+    follow-up wrapper suite (`tests/test_codespace_spawner.py::test_relay_ping_probe_command_round_trips_against_real_listener`)
+  - focused follow-up only on installer-adjacent regressions during the edit loop:
+    `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-bridge --reinstall --admission-wait 540 -k "install_sre_retry or install_venv_corruption_retry or installer_powershell51 or install_ps1_build_artifact_scrub or install_ssh_manager_selectors"`
+    -> PASS (`15 passed, 11 skipped, 3233 deselected`)
+    `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-bridge --reinstall --admission-wait 540 -k "install or installer"`
+    -> PASS (`140 passed, 12 skipped, 3107 deselected`)
+  - final full suite after the conversion:
+    `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-bridge --reinstall --admission-wait 540`
+    -> PASS (all 8 sub-suites green after the review-fix pass; aggregate
+    `3228 passed, 31 skipped`)
+  - shared-engine regression suites:
+    `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-pull-requests --reinstall --admission-wait 540`
+    -> PASS (`26 passed`)
+    `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-logger --reinstall --admission-wait 540`
+    -> PASS (`496 passed, 17 skipped`; wrapper runner sub-suite summary `247 passed, 7 skipped`)
+    `test-supervisor --admission-timeout 120 --timeout 600 -- python3 tools/run-plugin-tests.py agent-vault --reinstall --admission-wait 540`
+    -> PASS (`260 passed, 12 skipped`)

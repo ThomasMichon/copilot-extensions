@@ -806,7 +806,6 @@ def _cmd_contracts(rest: list[str]) -> int:
 def _cmd_mux_daemon(rest: list[str]) -> int:
     """Manager mux-companion daemon internals (Phase 3b Sub-slice 3)."""
     from .mux_daemon_cli import cmd_mux_daemon
-
     return cmd_mux_daemon(rest)
 
 
@@ -1611,9 +1610,7 @@ def main(argv: list[str] | None = None) -> int:
         print("                         real project identity, faked worktree/pivot data")
         print("                         (in the Picker: l launch/resume · b bare-resume · n new)")
         print("  companion              Mux Companion: read-only status + session lineage for the current worktree (visions/mux-companion)")
-        print("  mux-daemon <run|ensure|register|remove|show|status [--json]> (alias: daemons status)")
-        print("                         Manager mux-companion daemon internals (Phase 3b Sub-slice 3 Step 2;")
-        print("                         status (#5001 Phase 1, pid/port/active/version/busy) is live)")
+        print("  mux-daemon <run|ensure|register|remove|show|status [--json]>  (status alias: daemons status; #5001 Phase 1)")
         print()
         print("Phase 2 provisions prerequisites + drives the core install; Phase 3")
         print("adds the Manager state views (projects/repos/plugin enablement); later")
@@ -1637,8 +1634,11 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_picker(args[1:])
     if args and args[0] == "companion":
         return _cmd_companion(args[1:])
-    if args and args[0] in ("mux-daemon", "daemons"):
+    if args and args[0] == "mux-daemon":
         return _cmd_mux_daemon(args[1:])
+    if args and args[0] == "daemons":
+        from .daemons_cli import cmd_daemons
+        return cmd_daemons(args[1:])
     if args and args[0] == "doctor":
         from . import doctor_cli
 

@@ -133,6 +133,69 @@ def test_busy_server_explicitly_requests_fallback(tmp_path):
         server.close()
 
 
+def test_close_admission_rejects_new_connections_with_reason_but_keeps_listening():
+    """Single-shot-caller admission discipline: once ``close_admission`` is
+    called, the socket stays open and a new connection still completes a
+    round trip -- it just gets a structured ``{"fallback": true, "reason":
+    ...}`` instead of ``decide`` ever running, distinguishing this from a
+    bare OS-level connection-refused a caller cannot act on."""
+    server = HookIpcServer(lambda kind, payload, deadline: {"should": "not-run"})
+    server.start()
+    try:
+        endpoint = server.rendezvous()
+        host, port = endpoint["hook_endpoint"].split(":")
+        server.close_admission("superseded")
+        with socket.create_connection((host, int(port)), timeout=1) as conn:
+            conn.sendall(
+                json.dumps({
+                    "version": 1,
+                    "token": endpoint["hook_token"],
+                    "kind": "preToolUse",
+                    "payload": {},
+                    "deadline": time.time() + 1,
+                }).encode() + b"\n"
+            )
+            conn.shutdown(socket.SHUT_WR)
+            raw = conn.recv(4096)
+        response = json.loads(raw.decode("utf-8"))
+        assert response == {"version": 1, "fallback": True, "reason": "superseded"}
+    finally:
+        server.close()
+
+
+def test_open_admission_reverses_close_admission_on_a_still_live_server():
+    seen = {}
+
+    def decide(kind, payload, deadline):
+        seen["ran"] = True
+        return {"ok": True}
+
+    server = HookIpcServer(decide)
+    server.start()
+    try:
+        endpoint = server.rendezvous()
+        host, port = endpoint["hook_endpoint"].split(":")
+        server.close_admission("superseded")
+        server.open_admission()
+        with socket.create_connection((host, int(port)), timeout=1) as conn:
+            conn.sendall(
+                json.dumps({
+                    "version": 1,
+                    "token": endpoint["hook_token"],
+                    "kind": "preToolUse",
+                    "payload": {},
+                    "deadline": time.time() + 1,
+                }).encode() + b"\n"
+            )
+            conn.shutdown(socket.SHUT_WR)
+            raw = conn.recv(4096)
+        response = json.loads(raw.decode("utf-8"))
+        assert response.get("result") == {"ok": True}
+        assert seen.get("ran") is True
+    finally:
+        server.close()
+
+
 def test_client_falls_back_to_pre_guards(monkeypatch, tmp_path):
     class Guard:
         @staticmethod

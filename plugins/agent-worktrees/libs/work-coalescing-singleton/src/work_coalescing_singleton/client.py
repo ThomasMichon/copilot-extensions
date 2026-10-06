@@ -98,6 +98,14 @@ def request(
         message["client_id"] = client_id
     resp = _send_recv(host, port, token, message, timeout=request_deadline_s + 1.0)
     if resp.get("fallback"):
+        reason = resp.get("reason")
+        if reason:
+            # A structured rejection (e.g. "superseded" -- see
+            # CoalescingServer.close_admission) rather than an ordinary
+            # per-request deadline miss: this endpoint is no longer
+            # admitting new work, so the caller's *next* call should
+            # re-resolve rendezvous rather than retry this same endpoint.
+            raise DaemonUnavailable(f"daemon reported fallback (reason={reason})")
         raise DaemonUnavailable("daemon reported fallback (deadline exceeded server-side)")
     result = resp.get("result")
     if not isinstance(result, dict):
