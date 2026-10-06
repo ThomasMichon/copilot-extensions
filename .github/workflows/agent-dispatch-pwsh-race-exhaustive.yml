@@ -1,0 +1,68 @@
+name: agent-dispatch pwsh mutex-race exhaustive suite
+
+# Deliberately its OWN workflow file, not a job inside ci.yml, matching
+# context-handoff-exhaustive.yml / crash-diagnostics-stress.yml's own
+# precedent: a top-level `schedule` trigger applies to EVERY job declared
+# on that trigger's workflow, so adding it to ci.yml would put the entire
+# fast/smoke/full matrix on a schedule too, not just this one suite.
+#
+# test_install_ps1_build_snapshot.py's own docstring documents two tests
+# (test_concurrent_publishers_never_corrupt_or_lose_the_snapshot,
+# test_reusing_an_already_valid_snapshot_never_blocks_behind_a_long_held_build_lock)
+# that race MULTIPLE concurrent real `pwsh` processes against the same
+# named mutex -- genuine, but disproportionate to run unconditionally in
+# every PR's required smoke lane. They self-skip unless
+# AGENT_DISPATCH_RUN_PWSH_RACE_TESTS=1 is set. Before this workflow
+# existed, nothing in the repo ever set that flag, so these tests never
+# actually ran anywhere (round-26 review finding on #5378) despite
+# concurrent snapshot publication/reuse being a core correctness guarantee
+# of the build-snapshot fix. This workflow is what actually runs them, on
+# both ubuntu-latest and windows-latest (two separate jobs, not a
+# templated `runs-on`, which this repo's check-trusted-ci.py guard
+# forbids as a "dynamic runner route") since `pwsh` mutex/named-lock
+# behavior is worth proving on the real target platform (Windows) as well
+# as the cheaper Linux runner. Runs on workflow_dispatch (on demand) and a
+# weekly schedule; never blocks a PR merge.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 11 * * 2"
+
+permissions:
+  contents: read
+
+jobs:
+  race-linux:
+    name: pwsh mutex-race suite (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Run the pwsh mutex-race suite
+        env:
+          AGENT_DISPATCH_RUN_PWSH_RACE_TESTS: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          -k "install_ps1_build_snapshot"
+
+  race-windows:
+    name: pwsh mutex-race suite (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Run the pwsh mutex-race suite
+        env:
+          AGENT_DISPATCH_RUN_PWSH_RACE_TESTS: "1"
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          -k "install_ps1_build_snapshot"
