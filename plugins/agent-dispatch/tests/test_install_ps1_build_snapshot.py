@@ -491,3 +491,89 @@ Publish-FileAtomically -Path "{target}" -Content "C:\\snap\\new" -Encoding ([Sys
     assert sorted(p.name for p in target.parent.iterdir()) == ["payload-dir"]
 
 
+def _run_stamp_harness(
+    tmp_path: Path,
+    *,
+    src_version: str,
+    existing_stamped_version: str | None,
+    force: bool = False,
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Invoke-Stamp's version-ordering guard, with everything it depends on
+    OTHER than Test-VersionLt/Enter-PluginSnapshotLock/Publish-FileAtomically
+    stubbed out (a real snapshot build and binstub deploy are irrelevant to
+    the guard itself and heavy to construct here)."""
+    install_dir = tmp_path / "install"
+    install_dir.mkdir(parents=True)
+    plugin_dir = _marketplace_plugin_dir(tmp_path)
+    _seed_plugin_dir(plugin_dir)
+    if existing_stamped_version is not None:
+        (install_dir / "stamped-version").write_text(existing_stamped_version, encoding="utf-8")
+
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        "function Write-Ok { param($m) Write-Host \"OK: $m\" }\n"
+        "function Write-Warn { param($m) Write-Host \"WARN: $m\" }\n"
+        "function Write-Skip { param($m) Write-Host \"SKIP: $m\" }\n"
+        "function Write-Fail { param($m) Write-Host \"FAIL: $m\" }\n"
+        # Stubbed: irrelevant to the version-ordering guard under test.
+        "function New-PluginBuildSnapshot { param($PluginDir, $InstallDir, $Version) return Join-Path $InstallDir \"snapshots/$Version\" }\n"
+        "function Deploy-SelfProvisioningBinstub { }\n"
+        + _extract_function_block("Get-VerTuple")
+        + "\n\n"
+        + _extract_function_block("Test-VersionLt")
+        + "\n\n"
+        + _extract_function_block("Enter-PluginSnapshotLock")
+        + "\n\n"
+        + _extract_function_block("Publish-FileAtomically")
+        + "\n\n"
+        + _extract_function_block("Invoke-Stamp")
+        + "\n\n"
+        f'$SrcVersion = "{src_version}"\n'
+        f'$InstallDir = "{install_dir}"\n'
+        f'$LocalBin = "{tmp_path / "localbin"}"\n'
+        f'$PluginDir = "{plugin_dir}"\n'
+        f"$Force = ${'true' if force else 'false'}\n"
+        "Invoke-Stamp\n"
+    )
+    result = subprocess.run(
+        [_PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True,
+        text=True,
+        env=os.environ,
+        timeout=30,
+        check=True,
+    )
+    return result, install_dir / "stamped-version"
+
+
+def test_stamp_publishes_normally_with_no_prior_stamped_version(tmp_path: Path) -> None:
+    result, marker = _run_stamp_harness(tmp_path, src_version="0.2.0-dev1", existing_stamped_version=None)
+    assert marker.read_text(encoding="utf-8") == "0.2.0-dev1", result.stdout + result.stderr
+
+
+def test_stamp_publishes_normally_when_newer_than_current(tmp_path: Path) -> None:
+    result, marker = _run_stamp_harness(
+        tmp_path, src_version="0.2.0-dev2", existing_stamped_version="0.2.0-dev1"
+    )
+    assert marker.read_text(encoding="utf-8") == "0.2.0-dev2", result.stdout + result.stderr
+
+
+def test_stamp_skips_publishing_when_older_than_current(tmp_path: Path) -> None:
+    """A delayed/preempted older-version stamp acquiring the lock AFTER a
+    newer one already published must not overwrite the newer markers --
+    the mutex only serializes writes, it doesn't guarantee arrival order."""
+    result, marker = _run_stamp_harness(
+        tmp_path, src_version="0.2.0-dev1", existing_stamped_version="0.2.0-dev2"
+    )
+    assert "Not publishing" in result.stdout, result.stdout + result.stderr
+    assert marker.read_text(encoding="utf-8") == "0.2.0-dev2"
+
+
+def test_stamp_force_overrides_the_version_ordering_guard(tmp_path: Path) -> None:
+    result, marker = _run_stamp_harness(
+        tmp_path, src_version="0.2.0-dev1", existing_stamped_version="0.2.0-dev2", force=True
+    )
+    assert marker.read_text(encoding="utf-8") == "0.2.0-dev1", result.stdout + result.stderr
+
+
+

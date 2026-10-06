@@ -877,16 +877,36 @@ function Publish-FileAtomically {
 }
 
 function Enter-PluginSnapshotLock {
-    <# Serializes New-PluginBuildSnapshot's check/copy/publish sequence
-       against concurrent invocations (two near-simultaneous install/stamp
-       actions) under one named mutex keyed by $InstallDir -- mirrors
-       agent-machines' own Enter-StampLock
+    <# Serializes a critical section against concurrent invocations (two
+       near-simultaneous install/stamp actions) under one named mutex keyed
+       by $InstallDir -- mirrors agent-machines' own Enter-StampLock
        (plugins/agent-machines/scripts/init.ps1) in a distinct namespace.
-       Without this, two callers can both observe no valid snapshot, each
-       finish their own temp copy, and the LATER publisher's rename-aside
-       step retires the snapshot the EARLIER caller already returned and
-       may still be actively building from. #>
-    param([Parameter(Mandatory)][string]$InstallDir)
+
+       Two call-site scopes share this one lock (same key, thread-affine
+       reentrant):
+       - New-PluginBuildSnapshot's own (short) check/copy/publish sequence.
+         Without it, two callers could both observe no valid snapshot, each
+         finish their own temp copy, and the LATER publisher's rename-aside
+         step would retire the snapshot the EARLIER caller already returned
+         and may still be actively building from.
+       - Install-Runtime's WIDER span from snapshot resolution through the
+         end of the actual package install. Without this outer scope, two
+         same-version callers could both take the (correct, intentional)
+         snapshot-reuse fast path and then concurrently scrub/rebuild
+         PEP 517 artifacts (build/, *.egg-info) under the SAME shared
+         $BuildSrcDir, each potentially deleting the other's in-progress
+         build output.
+
+       -TimeoutSeconds defaults to 20s (comfortably covers the short
+       snapshot-only scope); Install-Runtime's own wider acquisition passes
+       a much larger value, since a real venv+package build this lock can
+       now span takes ~30-120s on its own (see Deploy-SelfProvisioningBinstub's
+       own first-use provisioning estimate) -- the default would almost
+       certainly time out under any genuinely concurrent build otherwise. #>
+    param(
+        [Parameter(Mandatory)][string]$InstallDir,
+        [int]$TimeoutSeconds = 20
+    )
     $hash = [BitConverter]::ToString(
         [Security.Cryptography.SHA256]::Create().ComputeHash(
             [Text.Encoding]::UTF8.GetBytes($InstallDir.ToLowerInvariant())
@@ -900,7 +920,7 @@ function Enter-PluginSnapshotLock {
     $mutex = New-Object Threading.Mutex($false, $mutexName)
     $held = $false
     try {
-        $held = $mutex.WaitOne([TimeSpan]::FromSeconds(20))
+        $held = $mutex.WaitOne([TimeSpan]::FromSeconds($TimeoutSeconds))
     } catch [Threading.AbandonedMutexException] {
         $held = $true
     }
@@ -1221,6 +1241,21 @@ function Install-Runtime {
     # New-PluginBuildSnapshot's docstring for the confirmed incident.
     # -BestEffort: a failed snapshot here only means building from the live
     # payload again (the prior, only-ever behavior) -- not fatal.
+    #
+    # The OUTER lock below (same $InstallDir key New-PluginBuildSnapshot's
+    # own inner acquisition reenters harmlessly) spans snapshot resolution
+    # through the end of the actual package install: two same-version
+    # callers both taking the snapshot-reuse fast path would otherwise
+    # concurrently scrub/rebuild PEP 517 artifacts (build/, *.egg-info)
+    # under the SAME shared $BuildSrcDir, each able to delete the other's
+    # in-progress build output. A real build can run ~30-120s on its own
+    # (see Deploy-SelfProvisioningBinstub's own first-use estimate), so this
+    # acquisition passes a much longer timeout than the short snapshot-only
+    # default -- `exit` (used throughout the build steps below on failure)
+    # still runs this `finally`, confirmed: PowerShell unwinds pending
+    # `finally` blocks before an `exit` actually terminates the process.
+    $buildMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds 180
+    try {
     $BuildSrcDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion -BestEffort
 
     $hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
@@ -1488,6 +1523,10 @@ function Install-Runtime {
     }
     $ErrorActionPreference = $prevEAP
     Remove-ConsoleTrampolines -VenvDir $VenvDir
+    } finally {
+        [void]$buildMutex.ReleaseMutex()
+        $buildMutex.Dispose()
+    }
 
     # -- stamp build provenance (version from pyproject -- the single source of
     # truth -- plus git commit/branch) into the deployed package, so the runtime
@@ -3197,12 +3236,31 @@ function Invoke-Stamp {
     # harmlessly rather than deadlocking.
     $stampMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir
     try {
+        # Version-ordering guard, UNDER this same lock: the mutex only
+        # serializes overlapping writes, it does not guarantee ARRIVAL
+        # order. A delayed/preempted older-version invocation could still
+        # acquire this lock AFTER a newer one already published, and
+        # (without this check) would unconditionally overwrite both
+        # markers with its own stale version. Compare against whatever
+        # stamped-version is CURRENTLY on disk (read inside the lock, so
+        # this observes the true latest publish) and skip rather than
+        # downgrade, mirroring Invoke-DowngradeGuard's own
+        # -Force/AGENT_DISPATCH_ALLOW_DOWNGRADE override for a deliberate
+        # rollback.
+        $stampedVersionMarker = Join-Path $InstallDir 'stamped-version'
+        $currentStamped = if (Test-Path $stampedVersionMarker) {
+            (Get-Content -LiteralPath $stampedVersionMarker -Raw -ErrorAction SilentlyContinue).Trim()
+        } else { $null }
+        if ($currentStamped -and (Test-VersionLt -A $SrcVersion -B $currentStamped) -and -not $Force) {
+            Write-Skip "Not publishing: source $SrcVersion is older than already-stamped $currentStamped (a newer stamp arrived first; -Force to override)"
+            return
+        }
         $snapDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion
         # Publish-FileAtomically guards the binstub's self-provisioning read
         # (which never takes this mutex) against observing a torn,
         # partially-written marker file.
         Publish-FileAtomically -Path (Join-Path $InstallDir 'payload-dir') -Content $snapDir -Encoding $utf8NoBom
-        Publish-FileAtomically -Path (Join-Path $InstallDir 'stamped-version') -Content $SrcVersion -Encoding $utf8NoBom
+        Publish-FileAtomically -Path $stampedVersionMarker -Content $SrcVersion -Encoding $utf8NoBom
         Write-Ok "Snapshot: $snapDir"
     } finally {
         [void]$stampMutex.ReleaseMutex()
