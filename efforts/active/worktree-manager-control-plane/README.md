@@ -870,7 +870,7 @@ worktree-manager.
       agent-dispatch, agent-worktrees, worktree-manager), so it's scoped as
       its own PR rather than folded into the fix above. Tracked as
       [#5006](https://github.com/ThomasMichon/copilot-extensions/issues/5006).
-- [ ] **Background daemon rotation.** Resident per-version mux-daemons
+- **Background daemon rotation.** Resident per-version mux-daemons
       accumulate indefinitely: `activate_after_update()`'s cutover is only
       attempted opportunistically (at whichever session's `self_update()`
       call happens to run next) and a daemon with even one long-lived
@@ -879,11 +879,32 @@ worktree-manager.
       re-resolution at idle boundaries → periodic sweep → validation),
       modeled on `agent-bridge`/`agent-dispatch`'s own drain/cutover
       conduct and `agent-worktrees`' existing cooldown-throttled resident
-      reaper. Not yet started. Phase 1 (observability) is self-contained
-      and may land independently; only Phases 2-4 need Phase 3's
-      client-side re-resolution piece scoped in `agent-worktrees` first.
-      Tracked as
+      reaper. Tracked as
       [#5001](https://github.com/ThomasMichon/copilot-extensions/issues/5001).
+  - [x] Phase 1, aggregate slice: `worktree-manager mux-daemon status
+        [--json]` (aliased `daemons status`) lists every resident
+        mux-daemon for the install root -- pid/port/active-endpoint flag,
+        and (when reachable, owner-verified, and running compatible code)
+        its own version/attached-client-COUNT/busy state. Landed via
+        [#5131](https://github.com/ThomasMichon/copilot-extensions/pull/5131)
+        plus a follow-up,
+        [#5392](https://github.com/ThomasMichon/copilot-extensions/pull/5392),
+        that closed 9 rounds of Copilot review findings #5131 itself
+        merged before it could absorb (see Journal) -- including a
+        HIGH-severity control-token-disclosure fix (OS-owner verification
+        via Windows SIDs/POSIX uid, plus a narrowing post-connection
+        re-check), a coalescing bug that undercounted concurrent health
+        probes, and an alias that over-exposed the internal `mux-daemon`
+        command group.
+  - [ ] Phase 1, attribution slice (still open): attributing each
+        attached client to its specific project/worktree_id/mux_session
+        identity (and that connection's own busy state) -- the issue's
+        original Phase 1 scope, explicitly deferred in #5131/#5392 since
+        no existing wire RPC or in-memory structure correlates a live
+        connection to a mapping entry yet.
+  - [ ] Phases 2-4 (the actual retirement sweep): remain open, and still
+        need Phase 3's client-side re-resolution piece scoped in
+        `agent-worktrees` first.
 - [x] `doctor`/validation breadth: plugin-catalog alignment (coverage)
       reporting landed (PR #4986), covering unmet-plugin-prerequisite/
       cross-plugin-drift detection. The governing vision
@@ -1065,6 +1086,35 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-10-03/06** — Claimed and landed Phase 7's "Background daemon
+  rotation" Phase 1 (observability), copilot-extensions#5001: added
+  `worktree-manager mux-daemon status [--json]` (aliased `daemons status`)
+  enumerating resident mux-daemons with pid/port/active/version/attached-
+  client/busy state. PR #5131 merged (via Maintainer admin bypass) after
+  three rounds of Copilot review fixes but BEFORE a fourth round's fixes
+  could reach that now-closed branch -- the remaining commits were
+  cherry-picked onto a fresh branch off `dev` and landed as a separate
+  follow-up, PR #5392, which absorbed six MORE review rounds (9 total
+  across both PRs) before merging clean. Real, substantive findings fixed
+  along the way: a HIGH-severity control-token-disclosure bug (a lookalike
+  process from a different local OS account could receive the cutover
+  bearer token -- fixed with Windows-SID/POSIX-uid ownership verification
+  plus a narrowing post-connection re-check, since full elimination needs
+  a wire-protocol-level peer-authentication redesign affecting every
+  `ControlClient` caller, explicitly scoped out and left for future work
+  under the same issue); a coalescing bug that let two concurrent health
+  probes undercount each other's load; an alias that accidentally exposed
+  the entire internal `mux-daemon` command group instead of just `status`;
+  and a macOS/BSD gap in the post-connection identity re-check (local
+  `ps -o lstart=` fallback, since the shared `zdd` library's
+  `process_start_time()` only implements Windows/Linux). Also fixed a
+  pre-existing, unrelated flaky test
+  (`test_resident_monitor_restart_republishes_live_mapping_to_new_
+  generation`) whose 5s join timeout was too tight for this machine's
+  current load (observed up to 15.5s for a nominal ~0.6s workload),
+  widened to 20s with an explicit thread-liveness assertion.
+  Phases 2-4 (the actual retirement sweep) remain open.
 
 - **2026-10-04/05** — Executed and landed Phase 9 (PR #5232, merged): moved
   `wt.exe`/`CREATE_NEW_CONSOLE`/`osascript`/POSIX-terminal probing into a new
