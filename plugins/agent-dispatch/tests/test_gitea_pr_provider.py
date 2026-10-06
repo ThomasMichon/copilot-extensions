@@ -39,8 +39,10 @@ def _pr(**overrides: object) -> dict:
     return base
 
 
-def _review(*, state: str, review_id: int, login: str = "reviewer") -> dict:
-    return {"id": review_id, "state": state, "user": {"login": login}}
+def _review(
+    *, state: str, review_id: int, login: str = "reviewer", dismissed: bool = False,
+) -> dict:
+    return {"id": review_id, "state": state, "user": {"login": login}, "dismissed": dismissed}
 
 
 # --- _split --------------------------------------------------------------
@@ -56,6 +58,62 @@ def test_split_parses_host_owner_repo():
 def test_split_rejects_malformed_repo(bad):
     with pytest.raises(ValueError):
         _split(bad)
+
+
+# --- GiteaPRAdapter: credential-authority allowlisting ----------------------
+
+
+def test_adapter_requires_non_empty_allowed_hosts():
+    with pytest.raises(ValueError, match="allowed_hosts"):
+        GiteaPRAdapter("review-bot")
+
+
+def test_adapter_rejects_empty_allowed_hosts_explicitly():
+    with pytest.raises(ValueError, match="allowed_hosts"):
+        GiteaPRAdapter("review-bot", allowed_hosts=frozenset())
+
+
+def test_fetch_pr_refuses_a_host_outside_the_allowlist(monkeypatch):
+    """A payload_ref's host is caller-supplied data, not a trusted
+    credential authority -- a ref naming an unconfigured host must never
+    reach this adapter's token."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+
+    def boom(*_a, **_k):
+        raise AssertionError("must not make any request for a disallowed host")
+
+    adapter = GiteaPRAdapter(
+        "review-bot", runner=boom, allowed_hosts=frozenset({"trusted.example.com"})
+    )
+
+    with pytest.raises(RuntimeError, match="not in this adapter's configured allowed_hosts"):
+        adapter.fetch_pr("evil.example.com/owner/repo", 1)
+
+
+def test_fetch_pr_allows_a_host_in_the_allowlist_case_insensitively(monkeypatch):
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+
+    def runner(args, **kwargs):
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status(json.dumps({"login": "review-bot"}), 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status(json.dumps({"full_name": "example/project"}), 200)
+        if url.endswith("/pulls/7"):
+            return _status(json.dumps(_pr(number=7)), 200)
+        if url.endswith("/pulls/7/reviews"):
+            return _status(json.dumps([]), 200)
+        if "/commits/head-sha/status" in url:
+            return _status(json.dumps({"state": "success", "total_count": 1}), 200)
+        if url.endswith("/git/commits/head-sha"):
+            return _status(json.dumps({}), 200)
+        raise AssertionError(f"unexpected curl invocation: {url}")
+
+    adapter = GiteaPRAdapter(
+        "review-bot", runner=runner, allowed_hosts=frozenset({"GITEA.EXAMPLE.COM"}),
+    )
+    raw = adapter.fetch_pr("gitea.example.com/example/project", 7)
+    assert raw["pull_request"]["number"] == 7
 
 
 # --- observe_pr_state: approval dimension ---------------------------------
@@ -104,6 +162,51 @@ def test_comment_only_review_maps_to_pending():
 def test_pending_review_is_ignored_entirely():
     observation = observe_pr_state(_pr(), reviews=[_review(state="PENDING", review_id=1)])
     assert observation.approval_status == ApprovalStatus.NONE
+
+
+def test_dismissed_request_changes_does_not_still_block():
+    observation = observe_pr_state(
+        _pr(),
+        reviews=[_review(state="REQUEST_CHANGES", review_id=1, dismissed=True)],
+    )
+    assert observation.approval_status == ApprovalStatus.NONE
+
+
+def test_dismissed_approval_does_not_still_approve():
+    observation = observe_pr_state(
+        _pr(), reviews=[_review(state="APPROVED", review_id=1, dismissed=True)]
+    )
+    assert observation.approval_status == ApprovalStatus.NONE
+
+
+def test_dismissed_review_comments_are_not_blocking(monkeypatch):
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+
+    def runner(args, **kwargs):
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status(json.dumps({"login": "review-bot"}), 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status(json.dumps({"full_name": "example/project"}), 200)
+        if url.endswith("/pulls/7"):
+            return _status(json.dumps(_pr(number=7)), 200)
+        if url.endswith("/pulls/7/reviews"):
+            return _status(
+                json.dumps([_review(state="REQUEST_CHANGES", review_id=1, dismissed=True)]), 200
+            )
+        if "/reviews/1/comments" in url:
+            raise AssertionError("a dismissed review's comments must not be fetched")
+        if "/commits/head-sha/status" in url:
+            return _status(json.dumps({"state": "success", "total_count": 1}), 200)
+        if url.endswith("/git/commits/head-sha"):
+            return _status(json.dumps({}), 200)
+        raise AssertionError(f"unexpected curl invocation: {url}")
+
+    adapter = GiteaPRAdapter(
+        "review-bot", runner=runner, allowed_hosts=frozenset({"gitea.example.com"}),
+    )
+    observation = adapter.observe("gitea.example.com/example/project", 7)
+    assert HoldReason.BLOCKING_THREADS not in observation.holds
 
 
 def test_unrecognized_review_state_raises():
@@ -246,7 +349,7 @@ def test_empty_status_rollup_with_zero_total_count_is_not_pending(monkeypatch):
             return _status(json.dumps({}), 200)
         raise AssertionError(f"unexpected curl invocation: {url}")
 
-    adapter = GiteaPRAdapter("review-bot", runner=runner)
+    adapter = GiteaPRAdapter("review-bot", runner=runner, allowed_hosts=frozenset({"gitea.example.com"}))
     raw = adapter.fetch_pr("gitea.example.com/example/project", 7)
     assert raw["status_rollup"] is None
 
@@ -282,7 +385,7 @@ def test_fetch_pr_unwraps_nested_commit_detail_for_last_commit_at(monkeypatch):
             )
         raise AssertionError(f"unexpected curl invocation: {url}")
 
-    adapter = GiteaPRAdapter("review-bot", runner=runner)
+    adapter = GiteaPRAdapter("review-bot", runner=runner, allowed_hosts=frozenset({"gitea.example.com"}))
     raw = adapter.fetch_pr("gitea.example.com/example/project", 7)
     observation = observe_pr_state(
         raw["pull_request"], raw["reviews"], raw["review_comments"], raw["status_rollup"],
@@ -311,7 +414,7 @@ def test_fetch_pr_verifies_identity_and_repo_then_returns_full_payload(monkeypat
             return _status(json.dumps({}), 200)
         raise AssertionError(f"unexpected curl invocation: {url}")
 
-    adapter = GiteaPRAdapter("review-bot", runner=runner)
+    adapter = GiteaPRAdapter("review-bot", runner=runner, allowed_hosts=frozenset({"gitea.example.com"}))
 
     raw = adapter.fetch_pr("gitea.example.com/example/project", 7)
 
@@ -323,7 +426,7 @@ def test_fetch_pr_verifies_identity_and_repo_then_returns_full_payload(monkeypat
 def test_identity_mismatch_raises(monkeypatch):
     monkeypatch.setenv("GITEA_TOKEN", "tok")
     responses = _fake_responses(_status(json.dumps({"login": "someone-else"}), 200))
-    adapter = GiteaPRAdapter("review-bot", runner=responses)
+    adapter = GiteaPRAdapter("review-bot", runner=responses, allowed_hosts=frozenset({"gitea.example.com"}))
 
     with pytest.raises(RuntimeError, match="identity mismatch"):
         adapter.fetch_pr("gitea.example.com/example/project", 1)
@@ -335,7 +438,7 @@ def test_repository_mismatch_raises(monkeypatch):
         _status(json.dumps({"login": "review-bot"}), 200),
         _status(json.dumps({"full_name": "someone/else"}), 200),
     )
-    adapter = GiteaPRAdapter("review-bot", runner=responses)
+    adapter = GiteaPRAdapter("review-bot", runner=responses, allowed_hosts=frozenset({"gitea.example.com"}))
 
     with pytest.raises(RuntimeError, match="repository identity mismatch"):
         adapter.fetch_pr("gitea.example.com/example/project", 1)
@@ -344,7 +447,7 @@ def test_repository_mismatch_raises(monkeypatch):
 def test_missing_token_env_raises(monkeypatch):
     monkeypatch.delenv("GITEA_TOKEN", raising=False)
     adapter = GiteaPRAdapter(
-        "review-bot", runner=lambda *a, **k: (_ for _ in ()).throw(AssertionError("unreachable"))
+        "review-bot", runner=lambda *a, **k: (_ for _ in ()).throw(AssertionError("unreachable")), allowed_hosts=frozenset({"gitea.example.com"})
     )
 
     with pytest.raises(RuntimeError, match="GITEA_TOKEN"):
@@ -354,7 +457,7 @@ def test_missing_token_env_raises(monkeypatch):
 def test_curl_failure_raises(monkeypatch):
     monkeypatch.setenv("GITEA_TOKEN", "tok")
     responses = _fake_responses(SimpleNamespace(returncode=1, stdout="", stderr="boom"))
-    adapter = GiteaPRAdapter("review-bot", runner=responses)
+    adapter = GiteaPRAdapter("review-bot", runner=responses, allowed_hosts=frozenset({"gitea.example.com"}))
 
     with pytest.raises(RuntimeError, match="Gitea operation failed"):
         adapter.fetch_pr("gitea.example.com/example/project", 1)
@@ -363,7 +466,7 @@ def test_curl_failure_raises(monkeypatch):
 def test_http_error_status_raises(monkeypatch):
     monkeypatch.setenv("GITEA_TOKEN", "tok")
     responses = _fake_responses(_status("not found", 404))
-    adapter = GiteaPRAdapter("review-bot", runner=responses)
+    adapter = GiteaPRAdapter("review-bot", runner=responses, allowed_hosts=frozenset({"gitea.example.com"}))
 
     with pytest.raises(RuntimeError, match="HTTP 404"):
         adapter.fetch_pr("gitea.example.com/example/project", 1)
@@ -390,7 +493,7 @@ def test_observe_fetches_and_classifies_in_one_call(monkeypatch):
             return _status(json.dumps({}), 200)
         raise AssertionError(f"unexpected curl invocation: {url}")
 
-    adapter = GiteaPRAdapter("review-bot", runner=runner)
+    adapter = GiteaPRAdapter("review-bot", runner=runner, allowed_hosts=frozenset({"gitea.example.com"}))
 
     observation = adapter.observe("gitea.example.com/example/project", 7)
 

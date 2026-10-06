@@ -22,10 +22,13 @@ Repo addressing: unlike GitHub (always github.com) and Azure DevOps (whose
 self-hosted with no single well-known host -- a reviewer ``payload_ref``
 names it directly: ``gitea-pr:<host>/<owner>/<repo>#<number>``, where
 ``<host>`` is the instance hostname with no scheme (e.g.
-``gitea.example.com``). This adapter derives ``https://<host>`` as the API
-base from the ref itself, so no separate host-to-instance config mapping is
-needed (decided here, closing the "parsed structurally... but no live
-adapter exists yet" note in ``review_target_refs.py``).
+``gitea.example.com``, decided here, closing the "parsed structurally...
+but no live adapter exists yet" note in ``review_target_refs.py``). The
+ref's host is **never trusted directly** as a credential authority --
+``GiteaPRAdapter`` requires a configured, non-empty ``allowed_hosts`` and
+refuses any ref naming a host outside it, since an untrusted/attacker-
+controlled ref would otherwise be able to redirect this adapter's token to
+an arbitrary server.
 """
 
 from __future__ import annotations
@@ -82,6 +85,8 @@ def _approval_status(reviews: list[Mapping[str, Any]]) -> ApprovalStatus:
     """
     latest_by_reviewer: dict[str, Mapping[str, Any]] = {}
     for review in reviews:
+        if review.get("dismissed"):
+            continue  # a dismissed verdict must not still block/approve.
         state = review.get("state")
         if state not in _REVIEW_STATE_TO_APPROVAL:
             raise GiteaPRObservationError(f"unrecognized Gitea review state {state!r}")
@@ -208,12 +213,24 @@ class GiteaPRAdapter:
         expected_login: str,
         runner: Callable[..., Any] = subprocess.run,
         *,
+        allowed_hosts: frozenset[str] | None = None,
         token_env: str | None = None,
     ):
         if not expected_login:
             raise ValueError("expected_login must be non-empty")
+        if not allowed_hosts:
+            raise ValueError(
+                "GiteaPRAdapter requires a non-empty allowed_hosts: the "
+                "target host comes from a caller-supplied payload_ref "
+                "(gitea-pr:<host>/<owner>/<repo>#<number>), so the "
+                "credential authority must be bound to a configured "
+                "allowlist rather than trusting that ref's host directly "
+                "-- otherwise a ref naming an arbitrary host would send "
+                "this adapter's token there."
+            )
         self.expected_login = expected_login
         self.runner = runner
+        self.allowed_hosts = frozenset(host.casefold() for host in allowed_hosts)
         self.token_env = token_env or DEFAULT_GITEA_TOKEN_ENV
         self._verified_repos: set[str] = set()
 
@@ -276,6 +293,12 @@ class GiteaPRAdapter:
         """Fetch the raw PR payload (plus reviews/comments/status) for
         ``repo`` (``<host>/<owner>/<name>``) and ``number``."""
         host, owner, name = _split(repo)
+        if host.casefold() not in self.allowed_hosts:
+            raise RuntimeError(
+                f"Gitea reviewer ref names host {host!r}, which is not in "
+                "this adapter's configured allowed_hosts -- refusing to "
+                "send credentials to an unconfigured authority."
+            )
         api_base = f"https://{host}"
         self._verify_identity(api_base, repo, owner, name)
         pull_request = self._call(api_base, "GET", f"/repos/{owner}/{name}/pulls/{number}")
@@ -286,6 +309,8 @@ class GiteaPRAdapter:
         ) or []
         review_comments: list[dict[str, Any]] = []
         for review in reviews:
+            if review.get("dismissed"):
+                continue  # a dismissed review's inline comments don't block either.
             review_id = review.get("id")
             if not isinstance(review_id, int):
                 continue

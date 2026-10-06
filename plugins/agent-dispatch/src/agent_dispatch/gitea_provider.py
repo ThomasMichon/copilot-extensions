@@ -146,6 +146,33 @@ class GiteaProvider:
         if allow_cache:
             self._verified_repos.add(repo)
 
+    # -- paginated comment listing ----------------------------------------
+
+    def _all_comments(self, repo: str, number: int) -> list[dict[str, Any]]:
+        """List every comment on an issue/PR, across pages.
+
+        A single unpaginated page silently misses a reservation marker (or
+        this loop's own prior comment to edit) once a busy issue accumulates
+        enough comments to push it past the first page -- discovery would
+        then treat an already-reserved issue as unreserved and dispatch
+        duplicate work.
+        """
+        comments: list[dict[str, Any]] = []
+        for _page_index in range(_MAX_ISSUE_PAGES):
+            page = _page_index + 1
+            rows = self._call(
+                "GET",
+                f"/repos/{repo}/issues/{number}/comments"
+                f"?page={page}&limit={_ISSUE_PAGE_SIZE}",
+            ) or []
+            comments.extend(rows)
+            if len(rows) < _ISSUE_PAGE_SIZE:
+                return comments
+        raise RuntimeError(
+            f"Gitea comment listing for {repo}#{number} exceeded the bounded "
+            f"{_MAX_ISSUE_PAGES * _ISSUE_PAGE_SIZE}-comment scan"
+        )
+
     # -- label id resolution ---------------------------------------------
 
     def _labels_by_name(self, repo: str) -> dict[str, int]:
@@ -196,9 +223,7 @@ class GiteaProvider:
                 if row.get("pull_request") is not None:
                     continue  # belt-and-suspenders: type=issues already excludes PRs.
                 number = int(row["number"])
-                comments = self._call(
-                    "GET", f"/repos/{repo}/issues/{number}/comments"
-                ) or []
+                comments = self._all_comments(repo, number)
                 reservations = tuple(
                     marker
                     for comment in comments
@@ -235,7 +260,7 @@ class GiteaProvider:
     def _find_own_loop_comment(
         self, repo: str, number: int, loop: str
     ) -> int | None:
-        comments = self._call("GET", f"/repos/{repo}/issues/{number}/comments") or []
+        comments = self._all_comments(repo, number)
         found_id: int | None = None
         for comment in comments:
             marker = _parse_marker(
@@ -299,7 +324,7 @@ class GiteaProvider:
             repo, issue,
             {**reservation, "issue": issue.number, "state": "released", "reason": reason},
         )
-        comments = self._call("GET", f"/repos/{repo}/issues/{issue.number}/comments") or []
+        comments = self._all_comments(repo, issue.number)
         current = _Issue(
             number=issue.number, title=issue.title, url=issue.url, labels=issue.labels,
             created_at=issue.created_at, updated_at=issue.updated_at,

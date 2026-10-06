@@ -94,7 +94,7 @@ def test_list_open_issues_filters_pull_requests_and_reads_comments(monkeypatch):
             )
         if "/issues?state=open" in url and "page=2" in url:
             return _status([], 200)
-        if url.endswith("/issues/1/comments"):
+        if "/issues/1/comments?" in url:
             return _status([], 200)
         raise AssertionError(f"unexpected curl invocation: {url}")
 
@@ -125,6 +125,61 @@ def test_list_open_issues_paginates_until_a_short_page(monkeypatch):
     assert len(issues) == 51
 
 
+def test_all_comments_paginates_past_a_full_first_page(monkeypatch):
+    """A busy issue with more comments than one page must not have its
+    reservation marker (pushed onto a later page) silently missed --
+    discovery would otherwise treat an already-reserved issue as
+    unreserved and dispatch duplicate work."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+    from agent_dispatch.issue_loop_markers import _marker
+
+    marker = _marker({
+        "loop": "backlog", "occurrence": 1, "state": "reserved",
+        "at": 0, "label": "backlog-active", "issue": 1,
+    })
+
+    def runner(args, **kwargs):
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status({"login": "issue-bot"}, 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status({"full_name": "example/project"}, 200)
+        if "/issues?state=open" in url and "page=1" in url:
+            return _status([_issue_row(1)], 200)
+        if "/issues?state=open" in url and "page=2" in url:
+            return _status([], 200)
+        if "/issues/1/comments?page=1" in url:
+            return _status(
+                [{"id": n, "body": f"filler {n}", "user": {"login": "someone-else"}}
+                 for n in range(1, 51)],
+                200,
+            )
+        if "/issues/1/comments?page=2" in url:
+            return _status(
+                [{"id": 51, "body": marker, "user": {"login": "issue-bot"}}], 200
+            )
+        raise AssertionError(f"unexpected curl invocation: {url}")
+
+    (issue,) = _provider(runner).list_open_issues("example/project")
+    assert len(issue.reservations) == 1
+    assert issue.reservations[0]["loop"] == "backlog"
+
+
+def test_all_comments_raises_past_the_bounded_scan(monkeypatch):
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+
+    def runner(args, **kwargs):
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status({"login": "issue-bot"}, 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status({"full_name": "example/project"}, 200)
+        return _status([{"id": n} for n in range(50)], 200)  # always a full page
+
+    with pytest.raises(RuntimeError, match="bounded"):
+        _provider(runner)._all_comments("example/project", 1)
+
+
 def test_reservation_marker_roundtrips_through_comments(monkeypatch):
     """A reserve -> claim -> release cycle: each transition edits the same
     marker comment in place (mirrors GitHub's own edit-not-repost
@@ -140,7 +195,7 @@ def test_reservation_marker_roundtrips_through_comments(monkeypatch):
             return _status({"login": "issue-bot"}, 200)
         if url.endswith("/api/v1/repos/example/project"):
             return _status({"full_name": "example/project"}, 200)
-        if url.endswith("/issues/1/comments") and method == "GET":
+        if "/issues/1/comments?" in url and method == "GET":
             if comment_body["value"] is None:
                 return _status([], 200)
             return _status(
@@ -198,7 +253,7 @@ def test_release_keeps_label_when_another_loop_is_still_active(monkeypatch):
             return _status({"login": "issue-bot"}, 200)
         if url.endswith("/api/v1/repos/example/project"):
             return _status({"full_name": "example/project"}, 200)
-        if url.endswith("/issues/1/comments") and method == "GET":
+        if "/issues/1/comments?" in url and method == "GET":
             return _status(
                 [{"id": 1, "body": f"x\n\n{other_marker}", "user": {"login": "issue-bot"}}], 200
             )
@@ -226,7 +281,7 @@ def test_label_id_resolution_raises_when_label_absent(monkeypatch):
             return _status({"login": "issue-bot"}, 200)
         if url.endswith("/api/v1/repos/example/project"):
             return _status({"full_name": "example/project"}, 200)
-        if url.endswith("/issues/1/comments") and method == "GET":
+        if "/issues/1/comments?" in url and method == "GET":
             return _status([], 200)
         if url.endswith("/issues/1/comments") and method == "POST":
             return _status({"id": 1}, 201)
