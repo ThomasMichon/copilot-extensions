@@ -107,6 +107,32 @@ host that should run it; a client-only host opts out (`--no-service` /
   the service installer or launcher creates a process that outlives the
   invocation. Payload-local shims and hooks follow the corresponding rule in
   [`runtime-agent-plugin` § Give the agent an attributable command](runtime-agent-plugin.md#3-give-the-agent-an-attributable-command).
+- **Generalize "nothing pins the plugin payload" to every deletable checkout,
+  not just the marketplace payload directory.** The same hazard applies
+  identically to an **anchor repo checkout**, a **worktree checkout**, and a
+  **session-state folder**: all four are locations something else (a worktree
+  manager, a cleanup sweep, a session-retirement reaper) may move, rename, or
+  delete out from under a long-running process that never asked to be told
+  first. A long-running **daemon** or **task worker** — anything whose
+  lifetime is not bounded to "this one invocation" — must resolve its working
+  directory, and the working directory of anything it spawns that outlives it,
+  to a **versioned runtime slot** (`~/.<plugin>/versions/<v>`) or a **durable,
+  user-home-style state location** (`~/.<plugin>/...`, see
+  [`durable-vs-versioned-runtime`](durable-vs-versioned-runtime.md) for the
+  split when the two need to live on separate lifecycles) — never a repo
+  checkout, worktree checkout, or session folder, no matter how convenient
+  that cwd is at spawn time.
+  - **The one sanctioned exception: a process guaranteed to terminate before
+    the folder could be removed.** A quick single-shot request (one RPC, one
+    CLI invocation, answered and exited before any caller could plausibly
+    delete the folder it ran from) or a genuinely **short-lived** daemon/task
+    worker whose own lifetime is explicitly bounded to that folder's lifetime
+    (this suite's `launch_session` and a per-worktree status-updater are the
+    existing exemplars) may use the repo/worktree folder as cwd — and, to
+    match Copilot CLI's own convention, specifically the **worktree root**.
+    The moment a process might **outlive** the worktree/session that spawned
+    it (a resident daemon, a detached background task, anything registered
+    with a supervisor per this pattern), this exception no longer applies.
 - **A tier-1/2 daemon on a logon-trigger-only schedule needs to cycle itself,
   not wait for a reboot.** A user-mode Scheduled Task registered with
   `MultipleInstancesPolicy=IgnoreNew` and no periodic trigger only relaunches

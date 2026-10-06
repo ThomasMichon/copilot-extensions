@@ -217,6 +217,71 @@ now?*:
    which runs the normal drain + `clear_if_owner`-is-a-no-op-since-we're-not-active
    path). Any miss resets the counter.
 
+### A bounded ceiling on the K-confirmation gate — never an unbounded wait
+
+Gate 2 above has a real failure mode a transient-miss debounce alone does not
+cover: on a host with frequent, *unrelated* concurrent traffic (another channel
+the same busy-predicate checks — a hook/classify/tracking-write call, a sibling
+request), some channel can be non-idle often enough that "every channel quiet"
+never lands on two consecutive polls **in a row**, even though the daemon
+correctly observes *superseded* on every single poll. Confirmed in production:
+a demoted `agent-worktrees` status-monitor lingered for **multiple days** this
+way (copilot-extensions#5326 follow-up, landed in #5359) — busy_reasons() kept
+resetting the confirm counter to zero indefinitely.
+
+The fix generalizes to every consumer of this gate: once `superseded` is first
+observed, start a clock (not a counter). Reaching a bounded ceiling
+(`_SELF_RETIRE_MAX_GRACE_S`-shaped — on the order of 1-2 minutes, well short of
+this doc's own "never linger more than ~10 minutes" architecture ceiling) forces
+the exit **regardless of busy_reasons()** — the daemon finishes whatever single
+bounded unit of work is already in flight, writes its state, and exits. K
+consecutive clean confirms is the *fast, graceful* path; the deadline is the
+**upper bound that must never be skippable**. A demoted daemon that depends
+solely on K-confirmation, with no deadline fallback, does not satisfy this
+pattern's invariants.
+
+### Admission discipline once superseded — stop growing scope, finish what's already yours
+
+The moment a daemon observes `superseded` (same predicate as above), it must
+immediately close **admission** — it may keep *serving* and *finishing* what it
+already has, but must never let its own bounded scope grow further:
+
+- **Never admit a new tracked source.** Whatever "source" means for this
+  daemon (a new worktree/project folder to sweep, a new owned task-daemon, a
+  new long-lived mapping to track) must stop being discoverable/addable the
+  instant admission closes — not merely "stop starting new sweep cycles while
+  an old one still holds a stale source list," but literally refuse to grow
+  the set from here on. An update to something *already* tracked is not new
+  scope and may still be accepted/served.
+- **Single-shot (request/response) callers get an explicit, actionable
+  rejection — never a bare connection-refused.** A caller that opens a
+  connection, asks once, and expects one reply must receive a structured
+  "I'm going away, here's why, re-resolve discovery and call the replacement"
+  response (the existing `{"fallback": true, ...}` wire shape this suite's
+  `work-coalescing-singleton` servers already use for a deadline-exceeded
+  case is the right shape to extend with a `reason` — not a hard-closed
+  listening socket that degrades to an ambiguous OS-level connection-refused
+  the caller has to guess at).
+- **Persistent subscribers get a notice, then an explicit close — never a
+  silent drop.** A caller that holds an open streaming channel (SSE,
+  WebSocket) — the expected shape for **daemon-to-daemon** communication
+  between two long-running resident services in this suite, as opposed to an
+  ordinary CLI-to-daemon single-shot call — must be sent an explicit
+  going-away notice over that same channel (reason: superseded/updating)
+  before the daemon closes it. A subscriber that only ever sees its socket
+  die with no message has no way to distinguish "the daemon updated" from "the
+  daemon crashed."
+- **Immediately drop, never queue, anything that would still need to be
+  started.** If a request arrives after admission has closed, it is rejected
+  per the two bullets above — it must never be accepted into an internal
+  backlog to run "once there's room." There is no "once there's room" once
+  superseded.
+- **Only already-admitted, already-in-flight transactional work for which this
+  daemon is the sole custody bearer may still be allowed to finish.** That is
+  the *only* class of work a superseded daemon still owes completion — not new
+  work, not queued-but-unstarted work, just the bounded unit(s) genuinely
+  already running that no successor could resume in its place.
+
 ### Opt-in until validated on a real cutover
 
 ### Default-on, with an opt-out
@@ -361,6 +426,10 @@ agent-bridge needs.
 4. **Never strand clients.** After the commit point, if the old endpoint is
    unreachable, **commit-forward** to the healthy new one (never roll back into a
    dead daemon). An aborted pre-commit cutover **rolls back** (old stays live).
+   A demoted daemon's own admission-closing and caller-notification obligations
+   are the daemon-side half of this same invariant — see
+   [§ Admission discipline once superseded](#admission-discipline-once-superseded--stop-growing-scope-finish-whats-already-yours)
+   and [§ A bounded ceiling on the K-confirmation gate](#a-bounded-ceiling-on-the-k-confirmation-gate--never-an-unbounded-wait).
 5. **A passive instance seizes no shared singleton** (relay port, pinned socket,
    single-instance lock) until promotion.
 6. **`zdd` stays pure + consumer-agnostic** and byte-identical across consumers
