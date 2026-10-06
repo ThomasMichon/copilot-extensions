@@ -101,17 +101,30 @@ def test_lazy_start_spawns_when_absent(monkeypatch, tmp_path):
     assert spawned == [True]
 
 
-def test_coordinator_spawn_uses_windowless_interpreter(monkeypatch, tmp_path):
+def test_coordinator_spawn_uses_console_interpreter_and_no_window_flag(monkeypatch, tmp_path):
+    """Regression test: the coordinator has RECURRING console-subsystem
+    descendants (it shells out to `agent-worktrees` etc. for repo/worktree-
+    status queries), so it must keep a hidden console of its own
+    (`windowless_daemon_kwargs()` / `CREATE_NO_WINDOW`) rather than detaching
+    entirely under a `pythonw.exe` substitution -- a `DETACHED_PROCESS` root
+    has no console for those children to inherit, so each one would allocate
+    its own fresh, visible Default Terminal window."""
     calls = []
+    daemon_kwargs_calls = []
     monkeypatch.setattr(m.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(
-        "agent_dispatch.procutil.windowless_python", lambda _python: "PYTHONW"
+        "agent_dispatch.procutil.windowless_daemon_kwargs",
+        lambda **kw: daemon_kwargs_calls.append(kw) or {"creationflags": "NO_WINDOW"},
     )
     monkeypatch.setattr(m.subprocess, "Popen", lambda argv, **kwargs: calls.append((argv, kwargs)))
 
     m._spawn_coordinator_process()
 
-    assert calls[0][0] == ["PYTHONW", "-m", "agent_dispatch", "serve"]
+    # The interpreter is NOT substituted to a pythonw.exe sibling.
+    assert calls[0][0][1:] == ["-m", "agent_dispatch", "serve"]
+    assert not calls[0][0][0].lower().endswith("pythonw.exe")
+    assert daemon_kwargs_calls == [{}]
+    assert calls[0][1]["creationflags"] == "NO_WINDOW"
 
 
 def test_coordinator_spawn_resolves_installed_slot_not_sys_executable(

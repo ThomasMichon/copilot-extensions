@@ -364,11 +364,11 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
             return int(sock.getsockname()[1])
 
     def spawn_passive(port: int):
-        from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
+        from agent_procutil import windowless_daemon_kwargs
 
         python = _sys.executable
         cmd = [
-            windowless_python(python),
+            python,
             "-m",
             "agent_dispatch",
             "serve",
@@ -388,7 +388,6 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
         # using, while the rest of this cutover keeps using the first
         # snapshot.
         child_env = dict(os.environ)
-        child_env.update(windowless_python_env(python))
         # AGENT_DISPATCH_PORT must be set *after* the overlay snapshot above:
         # the orchestrator already selected this specific free `port` for the
         # passive process to bind (and passes it explicitly via `--port`
@@ -402,7 +401,18 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
             "stdout": _subprocess.DEVNULL,
             "stderr": _subprocess.DEVNULL,
         }
-        kwargs.update(detached_kwargs())
+        # NOT windowless_python()/detached_kwargs(): this coordinator is a
+        # daemon with RECURRING console-subsystem descendants (it repeatedly
+        # shells out to `agent-worktrees` etc. for repo/worktree-status
+        # queries). A DETACHED_PROCESS root has no console for those children
+        # to inherit, so each one allocates its own fresh, visible Default
+        # Terminal window (confirmed via a live controlled comparison -- see
+        # docs/patterns/windows-background-process-launch.md and
+        # efforts/active/windows-launch-hardening/README.md). Keep the
+        # console-subsystem interpreter (`python`, not `pythonw.exe`) and use
+        # CREATE_NO_WINDOW so this process's own console stays hidden while
+        # still being inheritable by its children.
+        kwargs.update(windowless_daemon_kwargs())
         return _subprocess.Popen(cmd, **kwargs)  # noqa: S603
 
     def health_check(check_host: str, port: int) -> bool:
