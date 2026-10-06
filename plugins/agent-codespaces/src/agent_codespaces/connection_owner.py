@@ -977,7 +977,6 @@ def ensure_owner_running(
     try:
         import subprocess
         import sys
-
         from agent_procutil import windowless_daemon_kwargs
 
         argv = [sys.executable, "-m", "agent_codespaces", "owner"]
@@ -986,12 +985,7 @@ def ensure_owner_running(
             "stdout": subprocess.DEVNULL,
             "stderr": subprocess.DEVNULL,
             "close_fds": True,
-            # Never the caller's ambient cwd: the Connection Owner is a
-            # permanent-ish background daemon that may outlive whatever
-            # repo/worktree checkout the caller happened to be running from
-            # (service-lifecycle-supervision's "nothing pins the plugin
-            # payload" rule, generalized to every deletable checkout).
-            "cwd": os.path.expanduser("~"),
+            "cwd": os.path.expanduser("~"),  # never the caller's cwd
             **windowless_daemon_kwargs(breakaway=True),
         }
         subprocess.Popen(argv, **popen_kwargs)
