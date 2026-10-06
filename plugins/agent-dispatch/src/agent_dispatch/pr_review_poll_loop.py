@@ -23,7 +23,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from .azure_devops_provider_adapter import AzureDevOpsPRAdapter
-from .gitea_pr_provider_stub import GiteaPRAdapter
+from .gitea_pr_provider import GiteaPRAdapter
 from .github_provider_adapter import GitHubPRAdapter
 from .review_target_refs import target_from_observation_key
 
@@ -32,8 +32,8 @@ from .pr_observation_store import PRObservationStore, record_observation
 from .pr_polling_policy import RepoTier, poll_due
 
 #: Fetches the current raw observation for one PR. In production this is a
-#: provider-specific adapter's ``observe`` method (GitHub today, Azure DevOps
-#: now supported too); tests inject a fake.
+#: provider-specific adapter's ``observe`` method (GitHub, Azure DevOps, and
+#: Gitea all supported today); tests inject a fake.
 Observer = Callable[[str, int], PRObservation]
 
 

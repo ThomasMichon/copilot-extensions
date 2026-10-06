@@ -4,17 +4,20 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`)
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-09-30
-- **Status:** Active (Phase 9 done; only the separately tracked Phase 2 Gitea reviewer follow-on and Phase 3 single-emitter-primitive follow-on remain)
+- **Status:** Active (Phase 9 done; the Phase 2 Gitea backlog
+  ([#4825](https://github.com/ThomasMichon/copilot-extensions/issues/4825))
+  and reviewer follow-ons both landed 2026-10-05; only Phase 3's own
+  tracked single-emitter-primitive follow-on slice remains)
 - **Vision:** `visions/plugins/agent-dispatch/README.md` (§*The recipe*)
   advances *loop-recipes* from "four fixed archetypes, hand-declared per
   consumer" to "named, extendable templates a consumer instantiates with a
   handful of params"; `visions/plugins/agent-dispatch/repository-issue-loop/README.md`
   and `visions/plugins/agent-dispatch/reviewer/README.md` now reflect the
   realized `extends:` model, the four named recipe instantiations, the
-  realized GitHub + Azure DevOps backlog-provider surface (with Gitea still a
-  deferred stub), and the still-partial reviewer-side provider neutrality
-  (GitHub + Azure DevOps read-side observation realized; Gitea still open,
-  and webhook / direct-action parity intentionally narrower).
+  realized GitHub + Azure DevOps + Gitea backlog-provider surface, and the
+  realized reviewer-side provider neutrality (GitHub + Azure DevOps + Gitea
+  read-side observation all realized; webhook / direct-action parity
+  intentionally narrower for every provider).
 - **Umbrella issue:** #4691 (claimed and expanded by this effort — was an
   unplanned placeholder for the `extends:` model alone; this effort's scope
   also covers the provider-adapter gap and four new named recipes, all
@@ -231,17 +234,21 @@ not new engines either. The `extends:` model (Phase 3) and provider adapters
       implements `ForgeProvider`, and `"azure-devops"` is already in
       `_SUPPORTED_FORGE_PROVIDERS`. Landed by a different effort before this
       one reached Phase 2; no new code needed here beyond this finding.
-- [x] Add a Gitea backlog-provider adapter, same surface. **Deferred to
-      `ThomasMichon/copilot-extensions#4825`**: per operator direction, a
-      structural `GiteaProvider` stub landed (implements `ForgeProvider`;
-      `_forge_provider_for` can route to it), but every method raises
-      `NotImplementedError` pointing at the tracking issue, and
-      `validate_config` deliberately still **rejects** `forge.provider:
-      gitea` (accepting it would validate cleanly then fail forever on the
-      first tick) until a real adapter lands — real implementation is left
-      to a future agent/session with Gitea access and expertise, since no
-      integration approach was chosen and no live instance is available
-      here to validate against.
+- [x] Add a Gitea backlog-provider adapter, same surface. **Done
+      2026-10-05, closing `ThomasMichon/copilot-extensions#4825`**: a real
+      `GiteaProvider` (`gitea_provider.py`, replacing the structural stub)
+      implements `ForgeProvider` via the Gitea REST API over `curl` (the
+      same integration approach `agent-worktrees`' own Gitea PR provider
+      already decided and validated), and `"gitea"` is back in
+      `_SUPPORTED_FORGE_PROVIDERS` -- `validate_config` now accepts a
+      well-formed `forge.provider: gitea` declaration (new
+      `forge.api_base`/`forge.token_env` fields, validated by a new
+      `gitea_connection.py`). Validated against a real Gitea instance (not
+      unit tests alone, per this repo's "validate beyond unit tests"
+      policy): list/reserve/claim/release all exercised end-to-end against
+      a disposable scratch repo, catching and fixing nothing in this
+      surface (two real bugs *were* caught in the sibling reviewer-side
+      adapter below).
 - [x] Add the equivalent forge adapter for the **reviewer** recipe's
       provider-neutral **read-side observation** capability for Azure
       DevOps. Landed here: `azure_devops_provider_adapter.py` mirrors the
@@ -255,11 +262,28 @@ not new engines either. The `extends:` model (Phase 3) and provider adapters
       remain worker-direct tool actions, so Azure DevOps parity here is the
       read-side adapter/routing surface, not a new engine-side vote-casting
       API.
-- [ ] Add the equivalent forge adapter for the **reviewer** recipe's
-      provider-neutral review capability for Gitea. **Still explicitly
-      deferred**: a structural `GiteaPRAdapter` stub exists (mirroring the
-      backlog-side stub precedent and keeping the provider slot named), but
-      no real Gitea API integration is implemented in this effort/session.
+- [x] Add the equivalent forge adapter for the **reviewer** recipe's
+      provider-neutral review capability for Gitea. **Done 2026-10-05**: a
+      real `GiteaPRAdapter` (`gitea_pr_provider.py`, replacing the
+      structural stub) mirrors the GitHub/Azure DevOps adapters' pure-
+      classifier + thin-REST-wrapper shape. Decided the previously-open
+      repo-addressing question (`review_target_refs.py`'s own "parsed
+      structurally... but no live adapter exists yet" note): a Gitea
+      reviewer ref is `gitea-pr:<host>/<owner>/<repo>#<number>`, where
+      `<host>` is the instance hostname with no scheme -- the adapter
+      derives `https://<host>` directly, needing no separate host-to-
+      instance config mapping. Validated against a real Gitea PR (not unit
+      tests alone): approval-status aggregation (latest review per
+      reviewer, `REQUEST_CHANGES` observed correctly), blocking-thread
+      detection (an unresolved inline review comment), and mergeability
+      all confirmed live. Live validation caught two real adapter bugs unit
+      tests alone could not have (fixed before landing): Gitea's combined
+      commit-status endpoint reports `"pending"` by default even with
+      `total_count: 0` (no CI configured at all) -- unlike GitHub, which
+      omits the rollup entirely in that case -- now treated as "no checks"
+      (clean), not pending; and `git/commits/{sha}`'s author/committer
+      dates are nested under an inner `commit` key the first pass read
+      flatly, silently returning `last_commit_at: None` forever.
 - [x] Tests: adapter contract tests mirroring the existing GitHub adapter's
       own test shape, for both backlog and reviewer surfaces.
 
@@ -466,6 +490,49 @@ below — read it before starting any Phase 3 work).
 _Pending review._
 
 ## Journal
+
+### 2026-10-05 — Phase 2 close-out: real Gitea backlog + reviewer adapters (done)
+Picked up `ThomasMichon/copilot-extensions#4825` and Phase 2's sibling
+reviewer-side Gitea item -- this facility now has Gitea access and
+expertise (its own self-hosted instance), closing exactly the gap the
+stub-landing Journal entry below flagged as blocking.
+
+- **Backlog adapter** (`gitea_provider.py`, replacing `gitea_provider_stub.py`):
+  real `GiteaProvider` via the Gitea REST API over `curl` -- the same
+  integration approach `agent-worktrees`' own Gitea PR provider already
+  decided and validated, not a fresh decision. New `gitea_connection.py`
+  validates `forge.api_base`/`forge.token_env` (gitea-only); `"gitea"` is
+  back in `_SUPPORTED_FORGE_PROVIDERS`.
+- **Reviewer adapter** (`gitea_pr_provider.py`, replacing
+  `gitea_pr_provider_stub.py`): real `GiteaPRAdapter` mirroring
+  `github_provider_adapter.py`/`azure_devops_provider_adapter.py`'s
+  pure-classifier + thin-REST-wrapper split. Decided
+  `review_target_refs.py`'s previously-open Gitea ref shape question:
+  `gitea-pr:<host>/<owner>/<repo>#<number>`, letting the adapter derive
+  `https://<host>` directly with no separate host-to-instance config.
+- **Live-validated both** (not unit tests alone, per this repo's own
+  policy) against a disposable scratch repo/PR on the facility's own Gitea
+  instance: backlog list/reserve/claim/release round-tripped correctly
+  (comment-marker edit-in-place, label add/remove); reviewer approval
+  aggregation, blocking-thread detection, and mergeability all confirmed
+  against a real `REQUEST_CHANGES` review with an unresolved inline
+  comment. Live validation caught two real bugs no unit test (mocking
+  plausible-looking fixtures) would have: Gitea's combined commit-status
+  endpoint defaults to `"pending"` even with zero statuses configured
+  (unlike GitHub, which omits the rollup entirely) -- now correctly read
+  as "no checks" (clean); and `git/commits/{sha}`'s author/committer dates
+  are nested under an inner `commit` key, not flat -- the first pass
+  silently returned `last_commit_at: None` forever. Both fixed before
+  landing, with regression tests added.
+- Manually widened the module-size baseline for `repository_issue_loops.py`
+  (1826 -> 1835, +9 lines: the two-line `gitea_connection` validate call +
+  forge-dict wiring + the now-3-provider `_SUPPORTED_FORGE_PROVIDERS` set) --
+  a deliberate, reviewed edit per that guard's own documented escape hatch.
+- Replaced the four stub-era tests (`test_validate_config_rejects_gitea_
+  provider_until_implemented`, `test_forge_provider_for_selects_gitea_stub`,
+  `test_gitea_provider_is_an_explicit_stub`, `test_gitea_pr_adapter_is_an_
+  explicit_stub`) with real-behavior coverage; added two new dedicated test
+  files (`test_gitea_provider.py`, `test_gitea_pr_provider.py`).
 
 ### 2026-09-30 — Kickoff
 - Claimed and expanded #4691 (previously an unplanned placeholder for the

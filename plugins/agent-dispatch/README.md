@@ -696,8 +696,9 @@ verification abandons a reviewer task once the target change's last commit is
 older than that many days. The timestamp may come from inline reviewer metadata
 (`payload_inline.reviewer_loop.last_commit_at`) or, for the built-in
 provider-backed flows, from a `payload_ref` like
-`github-pr:owner/repo#123` or
-`azure-devops-pr:organization/project/repository#123` resolved through the
+`github-pr:owner/repo#123`,
+`azure-devops-pr:organization/project/repository#123`, or
+`gitea-pr:host/owner/repo#123` resolved through the
 persisted PR-observation cache. Suspended reviewer tasks also use the same
 deadline to wake a parked hibernation waiter instead of remaining dormant
 forever. The threshold is per declaration; omitting the key disables
@@ -706,14 +707,13 @@ stale-exit checking entirely.
 **Provider state today.** The reusable `reviewer-loop` lifecycle is recipe-able
 today (`global:reviewer` / `global:conflict-resolution` in the `extends:`
 registry below). Its read-side provider observation *primitives* now cover
-GitHub and Azure DevOps (provider-backed `payload_ref` parsing, persisted
-observation lookup for stale-exit checks, a provider-aware poll observer
-helper, and a read-only Azure DevOps PR adapter alongside the existing GitHub
-one). The forge-facing webhook receiver and the worker's direct
-verdict-posting / merge-or-close action path remain GitHub-shaped today, and
-this plugin does not yet ship a live Azure DevOps webhook or poll-service
-producer that seeds observations on its own. Gitea remains deferred to a
-structural stub only.
+GitHub, Azure DevOps, and Gitea (provider-backed `payload_ref` parsing,
+persisted observation lookup for stale-exit checks, a provider-aware poll
+observer helper, and read-only Azure DevOps/Gitea PR adapters alongside the
+existing GitHub one). The forge-facing webhook receiver and the worker's
+direct verdict-posting / merge-or-close action path remain GitHub-shaped
+today, and this plugin does not yet ship a live Azure DevOps or Gitea
+webhook/poll-service producer that seeds observations on its own.
 
 ```bash
 agent-dispatch reviewer-loop setup .copilot-extensions/agent-dispatch/registrar/reviewer-loop.json
@@ -828,18 +828,18 @@ Reservations owned by another loop are selection blockers and are never
 silently cleared.
 
 **Provider state today.** The provider-neutral backlog surface is realized for
-GitHub and Azure DevOps. GitHub uses the label + marker-comment flow described
-above; Azure DevOps implements the same list / reserve / claim / release
-surface for work-item backlogs through its own adapter. Gitea is only a
-structural future seam today: a stub provider exists so the runtime has a named
-adapter slot, but declarations with `forge.provider: gitea` are still
-validation-rejected until a real adapter lands (tracked separately as
-`ThomasMichon/copilot-extensions#4825`).
+GitHub, Azure DevOps, and Gitea. GitHub uses the label + marker-comment flow
+described above; Azure DevOps implements the same list / reserve / claim /
+release surface for work-item backlogs through its own adapter; Gitea
+implements it through the Gitea REST API (`gitea_provider.py`), configured via
+`forge.api_base` (the instance base URL) and an optional `forge.token_env`
+(the environment variable holding an API token, default `GITEA_TOKEN`).
 
 The configured producer identity is verified against the selected provider
-immediately before every mutation (for example `gh` against the GitHub repo, or
-the authenticated Azure DevOps surface against its project/work-item backend);
-comments from other authors are untrusted issue data.
+immediately before every mutation (for example `gh` against the GitHub repo,
+the authenticated Azure DevOps surface against its project/work-item backend,
+or a Gitea instance's own `/user`/`/repos/{owner}/{repo}` reads); comments
+from other authors are untrusted issue data.
 
 **Rehearsing a new or edited declaration before trusting it to run
 unattended:** `rehearsal_mode: true` (default `false`) makes every
@@ -1003,16 +1003,15 @@ effort demonstrates its constituent issues are resolved or transferred).
 consumer the shared loop shape and lifecycle contract; it does not erase the
 remaining provider boundaries:
 
-- Backlog-side provider neutrality is realized for GitHub and Azure DevOps.
-  Gitea remains a declared future adapter slot and is still validation-rejected
-  pending the real implementation (`ThomasMichon/copilot-extensions#4825`).
+- Backlog-side provider neutrality is realized for GitHub, Azure DevOps, and
+  Gitea.
 - Reviewer-side provider neutrality is still partial. The `reviewer-loop`
   engine and its `global:reviewer` / `global:conflict-resolution` recipes
   exist, and the read-side observation adapter surface plus provider-aware
-  poll helper now cover GitHub and Azure DevOps; however, the forge-facing
-  webhook receiver plus the worker's direct verdict-posting / merge-or-close
-  action path are still GitHub-shaped, and no live Azure DevOps trigger/poll
-  producer is wired yet. Gitea remains the deferred future adapter slot.
+  poll helper now cover GitHub, Azure DevOps, and Gitea; however, the
+  forge-facing webhook receiver plus the worker's direct verdict-posting /
+  merge-or-close action path are still GitHub-shaped, and no live Azure
+  DevOps or Gitea trigger/poll producer is wired yet.
 - For `global:backlog-triager`, `global:issue-reproducer`,
   `global:effort-builder`, and `global:effort-driver`, the shared recipe stops
   at the reusable lifecycle contract. The consuming repo still supplies its own

@@ -9,7 +9,7 @@ hook model (``visions/plugins/agent-dispatch/README.md``):
 machinery (``repository_issue_loops.py``) is reused completely unchanged;
 the script supplies only the domain-specific backlog source, never the loop
 shape. Split into its own module purely to stay under this repo's
-module-size cap, mirroring ``gitea_provider_stub.py``'s own precedent.
+module-size cap, mirroring ``gitea_provider.py``'s own precedent.
 """
 
 from __future__ import annotations

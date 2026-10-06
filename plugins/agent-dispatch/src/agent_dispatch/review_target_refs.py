@@ -10,8 +10,11 @@ This module keeps that parsing provider-aware but minimal:
 
 - GitHub refs keep their established ``github-pr:owner/repo#123`` shape.
 - Azure DevOps adds ``azure-devops-pr:organization/project/repository#123``.
-- Gitea is parsed structurally for the future stub/factory path, but no live
-  adapter exists yet.
+- Gitea adds ``gitea-pr:host/owner/repo#123``, where ``host`` is the
+  instance hostname with no scheme (e.g. ``gitea.example.com``) -- a real
+  adapter (``gitea_pr_provider.GiteaPRAdapter``) derives ``https://host``
+  directly from the ref, so no separate host-to-instance config mapping is
+  needed.
 
 The parse result is pure data: a provider tag, a provider-specific repo key,
 and the PR number. Callers decide what to do with it.

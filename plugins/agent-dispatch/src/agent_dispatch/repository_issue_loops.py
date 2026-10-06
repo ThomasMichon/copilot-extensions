@@ -3,7 +3,7 @@
 The high-level declaration expands to an ordinary periodic emitter and one
 headless supervised lane.  This module supplies the emitter's provider-neutral
 selection/reservation state machine and the GitHub and Azure DevOps adapters
-(the stubbed Gitea adapter lives in ``gitea_provider_stub.py``, size-capped).
+(the Gitea adapter lives in ``gitea_provider.py``, size-capped).
 """
 
 from __future__ import annotations
@@ -26,7 +26,8 @@ from .ado_discovery_scope import (
     wiql_literal,
     wiql_scope_clauses,
 )
-from .gitea_provider_stub import GiteaProvider
+from .gitea_connection import validate_gitea_connection
+from .gitea_provider import GiteaProvider
 from .issue_loop_markers import _marker, _marker_plain, _parse_marker
 from .repository_issue_selection import eligible_issues, validate_issue_numbers
 from .repository_issue_task_contracts import (
@@ -58,9 +59,11 @@ _KNOWN_KEYS = frozenset(
         "evaluator_ref", "task_contract", "rehearsal_mode",
     }
 )
-_FORGE_KEYS = frozenset({"provider", "producer_login", "discovery_scope"}) | SCRIPT_FORGE_KEYS
-#: Excludes "gitea" (stub only, gitea_provider_stub.py); add back once #4825 lands.
-_SUPPORTED_FORGE_PROVIDERS = frozenset({"github", "azure-devops", "script"})
+_FORGE_KEYS = (
+    frozenset({"provider", "producer_login", "discovery_scope", "api_base", "token_env"})
+    | SCRIPT_FORGE_KEYS
+)
+_SUPPORTED_FORGE_PROVIDERS = frozenset({"github", "azure-devops", "gitea", "script"})
 _RESERVATION_KEYS = frozenset({"label", "comment", "orphan_after_seconds"})
 _GITHUB_ISSUE_PAGE_SIZE = 100
 _GITHUB_MAX_ISSUE_PAGES = 10
@@ -235,6 +238,7 @@ def validate_config(
         )
     provider_name = forge.get("provider")
     discovery_scope = validate_discovery_scope(forge, provider=provider_name)
+    gitea_connection = validate_gitea_connection(forge, provider=provider_name)
     script_config = validate_script_forge_config(
         forge,
         provider=provider_name,
@@ -415,6 +419,7 @@ def validate_config(
             "provider": forge.get("provider"),
             "producer_login": producer_login,
             "discovery_scope": discovery_scope,
+            **(gitea_connection or {}),
             **(script_config or {}),
         },
         "reservation": {
@@ -1202,7 +1207,11 @@ def _forge_provider_for(
             producer_login, discovery_scope=forge.get("discovery_scope")
         )
     if provider_name == "gitea":
-        return GiteaProvider(producer_login)
+        return GiteaProvider(
+            producer_login,
+            api_base=forge.get("api_base"),
+            token_env=forge.get("token_env"),
+        )
     if provider_name == "script":
         return build_provider(forge, producer_login=producer_login, repo_root=cwd)
     raise RegistrarError(
