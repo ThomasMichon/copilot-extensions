@@ -119,6 +119,27 @@ class TestResolveRootCodename:
         )
         assert root_chain.resolve_root_codename(child, project="ext") is None
 
+    def test_mismatched_embedded_worktree_id_is_rejected(
+        self, tmp_path, monkeypatch,
+    ):
+        # `tracking.load_record` trusts the YAML's content as-is -- a
+        # corrupted/hand-edited `wt-root.yaml` could claim a DIFFERENT
+        # (even path-traversing) `worktree_id` than its own filename. That
+        # forged identity must never be trusted; fail closed instead of
+        # letting it flow into subsequent hop fingerprints/write paths or
+        # attribute the wrong root.
+        _seed(tmp_path, monkeypatch, "harness", "wt-root",
+              codename="amber-thicket", codename_source="built-in")
+        root_dir = tmp_path / ".harness" / "worktrees"
+        corrupted = tracking.load_record(root_dir / "wt-root.yaml")
+        corrupted.worktree_id = "wt-forged"
+        tracking.save_record(corrupted, root_dir / "wt-root.yaml")
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        assert root_chain.resolve_root_codename(child, project="ext") is None
+
     def test_cyclic_owner_graph_returns_none(self, tmp_path, monkeypatch):
         # Seed A -> owner B, then rewrite B -> owner A (a corrupted/hand-
         # edited cycle); the walk must refuse to loop forever.
@@ -429,13 +450,36 @@ class TestResolveRootCodename:
         )
         assert root_chain.resolve_root_codename(child, project="ext") is None
 
-    def test_root_raw_marker_mode_still_publishes_its_codename(
+    def test_root_raw_marker_mode_still_publishes_a_built_in_codename(
         self, tmp_path, monkeypatch,
     ):
         # A root repo in `true` (raw marker) mode already accepts full
-        # exposure on its OWN PRs -- publishing the mere codename via
+        # exposure on its OWN PRs -- publishing a BUILT-IN codename via
         # someone else's marker is strictly less revealing, so it's
-        # allowed unconditionally (no custom-wordlist gate applies).
+        # allowed unconditionally.
+        root_config = _cfg()
+        root_config.default_repo.pr.source_attribution = True
+        _seed(
+            tmp_path, monkeypatch, "harness", "wt-root",
+            codename="amber-thicket", codename_source="built-in",
+            config=root_config,
+        )
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        assert root_chain.resolve_root_codename(child, project="ext") == (
+            "amber-thicket"
+        )
+
+    def test_root_raw_marker_mode_never_leaks_a_custom_codename(
+        self, tmp_path, monkeypatch,
+    ):
+        # `true` (raw marker) is a CLOSED-CIRCUIT setting for the root's
+        # own PRs -- it is not cross-repo consent to publish a CUSTOM-
+        # wordlist alias (not inherently public-safe) into a DIFFERENT,
+        # possibly-public child repo. Only an explicit `"codename"` mode
+        # selection (with its own opt-in) may cross that boundary.
         root_config = _cfg()
         root_config.default_repo.pr.source_attribution = True
         _seed(
@@ -447,9 +491,7 @@ class TestResolveRootCodename:
             tmp_path, monkeypatch, "ext", "wt-child",
             owner_ref="anomalous-potato/harness/wt-root#s1",
         )
-        assert root_chain.resolve_root_codename(child, project="ext") == (
-            "harbor-lattice"
-        )
+        assert root_chain.resolve_root_codename(child, project="ext") is None
 
     def test_worktree_id_reuse_invalidates_a_stale_sidecar(
         self, tmp_path, monkeypatch,

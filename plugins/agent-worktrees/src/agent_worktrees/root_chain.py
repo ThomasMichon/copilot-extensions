@@ -223,8 +223,13 @@ def _load_local_record(
 
     Returns ``None`` if either component is unsafe to join as a path
     segment (see :func:`_is_safe_path_component`), the project/tracking dir
-    can't be resolved, the record file is absent, or it fails to parse --
-    every failure mode degrades to "chain unresolved here", never an
+    can't be resolved, the record file is absent, fails to parse, or its
+    OWN embedded ``worktree_id`` doesn't exactly match the requested
+    *worktree_id* -- ``tracking.load_record`` trusts the YAML's content as-
+    is, so a corrupted/hand-edited ``wt-root.yaml`` could otherwise claim a
+    different (even path-traversing) identity, which would then flow
+    onward into subsequent hop fingerprints, write paths, and attribution.
+    Every failure mode degrades to "chain unresolved here", never an
     exception.
     """
     if not _is_safe_path_component(worktree_id):
@@ -238,9 +243,12 @@ def _load_local_record(
     if not path.exists():
         return None
     try:
-        return tracking.load_record(path)
+        record = tracking.load_record(path)
     except Exception:
         return None
+    if record.worktree_id != worktree_id:
+        return None
+    return record
 
 
 def _load_root_config(root_project: str | None):
@@ -309,12 +317,16 @@ def _ensure_publishable_root_codename(
     # falls back to `false` the same way the primary codename-publish path
     # does) must never have its codename exposed via someone ELSE's
     # marker, regardless of codename provenance. `true` (raw mode) already
-    # accepts full exposure on its OWN PRs, so publishing the mere codename
-    # here is strictly less revealing -- allowed unconditionally. Only
-    # `"codename"` mode still needs the existing provenance/explicit check
-    # below (a custom wordlist requires that repo's own explicit opt-in).
+    # accepts full exposure on its OWN PRs for a BUILT-IN codename -- but
+    # it is a closed-circuit setting, never cross-repo consent for a
+    # CUSTOM-wordlist alias (that vocabulary is not inherently public-safe
+    # merely because some explicit value was set); a custom codename
+    # crossing into a different (possibly public) child repo still needs
+    # the root to have explicitly selected `"codename"` mode specifically.
     root_attribution = getattr(root_prcfg, "source_attribution", "codename")
     if root_attribution not in ("codename", True):
+        return None
+    if root_record.codename_source == "custom" and root_attribution != "codename":
         return None
     if root_attribution == "codename":
         explicit = bool(
