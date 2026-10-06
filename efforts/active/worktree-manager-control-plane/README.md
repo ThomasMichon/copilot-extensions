@@ -880,10 +880,16 @@ worktree-manager.
       unnecessary for this consumer and is not planned unless a genuine
       second consumer surfaces that cannot cheaply re-verify liveness/identity
       at its own kill site the way this one does — a broader per-consumer
-      audit (agent-bridge, agent-dispatch, agent-worktrees) found no such case
-      in a first pass (2026-10-05), but was not exhaustive. Left open on
-      #5006 for a maintainer call on whether to close it as resolved-
-      differently or keep it for that broader audit.
+      audit (2026-10-05) found **at least one real additional case**:
+      `plugins/agent-bridge/src/agent_bridge/service_process_cli.py`'s
+      `_kill_pid` (bare `taskkill`/`os.kill`, no identity-bound termination)
+      called after a separate `_pid_is_agent_bridge` identity check — the
+      same check-then-bare-kill window, not yet remediated. Likely also
+      fixable with a freshly-captured `process_start_time` token rather
+      than the breadcrumb schema change (review feedback, PR #5473), but
+      that fix itself is not yet done. Left open on #5006, which now
+      records this specific remaining site rather than claiming none
+      exist; the audit was still not exhaustive across every plugin.
 - **Background daemon rotation.** Resident per-version mux-daemons
       accumulate indefinitely: `activate_after_update()`'s cutover is only
       attempted opportunistically (at whichever session's `self_update()`
@@ -1112,15 +1118,18 @@ claiming discipline alone.
   findings from continuing this effort: (1) #5006's PID-reuse-safe
   mux-daemon termination is already resolved for the mux-daemon call site
   via #5060, using a simpler live-reverification design than this Plan's
-  original breadcrumb-schema proposal — marked `[x]`, with the remaining
-  broader-consumer-audit question left open on the issue itself for a
-  maintainer call rather than closed unilaterally; (2) clarified the
+  original breadcrumb-schema proposal — marked `[x]`; (2) clarified the
   Phase 2-4 ordering note under #5001's "Background daemon rotation" bullet
   — Phase 2 genuinely depends on Phase 3's design existing first, despite
   the numbering, which read ambiguously before. No vision revision was
   needed: neither finding changes a stated behavior/guarantee in
   `visions/installer` or `visions/picker`, only the effort's own
-  in-progress Plan detail.
+  in-progress Plan detail. Review on the landing PR (#5473) caught a real
+  gap in the first pass: the claim that a broader per-consumer audit found
+  "no such case" was wrong — `agent-bridge`'s `service_process_cli.py`
+  (`_kill_pid` / `_pid_is_agent_bridge`) has the identical check-then-
+  bare-kill window, just not yet remediated. Corrected the Plan text to
+  record that specific site instead of claiming none exist.
 - **2026-10-03/06** — Claimed and landed Phase 7's "Background daemon
   rotation" Phase 1 (observability), copilot-extensions#5001: added
   `worktree-manager mux-daemon status [--json]` (aliased `daemons status`)
