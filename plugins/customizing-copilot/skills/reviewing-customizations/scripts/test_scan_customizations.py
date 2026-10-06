@@ -1576,6 +1576,129 @@ def test_agent_mcp_agent_with_unrestricted_tools_never_needs_shell_flag(
     )
 
 
+@pytest.mark.guard
+def test_mcp_server_narrow_tool_list_is_flagged(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    tools: ['*']\n"
+        "  svc-b:\n"
+        "    command: agent-mcp\n"
+        "    tools: ['example_search', 'example_status']\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    findings = [f for f in report.findings if f.check == "mcp-server-tools-allowlist"]
+    assert len(findings) == 1
+    assert "svc-b" in findings[0].message
+    assert "example_search" in findings[0].message
+
+
+@pytest.mark.guard
+def test_mcp_server_wildcard_tool_list_passes(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    tools: ['*']\n"
+        "  svc-b:\n"
+        "    command: agent-mcp\n"
+        "    tools: ['*']\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert not any(
+        f.check == "mcp-server-tools-allowlist" for f in report.findings
+    )
+
+
+@pytest.mark.guard
+def test_mcp_server_block_sequence_tool_list_is_flagged(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    tools:\n"
+        "      - example_read\n"
+        "      - example_write\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    findings = [f for f in report.findings if f.check == "mcp-server-tools-allowlist"]
+    assert len(findings) == 1
+    assert "example_read" in findings[0].message
+    assert "example_write" in findings[0].message
+
+
+@pytest.mark.guard
+def test_mcp_server_nested_env_key_is_not_mistaken_for_tools(tmp_path: Path):
+    # A same-named key nested one level deeper than the server's own direct
+    # fields (e.g. inside an `env:` mapping) must never be mistaken for the
+    # server's own `tools:` field.
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    env:\n"
+        "      TOOLS: enabled\n"
+        "    tools: ['*']\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert not any(
+        f.check == "mcp-server-tools-allowlist" for f in report.findings
+    )
+
+
 def test_external_plugin_agent_guard_is_origin_version_advisory(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()

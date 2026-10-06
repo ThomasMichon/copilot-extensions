@@ -289,6 +289,29 @@ fallback below, which needs shell access to invoke the materialized fleet
 when the native catalog fails to register. Give an MCP-owning agent full
 tool access like any other.
 
+**Per-server `tools:` allow-lists: prefer `["*"]`, not a hand-enumerated
+list.** An `mcp-servers.<name>.tools` entry narrowed to specific tool names
+(e.g. `tools: ["foo_search", "foo_status"]`) is brittle in a way `["*"]` is
+not: the upstream MCP server's own tool catalog can add, rename, or retire
+tools between releases, entirely independent of this repo's release cycle --
+a hand-maintained enumeration has no warning when it drifts out of sync with
+that catalog. When it drifts, the agent doesn't just lose the tools the list
+omits; a stale or misspelled entry can make the whole allow-list reject
+*every* name in it ("Unknown tool name in the tool allowlist: ..."), denying
+the agent that server's tools entirely by accident. This is not hypothetical:
+a real-world consuming repo had two agents hand-enumerating a single MCP
+server's tools (e.g. `tools: ["example_search", "example_status"]`); that list
+silently diverged from the server's actual tool catalog and broke MCP session
+startup for both agents.
+
+Default every `mcp-servers.<name>.tools` entry to `["*"]`, exactly like the
+top-level `tools` field above, and narrow it only for a specific, reviewed
+reason to withhold one particular upstream tool -- document that reason
+inline when you do. "Only expose the tools this agent needs" is not such a
+reason by itself: the agent's own system prompt and `description` already
+scope which tools it actually calls, so an explicit allow-list adds drift
+risk without adding real safety.
+
 Every Task-capable agent -- including a coordinator that may spawn other agent
 types -- must include this literal, agent-specific line:
 
@@ -367,6 +390,14 @@ equivalence. An agent **fails** review if any applicable box is unchecked:
 - [ ] **Tools are not narrowed for anti-recursion.** `tools` is omitted or
       `["*"]` (or lists only *additive* MCP grants); it is **never** trimmed to
       "prevent recursion" — that cripples the agent, it doesn't protect it.
+- [ ] **Per-server `mcp-servers.<name>.tools` is `["*"]`, not a hand-enumerated
+      list.** A named allow-list drifts out of sync with the upstream server's
+      own catalog (additions/renames/retirements happen on the upstream's
+      schedule, not this repo's) and a stale/misspelled entry can reject the
+      whole list, silently denying the agent that server's tools entirely.
+      `reviewing-customizations` flags a narrowed per-server list as
+      `mcp-server-tools-allowlist`; narrow it only for a specific, documented
+      reason to withhold one particular tool.
 - [ ] **Tools are not narrowed to force MCP-only usage.** An MCP-owning agent's
       `tools` is not restricted to its MCP surface alone to compel MCP calls or
       block workarounds -- `agent-mcp`'s `materialize`/`call` subcommands are an

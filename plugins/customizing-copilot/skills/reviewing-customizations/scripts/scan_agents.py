@@ -70,6 +70,95 @@ def agent_can_invoke_shell(frontmatter: str) -> bool:
     return tools is None or bool({"*", SHELL_EXECUTION_TOOL} & tools)
 
 
+def mcp_server_tool_entries(frontmatter: str) -> list[tuple[str, str]]:
+    """Return ``(server_name, raw tools value)`` for each ``mcp-servers.<name>.tools``.
+
+    Walks the ``mcp-servers:`` block by indentation (this scanner stays
+    regex/indentation-based rather than taking a YAML dependency, matching
+    every other parser in this module): a line at the block's own indent
+    that is just ``<name>:`` opens a server entry. Within a server entry,
+    only a line at that server's own **direct-field** indent (the indent of
+    its first field, e.g. ``type``/``command``) is considered for a
+    ``tools:`` match -- a more deeply indented line (a nested ``env:``
+    mapping's own children, for example) is skipped, so a coincidentally
+    named nested key can never be mistaken for the server's own ``tools``
+    field. Both an inline value (``tools: ["*"]``) and a block sequence
+    (``tools:`` followed by indented ``- name`` items) are captured; a
+    folded/multi-line scalar is not, since every shipped example writes this
+    field as one of those two short forms.
+    """
+    lines = frontmatter.splitlines()
+    out: list[tuple[str, str]] = []
+    in_mcp_servers = False
+    mcp_indent = 0
+    server_name: str | None = None
+    server_indent: int | None = None
+    field_indent: int | None = None
+    pending_indent: int | None = None
+    pending_items: list[str] = []
+
+    def flush_pending() -> None:
+        nonlocal pending_indent, pending_items
+        if server_name is not None and pending_items:
+            out.append((server_name, " ".join(pending_items)))
+        pending_indent = None
+        pending_items = []
+
+    for line in lines:
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        stripped = line.strip()
+
+        if pending_indent is not None:
+            seq_match = re.match(r"^-\s*(.+)$", stripped)
+            if seq_match and indent > pending_indent:
+                pending_items.append(seq_match.group(1).strip())
+                continue
+            flush_pending()
+
+        if indent == 0 and re.match(r"(?i)^mcp-servers\s*:\s*$", stripped):
+            in_mcp_servers = True
+            mcp_indent = indent
+            server_name = None
+            server_indent = None
+            field_indent = None
+            continue
+        if not in_mcp_servers:
+            continue
+        if indent <= mcp_indent:
+            in_mcp_servers = False
+            server_name = None
+            server_indent = None
+            field_indent = None
+            continue
+
+        server_match = re.match(r"^([A-Za-z0-9_.-]+)\s*:\s*$", stripped)
+        if server_match and (server_indent is None or indent <= server_indent):
+            server_name = server_match.group(1)
+            server_indent = indent
+            field_indent = None
+            continue
+        if server_name is None:
+            continue
+        if field_indent is None:
+            field_indent = indent
+        if indent != field_indent:
+            continue  # more deeply nested than the server's own fields
+
+        tools_match = re.match(r"(?i)^tools\s*:\s*(.*)$", stripped)
+        if not tools_match:
+            continue
+        value = tools_match.group(1).strip()
+        if value:
+            out.append((server_name, value))
+        else:
+            pending_indent = indent
+            pending_items = []
+    flush_pending()
+    return out
+
+
 def has_anti_self_delegation(text: str, agent_name: str) -> bool:
     """Require an explicit do-not-spawn/delegate line naming this agent type."""
     flat = re.sub(r"\s+", " ", text)
@@ -327,3 +416,26 @@ def scan_agents(
                 "stub and is unusable without shell/PowerShell execution, no "
                 "matter how thoroughly the body documents it",
             )
+
+        for server_name, raw_tools in mcp_server_tool_entries(frontmatter):
+            without_comments = raw_tools.split("#", 1)[0]
+            tokens = {
+                token.lower()
+                for token in re.findall(r"[A-Za-z*][A-Za-z0-9_.*:/-]*", without_comments)
+            }
+            if tokens and "*" not in tokens:
+                add(
+                    "mcp-server-tools-allowlist",
+                    f"mcp-servers.{server_name}.tools is a hand-enumerated "
+                    f"list ({', '.join(sorted(tokens))}) instead of [\"*\"] "
+                    "-- the upstream server's own tool catalog can add, "
+                    "rename, or retire tools independent of this repo's "
+                    "release cycle, and a stale/misspelled entry can make "
+                    "the whole allow-list reject every name in it, silently "
+                    "denying the agent that server's tools entirely (a real "
+                    "regression seen in the wild: two agents hand-"
+                    "enumerating one MCP server's tools drifted out of sync "
+                    "with its catalog and broke MCP session startup for "
+                    "both). Use [\"*\"] unless withholding one specific tool "
+                    "for a documented reason.",
+                )
