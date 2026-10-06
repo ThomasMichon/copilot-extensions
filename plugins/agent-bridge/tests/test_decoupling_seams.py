@@ -76,6 +76,30 @@ def test_codespace_transport_exposes_its_name():
     assert CodeSpaceTransport("cs-1", manager=object(), source=object()).codespace_name == "cs-1"
 
 
+def test_codespace_transport_run_script_feeds_stdin():
+    import asyncio
+
+    from agent_bridge.session_host.codespace_transport import CodeSpaceTransport
+
+    class _Res:
+        exit_code, stdout, stderr = 0, "ok", ""
+
+    class _Mgr:
+        calls: list = []
+
+        async def ensure_connected(self, *_a, **_k):
+            return None
+
+        async def exec_command(self, host, command, timeout=None, input_bytes=None):
+            self.calls.append((host, command, input_bytes))
+            return _Res()
+
+    mgr = _Mgr()
+    t = CodeSpaceTransport("cs-1", manager=mgr, source=object())
+    assert asyncio.run(t.run_script("echo hi\n", timeout=5)) == (0, "ok", "")
+    assert mgr.calls == [("cs-1", "bash -s", b"echo hi\n")]
+
+
 # --- _resolve_relay_launch_env (session_manager) -------------------------
 
 def test_relay_launch_env_prefers_cli_and_parses_json():

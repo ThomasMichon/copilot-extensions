@@ -444,9 +444,10 @@ class CodeSpaceSpawner:
             )
             if provision_cmd:
                 try:
-                    prov_rc, _pout, prov_err = await self._transport.run(
-                        provision_cmd, timeout=30.0,
-                    )
+                    # Over stdin when supported: with repo hooks the script
+                    # can exceed the Windows command-line limit as argv.
+                    run = getattr(self._transport, "run_script", self._transport.run)
+                    prov_rc, _pout, prov_err = await run(provision_cmd, timeout=30.0)
                     if prov_rc != 0:
                         log.warning(
                             "CodeSpace provision (relay helpers + repo hooks) "
