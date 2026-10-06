@@ -885,6 +885,30 @@ def test_crash_tail_capture_never_blocks_a_chatty_child():
     assert tail.tail_text() == "x" * 4096
 
 
+def test_crash_tail_capture_wait_until_drained_blocks_for_final_bytes():
+    """``wait_until_drained`` must block until the drain thread has actually
+    consumed a delayed final write + EOF, not return based on ``poll()``
+    alone -- otherwise a reader could observe the process as exited while
+    its last (often most diagnostic) bytes are still in flight (#5487
+    review)."""
+    r, w = os.pipe()
+    stream = os.fdopen(r, "rb")
+    tail = launcher._CrashTailCapture(stream)
+
+    def _delayed_writer() -> None:
+        time.sleep(0.2)
+        with os.fdopen(w, "wb") as out:
+            out.write(b"final traceback line\n")
+
+    writer = threading.Thread(target=_delayed_writer)
+    writer.start()
+    # Immediately after spawning, the delayed writer hasn't written yet.
+    assert tail.tail_text() == ""
+    tail.wait_until_drained(timeout=5.0)
+    writer.join()
+    assert tail.tail_text() == "final traceback line\n"
+
+
 def test_launch_session_host_surfaces_crash_tail(tmp_path, monkeypatch):
     """An early-exiting host surfaces its own stdout/stderr tail in the
     raised RuntimeError instead of only a bare exit code (#5384)."""
@@ -919,34 +943,87 @@ def test_launch_session_host_surfaces_crash_tail(tmp_path, monkeypatch):
     assert "diagnosable detail line" in message
 
 
+def test_launch_session_host_timeout_kills_hung_process(tmp_path, monkeypatch):
+    """A host that neither becomes ready nor exits within ``ready_timeout``
+    must be killed rather than left running (leaking a hung process, its
+    capture thread, and its pipe file descriptor) (#5487 review)."""
+    hang_script = tmp_path / "hang.py"
+    hang_script.write_text(
+        "import sys, time\n"
+        "print('still starting...')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(30)\n"
+    )
+
+    real_popen = subprocess.Popen
+    spawned: dict[str, subprocess.Popen] = {}
+
+    def _fake_popen(argv, **kwargs):
+        proc = real_popen([sys.executable, str(hang_script)], **kwargs)
+        spawned["proc"] = proc
+        return proc
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", _fake_popen)
+
+    with pytest.raises(TimeoutError):
+        launcher.launch_session_host(
+            ["irrelevant-child-argv"],
+            state_dir=tmp_path,
+            ready_timeout=0.5,
+        )
+
+    proc = spawned["proc"]
+    for _ in range(100):
+        if proc.poll() is not None:
+            break
+        time.sleep(0.05)
+    assert proc.poll() is not None, "hung host process was not killed"
+
+
 def test_detach_stdio_from_frontend_closes_frontend_pipe(tmp_path):
     """Once the host calls ``_detach_stdio_from_frontend``, the frontend's
     crash-tail pipe must see EOF (its write end closed) instead of staying
     open for the host's full lifetime -- a host that outlives a later
     frontend exit/restart must never depend on that pipe still being read
-    (#5487 review)."""
+    (#5487 review). The child stays alive well past the detach so EOF can
+    only have come from the dup2 itself, not from process exit (otherwise
+    the test would pass even if the detach did nothing)."""
     script = tmp_path / "detach_probe.py"
     script.write_text(
-        "import sys\n"
+        "import sys, time\n"
         "from agent_bridge.session_host.launcher import ("
         "_detach_stdio_from_frontend)\n"
         "print('before-detach')\n"
         "sys.stdout.flush()\n"
         "_detach_stdio_from_frontend()\n"
+        "time.sleep(5.0)\n"  # stay alive well past the bounded read below
         "print('after-detach-should-not-reach-the-frontend')\n"
-        "sys.stdout.flush()\n"
     )
     proc = subprocess.Popen(
         [sys.executable, str(script)],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
-    # Blocks only until EOF -- i.e. until the pipe's write end is closed by
-    # the dup2 inside _detach_stdio_from_frontend, not until the child exits.
-    captured = proc.stdout.read()
-    proc.wait(timeout=5)
-    assert b"before-detach" in captured
-    assert b"after-detach-should-not-reach-the-frontend" not in captured
+    try:
+        result: dict[str, bytes] = {}
+
+        def _read() -> None:
+            result["data"] = proc.stdout.read()
+
+        reader = threading.Thread(target=_read, daemon=True)
+        reader.start()
+        reader.join(timeout=5.0)
+        assert not reader.is_alive(), "pipe never reached EOF"
+        # The child's own 5s sleep hasn't elapsed yet -- it is still alive,
+        # so the EOF above came from the dup2 inside
+        # _detach_stdio_from_frontend, not from process exit.
+        assert proc.poll() is None
+        captured = result["data"]
+        assert b"before-detach" in captured
+        assert b"after-detach-should-not-reach-the-frontend" not in captured
+    finally:
+        proc.kill()
+        proc.wait(timeout=5)
 
 
 # --------------------------------------------------------------------------

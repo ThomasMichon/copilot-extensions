@@ -754,7 +754,7 @@
         },
         {
           "path": "plugins/agent-bridge/tests/test_session_host.py",
-          "sha256": "7df02c4cb42bb71f601d769e3da1eb102979e4ea5b4296a9922f251acb1d7664",
+          "sha256": "ab3ff9f794e2eeb830d6a1fa52cb98b4405e816855af9514ee510a12e43a6193",
           "semantic": false,
           "non_semantic_reason": "This test suite consumes the protocol but does not produce its wire shape."
         }

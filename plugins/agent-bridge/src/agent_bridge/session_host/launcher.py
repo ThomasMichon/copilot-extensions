@@ -106,6 +106,19 @@ class _CrashTailCapture:
             data = bytes(self._buf)
         return data.decode("utf-8", errors="replace")
 
+    def wait_until_drained(self, timeout: float = 2.0) -> None:
+        """Block until the drain thread has consumed the stream to EOF.
+
+        A dead process's exit (``proc.poll()``) can be observed before the
+        drain thread has read the bytes still buffered in the OS pipe, so
+        a ``tail_text()`` taken immediately after can omit (or miss
+        entirely) the process's final output. Call this first -- bounded,
+        since a process that never actually closes its stdout (unexpected,
+        but not this function's job to diagnose) must not hang the caller
+        forever.
+        """
+        self._thread.join(timeout)
+
 
 def host_spawn_kwargs() -> dict[str, Any]:
     """``subprocess`` kwargs for the FRONTEND to spawn the host so it survives.
@@ -201,6 +214,11 @@ def launch_session_host(
     deadline = time.time() + ready_timeout
     while time.time() < deadline:
         if proc.poll() is not None:
+            # The process has exited, but the OS pipe may still hold bytes
+            # the drain thread hasn't consumed yet -- wait for it to reach
+            # EOF before reading the tail, so the final traceback line
+            # isn't dropped by a race between poll() and the reader.
+            crash_tail.wait_until_drained()
             tail_text = crash_tail.tail_text().strip()
             detail = f"\n--- last output ---\n{tail_text}" if tail_text else ""
             raise RuntimeError(
@@ -224,6 +242,15 @@ def launch_session_host(
                 )
         time.sleep(0.05)
 
+    # The host neither became ready nor exited within the deadline -- stop
+    # waiting on it rather than leaking a hung process, an unbounded-lifetime
+    # daemon thread, and its pipe file descriptor.
+    proc.kill()
+    try:
+        proc.wait(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        pass
+    crash_tail.wait_until_drained()
     raise TimeoutError(f"session host did not become ready within {ready_timeout}s")
 
 
