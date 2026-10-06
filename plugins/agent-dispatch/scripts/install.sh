@@ -53,13 +53,20 @@ set -euo pipefail
 # contract.py enforces it byte-identical across every plugin's own copy;
 # mirrors the identical install.ps1 override just above its own
 # byte-identical self-stage block). agent-dispatch specifically can
-# legitimately spend 30-120s building PLUS up to ~450s waiting on its own
-# cross-version activation/cutover lock (_versioned_activate's lock) -- a
-# genuine ~570s worst case the shared 480s default would kill mid-wait,
-# terminating a perfectly healthy newer install. An operator's own explicit
-# override (env var already set before this script runs) always wins --
-# only supply a default when none is present.
-: "${AGENT_DISPATCH_INSTALL_DEADLINE_SEC:=650}"
+# legitimately chain THREE sequential spans in its own worst case, not just
+# the lock-wait alone: its own build (30-120s) PLUS waiting up to ~450s on
+# its own cross-version activation/cutover lock (_versioned_activate's
+# lock) for ANOTHER invocation's reconciliation to finish, PLUS -- once
+# THIS invocation finally acquires that lock -- its OWN cutover/
+# reconciliation work (a real _coordinator_cutover call, whose own
+# zdd.cutover defaults allow up to health_timeout(60s) + drain_timeout
+# (300s) + 60s of its own internal cutover-lease wait, ~420s). A genuine
+# ~990s worst case (120 + 450 + 420) the shared 480s default -- or an
+# under-sized override -- would kill mid-cutover, terminating a perfectly
+# healthy install. An operator's own explicit override (env var already
+# set before this script runs) always wins -- only supply a default when
+# none is present.
+: "${AGENT_DISPATCH_INSTALL_DEADLINE_SEC:=1050}"
 export AGENT_DISPATCH_INSTALL_DEADLINE_SEC
 
 _ok()   { printf '  [OK]   %s\n' "$1"; }
@@ -1093,6 +1100,51 @@ _ensure_runtime() {
         fi
         _versioned_mark_complete
         _versioned_activate || exit 1
+        # The supersession check and the shared publication it protects
+        # (the binstub + deploy-manifest, both readable/overwritable by any
+        # OTHER concurrent invocation) are NOT atomic unless the SAME global
+        # lock spans both: checking, then releasing, then publishing still
+        # leaves a gap where a newer installer (or stamp) could activate and
+        # publish in between, and this older invocation would still
+        # overwrite that newer content with its own stale one. Hold the
+        # same global (.activate.lock) lock _versioned_activate itself uses
+        # through the check AND deploy_binstub AND _write_manifest -- the
+        # two steps that actually publish shared, version-sensitive content
+        # another invocation could race.
+        local _publish_lock_link=""
+        _unlock_publish() {
+            if [[ -n "$_publish_lock_link" ]]; then
+                local owner
+                owner="$(readlink "$_publish_lock_link" 2>/dev/null || true)"
+                [[ "$owner" != "$$" ]] || rm -f "$_publish_lock_link"
+            else
+                flock -u 8 2>/dev/null || true
+                exec 8>&- 2>/dev/null || true
+            fi
+        }
+        if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
+            exec 8>"$INSTALL_DIR/.activate.lock"
+            flock 8
+        else
+            _publish_lock_link="$INSTALL_DIR/.activate.lock.pid"
+            local owner
+            until ln -s "$$" "$_publish_lock_link" 2>/dev/null; do
+                owner="$(readlink "$_publish_lock_link" 2>/dev/null || true)"
+                if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+                    sleep 1
+                elif ln -s "$$" "$_publish_lock_link.reap" 2>/dev/null; then
+                    if [[ "$(readlink "$_publish_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
+                        rm -f "$_publish_lock_link"
+                    fi
+                    rm -f "$_publish_lock_link.reap"
+                elif [[ "$(readlink "$_publish_lock_link.reap" 2>/dev/null || true)" =~ ^[0-9]+$ ]] &&
+                     ! kill -0 "$(readlink "$_publish_lock_link.reap" 2>/dev/null)" 2>/dev/null; then
+                    rm -f "$_publish_lock_link.reap" 2>/dev/null || true
+                else
+                    sleep 0.1
+                fi
+            done
+        fi
         if _activation_superseded_now; then
             # This invocation's own build lost the cross-version activation
             # race -- either caught immediately by _versioned_activate
@@ -1108,16 +1160,17 @@ _ensure_runtime() {
             # stale one. Stop here; the already-active newer slot remains
             # fully installed and untouched.
             _skip "Build $SRC_VERSION superseded by a newer concurrent build -- skipping remaining publication (manifest, verification, PATH, pivot) for this invocation"
+            _unlock_publish
             return 0
         fi
+        deploy_binstub
+        _write_manifest
+        _unlock_publish
+    else
+        # Legacy (non-versioned) mode: no supersession concept, no lock.
+        deploy_binstub
+        _write_manifest
     fi
-
-    # -- binstub (self-provisioning) -- see the comment above the (now
-    # legacy-mode-only, versioned mode handled by the guard above) removed
-    # call site for why this runs here, after the supersession check.
-    deploy_binstub
-
-    _write_manifest
 
     if "$LINK_PYTHON" -c 'import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__' 2>/dev/null; then
         _ok 'Verification: module imports successfully'

@@ -83,14 +83,20 @@ $ErrorActionPreference = 'Stop'
 # ($__wdEnvVar = "<PLUGIN>_INSTALL_DEADLINE_SEC") -- deliberately set OUTSIDE
 # that block (never edit its literal "480" default: tools/check-install-
 # contract.py enforces it byte-identical across every plugin's own copy).
-# agent-dispatch specifically can legitimately spend 30-120s building PLUS up
-# to ~450s waiting on its own cross-version activation/cutover lock
-# ($script:GlobalActivationLockTimeoutSeconds, set further below) -- a genuine
-# ~570s worst case the shared 480s default would kill mid-wait, terminating a
-# perfectly healthy newer install. An operator's own explicit override (env
-# var already set before this script runs) always wins -- only supply a
-# default when none is present.
-if (-not $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC) { $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC = '650' }
+# agent-dispatch specifically can legitimately chain THREE sequential spans in
+# its own worst case, not just the lock-wait alone: its own build (30-120s)
+# PLUS waiting up to ~450s on its own cross-version activation/cutover lock
+# ($script:GlobalActivationLockTimeoutSeconds, set further below) for ANOTHER
+# invocation's reconciliation to finish, PLUS -- once THIS invocation finally
+# acquires that lock -- its OWN cutover/reconciliation work (a real
+# Invoke-CoordinatorCutover call, whose own zdd.cutover defaults allow up to
+# health_timeout(60s) + drain_timeout(300s) + 60s of its own internal
+# cutover-lease wait, ~420s). A genuine ~990s worst case (120 + 450 + 420)
+# the shared 480s default -- or an under-sized override -- would kill mid-
+# cutover, terminating a perfectly healthy install. An operator's own
+# explicit override (env var already set before this script runs) always
+# wins -- only supply a default when none is present.
+if (-not $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC) { $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC = '1050' }
 
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
@@ -1748,29 +1754,52 @@ function Install-Runtime {
         }
         Invoke-VersionedMarkComplete
         if (-not (Invoke-VersionedActivate)) { exit 1 }
-        if (Test-ActivationSupersededNow) {
-            # This invocation's own build lost the cross-version activation
-            # race -- either caught immediately inside Invoke-VersionedActivate,
-            # or only discovered HERE via the LIVE re-check (this invocation
-            # could have WON its own activation and released the lock, only
-            # for a newer version to activate before reaching this exact
-            # point -- see Test-ActivationSupersededNow's own docstring).
-            # Everything below (manifest, verify, PATH, pivot, gc) resolves
-            # or reports through THIS invocation's own $VenvPython/$LinkPython
-            # -- publishing it now would overwrite the newer build's already-
-            # correct manifest with this older build's stale one. Stop here;
-            # the already-active newer slot remains fully installed and
-            # untouched. The buildMutex is still released normally via the
-            # enclosing `finally` below.
-            Write-Skip "Build $SrcVersion superseded by a newer concurrent build -- skipping remaining publication (manifest, verification, PATH, pivot) for this invocation"
-            return
+        # The supersession check and the shared publication it protects
+        # (the binstub + deploy-manifest, both readable/overwritable by any
+        # OTHER concurrent invocation) are NOT atomic unless the SAME global
+        # lock spans both: checking, then releasing, then publishing still
+        # leaves a gap where a newer installer (or stamp) could activate and
+        # publish in between, and this older invocation would still
+        # overwrite that newer content with its own stale one. Acquire the
+        # global lock NESTED inside the already-held version-scoped
+        # buildMutex (consistent with Invoke-VersionedActivate's own
+        # established ordering -- see Enter-PluginSnapshotLock's own
+        # docstring for why the opposite nesting order would deadlock) and
+        # hold it through Deploy-SelfProvisioningBinstub AND Write-Manifest
+        # -- the two steps that actually publish shared, version-sensitive
+        # content another invocation could race.
+        $publishMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
+        try {
+            if (Test-ActivationSupersededNow) {
+                # This invocation's own build lost the cross-version
+                # activation race -- either caught immediately inside
+                # Invoke-VersionedActivate, or only discovered HERE via the
+                # LIVE re-check (this invocation could have WON its own
+                # activation, only for a newer version to activate before
+                # reaching this exact point -- see
+                # Test-ActivationSupersededNow's own docstring). Everything
+                # below (manifest, verify, PATH, pivot, gc) resolves or
+                # reports through THIS invocation's own
+                # $VenvPython/$LinkPython -- publishing it now would
+                # overwrite the newer build's already-correct manifest with
+                # this older build's stale one. Stop here; the already-
+                # active newer slot remains fully installed and untouched.
+                # Both mutexes are still released normally via their
+                # enclosing `finally` blocks.
+                Write-Skip "Build $SrcVersion superseded by a newer concurrent build -- skipping remaining publication (manifest, verification, PATH, pivot) for this invocation"
+                return
+            }
+            Deploy-SelfProvisioningBinstub
+            Write-Manifest
+        } finally {
+            [void]$publishMutex.ReleaseMutex()
+            $publishMutex.Dispose()
         }
+    } else {
+        # Legacy (non-versioned) mode: no supersession concept, no lock.
+        Deploy-SelfProvisioningBinstub
+        Write-Manifest
     }
-
-    # -- binstub (self-provisioning; #1393) -- see the comment above the
-    # (now legacy-mode-only, versioned mode handled by the guard above)
-    # removed call site for why this runs here, after the supersession check.
-    Deploy-SelfProvisioningBinstub
     } finally {
         # Held through the health gate, completion marker, AND activation
         # above (not just the package build/install): a second same-version
@@ -1784,8 +1813,6 @@ function Install-Runtime {
         [void]$buildMutex.ReleaseMutex()
         $buildMutex.Dispose()
     }
-
-    Write-Manifest
 
     # -- verify (through the stable `.venv` link) --
     $prevEAP = $ErrorActionPreference
