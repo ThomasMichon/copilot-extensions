@@ -378,8 +378,16 @@ _versioned_activate() {
     # invocation already activated -- silently regressing current-version.
     # versioned_runtime.py's own `activate` performs no version comparison of
     # its own, so the guard lives here, under a global (version-independent)
-    # flock so the compare-then-publish sequence is atomic against another
-    # concurrent activate call.
+    # lock so the compare-then-publish sequence is atomic against another
+    # concurrent activate call. `flock` is absent by default on macOS (a
+    # plugin this installer explicitly supports), so a bare `command -v
+    # flock` fallback would silently degrade to NO mutual exclusion there --
+    # fall back to the same PID-symlink lock used by
+    # plugins/agent-machines/scripts/init.sh's stamp lock and
+    # plugins/agent-worktrees/scripts/invoke-payload-runtime.sh's provision
+    # lock (an atomic `ln -s $$ <path>`, reclaimed only once its recorded
+    # owner PID is confirmed dead) so every platform gets REAL mutual
+    # exclusion, not a best-effort no-op.
     #
     # ACTIVATION_SUPERSEDED is the caller-visible signal that THIS ENTIRE
     # invocation lost the race, not merely that its activate call was a
@@ -396,24 +404,52 @@ _versioned_activate() {
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
-    local lock="$INSTALL_DIR/.activate.lock"
     mkdir -p "$INSTALL_DIR"
-    exec 8>"$lock"
-    command -v flock >/dev/null 2>&1 && flock 8
+    local _activate_lock_link=""
+    _unlock_activate() {
+        if [[ -n "$_activate_lock_link" ]]; then
+            local owner
+            owner="$(readlink "$_activate_lock_link" 2>/dev/null || true)"
+            [[ "$owner" != "$$" ]] || rm -f "$_activate_lock_link"
+        else
+            flock -u 8 2>/dev/null || true
+            exec 8>&- 2>/dev/null || true
+        fi
+    }
+    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
+        exec 8>"$INSTALL_DIR/.activate.lock"
+        flock 8
+    else
+        _activate_lock_link="$INSTALL_DIR/.activate.lock.pid"
+        local owner
+        until ln -s "$$" "$_activate_lock_link" 2>/dev/null; do
+            owner="$(readlink "$_activate_lock_link" 2>/dev/null || true)"
+            if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+                sleep 1
+            elif [[ "$(readlink "$_activate_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
+                # Re-verify the link is still the SAME stale value observed
+                # above before removing it (TOCTOU-safe reap): another
+                # process could have reaped and replaced it between the two
+                # readlink calls, and a blind rm -f would then delete that
+                # new, live lock instead.
+                rm -f "$_activate_lock_link"
+            fi
+        done
+    fi
     local current_active
     current_active="$(_versioned_current)"
     if [[ -n "$current_active" ]] && _version_lt "$SRC_VERSION" "$current_active" && [[ "$FORCE" -ne 1 ]]; then
         _skip "Not activating: source $SRC_VERSION is older than already-active $current_active (a newer build activated first; --force to override)"
         ACTIVATION_SUPERSEDED=1
-        exec 8>&-
+        _unlock_activate
         return 0
     fi
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
         _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
-        exec 8>&-
+        _unlock_activate
         return 1
     fi
-    exec 8>&-
+    _unlock_activate
     _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
 }
 

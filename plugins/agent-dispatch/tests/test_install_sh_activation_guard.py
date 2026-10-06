@@ -1,6 +1,5 @@
 """Regression coverage for install.sh's `_versioned_activate` cross-version
-ordering guard (parity with install.ps1's Invoke-VersionedActivate; round 13
-review of ThomasMichon/copilot-extensions#5378).
+ordering guard (parity with install.ps1's Invoke-VersionedActivate).
 
 Two concurrent POSIX installs for DIFFERENT versions can legitimately build
 fully in parallel (nothing in install.sh serializes the build itself), so a
@@ -123,12 +122,20 @@ def _run_activate_harness(
     try:
         with os.fdopen(fd, "w", newline="\n", encoding="utf-8") as f:
             f.write(script + "\n")
+        env = dict(os.environ)
+        # git-bash's `ln -s` otherwise fails outright ("No such file or
+        # directory") on Windows without this -- it needs an explicit
+        # request for a real, native symlink rather than its default
+        # emulation. Irrelevant on a genuine POSIX bash (Linux/macOS CI),
+        # where `ln -s` always creates a real symlink.
+        env["MSYS"] = "winsymlinks:nativestrict"
         result = subprocess.run(
             [_BASH, os.path.basename(script_path)],
             cwd=str(_INSTALL_SH.parent),
             capture_output=True,
             text=True,
             timeout=15,
+            env=env,
         )
     finally:
         os.unlink(script_path)
