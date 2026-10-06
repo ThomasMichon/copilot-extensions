@@ -1304,8 +1304,19 @@ def test_resident_monitor_restart_republishes_live_mapping_to_new_generation(tmp
         first.close()
         if second is not None:
             second.close()
-        thread.join(timeout=5)
+        # Generous relative to the nominal ~0.6s budget
+        # (60 iterations * 0.01s poll): on a heavily loaded machine, each
+        # iteration's real wall-clock cost (registry/lock I/O, OS
+        # scheduling contention) can run well past the poll interval --
+        # a tight join timeout here was observed to leave the thread still
+        # running past a 5s wait, turning a slow-but-healthy daemon loop
+        # into a flaky `KeyError: 'rc'` instead of a clear timeout signal.
+        thread.join(timeout=20)
 
+    assert thread.is_alive() is False, (
+        "daemon thread did not finish within the join timeout -- "
+        "see this test's own comment on machine-load sensitivity"
+    )
     assert daemon_result["rc"] == 0
 
 
