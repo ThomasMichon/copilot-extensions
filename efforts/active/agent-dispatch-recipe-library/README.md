@@ -504,10 +504,11 @@ adapters the entry below describes through its first six review rounds.
 This session drove it the rest of the way through 14 more automated review
 rounds (7-20) to a clean merge -- **squash-merged into `dev`.** Every round's
 finding was fixed, regression-tested, and live re-validated against a fresh
-disposable Gitea scratch repo (created via the admin identity, `cjohnson`
-added as collaborator for the actual adapter-under-test calls, deleted after
-each round) before the next push, per this repo's own validation policy.
-Highlights by round (full detail in session history/PR diff):
+disposable Gitea scratch repo (created via an admin identity, a day-to-day
+lower-privilege collaborator identity added for the actual adapter-under-
+test calls, deleted after each round) before the next push, per this
+repo's own validation policy. Highlights by round (full detail in session
+history/PR diff):
 
 - **7:** `reserve()` wrote its `reserved` marker before the label existed --
   reordered so the label is resolved first.
