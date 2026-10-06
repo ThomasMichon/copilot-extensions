@@ -1,0 +1,9 @@
+{
+  "comment": "fix stale _infer_worktree_id monkeypatch target in test_pr_ops.py left by #5498",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
