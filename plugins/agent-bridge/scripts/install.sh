@@ -1132,7 +1132,11 @@ _migration_check() {
 # Vendor a standalone uv into the runtime tool dir when uv is absent (pristine or
 # governed box) instead of dead-ending; add it to PATH for this run.
 _ensure_uv() {
-    ensure_uv "$INSTALL_DIR" tool 1 >/dev/null
+    if ensure_uv "$INSTALL_DIR" tool 1 >/dev/null; then
+        return 0
+    fi
+    _fail "uv is required but not found, and vendoring failed (no reachable uv installer). Install uv, then retry."
+    return 1
 }
 
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):

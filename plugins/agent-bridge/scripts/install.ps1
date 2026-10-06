@@ -1932,7 +1932,9 @@ function Materialize-SnapshotVendoredLibs {
     }
     foreach ($entry in $sources.GetEnumerator()) {
         $source = $entry.Value
-        if (-not $source) { continue }
+        if (-not $source) {
+            throw "Cannot materialize stamped snapshot: required vendored library '$($entry.Key)' is unresolved."
+        }
         $destination = Join-Path $libsDir $entry.Key
         if ([System.IO.Path]::GetFullPath($source) -eq [System.IO.Path]::GetFullPath($destination)) {
             continue
