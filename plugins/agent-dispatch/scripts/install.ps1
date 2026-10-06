@@ -474,24 +474,51 @@ function Invoke-VersionedActivate {
        non-elevated in-place refresh. In the junction-free marker model `.venv` is
        normally absent (the binstub, task launchers, and deploy-manifest all
        resolve the slot through the marker), so this guard is correctly false on a
-       normal update. #>
+       normal update.
+
+       Version-ordering guard, UNDER a GLOBAL ($InstallDir-only, cross-version)
+       lock: Install-Runtime's own buildMutex is deliberately VERSION-scoped (a
+       wedged build for one version must never block an unrelated install of a
+       different version), so two DIFFERENT versions can legitimately build and
+       reach this activation call fully concurrently, each under its own
+       independent lock. Without a cross-version check right here, a slower
+       OLDER-version build that started first could still finish (and call
+       activate) AFTER a faster NEWER-version build already activated, silently
+       overwriting `current-version` with a regression -- versioned_runtime.py's
+       own `activate` performs no version comparison of its own. Mirrors
+       Invoke-Stamp's identical marker-publication guard (same lock scope,
+       same Test-VersionLt comparison, same -Force/AGENT_DISPATCH_ALLOW_DOWNGRADE
+       override for a deliberate rollback) -- read the currently-active version
+       INSIDE the lock so this observes the true latest publish, not a stale
+       snapshot read before acquiring it. #>
     if (-not $VersionedRuntime) { return $true }
-    $legacyVenv = Join-Path $InstallDir '.venv'
-    if ((Test-Path $legacyVenv) -and -not (Test-VenvIsLink $legacyVenv)) {
-        Write-Step 'Releasing legacy .venv for versioned migration (stopping coordinator + supervisor)...'
-        try { Stop-DispatchProcess -Subcommand serve | Out-Null } catch {}
-        try { Retire-SupervisorProcesses | Out-Null } catch {}
+    $activateMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir
+    try {
+        $currentActive = Get-VersionedCurrent
+        if ($currentActive -and (Test-VersionLt -A $SrcVersion -B $currentActive) -and -not $Force) {
+            Write-Skip "Not activating: source $SrcVersion is older than already-active $currentActive (a newer build activated first; -Force to override)"
+            return $true
+        }
+        $legacyVenv = Join-Path $InstallDir '.venv'
+        if ((Test-Path $legacyVenv) -and -not (Test-VenvIsLink $legacyVenv)) {
+            Write-Step 'Releasing legacy .venv for versioned migration (stopping coordinator + supervisor)...'
+            try { Stop-DispatchProcess -Subcommand serve | Out-Null } catch {}
+            try { Retire-SupervisorProcesses | Out-Null } catch {}
+        }
+        $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+        $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
+        & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
+            ForEach-Object { Write-Step $_ }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
+            return $false
+        }
+        Write-Ok "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
+        return $true
+    } finally {
+        [void]$activateMutex.ReleaseMutex()
+        $activateMutex.Dispose()
     }
-    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
-        ForEach-Object { Write-Step $_ }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
-        return $false
-    }
-    Write-Ok "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
-    return $true
 }
 
 function Get-VersionedCurrent {
@@ -1044,6 +1071,25 @@ function New-PluginBuildSnapshot {
         Write-Skip 'No source version resolved -- building from the live payload (snapshot skipped)'
         return $PluginDir
     }
+    # Lock-free fast path, BEFORE acquiring any mutex: a published snapshot is
+    # immutable (see the rename-aside/immutable-publish comment below), so
+    # reading it needs no lock at all -- exactly how the binstub's own
+    # first-use read already works. Without this check up front, a `stamp`
+    # invocation (this function's only other caller besides Install-Runtime)
+    # would queue behind Install-Runtime's OWN acquisition of this identical
+    # version-scoped mutex -- which Install-Runtime can hold for its full
+    # 30-120+ second package build, not just this function's short
+    # check/copy/publish sequence -- and time out on this function's much
+    # shorter default lock timeout even though the snapshot it actually
+    # needs is already valid and sitting on disk. Checked again, inside the
+    # lock, below: a concurrent publisher could still be mid-build right
+    # now, so this early check is a (correct, since immutable) optimization,
+    # never a substitute for the authoritative check.
+    $snapDirFast = Join-Path (Join-Path $InstallDir 'snapshots') $Version
+    if (Test-Path (Join-Path $snapDirFast 'pyproject.toml')) {
+        Write-Ok "Reusing existing build snapshot: $snapDirFast"
+        return $snapDirFast
+    }
     try {
         # Initialized before any failure-prone step (mutex acquisition
         # included) so the outer catch below can safely check it under this
@@ -1554,10 +1600,6 @@ function Install-Runtime {
     }
     $ErrorActionPreference = $prevEAP
     Remove-ConsoleTrampolines -VenvDir $VenvDir
-    } finally {
-        [void]$buildMutex.ReleaseMutex()
-        $buildMutex.Dispose()
-    }
 
     # -- stamp build provenance (version from pyproject -- the single source of
     # truth -- plus git commit/branch) into the deployed package, so the runtime
@@ -1613,6 +1655,19 @@ function Install-Runtime {
         }
         Invoke-VersionedMarkComplete
         if (-not (Invoke-VersionedActivate)) { exit 1 }
+    }
+    } finally {
+        # Held through the health gate, completion marker, AND activation
+        # above (not just the package build/install): a second same-version
+        # installer that only waited out the earlier, narrower release
+        # point could force-reinstall into this exact versions/<version>
+        # venv while THIS process is still validating the slot or has only
+        # just activated it, exposing a partially modified "current" runtime
+        # to any daemon/CLI invocation racing the swap. Release only once
+        # this process's own slot is fully published and the stable `.venv`
+        # link (if versioned) has been swapped onto it.
+        [void]$buildMutex.ReleaseMutex()
+        $buildMutex.Dispose()
     }
 
     Write-Manifest
@@ -3254,17 +3309,31 @@ function Invoke-Stamp {
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
-    # Hold ONE lock across snapshot creation AND both marker writes -- not
-    # just New-PluginBuildSnapshot's own internal (narrower) acquisition.
-    # Without this outer scope, two overlapping stamps for DIFFERENT
-    # versions could each finish their own (separately-locked) snapshot,
-    # then race the UNLOCKED marker writes below: an older, slower
-    # invocation could publish its markers AFTER a newer one already
-    # finished, pointing payload-dir/stamped-version at stale content, or
-    # leaving the two markers naming different versions. Mutex is
-    # thread-reentrant, so New-PluginBuildSnapshot's own inner
-    # Enter-PluginSnapshotLock call (same $InstallDir key) re-enters
-    # harmlessly rather than deadlocking.
+    # Snapshot build happens with NO global lock held: New-PluginBuildSnapshot
+    # takes its OWN version-scoped lock (keyed $InstallDir+$SrcVersion)
+    # entirely internally, acquiring and releasing it before this function
+    # ever touches the global lock below. This ordering is deliberate, not
+    # incidental: Install-Runtime holds that SAME version-scoped lock as a
+    # wide OUTER scope spanning its full build+install+activate span, and
+    # (via Invoke-VersionedActivate) acquires the global, $InstallDir-only
+    # lock NESTED inside it for a short version-ordering check. If this
+    # function instead held the global lock OUTER and let
+    # New-PluginBuildSnapshot acquire the version-scoped lock NESTED inside
+    # it -- the previous shape here, and the exact opposite nesting order --
+    # a concurrent `stamp` and `install` for the same version could deadlock:
+    # stamp holding global and waiting on version, install holding version
+    # and waiting on global. Keeping the two acquisitions here strictly
+    # SEQUENTIAL (never nested) makes that AB-BA cycle impossible, regardless
+    # of which lock Install-Runtime nests inside the other.
+    $snapDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion
+
+    # Hold ONE lock across the version-ordering guard AND both marker writes
+    # (not narrower, independent acquisitions for each): two overlapping
+    # stamps for DIFFERENT versions could otherwise each pass the guard, then
+    # race the writes below -- an older, slower invocation could publish its
+    # markers AFTER a newer one already finished, pointing
+    # payload-dir/stamped-version at stale content, or leaving the two
+    # markers naming different versions.
     $stampMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir
     try {
         # Version-ordering guard, UNDER this same lock: the mutex only
@@ -3286,7 +3355,6 @@ function Invoke-Stamp {
             Write-Skip "Not publishing: source $SrcVersion is older than already-stamped $currentStamped (a newer stamp arrived first; -Force to override)"
             return
         }
-        $snapDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion
         # Publish-FileAtomically guards the binstub's self-provisioning read
         # (which never takes this mutex) against observing a torn,
         # partially-written marker file.

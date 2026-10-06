@@ -486,6 +486,71 @@ Write-Output "BOTH-INDEPENDENT-LOCKS-ACQUIRED"
     assert "BOTH-INDEPENDENT-LOCKS-ACQUIRED" in result.stdout, result.stdout + result.stderr
 
 
+def test_reusing_an_already_valid_snapshot_never_blocks_behind_a_long_held_build_lock(
+    tmp_path: Path,
+) -> None:
+    """Install-Runtime can hold the identical version-scoped mutex for its
+    full 30-120+ second package build. A concurrent `stamp` invocation (or
+    any other caller) asking for an ALREADY-VALID snapshot of that exact
+    version must never queue behind that heavy build and risk timing out
+    on its own much shorter default lock timeout -- a published snapshot is
+    immutable, so reading it needs no lock at all (exactly like the
+    binstub's own first-use read). Proves this directly: a background
+    process holds the version-scoped lock for well longer than
+    New-PluginBuildSnapshot's own default 20s timeout, while a second,
+    separate call for the SAME version (with a valid snapshot already on
+    disk) still returns promptly instead of blocking on it."""
+    plugin_dir = _marketplace_plugin_dir(tmp_path)
+    install_dir = tmp_path / "install"
+    _seed_plugin_dir(plugin_dir)
+    snap_dir = install_dir / "snapshots" / "0.1.0-dev1"
+    snap_dir.mkdir(parents=True)
+    (snap_dir / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+
+    # Holds the version-scoped lock for well past New-PluginBuildSnapshot's
+    # own default 20s timeout, simulating Install-Runtime's long build.
+    holder_script = f"""
+$ErrorActionPreference = 'Stop'
+{_extract_function_block("Enter-PluginSnapshotLock")}
+
+$held = Enter-PluginSnapshotLock -InstallDir "{install_dir}" -Version "0.1.0-dev1"
+Write-Output "LOCK-HELD"
+Start-Sleep -Seconds 25
+[void]$held.ReleaseMutex()
+$held.Dispose()
+"""
+    holder = subprocess.Popen(
+        [_PWSH, "-NoProfile", "-NonInteractive", "-Command", holder_script],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=os.environ,
+    )
+    try:
+        # Wait for the holder to actually have the lock before racing it.
+        assert holder.stdout is not None
+        line = holder.stdout.readline()
+        assert "LOCK-HELD" in line, line
+
+        extra = f"""
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+$result = New-PluginBuildSnapshot -PluginDir "{plugin_dir}" -InstallDir "{install_dir}" -Version "0.1.0-dev1"
+$sw.Stop()
+Write-Output "RESULT:$result"
+Write-Output "ELAPSED_MS:$($sw.ElapsedMilliseconds)"
+"""
+        result = _run_harness(extra)
+    finally:
+        holder.communicate(timeout=60)
+
+    returned = Path(result.stdout.split("RESULT:", 1)[1].strip().splitlines()[0])
+    elapsed_ms = int(result.stdout.split("ELAPSED_MS:", 1)[1].strip().splitlines()[0])
+    assert returned == snap_dir
+    # Comfortably under the holder's 25s sleep and under the 20s default
+    # lock timeout -- proves the lock was never actually acquired for this.
+    assert elapsed_ms < 10_000, f"took {elapsed_ms}ms -- blocked behind the held lock"
+
+
 def test_publish_file_atomically_creates_a_new_file(tmp_path: Path) -> None:
     target = tmp_path / "install" / "payload-dir"
     target.parent.mkdir(parents=True)
@@ -607,6 +672,114 @@ def test_stamp_force_overrides_the_version_ordering_guard(tmp_path: Path) -> Non
     )
     assert marker.read_text(encoding="utf-8") == "0.2.0-dev1", result.stdout + result.stderr
     assert deployed.exists()
+
+
+def _run_activate_harness(
+    tmp_path: Path,
+    *,
+    src_version: str,
+    current_active: str | None,
+    force: bool = False,
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Invoke-VersionedActivate's cross-version ordering guard, with
+    Get-VersionedCurrent stubbed (it shells out to the real
+    versioned_runtime.py `current` command, irrelevant to the guard itself)
+    and the actual python/venv invocation replaced by a fake "python" .cmd
+    that just drops a marker file -- so a test can prove whether the real
+    activation call happened at all, not merely what it would have printed."""
+    install_dir = tmp_path / "install"
+    install_dir.mkdir(parents=True)
+    activated_marker = tmp_path / "activated"
+    fake_python = tmp_path / "fake-python.cmd"
+    fake_python.write_text(
+        f'@echo off\r\necho activated>"{activated_marker}"\r\nexit /b 0\r\n',
+        encoding="utf-8",
+    )
+
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        "function Write-Ok { param($m) Write-Host \"OK: $m\" }\n"
+        "function Write-Warn { param($m) Write-Host \"WARN: $m\" }\n"
+        "function Write-Skip { param($m) Write-Host \"SKIP: $m\" }\n"
+        "function Write-Fail { param($m) Write-Host \"FAIL: $m\" }\n"
+        "function Write-Step { param($m) Write-Host \"STEP: $m\" }\n"
+        "function Test-VenvIsLink { param($p) return $false }\n"
+        f'function Get-VersionedCurrent {{ return "{current_active or ""}" }}\n'
+        + _extract_function_block("Get-VerTuple")
+        + "\n\n"
+        + _extract_function_block("Test-VersionLt")
+        + "\n\n"
+        + _extract_function_block("Enter-PluginSnapshotLock")
+        + "\n\n"
+        + _extract_function_block("Invoke-VersionedActivate")
+        + "\n\n"
+        "$VersionedRuntime = $true\n"
+        f'$InstallDir = "{install_dir}"\n'
+        f'$SrcVersion = "{src_version}"\n'
+        f"$Force = ${'true' if force else 'false'}\n"
+        f'$VenvPython = "{fake_python}"\n'
+        f'$LinkPython = "{fake_python}"\n'
+        "$result = Invoke-VersionedActivate\n"
+        'Write-Output "RETURNED:$result"\n'
+    )
+    # Written to and run as a real .ps1 FILE (not -Command): $PSScriptRoot
+    # is an automatic, per-scope variable PowerShell rebinds to "" inside
+    # any function defined from a bare -Command string, regardless of a
+    # manual top-level assignment -- only a genuine backing script file
+    # gives Invoke-VersionedActivate's own Join-Path $PSScriptRoot call a
+    # real, non-empty directory to resolve against (the fake "python" below
+    # ignores every argument it's passed anyway, so the directory's actual
+    # content never matters).
+    script_path = tmp_path / "harness.ps1"
+    script_path.write_text(script, encoding="utf-8")
+    result = subprocess.run(
+        [_PWSH, "-NoProfile", "-NonInteractive", "-File", str(script_path)],
+        capture_output=True,
+        text=True,
+        env=os.environ,
+        timeout=30,
+        check=True,
+    )
+    return result, activated_marker
+
+
+def test_activate_proceeds_normally_with_no_prior_active_version(tmp_path: Path) -> None:
+    result, activated = _run_activate_harness(tmp_path, src_version="0.2.0-dev1", current_active=None)
+    assert "RETURNED:True" in result.stdout, result.stdout + result.stderr
+    assert activated.exists()
+
+
+def test_activate_proceeds_when_newer_than_currently_active(tmp_path: Path) -> None:
+    result, activated = _run_activate_harness(
+        tmp_path, src_version="0.2.0-dev2", current_active="0.2.0-dev1"
+    )
+    assert "RETURNED:True" in result.stdout, result.stdout + result.stderr
+    assert activated.exists()
+
+
+def test_activate_skips_when_older_than_currently_active(tmp_path: Path) -> None:
+    """A slower, older-version build that started first can still finish
+    (health gate + mark-complete) AFTER a faster, newer-version build
+    already activated -- since the two run under independent, version-scoped
+    build locks and are never serialized against each other during the
+    build itself. The cross-version ordering guard inside
+    Invoke-VersionedActivate must catch this at the one point where it
+    matters (the actual activate/publish call) and skip rather than
+    silently regress `current-version`."""
+    result, activated = _run_activate_harness(
+        tmp_path, src_version="0.2.0-dev1", current_active="0.2.0-dev2"
+    )
+    assert "Not activating" in result.stdout, result.stdout + result.stderr
+    assert "RETURNED:True" in result.stdout, result.stdout + result.stderr
+    assert not activated.exists()
+
+
+def test_activate_force_overrides_the_cross_version_ordering_guard(tmp_path: Path) -> None:
+    result, activated = _run_activate_harness(
+        tmp_path, src_version="0.2.0-dev1", current_active="0.2.0-dev2", force=True
+    )
+    assert "RETURNED:True" in result.stdout, result.stdout + result.stderr
+    assert activated.exists()
 
 
 def _run_version_lt(a: str, b: str) -> bool:
