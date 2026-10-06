@@ -74,11 +74,38 @@ def _freeze_path(project: str | None, worktree_id: str):
     return cfg.tracking_dir(project) / f"{worktree_id}{_FREEZE_SUFFIX}"
 
 
-def _load_frozen_root(project: str | None, worktree_id: str) -> tuple[bool, str | None]:
+def _freeze_identity(record: tracking.WorktreeRecord) -> tuple[str, str]:
+    """The ``(owner_ref, started_at)`` pair a frozen decision is bound to.
+
+    ``owner_ref`` is NOT actually immutable for a worktree's whole life --
+    accepting a worktree claim handoff rewrites it (``claim_handoffs.py``).
+    ``started_at`` is stamped once at ``create_new_record`` time and never
+    reused: a worktree id later reaped and recreated gets a fresh one. A
+    frozen decision is therefore valid only while BOTH still match the
+    record's current values -- a handoff or an id-reuse after a hard delete
+    each invalidate it, causing a fresh (consistent) resolution under
+    whatever is current, rather than silently publishing a stale root
+    forever or leaking a predecessor's decision into a reused id. This
+    doubles as the lifecycle-cleanup fix a dedicated sidecar-removal hook
+    at every tracking-record deletion call site would otherwise need
+    (``handoff_trace.remove_trace``'s own contract) -- self-invalidating
+    beats having to wire into ``retire_record``/``reap_cli``/the cleanup
+    command individually, and needs no changes to any of those (two of
+    which are at their own line-count ceiling).
+    """
+    return (record.owner_ref or "", record.started_at or "")
+
+
+def _load_frozen_root(
+    project: str | None, record: tracking.WorktreeRecord,
+) -> tuple[bool, str | None]:
     """Return ``(frozen, codename)``: ``frozen`` is True only when a prior
-    resolution was persisted (``codename`` may legitimately be ``None`` --
+    resolution was persisted AND is still bound to *record*'s CURRENT
+    ``_freeze_identity`` (``codename`` may legitimately be ``None`` --
     "frozen: this worktree has no publishable root"). ``(False, None)``
-    means never resolved/frozen yet -- a fresh walk is needed.
+    means never resolved/frozen yet, or the stored identity no longer
+    matches (a handoff rewrote ``owner_ref``, or this id was reaped and
+    recreated) -- a fresh walk is needed either way.
 
     Validates the EXACT sidecar schema before accepting a ``None``: a
     missing ``root_codename`` key (an empty/truncated/malformed object) is
@@ -95,11 +122,14 @@ def _load_frozen_root(project: str | None, worktree_id: str) -> tuple[bool, str 
     re-freezes a clean result.
     """
     try:
-        path = _freeze_path(project, worktree_id)
+        path = _freeze_path(project, record.worktree_id)
         if not path.exists():
             return False, None
         data = json.loads(path.read_text())
         if not isinstance(data, dict) or "root_codename" not in data:
+            return False, None
+        identity = (data.get("owner_ref"), data.get("started_at"))
+        if identity != _freeze_identity(record):
             return False, None
         codename = data["root_codename"]
         if codename is None:
@@ -112,28 +142,31 @@ def _load_frozen_root(project: str | None, worktree_id: str) -> tuple[bool, str 
         return False, None
 
 
-def _freeze_root(project: str | None, worktree_id: str, codename: str | None) -> None:
-    """Persist *codename* (or ``None``) as this worktree's PERMANENT root-
-    codename decision, so a LATER change to the root's own repo config
-    (e.g. toggling ``source_attribution_configured``) can never retroactively
+def _freeze_root(
+    project: str | None, record: tracking.WorktreeRecord, codename: str | None,
+) -> None:
+    """Persist *codename* (or ``None``) as this worktree's root-codename
+    decision, BOUND to its current ``_freeze_identity`` (``owner_ref`` +
+    ``started_at``), so a LATER change to the root's own repo config (e.g.
+    toggling ``source_attribution_configured``) can never retroactively
     expose a previously-withheld custom-wordlist codename, or hide one
     already published -- the same ``unconfigured-attribution-never-leaks``
     "freeze once, never re-derive from live config" guarantee this plugin's
     own PR-attribution design already applies to the PRIMARY codename
-    (``tracking.PRRecord.attribution_mode``/``attribution_explicit``).
-    Scoped to the WORKTREE rather than one PR entry (simpler: a worktree's
-    ``owner_ref`` is set at creation and practically never changes, so one
-    worktree-lifetime freeze is sufficient and self-contained -- it doesn't
-    require extending ``tracking.py``'s own capped PR-entry schema).
-    Callers must hold this worktree's freeze lock (see
-    :func:`resolve_root_codename`) across the read-check -> compute -> this
-    write; never raises on its own: a failed write just means the next call
-    re-resolves live.
+    (``tracking.PRRecord.attribution_mode``/``attribution_explicit``) --
+    while still invalidating itself the moment the bound identity changes
+    (see :func:`_freeze_identity`). Callers must hold this worktree's
+    freeze lock (see :func:`resolve_root_codename`) across the read-check
+    -> compute -> this write; never raises on its own: a failed write just
+    means the next call re-resolves live.
     """
+    owner_ref, started_at = _freeze_identity(record)
     try:
-        _freeze_path(project, worktree_id).write_text(
-            json.dumps({"root_codename": codename})
-        )
+        _freeze_path(project, record.worktree_id).write_text(json.dumps({
+            "root_codename": codename,
+            "owner_ref": owner_ref,
+            "started_at": started_at,
+        }))
     except Exception:
         pass
 
@@ -309,16 +342,22 @@ def resolve_root_codename(
     chain worth annotating -- the caller's existing ``codename=`` marker
     field already names it.
 
-    The result is FROZEN per-worktree on first resolution (when *ensure* is
-    True) and reused on every later call -- see :func:`_freeze_root`. The
-    read-check -> compute -> write is itself serialized under this
-    worktree's own tracking record lock (:class:`tracking._RecordLock`) so
-    two concurrent publish/finalize processes can't both observe "not
+    The result is FROZEN (when *ensure* is True) and reused on every later
+    call with the SAME ``owner_ref``/``started_at`` identity -- see
+    :func:`_freeze_root`/:func:`_freeze_identity` -- so a later change to
+    the root's own repo config can never retroactively expose or hide a
+    previously-decided codename. A worktree claim handoff rewriting
+    ``owner_ref``, or this worktree id being reaped and recreated (a fresh
+    ``started_at``), each invalidate the stale freeze automatically, rather
+    than requiring explicit cleanup at every tracking-record deletion call
+    site. The read-check -> compute -> write is itself serialized under
+    this worktree's own tracking record lock (:class:`tracking._RecordLock`)
+    so two concurrent publish/finalize processes can't both observe "not
     frozen," independently derive different decisions, and clobber each
     other -- every caller gets back the single WINNING persisted value,
     never a locally-computed one that lost the race.
     """
-    frozen, frozen_codename = _load_frozen_root(project, record.worktree_id)
+    frozen, frozen_codename = _load_frozen_root(project, record)
     if frozen:
         return frozen_codename
 
@@ -362,11 +401,11 @@ def resolve_root_codename(
         # Re-check INSIDE the lock: another process may have frozen this
         # worktree's decision while we were resolving `this_machine`/
         # `project` above.
-        frozen, frozen_codename = _load_frozen_root(project, record.worktree_id)
+        frozen, frozen_codename = _load_frozen_root(project, record)
         if frozen:
             return frozen_codename
         result = _compute()
-        _freeze_root(project, record.worktree_id, result)
+        _freeze_root(project, record, result)
         return result
 
 

@@ -287,6 +287,67 @@ class TestResolveRootCodename:
         _PROJECT_CONFIGS["harness"] = _cfg(source_attribution_configured=True)
         assert root_chain.resolve_root_codename(child, project="ext") is None
 
+    def test_owner_ref_handoff_invalidates_the_freeze(
+        self, tmp_path, monkeypatch,
+    ):
+        # A worktree claim handoff rewrites owner_ref (claim_handoffs.py) --
+        # the frozen decision bound to the OLD owner_ref must not survive
+        # it; a new one is computed and frozen against the NEW owner_ref.
+        _seed(tmp_path, monkeypatch, "harness", "wt-root",
+              codename="amber-thicket", codename_source="built-in")
+        _seed(tmp_path, monkeypatch, "other-harness", "wt-other-root",
+              codename="cobalt-ember", codename_source="built-in")
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        assert root_chain.resolve_root_codename(child, project="ext") == (
+            "amber-thicket"
+        )
+        # Simulate a handoff: the record's owner_ref is reassigned.
+        tdir = tmp_path / ".ext" / "worktrees"
+        rec = tracking.load_record(tdir / "wt-child.yaml")
+        rec.owner_ref = "anomalous-potato/other-harness/wt-other-root#s2"
+        tracking.save_record(rec, tdir / "wt-child.yaml")
+        assert root_chain.resolve_root_codename(rec, project="ext") == (
+            "cobalt-ember"
+        )
+
+    def test_worktree_id_reuse_invalidates_a_stale_sidecar(
+        self, tmp_path, monkeypatch,
+    ):
+        # A recreated worktree (same id, a fresh `started_at`) must never
+        # inherit a predecessor's frozen root decision from an orphaned
+        # sidecar the tracking-record deletion path didn't clean up.
+        _seed(tmp_path, monkeypatch, "harness", "wt-root",
+              codename="amber-thicket", codename_source="built-in")
+        _seed(tmp_path, monkeypatch, "other-harness", "wt-other-root",
+              codename="cobalt-ember", codename_source="built-in")
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        assert root_chain.resolve_root_codename(child, project="ext") == (
+            "amber-thicket"
+        )
+        # The worktree id is reaped and recreated with a different origin,
+        # but the OLD sidecar was never removed (what this invalidation
+        # protects against even without explicit cleanup wiring).
+        recreated = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/other-harness/wt-other-root#s9",
+        )
+        # Force a distinct `started_at` deterministically (two `_seed` calls
+        # in quick succession could otherwise land in the same wall-clock
+        # second, since `_now_iso` has only second-level resolution).
+        tdir = tmp_path / ".ext" / "worktrees"
+        recreated.started_at = "2099-01-01T00:00:00"
+        tracking.save_record(recreated, tdir / "wt-child.yaml")
+        assert recreated.started_at != child.started_at
+        assert root_chain.resolve_root_codename(recreated, project="ext") == (
+            "cobalt-ember"
+        )
+
     def test_malformed_frozen_sidecar_is_never_trusted(
         self, tmp_path, monkeypatch,
     ):
@@ -355,8 +416,14 @@ class TestResolveRootCodename:
         real_load_config = root_chain.cfg.load_config
 
         def _racing_load_config(*a, **k):
-            # Another process wins the race and freezes first.
-            sidecar.write_text('{"root_codename": "winner-codename"}')
+            # Another process wins the race and freezes first, bound to
+            # the SAME identity this call will itself compute.
+            import json
+            owner_ref, started_at = root_chain._freeze_identity(child)
+            sidecar.write_text(json.dumps({
+                "root_codename": "winner-codename",
+                "owner_ref": owner_ref, "started_at": started_at,
+            }))
             return real_load_config(*a, **k)
 
         monkeypatch.setattr(
