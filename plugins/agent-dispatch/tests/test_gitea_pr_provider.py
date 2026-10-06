@@ -329,7 +329,7 @@ def test_mergeable_with_no_status_rollup_is_clean():
         ("success", Mergeability.CLEAN),
         ("skipped", Mergeability.CLEAN),
         ("pending", Mergeability.CHECKS_PENDING),
-        ("warning", Mergeability.CHECKS_PENDING),
+        ("warning", Mergeability.CHECKS_FAILED),
         ("failure", Mergeability.CHECKS_FAILED),
         ("error", Mergeability.CHECKS_FAILED),
     ],
@@ -511,6 +511,78 @@ def test_fetch_pr_unwraps_nested_commit_detail_for_last_commit_at(monkeypatch):
         raw["pull_request"], raw["reviews"], raw["review_comment_groups"], raw["status_rollup"],
     )
     assert observation.last_commit_at is not None
+
+
+def test_fetch_pr_skips_comments_request_when_count_is_zero(monkeypatch):
+    """Gitea reports comments_count on each review -- a review known to
+    carry none (approval/comment-only) must not cost a wasted request on
+    every poll of a long-lived PR."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+
+    def runner(args, **kwargs):
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status(json.dumps({"login": "review-bot"}), 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status(json.dumps({"full_name": "example/project"}), 200)
+        if url.endswith("/pulls/7"):
+            return _status(json.dumps(_pr(number=7)), 200)
+        if "/pulls/7/reviews?page=1" in url:
+            return _status(
+                json.dumps([
+                    {**_review(state="APPROVED", review_id=1), "comments_count": 0},
+                ]),
+                200,
+            )
+        if "/pulls/7/reviews?page=" in url:
+            return _status(json.dumps([]), 200)
+        if "/reviews/1/comments" in url:
+            raise AssertionError("must not fetch comments when comments_count is 0")
+        if "/commits/head-sha/status" in url:
+            return _status(json.dumps({"state": "success", "total_count": 1}), 200)
+        if url.endswith("/git/commits/head-sha"):
+            return _status(json.dumps({}), 200)
+        raise AssertionError(f"unexpected curl invocation: {url}")
+
+    adapter = GiteaPRAdapter(
+        "review-bot", runner=runner, api_bases={"gitea.example.com": "https://gitea.example.com"},
+    )
+    observation = adapter.observe("gitea.example.com/example/project", 7)
+    assert observation.approval_status == ApprovalStatus.APPROVED
+
+
+def test_fetch_pr_still_fetches_comments_when_count_is_absent(monkeypatch):
+    """A missing comments_count (older Gitea, or an omitted field) must
+    still fetch, for compatibility -- only an explicit zero skips."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+    fetched = []
+
+    def runner(args, **kwargs):
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status(json.dumps({"login": "review-bot"}), 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status(json.dumps({"full_name": "example/project"}), 200)
+        if url.endswith("/pulls/7"):
+            return _status(json.dumps(_pr(number=7)), 200)
+        if "/pulls/7/reviews?page=1" in url:
+            return _status(json.dumps([_review(state="COMMENT", review_id=1)]), 200)
+        if "/pulls/7/reviews?page=" in url:
+            return _status(json.dumps([]), 200)
+        if "/reviews/1/comments" in url:
+            fetched.append(url)
+            return _status(json.dumps([]), 200)
+        if "/commits/head-sha/status" in url:
+            return _status(json.dumps({"state": "success", "total_count": 1}), 200)
+        if url.endswith("/git/commits/head-sha"):
+            return _status(json.dumps({}), 200)
+        raise AssertionError(f"unexpected curl invocation: {url}")
+
+    adapter = GiteaPRAdapter(
+        "review-bot", runner=runner, api_bases={"gitea.example.com": "https://gitea.example.com"},
+    )
+    adapter.observe("gitea.example.com/example/project", 7)
+    assert fetched
 
 
 def test_fetch_pr_verifies_identity_and_repo_then_returns_full_payload(monkeypatch):

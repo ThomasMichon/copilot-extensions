@@ -58,7 +58,7 @@ _COMMIT_STATUS_TO_MERGEABILITY: dict[str, Mergeability] = {
     "success": Mergeability.CLEAN,
     "skipped": Mergeability.CLEAN,
     "pending": Mergeability.CHECKS_PENDING,
-    "warning": Mergeability.CHECKS_PENDING,
+    "warning": Mergeability.CHECKS_FAILED,
     "failure": Mergeability.CHECKS_FAILED,
     "error": Mergeability.CHECKS_FAILED,
 }
@@ -400,6 +400,15 @@ class GiteaPRAdapter:
                 continue  # a dismissed/stale review's inline comments don't block either.
             review_id = review.get("id")
             if not isinstance(review_id, int):
+                continue
+            # Gitea reports comments_count on each review; skip the (often
+            # empty) per-review comments request entirely when it is
+            # present and zero -- an approval or comment-only review
+            # typically carries no inline comments at all, and fetching
+            # anyway turns every poll of a long-lived PR into one wasted
+            # request per such review. A missing count (older Gitea, or a
+            # field this payload omits) still fetches, for compatibility.
+            if review.get("comments_count") == 0:
                 continue
             group = self._all_review_comments(api_base, owner, name, number, review_id)
             if group:
