@@ -902,7 +902,17 @@ jobs:
     needs: discover
     if: needs.discover.outputs.heavy == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    # Was 6: the job's own shadow-mode coverage-guided-selection step is
+    # continue-on-error, but that only absorbs a step FAILURE, never a
+    # job-level timeout cancellation -- and this job already passed its
+    # very first real run with only ~4s of margin inside a 6-minute budget
+    # (collect-only + guard tests + the coverage-guided-selection git/API
+    # analysis, whose runtime scales with diff size). A larger PR diff
+    # across several commits reproducibly exceeded the margin and was
+    # cancelled at ~6m30s three runs in a row -- a CI-environment-timing
+    # bug, not a real regression. Widened with headroom rather than a
+    # bare minimum bump.
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
