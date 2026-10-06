@@ -36,7 +36,9 @@ from . import config as cfg
 from . import tracking
 
 #: Defensive cap on chain depth -- protects against a corrupted/cyclic
-#: owner_ref graph (hand-edited YAML, a bug elsewhere) looping forever.
+#: owner_ref graph (hand-edited YAML, a bug elsewhere) looping forever. A
+#: chain of up to this many ANCESTORS is accepted; only a longer one is
+#: rejected.
 _MAX_CHAIN_DEPTH = 32
 
 #: Sidecar suffix for a per-worktree frozen root-codename decision (see
@@ -45,6 +47,27 @@ _MAX_CHAIN_DEPTH = 32
 #: concern that doesn't need ``tracking.py``'s own schema/migration rigor
 #: (that module is at its line-count ceiling; see module docstring).
 _FREEZE_SUFFIX = ".root-attribution.json"
+
+
+def _is_safe_path_component(value: str | None) -> bool:
+    """True when *value* is safe to join as a single filesystem path
+    segment -- no path separators, no ``..``/``.`` traversal, no NUL.
+    ``project``/``worktree_id`` fields of a parsed
+    :class:`~agent_worktrees.tracking_claims.ClaimRef` are sourced from
+    persisted YAML and are **not** validated by ``parse_claim_ref`` itself
+    (a three-or-more-component ref is simply accepted as qualified) -- a
+    corrupted or hand-edited ``owner_ref`` must be rejected here before
+    ever being joined into a real path, or evaluated under the WRONG
+    project's provenance policy. Same guard as
+    ``claims_transitive_cli._is_safe_path_component`` (duplicated rather
+    than imported -- a small, private, path-safety helper each module owns
+    independently).
+    """
+    if not value or "\x00" in value:
+        return False
+    if "/" in value or "\\" in value:
+        return False
+    return value not in (".", "..")
 
 
 def _freeze_path(project: str | None, worktree_id: str):
@@ -57,21 +80,28 @@ def _load_frozen_root(project: str | None, worktree_id: str) -> tuple[bool, str 
     "frozen: this worktree has no publishable root"). ``(False, None)``
     means never resolved/frozen yet -- a fresh walk is needed.
 
-    A non-``None`` deserialized value is validated with the same
+    Validates the EXACT sidecar schema before accepting a ``None``: a
+    missing ``root_codename`` key (an empty/truncated/malformed object) is
+    NOT the same as an explicit JSON ``null`` and must not be silently
+    accepted as an intentional "frozen: no root" decision -- ``dict.get``
+    alone can't tell those apart, so the key's presence is checked first.
+    A non-``None`` value is further validated with the same
     :func:`agent_worktrees.codename.is_valid_handle` gate every OTHER
     codename interpolated into the marker goes through: this sidecar is a
     plain JSON file, not a validated tracking record, and a malformed or
     hand-edited one must never publish arbitrary text (including a stray
-    ``-->``) straight into the HTML comment. An invalid value degrades to
-    "never frozen" so the normal provenance path re-runs and re-freezes a
-    clean result, rather than being treated as a frozen ``None``.
+    ``-->``) straight into the HTML comment. Any invalid/ambiguous shape
+    degrades to "never frozen" so the normal provenance path re-runs and
+    re-freezes a clean result.
     """
     try:
         path = _freeze_path(project, worktree_id)
         if not path.exists():
             return False, None
         data = json.loads(path.read_text())
-        codename = data.get("root_codename")
+        if not isinstance(data, dict) or "root_codename" not in data:
+            return False, None
+        codename = data["root_codename"]
         if codename is None:
             return True, None
         from . import codename as codename_mod
@@ -94,8 +124,11 @@ def _freeze_root(project: str | None, worktree_id: str, codename: str | None) ->
     Scoped to the WORKTREE rather than one PR entry (simpler: a worktree's
     ``owner_ref`` is set at creation and practically never changes, so one
     worktree-lifetime freeze is sufficient and self-contained -- it doesn't
-    require extending ``tracking.py``'s own capped PR-entry schema). Never
-    raises: a failed write just means the next call re-resolves live.
+    require extending ``tracking.py``'s own capped PR-entry schema).
+    Callers must hold this worktree's freeze lock (see
+    :func:`resolve_root_codename`) across the read-check -> compute -> this
+    write; never raises on its own: a failed write just means the next call
+    re-resolves live.
     """
     try:
         _freeze_path(project, worktree_id).write_text(
@@ -110,10 +143,16 @@ def _load_local_record(
 ) -> tracking.WorktreeRecord | None:
     """Load a same-machine worktree record by ``(project, worktree_id)``.
 
-    Returns ``None`` if the project/tracking dir can't be resolved, the
-    record file is absent, or it fails to parse -- every failure mode
-    degrades to "chain unresolved here", never an exception.
+    Returns ``None`` if either component is unsafe to join as a path
+    segment (see :func:`_is_safe_path_component`), the project/tracking dir
+    can't be resolved, the record file is absent, or it fails to parse --
+    every failure mode degrades to "chain unresolved here", never an
+    exception.
     """
+    if not _is_safe_path_component(worktree_id):
+        return None
+    if project is not None and not _is_safe_path_component(project):
+        return None
     try:
         path = cfg.project_dir(project) / "worktrees" / f"{worktree_id}.yaml"
     except Exception:
@@ -189,6 +228,64 @@ def _ensure_publishable_root_codename(
     return codename
 
 
+def _walk_to_root(
+    record: tracking.WorktreeRecord,
+    *,
+    project: str | None,
+    this_machine: str | None,
+) -> tuple[tracking.WorktreeRecord, str | None] | None:
+    """Walk *record*'s ``owner_ref`` chain to its root. Returns ``(root,
+    root_project)``, or ``None`` when there is no chain, the chain steps
+    onto a different machine, is cyclic, exceeds the depth cap, or an
+    intermediate owner record can't be loaded/is an unsafe path component.
+    """
+    current = record
+    current_project = project
+    seen: set[tuple[str | None, str]] = set()
+    # _MAX_CHAIN_DEPTH + 1: a chain of exactly the documented cap's worth of
+    # ANCESTORS needs one more iteration than that to actually CONFIRM the
+    # last one has no further owner (the iteration that loads ancestor N
+    # is distinct from the one that observes ancestor N is the root) --
+    # without the +1, a chain of exactly the cap's depth would be rejected
+    # as if it exceeded it, one short of the documented boundary.
+    for _ in range(_MAX_CHAIN_DEPTH + 1):
+        parsed = current.owner_claim_ref
+        if parsed is None:
+            break
+        if parsed.machine:
+            # Fail CLOSED when this machine's own identity can't be
+            # resolved: an unresolved `this_machine` must never be treated
+            # as "matches any qualified owner machine" -- that would let a
+            # cross-machine ref masquerade as same-machine and load
+            # whatever happens to live locally under that project/worktree
+            # id. Only a POSITIVELY confirmed match proceeds.
+            if not this_machine or parsed.machine != this_machine:
+                return None
+        parent_project = parsed.project or current_project
+        if not _is_safe_path_component(parsed.worktree_id) or (
+            parent_project is not None and not _is_safe_path_component(parent_project)
+        ):
+            # A corrupted/hand-edited owner_ref could otherwise escape the
+            # intended tracking directory, or have its codename evaluated
+            # under the WRONG project's provenance policy.
+            return None
+        key = (parent_project, parsed.worktree_id)
+        if key in seen:
+            return None  # cyclic owner graph; refuse to loop
+        seen.add(key)
+        parent = _load_local_record(parent_project, parsed.worktree_id)
+        if parent is None:
+            return None  # owner record gone/unreadable; chain unresolved
+        current = parent
+        current_project = parent_project
+    else:
+        return None  # exceeded depth cap; treat as unresolved
+
+    if current is record:
+        return None  # no chain at all -- nothing to annotate
+    return current, current_project
+
+
 def resolve_root_codename(
     record: tracking.WorktreeRecord,
     *,
@@ -213,9 +310,13 @@ def resolve_root_codename(
     field already names it.
 
     The result is FROZEN per-worktree on first resolution (when *ensure* is
-    True) and reused on every later call -- see :func:`_freeze_root` --
-    so a subsequent change to the root's own repo config can never
-    retroactively expose or hide a previously-decided codename.
+    True) and reused on every later call -- see :func:`_freeze_root`. The
+    read-check -> compute -> write is itself serialized under this
+    worktree's own tracking record lock (:class:`tracking._RecordLock`) so
+    two concurrent publish/finalize processes can't both observe "not
+    frozen," independently derive different decisions, and clobber each
+    other -- every caller gets back the single WINNING persisted value,
+    never a locally-computed one that lost the race.
     """
     frozen, frozen_codename = _load_frozen_root(project, record.worktree_id)
     if frozen:
@@ -226,51 +327,47 @@ def resolve_root_codename(
             this_machine = cfg.load_config().machine
         except Exception:
             this_machine = None
-    if project is None:
+    resolved_project = project
+    if resolved_project is None:
         try:
-            project = cfg.project_name()
+            resolved_project = cfg.project_name()
         except Exception:
-            project = None
+            resolved_project = None
 
-    current = record
-    current_project = project
-    seen: set[tuple[str | None, str]] = set()
-    for _ in range(_MAX_CHAIN_DEPTH):
-        parsed = current.owner_claim_ref
-        if parsed is None:
-            break
-        if parsed.machine:
-            # Fail CLOSED when this machine's own identity can't be
-            # resolved: an unresolved `this_machine` must never be treated
-            # as "matches any qualified owner machine" -- that would let a
-            # cross-machine ref masquerade as same-machine and load
-            # whatever happens to live locally under that project/worktree
-            # id. Only a POSITIVELY confirmed match proceeds.
-            if not this_machine or parsed.machine != this_machine:
-                return None
-        parent_project = parsed.project or current_project
-        key = (parent_project, parsed.worktree_id)
-        if key in seen:
-            return None  # cyclic owner graph; refuse to loop
-        seen.add(key)
-        parent = _load_local_record(parent_project, parsed.worktree_id)
-        if parent is None:
-            return None  # owner record gone/unreadable; chain unresolved
-        current = parent
-        current_project = parent_project
-    else:
-        return None  # exceeded depth cap; treat as unresolved
+    def _compute() -> str | None:
+        walked = _walk_to_root(
+            record, project=resolved_project, this_machine=this_machine,
+        )
+        if walked is None:
+            return None
+        root, root_project = walked
+        return _ensure_publishable_root_codename(root, root_project, ensure=ensure)
 
-    if current is record:
-        return None  # no chain at all -- nothing to annotate
+    if not ensure:
+        # A diagnostic/peek caller must never lock in a premature decision
+        # that then blocks the real publish call later -- compute fresh,
+        # no lock, no persistence.
+        return _compute()
 
-    result = _ensure_publishable_root_codename(current, current_project, ensure=ensure)
-    if ensure:
-        # Only the real publish path (ensure=True, the default) freezes --
-        # a diagnostic/peek caller (ensure=False) must never lock in a
-        # premature decision that then blocks the real publish call later.
+    if not _is_safe_path_component(record.worktree_id) or (
+        project is not None and not _is_safe_path_component(project)
+    ):
+        # Can't safely build/lock a sidecar path for this ref shape --
+        # degrade to an unfrozen computation each call rather than raise.
+        return _compute()
+
+    with tracking._RecordLock(
+        _freeze_path(project, record.worktree_id), require_sidecar=True,
+    ):
+        # Re-check INSIDE the lock: another process may have frozen this
+        # worktree's decision while we were resolving `this_machine`/
+        # `project` above.
+        frozen, frozen_codename = _load_frozen_root(project, record.worktree_id)
+        if frozen:
+            return frozen_codename
+        result = _compute()
         _freeze_root(project, record.worktree_id, result)
-    return result
+        return result
 
 
 def root_codename_for_marker(record: tracking.WorktreeRecord, config) -> str | None:

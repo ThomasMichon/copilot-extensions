@@ -128,6 +128,54 @@ class TestResolveRootCodename:
                   owner_ref="anomalous-potato/harness/wt-a#s2")
         assert root_chain.resolve_root_codename(b, project="ext") is None
 
+    def test_path_traversal_in_owner_ref_worktree_id_is_rejected(
+        self, tmp_path, monkeypatch,
+    ):
+        # A hand-edited/corrupted owner_ref embedding a path separator in
+        # the worktree-id component must never be joined into a real path.
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/../../secret#s1",
+        )
+        assert root_chain.resolve_root_codename(child, project="ext") is None
+
+    def test_path_traversal_in_owner_ref_project_is_rejected(
+        self, tmp_path, monkeypatch,
+    ):
+        # Same, but the traversal attempt is in the PROJECT component --
+        # must not get a chance to evaluate a codename under the wrong
+        # project's provenance policy.
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/../secret/wt-root#s1",
+        )
+        assert root_chain.resolve_root_codename(child, project="ext") is None
+
+    def test_chain_of_exactly_the_cap_depth_resolves(self, tmp_path, monkeypatch):
+        # A chain of exactly _MAX_CHAIN_DEPTH ancestors is the documented
+        # boundary and must still resolve -- only a STRICTLY longer chain
+        # is rejected.
+        depth = root_chain._MAX_CHAIN_DEPTH
+        _seed(tmp_path, monkeypatch, "p0", "wt-0",
+              codename="amber-thicket", codename_source="built-in")
+        leaf = None
+        for i in range(1, depth + 1):
+            owner_ref = f"anomalous-potato/p{i - 1}/wt-{i - 1}#s{i}"
+            leaf = _seed(tmp_path, monkeypatch, f"p{i}", f"wt-{i}", owner_ref=owner_ref)
+        assert root_chain.resolve_root_codename(leaf, project=f"p{depth}") == (
+            "amber-thicket"
+        )
+
+    def test_chain_exceeding_the_cap_depth_is_rejected(self, tmp_path, monkeypatch):
+        depth = root_chain._MAX_CHAIN_DEPTH + 1
+        _seed(tmp_path, monkeypatch, "p0", "wt-0",
+              codename="amber-thicket", codename_source="built-in")
+        leaf = None
+        for i in range(1, depth + 1):
+            owner_ref = f"anomalous-potato/p{i - 1}/wt-{i - 1}#s{i}"
+            leaf = _seed(tmp_path, monkeypatch, f"p{i}", f"wt-{i}", owner_ref=owner_ref)
+        assert root_chain.resolve_root_codename(leaf, project=f"p{depth}") is None
+
     def test_root_missing_codename_is_backfilled_when_ensure(
         self, tmp_path, monkeypatch,
     ):
@@ -260,6 +308,62 @@ class TestResolveRootCodename:
         assert "amber-thicket" in sidecar.read_text()
         assert "-->" not in sidecar.read_text().replace(
             '"root_codename": "amber-thicket"', ""
+        )
+
+    def test_freeze_is_serialized_under_the_cross_process_record_lock(
+        self, tmp_path, monkeypatch,
+    ):
+        # The read-check -> compute -> write must be wrapped in the shared
+        # cross-process tracking lock (never a bare unlocked read-then-
+        # write), so two concurrent processes can't independently derive
+        # and clobber each other's decision.
+        _seed(tmp_path, monkeypatch, "harness", "wt-root",
+              codename="amber-thicket", codename_source="built-in")
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        seen_paths = []
+        real_lock = tracking._RecordLock
+
+        class _SpyLock(real_lock):
+            def __enter__(self):
+                seen_paths.append(self._yaml_path)
+                return super().__enter__()
+
+        monkeypatch.setattr(tracking, "_RecordLock", _SpyLock)
+        result = root_chain.resolve_root_codename(child, project="ext")
+        assert result == "amber-thicket"
+        assert seen_paths == [
+            tmp_path / ".ext" / "worktrees" / "wt-child.root-attribution.json"
+        ]
+
+    def test_another_processs_frozen_value_wins_over_a_racing_recompute(
+        self, tmp_path, monkeypatch,
+    ):
+        # Simulate another process freezing a decision WHILE this call is
+        # resolving this_machine/project (before it takes the lock): the
+        # in-lock re-check must return that WINNING value, never a
+        # locally-computed one that lost the race.
+        _seed(tmp_path, monkeypatch, "harness", "wt-root",
+              codename="amber-thicket", codename_source="built-in")
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        sidecar = tmp_path / ".ext" / "worktrees" / "wt-child.root-attribution.json"
+        real_load_config = root_chain.cfg.load_config
+
+        def _racing_load_config(*a, **k):
+            # Another process wins the race and freezes first.
+            sidecar.write_text('{"root_codename": "winner-codename"}')
+            return real_load_config(*a, **k)
+
+        monkeypatch.setattr(
+            "agent_worktrees.config.load_config", _racing_load_config,
+        )
+        assert root_chain.resolve_root_codename(child, project="ext") == (
+            "winner-codename"
         )
 
     def test_ensure_false_peek_never_freezes_a_premature_decision(
