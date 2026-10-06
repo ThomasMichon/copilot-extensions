@@ -1,0 +1,9 @@
+{
+  "comment": "pivot-streaming-transport Phase 4: narrow the in-list nav refresh to body-data + footer only",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

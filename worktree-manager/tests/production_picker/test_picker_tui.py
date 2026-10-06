@@ -10666,8 +10666,8 @@ def test_tick_pure_cosmetic_pulse_narrows_segment_refresh_to_chrome_and_body():
     pulse (``nf-chrome``'s pulsing status dot, ``nf-body-data``'s own internal
     pulse fast-path, #4719) -- never the other five (title/pivots/machine/
     buttons/footer), which have no pulse/spin dependency when nothing else is
-    busy. A tick that DOES have a competing busy/nav condition must still
-    refresh every segment, unchanged from before Phase 4."""
+    busy. A competing busy condition must still refresh every segment,
+    unchanged from before Phase 4."""
     src = _fixture_source()
     all_segments = ("nf-title", "nf-pivots", "nf-chrome", "nf-machine",
                      "nf-buttons", "nf-body-data", "nf-footer")
@@ -10709,16 +10709,106 @@ def test_tick_pure_cosmetic_pulse_narrows_segment_refresh_to_chrome_and_body():
                 assert touched == {"nf-chrome", "nf-body-data"}, (
                     f"pure pulse tick touched unexpected segments: {touched}")
 
-                # A competing nav condition on the SAME cadence boundary must
-                # still refresh every segment -- the narrowing never applies
-                # when anything else triggered the tick's refresh too.
-                scr._nav_dirty = True
+                # A competing busy condition must still refresh every segment
+                # -- the narrowing never applies when anything else (busy)
+                # triggered the tick's refresh too.
+                scr._busy_label = "doing a thing"
+                scr._nav_dirty = False
                 scr.frame = 9
                 touched.clear()
                 scr._tick()
                 assert touched == set(all_segments), (
-                    f"nav-driven tick unexpectedly narrowed segments: {touched}")
+                    f"busy-driven tick unexpectedly narrowed segments: {touched}")
             finally:
+                scr._busy_label = None
+                for widget, attr, original in monkeypatch_targets:
+                    object.__setattr__(widget, attr, original)
+
+    asyncio.run(run())
+
+
+def test_tick_pure_nav_narrows_segment_refresh_to_body_and_footer():
+    """pivot-streaming-transport Phase 4: a pure in-list nav tick (``_nav_
+    dirty`` set, no busy condition) must refresh ONLY ``nf-body-data`` and
+    ``nf-footer`` -- the two segments empirically confirmed (a headless
+    harness diffing each segment's actual rendered content across a real nav
+    move, including the one-time ``wt_sel`` 0->1 boot-edge-case from
+    ``_wt_track_focus()``'s "selection follows focus" rule, #2258 P3-1) to
+    ever depend on ``sel`` moving within the Worktrees list body.
+    ``nf-title``/``nf-pivots``/``nf-chrome``/``nf-machine``/``nf-buttons``
+    never change for an in-list move (``build_chrome()``'s own ``sel``
+    checks only compare against the ``"M"``/``"BTN"`` zones, never an
+    in-zone index). ``nf-body-sticky`` was never part of this method's
+    refresh set in the first place (it manages its own repaint via
+    ``set_lines()``'s own content-equality check, called separately) -- not
+    narrowed away, correctly absent both before and after this change. A
+    competing busy condition must still refresh every segment."""
+    src = _fixture_source()
+    all_segments = ("nf-title", "nf-pivots", "nf-chrome", "nf-machine",
+                     "nf-buttons", "nf-body-data", "nf-footer")
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+
+            widgets = {seg_id: scr.query_one(f"#{seg_id}") for seg_id in all_segments}
+            touched = set()
+
+            def _make_tracker(seg_id, widget, attr):
+                original = getattr(widget, attr)
+
+                def _tracked(*a, **k):
+                    touched.add(seg_id)
+                    return original(*a, **k)
+                return _tracked
+
+            monkeypatch_targets = []
+            for seg_id, widget in widgets.items():
+                attr = "refresh_data" if seg_id == "nf-body-data" else "refresh"
+                monkeypatch_targets.append((widget, attr, getattr(widget, attr)))
+                object.__setattr__(widget, attr, _make_tracker(seg_id, widget, attr))
+            try:
+                # Pure nav: a real in-list cursor move (through the actual
+                # production call path, not a hand-set flag) sets
+                # `_nav_dirty`; no busy condition. No `await` happens between
+                # patching and this synchronous `_tick()` call, so the real
+                # background render timer (which also drives `_tick()` on its
+                # own schedule) cannot interleave -- asyncio only switches
+                # tasks at an await point.
+                scr._busy_label = None
+                scr.sel = ("L", 1)
+                scr._wt_track_focus()
+                scr._nav_dirty = True
+                scr.frame = 1  # not a multiple of 5 -- isolates the nav path
+                touched.clear()
+                scr._tick()
+                assert touched == {"nf-body-data", "nf-footer"}, (
+                    f"pure nav tick touched unexpected segments: {touched}")
+
+                # A second, steady-state nav move (wt_sel already tracks
+                # focus from the move above) narrows identically.
+                scr.sel = ("L", 2)
+                scr._wt_track_focus()
+                scr._nav_dirty = True
+                scr.frame = 2
+                touched.clear()
+                scr._tick()
+                assert touched == {"nf-body-data", "nf-footer"}, (
+                    f"steady-state nav tick touched unexpected segments: {touched}")
+
+                # A competing busy condition must still refresh every segment.
+                scr._busy_label = "doing a thing"
+                scr._nav_dirty = True
+                scr.frame = 3
+                touched.clear()
+                scr._tick()
+                assert touched == set(all_segments), (
+                    f"busy+nav tick unexpectedly narrowed segments: {touched}")
+            finally:
+                scr._busy_label = None
                 for widget, attr, original in monkeypatch_targets:
                     object.__setattr__(widget, attr, original)
 
