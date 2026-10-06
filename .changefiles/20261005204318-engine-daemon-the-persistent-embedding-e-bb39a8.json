@@ -1,0 +1,9 @@
+{
+  "comment": "engine daemon: the persistent embedding-engine spawn no longer inherits the caller's ambient cwd -- rooted at its own durable engine home instead (service-lifecycle-supervision CWD-compliance sweep)",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
