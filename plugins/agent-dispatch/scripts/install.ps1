@@ -463,16 +463,16 @@ $SrcVersion       = $null
 # Set-StrictMode -Version 2.0 throws on at the very first read.
 $script:ActivationSuperseded = $false
 # Shared timeout for every acquisition of the GLOBAL (version-independent)
-# Enter-PluginSnapshotLock -InstallDir $InstallDir mutex -- Invoke-
+# Enter-PluginSnapshotLock -InstallDir $InstallDir lock -- Invoke-
 # VersionedActivate's own marker-publish, Invoke-Stamp's marker-publish, and
 # Invoke-Update's cutover/coordinator-reconciliation span all contend on this
-# IDENTICAL named mutex. Whichever one of them can legitimately hold it
+# IDENTICAL lock. Whichever one of them can legitimately hold it
 # LONGEST (a real Invoke-CoordinatorCutover call: zdd.cutover's own
 # health_timeout(60s) + drain_timeout(300s) + 60s internal lease-wait slack
 # -- see Invoke-CoordinatorCutover's own call site) sets the floor every
 # OTHER caller's own timeout must meet -- a shorter one would throw "Timed
 # out waiting..." during a perfectly normal long cutover instead of simply
-# waiting its turn, since they all share one mutex, not independent locks.
+# waiting its turn, since they all share one lock, not independent locks.
 $script:GlobalActivationLockTimeoutSeconds = 450
 if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VERSIONED retired)
     $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
@@ -1006,6 +1006,22 @@ function Enter-PluginSnapshotLock {
        mirrors agent-machines' own Enter-StampLock
        (plugins/agent-machines/scripts/init.ps1) in a distinct namespace.
 
+       Tries the "Global\" namespace first (serializes across EVERY
+       session on the machine, not just the caller's own) and falls back
+       to the pre-existing "Local\" namespace (this session only) when
+       creating a Global object fails -- a standard, non-elevated user
+       lacks the SeCreateGlobalPrivilege Windows requires to CREATE (not
+       merely open) one, so unconditionally requiring "Global\" would
+       break lock acquisition outright for ordinary users. This is a
+       strict best-effort widening: a "Local\"-only installer invocation
+       launched from a different session (e.g. the coordinator's own
+       Scheduled Task, often a different session than an interactive
+       sessionStart hook) would otherwise acquire its own independent
+       mutex instance and silently defeat this whole lock-ordering
+       contract; the fallback never regresses below that pre-existing
+       floor, it only widens the common case where the privilege is
+       available.
+
        Two DISTINCT locks share this one implementation (different keys,
        each independently thread-affine reentrant within its own scope):
 
@@ -1053,12 +1069,22 @@ function Enter-PluginSnapshotLock {
             [Text.Encoding]::UTF8.GetBytes($key)
         )
     ).Replace('-', '').Substring(0, 24)
-    $mutexName = if ($env:OS -eq 'Windows_NT') {
-        "Local\CopilotExtensions.AgentDispatch.Snapshot.$hash"
+    $mutex = $null
+    if ($env:OS -eq 'Windows_NT') {
+        try {
+            $mutex = New-Object Threading.Mutex($false, "Global\CopilotExtensions.AgentDispatch.Snapshot.$hash")
+        } catch [UnauthorizedAccessException] {
+            # Caller lacks SeCreateGlobalPrivilege (the common case for a
+            # standard, non-elevated user) -- fall back to the pre-existing
+            # session-scoped namespace rather than failing the install.
+            $mutex = $null
+        }
+        if (-not $mutex) {
+            $mutex = New-Object Threading.Mutex($false, "Local\CopilotExtensions.AgentDispatch.Snapshot.$hash")
+        }
     } else {
-        "CopilotExtensions.AgentDispatch.Snapshot.$hash"
+        $mutex = New-Object Threading.Mutex($false, "CopilotExtensions.AgentDispatch.Snapshot.$hash")
     }
-    $mutex = New-Object Threading.Mutex($false, $mutexName)
     $held = $false
     try {
         $held = $mutex.WaitOne([TimeSpan]::FromSeconds($TimeoutSeconds))
