@@ -307,7 +307,17 @@ not a known fix.)_
       profiled call site** — a future session should profile *it*
       specifically (same discipline as every other call site in this
       phase: verify the shape, don't assume it matches a prior fix) before
-      this item can be checked off.
+      this item can be checked off. `visions/picker/README.md`'s
+      `§Behaviors/responsive-by-budget` now names the three recurring cost
+      shapes this phase keeps finding one call site at a time (eager/
+      over-resolution, scanning everything installed instead of what the
+      boot path actually needs, and monolithic cold-path modules) — the
+      import-overhead investigation should be framed against those three
+      (e.g. is the plugin/provider set being imported eagerly instead of
+      on-demand? is a large shared module being imported in full for one
+      small piece? is boot resolving every installed plugin instead of
+      only the ones the first frame needs?) rather than treated as an
+      unrelated new mystery.
 
 ### Phase 5 — Hold the budgets: a timing regression harness
 
