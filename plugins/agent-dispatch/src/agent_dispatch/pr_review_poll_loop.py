@@ -41,7 +41,7 @@ def build_provider_observer(
     expected_logins: Mapping[str, str],
     *,
     runner: Callable[..., Any] = subprocess.run,
-    gitea_allowed_hosts: frozenset[str] = frozenset(),
+    gitea_api_bases: Mapping[str, str] | None = None,
 ) -> Observer:
     """Build an observer that routes store keys to the right provider adapter.
 
@@ -49,10 +49,11 @@ def build_provider_observer(
     (``repo_key``, ``number``); this helper is the production bridge from the
     persisted observation-store key back to the forge-specific adapter.
 
-    ``gitea_allowed_hosts`` is the configured allowlist a ``gitea-pr:`` ref's
-    host must appear in before ``GiteaPRAdapter`` will send its token there
-    (see that adapter's own docstring) -- required, non-empty, when this
-    observer will ever see a Gitea-tagged ref.
+    ``gitea_api_bases`` is the configured key -> real API base URL mapping a
+    ``gitea-pr:`` ref's key is resolved against before ``GiteaPRAdapter``
+    will send its token anywhere (see that adapter's own docstring) --
+    required, non-empty, when this observer will ever see a Gitea-tagged
+    ref.
     """
     adapters: dict[str, Any] = {}
 
@@ -72,7 +73,7 @@ def build_provider_observer(
             adapter = AzureDevOpsPRAdapter(expected_login, runner=runner)
         elif provider == "gitea":
             adapter = GiteaPRAdapter(
-                expected_login, runner=runner, allowed_hosts=gitea_allowed_hosts,
+                expected_login, runner=runner, api_bases=gitea_api_bases or {},
             )
         else:
             raise ValueError(f"unsupported reviewer provider {provider!r}")

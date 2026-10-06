@@ -698,7 +698,9 @@ older than that many days. The timestamp may come from inline reviewer metadata
 provider-backed flows, from a `payload_ref` like
 `github-pr:owner/repo#123`,
 `azure-devops-pr:organization/project/repository#123`, or
-`gitea-pr:host/owner/repo#123` resolved through the
+`gitea-pr:key/owner/repo#123` (where `key` is resolved against a
+configured `key -> API base URL` mapping, never trusted as a URL
+directly) resolved through the
 persisted PR-observation cache. Suspended reviewer tasks also use the same
 deadline to wake a parked hibernation waiter instead of remaining dormant
 forever. The threshold is per declaration; omitting the key disables

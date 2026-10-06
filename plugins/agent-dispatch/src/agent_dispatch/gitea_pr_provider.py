@@ -20,13 +20,18 @@ worker-direct tool actions, exactly as for the other two forges):
 Repo addressing: unlike GitHub (always github.com) and Azure DevOps (whose
 ``organization/project/repository`` already names the org), Gitea is
 self-hosted with no single well-known host -- a reviewer ``payload_ref``
-names it directly: ``gitea-pr:<host>/<owner>/<repo>#<number>``, where
-``<host>`` is the instance hostname with no scheme (e.g.
-``gitea.example.com``, decided here, closing the "parsed structurally...
-but no live adapter exists yet" note in ``review_target_refs.py``). The
-ref's host is **never trusted directly** as a credential authority --
-``GiteaPRAdapter`` requires a configured, non-empty ``allowed_hosts`` and
-refuses any ref naming a host outside it, since an untrusted/attacker-
+names it directly: ``gitea-pr:<key>/<owner>/<repo>#<number>``, where
+``<key>`` is an opaque authority key (conventionally the instance hostname,
+e.g. ``gitea.example.com``, but never resolved as one -- decided here,
+closing the "parsed structurally... but no live adapter exists yet" note
+in ``review_target_refs.py``). The ref's ``<key>`` is **never trusted
+directly** as a credential authority or turned into a URL -- it is looked
+up in a configured, non-empty ``api_bases`` mapping (``<key>`` ->
+the instance's real, possibly path-hosted, base URL, e.g.
+``https://h/gitea`` for an instance mounted under a path, the same
+deployment shape ``agent_worktrees.providers.gitea`` already supports via
+its own explicit ``api_base``). A ``<key>`` with no configured entry is
+refused before any request is made, since an untrusted/attacker-
 controlled ref would otherwise be able to redirect this adapter's token to
 an arbitrary server.
 """
@@ -43,6 +48,9 @@ from typing import Any
 from .github_provider_adapter import PRObservation, _has_wip_marker
 from .gitea_connection import DEFAULT_GITEA_TOKEN_ENV
 from .provider_state_machine import ApprovalStatus, HoldReason, Mergeability, Revision
+
+_REVIEW_PAGE_SIZE = 50
+_MAX_REVIEW_PAGES = 20
 
 _REVIEW_STATE_TO_APPROVAL: dict[str, str] = {
     "APPROVED": "APPROVED",
@@ -69,7 +77,7 @@ def _split(repo: str) -> tuple[str, str, str]:
     parts = repo.split("/")
     if len(parts) != 3 or not all(parts):
         raise ValueError(
-            "Gitea reviewer repo must be '<host>/<owner>/<repository>'"
+            "Gitea reviewer repo must be '<key>/<owner>/<repository>'"
         )
     return parts[0], parts[1], parts[2]
 
@@ -213,24 +221,25 @@ class GiteaPRAdapter:
         expected_login: str,
         runner: Callable[..., Any] = subprocess.run,
         *,
-        allowed_hosts: frozenset[str] | None = None,
+        api_bases: Mapping[str, str] | None = None,
         token_env: str | None = None,
     ):
         if not expected_login:
             raise ValueError("expected_login must be non-empty")
-        if not allowed_hosts:
+        if not api_bases:
             raise ValueError(
-                "GiteaPRAdapter requires a non-empty allowed_hosts: the "
-                "target host comes from a caller-supplied payload_ref "
-                "(gitea-pr:<host>/<owner>/<repo>#<number>), so the "
-                "credential authority must be bound to a configured "
-                "allowlist rather than trusting that ref's host directly "
-                "-- otherwise a ref naming an arbitrary host would send "
-                "this adapter's token there."
+                "GiteaPRAdapter requires a non-empty api_bases: the "
+                "target instance comes from a caller-supplied payload_ref "
+                "(gitea-pr:<key>/<owner>/<repo>#<number>), so the "
+                "credential authority and real (possibly path-hosted) API "
+                "base must be bound to a configured mapping rather than "
+                "reconstructed from that ref's key directly -- otherwise a "
+                "ref naming an arbitrary key would send this adapter's "
+                "token to an unconfigured server."
             )
         self.expected_login = expected_login
         self.runner = runner
-        self.allowed_hosts = frozenset(host.casefold() for host in allowed_hosts)
+        self.api_bases = {key.casefold(): base.rstrip("/") for key, base in api_bases.items()}
         self.token_env = token_env or DEFAULT_GITEA_TOKEN_ENV
         self._verified_repos: set[str] = set()
 
@@ -289,24 +298,47 @@ class GiteaPRAdapter:
             )
         self._verified_repos.add(repo_key)
 
+    def _all_reviews(self, api_base: str, owner: str, name: str, number: int) -> list[dict[str, Any]]:
+        """List every review on a PR, across pages.
+
+        A single unpaginated page silently drops approvals/change-requests
+        once a PR accumulates more reviews than one page -- ``_approval_status``
+        would then classify against a stale/incomplete verdict, and the
+        dropped reviews' own inline comments would never be checked for
+        :data:`HoldReason.BLOCKING_THREADS` either.
+        """
+        reviews: list[dict[str, Any]] = []
+        for _page_index in range(_MAX_REVIEW_PAGES):
+            page = _page_index + 1
+            rows = self._call(
+                api_base, "GET",
+                f"/repos/{owner}/{name}/pulls/{number}/reviews"
+                f"?page={page}&limit={_REVIEW_PAGE_SIZE}",
+            ) or []
+            reviews.extend(rows)
+            if len(rows) < _REVIEW_PAGE_SIZE:
+                return reviews
+        raise RuntimeError(
+            f"Gitea review listing for {owner}/{name}#{number} exceeded the "
+            f"bounded {_MAX_REVIEW_PAGES * _REVIEW_PAGE_SIZE}-review scan"
+        )
+
     def fetch_pr(self, repo: str, number: int) -> dict[str, Any]:
         """Fetch the raw PR payload (plus reviews/comments/status) for
-        ``repo`` (``<host>/<owner>/<name>``) and ``number``."""
-        host, owner, name = _split(repo)
-        if host.casefold() not in self.allowed_hosts:
+        ``repo`` (``<key>/<owner>/<name>``) and ``number``."""
+        key, owner, name = _split(repo)
+        api_base = self.api_bases.get(key.casefold())
+        if api_base is None:
             raise RuntimeError(
-                f"Gitea reviewer ref names host {host!r}, which is not in "
-                "this adapter's configured allowed_hosts -- refusing to "
-                "send credentials to an unconfigured authority."
+                f"Gitea reviewer ref names key {key!r}, which is not in "
+                "this adapter's configured api_bases -- refusing to send "
+                "credentials to an unconfigured authority."
             )
-        api_base = f"https://{host}"
         self._verify_identity(api_base, repo, owner, name)
         pull_request = self._call(api_base, "GET", f"/repos/{owner}/{name}/pulls/{number}")
         if not isinstance(pull_request, Mapping):
             raise RuntimeError(f"Gitea PR fetch returned nothing for {repo}#{number}")
-        reviews = self._call(
-            api_base, "GET", f"/repos/{owner}/{name}/pulls/{number}/reviews"
-        ) or []
+        reviews = self._all_reviews(api_base, owner, name, number)
         review_comments: list[dict[str, Any]] = []
         for review in reviews:
             if review.get("dismissed"):
