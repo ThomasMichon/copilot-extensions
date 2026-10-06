@@ -532,15 +532,29 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     # own fallback claim-and-send-keys delivery never finds it again and
     # double-delivers the same turn.
     #
-    # Known, accepted scope boundary: claiming happens here, at
-    # PLAN-BUILD time -- before the external launcher
-    # (launch-session.{ps1,sh}) has actually exec'd this `launch_cmd`. See
-    # the identical note at `resolve_cli.py`'s own claim site for the full
-    # rationale; this is the same accepted, narrow, Phase-3-deferred risk,
-    # not a new one introduced by this sibling non-JSON path.
+    # A live mux session (`verdict.mux_live`, set above) is the one case
+    # where this returned `launch_cmd` is NEVER actually exec'd at all --
+    # the external launcher reattaches the existing pane instead (see
+    # `worktree-manager/bin/launch-session.{sh,ps1}`'s own live-mux
+    # handling). Embedding/claiming a seed into an argv that will never run
+    # would silently lose it, so this falls back to the OLDER
+    # persisted-`pending_seed`-plus-mux-send-keys mechanism instead, which
+    # CAN reach an already-live pane: an explicit `--seed` on this call is
+    # persisted (never embedded) so a later attach/send-keys delivery can
+    # still pick it up, and an already-persisted `pending_seed` is left
+    # untouched (never claimed here) for the same reason.
+    #
+    # Known, accepted scope boundary: outside the live-mux case above,
+    # claiming happens here, at PLAN-BUILD time -- before the external
+    # launcher (launch-session.{ps1,sh}) has actually exec'd this
+    # `launch_cmd`. See the identical note at `resolve_cli.py`'s own claim
+    # site for the full rationale; this is the same accepted, narrow,
+    # Phase-3-deferred risk, not a new one introduced by this sibling
+    # non-JSON path.
+    live_mux = verdict is not None and getattr(verdict, "mux_live", False)
     explicit_seed = getattr(args, "seed", None)
     delivered_seed = explicit_seed
-    if not bare_resume:
+    if not bare_resume and not live_mux:
         if args.dry_run:
             delivered_seed = explicit_seed or getattr(record, "pending_seed", None)
         else:
@@ -549,6 +563,12 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         if delivered_seed:
             launch_cmd = embody_resume.with_seed(launch_cmd, delivered_seed)
             print("   Seeding first turn once ready.")
+    elif not bare_resume and live_mux and explicit_seed:
+        pending_seed_mod.restore_pending_seed(record.yaml_path, explicit_seed)
+        print(
+            "   Live mux session found -- queuing the seed for delivery "
+            "on reattach instead of this unused launch command."
+        )
 
     print()
 

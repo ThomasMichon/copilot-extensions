@@ -367,3 +367,34 @@ _Pending._
     alongside new ones, which is expected.)
   - Re-ran the full 213-test keyword sweep after these edits: still
     passing, no regressions.
+- **2026-10-06** — `guards + lint` flagged `handoff_cutover.py` at 1001
+  lines (the 1000-line module cap is shrink-only, and the prior round's
+  dry-run fix added net lines); fixed by tightening the comment's wording
+  (no behavior change). A fourth Copilot review pass then surfaced 2
+  genuinely new Medium findings (not nits this time) plus 2 already-fixed
+  stale references the bot's own "Previously missed" section flagged
+  against unchanged code:
+  - **Bare-resume + a PERSISTED `pending_seed` still got claimed/injected
+    in JSON mode.** The earlier bare-resume guard (this round's first
+    entry) only rejected an *explicit* `--seed`; it never checked
+    `bare_resume` before claiming/embedding an already-persisted
+    `pending_seed` in `_resolve_json_mode`'s own branch, unlike
+    `_resolve_resume_context` (the non-JSON sibling), which already
+    guarded this correctly. Fixed by wrapping the claim+embed block in
+    `if not bare_resume:`, mirroring the sibling path exactly; new test
+    `test_bare_resume_leaves_a_persisted_pending_seed_queued_in_json_mode`.
+  - **A live mux session silently lost an explicit seed.** When
+    `verify_worktree_active()` finds an existing live mux session, the
+    external launcher reattaches that pane and never execs the returned
+    `launch_cmd` at all (`worktree-manager/bin/launch-session.{sh,ps1}`'s
+    own live-mux handling) -- but `_resolve_resume_context` still claimed
+    and embedded the seed into that unused command regardless. Fixed by
+    detecting `verdict.mux_live` and, in that case, persisting an explicit
+    seed via `pending_seed.restore_pending_seed` instead (so the OLDER
+    send-keys mechanism, which CAN reach an already-live pane, still
+    delivers it) rather than clearing/embedding it into a command nobody
+    runs; a pre-existing persisted `pending_seed` is left untouched in
+    this case too. New test
+    `test_live_mux_resume_queues_explicit_seed_instead_of_embedding_unused_argv`.
+  - Re-ran the full keyword sweep: 215 tests passing (213 + 2 new), no
+    regressions.

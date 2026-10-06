@@ -42,10 +42,10 @@ def _stub_launch_plumbing(monkeypatch, config: cfg.Config) -> None:
     monkeypatch.setattr(m.sessions, "find_latest_session_id_fast", lambda *_a, **_k: None)
 
 
-def _create_config(tmp_path: Path) -> cfg.Config:
+def _create_config(tmp_path: Path, **overrides) -> cfg.Config:
     anchor = tmp_path / "anchor"
     anchor.mkdir()
-    return cfg.Config(
+    base = dict(
         srcroot=str(tmp_path),
         machine="test",
         platform="windows",
@@ -57,6 +57,8 @@ def _create_config(tmp_path: Path) -> cfg.Config:
             )
         },
     )
+    base.update(overrides)
+    return cfg.Config(**base)
 
 
 def _args(**overrides):
@@ -153,3 +155,89 @@ def test_no_mux_launch_still_gets_the_seed(tmp_path: Path, monkeypatch, capfd):
     assert rc == 0
     payload = json.loads(capfd.readouterr().out)
     assert payload["launch"]["cmd"][-2:] == ["--interactive", "do the thing"]
+
+
+def test_bare_resume_leaves_a_persisted_pending_seed_queued_in_json_mode(
+    tmp_path: Path, monkeypatch, capfd,
+):
+    """Review finding: a persisted `pending_seed` must stay queued (never
+    claimed/injected) for a `--bare-resume --json` resume, the same as the
+    non-JSON `_resolve_resume_context` path already guarantees -- bare
+    resume launches Copilot in HOME with no resumed conversation for a
+    seed to join. Without this guard the JSON path's own claim-and-embed
+    block ran unconditionally and silently consumed the queued seed even
+    though `--bare-resume` never delivers it."""
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path, pending_seed="queued at creation",
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+
+    rc = resolve_cli.cmd_resolve(_args(seed=None, bare_resume=True))
+
+    assert rc == 0
+    payload = json.loads(capfd.readouterr().out)
+    assert "--interactive" not in payload["launch"]["cmd"]
+    reloaded = tracking.load_record(tmp_path / "wt-a.yaml")
+    assert reloaded.pending_seed == "queued at creation"
+
+
+def test_live_mux_resume_queues_explicit_seed_instead_of_embedding_unused_argv(
+    tmp_path: Path, monkeypatch, capfd,
+):
+    """Review finding: when a live mux session already exists, the external
+    launcher reattaches it and never execs the returned launch command at
+    all (see ``worktree-manager/bin/launch-session.{sh,ps1}``'s own
+    live-mux handling) -- so embedding/claiming a seed into that unused argv
+    would silently lose it. The non-JSON `_resolve_resume_context` path
+    must instead persist an explicit `--seed` as `pending_seed` (for the
+    older send-keys delivery, which CAN reach an already-live pane) rather
+    than clearing/embedding it into the command nobody will run."""
+    from agent_worktrees import resolve_launch_cli as rlc
+
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path, auto_fast_forward=False)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path, codename="already-set",
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    monkeypatch.setattr(
+        rlc, "_dispatch_validate_profile_assignment_config", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        rlc.sessions, "verify_worktree_active",
+        lambda *_a, **_k: SimpleNamespace(mux_live=True, live_session_ids=["s1"]),
+    )
+    monkeypatch.setattr(rlc.sessions, "resolve_resume_target", lambda *_a, **_k: None)
+    monkeypatch.setattr(rlc.tracking, "stamp_mux_live", lambda *_a, **_k: None)
+    monkeypatch.setattr(rlc.tracking, "stamp_bound_live", lambda *_a, **_k: None)
+    monkeypatch.setattr(rlc.local_cache_refresh, "refresh_local_cache", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        rlc, "_dispatch_launch_profile_selection",
+        lambda *_a, **_k: SimpleNamespace(profile=None, assignment=None),
+    )
+    monkeypatch.setattr(rlc, "_dispatch_reflect_assignment", lambda *_a, **_k: None)
+    monkeypatch.setattr(rlc, "_dispatch_apply_assignment_env", lambda env, _sel: env)
+    monkeypatch.setattr(rlc, "_build_launch_cmd", lambda *_a, **_k: ["copilot"])
+    monkeypatch.setattr(rlc, "_build_env", lambda *_a, **_k: {})
+    monkeypatch.setattr(rlc, "_repo_session_env", lambda *_a, **_k: {})
+    monkeypatch.setattr(rlc, "_preflight_launch", lambda *_a, **_k: SimpleNamespace(error=None))
+    monkeypatch.setattr(rlc.activity, "log_event", lambda *_a, **_k: None)
+    monkeypatch.setattr(rlc, "_emit_plan", lambda *_a, **_k: None)
+
+    args = argparse.Namespace(
+        json=False, base=False, dry_run=False, no_resume=False, no_mux=False,
+        bare_resume=False, seed="do the thing", no_fast_forward=False,
+        profile=None,
+    )
+    context = rlc.ResolveLaunchContext(config=config, args=args, record=record)
+
+    rc = rlc._resolve_resume_context(context)
+
+    assert rc == 0
+    out = capfd.readouterr().out
+    assert "do the thing" not in out  # never embedded into the unused argv
+    reloaded = tracking.load_record(tmp_path / "wt-a.yaml")
+    assert reloaded.pending_seed == "do the thing"

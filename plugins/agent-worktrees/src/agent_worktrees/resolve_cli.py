@@ -666,13 +666,18 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # launcher (launch-session.{ps1,sh}, which wraps or doesn't wrap this
     # exact `cmd` in a mux pane independently of anything decided here)
     # ends up muxed or `--no-mux`, since there is no pane to target either
-    # way. An explicit `--seed` on this call wins; either way, any
-    # record-persisted `pending_seed` (queued at creation time by
-    # `resolve --new --seed`, for the Picker's own two-hop new-worktree
-    # flow, which re-resolves by --worktree-id here) is claimed (cleared)
-    # under the existing race-safe write-guard so `agent-worktrees embody`'s
-    # own fallback claim-and-send-keys delivery never finds it again and
-    # double-delivers the same turn.
+    # way. `bare_resume` skips claiming/injecting entirely (mirrors
+    # `resolve_launch_cli._resolve_resume_context`'s identical guard) --
+    # there is no resumed conversation, and arguably no well-defined
+    # "worktree session," for a seed to join, and a persisted
+    # `pending_seed` must stay queued for a later real resume rather than
+    # being silently consumed here. An explicit `--seed` on this call wins;
+    # either way, any record-persisted `pending_seed` (queued at creation
+    # time by `resolve --new --seed`, for the Picker's own two-hop
+    # new-worktree flow, which re-resolves by --worktree-id here) is
+    # claimed (cleared) under the existing race-safe write-guard so
+    # `agent-worktrees embody`'s own fallback claim-and-send-keys delivery
+    # never finds it again and double-delivers the same turn.
     #
     # Known, accepted scope boundary: claiming happens here, at
     # PLAN-BUILD time -- before the external launcher
@@ -695,11 +700,12 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # function at all) reintroduces real double-delivery on every
     # subsequent successful resume instead of this narrow, infrequent loss
     # window.
-    explicit_seed = getattr(state.args, "seed", None)
-    claimed_seed = pending_seed_mod.claim_pending_seed(yaml_path)
-    delivered_seed = explicit_seed or claimed_seed
-    if delivered_seed:
-        launch_cmd = embody_resume.with_seed(launch_cmd, delivered_seed)
+    if not getattr(state.args, "bare_resume", False):
+        explicit_seed = getattr(state.args, "seed", None)
+        claimed_seed = pending_seed_mod.claim_pending_seed(yaml_path)
+        delivered_seed = explicit_seed or claimed_seed
+        if delivered_seed:
+            launch_cmd = embody_resume.with_seed(launch_cmd, delivered_seed)
 
     launch = {
         "action": "exec",
