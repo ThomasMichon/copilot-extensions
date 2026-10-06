@@ -1791,6 +1791,13 @@ function Install-Runtime {
             }
             Deploy-SelfProvisioningBinstub
             Write-Manifest
+            # Register-PickerPivot ALSO writes shared, version-sensitive
+            # content (pivots/agent-dispatch.json, from THIS invocation's
+            # own $PluginDir) another invocation could race the exact same
+            # way as the binstub/manifest above -- keep it inside this same
+            # protected span rather than letting it run after the mutex is
+            # released.
+            Register-PickerPivot
         } finally {
             [void]$publishMutex.ReleaseMutex()
             $publishMutex.Dispose()
@@ -1799,6 +1806,7 @@ function Install-Runtime {
         # Legacy (non-versioned) mode: no supersession concept, no lock.
         Deploy-SelfProvisioningBinstub
         Write-Manifest
+        Register-PickerPivot
     }
     } finally {
         # Held through the health gate, completion marker, AND activation
@@ -1844,7 +1852,6 @@ function Install-Runtime {
         }
     }
 
-    Register-PickerPivot
 }
 
 function Write-Manifest {

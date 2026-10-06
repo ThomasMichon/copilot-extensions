@@ -1165,11 +1165,18 @@ _ensure_runtime() {
         fi
         deploy_binstub
         _write_manifest
+        # _register_pivot ALSO writes shared, version-sensitive content
+        # (pivots/agent-dispatch.json, from THIS invocation's own
+        # PLUGIN_DIR) another invocation could race the exact same way as
+        # the binstub/manifest above -- keep it inside this same protected
+        # span rather than letting it run after the lock is released.
+        _register_pivot
         _unlock_publish
     else
         # Legacy (non-versioned) mode: no supersession concept, no lock.
         deploy_binstub
         _write_manifest
+        _register_pivot
     fi
 
     if "$LINK_PYTHON" -c 'import agent_dispatch, agent_dispatch.embody, agent_dispatch.__main__' 2>/dev/null; then
@@ -1188,8 +1195,6 @@ _ensure_runtime() {
         *":$LOCAL_BIN:"*) _ok "PATH: $LOCAL_BIN is on PATH" ;;
         *) _step "Add $LOCAL_BIN to your PATH: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
     esac
-
-    _register_pivot
 }
 
 _write_manifest() {
