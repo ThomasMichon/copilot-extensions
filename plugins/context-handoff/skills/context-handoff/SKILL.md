@@ -248,6 +248,46 @@ straight to noting the un-synced state in the brief if there is any doubt
 about whether it is safe to rebase right now (e.g. genuinely conflicting
 in-flight work you cannot lose).
 
+## Quiesce owned background work before triggering
+
+A handoff hands the successor a worktree, not this process's live memory --
+anything this session kicked off that only *it* is tracking (a background
+`task`/`general-purpose` agent, an async shell, a `manage_schedule` entry)
+does not automatically transfer. Left running unacknowledged, it becomes
+either an orphan nobody is watching, or -- worse -- a second actor racing the
+successor against the same worktree/claims the successor now believes it
+owns alone. Before calling `trigger_handoff` (or the CLI equivalent):
+
+1. **Stop what you can stop.** For every background agent or async shell this
+   session itself started and still owns, either wait for it to finish, or
+   stop it (`stop_powershell`, or the agent equivalent) if it is not near
+   done. Do not leave one running on the assumption "the successor will
+   notice" -- it inherits the worktree, not your task list.
+2. **Check in whatever progress is checkoutable before stopping it.** If a
+   background task has useful partial results (a file written, a commit
+   staged, findings worth keeping), capture that into the handoff brief or
+   the repo itself before tearing it down -- stopping a task is not licence
+   to silently discard what it already produced.
+3. **Clear schedules you own.** Stop (`manage_schedule` `action: "stop"`)
+   every schedule this session created, unless the schedule's entire purpose
+   is to keep running independent of this conversation (rare -- e.g. an
+   operator-requested recurring reminder with its own lifecycle). A
+   self-paced `/every`-style loop schedule is exactly the kind that should be
+   stopped here, not left ticking into a worktree whose active session is
+   about to change out from under it.
+4. **Explicitly re-arm only what the successor genuinely needs.** If a
+   stopped schedule or background task must resume after cutover, say so
+   plainly in **Outstanding Background Flows & External State** --
+   name the exact schedule/task, its purpose, and the exact command to
+   restart it. The default is quiesce-and-report; re-arming is a deliberate,
+   named exception the brief must ask for, not an inertia-driven carryover.
+
+This still is not a reason to delay a context-pressure-driven handoff that
+must trigger immediately: if stopping something cleanly isn't safe to do in
+the time available, note in the brief that it was left running and why,
+exactly as the sync step above does for an unresolved conflict -- never
+silently omit it.
+
 ## Efforts + handoffs
 
 When both capabilities are present, use them to let one session own one slice

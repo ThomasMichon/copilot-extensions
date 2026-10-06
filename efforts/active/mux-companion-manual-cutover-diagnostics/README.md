@@ -137,6 +137,25 @@ view highlighting whether resolved head matches the just-resumed session).
       a detected mismatch is surfaced for the operator to hand to the
       current session to patch up and file, not acted on by the Companion.
 
+### Step 5 — `context-handoff`: quiesce owned background work before triggering (Done 2026-10-06)
+- [x] New skill section ("Quiesce owned background work before triggering")
+      in `plugins/context-handoff/skills/context-handoff/SKILL.md`, inserted
+      right after "Sync before triggering" (same pattern): before calling
+      `trigger_handoff`, stop/wait-out every background agent or async shell
+      the session still owns, check in whatever partial progress they
+      produced, and stop every `manage_schedule` entry the session created --
+      unless the brief explicitly, deliberately asks the successor to
+      re-arm a specific one by name with its restart command. A
+      context-pressure-driven handoff that must trigger immediately is still
+      not blocked on this -- same escape hatch as the sync step: note what
+      was left running and why.
+- [ ] Live-test coverage for this new step (see Validation Plan) is
+      deliberately left for a follow-up leg: it needs a real predecessor
+      session with a genuinely owned, still-running background task or
+      schedule at the moment of handoff, which this leg's own throwaway
+      worktree test (Step 3/4's retire-mechanism re-validation) did not
+      include.
+
 ## Validation Plan
 
 - [ ] Live-tested in this operator's own manual-mode worktree: press "Cut
@@ -144,9 +163,87 @@ view highlighting whether resolved head matches the just-resumed session).
       and the predecessor pane retires.
 - [ ] Live-tested: after a manual `/clear` + paste-`HANDOFF_SEED` resume
       (no button), reopening the Companion shows the new session as head.
+- [x] Live re-validated the #5455 predecessor-retire root-cause fix itself
+      (not the Companion button, not mocked): a real throwaway worktree, a
+      real `note-handoff` + `register-session --handoff-token` +
+      `link-succession --handoff-token` cycle against the installed
+      `context-handoff@0.5.8-dev1`, and a real psmux predecessor pane.
+      Reproduced the OLD bug first (omitting the explicit token on the
+      successor's registration silently cancelled the real pending token --
+      `link-succession` then rejected a replay with "is cancelled, not
+      pending"), then re-ran with the token threaded through as the fix
+      does: link succeeded, `handoffs-check` surfaced the real token as a
+      retire candidate (previously impossible -- a cancelled entry is
+      permanently excluded), and `--execute` genuinely killed the live
+      predecessor pane (confirmed gone from `psmux list-panes`). See
+      2026-10-06 journal entry for the full command sequence.
+- [ ] Live-tested: a predecessor with an owned, still-running background
+      task/agent (a `task` tool invocation, an async shell) at the moment of
+      handoff -- confirm the new "Quiesce owned background work before
+      triggering" skill step actually gets followed (stopped or explicitly
+      carried forward in the brief), not silently dropped or left to race
+      the successor.
+- [ ] Live-tested: a predecessor with an active, self-owned
+      `manage_schedule` entry at the moment of handoff -- confirm it gets
+      stopped before triggering (or explicitly, deliberately re-armed in the
+      brief with the exact restart command), never left ticking into a
+      worktree whose active session changed out from under it.
 - [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
+
+### 2026-10-06 — Live re-validated the #5455 fix; triaged 2 stray claims; new quiesce-before-trigger skill step
+Picked up via handoff (task `5bad80aac0b7435ea0b3585944d5025a`), whose two
+remaining items were: (1) live re-validate the #5455 predecessor-retire fix
+against real mechanism (not the old/broken code the original discovery ran
+against), and (2) triage two flagged worktree claims.
+
+**Claims triaged**: both
+(`tmichon-cloud1-win-20261003-002711-0ac7`, dead per `claimant-liveness`;
+`tmichon-cloud1-win-20261005-170627-4c2b`, live claimant but the worktree
+itself had 0 live sessions/mux and a terminal controller relation) were
+confirmed "no commits and clean tree" by `finalize`'s own dry-run and real
+run -- both empty, abandoned duplicates, now finalized/removed.
+
+**Live re-validation**: created a real throwaway `copilot-extensions`
+worktree, a real psmux session (`wt-test-predecessor`) with a genuine
+multi-window live pane, and exercised the installed `context-handoff@
+0.5.8-dev1` fix through actual `agent-worktrees` CLI calls (`note-handoff`,
+`register-session`, `link-succession`, `handoffs-check`) -- not mocks.
+First reproduced the OLD bug on purpose: registering a successor session
+*without* passing `--handoff-token` silently cancelled the real pending
+handoff (`link-succession`'s replay then failed with "is cancelled, not
+pending"), exactly matching the root cause `handoff-core.mjs`'s
+`promoteSuccessorHead` now defends against. Re-ran with the token threaded
+through end-to-end as the fix does: `link-succession` succeeded,
+`handoffs-check` (read-only) surfaced the real token as a retire candidate
+(impossible under the old bug -- a cancelled entry is permanently excluded
+from `_pending_handoff_retire_requests`), and `handoffs-check --execute`
+genuinely killed the live predecessor psmux pane (confirmed gone from
+`psmux list-panes`, whole test session torn down). This is the live,
+non-mocked confirmation the Validation Plan's retire-mechanism item needed.
+Cleaned up (killed the test psmux session, deregistered the fake sessions,
+finalized the throwaway worktree -- clean tree, no commits).
+
+**New scope from the operator mid-session**: two more live-test shapes are
+needed before this effort's own Validation Plan is really complete --
+cutover with the predecessor holding (a) a live, owned background
+task/agent, and (b) an active, owned `manage_schedule` entry. Neither is
+exercised by anything above. The operator also asked for a durable behavior
+change, not just a future test: the `context-handoff` skill must *require*
+quiescing owned background work (stop or wait out background
+agents/shells, check in whatever partial results they produced, stop owned
+schedules) before `trigger_handoff`, while still allowing the brief to
+explicitly ask the successor to re-arm a named schedule/task afterward (the
+default is quiesce-and-report, re-arming is a deliberate named exception).
+Added a new "Quiesce owned background work before triggering" section to
+`plugins/context-handoff/skills/context-handoff/SKILL.md`, mirroring the
+existing "Sync before triggering" section's shape and its
+context-pressure escape hatch. Tracked the two new live-test shapes as
+unchecked Validation Plan items and a new Step 5 sub-item -- deliberately
+left for a follow-up leg since they need a real owned background task/
+schedule in flight at handoff time, which this leg's own throwaway-worktree
+test didn't include.
 
 ### 2026-10-05 — Predecessor-retire root cause found and fixed (mux-bind-relay follow-up)
 Live-driving this effort's own two Validation Plan items (operator ask,

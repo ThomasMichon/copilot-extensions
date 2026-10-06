@@ -1,0 +1,9 @@
+{
+  "comment": "Require quiescing owned background work (agents, async shells, schedules) before trigger_handoff; allow explicit re-arm requests in the brief",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "minor"
+    }
+  ]
+}
