@@ -154,8 +154,15 @@ async def test_small_catalog_run_code_embeds_interface():
 async def test_run_node_passes_no_window_creationflags(monkeypatch):
     # The Node-harness spawn must carry the standard Windows console-
     # suppression flag (copilot-extensions#5425), regardless of whether a
-    # real `node` runtime is available on this runner.
+    # real `node` runtime is available on this runner -- stub `shutil.which`
+    # so `_handle_run`'s own runtime-presence check doesn't short-circuit
+    # before `_run_node` ever spawns anything.
     from agent_mcp._exec import no_window_creationflags
+
+    monkeypatch.setattr(
+        "agent_mcp.decorators.code_mode.shutil.which",
+        lambda name: "/fake/node",
+    )
 
     captured: dict = {}
 

@@ -234,7 +234,11 @@ async def test_command_summarizer_passes_no_window_creationflags(tmp_path, monke
     dec = _storage(tmp_path, rules=[
         {"tool": "g", "outputs": [{"path": "items", "summary": {"command": cmd}}]}])
     await run(dec, up, call_req("g"))
-    assert captured["kwargs"].get("creationflags") == no_window_creationflags()
+    # Production uses no_window_kwargs(), which omits "creationflags" entirely
+    # off Windows (an empty {}); no_window_creationflags() instead always
+    # returns an int (0 off Windows). Compare against the same default so this
+    # assertion holds on every platform, not just Windows.
+    assert captured["kwargs"].get("creationflags", 0) == no_window_creationflags()
 
 
 async def test_rule_tool_glob_no_match_falls_back_to_blanket(tmp_path):

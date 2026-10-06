@@ -118,7 +118,10 @@ async def test_command_filter_passes_no_window_creationflags(monkeypatch):
     cmd = [sys.executable, "-c", "print('[1, 2]')"]
     dec = _transform(rules=[{"tool": "g", "command": cmd}])
     await run(dec, up, call_req("g"))
-    assert captured["kwargs"].get("creationflags") == no_window_creationflags()
+    # no_window_kwargs() omits "creationflags" entirely off Windows (an empty
+    # {}); no_window_creationflags() always returns an int (0 off Windows).
+    # Compare against the same default so this holds on every platform.
+    assert captured["kwargs"].get("creationflags", 0) == no_window_creationflags()
 
 
 async def test_no_rule_match_passes_through():

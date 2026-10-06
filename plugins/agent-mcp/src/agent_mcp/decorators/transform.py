@@ -13,7 +13,7 @@ content block):
 * ``command: [...]``  -- pipe the result JSON to a filter's stdin; its stdout
   (parsed as JSON) replaces the result. The jq-style escape hatch. Supports the
   same ``${python}`` cross-platform-interpreter token as ``server.command`` /
-  ``auth.command`` (see :func:`agent_mcp.config.expand_python_token`).
+  ``auth.command`` (see :func:`agent_mcp._exec.expand_python_token`).
 
 Ops apply in order extract -> pick -> drop (or ``command`` alone). Multiple rules
 matching the same tool apply in sequence.
