@@ -21,9 +21,10 @@
   `ThomasMichon/copilot-extensions#5472` (consolidated: every `agent-*`
   plugin's immutable-versioned-runtime conformance gap for a same-version,
   content-changed update — agent-vault/agent-codespaces/agent-worktrees/
-  agent-mcp's unsafe races, agent-bridge/agent-index's lock-safe-but-still-
-  non-conforming rewrite, and agent-ssh/agent-containers/agent-machines'
-  unconditional in-place reinstall; filed and expanded this slice)
+  agent-mcp/agent-index's unsafe races, agent-bridge's lock-safe-but-still-
+  non-conforming rewrite (the only plugin that's actually lock-safe), and
+  agent-ssh/agent-containers/agent-machines' unconditional in-place
+  reinstall; filed and expanded this slice)
 
 ## Guiding Intent
 
@@ -166,7 +167,6 @@ Operator, end of a long multi-repo session:
       | agent-ssh | **Violates** | N/A (no daemon) | Unconditionally reinstalls the package into the existing `$VenvDir` whenever the venv already exists, with no same-version-content-changed refusal (`install.ps1:872-949`). |
       | agent-containers | **Violates** | N/A (no daemon) | Same unconditional in-place reinstall shape (`init.ps1:648-758`). |
       | agent-machines | **Violates** | N/A (no daemon) | Same unconditional in-place reinstall shape (`init.ps1:2164-2251`). |
-      | **agent-pull-requests** | **Conforms** | N/A (no daemon) | The one plugin in the repo doing this correctly: refuses to rebuild a completed same-version slot whose content changed — "bump the plugin version instead of rebuilding an immutable slot in place" — and exits 1 even under `-Force` (`install.ps1:524-535`). **Reference pattern for every other plugin to port.** |
 
       **Net finding:** almost the entire `agent-*` runtime-deploy ecosystem
       violates `immutable-versioned-runtime` for a same-version,
