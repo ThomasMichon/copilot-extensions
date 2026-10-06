@@ -10,8 +10,12 @@ This module keeps that parsing provider-aware but minimal:
 
 - GitHub refs keep their established ``github-pr:owner/repo#123`` shape.
 - Azure DevOps adds ``azure-devops-pr:organization/project/repository#123``.
-- Gitea is parsed structurally for the future stub/factory path, but no live
-  adapter exists yet.
+- Gitea adds ``gitea-pr:key/owner/repo#123``, where ``key`` is an opaque
+  authority key (conventionally the instance hostname) resolved against a
+  configured ``key -> real API base URL`` mapping by a real adapter
+  (``gitea_pr_provider.GiteaPRAdapter``) -- never trusted directly or
+  turned into a URL, since this ref is caller/producer-supplied data and
+  the instance may be path-hosted (e.g. ``https://h/gitea``).
 
 The parse result is pure data: a provider tag, a provider-specific repo key,
 and the PR number. Callers decide what to do with it.

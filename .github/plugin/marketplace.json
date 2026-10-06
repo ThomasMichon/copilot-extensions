@@ -92,7 +92,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.12.3-dev1",
+      "version": "0.12.4-dev1",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -152,7 +152,7 @@
     {
       "name": "agent-conduct-guidance",
       "description": "Consolidated, generally-good agent conduct guidance for Copilot CLI: one plugin hosting multiple independent ambient modules, each a concise checked-in instruction projection plus a paired on-demand skill. Modules: process-spawn hygiene (spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly, especially on Windows), coordinator-first delegation (route broad separable research, comparisons, evaluations, domain-tool calls, and disjoint bulk edits into bounded sub-agent contexts while the coordinator retains synthesis, integration, and completion), and scratch-space hygiene (resolve a portable scratch root and a timestamped per-task subfolder before writing an ad hoc working file outside a repository, instead of littering a drive root with undated loose files). Designed to absorb further similarly-scoped conduct guidance as its own module rather than proliferating single-purpose plugins.",
-      "version": "0.1.5-dev1",
+      "version": "0.1.6-dev1",
       "source": "plugins/agent-conduct-guidance"
     }
   ]
