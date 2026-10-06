@@ -193,6 +193,168 @@ file format every adopting plugin commits to.
   `current`-protection logic would let a routine GC destroy an in-progress,
   claimed, but not-yet-activated dev build.
 
+## Ordinary installers: refuse, never silently mutate a numbered slot
+
+`dev` existing as a protected, claim-gated mutable home does not by itself
+stop a plugin's ordinary `install`/`update` path from still rebuilding a
+numbered slot in place when it happens to target the *same version string*
+with changed content (the exact anti-pattern `dev` exists to replace) — the
+two are independent unless an installer explicitly wires them together. An
+audit across this repo's own vendoring plugins
+(`ThomasMichon/copilot-extensions#5472`, `#5468`) found most installers
+still silently rewrite a completed numbered slot in this case — some of
+them racing a live daemon's open file handles in the process, which is a
+correctness bug on top of the immutability violation.
+
+**The required behavior for every plugin's ordinary installer path:**
+
+- If the target version's slot does not exist yet, build it — ordinary,
+  unremarkable first install.
+- If the target version's slot exists, is marked complete, and its recorded
+  payload hash matches the current source tree, this is a true no-op **for
+  the slot's own contents**: activate it (or leave it active) and skip the
+  venv/package (re)install — never re-run that step "just in case." Normal
+  out-of-slot reconciliation (binstubs, the deploy manifest, hook/service
+  registration) still runs exactly as it would on any other invocation;
+  this no-op narrows only the slot-rebuild step, not the whole installer.
+- If the target version's slot exists, is marked complete, but its payload
+  hash does **not** match the current source tree (the dev-iteration
+  anti-pattern: same version string, genuinely different content), **refuse**
+  — exit non-zero with a message naming the mismatch and pointing at `dev`/
+  `dev-release` as the correct path for iterating without a version bump.
+  The hash **must cover every runtime install input** (the full source
+  tree an install actually consumes — `src/`, vendored libs, not just
+  `pyproject.toml` metadata), or a source-only change with unchanged
+  metadata silently takes the already-matches no-op path instead of this
+  refusal — a stale-slot bug, not a safe one. `agent-pull-requests`'
+  installer (`install.ps1`/`install.sh`) already implements the refusal
+  **control flow**, but its own `Get-PayloadHash`/`_payload_hash` only
+  hashes `pyproject.toml` files, not `src/` — copy the control flow, not
+  that narrower hash scope; `agent-pull-requests` itself needs the wider
+  digest and stays in Phase 3's rollout list for that fix, not held up as
+  already-complete. This refusal is the **target state for a plugin that
+  adopts this contract** — it is not yet universal, and today's operator
+  guidance (`docs/install-contract.md`, the
+  `diagnosing-copilot-extensions` skill) still directs a `--force`
+  rebuild as the recovery step for a stale/corrupt runtime on a
+  not-yet-adopting plugin. Once a plugin adopts the refusal, `--force`
+  must not bypass it for a content mismatch — `dev`/`dev-release` and the
+  generation-based repair path below are its intended replacements for
+  what that operator guidance currently reaches for `--force` to
+  accomplish, and that guidance needs reconciling (naming the adopting
+  plugins explicitly, or superseding the `--force` recommendation
+  entirely) as part of each plugin's own adoption, not asserted as already
+  true repo-wide by this doc alone.
+
+This refusal is what actually closes the loop `dev` opened: without it, a
+contributor (or an impatient automation) can still reach for "just run
+install.ps1 again" and silently re-trigger the old hot-patch-equivalent
+hazard against a numbered slot, bypassing `dev` entirely.
+
+## Repairing a broken numbered slot is a cutover, not a delete-and-rebuild
+
+A numbered slot can end up broken at runtime despite having a seemingly
+valid completion marker — a partial write survived a crash in a way
+`is_complete()`'s marker+hash check didn't catch, a dependency's own cache
+corrupted independently of this plugin's payload, or a Windows file-lock
+timeout left a half-updated interpreter. This is a **distinct case** from
+the ordinary refuse-on-mismatch above: the payload hash may still match (so
+the ordinary no-op/refuse logic sees nothing wrong), yet the slot is
+provably unhealthy by a direct check (an import smoke-test, a health
+endpoint, a corrupted trampoline).
+
+**This is not a license to delete and rebuild the same slot directory.**
+`immutable-versioned-runtime`
+(`visions/plugin-services/README.md`'s *Features*) requires that "a new
+version is installed **beside** the old one... switching versions... is a
+selection, not a rewrite." Deleting `versions/<v>` and recreating a build
+under that same identity still rewrites what that identity refers to — it
+destroys the one build `last-known-good`/an operator's rollback intent
+might still be pointing at, exactly as if the files had been edited in
+place one at a time. Treat recovery as an ordinary generation cutover whose
+trigger is a failed health check instead of a version bump, reusing the
+exact serialization and promote-before-retire discipline
+[`graceful-daemon-cutover`](graceful-daemon-cutover.md) already requires
+for every other cutover/repair path in this repo:
+
+1. **Confirm the slot is genuinely broken** via a direct check (import
+   smoke-test, signature/trampoline validation, a declared health probe) —
+   never assume brokenness from an absent marker alone. This case is
+   explicitly **not** what `toss_incomplete()` already covers: that helper
+   skips whichever slot `current-version` currently selects, so an active,
+   live slot with a missing or invalid completion marker is exactly the
+   gap this repair path exists for, not a case already handled elsewhere.
+2. **Acquire the same exclusive cutover lease an ordinary update/promotion
+   holds** before touching any generation state — a repair racing a
+   concurrent installer run (or a second repair attempt) must not be
+   possible, per *graceful-daemon-cutover*'s serialization rule.
+3. **Build the replacement under a distinct generation identity**, never
+   back into the broken slot's own directory, so the broken slot's
+   identity is left completely untouched and `last-known-good` still means
+   what it said before the repair started. Health-gate the new build in
+   isolation, exactly like an ordinary install. **That distinct identity
+   has two further obligations, not just "pick an unused name":**
+   - It must **sort correctly against every existing recovery resolver**.
+     A naive suffix like `<version>+repair1` is treated as an unsupported
+     string by `versioned_runtime._version_key`
+     (`libs/versioned-runtime/versioned_runtime.py:135-149`) and sorts
+     *after* every real release — a later genuine release (`9.0.0`) could
+     then lose to a stale repair generation during marker-loss recovery,
+     and plugin-local/shell resolvers may each order it differently still.
+     Whatever scheme a plugin picks must integrate with one shared,
+     already-existing ordering rather than inventing a representation
+     `_version_key` doesn't recognize.
+   - It must **propagate everywhere a plain package version is otherwise
+     compared or recorded**, not just the directory name.
+     `agent-dispatch`'s `self_update` module compares a running daemon's
+     self-reported `__version__`/`running-version.json` directly against
+     `current-version` to decide whether it should act, from both its
+     coordinator and supervisor call paths
+     (`plugins/agent-dispatch/src/agent_dispatch/runtime_version.py`,
+     `self_update.py`): activating a mismatched generation identity while
+     the process still reports the plain package version makes that
+     comparison mismatch forever, so self-update keeps treating an
+     already-repaired daemon as stale, and ownership/ops records lose
+     track of which slot is actually live. The generation identity needs
+     its own first-class field in whatever record keeps that comparison
+     (keeping the user-facing package version unchanged), not an ad hoc
+     string appended only to the directory name.
+
+   The exact representation that satisfies both obligations above is
+   implementation detail for whichever plugin needs this first — this
+   section fixes the *contract* (distinct identity, correctly ordered,
+   propagated through every comparison, promote-before-retire, same lease
+   as every other cutover), not the wiring.
+4. **Promote before you retire, never the reverse**: once the replacement's
+   health gate passes, atomically flip `current-version` (and any routing)
+   to it. Only after that promotion is *confirmed* — not merely
+   attempted — does the broken slot become eligible for retirement.
+5. **Drain and retire the broken slot through the ordinary cutover path**:
+   closed admission + any already-admitted work finished before removal,
+   same as a routine cutover. Re-validate the broken slot's own identity
+   immediately before removing it (its owner/lock/routing agreement may
+   have changed between step 1's detection and this action) rather than
+   trusting a stale snapshot — if nothing was ever live on it, this
+   collapses to an immediate, uneventful removal. **The target is
+   confirmed unhealthy, so its control endpoint may not be able to close
+   admission or complete an ordinary drain at all.** When the broken slot
+   is unreachable for a clean drain, follow *graceful-daemon-cutover*'s own
+   fallback exactly: commit forward on the confirmed promotion (already
+   satisfied by step 4) within a bounded, logged timeout rather than
+   blocking repair indefinitely on a drain that may never complete, and
+   never route anything back to the known-broken slot regardless of how
+   its retirement concludes.
+
+Because the replacement is built under its own distinct identity and
+promoted before the broken slot is ever touched, this satisfies
+`immutable-versioned-runtime` and `zero-downtime-cutover` by construction —
+no identity is ever rewritten, and the broken slot's own (non-)rollback
+value is lost only because it was never a valid rollback target to begin
+with. Treat this as a rare, logged, operator-visible event (infrastructure
+self-repair, not silent-and-routine), distinct from both the ordinary
+install/update path above and from `dev`'s deliberately-mutable,
+claim-gated exception.
+
 ## Rationale
 
 The instinct this pattern satisfies is exactly the durable-vs-versioned
@@ -212,11 +374,19 @@ adding a second, uncontrolled mutability posture to the runtime.
 - [`durable-vs-versioned-runtime`](durable-vs-versioned-runtime.md) — the
   general immutable/durable split this pattern narrows for one specific,
   worktree-scoped exception.
+- [`graceful-daemon-cutover`](graceful-daemon-cutover.md) — the
+  serialization, promote-before-retire, and drain discipline *Repairing a
+  broken numbered slot* reuses rather than inventing a parallel contract.
 - `libs/versioned-runtime/versioned_runtime.py` — `claim_dev` / `release_dev`
   / `read_dev_claim`, and `gc()`'s dev-slot protection.
 - `plugins/agent-worktrees/src/agent_worktrees/finalize.py` --
   `_warn_of_dev_slot_claims_for_worktree`.
 - `efforts/active/mutable-dev-slot/README.md` — rollout status per plugin.
+- `ThomasMichon/copilot-extensions#5472` / `#5468` — the audit that found
+  most vendoring plugins' ordinary install/update path still mutates a
+  numbered slot in place for a same-version, changed-content update,
+  motivating this doc's *Ordinary installers* and *Repairing a broken
+  numbered slot* sections.
 - `CONTRIBUTING.md`'s *Hot-patching a deployed venv for fast pre-merge
   iteration* gotcha — the ad hoc technique this pattern is meant to
   eventually supersede once a plugin adopts `dev-claim`/`dev-release`.
