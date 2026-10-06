@@ -28,6 +28,12 @@ def add_parsers(sub) -> None:
     )
 
 
+# pivot-streaming-transport Phase 5: same budget as the shipped precedent in
+# __main__.py's own populate hot path (_BOUND_LIVE_HINT_TTL_SECS/
+# _MUX_LIVE_HINT_TTL_SECS).
+_HINT_TTL_SECS = 600
+
+
 def _fresh_bound_live_hint(rec) -> bool | None:
     live = getattr(rec, "bound_live", None)
     if live is None:
@@ -40,7 +46,31 @@ def _fresh_bound_live_hint(rec) -> bool | None:
     except (TypeError, ValueError):
         return None
     now = datetime.now(dt.tzinfo) if dt.tzinfo is not None else datetime.now()
-    if (now - dt).total_seconds() > 600:
+    if (now - dt).total_seconds() > _HINT_TTL_SECS:
+        return None
+    return bool(live)
+
+
+def _fresh_mux_live_hint(rec) -> bool | None:
+    """The record's cached mux-liveness, iff still fresh; else ``None``.
+
+    Mirrors :func:`_fresh_bound_live_hint` for the separate ``mux_live``/
+    ``mux_live_at`` fields :func:`tracking.stamp_mux_live` stamps (a
+    genuinely different signal: a bare/un-muxed Copilot has no mux to
+    attach, so this is never a substitute for the bound-live hint -- see
+    its own caller for exactly how the two are kept separate)."""
+    live = getattr(rec, "mux_live", None)
+    if live is None:
+        return None
+    stamped = getattr(rec, "mux_live_at", None)
+    if not stamped:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(stamped))
+    except (TypeError, ValueError):
+        return None
+    now = datetime.now(dt.tzinfo) if dt.tzinfo is not None else datetime.now()
+    if (now - dt).total_seconds() > _HINT_TTL_SECS:
         return None
     return bool(live)
 
@@ -119,14 +149,49 @@ def build_payload(*, worktree_ids: list[str] | None = None) -> dict:
     pathful_records = [
         rec for rec in records if rec.worktree_path and Path(rec.worktree_path).exists()
     ]
-    try:
-        bound = reclaim.resolve_bound_copilots()
-        bound_scan_ok = True
-    except Exception:
+    # pivot-streaming-transport Phase 5: skip the ~4.8s unfiltered,
+    # system-wide `resolve_bound_copilots()` scan for the NARROW, scoped
+    # refine call (requested_set non-empty -- the Picker's per-row
+    # Actions-dialog case the module docstring above already calls out,
+    # not the general periodic full-batch sweep) when EVERY record in that
+    # narrow scope already carries an affirmatively-True, still-fresh
+    # `bound_live` hint. This is the exact asymmetric trust already
+    # reviewed/shipped for `__main__.py`'s own populate hot path
+    # (`_fresh_bound_live_hint`/`_fresh_mux_live_hint`): a fresh `True`
+    # short-circuits the check (a false positive here is harmless -- the
+    # session really was live moments ago); a fresh `False`, stale, or
+    # absent hint ALWAYS still falls through to the real scan -- never
+    # trusted to skip it. The general (unscoped) sweep never takes this
+    # path: its own job includes catching a previously-live record that
+    # has since gone away (a negative transition), which an
+    # affirmative-only hint can never prove, so it always re-scans.
+    #
+    # Deliberately gated on `_fresh_bound_live_hint` ONLY, not the
+    # analogous `mux_live` hint, even though both are read here: `mux_live`
+    # and `bound_live` are genuinely different signals (a bare/un-muxed
+    # Copilot has no mux to attach, and vice versa) -- stamping
+    # `bound_live=True` on `mux_live` evidence alone would conflate them,
+    # exactly the silent-desync risk this phase's own validation plan
+    # warns against. `_fresh_mux_live_hint` exists here for parity with the
+    # shipped precedent and is available to a future caller; it never
+    # participates in this gate.
+    skip_bound_scan = bool(requested_set) and all(
+        _fresh_bound_live_hint(rec) is True for rec in records
+    )
+    if skip_bound_scan:
         bound = []
-        bound_scan_ok = False
-    live_ids = {entry.get("worktree_id") for entry in bound if entry.get("worktree_id")}
-    had_unresolved_bound = any(entry.get("worktree_id") is None for entry in bound)
+        bound_scan_ok = True
+        had_unresolved_bound = False
+        live_ids = {rec.worktree_id for rec in records}
+    else:
+        try:
+            bound = reclaim.resolve_bound_copilots()
+            bound_scan_ok = True
+        except Exception:
+            bound = []
+            bound_scan_ok = False
+        live_ids = {entry.get("worktree_id") for entry in bound if entry.get("worktree_id")}
+        had_unresolved_bound = any(entry.get("worktree_id") is None for entry in bound)
     try:
         mux_map = sessions.mux_status_many([rec.worktree_id for rec in pathful_records])
         mux_scan_ok = True
@@ -183,6 +248,7 @@ def build_payload(*, worktree_ids: list[str] | None = None) -> dict:
             "bound_visible_change_count": bound_visible_change_count,
             "had_unresolved_bound": had_unresolved_bound,
             "mux_scan_ok": mux_scan_ok,
+            "bound_scan_skipped": skip_bound_scan,
         },
     }
 
