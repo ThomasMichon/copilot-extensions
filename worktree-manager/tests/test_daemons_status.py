@@ -423,6 +423,35 @@ def test_pid_owned_by_current_user_posix_ps_fallback_matches_and_mismatches(monk
     assert daemons_status._pid_owned_by_current_user(123) is False
 
 
+def test_pid_owned_by_current_user_posix_procfs_matches_and_mismatches(monkeypatch):
+    """The primary Linux path (``/proc/<pid>`` stat ``st_uid``), exercised
+    deterministically via a stubbed directory/stat rather than the real
+    host's own ``/proc`` -- and confirming it never falls through to the
+    ``ps`` fallback at all when ``/proc`` answers directly."""
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(os, "getuid", lambda: 501, raising=False)
+    monkeypatch.setattr(daemons_status.Path, "is_dir", lambda self: True)
+
+    ps_called = []
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: ps_called.append(True) or (_ for _ in ()).throw(
+            AssertionError("ps fallback must not run when /proc answers directly")
+        )
+    )
+
+    class _Stat:
+        def __init__(self, uid):
+            self.st_uid = uid
+
+    monkeypatch.setattr(daemons_status.Path, "stat", lambda self: _Stat(501))
+    assert daemons_status._pid_owned_by_current_user(123) is True
+    assert not ps_called
+
+    monkeypatch.setattr(daemons_status.Path, "stat", lambda self: _Stat(999))
+    assert daemons_status._pid_owned_by_current_user(123) is False
+    assert not ps_called
+
+
 def test_pid_owned_by_current_user_handles_a_timed_out_probe(monkeypatch):
     """A probe that times out or can't start must never crash the whole
     status report (``check=False`` on ``subprocess.run`` does not suppress
