@@ -474,11 +474,19 @@ _versioned_activate() {
                     rm -f "$_activate_lock_link"
                 fi
                 rm -f "$_activate_lock_link.reap"
-            elif [[ "$(readlink "$_activate_lock_link.reap" 2>/dev/null || true)" =~ ^[0-9]+$ ]] &&
-                 ! kill -0 "$(readlink "$_activate_lock_link.reap" 2>/dev/null)" 2>/dev/null; then
+            elif owner="$(readlink "$_activate_lock_link.reap" 2>/dev/null || true)" &&
+                 [[ "$owner" =~ ^[0-9]+$ ]] &&
+                 ! kill -0 "$owner" 2>/dev/null; then
                 # The reap mutex itself is stale (its owner died mid-reap) --
                 # reclaim it so the main lock can never wedge permanently.
-                rm -f "$_activate_lock_link.reap" 2>/dev/null || true
+                # Same TOCTOU hazard (and same re-verify fix) as the main
+                # lock's own reap above: re-check the symlink still points
+                # at the SAME stale PID immediately before removing --
+                # another process could already have reaped and replaced it
+                # with a live reaper between the staleness check and here.
+                if [[ "$(readlink "$_activate_lock_link.reap" 2>/dev/null || true)" == "$owner" ]]; then
+                    rm -f "$_activate_lock_link.reap" 2>/dev/null || true
+                fi
             else
                 sleep 0.1
             fi
@@ -1145,9 +1153,14 @@ _ensure_runtime() {
                         rm -f "$_publish_lock_link"
                     fi
                     rm -f "$_publish_lock_link.reap"
-                elif [[ "$(readlink "$_publish_lock_link.reap" 2>/dev/null || true)" =~ ^[0-9]+$ ]] &&
-                     ! kill -0 "$(readlink "$_publish_lock_link.reap" 2>/dev/null)" 2>/dev/null; then
-                    rm -f "$_publish_lock_link.reap" 2>/dev/null || true
+                elif owner="$(readlink "$_publish_lock_link.reap" 2>/dev/null || true)" &&
+                     [[ "$owner" =~ ^[0-9]+$ ]] &&
+                     ! kill -0 "$owner" 2>/dev/null; then
+                    # Same TOCTOU hazard (and re-verify fix) as the
+                    # activation lock's own reap -- see its comment.
+                    if [[ "$(readlink "$_publish_lock_link.reap" 2>/dev/null || true)" == "$owner" ]]; then
+                        rm -f "$_publish_lock_link.reap" 2>/dev/null || true
+                    fi
                 else
                     sleep 0.1
                 fi
@@ -1896,9 +1909,14 @@ do_stamp() {
                     rm -f "$_stamp_lock_link"
                 fi
                 rm -f "$_stamp_lock_link.reap"
-            elif [[ "$(readlink "$_stamp_lock_link.reap" 2>/dev/null || true)" =~ ^[0-9]+$ ]] &&
-                 ! kill -0 "$(readlink "$_stamp_lock_link.reap" 2>/dev/null)" 2>/dev/null; then
-                rm -f "$_stamp_lock_link.reap" 2>/dev/null || true
+            elif owner="$(readlink "$_stamp_lock_link.reap" 2>/dev/null || true)" &&
+                 [[ "$owner" =~ ^[0-9]+$ ]] &&
+                 ! kill -0 "$owner" 2>/dev/null; then
+                # Same TOCTOU hazard (and re-verify fix) as the activation
+                # lock's own reap -- see its comment.
+                if [[ "$(readlink "$_stamp_lock_link.reap" 2>/dev/null || true)" == "$owner" ]]; then
+                    rm -f "$_stamp_lock_link.reap" 2>/dev/null || true
+                fi
             else
                 sleep 0.1
             fi
@@ -2046,9 +2064,14 @@ do_update() {
                     rm -f "$_cutover_lock_link"
                 fi
                 rm -f "$_cutover_lock_link.reap"
-            elif [[ "$(readlink "$_cutover_lock_link.reap" 2>/dev/null || true)" =~ ^[0-9]+$ ]] &&
-                 ! kill -0 "$(readlink "$_cutover_lock_link.reap" 2>/dev/null)" 2>/dev/null; then
-                rm -f "$_cutover_lock_link.reap" 2>/dev/null || true
+            elif owner="$(readlink "$_cutover_lock_link.reap" 2>/dev/null || true)" &&
+                 [[ "$owner" =~ ^[0-9]+$ ]] &&
+                 ! kill -0 "$owner" 2>/dev/null; then
+                # Same TOCTOU hazard (and re-verify fix) as the activation
+                # lock's own reap -- see its comment.
+                if [[ "$(readlink "$_cutover_lock_link.reap" 2>/dev/null || true)" == "$owner" ]]; then
+                    rm -f "$_cutover_lock_link.reap" 2>/dev/null || true
+                fi
             else
                 sleep 0.1
             fi
