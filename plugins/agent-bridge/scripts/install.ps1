@@ -1963,6 +1963,14 @@ function Materialize-SnapshotVendoredLibs {
         }
         [System.IO.File]::WriteAllText($snapshotPyproject, $pyprojectText, $utf8NoBom)
     }
+
+    foreach ($entry in $rewrites.GetEnumerator()) {
+        $nestedPyproject = Join-Path (Join-Path $libsDir $entry.Value) 'pyproject.toml'
+        if (-not (Test-Path -LiteralPath $nestedPyproject)) { continue }
+        $nestedText = [System.IO.File]::ReadAllText($nestedPyproject)
+        $nestedText = $nestedText.Replace(', editable = true }', ' }')
+        [System.IO.File]::WriteAllText($nestedPyproject, $nestedText, $utf8NoBom)
+    }
 }
 
 function Materialize-SnapshotInstallerEngine {
