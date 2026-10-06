@@ -306,11 +306,10 @@ def _handoff_cutover_spawn_result(
         env[core._SESSION_HANDOFF_TOKEN] = handoff_token
 
     if headless:
-        # No pane, no mux session, no seed-typing choreography: the seed is
-        # passed as a native ``--interactive <seed>`` argument directly by
-        # headless_new_session itself (the full flag name, never the short
-        # ``-i``, which PowerShell can intercept -- headless has no
-        # pane-wrapper argv mangling to route around).
+        # No pane/mux/seed-typing: the seed is passed as a native
+        # ``--interactive <seed>`` argument directly by
+        # headless_new_session itself (never the short ``-i``, which
+        # PowerShell can intercept).
         if getattr(args, "dry_run", False):
             dry_result: dict[str, object] = {
                 "ok": True,
