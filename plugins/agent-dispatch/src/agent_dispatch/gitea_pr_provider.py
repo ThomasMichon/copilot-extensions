@@ -155,6 +155,14 @@ def _approval_status(reviews: list[Mapping[str, Any]]) -> ApprovalStatus:
     canonical = {state for _rid, state in verdict_by_reviewer.values()}
     if "CHANGES_REQUESTED" in canonical:
         return ApprovalStatus.CHANGES_REQUESTED
+    # An official PENDING re-request on one reviewer must not lose to a
+    # stale APPROVED from another -- it means a requested review is still
+    # genuinely outstanding, which must not let the aggregate advance to
+    # APPROVED (matching the Azure DevOps adapter's own all-positive
+    # aggregation, where an outstanding request is never overridden by an
+    # unrelated approval).
+    if "PENDING" in canonical:
+        return ApprovalStatus.PENDING
     if "APPROVED" in canonical:
         return ApprovalStatus.APPROVED
     if reviewers_with_any_review:

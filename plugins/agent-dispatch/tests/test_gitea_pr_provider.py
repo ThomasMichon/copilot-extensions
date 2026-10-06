@@ -312,6 +312,20 @@ def test_pending_team_review_request_maps_to_pending_not_none():
     assert observation.approval_status == ApprovalStatus.PENDING
 
 
+def test_pending_request_from_one_reviewer_wins_over_another_reviewers_approval():
+    """An official REQUEST_REVIEW re-request on one reviewer must not
+    lose to a stale APPROVED from another -- a requested review still
+    outstanding must not let the aggregate advance to APPROVED."""
+    observation = observe_pr_state(
+        _pr(),
+        reviews=[
+            _review(state="APPROVED", review_id=1, login="alice"),
+            _review(state="REQUEST_REVIEW", review_id=2, login="bob"),
+        ],
+    )
+    assert observation.approval_status == ApprovalStatus.PENDING
+
+
 def test_pending_review_is_ignored_entirely():
     observation = observe_pr_state(_pr(), reviews=[_review(state="PENDING", review_id=1)])
     assert observation.approval_status == ApprovalStatus.NONE
