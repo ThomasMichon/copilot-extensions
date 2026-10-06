@@ -169,12 +169,11 @@ view highlighting whether resolved head matches the just-resumed session).
       `manage_schedule`/background-task primitives -- recorded in the
       skill's own "Known exception" subsection rather than silently
       left unmentioned.
-- [ ] Live-test coverage for this new step (see Validation Plan) is
-      deliberately left for a follow-up leg: it needs a real predecessor
-      session with a genuinely owned, still-running background task or
-      schedule at the moment of handoff, which this leg's own throwaway
-      worktree test (Step 3/4's retire-mechanism re-validation) did not
-      include.
+- [x] Live-test coverage for this new step (see Validation Plan): done
+      2026-10-06 in the very session that merged PR #5491 -- a real owned
+      background `task` agent and a real `manage_schedule` entry were both
+      quiesced correctly (observed completion; unconditional stop) before
+      composing this handoff.
 
 ## Validation Plan
 
@@ -197,23 +196,47 @@ view highlighting whether resolved head matches the just-resumed session).
       permanently excluded), and `--execute` genuinely killed the live
       predecessor pane (confirmed gone from `psmux list-panes`). See
       2026-10-06 journal entry for the full command sequence.
-- [ ] Live-tested: a predecessor with an owned, still-running background
+- [x] Live-tested: a predecessor with an owned, still-running background
       task/agent (a `task` tool invocation, an async shell) at the moment of
-      handoff -- confirm the new "Quiesce owned background work before
-      triggering" skill step actually gets followed (stopped or explicitly
-      carried forward in the brief), not silently dropped or left to race
-      the successor.
-- [ ] Live-tested: a predecessor with an active, self-owned
-      `manage_schedule` entry at the moment of handoff -- confirm it ALWAYS
-      gets stopped before triggering (never left running because it's
-      "going to be re-armed"), and -- only when the successor genuinely
-      needs it resumed -- the brief additionally, separately names the exact
-      restart command as a post-cutover action. Re-arming is never a
-      substitute for stopping it now; this item is not satisfied by a
-      re-arm note alone.
+      handoff -- confirmed the new "Quiesce owned background work before
+      triggering" skill step is actually followed. Started a real
+      background `task` agent (a 5-minute sleep-then-report job) while
+      composing this handoff, then -- per the skill's capture-before-stop
+      ordering -- waited for its OBSERVED completion (`read_agent` showed
+      `status: idle`, turn output `"done"`) rather than sending it a
+      closing message and assuming it finished. Captured here, not
+      silently dropped.
+- [x] Live-tested: a predecessor with an active, self-owned
+      `manage_schedule` entry at the moment of handoff -- confirmed it gets
+      stopped unconditionally. Created a real `manage_schedule` entry
+      (10-minute interval) alongside the background task above, then
+      stopped it (`manage_schedule action: stop`) before composing/
+      triggering -- no re-arm was requested since it was a test artifact
+      with no successor-side purpose, matching the "re-arm is a deliberate,
+      named exception, not a default" rule.
 - [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
+
+### 2026-10-06 (later) — Live-tested the quiesce step itself; closed the effort's last two Validation Plan items
+Continuing the same day's work after PR #5491 merged: picked up the two
+remaining Validation Plan items (owned background task / owned schedule
+present at handoff time). Rather than simulate these, exercised the actual
+new skill requirement live, in this very session, immediately before
+composing this handoff:
+- Started a real background `task` agent (a 5-minute sleep-then-report job)
+  and a real `manage_schedule` entry (10-minute interval) to stand in for
+  genuinely owned background work.
+- Quiesced both per the skill's capture-before-stop/observed-termination
+  rule: waited for the background agent's actual completion (`read_agent`
+  returned `status: idle` with turn output `"done"` -- not a sent closing
+  message treated as sufficient) and stopped the schedule unconditionally
+  (`manage_schedule action: stop`, no re-arm requested since it was a test
+  artifact with no successor-side purpose).
+- Both Validation Plan items and Step 5's own follow-up checkbox are now
+  checked -- this effort's Validation Plan is fully green, pending only the
+  two operator-only Companion-button live-tests (Validation Plan items 1-2),
+  which remain open since they need the operator's own hands-on worktree.
 
 ### 2026-10-06 — Live re-validated the #5455 fix; triaged 2 stray claims; new quiesce-before-trigger skill step
 Picked up via handoff (task `5bad80aac0b7435ea0b3585944d5025a`), whose two
