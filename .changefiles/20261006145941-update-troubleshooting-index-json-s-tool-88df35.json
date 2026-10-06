@@ -1,0 +1,9 @@
+{
+  "comment": "Update troubleshooting-index.json's tools-unavailable-fallback markers to match handoff-fallback.instructions.md's trimmed section headers (PR #5491 shortened them to fit the projection byte budget, breaking the cross-plugin coverage contract).",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}
