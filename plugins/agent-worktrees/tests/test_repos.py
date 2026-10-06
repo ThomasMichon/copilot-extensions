@@ -1287,9 +1287,10 @@ def test_sync_repo_bare_anchor_skips_when_diverged(home: Path, tmp_path: Path):
         capture_output=True, text=True,
     ).stdout.strip()
     local_commit = subprocess.run(
-        ["git", "-C", str(anchor), "commit-tree", local_tree, "-p", "main",
+        ["git", "-c", "user.name=Test", "-c", "user.email=t@example.com",
+         "-C", str(anchor), "commit-tree", local_tree, "-p", "main",
          "-m", "local-only"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, check=True,
     ).stdout.strip()
     _git(anchor, "update-ref", "refs/heads/main", local_commit)
 
@@ -1333,9 +1334,10 @@ def test_sync_repo_bare_anchor_mirror_refspec_cannot_clobber_diverged_ref(
         capture_output=True, text=True,
     ).stdout.strip()
     local_commit = subprocess.run(
-        ["git", "-C", str(anchor), "commit-tree", local_tree, "-p", "main",
+        ["git", "-c", "user.name=Test", "-c", "user.email=t@example.com",
+         "-C", str(anchor), "commit-tree", local_tree, "-p", "main",
          "-m", "local-only"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, check=True,
     ).stdout.strip()
     _git(anchor, "update-ref", "refs/heads/main", local_commit)
 

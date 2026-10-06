@@ -1,0 +1,9 @@
+{
+  "comment": "Fix bare-anchor repos sync tests failing on runners without a git identity",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
