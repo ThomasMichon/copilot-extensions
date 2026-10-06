@@ -955,41 +955,65 @@ class Supervisor:
 
         return _r(self, now=now)
 
-    def _reserving_unknown_past_timeout(self, res: dict) -> bool:
-        """Whether a ``reserving`` reservation's liveness verdict has sat at
-        ``UNKNOWN`` (never resolved to confirmed live or confirmed gone) past
-        this supervisor's own ``reserving_timeout`` bound.
+    def _reserving_worktree_confirmed_absent(
+        self, res: dict, task: dict, worktree: str
+    ) -> bool:
+        """Whether ``worktree`` can be **positively** confirmed absent from
+        the local ``agent-worktrees`` registry, as a safe escalation path for
+        a ``reserving`` reservation whose ``verdict_fn`` liveness check stays
+        ``UNKNOWN`` forever.
 
-        Mirrors the aging gate already used by the handle-less and
-        live-owner-no-session branches of :meth:`reconcile_reserving` --
-        ``reserving_timeout <= 0`` disables the bound entirely, and only this
-        same stable supervisor identity may act on its own reservation (never
-        a different supervisor's in-flight attempt).
+        Mirrors the identical, already-reviewed escalation
+        :meth:`release_requested_bodies` already uses for exactly this tri-
+        state gap (Copilot review, PR copilot-extensions#5489, 2026-10-06):
+        a bare timeout cannot safely convert ``UNKNOWN`` into permission to
+        release, because ``UNKNOWN`` also covers an ordinary resolver
+        timeout/transient probe failure, not just genuine absence -- the
+        original worker may still be live, and ``reserve_spawn()`` treats a
+        failed reservation as immediately retryable, so an unconditional
+        release on elapsed time alone risks a second worker launching
+        against (or destructively cleaning up) a still-live created
+        worktree. Only act on a **positive, identity-bound absence signal**:
+        this reservation's own worktree was created by agent-dispatch itself
+        on THIS host (never a different supervisor's/machine's worktree --
+        checking a remote host's filesystem from here would be meaningless),
+        carries no session handle yet (a spawned-but-unclaimed body's real
+        liveness is resolved through its own recorded handle elsewhere, never
+        bypassed by this worktree-directory-only shortcut), and the local
+        ``agent-worktrees`` registry (never ``verdict_fn``'s general owner-
+        identity-keyed probe) confirms the directory itself no longer
+        exists.
         """
+        if (
+            res.get("session_handle")
+            or res.get("worktree") != worktree
+            or res.get("worktree_ownership") != "created"
+            or not isinstance(res.get("creating_host"), str)
+            or res["creating_host"].casefold() != (self.machine or "").casefold()
+        ):
+            return False
+        from . import embody
+
         try:
-            age = time.time() - float(res.get("reserved_at") or 0)
-        except (TypeError, ValueError):
-            age = 0.0
-        return (
-            self.reserving_timeout > 0
-            and res.get("reserved_by") == self.supervisor_id
-            and age >= self.reserving_timeout
-        )
+            probe_project = self._spawn_attribute(
+                task,
+                "allocation_project",
+                embody.project_for_task(task) or "",
+            ) or None
+            present = self.worktree_directory_present_fn(worktree, probe_project)
+        except Exception:
+            present = None
+        return present is False
 
     def _fail_unresolved_reserving(self, res: dict, reason: str) -> bool:
-        """Release a ``reserving`` reservation whose liveness verdict never
-        escalated past ``UNKNOWN`` within the bound, so a fresh attempt may be
-        reserved (confirmed live, 2026-10-05: a worktree-backed reservation
-        whose target worktree never materialized on disk at all left
-        ``verdict_fn`` unable to ever return ``GONE`` -- the GONE/LIVE tri-
-        state's own "never treat ignorance as death" safety guarantee meant
-        no sweep ever revisited it, holding the task's ``exclusive_key``
-        reservation slot indefinitely).
-
-        Never a confirmed-gone release (``release_requested`` stays unset) --
-        the verdict genuinely never resolved either way, so this is the same
-        "waited long enough, still ambiguous" semantics as the sibling
-        sessionless-worktree branch, not a positive absence proof.
+        """Release a ``reserving`` reservation whose worktree is positively
+        confirmed absent (see :meth:`_reserving_worktree_confirmed_absent`)
+        so a fresh attempt may be reserved (confirmed live, 2026-10-05: a
+        worktree-backed reservation whose target worktree never materialized
+        on disk at all left ``verdict_fn`` unable to ever return ``gone`` --
+        the GONE/LIVE tri-state's own "never treat ignorance as death"
+        safety guarantee meant no sweep ever revisited it, holding the
+        task's ``exclusive_key`` reservation slot indefinitely).
         """
         try:
             age = time.time() - float(res.get("reserved_at") or 0)
@@ -1050,13 +1074,6 @@ class Supervisor:
                 except Exception:
                     verdict = _tracking().UNKNOWN
                 if verdict == _tracking().UNKNOWN:
-                    if self._reserving_unknown_past_timeout(res):
-                        if self._fail_unresolved_reserving(
-                            res,
-                            "carried local body liveness never resolved past "
-                            "unknown (neither live nor confirmed gone)",
-                        ):
-                            reconciled += 1
                     continue
                 if verdict == _tracking().LIVE:
                     try:
@@ -1116,14 +1133,6 @@ class Supervisor:
                 except Exception:
                     verdict = _tracking().UNKNOWN
                 if verdict == _tracking().UNKNOWN:
-                    if self._reserving_unknown_past_timeout(res):
-                        if self._fail_unresolved_reserving(
-                            res,
-                            "script body liveness never resolved past unknown "
-                            f"(neither live nor confirmed gone, worker {worker_id}, "
-                            f"pid {pid})",
-                        ):
-                            reconciled += 1
                     continue
                 if verdict == _tracking().LIVE:
                     try:
@@ -1188,11 +1197,12 @@ class Supervisor:
             except Exception:
                 verdict = _tracking().UNKNOWN
             if verdict == _tracking().UNKNOWN:
-                if self._reserving_unknown_past_timeout(res):
+                if self._reserving_worktree_confirmed_absent(res, task, worktree):
                     if self._fail_unresolved_reserving(
                         res,
-                        "reserved worktree's owner liveness never resolved past "
-                        "unknown (neither live nor confirmed gone)",
+                        "reserved worktree confirmed absent from the local "
+                        "agent-worktrees registry while its owner liveness "
+                        "stayed unknown",
                     ):
                         reconciled += 1
                 continue

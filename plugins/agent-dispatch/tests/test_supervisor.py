@@ -6725,59 +6725,69 @@ def test_reconcile_stale_foreign_reserving_worktree_with_no_session_stays_reserv
     assert q.get_reservation(reservation.key).state == SpawnState.RESERVING
 
 
-def test_reconcile_stale_own_reserving_worktree_with_unknown_verdict_fails(
-    q, client
-):
+def test_reconcile_reserving_worktree_confirmed_absent_fails(q, client):
     """Regression for a confirmed field incident (PR #8133, 2026-10-05): a
     worktree-backed reservation whose target worktree never materialized on
     disk at all left ``verdict_fn`` unable to ever resolve to ``live`` or
-    ``gone`` -- it stayed ``unknown`` forever. The GONE/LIVE tri-state's own
-    "never treat ignorance as death" safety guarantee meant no automatic
-    sweep ever revisited it (only the handle-less and live-owner-no-session
-    branches had a bound), holding the task's ``exclusive_key`` slot
-    indefinitely until an operator manually failed it by hand. Past the same
-    ``reserving_timeout`` bound those sibling branches already share, this
-    now fails too so a fresh attempt may be reserved.
+    ``gone`` -- it stayed ``unknown`` forever, and (per Copilot's review on
+    copilot-extensions#5489) a bare elapsed-time bound cannot safely treat
+    that as permission to release, since ``UNKNOWN`` also covers an ordinary
+    resolver timeout where the original worker may still be live. Only a
+    **positive** absence signal -- the local ``agent-worktrees`` registry
+    confirming the directory itself never existed, the same escalation
+    :meth:`release_requested_bodies` already uses for this identical gap --
+    may release it, never elapsed time alone.
     """
     task = q.create("ordinary")
-    reservation, _ = q.reserve_spawn(
-        task.id,
-        reserved_by="supervisor-test",
-        now=time.time() - 601,
+    reservation, _ = q.reserve_spawn(task.id, reserved_by="supervisor-test")
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-never-materialized",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
     )
-    q.record_spawn_worktree(reservation.key, "wt-never-materialized")
     sup = Supervisor(
         client,
         spawn_fn=_ok_spawn(),
         repo=TEST_REPO,
+        machine="host-a",
         supervisor_id="supervisor-test",
         verdict_fn=lambda *_args: tracking.UNKNOWN,
-        reserving_timeout=600,
+        worktree_directory_present_fn=lambda _wt, _project: False,
         nudge=False,
     )
 
     assert sup.reconcile_reserving() == 1
     failed = q.get_reservation(reservation.key)
-    assert failed.state == SpawnState.FAILED
-    assert "never resolved past unknown" in failed.detail
-    # A fresh attempt is immediately eligible.
-    _fresh, acquired = q.reserve_spawn(task.id)
-    assert acquired is True
+    assert failed.state == SpawnState.RELEASING
+    assert "confirmed absent" in failed.detail
 
 
-def test_reconcile_young_own_reserving_worktree_with_unknown_verdict_stays_reserved(
-    q, client
+@pytest.mark.parametrize("present", [True, None])
+def test_reconcile_reserving_worktree_unresolved_absence_stays_reserved(
+    q, client, present
 ):
+    """Neither a confirmed-PRESENT directory nor a still-unresolvable probe
+    (``None``, e.g. the registry itself is unreachable) authorizes a
+    release -- only a confirmed-absent (``False``) verdict ever does."""
     task = q.create("ordinary")
     reservation, _ = q.reserve_spawn(task.id, reserved_by="supervisor-test")
-    q.record_spawn_worktree(reservation.key, "wt-never-materialized")
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-maybe-present",
+        ownership="created",
+        creating_host="host-a",
+        driver="agent-dispatch",
+    )
     sup = Supervisor(
         client,
         spawn_fn=_ok_spawn(),
         repo=TEST_REPO,
+        machine="host-a",
         supervisor_id="supervisor-test",
         verdict_fn=lambda *_args: tracking.UNKNOWN,
-        reserving_timeout=600,
+        worktree_directory_present_fn=lambda _wt, _project: present,
         nudge=False,
     )
 
@@ -6785,173 +6795,37 @@ def test_reconcile_young_own_reserving_worktree_with_unknown_verdict_stays_reser
     assert q.get_reservation(reservation.key).state == SpawnState.RESERVING
 
 
-def test_reconcile_stale_reserving_carried_local_session_unknown_verdict_fails(
-    q, client,
+def test_reconcile_reserving_worktree_unknown_verdict_on_foreign_host_stays_reserved(
+    q, client
 ):
-    """Same gap, the carried-session shape: a ``reserving`` reservation that
-    inherited a prior episode's ``local-body:`` session handle (via a shared
-    ``exclusive_key``) whose liveness probe never resolves past ``unknown``
-    previously had no bound at all in this branch either."""
-    old_task = q.create("old", exclusive_key="review:repo:42")
-    old_reservation, _ = q.reserve_spawn(old_task.id)
-    q.record_spawn(
-        old_reservation.key,
-        session_handle="local-body:session-unknown",
-        worktree="wt-review",
+    """A reservation's worktree created on a DIFFERENT host must never be
+    checked against this supervisor's own local registry -- that would
+    probe the wrong machine's filesystem entirely and could wrongly
+    conclude a still-live remote worktree is absent."""
+    task = q.create("ordinary")
+    reservation, _ = q.reserve_spawn(task.id, reserved_by="supervisor-test")
+    q.record_spawn_worktree(
+        reservation.key,
+        "wt-on-other-host",
+        ownership="created",
+        creating_host="host-b",
+        driver="agent-dispatch",
     )
-    q.claim_one("headless-owner", task_id=old_task.id)
-    q.start(old_task.id, "headless-owner")
-    q.complete(old_task.id, "headless-owner", result_ref="result/1")
-    settle_sup = Supervisor(
-        client,
-        spawn_fn=_ok_spawn(),
-        repo=TEST_REPO,
-        local_body_verdict_fn=lambda _sid: "live",
-        local_body_activity_fn=lambda _sid: "IDLE",
-        local_end_fn=lambda _sid: pytest.fail(
-            "idle completed session should remain reusable"
-        ),
-        nudge=False,
-    )
-    assert settle_sup.reconcile() == 1
-
-    new_task = q.create("new", exclusive_key="review:repo:42")
-    carried, acquired = q.reserve_spawn(
-        new_task.id, reserved_by="supervisor-test", now=time.time() - 601
-    )
-    assert acquired is True
-    assert carried.session_handle == "local-body:session-unknown"
-
     sup = Supervisor(
         client,
         spawn_fn=_ok_spawn(),
         repo=TEST_REPO,
+        machine="host-a",
         supervisor_id="supervisor-test",
-        local_body_verdict_fn=lambda _sid: tracking.UNKNOWN,
-        reserving_timeout=600,
-        nudge=False,
-    )
-
-    assert sup.reconcile_reserving() == 1
-    failed = q.get_reservation(carried.key)
-    assert failed.state == SpawnState.FAILED
-    assert "never resolved past unknown" in failed.detail
-
-
-def test_reconcile_young_reserving_carried_local_session_unknown_verdict_stays_reserved(
-    q, client,
-):
-    old_task = q.create("old", exclusive_key="review:repo:42")
-    old_reservation, _ = q.reserve_spawn(old_task.id)
-    q.record_spawn(
-        old_reservation.key,
-        session_handle="local-body:session-unknown",
-        worktree="wt-review",
-    )
-    q.claim_one("headless-owner", task_id=old_task.id)
-    q.start(old_task.id, "headless-owner")
-    q.complete(old_task.id, "headless-owner", result_ref="result/1")
-    settle_sup = Supervisor(
-        client,
-        spawn_fn=_ok_spawn(),
-        repo=TEST_REPO,
-        local_body_verdict_fn=lambda _sid: "live",
-        local_body_activity_fn=lambda _sid: "IDLE",
-        local_end_fn=lambda _sid: pytest.fail(
-            "idle completed session should remain reusable"
+        verdict_fn=lambda *_args: tracking.UNKNOWN,
+        worktree_directory_present_fn=lambda _wt, _project: pytest.fail(
+            "must never probe a worktree created on a different host"
         ),
-        nudge=False,
-    )
-    assert settle_sup.reconcile() == 1
-
-    new_task = q.create("new", exclusive_key="review:repo:42")
-    carried, acquired = q.reserve_spawn(new_task.id, reserved_by="supervisor-test")
-    assert acquired is True
-
-    sup = Supervisor(
-        client,
-        spawn_fn=_ok_spawn(),
-        repo=TEST_REPO,
-        supervisor_id="supervisor-test",
-        local_body_verdict_fn=lambda _sid: tracking.UNKNOWN,
-        reserving_timeout=600,
         nudge=False,
     )
 
     assert sup.reconcile_reserving() == 0
-    assert q.get_reservation(carried.key).state == SpawnState.RESERVING
-
-
-def test_reconcile_stale_reserving_carried_script_session_unknown_verdict_fails(
-    q, client,
-):
-    """Same gap, the script-body shape (Copilot review on #5489: this branch
-    lacked its own coverage). A ``fail_spawn`` on an otherwise-live reservation
-    (no ``release_requested``) is not "retired", so its ``script-body:``
-    handle carries forward into the next ``reserve_spawn`` on the same
-    ``exclusive_key``, landing straight in ``reserving``."""
-    old_task = q.create("old", exclusive_key="review:repo:43")
-    old_reservation, _ = q.reserve_spawn(old_task.id)
-    q.record_spawn(
-        old_reservation.key,
-        session_handle='script-body:{"pid":4321,"start_token":"tok","worker_id":"script-1"}',
-        worktree="wt-script",
-    )
-    q.fail_spawn(old_reservation.key, detail="prior attempt ended")
-
-    new_task = q.create("new", exclusive_key="review:repo:43")
-    carried, acquired = q.reserve_spawn(
-        new_task.id, reserved_by="supervisor-test", now=time.time() - 601
-    )
-    assert acquired is True
-    assert carried.session_handle == (
-        'script-body:{"pid":4321,"start_token":"tok","worker_id":"script-1"}'
-    )
-
-    sup = Supervisor(
-        client,
-        spawn_fn=_ok_spawn(),
-        repo=TEST_REPO,
-        supervisor_id="supervisor-test",
-        script_body_verdict_fn=lambda _pid, _token: tracking.UNKNOWN,
-        reserving_timeout=600,
-        nudge=False,
-    )
-
-    assert sup.reconcile_reserving() == 1
-    failed = q.get_reservation(carried.key)
-    assert failed.state == SpawnState.FAILED
-    assert "never resolved past unknown" in failed.detail
-
-
-def test_reconcile_young_reserving_carried_script_session_unknown_verdict_stays_reserved(
-    q, client,
-):
-    old_task = q.create("old", exclusive_key="review:repo:43")
-    old_reservation, _ = q.reserve_spawn(old_task.id)
-    q.record_spawn(
-        old_reservation.key,
-        session_handle='script-body:{"pid":4321,"start_token":"tok","worker_id":"script-1"}',
-        worktree="wt-script",
-    )
-    q.fail_spawn(old_reservation.key, detail="prior attempt ended")
-
-    new_task = q.create("new", exclusive_key="review:repo:43")
-    carried, acquired = q.reserve_spawn(new_task.id, reserved_by="supervisor-test")
-    assert acquired is True
-
-    sup = Supervisor(
-        client,
-        spawn_fn=_ok_spawn(),
-        repo=TEST_REPO,
-        supervisor_id="supervisor-test",
-        script_body_verdict_fn=lambda _pid, _token: tracking.UNKNOWN,
-        reserving_timeout=600,
-        nudge=False,
-    )
-
-    assert sup.reconcile_reserving() == 0
-    assert q.get_reservation(carried.key).state == SpawnState.RESERVING
+    assert q.get_reservation(reservation.key).state == SpawnState.RESERVING
 
 
 @pytest.mark.parametrize(
