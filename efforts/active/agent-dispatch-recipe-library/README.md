@@ -269,11 +269,17 @@ not new engines either. The `extends:` model (Phase 3) and provider adapters
       classifier + thin-REST-wrapper shape. Decided the previously-open
       repo-addressing question (`review_target_refs.py`'s own "parsed
       structurally... but no live adapter exists yet" note): a Gitea
-      reviewer ref is `gitea-pr:<host>/<owner>/<repo>#<number>`, where
-      `<host>` is the instance hostname with no scheme -- the adapter
-      derives `https://<host>` directly, needing no separate host-to-
-      instance config mapping. Validated against a real Gitea PR (not unit
-      tests alone): approval-status aggregation (latest review per
+      reviewer ref is `gitea-pr:<key>/<owner>/<repo>#<number>`, where
+      `<key>` is an opaque authority key (conventionally the instance
+      hostname, but never resolved as one) looked up in a configured,
+      non-empty `api_bases` mapping (`<key>` -> the instance's real,
+      possibly path-hosted, base URL) -- the ref is never trusted directly
+      as a credential authority or turned into a URL (a post-review
+      hardening pass on this same slice: the first cut did derive
+      `https://<key>` directly, which both leaked credentials to an
+      arbitrary ref-named host and broke path-hosted instances; both are
+      fixed in the landed adapter). Validated against a real Gitea PR (not
+      unit tests alone): approval-status aggregation (latest review per
       reviewer, `REQUEST_CHANGES` observed correctly), blocking-thread
       detection (an unresolved inline review comment), and mergeability
       all confirmed live. Live validation caught two real adapter bugs unit
@@ -508,8 +514,9 @@ stub-landing Journal entry below flagged as blocking.
   `github_provider_adapter.py`/`azure_devops_provider_adapter.py`'s
   pure-classifier + thin-REST-wrapper split. Decided
   `review_target_refs.py`'s previously-open Gitea ref shape question:
-  `gitea-pr:<host>/<owner>/<repo>#<number>`, letting the adapter derive
-  `https://<host>` directly with no separate host-to-instance config.
+  `gitea-pr:<key>/<owner>/<repo>#<number>`, where `<key>` resolves against
+  a configured `api_bases` mapping to the instance's real (possibly
+  path-hosted) base URL -- never trusted directly or turned into a URL.
 - **Live-validated both** (not unit tests alone, per this repo's own
   policy) against a disposable scratch repo/PR on the facility's own Gitea
   instance: backlog list/reserve/claim/release round-tripped correctly
@@ -533,6 +540,21 @@ stub-landing Journal entry below flagged as blocking.
   `test_gitea_provider_is_an_explicit_stub`, `test_gitea_pr_adapter_is_an_
   explicit_stub`) with real-behavior coverage; added two new dedicated test
   files (`test_gitea_provider.py`, `test_gitea_pr_provider.py`).
+- **Post-review hardening (same day, three automated review rounds):**
+  this PR's own automated reviewer caught a real credential-authority gap
+  the live validation above didn't exercise (the reviewer ref's key was
+  trusted directly as a DNS-resolvable host, letting an untrusted ref
+  redirect `GITEA_TOKEN` to an arbitrary server, and breaking path-hosted
+  instances) -- fixed via the `api_bases` mapping design described above.
+  Further rounds caught: dismissed/stale Gitea reviews still counted
+  toward approval aggregation (now skipped); `/pulls/{n}/reviews` and each
+  review's own `/comments` sub-list were both unpaginated (now bounded-
+  scanned, mirroring the backlog side's `_all_comments`); Gitea's
+  `skipped` commit-status state raised instead of mapping to clean; and
+  two module docstrings embedded transient "this closes tracking-issue-X"
+  prose that belongs in this Journal, not timeless source documentation.
+  All fixed and re-validated live against a disposable Gitea PR before
+  merge.
 
 ### 2026-09-30 — Kickoff
 - Claimed and expanded #4691 (previously an unplanned placeholder for the

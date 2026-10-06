@@ -41,8 +41,12 @@ def _pr(**overrides: object) -> dict:
 
 def _review(
     *, state: str, review_id: int, login: str = "reviewer", dismissed: bool = False,
+    stale: bool = False,
 ) -> dict:
-    return {"id": review_id, "state": state, "user": {"login": login}, "dismissed": dismissed}
+    return {
+        "id": review_id, "state": state, "user": {"login": login},
+        "dismissed": dismissed, "stale": stale,
+    }
 
 
 # --- _split --------------------------------------------------------------
@@ -211,6 +215,34 @@ def test_dismissed_approval_does_not_still_approve():
     assert observation.approval_status == ApprovalStatus.NONE
 
 
+def test_stale_request_changes_does_not_block():
+    """Gitea 1.26+ exposes ``stale`` separately from ``dismissed`` (a
+    review attached to an older head); an undismissed-but-stale verdict
+    must not determine the current status either."""
+    observation = observe_pr_state(
+        _pr(), reviews=[_review(state="REQUEST_CHANGES", review_id=1, stale=True)]
+    )
+    assert observation.approval_status == ApprovalStatus.NONE
+
+
+def test_stale_approval_does_not_still_approve():
+    observation = observe_pr_state(
+        _pr(), reviews=[_review(state="APPROVED", review_id=1, stale=True)]
+    )
+    assert observation.approval_status == ApprovalStatus.NONE
+
+
+def test_fresh_review_still_counts_alongside_a_stale_one():
+    observation = observe_pr_state(
+        _pr(),
+        reviews=[
+            _review(state="REQUEST_CHANGES", review_id=1, login="alice", stale=True),
+            _review(state="APPROVED", review_id=2, login="bob"),
+        ],
+    )
+    assert observation.approval_status == ApprovalStatus.APPROVED
+
+
 def test_dismissed_review_comments_are_not_blocking(monkeypatch):
     monkeypatch.setenv("GITEA_TOKEN", "tok")
 
@@ -268,6 +300,7 @@ def test_mergeable_with_no_status_rollup_is_clean():
     ("status_rollup", "expected"),
     [
         ("success", Mergeability.CLEAN),
+        ("skipped", Mergeability.CLEAN),
         ("pending", Mergeability.CHECKS_PENDING),
         ("warning", Mergeability.CHECKS_PENDING),
         ("failure", Mergeability.CHECKS_FAILED),
@@ -531,3 +564,117 @@ def test_observe_fetches_and_classifies_in_one_call(monkeypatch):
 
     assert observation.number == 7
     assert observation.approval_status == ApprovalStatus.APPROVED
+
+
+def test_fetch_pr_paginates_past_a_full_first_page_of_reviews(monkeypatch):
+    """A PR with more reviews than one page must not have a later
+    approval/change-request silently dropped."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+
+    def runner(args, **kwargs):
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status(json.dumps({"login": "review-bot"}), 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status(json.dumps({"full_name": "example/project"}), 200)
+        if url.endswith("/pulls/7"):
+            return _status(json.dumps(_pr(number=7)), 200)
+        if "/pulls/7/reviews?page=1" in url:
+            return _status(
+                json.dumps([
+                    _review(state="COMMENT", review_id=n, login=f"user{n}")
+                    for n in range(1, 51)
+                ]),
+                200,
+            )
+        if "/pulls/7/reviews?page=2" in url:
+            return _status(
+                json.dumps([_review(state="REQUEST_CHANGES", review_id=51, login="late-reviewer")]),
+                200,
+            )
+        if "/reviews/" in url and "/comments" in url:
+            return _status(json.dumps([]), 200)
+        if "/commits/head-sha/status" in url:
+            return _status(json.dumps({"state": "success", "total_count": 1}), 200)
+        if url.endswith("/git/commits/head-sha"):
+            return _status(json.dumps({}), 200)
+        raise AssertionError(f"unexpected curl invocation: {url}")
+
+    adapter = GiteaPRAdapter(
+        "review-bot", runner=runner, api_bases={"gitea.example.com": "https://gitea.example.com"},
+    )
+    observation = adapter.observe("gitea.example.com/example/project", 7)
+    assert observation.approval_status == ApprovalStatus.CHANGES_REQUESTED
+
+
+def test_all_reviews_raises_past_the_bounded_scan(monkeypatch):
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+
+    def runner(args, **kwargs):
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status(json.dumps({"login": "review-bot"}), 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status(json.dumps({"full_name": "example/project"}), 200)
+        return _status(json.dumps([{"id": n} for n in range(50)]), 200)  # always full
+
+    adapter = GiteaPRAdapter(
+        "review-bot", runner=runner, api_bases={"gitea.example.com": "https://gitea.example.com"},
+    )
+    with pytest.raises(RuntimeError, match="bounded"):
+        adapter._all_reviews("https://gitea.example.com", "example", "project", 7)
+
+
+def test_fetch_pr_paginates_past_a_full_first_page_of_review_comments(monkeypatch):
+    """A review with more inline comments than one page must not have an
+    unresolved comment on a later page silently clear BLOCKING_THREADS."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+
+    def runner(args, **kwargs):
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status(json.dumps({"login": "review-bot"}), 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status(json.dumps({"full_name": "example/project"}), 200)
+        if url.endswith("/pulls/7"):
+            return _status(json.dumps(_pr(number=7)), 200)
+        if "/pulls/7/reviews?" in url:
+            return _status(json.dumps([_review(state="COMMENT", review_id=1)]), 200)
+        if "/reviews/1/comments?page=1" in url:
+            return _status(
+                json.dumps(
+                    [{"id": n, "resolver": {"login": "x"}} for n in range(1, 51)]
+                ),
+                200,
+            )
+        if "/reviews/1/comments?page=2" in url:
+            return _status(json.dumps([{"id": 51, "resolver": None}]), 200)
+        if "/commits/head-sha/status" in url:
+            return _status(json.dumps({"state": "success", "total_count": 1}), 200)
+        if url.endswith("/git/commits/head-sha"):
+            return _status(json.dumps({}), 200)
+        raise AssertionError(f"unexpected curl invocation: {url}")
+
+    adapter = GiteaPRAdapter(
+        "review-bot", runner=runner, api_bases={"gitea.example.com": "https://gitea.example.com"},
+    )
+    observation = adapter.observe("gitea.example.com/example/project", 7)
+    assert HoldReason.BLOCKING_THREADS in observation.holds
+
+
+def test_all_review_comments_raises_past_the_bounded_scan(monkeypatch):
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+
+    def runner(args, **kwargs):
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status(json.dumps({"login": "review-bot"}), 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status(json.dumps({"full_name": "example/project"}), 200)
+        return _status(json.dumps([{"id": n} for n in range(50)]), 200)  # always full
+
+    adapter = GiteaPRAdapter(
+        "review-bot", runner=runner, api_bases={"gitea.example.com": "https://gitea.example.com"},
+    )
+    with pytest.raises(RuntimeError, match="bounded"):
+        adapter._all_review_comments("https://gitea.example.com", "example", "project", 7, 1)

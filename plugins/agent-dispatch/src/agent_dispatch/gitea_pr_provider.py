@@ -9,25 +9,20 @@ worker-direct tool actions, exactly as for the other two forges):
   payloads in, a provider-neutral
   :class:`~agent_dispatch.github_provider_adapter.PRObservation` out.
 - :class:`GiteaPRAdapter` is the thin, curl-based REST wrapper that fetches
-  that raw shape and calls the classifier -- the same integration approach
-  (Gitea REST via ``curl``, no vendored CLI, no new Python HTTP dependency)
-  :mod:`agent_dispatch.gitea_provider` already decided and validated for
-  the backlog surface; see that module's own docstring for the full
-  rationale (``ThomasMichon/copilot-extensions#4825``'s sibling tracking
-  item for this reviewer-side surface, per the ``agent-dispatch-recipe-
-  library`` effort's Phase 2).
+  that raw shape and calls the classifier, via the Gitea REST API over
+  ``curl`` (no vendored CLI, no new Python HTTP dependency) -- the same
+  integration approach :mod:`agent_dispatch.gitea_provider` uses for the
+  backlog surface; see that module's own docstring for the full rationale.
 
 Repo addressing: unlike GitHub (always github.com) and Azure DevOps (whose
 ``organization/project/repository`` already names the org), Gitea is
 self-hosted with no single well-known host -- a reviewer ``payload_ref``
 names it directly: ``gitea-pr:<key>/<owner>/<repo>#<number>``, where
 ``<key>`` is an opaque authority key (conventionally the instance hostname,
-e.g. ``gitea.example.com``, but never resolved as one -- decided here,
-closing the "parsed structurally... but no live adapter exists yet" note
-in ``review_target_refs.py``). The ref's ``<key>`` is **never trusted
-directly** as a credential authority or turned into a URL -- it is looked
-up in a configured, non-empty ``api_bases`` mapping (``<key>`` ->
-the instance's real, possibly path-hosted, base URL, e.g.
+e.g. ``gitea.example.com``, but never resolved as one). The ref's ``<key>``
+is **never trusted directly** as a credential authority or turned into a
+URL -- it is looked up in a configured, non-empty ``api_bases`` mapping
+(``<key>`` -> the instance's real, possibly path-hosted, base URL, e.g.
 ``https://h/gitea`` for an instance mounted under a path, the same
 deployment shape ``agent_worktrees.providers.gitea`` already supports via
 its own explicit ``api_base``). A ``<key>`` with no configured entry is
@@ -61,6 +56,7 @@ _REVIEW_STATE_TO_APPROVAL: dict[str, str] = {
 }
 _COMMIT_STATUS_TO_MERGEABILITY: dict[str, Mergeability] = {
     "success": Mergeability.CLEAN,
+    "skipped": Mergeability.CLEAN,
     "pending": Mergeability.CHECKS_PENDING,
     "warning": Mergeability.CHECKS_PENDING,
     "failure": Mergeability.CHECKS_FAILED,
@@ -93,8 +89,13 @@ def _approval_status(reviews: list[Mapping[str, Any]]) -> ApprovalStatus:
     """
     latest_by_reviewer: dict[str, Mapping[str, Any]] = {}
     for review in reviews:
-        if review.get("dismissed"):
-            continue  # a dismissed verdict must not still block/approve.
+        if review.get("dismissed") or review.get("stale"):
+            # A dismissed verdict must not still block/approve; a stale one
+            # (Gitea 1.26+: a review attached to an older head, distinct
+            # from dismissed) must not determine the current status either
+            # -- especially on a first observation, where no history
+            # evaluator exists yet to correct it.
+            continue
         state = review.get("state")
         if state not in _REVIEW_STATE_TO_APPROVAL:
             raise GiteaPRObservationError(f"unrecognized Gitea review state {state!r}")
@@ -323,6 +324,32 @@ class GiteaPRAdapter:
             f"bounded {_MAX_REVIEW_PAGES * _REVIEW_PAGE_SIZE}-review scan"
         )
 
+    def _all_review_comments(
+        self, api_base: str, owner: str, name: str, number: int, review_id: int,
+    ) -> list[dict[str, Any]]:
+        """List every inline comment on one review, across pages.
+
+        A single unpaginated page can hide an unresolved comment sitting on
+        a later page, silently clearing :data:`HoldReason.BLOCKING_THREADS`
+        for a review that still has open feedback.
+        """
+        comments: list[dict[str, Any]] = []
+        for _page_index in range(_MAX_REVIEW_PAGES):
+            page = _page_index + 1
+            rows = self._call(
+                api_base, "GET",
+                f"/repos/{owner}/{name}/pulls/{number}/reviews/{review_id}/comments"
+                f"?page={page}&limit={_REVIEW_PAGE_SIZE}",
+            ) or []
+            comments.extend(rows)
+            if len(rows) < _REVIEW_PAGE_SIZE:
+                return comments
+        raise RuntimeError(
+            f"Gitea review-comment listing for {owner}/{name}#{number} review "
+            f"{review_id} exceeded the bounded "
+            f"{_MAX_REVIEW_PAGES * _REVIEW_PAGE_SIZE}-comment scan"
+        )
+
     def fetch_pr(self, repo: str, number: int) -> dict[str, Any]:
         """Fetch the raw PR payload (plus reviews/comments/status) for
         ``repo`` (``<key>/<owner>/<name>``) and ``number``."""
@@ -341,16 +368,14 @@ class GiteaPRAdapter:
         reviews = self._all_reviews(api_base, owner, name, number)
         review_comments: list[dict[str, Any]] = []
         for review in reviews:
-            if review.get("dismissed"):
-                continue  # a dismissed review's inline comments don't block either.
+            if review.get("dismissed") or review.get("stale"):
+                continue  # a dismissed/stale review's inline comments don't block either.
             review_id = review.get("id")
             if not isinstance(review_id, int):
                 continue
-            comments = self._call(
-                api_base, "GET",
-                f"/repos/{owner}/{name}/pulls/{number}/reviews/{review_id}/comments",
-            ) or []
-            review_comments.extend(comments)
+            review_comments.extend(
+                self._all_review_comments(api_base, owner, name, number, review_id)
+            )
         head_sha = (pull_request.get("head") or {}).get("sha")
         status_rollup = None
         if isinstance(head_sha, str) and head_sha:

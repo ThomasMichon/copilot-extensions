@@ -3,25 +3,19 @@
 Implements the same ``ForgeProvider`` contract (``list_open_issues``/
 ``reserve``/``claim``/``release``) as ``GitHubProvider``/
 ``AzureDevOpsProvider`` in ``repository_issue_loops.py``, kept in its own
-module purely to stay under that module's size cap (mirroring the
-``gitea_provider_stub.py`` precedent this file replaces).
+module purely to stay under that module's size cap.
 
-Integration approach (the decision ``ThomasMichon/copilot-extensions#4825``
-asked for): Gitea's REST API (``/api/v1``) via ``curl``, the same choice
-``agent-worktrees``' own ``GiteaProvider`` (``plugins/agent-worktrees/src/
-agent_worktrees/providers/gitea.py``) already made and validated in
-production for PR operations against a real Gitea instance -- no vendored
-``tea`` CLI, no new Python HTTP dependency, and a precedent already proven
-rather than a fresh decision. Every method below has been validated against
-a real Gitea instance (not unit tests alone), per this repo's own
-"validate beyond unit tests before landing a fix" policy -- see this
-effort's Journal for the validation record.
+Integration approach: Gitea's REST API (``/api/v1``) via ``curl``, the
+same choice ``agent-worktrees``' own ``GiteaProvider``
+(``plugins/agent-worktrees/src/agent_worktrees/providers/gitea.py``) uses
+in production for PR operations -- no vendored ``tea`` CLI, no new Python
+HTTP dependency.
 
 Comment-marker reservation convention (``_marker``/``_parse_marker``/
 ``_latest_reservations``) is shared unmodified with the GitHub/Azure DevOps
 adapters -- Gitea issue comments are stored as raw Markdown (no HTML-comment
-stripping, confirmed live), so the HTML-comment marker form (``_marker``,
-GitHub's choice) round-trips unchanged.
+stripping), so the HTML-comment marker form (``_marker``, GitHub's choice)
+round-trips unchanged.
 """
 
 from __future__ import annotations
@@ -37,9 +31,6 @@ from .issue_loop_markers import _marker, _parse_marker
 
 if TYPE_CHECKING:
     from .repository_issue_loops import Issue
-
-#: Tracked follow-up this module closes out.
-GITEA_PROVIDER_TRACKING_ISSUE = "ThomasMichon/copilot-extensions#4825"
 
 _ISSUE_PAGE_SIZE = 50
 _MAX_ISSUE_PAGES = 20
