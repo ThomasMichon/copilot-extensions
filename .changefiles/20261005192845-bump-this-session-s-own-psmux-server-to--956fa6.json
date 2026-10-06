@@ -1,0 +1,9 @@
+{
+  "comment": "Bump this session's own psmux server to AboveNormal priority (interim psmux#608 mitigation)",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
