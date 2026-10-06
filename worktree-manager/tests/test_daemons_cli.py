@@ -137,6 +137,59 @@ def test_cmd_daemons_mappings_text_mode_renders_live_marker_and_fields(monkeypat
     assert "  proj/wt-2" in out
 
 
+def test_cmd_daemons_mappings_qualifies_the_live_marker_as_registry_state(monkeypatch, capsys):
+    """The registry's ``live`` bit is not confirmed liveness -- a dead
+    session can retain ``live: true`` until the next real probe. The
+    legend must say so, not simply call the marker 'live'."""
+    report = [
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "mux_session": "wt-1",
+            "live": True,
+            "attached_clients": 1,
+            "observed_at": "2026-09-25T00:00:00Z",
+        }
+    ]
+    monkeypatch.setattr(
+        "worktree_manager.daemons_status.mapping_statuses", lambda: report
+    )
+
+    rc = daemons_cli.cmd_daemons(["mappings"])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "NOT confirmed liveness" in out
+
+
+def test_cmd_daemons_status_rejects_an_unsupported_option(monkeypatch, capsys):
+    called = []
+    monkeypatch.setattr(
+        "worktree_manager.daemons_status.daemon_statuses",
+        lambda: called.append(True) or [],
+    )
+
+    rc = daemons_cli.cmd_daemons(["status", "--jsoon"])
+
+    assert rc == 2
+    assert "unsupported option" in capsys.readouterr().out
+    assert not called
+
+
+def test_cmd_daemons_mappings_rejects_an_unsupported_option(monkeypatch, capsys):
+    called = []
+    monkeypatch.setattr(
+        "worktree_manager.daemons_status.mapping_statuses",
+        lambda: called.append(True) or [],
+    )
+
+    rc = daemons_cli.cmd_daemons(["mappings", "--jsoon"])
+
+    assert rc == 2
+    assert "unsupported option" in capsys.readouterr().out
+    assert not called
+
+
 def test_cmd_daemons_rejects_unknown_action():
     assert daemons_cli.cmd_daemons(["bogus"]) == 2
 
