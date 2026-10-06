@@ -120,13 +120,18 @@ def mcp_server_tool_entries(frontmatter: str) -> list[tuple[str, str]]:
     field_indent: int | None = None
     pending_indent: int | None = None
     pending_items: list[str] = []
+    pending_comment = ""
 
     def flush_pending() -> None:
-        nonlocal pending_indent, pending_items
+        nonlocal pending_indent, pending_items, pending_comment
         if server_name is not None and pending_items:
-            out.append((server_name, " ".join(pending_items)))
+            joined = " ".join(pending_items)
+            if pending_comment:
+                joined += "  " + pending_comment
+            out.append((server_name, joined))
         pending_indent = None
         pending_items = []
+        pending_comment = ""
 
     for line in lines:
         if not line.strip():
@@ -176,11 +181,12 @@ def mcp_server_tool_entries(frontmatter: str) -> list[tuple[str, str]]:
         if not tools_match:
             continue
         value = tools_match.group(1).strip()
-        if value:
+        if value and not value.startswith("#"):
             out.append((server_name, value))
         else:
             pending_indent = indent
             pending_items = []
+            pending_comment = value if value.startswith("#") else ""
     flush_pending()
     return out
 
