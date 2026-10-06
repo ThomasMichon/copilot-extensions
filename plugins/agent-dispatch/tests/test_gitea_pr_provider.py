@@ -42,12 +42,18 @@ def _pr(**overrides: object) -> dict:
 
 def _review(
     *, state: str, review_id: int, login: str = "reviewer", dismissed: bool = False,
-    stale: bool = False,
+    stale: bool = False, official: bool | None = None, team: str | None = None,
 ) -> dict:
-    return {
+    row: dict = {
         "id": review_id, "state": state, "user": {"login": login},
         "dismissed": dismissed, "stale": stale,
     }
+    if official is not None:
+        row["official"] = official
+    if team is not None:
+        row["user"] = None
+        row["team"] = {"name": team}
+    return row
 
 
 # --- _split --------------------------------------------------------------
@@ -258,6 +264,50 @@ def test_request_review_after_request_changes_resets_to_pending():
             _review(state="REQUEST_CHANGES", review_id=1, login="alice"),
             _review(state="REQUEST_REVIEW", review_id=2, login="alice"),
         ],
+    )
+    assert observation.approval_status == ApprovalStatus.PENDING
+
+
+def test_unofficial_approval_does_not_approve():
+    """Gitea's `official` field marks whether a review counts toward
+    merge policy -- a non-required reviewer's APPROVED must never flip
+    the aggregate status to APPROVED, since Gitea itself wouldn't count
+    it toward merge eligibility."""
+    observation = observe_pr_state(
+        _pr(),
+        reviews=[_review(state="APPROVED", review_id=1, login="alice", official=False)],
+    )
+    assert observation.approval_status != ApprovalStatus.APPROVED
+
+
+def test_unofficial_request_changes_does_not_block():
+    observation = observe_pr_state(
+        _pr(),
+        reviews=[
+            _review(state="REQUEST_CHANGES", review_id=1, login="alice", official=False),
+        ],
+    )
+    assert observation.approval_status != ApprovalStatus.CHANGES_REQUESTED
+
+
+def test_unofficial_review_does_not_erase_an_earlier_official_approval():
+    observation = observe_pr_state(
+        _pr(),
+        reviews=[
+            _review(state="APPROVED", review_id=1, login="alice", official=True),
+            _review(state="REQUEST_CHANGES", review_id=2, login="alice", official=False),
+        ],
+    )
+    assert observation.approval_status == ApprovalStatus.APPROVED
+
+
+def test_pending_team_review_request_maps_to_pending_not_none():
+    """A pending team review request carries `team` instead of `user`
+    (no individual reviewer) -- it is still a genuine pending request and
+    must not silently drop the "review still pending" signal down to
+    NONE just because there is no user login to key it by."""
+    observation = observe_pr_state(
+        _pr(), reviews=[_review(state="REQUEST_REVIEW", review_id=1, team="reviewers")],
     )
     assert observation.approval_status == ApprovalStatus.PENDING
 

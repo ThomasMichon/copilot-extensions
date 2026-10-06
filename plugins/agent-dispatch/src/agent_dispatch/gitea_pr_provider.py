@@ -98,13 +98,21 @@ def _approval_status(reviews: list[Mapping[str, Any]]) -> ApprovalStatus:
     re-request after changes stays reported as the stale
     ``CHANGES_REQUESTED``/``APPROVED`` instead of returning to
     ``PENDING``, since Gitea itself includes request-review rows when
-    selecting the latest approval state per reviewer. Only a ``COMMENT``
-    review carries no verdict of its own and must never supersede that
-    reviewer's last real state -- Gitea keeps an approval/rejection (or a
-    pending re-request) as the official decision until another
-    *verdict-or-request-bearing* review changes it, so a comment-only
-    review is tracked only far enough to know a review exists at all (for
-    the all-comments, no-verdicts-yet ``PENDING`` case below).
+    selecting the latest approval state per reviewer. Gitea's own
+    ``official`` field marks whether a review counts toward merge policy
+    -- an explicitly unofficial review (a non-required reviewer's
+    feedback) must never flip the aggregate verdict, so it is treated
+    like a comment: tracked only far enough to know a review exists.
+    Only a ``COMMENT`` (or explicitly unofficial) review carries no
+    verdict of its own and must never supersede a reviewer's last real
+    state -- Gitea keeps an approval/rejection (or a pending re-request)
+    as the official decision until another *verdict-or-request-bearing*
+    review changes it, so such a review is tracked only far enough to
+    know a review exists at all (for the all-comments, no-verdicts-yet
+    ``PENDING`` case below). A pending **team** review request (Gitea
+    carries ``team`` instead of ``user`` on that row) counts the same way
+    as an individual pending request -- its absence must not silently
+    drop the "review still pending" signal down to ``NONE``.
     """
     verdict_by_reviewer: dict[str, tuple[int, str]] = {}
     reviewers_with_any_review: set[str] = set()
@@ -123,11 +131,19 @@ def _approval_status(reviews: list[Mapping[str, Any]]) -> ApprovalStatus:
             continue  # a draft/unsubmitted review carries no verdict yet.
         reviewer = str((review.get("user") or {}).get("login") or "")
         if not reviewer:
-            continue
+            # A team review-request row carries `team` instead of `user`
+            # (no individual reviewer) -- still a genuine pending request,
+            # just keyed by team name rather than a user login.
+            team = str((review.get("team") or {}).get("name") or "")
+            if not team:
+                continue
+            reviewer = f"team:{team}"
         reviewers_with_any_review.add(reviewer)
         canonical = _REVIEW_STATE_TO_APPROVAL[state]
         if canonical == "COMMENT":
             continue  # feedback, not a verdict or request -- never supersedes one.
+        if review.get("official") is False:
+            continue  # unofficial: doesn't count toward merge policy, never supersedes one.
         review_id = int(review.get("id") or 0)
         existing = verdict_by_reviewer.get(reviewer)
         if existing is None or review_id >= existing[0]:
