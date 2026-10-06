@@ -401,129 +401,40 @@ _clear_update_marker() {
     exec 9>&-
 }
 
-# Detects `AssertionError: SRE module mismatch` -- a transient race on a
-# shared uv-managed Python interpreter that surfaces when several installers
-# hit it in quick succession during one big `agent-worktrees update --force`
-# sweep (#6785). The interpreter reliably heals within seconds once the
-# sweep's other uv invocations finish touching it, so a short-delay retry
-# recovers cleanly.
-_is_sre_module_mismatch() {
-    grep -q 'SRE module mismatch' <<<"$1"
-}
+. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"
 
-# Detects the pyvenv.cfg variant of the shared uv-managed-interpreter race
-# first seen above (_is_sre_module_mismatch): a concurrent `uv venv` from
-# another installer landing on the same slot can leave python present but
-# pyvenv.cfg missing/incomplete, so `uv venv --allow-existing` (or any later
-# uv Python-interpreter probe against that slot) fails immediately with uv
-# exit code 106 / "failed to locate pyvenv.cfg" (#6852). The slot self-heals
-# once the other install finishes writing it, so a short-delay retry
-# recovers cleanly.
-_is_venv_corruption() {
-    grep -qE 'failed to locate pyvenv\.cfg|exit code:? ?106' <<<"$1"
-}
-
-# Runs `uv pip install "$@"`, capturing combined output. On the transient SRE
-# module mismatch signature (see _is_sre_module_mismatch), retries with
-# backoff (up to 3 extra attempts: 3s/6s/10s); any other failure, or a
-# mismatch persisting after all retries, is returned as-is for the caller to
-# handle/fail on as before. A single 3s retry proved insufficient when many
-# plugins hammer the shared interpreter at once during a full
-# `agent-worktrees update --force` sweep -- the backoff schedule gives the
-# race more room to clear.
-#
-# Building from a local source tree (every call here installs FROM
-# "$PLUGIN_DIR", the pristine payload copy under
-# ~/.copilot/installed-plugins/) leaves setuptools' own build/lib and
-# *.egg-info staging behind IN that tree -- pip's build isolation covers the
-# *environment* the build runs in, not where the legacy build_meta backend
-# writes its intermediate files, which is CWD-relative to the project root
-# being built. Left in place, that stale build/lib/ then silently SHADOWS
-# fresh src/ on a later install if setuptools' own incremental-build mtime
-# check decides nothing "changed" (observed live: a stale build/lib/
-# transport.py missing a since-added function crashed the deployed daemon in
-# a restart loop -- see copilot-extensions#3444 sibling incident). Scrub it
-# after every successful install so the payload directory stays the pristine
-# clone it's supposed to be; a versioned runtime slot under
-# ~/.agent-bridge/versions/<ver>/ is the only place build output should end
-# up living.
-#
-# Also scrub BEFORE installing, not just after: residue already sitting in
-# "$PLUGIN_DIR" the moment an install starts (left by an earlier failed
-# attempt, a marketplace resync, or a concurrent process) shadows THIS
-# build too -- an after-only scrub only protects the NEXT install, not this
-# one. Confirmed live in the agent-dispatch sibling (copilot-extensions#3444,
-# 2026-09-23): a truncated recipes_cli.py shipped this way and crash-looped a
-# production supervisor daemon for ~8h. Also reaches the src-layout egg-info
-# (src/agent_bridge.egg-info), one level deeper than the root-level glob --
-# the exact location that shadowed a real fix and broke a live deployment
-# before being caught (registrar.py's `no_pair` field, same incident).
-#
-# An explicit-$1 scrub_dir only reaches the ONE vendored lib the caller
-# happens to name -- it silently misses any lib resolved TRANSITIVELY while
-# installing agent-bridge itself (agent-procutil, dropin-registry,
-# plugin-activation, plugin-resolve: pulled in via agent-bridge's own
-# `[tool.uv.sources]` workspace path deps, never given their own dedicated
-# install call here) even though each is its own independent setuptools
-# build root under "$PLUGIN_DIR/libs/<name>/" and accumulates the identical
-# stale build/egg-info residue. That gap self-reinvited the exact #3444/
-# #3456 bug class: a stale libs/agent-procutil/build/lib shadowing a fresh
-# src/agent_procutil and crashing every headless-spawn session host with
-# `ImportError: cannot import name 'JobHandle'`. agent-dispatch's own
-# install.sh (copilot-extensions#2863) already fixed this the right way --
-# glob every immediate child of libs/ unconditionally, since directory names
-# under libs/ don't map 1:1 to package names (e.g. agent-zdd -> libs/zdd) and
-# an enumerated allowlist drifts out of sync with new/renamed vendored libs.
 _scrub_payload_build_artifacts() {
-    # $1 (optional): an additional local source directory to scrub, for a
-    # vendored dependency installed from its OWN source tree OUTSIDE
-    # "$PLUGIN_DIR/libs/" (e.g. a marketplace layout resolving a lib from a
-    # sibling checkout) -- the libs/*/ glob below only reaches vendored libs
-    # that actually live under this payload's own libs/ directory. Harmless
-    # to pass a dir the glob already covered: rm -rf on an already-scrubbed
-    # path is a no-op.
-    rm -rf "$PLUGIN_DIR/build" "$PLUGIN_DIR"/*.egg-info \
-           "$PLUGIN_DIR"/src/*.egg-info 2>/dev/null || true
+    local extra_dir="${1:-}"
+    rm -rf "$PLUGIN_DIR/build" "$PLUGIN_DIR"/*.egg-info            "$PLUGIN_DIR"/src/*.egg-info 2>/dev/null || true
     local lib_dir
     for lib_dir in "$PLUGIN_DIR"/libs/*/; do
         [[ -d "$lib_dir" ]] || continue
-        rm -rf "${lib_dir}build" "${lib_dir}"*.egg-info \
-               "${lib_dir}"src/*.egg-info 2>/dev/null || true
+        rm -rf "${lib_dir}build" "${lib_dir}"*.egg-info                "${lib_dir}"src/*.egg-info 2>/dev/null || true
     done
-    local extra_dir="$1"
     if [[ -n "$extra_dir" && "$extra_dir" != "$PLUGIN_DIR" ]]; then
-        rm -rf "$extra_dir/build" "$extra_dir"/*.egg-info \
-               "$extra_dir"/src/*.egg-info 2>/dev/null || true
+        rm -rf "$extra_dir/build" "$extra_dir"/*.egg-info                "$extra_dir"/src/*.egg-info 2>/dev/null || true
     fi
 }
 
 _uv_pip_install_resilient() {
-    # $1: the local source directory this install actually builds from (pass
-    # "" when it's "$PLUGIN_DIR", already covered unconditionally above) --
-    # every other argument is forwarded verbatim to `uv pip install`.
     local scrub_dir="$1"; shift
     local out delay
     _scrub_payload_build_artifacts "$scrub_dir"
     if out="$(uv pip install "$@" 2>&1)"; then
-        printf '%s\n' "$out"
         _scrub_payload_build_artifacts "$scrub_dir"
+        printf '%s\n' "$out"
         return 0
     fi
     for delay in 3 6 10; do
-        if ! _is_sre_module_mismatch "$out"; then
+        if ! test_is_sre_module_mismatch "$out"; then
             break
         fi
         _warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
         sleep "$delay"
-        # Re-scrub before every retry, not just the first attempt: the failed
-        # attempt above (or a concurrent installer racing this one during the
-        # sleep) can recreate build/egg-info residue, which would otherwise
-        # shadow THIS retry's build the same way the pre-first-attempt scrub
-        # exists to prevent.
         _scrub_payload_build_artifacts "$scrub_dir"
         if out="$(uv pip install "$@" 2>&1)"; then
-            printf '%s\n' "$out"
             _scrub_payload_build_artifacts "$scrub_dir"
+            printf '%s\n' "$out"
             return 0
         fi
     done
@@ -538,38 +449,16 @@ _venv_healthy() {
     [[ -x "$1/bin/python" && -f "$1/pyvenv.cfg" ]]
 }
 
-# Runs `uv venv "$venv_dir" "$@"`, retrying with backoff (3s/6s/10s) on the
-# transient SRE-module-mismatch (#6785) or pyvenv.cfg-corruption (#6852)
-# races. Also treats a zero-exit run that didn't actually leave a pyvenv.cfg
-# behind at "$venv_dir/pyvenv.cfg" as a failure worth retrying -- uv can exit
-# 0 while still racing another concurrent writer touching the same slot.
 _uv_venv_resilient() {
     local venv_dir="$1"; shift
-    local out rc delay
-    out="$(uv venv "$venv_dir" "$@" 2>&1)"; rc=$?
-    for delay in 3 6 10; do
-        if [[ $rc -eq 0 && -f "$venv_dir/pyvenv.cfg" ]]; then
-            printf '%s\n' "$out"
-            return 0
-        fi
-        if [[ $rc -eq 0 ]]; then
-            _warn "uv venv reported success but pyvenv.cfg is missing at $venv_dir/pyvenv.cfg (shared interpreter race, #6852) -- retrying in ${delay}s"
-        elif _is_sre_module_mismatch "$out"; then
-            _warn "uv venv hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
-        elif _is_venv_corruption "$out"; then
-            _warn "uv venv hit a transient pyvenv.cfg corruption (shared Python cache race, #6852) -- retrying in ${delay}s"
-        else
-            break
-        fi
-        sleep "$delay"
-        out="$(uv venv "$venv_dir" "$@" 2>&1)"; rc=$?
-    done
-    if [[ $rc -eq 0 && -f "$venv_dir/pyvenv.cfg" ]]; then
+    local out rc
+    out="$(invoke_uv_venv_resilient uv "$venv_dir" "$@")"; rc=$?
+    if [[ $rc -eq 0 ]]; then
         printf '%s\n' "$out"
         return 0
     fi
     printf '%s\n' "$out" >&2
-    return 1
+    return "$rc"
 }
 
 # === install-contract:v3 versioned-venv helpers (agent-bridge) ===
@@ -1157,66 +1046,9 @@ _source_kind() {
 }
 # === end install-contract:v4 source-kind ===
 
-# Unified schema_version 3 manifest writer. Self-contained per plugin (no shared
-# module -- plugins are pulled independently from the marketplace). Records the
-# source footprint (local vs marketplace) and is written atomically (temp+move).
-_write_deploy_manifest_for() {
-    local service="$1" plugin="$2" install_path="$3" plugin_path="$4" venv_path="$5"
-    local manifest="$install_path/deploy-manifest.json"
-    local kind
-    kind="$(_source_kind "$plugin_path")"
-
-    local ver="0.0.0"
-    if [[ -f "$plugin_path/pyproject.toml" ]]; then
-        ver=$(grep -m1 '^version' "$plugin_path/pyproject.toml" | sed 's/.*"\(.*\)".*/\1/' || echo "0.0.0")
-    fi
-
-    # Git provenance only applies to a local checkout.
-    local commit="null" branch="null" dirty="false"
-    if [[ "$kind" == "local" ]]; then
-        local repo_root c b d
-        repo_root="$(cd "$plugin_path/.." && pwd)"
-        read -r c b d <<< "$(_git_info "$repo_root")"
-        commit="\"$c\""; branch="\"$b\""; dirty="$d"
-    fi
-
-    # Content identity (#776): a payload fingerprint so the manifest records WHAT
-    # content is deployed, not just the (reusable) version label -- populated even
-    # for a marketplace copy where "commit" is null.
-    local content_hash
-    content_hash="$(_payload_hash)"
-
-    local tmp="$manifest.tmp"
-    cat > "$tmp" << EOF
-{
-  "schema_version": 3,
-  "service": "$service",
-  "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
-  "source": {
-    "kind": "$kind",
-    "path": "$plugin_path",
-    "repo": "copilot-extensions",
-    "plugin": "$plugin",
-    "version": "$ver",
-    "commit": $commit,
-    "branch": $branch,
-    "dirty": $dirty,
-    "content_hash": "$content_hash"
-  },
-  "venv": "$venv_path",
-  "runtime": "python"
-}
-EOF
-    mv -f "$tmp" "$manifest"
-    _ok "Deploy manifest written (source: $kind)"
-}
-
 _write_deploy_manifest() {
-    # The manifest `venv` field records the active versioned slot ($VENV_DIR);
-    # the `venv` link is retired (marker-only, uniform-runtime-resolution #765).
-    _write_deploy_manifest_for "agent-bridge" "agent-bridge" \
-        "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR"
+    local source_path="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    write_deploy_manifest "agent-bridge" "agent-bridge" "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" "" "$source_path" "$SRC_VERSION"
 }
 
 _install_systemd_unit() {
@@ -1300,25 +1132,9 @@ _migration_check() {
 # Vendor a standalone uv into the runtime tool dir when uv is absent (pristine or
 # governed box) instead of dead-ending; add it to PATH for this run.
 _ensure_uv() {
-    command -v uv &>/dev/null && return 0
-    local tooldir="$INSTALL_DIR/tool"
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; return 0; fi
-    _step "uv not found -- vendoring a standalone uv into $tooldir"
-    mkdir -p "$tooldir"
-    local url="https://astral.sh/uv/install.sh" script="$tooldir/uv-install.sh" got=""
-    if command -v curl &>/dev/null; then curl -LsSf "$url" -o "$script" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v wget &>/dev/null; then wget -qO "$script" "$url" 2>/dev/null && got=1; fi
-    if [[ -z "$got" ]] && command -v python3 &>/dev/null; then
-        python3 - "$url" "$script" <<'PY' 2>/dev/null && got=1
-import sys, urllib.request
-urllib.request.urlretrieve(sys.argv[1], sys.argv[2])
-PY
+    if ensure_uv "$INSTALL_DIR" tool 1 >/dev/null; then
+        return 0
     fi
-    if [[ -n "$got" && -s "$script" ]]; then
-        env UV_INSTALL_DIR="$tooldir" UV_UNMANAGED_INSTALL="$tooldir" INSTALLER_NO_MODIFY_PATH=1 sh "$script" >/dev/null 2>&1 || true
-    fi
-    [[ -x "$tooldir/bin/uv" && ! -x "$tooldir/uv" ]] && ln -sf "$tooldir/bin/uv" "$tooldir/uv" 2>/dev/null || true
-    if [[ -x "$tooldir/uv" ]]; then export PATH="$tooldir:$PATH"; _ok "Vendored uv into $tooldir"; return 0; fi
     _fail "uv is required but not found, and vendoring failed (no reachable uv installer). Install uv, then retry."
     return 1
 }

@@ -249,6 +249,14 @@ function Write-Fail { param([string]$Msg) Write-Host "  [FAIL] $Msg" -Foreground
 function Write-Step { param([string]$Msg) Write-Host "  ...    $Msg" -ForegroundColor DarkGray }
 function Write-Warn { param([string]$Msg) Write-Host "  [WARN] $Msg" -ForegroundColor Yellow }
 
+. (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')
+
+Set-Item -Path Function:Ensure-UvShared -Value ${function:Ensure-Uv}
+Set-Item -Path Function:Invoke-UvPipInstallResilientShared -Value ${function:Invoke-UvPipInstallResilient}
+Set-Item -Path Function:Invoke-UvVenvResilientShared -Value ${function:Invoke-UvVenvResilient}
+Set-Item -Path Function:New-SignedVenvShared -Value ${function:New-SignedVenv}
+Set-Item -Path Function:Write-DeployManifestShared -Value ${function:Write-DeployManifest}
+
 # Stable, documented contract (ThomasMichon/copilot-extensions#5066): a file
 # containing a single epoch-seconds expiry, present for the duration of a
 # live-service update/start lifecycle -- any downstream consumer (a local
@@ -464,174 +472,69 @@ function Get-BootstrapPython {
     return $null
 }
 
-function Invoke-NativeCapture {
-    param([Parameter(Mandatory)][scriptblock]$Command)
+function Remove-PluginBuildArtifacts {
+    param([string]$SourceDir = '')
 
-    $previousErrorAction = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $exitCode = 1
-    $output = ''
-    try {
-        $output = (& $Command 2>&1 | Out-String -Width 4096).Trim()
-        $exitCode = $LASTEXITCODE
-    } catch {
-        $output = ($_ | Out-String -Width 4096).Trim()
-    } finally {
-        $ErrorActionPreference = $previousErrorAction
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
+        (Join-Path $PluginDir 'build'), `
+        (Join-Path $PluginDir '*.egg-info'), `
+        (Join-Path (Join-Path $PluginDir 'src') '*.egg-info')
+    $libsDir = Join-Path $PluginDir 'libs'
+    if (Test-Path -LiteralPath $libsDir) {
+        Get-ChildItem -LiteralPath $libsDir -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object {
+                Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
+                    (Join-Path $_.FullName 'build'), `
+                    (Join-Path $_.FullName '*.egg-info'), `
+                    (Join-Path (Join-Path $_.FullName 'src') '*.egg-info')
+            }
     }
-    return [pscustomobject]@{ ExitCode = $exitCode; Output = $output }
-}
-
-function Test-IsSreModuleMismatch {
-    <# Detects `AssertionError: SRE module mismatch` -- a transient race on
-       uv's shared managed-Python cache/junction (cpython-3.11-windows-x86_64-none)
-       that surfaces when several installers hit it in quick succession during
-       one big `agent-worktrees update --force` sweep (#6785). The interpreter
-       reliably heals within seconds once the sweep's other uv invocations
-       finish touching it, so a short-delay retry recovers cleanly. #>
-    param([string]$Output)
-    return $Output -match 'SRE module mismatch'
+    if ($SourceDir -and $SourceDir -ne $PluginDir) {
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
+            (Join-Path $SourceDir 'build'), `
+            (Join-Path $SourceDir '*.egg-info'), `
+            (Join-Path (Join-Path $SourceDir 'src') '*.egg-info')
+    }
 }
 
 function Invoke-UvPipInstallResilient {
-    <# Runs `uv pip install` with the given arguments, capturing combined
-       output and exit code. On the transient SRE-module-mismatch signature
-       (see Test-IsSreModuleMismatch), retries with backoff (up to 3 extra
-       attempts: 3s/6s/10s); any other failure, or a mismatch persisting after
-       all retries, is returned as-is for the caller to handle/fail on as
-       before. A single 3s retry proved insufficient when many plugins hammer
-       the shared interpreter at once during a full `agent-worktrees update
-       --force` sweep (observed in deployment after the first fix landed) --
-       the backoff schedule gives the race more room to clear.
-
-       Installing FROM the pristine payload directory ($PluginDir) leaves
-       setuptools' own build/ + *.egg-info staging behind IN that tree --
-       pip's build isolation covers the *environment* the build runs in, not
-       where the legacy build_meta backend writes intermediate files. Left in
-       place, a stale build/ (or src/*.egg-info, one level deeper than a
-       root-level glob reaches) can silently shadow fresh src/ on a later
-       install if setuptools' incremental-build mtime check decides nothing
-       "changed" -- confirmed live (copilot-extensions#3444): a truncated
-       recipes_cli.py shipped this way on POSIX and crash-looped a
-       production daemon for ~8h. Scrub before every attempt (first call AND
-       each retry, since a failed attempt or a concurrent installer racing
-       the retry delay can recreate residue) and after a successful install,
-       so the payload directory stays the pristine clone it's supposed to
-       be -- mirrors the POSIX installer's `_scrub_payload_build_artifacts`.
-
-       ``SourceDir`` (optional): an additional local source directory to
-       scrub, for a vendored dependency installed from its OWN source tree
-       OUTSIDE $PluginDir/libs/ (e.g. a marketplace layout resolving a lib
-       from a sibling checkout) -- the libs/*/ enumeration below only
-       reaches vendored libs that actually live under this payload's own
-       libs/ directory. Harmless to pass a dir the enumeration already
-       covered: Remove-Item on an already-scrubbed path is a no-op.
-
-       An explicit-SourceDir scrub only reaches the ONE vendored lib the
-       caller happens to name -- it silently misses any lib resolved
-       TRANSITIVELY while installing agent-bridge itself (agent-procutil,
-       dropin-registry, plugin-activation, plugin-resolve: pulled in via
-       agent-bridge's own `[tool.uv.sources]` workspace path deps, never
-       given their own dedicated install call here) even though each is its
-       own independent setuptools build root under
-       `$PluginDir/libs/<name>/` and accumulates the identical stale
-       build/egg-info residue. That gap self-reinvited the exact #3444/
-       #3456 bug class on POSIX: a stale libs/agent-procutil/build/lib
-       shadowing a fresh src/agent_procutil and crashing every
-       headless-spawn session host with `ImportError: cannot import name
-       'JobHandle'`. Mirrors the POSIX installer's own fix and
-       agent-dispatch's `Remove-PluginBuildArtifacts` (copilot-extensions
-       #2863) -- enumerate every immediate child of libs/ unconditionally,
-       since directory names under libs/ don't map 1:1 to package names
-       (e.g. agent-zdd -> libs/zdd) and an enumerated allowlist drifts out
-       of sync with new/renamed vendored libs. #>
     param(
         [Parameter(Mandatory)][string[]]$Arguments,
         [string]$SourceDir = ''
     )
-    $scrubArtifacts = {
-        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
-            (Join-Path $PluginDir 'build'), `
-            (Join-Path $PluginDir '*.egg-info'), `
-            (Join-Path (Join-Path $PluginDir 'src') '*.egg-info')
-        $libsDir = Join-Path $PluginDir 'libs'
-        if (Test-Path -LiteralPath $libsDir) {
-            Get-ChildItem -LiteralPath $libsDir -Directory -ErrorAction SilentlyContinue |
-                ForEach-Object {
-                    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
-                        (Join-Path $_.FullName 'build'), `
-                        (Join-Path $_.FullName '*.egg-info'), `
-                        (Join-Path (Join-Path $_.FullName 'src') '*.egg-info')
-                }
-        }
-        if ($SourceDir -and $SourceDir -ne $PluginDir) {
-            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
-                (Join-Path $SourceDir 'build'), `
-                (Join-Path $SourceDir '*.egg-info'), `
-                (Join-Path (Join-Path $SourceDir 'src') '*.egg-info')
-        }
-    }
+
+    Remove-PluginBuildArtifacts -SourceDir $SourceDir
     $delays = @(3, 6, 10)
-    & $scrubArtifacts
     $out = & uv pip install @Arguments 2>&1
     $exit = $LASTEXITCODE
-    if ($exit -eq 0) { & $scrubArtifacts }
+    if ($exit -eq 0) { Remove-PluginBuildArtifacts -SourceDir $SourceDir }
     foreach ($delay in $delays) {
         if ($exit -eq 0 -or -not (Test-IsSreModuleMismatch ($out | Out-String))) { break }
         Write-Warn "uv build hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
         Start-Sleep -Seconds $delay
-        & $scrubArtifacts
+        Remove-PluginBuildArtifacts -SourceDir $SourceDir
         $out = & uv pip install @Arguments 2>&1
         $exit = $LASTEXITCODE
-        if ($exit -eq 0) { & $scrubArtifacts }
+        if ($exit -eq 0) { Remove-PluginBuildArtifacts -SourceDir $SourceDir }
     }
     return [pscustomobject]@{ Output = $out; ExitCode = $exit }
 }
 
-function Test-IsVenvCorruption {
-    <# Detects the `pyvenv.cfg` variant of the shared uv-managed-interpreter
-       race first seen in #6785 (see Test-IsSreModuleMismatch): a concurrent
-       `uv venv` from another installer landing on the same slot can leave
-       python.exe present but pyvenv.cfg missing/incomplete, so `uv venv
-       --allow-existing` (or any later uv Python-interpreter probe against
-       that slot) fails immediately with uv exit code 106 / "failed to locate
-       pyvenv.cfg" (#6852). The slot self-heals once the other install
-       finishes writing it, so a short-delay retry recovers cleanly. #>
-    param([string]$Output)
-    return ($Output -match 'failed to locate pyvenv\.cfg') -or ($Output -match 'exit code:\s*106')
-}
-
 function Invoke-UvVenvResilient {
-    <# Runs `uv venv $VenvDir @Arguments`, capturing combined output and exit
-       code. Retries with backoff (3s/6s/10s) on the transient
-       SRE-module-mismatch (#6785) or pyvenv.cfg-corruption (#6852)
-       signatures. Also treats a zero-exit run that didn't actually leave a
-       pyvenv.cfg behind at $VenvDir\pyvenv.cfg as a failure worth retrying --
-       uv can exit 0 while still racing another concurrent writer touching
-       the same slot. #>
-    param([Parameter(Mandatory)][string]$VenvDir, [Parameter(Mandatory)][string[]]$Arguments)
-    $cfgPath = Join-Path $VenvDir 'pyvenv.cfg'
-    $delays = @(3, 6, 10)
-    $result = Invoke-NativeCapture { & uv venv $VenvDir @Arguments }
-    foreach ($delay in $delays) {
-        if ($result.ExitCode -eq 0 -and (Test-Path $cfgPath)) { break }
-        $text = ($result.Output | Out-String)
-        if ($result.ExitCode -eq 0) {
-            Write-Warn "uv venv reported success but pyvenv.cfg is missing at $cfgPath (shared interpreter race, #6852) -- retrying in ${delay}s"
-        } elseif (Test-IsSreModuleMismatch $text) {
-            Write-Warn "uv venv hit a transient SRE module mismatch (shared Python cache race, #6785) -- retrying in ${delay}s"
-        } elseif (Test-IsVenvCorruption $text) {
-            Write-Warn "uv venv hit a transient pyvenv.cfg corruption (shared Python cache race, #6852) -- retrying in ${delay}s"
-        } else {
-            break
-        }
-        Start-Sleep -Seconds $delay
-        $result = Invoke-NativeCapture { & uv venv $VenvDir @Arguments }
-    }
-    return $result
+    param(
+        [Parameter(Mandatory)][string]$VenvDir,
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [string]$UvCommand = 'uv'
+    )
+
+    return (Invoke-UvVenvResilientShared -VenvDir $VenvDir -Arguments $Arguments -UvCommand $UvCommand)
 }
 
 function Ensure-Uv {
+    if (-not ($env:AGENT_BRIDGE_UV_BOOTSTRAP_URL -or $env:AGENT_BRIDGE_UV_BOOTSTRAP_SHA256)) {
+        return [bool](Ensure-UvShared -InstallRoot $InstallDir -ToolDirectory 'tool' -AcquireIfMissing $true)
+    }
+
     $existing = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue
     if ($existing) {
         $result = Invoke-NativeCapture { & $existing.Source --version }
@@ -1126,48 +1029,14 @@ function Get-SignedBasePython {
 }
 
 function New-SignedVenv {
-    <# Create or rebuild $VenvDir so its python.exe is SAC-trusted. Prefers a
-       signed base Python via `--copies`; rebuilds an existing unsigned venv;
-       falls back to uv (unsigned) when no signed Python exists. Returns $true
-       if $VenvPython AND $VenvDir\pyvenv.cfg are both present afterward --
-       checking python.exe alone would treat a #6852-corrupted slot
-       (python.exe present, pyvenv.cfg missing) as already healthy and never
-       rebuild it. #>
-    # #935: toss an INCOMPLETE prior slot first so we never `uv venv
-    # --allow-existing` over a half-built corpse (the current/active slot is
-    # never tossed). No-op in legacy mode.
     Invoke-VersionedSlotClean
-    $cfgPath = Join-Path $VenvDir 'pyvenv.cfg'
-    if (Test-Path $VenvPython) {
-        $sig = if ($env:OS -eq 'Windows_NT') { try { (Get-AuthenticodeSignature $VenvPython).Status } catch { 'Unknown' } } else { 'Valid' }
-        if ($sig -ne 'Valid' -and (Get-SignedBasePython)) {
-            Write-Step 'Existing venv python is unsigned (Smart App Control-incompatible) -- rebuilding from signed Python'
-            try { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop }
-            catch { Write-Warn "Could not remove existing venv (in use?): $_" }
-        } elseif (-not (Test-Path $cfgPath)) {
-            Write-Warn "Existing venv python.exe present but pyvenv.cfg is missing at $cfgPath (shared interpreter race, #6852) -- rebuilding"
-            try { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop }
-            catch { Write-Warn "Could not remove corrupted venv (in use?): $_" }
-        }
-    }
-    if ((Test-Path $VenvPython) -and (Test-Path $cfgPath)) { return $true }
-
-    $signedBase = Get-SignedBasePython
-    if ($signedBase) {
-        & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
-        if ((Test-Path $VenvPython) -and (Test-Path $cfgPath)) {
-            Write-Ok "Venv created from signed Python ($signedBase)"
-            return $true
-        }
-        Write-Warn 'Signed-Python venv creation failed -- falling back to uv'
-    } elseif ($env:OS -eq 'Windows_NT') {
-        Write-Warn 'No signed system Python found -- using uv (unsigned). On Smart App Control machines, install python.org Python 3.10+ and re-run.'
-    }
-    $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments @('--python', '3.10', '--allow-existing')
-    if ($result.ExitCode -ne 0 -or -not (Test-Path $cfgPath)) {
-        $result = Invoke-UvVenvResilient -VenvDir $VenvDir -Arguments @('--allow-existing')
-    }
-    return ((Test-Path $VenvPython) -and (Test-Path $cfgPath))
+    return [bool](New-SignedVenvShared `
+        -VenvDir $VenvDir `
+        -VenvPython $VenvPython `
+        -PythonVersion '3.10' `
+        -UvCommand 'uv' `
+        -RequireSignedBase ($env:OS -eq 'Windows_NT') `
+        -AllowExisting $true)
 }
 
 # #1643: venue providers (agent-codespaces / agent-containers) are PURE
@@ -1557,65 +1426,18 @@ function Get-SourceKind {
 # === end install-contract:v3 source-kind ===
 
 function Write-DeployManifest {
-    # The manifest `venv` field records the stable `venv` link ($LinkDir), never
-    # a versions/<v> slot -- consumers resolve the runtime through the link.
-    Write-DeployManifestFor -Service 'agent-bridge' -Plugin 'agent-bridge' `
-        -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir
-}
-
-# Unified schema_version 3 manifest writer. Self-contained per plugin (no shared
-# module -- plugins are pulled independently from the marketplace). Records the
-# source footprint (local vs marketplace) and is written atomically (temp+move).
-function Write-DeployManifestFor {
-    param(
-        [string]$Service,
-        [string]$Plugin,
-        [string]$InstallPath,
-        [string]$PluginPath,
-        [string]$VenvPath
-    )
-    $manifestPath = Join-Path $InstallPath 'deploy-manifest.json'
-    $kind = Get-SourceKind -PluginPath $PluginPath
-
-    $ver = '0.0.0'
-    $pyproj = Join-Path $PluginPath 'pyproject.toml'
-    if (Test-Path $pyproj) {
-        $verLine = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
-        if ($verLine) { $ver = ($verLine.Line -replace '.*=\s*"([^"]+)".*','$1') }
-    }
-
-    # Git provenance only applies to a local checkout -- the marketplace vendor
-    # copy is not a git repo.
-    $commit = $null; $branch = $null; $dirty = $false
-    if ($kind -eq 'local') {
-        $gitInfo = Get-GitInfo -Path (Split-Path $PluginPath)
-        $commit = $gitInfo.commit; $branch = $gitInfo.branch; $dirty = $gitInfo.dirty
-    }
-
-    $manifest = [ordered]@{
-        schema_version = 3
-        service        = $Service
-        deployed_at    = (Get-Date -Format 'o')
-        deployed_by    = "$($env:COMPUTERNAME.ToLower())-windows"
-        source         = [ordered]@{
-            kind    = $kind
-            path    = ($PluginPath -replace '\\', '/')
-            repo    = 'copilot-extensions'
-            plugin  = $Plugin
-            version = $ver
-            commit  = $commit
-            branch  = $branch
-            dirty   = $dirty
-            content_hash = (Get-PayloadHash)
-        }
-        venv           = ($VenvPath -replace '\\', '/')
-        runtime        = 'python'
-    }
-
-    $tmp = "$manifestPath.tmp"
-    $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
-    Move-Item -Force -Path $tmp -Destination $manifestPath
-    Write-Ok "Deploy manifest written (source: $kind)"
+    $sourcePathOverride = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { '' }
+    Write-DeployManifestShared `
+        -Service 'agent-bridge' `
+        -Plugin 'agent-bridge' `
+        -InstallPath $InstallDir `
+        -PluginPath $PluginDir `
+        -VenvPath $LinkDir `
+        -GetSourceKind ${function:Get-SourceKind} `
+        -GetGitInfo ${function:Get-GitInfo} `
+        -SourcePathOverride $sourcePathOverride `
+        -VersionOverride $SrcVersion `
+        -PayloadHash (Get-PayloadHash)
 }
 
 function Get-ScheduledTaskLastResult {
@@ -2085,6 +1907,100 @@ exit /b %ERRORLEVEL%
     Write-Ok "Binstub: $BinstubPs1 (+ .cmd fallback) -- marker-routed, self-provisioning"
 }
 
+function Resolve-SnapshotInstallerEngineSource {
+    param([Parameter(Mandatory)][ValidateSet('ps1', 'sh')][string]$Ext)
+    $localEngine = Join-Path $PSScriptRoot ("installer-engine.$Ext")
+    if (Test-Path -LiteralPath $localEngine) { return $localEngine }
+    return Join-Path (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine') ("installer-engine.$Ext")
+}
+
+function Materialize-SnapshotVendoredLibs {
+    param([Parameter(Mandatory)][string]$SnapshotDir)
+    $libsDir = Join-Path $SnapshotDir 'libs'
+    if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
+    $sources = [ordered]@{
+        'ssh-manager'          = (Resolve-SshManager)
+        'credential-relay'     = (Resolve-CredentialRelay)
+        'zdd'                  = (Resolve-Zdd)
+        'single-instance-lease'= (Resolve-SingleInstanceLease)
+        'config-migrate'       = (Resolve-ConfigMigrate)
+        'agent-procutil'       = (Resolve-VendoredLib -LibName 'agent-procutil')
+        'plugin-resolve'       = (Resolve-VendoredLib -LibName 'plugin-resolve')
+        'dropin-registry'      = (Resolve-VendoredLib -LibName 'dropin-registry')
+        'plugin-activation'    = (Resolve-VendoredLib -LibName 'plugin-activation')
+        'remote-login-shell'   = (Resolve-VendoredLib -LibName 'remote-login-shell')
+    }
+    foreach ($entry in $sources.GetEnumerator()) {
+        $source = $entry.Value
+        if (-not $source) {
+            throw "Cannot materialize stamped snapshot: required vendored library '$($entry.Key)' is unresolved."
+        }
+        $destination = Join-Path $libsDir $entry.Key
+        if ([System.IO.Path]::GetFullPath($source) -eq [System.IO.Path]::GetFullPath($destination)) {
+            continue
+        }
+        Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue
+        Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
+    }
+
+    $snapshotPyproject = Join-Path $SnapshotDir 'pyproject.toml'
+    if (Test-Path -LiteralPath $snapshotPyproject) {
+        $pyprojectText = [System.IO.File]::ReadAllText($snapshotPyproject)
+        $rewrites = [ordered]@{
+            'agent-ssh-manager'          = 'ssh-manager'
+            'agent-credential-relay'     = 'credential-relay'
+            'agent-zdd'                  = 'zdd'
+            'agent-single-instance-lease'= 'single-instance-lease'
+            'agent-config-migrate'       = 'config-migrate'
+            'agent-plugin-resolve'       = 'plugin-resolve'
+            'agent-procutil'             = 'agent-procutil'
+            'agent-dropin-registry'      = 'dropin-registry'
+            'agent-plugin-activation'    = 'plugin-activation'
+            'agent-remote-login-shell'   = 'remote-login-shell'
+        }
+        foreach ($entry in $rewrites.GetEnumerator()) {
+            $oldLine = '{0} = {{ path = "../../libs/{1}", editable = true }}' -f $entry.Key, $entry.Value
+            $newLine = '{0} = {{ path = "libs/{1}" }}' -f $entry.Key, $entry.Value
+            $pyprojectText = $pyprojectText.Replace($oldLine, $newLine)
+        }
+        [System.IO.File]::WriteAllText($snapshotPyproject, $pyprojectText, $utf8NoBom)
+    }
+
+    foreach ($entry in $rewrites.GetEnumerator()) {
+        $nestedPyproject = Join-Path (Join-Path $libsDir $entry.Value) 'pyproject.toml'
+        if (-not (Test-Path -LiteralPath $nestedPyproject)) { continue }
+        $nestedText = [System.IO.File]::ReadAllText($nestedPyproject)
+        $nestedText = $nestedText.Replace(', editable = true }', ' }')
+        [System.IO.File]::WriteAllText($nestedPyproject, $nestedText, $utf8NoBom)
+    }
+}
+
+function Materialize-SnapshotInstallerEngine {
+    param([Parameter(Mandatory)][string]$SnapshotDir)
+    $scriptsDir = Join-Path $SnapshotDir 'scripts'
+    if (-not (Test-Path $scriptsDir)) { New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null }
+    foreach ($name in @('installer-engine.ps1', 'installer-engine.sh')) {
+        $ext = [System.IO.Path]::GetExtension($name).TrimStart('.')
+        $source = Resolve-SnapshotInstallerEngineSource -Ext $ext
+        $destination = Join-Path $scriptsDir $name
+        if ([System.IO.Path]::GetFullPath($source) -ne [System.IO.Path]::GetFullPath($destination)) {
+            Copy-Item -LiteralPath $source -Destination $destination -Force
+        }
+    }
+    $installSh = Join-Path $scriptsDir 'install.sh'
+    if (Test-Path $installSh) {
+        $shText = [System.IO.File]::ReadAllText($installSh)
+        $shText = $shText.Replace('. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"', '. "$SCRIPT_DIR/installer-engine.sh"')
+        [System.IO.File]::WriteAllText($installSh, $shText, $utf8NoBom)
+    }
+    $installPs1 = Join-Path $scriptsDir 'install.ps1'
+    if (Test-Path $installPs1) {
+        $ps1Text = [System.IO.File]::ReadAllText($installPs1)
+        $ps1Text = $ps1Text.Replace('. (Join-Path $PSScriptRoot ''..\..\..\libs\installer-engine\installer-engine.ps1'')', '. (Join-Path $PSScriptRoot ''installer-engine.ps1'')')
+        [System.IO.File]::WriteAllText($installPs1, $ps1Text, $utf8NoBom)
+    }
+}
+
 function Invoke-Stamp {
     # Fast base install (#1393, snapshot slot model): copy the payload SOURCE into
     # ~/.agent-bridge/snapshots/<ver>/, record markers, and deploy the self-
@@ -2107,6 +2023,8 @@ function Invoke-Stamp {
     Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
     }
+    Materialize-SnapshotVendoredLibs -SnapshotDir $snapTmp
+    Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)

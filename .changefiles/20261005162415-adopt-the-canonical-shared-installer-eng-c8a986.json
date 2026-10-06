@@ -1,0 +1,9 @@
+{
+  "comment": "Adopt the canonical shared installer engine wrappers for agent-bridge.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}
