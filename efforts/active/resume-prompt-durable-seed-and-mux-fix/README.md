@@ -267,6 +267,25 @@ is this effort's actual Phase 1 deliverable.)
       no reasonable way to block synchronously on pane readiness itself
       (`mux_seed_pane` can poll for up to minutes). Requires the same
       launcher-script changes as the item above; fold into that work.
+- [ ] **Deferred from Phase 1 (ninth review round):** `claim_pending_seed`
+      cannot distinguish "nothing was pending" from "claim failed" (lock
+      contention, an unreadable record) -- both return `None`. With an
+      explicit seed supplied, the current code proceeds with the explicit
+      value regardless, silently leaving an old, undelivered `pending_seed`
+      queued if the claim genuinely failed rather than finding nothing --
+      that stale prompt can then surface as an unexpected turn on a LATER
+      resume. Needs a richer return contract (e.g. a small result object
+      distinguishing "empty" / "claimed" / "claim-failed") threaded through
+      every existing call site, not a narrow single-file fix -- real design
+      surgery, scoped here rather than rushed.
+- [ ] **Deferred from Phase 1 (ninth review round):** `_RecordLock.__enter__`
+      creating/opening its sidecar file can itself raise `OSError`/
+      `PermissionError`, which currently escapes `pending_seed`'s own
+      documented "degrade to False, never raise" contract in
+      `claim_pending_seed`/`set_pending_seed`/`restore_pending_seed` alike.
+      A pre-existing lock-primitive gap (not introduced by this effort),
+      but worth hardening alongside the claim-ambiguity item above since
+      both touch the same call sites.
 
 ## Validation Plan
 
@@ -553,3 +572,53 @@ _Pending._
   - Full re-run after all of the above: `agent-worktrees` keyword sweep
     (223 tests) and the FULL `worktree-manager` suite (1707 tests, 13
     skipped) both pass with no regressions.
+- **2026-10-06** — `dev` advanced twice more while this PR awaited CI/review
+  (one real conflict, resolved by rebasing with a backup branch per
+  `git-collaboration` convention -- clean, no further conflicts on a
+  second rebase). A ninth Copilot review pass found 3 more real
+  robustness gaps, all fixed, plus 2 more review-provenance nits:
+  - **A degraded (not failed) liveness probe was treated as a confirmed
+    "no live mux."** `verify_worktree_active` degrades to
+    `LiveVerdict(mux_live=False, probes_ok=False)` on a mux/reclaim
+    hiccup -- not an exception -- so the prior `live_mux` check (`verdict
+    is not None and verdict.mux_live`) missed this case entirely and could
+    still claim/embed a seed the launcher then discards anyway on an
+    actually-live mux. Fixed in BOTH `resolve_cli.py` (JSON path) and
+    `resolve_launch_cli.py` (non-JSON path, carefully scoped so a
+    deliberately-skipped check -- `--dry-run`, which never mutates
+    `pending_seed` -- isn't mistaken for an uncertain one): an unconfirmed
+    probe now routes to the same queue-not-embed branch as a confirmed
+    live mux. New test
+    `test_degraded_liveness_probe_is_treated_as_uncertain_not_confirmed_absent`.
+  - **`set_pending_seed`'s own failure wasn't surfaced in the JSON
+    contract.** The JSON path's live-mux branch called it without
+    checking the return value, so a lock-contention/write failure while
+    queuing an explicit seed produced a plain successful plan with no
+    signal that the prompt never made it in. Added `seed_queue_failed:
+    bool` to the `launch` payload (only present/true on an actual
+    failure) -- an honest, non-fatal degradation: the launch itself still
+    proceeds (losing only the seed), but the caller can now tell. New
+    test `test_live_mux_seed_queue_failure_is_surfaced_not_silently_reported_success`.
+  - **Review-provenance nits (Low, x2):** removed the last two "review
+    finding" references from a source comment (`resolve_cli.py`) and a
+    test docstring (`test_resolve_seed_delivery.py`).
+  - **Accepted, narrower Phase-3-adjacent scope (not fixed this round):**
+    two related findings -- `_RecordLock.__enter__`'s own sidecar-creation
+    `OSError`/`PermissionError` escaping past `pending_seed`'s documented
+    "degrade to False" contract, and `claim_pending_seed`'s return value
+    being unable to distinguish "nothing was pending" from "claim failed
+    on lock contention/an unreadable record" (so an explicit seed can
+    proceed while an old, undelivered `pending_seed` silently survives to
+    be injected on a LATER resume as a stale, unexpected turn) -- are
+    real, but address a pre-existing lock primitive's own failure-mode
+    granularity (`_RecordLock`) and `claim_pending_seed`'s long-standing
+    two-state return contract (shared by every existing caller across the
+    codebase, not something introduced by this effort). Properly fixing
+    the latter needs a richer return type (or an out-parameter) threaded
+    through every call site, which is real design surgery rather than a
+    narrow, scoped Phase 1 fix -- noted here for a future pass rather than
+    rushed in this round.
+  - Full re-run: `agent-worktrees` keyword sweep (225 tests) passes with
+    no regressions (confirmed sufficient; the full `worktree-manager`
+    suite was already re-confirmed clean the prior round and this round's
+    changes don't touch that plugin).

@@ -353,7 +353,9 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
 
     interactive = not getattr(args, "json", False) and not getattr(args, "base", False)
     verdict = None
+    liveness_checked = False
     if interactive and not args.dry_run:
+        liveness_checked = True
         try:
             verdict = sessions.verify_worktree_active(record)
         except Exception:
@@ -551,7 +553,19 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     # site for the full rationale; this is the same accepted, narrow,
     # Phase-3-deferred risk, not a new one introduced by this sibling
     # non-JSON path.
-    live_mux = verdict is not None and getattr(verdict, "mux_live", False)
+    # A degraded probe (`verdict.probes_ok` false -- or the liveness check
+    # was attempted but raised, leaving `verdict` None) is NOT the same as
+    # a confirmed "no live mux" -- it means genuinely unknown, and treating
+    # it as "not live" risks the exact same silent loss a real live mux
+    # would cause. Treat "uncertain" the same as "live" here too -- but
+    # ONLY when the check was actually attempted (`liveness_checked`): a
+    # skipped check (non-interactive dispatch, or `--dry-run`, which never
+    # mutates `pending_seed` regardless) must not be mistaken for this.
+    live_mux = (
+        (liveness_checked and verdict is None)
+        or (verdict is not None and not getattr(verdict, "probes_ok", True))
+        or getattr(verdict, "mux_live", False)
+    )
     explicit_seed = getattr(args, "seed", None)
     delivered_seed = explicit_seed
     if not bare_resume and not live_mux:

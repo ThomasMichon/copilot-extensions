@@ -187,10 +187,10 @@ def test_bare_resume_leaves_a_persisted_pending_seed_queued_in_json_mode(
 def test_live_mux_in_json_mode_queues_explicit_seed_instead_of_embedding_unused_cmd(
     tmp_path: Path, monkeypatch, capfd,
 ):
-    """Review finding: the JSON path (`_resolve_json_mode`) is the Picker's
-    own real code path, and both launcher scripts probe for an existing
-    live mux session themselves BEFORE this `cmd` would ever run -- if one
-    exists, they reattach it and never exec `cmd` at all. Without the same
+    """The JSON path (`_resolve_json_mode`) is the Picker's own real code
+    path, and both launcher scripts probe for an existing live mux session
+    themselves BEFORE this `cmd` would ever run -- if one exists, they
+    reattach it and never exec `cmd` at all. Without the same
     `verdict.mux_live` detection the non-JSON path already has, a seed
     claimed/embedded here would be silently discarded on every JSON-mode
     live-mux reattach (worse than the non-JSON path's own queued-but-
@@ -221,10 +221,76 @@ def test_live_mux_in_json_mode_queues_explicit_seed_instead_of_embedding_unused_
     assert reloaded.pending_seed == "do the thing"
 
 
+def test_live_mux_seed_queue_failure_is_surfaced_not_silently_reported_success(
+    tmp_path: Path, monkeypatch, capfd,
+):
+    """A `set_pending_seed` failure (lock contention, an unreadable record,
+    a write failure) while queuing a seed for a live-mux reattach must be
+    surfaced in the returned plan (`seed_queue_failed: True`) -- the launch
+    itself still proceeds (losing only the seed, not the whole resume),
+    but silently reporting plain success would hide that the prompt never
+    made it in at all."""
+    from agent_worktrees import pending_seed as pending_seed_mod
+    from agent_worktrees import sessions as sessions_mod
+
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    monkeypatch.setattr(
+        sessions_mod, "verify_worktree_active",
+        lambda *_a, **_k: SimpleNamespace(mux_live=True),
+    )
+    monkeypatch.setattr(pending_seed_mod, "set_pending_seed", lambda *_a, **_k: False)
+
+    rc = resolve_cli.cmd_resolve(_args(seed="do the thing"))
+
+    assert rc == 0
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["launch"]["seed_claimed"] is False
+    assert payload["launch"]["seed_queue_failed"] is True
+
+
+def test_degraded_liveness_probe_is_treated_as_uncertain_not_confirmed_absent(
+    tmp_path: Path, monkeypatch, capfd,
+):
+    """`verify_worktree_active` degrades to `mux_live=False, probes_ok=False`
+    on a mux/reclaim hiccup -- NOT an exception. Treating that the same as
+    a confirmed "no live mux" risks the exact same silent loss a real live
+    mux would cause if the launcher then finds the mux anyway and
+    reattaches without executing the embedded `cmd`. An uncertain probe
+    must route to the same queue-not-embed branch as a confirmed live mux."""
+    from agent_worktrees import sessions as sessions_mod
+
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    monkeypatch.setattr(
+        sessions_mod, "verify_worktree_active",
+        lambda *_a, **_k: SimpleNamespace(mux_live=False, probes_ok=False),
+    )
+
+    rc = resolve_cli.cmd_resolve(_args(seed="do the thing"))
+
+    assert rc == 0
+    payload = json.loads(capfd.readouterr().out)
+    assert "--interactive" not in payload["launch"]["cmd"]
+    assert payload["launch"]["seed_claimed"] is False
+    reloaded = tracking.load_record(tmp_path / "wt-a.yaml")
+    assert reloaded.pending_seed == "do the thing"
+
+
 def test_seed_claimed_is_true_only_when_this_call_actually_embeds_a_seed(
     tmp_path: Path, monkeypatch, capfd,
 ):
-    """Explicit provenance (review finding): a delegated caller must not
+    """Explicit provenance: a delegated caller must not
     guess whether `cmd`'s own trailing argv is a claimed seed -- the
     returned plan's `seed_claimed` field is the sole source of truth, true
     only when `with_seed` actually ran in THIS call."""
