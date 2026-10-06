@@ -593,12 +593,15 @@ async def test_command_success_skips_repair(tmp_path):
 
 # -- Windows no-window creationflags on the mint/repair spawns ---------------
 
-async def test_command_mint_passes_no_window_creationflags(monkeypatch):
-    # The mint spawn must carry the standard Windows console-suppression flag
-    # (copilot-extensions#5425) -- captured via the same fake_exec monkeypatch
-    # pattern used for EntraInjector above, since asserting on a REAL spawn's
-    # creationflags isn't directly observable from Python.
-    from agent_mcp._exec import no_window_creationflags
+async def test_command_mint_passes_windowless_daemon_kwargs(monkeypatch):
+    # The mint spawn must carry whatever agent_procutil.
+    # windowless_daemon_kwargs() returns (copilot-extensions#5425; tree-reap
+    # follow-up) -- captured via the same fake_exec monkeypatch pattern used
+    # for EntraInjector above. Stub the helper to a sentinel rather than
+    # asserting a specific key, since its shape legitimately differs by
+    # platform (`creationflags` on Windows, `start_new_session` on POSIX).
+    sentinel = {"sentinel-no-window-flag": True}
+    monkeypatch.setattr("agent_mcp.auth.injectors.windowless_daemon_kwargs", lambda: sentinel)
 
     captured: dict = {}
 
@@ -613,12 +616,13 @@ async def test_command_mint_passes_no_window_creationflags(monkeypatch):
         "target_env": "API_KEY",
     }))
     assert await inj.child_env() == {"API_KEY": "abc"}
-    assert captured["kwargs"]["creationflags"] == no_window_creationflags()
+    assert captured["kwargs"]["sentinel-no-window-flag"] is True
 
 
-async def test_command_repair_passes_no_window_creationflags(monkeypatch):
-    # Same flag requirement on the separate `auth.repair` spawn path.
-    from agent_mcp._exec import no_window_creationflags
+async def test_command_repair_passes_windowless_daemon_kwargs(monkeypatch):
+    # Same requirement on the separate `auth.repair` spawn path.
+    sentinel = {"sentinel-no-window-flag": True}
+    monkeypatch.setattr("agent_mcp.auth.injectors.windowless_daemon_kwargs", lambda: sentinel)
 
     captured: list[dict] = []
 
@@ -639,7 +643,7 @@ async def test_command_repair_passes_no_window_creationflags(monkeypatch):
     # The mint attempt(s) raise before create_subprocess_exec returns, but the
     # call itself is still captured; the repair spawn is the other argv.
     assert len(captured) >= 2
-    assert all(kw.get("creationflags") == no_window_creationflags() for kw in captured)
+    assert all(kw.get("sentinel-no-window-flag") is True for kw in captured)
 
 
 # -- composite (multi-secret) injector --------------------------------------
