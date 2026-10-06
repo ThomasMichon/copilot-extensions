@@ -494,8 +494,24 @@ _versioned_activate() {
     fi
     local current_active
     current_active="$(_versioned_current)"
-    if [[ -n "$current_active" ]] && _version_lt "$SRC_VERSION" "$current_active" && [[ "$FORCE" -ne 1 ]]; then
-        _skip "Not activating: source $SRC_VERSION is older than already-active $current_active (a newer build activated first; --force to override)"
+    # Dual-authority comparison baseline, mirroring do_stamp's own guard:
+    # stamped-version is a SEPARATE authority a concurrent `stamp` action
+    # can publish WITHOUT ever activating (current-version stays untouched)
+    # -- comparing against current-version alone would let a delayed OLDER
+    # install still activate and overwrite current-version even though a
+    # NEWER version is already the intended/stamped one, stranding that
+    # newer snapshot. Read stamped-version directly (no interpreter needed)
+    # and activate against whichever of the two authorities is newer.
+    local activate_stamped=""
+    if [[ -f "$INSTALL_DIR/stamped-version" ]]; then
+        activate_stamped="$(cat "$INSTALL_DIR/stamped-version" 2>/dev/null || true)"
+    fi
+    local newest_published="$current_active"
+    if [[ -n "$activate_stamped" ]] && { [[ -z "$newest_published" ]] || _version_lt "$newest_published" "$activate_stamped"; }; then
+        newest_published="$activate_stamped"
+    fi
+    if [[ -n "$newest_published" ]] && _version_lt "$SRC_VERSION" "$newest_published" && [[ "$FORCE" -ne 1 ]]; then
+        _skip "Not activating: source $SRC_VERSION is older than already-published $newest_published (a newer build activated or stamped first; --force to override)"
         ACTIVATION_SUPERSEDED=1
         _unlock_activate
         return 0

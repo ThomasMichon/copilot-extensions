@@ -568,8 +568,28 @@ function Invoke-VersionedActivate {
     $activateMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
     try {
         $currentActive = Get-VersionedCurrent
-        if ($currentActive -and (Test-VersionLt -A $SrcVersion -B $currentActive) -and -not $Force) {
-            Write-Skip "Not activating: source $SrcVersion is older than already-active $currentActive (a newer build activated first; -Force to override)"
+        # Dual-authority comparison baseline, mirroring Invoke-Stamp's own
+        # guard: stamped-version is a SEPARATE authority a concurrent
+        # `stamp` action can publish WITHOUT ever activating (current-version
+        # stays untouched) -- comparing against current-version alone would
+        # let a delayed OLDER install still activate and overwrite
+        # current-version even though a NEWER version is already the
+        # intended/stamped one, stranding that newer snapshot. Read
+        # stamped-version directly (no interpreter needed, same marker-read
+        # pattern used throughout this file) and activate against whichever
+        # of the two authorities is actually newer.
+        $activateStamped = $null
+        $activateStampedPath = Join-Path $InstallDir 'stamped-version'
+        if (Test-Path $activateStampedPath) {
+            $activateStamped = (Get-Content -Path $activateStampedPath -Raw -ErrorAction SilentlyContinue)
+            if ($activateStamped) { $activateStamped = $activateStamped.Trim() }
+        }
+        $newestPublished = $currentActive
+        if ($activateStamped -and ((-not $newestPublished) -or (Test-VersionLt -A $newestPublished -B $activateStamped))) {
+            $newestPublished = $activateStamped
+        }
+        if ($newestPublished -and (Test-VersionLt -A $SrcVersion -B $newestPublished) -and -not $Force) {
+            Write-Skip "Not activating: source $SrcVersion is older than already-published $newestPublished (a newer build activated or stamped first; -Force to override)"
             $script:ActivationSuperseded = $true
             return $true
         }

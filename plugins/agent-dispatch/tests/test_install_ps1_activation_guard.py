@@ -53,6 +53,7 @@ def _run_activate_harness(
     *,
     src_version: str,
     current_active: str | None,
+    current_stamped: str | None = None,
     force: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     """Invoke-VersionedActivate's cross-version ordering guard, with
@@ -61,13 +62,19 @@ def _run_activate_harness(
     and the actual python/venv invocation replaced by a fake "python"
     native script that just drops a marker file -- so a test can prove
     whether the real activation call happened at all, not merely what it
-    would have printed. Cross-platform: a `.cmd` on Windows, a `chmod +x`
-    shebang shell script everywhere else -- NOT a `pwsh`-invoked script,
-    since `pwsh <path>` enforces a literal `.ps1` extension on the script
-    argument regardless of platform, and the real Invoke-VersionedActivate
-    always builds that argument as `versioned_runtime.py`."""
+    would have printed. `current_stamped`, when given, is written directly
+    to a `stamped-version` marker file -- the second, independent authority
+    the guard also compares against (a `stamp` action publishes this
+    without ever touching current-version). Cross-platform: a `.cmd` on
+    Windows, a `chmod +x` shebang shell script everywhere else -- NOT a
+    `pwsh`-invoked script, since `pwsh <path>` enforces a literal `.ps1`
+    extension on the script argument regardless of platform, and the real
+    Invoke-VersionedActivate always builds that argument as
+    `versioned_runtime.py`."""
     install_dir = tmp_path / "install"
     install_dir.mkdir(parents=True)
+    if current_stamped is not None:
+        (install_dir / "stamped-version").write_text(current_stamped, encoding="utf-8")
     activated_marker = tmp_path / "activated"
     if os.name == "nt":
         fake_python = tmp_path / "fake-python.cmd"
@@ -175,6 +182,67 @@ def test_activate_skips_when_older_than_currently_active(tmp_path: Path) -> None
 def test_activate_force_overrides_the_cross_version_ordering_guard(tmp_path: Path) -> None:
     result, activated = _run_activate_harness(
         tmp_path, src_version="0.2.0-dev1", current_active="0.2.0-dev2", force=True
+    )
+    assert "RETURNED:True" in result.stdout, result.stdout + result.stderr
+    assert activated.exists()
+    assert "SUPERSEDED:False" in result.stdout, result.stdout + result.stderr
+
+
+def test_activate_skips_when_older_than_a_stamped_version_with_no_active_one(tmp_path: Path) -> None:
+    """A delayed v1 install racing a v2 `stamp` must not activate and
+    strand the v2 snapshot: `stamp` publishes stamped-version WITHOUT ever
+    activating, so current-version can be entirely empty when this delayed
+    v1 install reaches its own activation guard. Comparing against
+    current-version alone would let it through; the dual-authority check
+    must also catch the newer stamped-version."""
+    result, activated = _run_activate_harness(
+        tmp_path, src_version="0.1.0-dev1", current_active=None, current_stamped="0.2.0-dev1"
+    )
+    assert "Not activating" in result.stdout, result.stdout + result.stderr
+    assert "RETURNED:True" in result.stdout, result.stdout + result.stderr
+    assert not activated.exists()
+    assert "SUPERSEDED:True" in result.stdout, result.stdout + result.stderr
+
+
+def test_activate_skips_when_older_than_a_stamped_version_newer_than_current(tmp_path: Path) -> None:
+    """The stamped authority can be newer than the current-active one even
+    when current-version IS set (an older real install is active while a
+    newer version has only been stamped, not yet activated) -- the guard
+    must pick the newer of the two authorities as its comparison baseline,
+    not just current-version."""
+    result, activated = _run_activate_harness(
+        tmp_path,
+        src_version="0.2.0-dev1",
+        current_active="0.1.0-dev1",
+        current_stamped="0.2.0-dev2",
+    )
+    assert "Not activating" in result.stdout, result.stdout + result.stderr
+    assert not activated.exists()
+    assert "SUPERSEDED:True" in result.stdout, result.stdout + result.stderr
+
+
+def test_activate_proceeds_when_newer_than_a_stale_stamped_version(tmp_path: Path) -> None:
+    """An older, already-superseded stamped-version must never block a
+    genuinely newer activation -- only the NEWER of the two authorities
+    matters as the floor."""
+    result, activated = _run_activate_harness(
+        tmp_path,
+        src_version="0.2.0-dev2",
+        current_active="0.2.0-dev1",
+        current_stamped="0.1.0-dev1",
+    )
+    assert "RETURNED:True" in result.stdout, result.stdout + result.stderr
+    assert activated.exists()
+    assert "SUPERSEDED:False" in result.stdout, result.stdout + result.stderr
+
+
+def test_activate_force_overrides_the_stamped_version_guard(tmp_path: Path) -> None:
+    result, activated = _run_activate_harness(
+        tmp_path,
+        src_version="0.1.0-dev1",
+        current_active=None,
+        current_stamped="0.2.0-dev1",
+        force=True,
     )
     assert "RETURNED:True" in result.stdout, result.stdout + result.stderr
     assert activated.exists()
