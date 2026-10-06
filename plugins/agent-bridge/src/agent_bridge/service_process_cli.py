@@ -173,30 +173,48 @@ def _pid_on_port(port: int) -> int | None:
 
 def _identity_termination_available() -> bool:
     """Whether this platform has a genuine identity-bound termination
-    primitive at all (a build-time/platform capability, independent of any
+    primitive at all (a build-time/kernel capability, independent of any
     specific pid). Windows always does (ctypes/kernel32); POSIX only when
-    both ``os.pidfd_open`` and ``signal.pidfd_send_signal`` are callable
-    (Linux 5.3+/Python 3.9+) -- absent on macOS/BSD."""
+    ``os.pidfd_open``/``signal.pidfd_send_signal`` are callable AND an
+    actual self-probe (``pidfd_open`` against our own, guaranteed-alive
+    pid) succeeds -- the Python bindings existing does not prove the
+    running kernel supports the syscall (an older kernel raises
+    ``ENOSYS``, which would otherwise be indistinguishable from a benign
+    per-victim lookup failure and incorrectly left unkilled instead of
+    falling back)."""
     if sys.platform == "win32":
         return True
     import signal as _signal
 
-    return callable(getattr(os, "pidfd_open", None)) and callable(
+    if not callable(getattr(os, "pidfd_open", None)) or not callable(
         getattr(_signal, "pidfd_send_signal", None)
-    )
+    ):
+        return False
+    try:
+        fd = os.pidfd_open(os.getpid(), 0)
+    except OSError:
+        return False
+    else:
+        os.close(fd)
+        return True
 
 
-def _enumerate_descendant_pids_windows(pid: int) -> list[tuple[int, str]]:
-    """Live descendants of *pid* on Windows, each with its own freshly
-    captured process-start-time identity token.
+def _enumerate_descendant_pids_windows(pid: int) -> tuple[list[tuple[int, int]], bool]:
+    """``(pid, parent_pid)`` pairs for every live descendant of *pid* on
+    Windows, plus whether the census itself succeeded.
 
-    Captured via a single WMI snapshot (all pid/parent-pid pairs) walked as
-    a BFS from *pid*, so a per-descendant token is taken close to the kill
-    without one round-trip per process.
+    Deliberately returns bare ancestry pairs, NOT identity tokens: a token
+    read any later than this one bulk snapshot would be sampling whichever
+    process currently owns that pid, not the one the snapshot actually
+    named -- see ``_verify_descendant_identity_windows``, which re-verifies
+    both ancestry and identity together, immediately before each kill.
+
+    The returned ``bool`` distinguishes a genuinely empty descendant list
+    (query succeeded, *pid* simply has no children) from an enumeration
+    failure (the query itself didn't run) -- callers must not treat the
+    latter as "no descendants to kill".
     """
     import subprocess as sp
-
-    from zdd import diagnostics
 
     try:
         out = sp.run(
@@ -211,9 +229,12 @@ def _enumerate_descendant_pids_windows(pid: int) -> list[tuple[int, str]]:
             capture_output=True,
             text=True,
             timeout=15,
+            **_core().no_window_kwargs(),
         )
     except (OSError, sp.TimeoutExpired):
-        return []
+        return [], False
+    if out.returncode != 0:
+        return [], False
 
     children_of: dict[int, list[int]] = {}
     for line in (out.stdout or "").splitlines():
@@ -227,90 +248,145 @@ def _enumerate_descendant_pids_windows(pid: int) -> list[tuple[int, str]]:
             continue
         children_of.setdefault(parent_pid, []).append(child_pid)
 
-    descendants: list[tuple[int, str]] = []
+    descendants: list[tuple[int, int]] = []
     seen = {pid}
     frontier = [pid]
     while frontier:
-        next_frontier = [
-            child_pid
-            for parent_pid in frontier
-            for child_pid in children_of.get(parent_pid, [])
-            if child_pid not in seen
-        ]
-        for child_pid in next_frontier:
-            seen.add(child_pid)
-            start = diagnostics.process_start_time(child_pid)
-            if start is not None:
-                descendants.append((child_pid, start))
+        next_frontier = []
+        for parent_pid in frontier:
+            for child_pid in children_of.get(parent_pid, []):
+                if child_pid in seen:
+                    continue
+                seen.add(child_pid)
+                descendants.append((child_pid, parent_pid))
+                next_frontier.append(child_pid)
         frontier = next_frontier
-    return descendants
+    return descendants, True
 
 
-def _kill_pid_tree_windows_if_identity(pid: int) -> None:
-    """Identity-bound Windows termination of *pid* AND its live descendants.
+def _verify_descendant_identity_windows(child_pid: int, recorded_parent_pid: int) -> str | None:
+    """Re-verify *child_pid* is STILL a live child of *recorded_parent_pid*
+    and return its current process-start-time identity token, or ``None``
+    if either check fails.
+
+    Performed as one narrow, per-pid re-check immediately before use --
+    never trusting the bulk census alone -- so a pid the OS reused for an
+    unrelated process between the census and this point (a different
+    parent, or no live parent at all) is rejected here rather than
+    accepted on stale ancestry evidence.
+    """
+    import subprocess as sp
+
+    from zdd import diagnostics
+
+    try:
+        out = sp.run(
+            [
+                _powershell_host(),
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "(Get-CimInstance Win32_Process -Filter "
+                f"'ProcessId={child_pid}' -ErrorAction SilentlyContinue).ParentProcessId",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            **_core().no_window_kwargs(),
+        )
+    except (OSError, sp.TimeoutExpired):
+        return None
+    current_ppid = (out.stdout or "").strip()
+    if not current_ppid.isdigit() or int(current_ppid) != recorded_parent_pid:
+        return None
+    return diagnostics.process_start_time(child_pid)
+
+
+def _kill_pid_tree_windows_if_identity(pid: int, start_time: str) -> None:
+    """Identity-bound Windows termination of *pid* (using the
+    already-captured *start_time*) AND its live descendants.
 
     ``zdd.diagnostics``'s Windows path (``TerminateProcess`` on a verified
     handle) only ever terminates the single named process -- unlike the
     legacy ``taskkill /T`` this replaces, it has no tree semantics of its
-    own. Descendants are enumerated and their own identity tokens captured
-    *before* the root is killed (so a kill doesn't orphan/rename-away
-    anything mid-enumeration), then each -- root and every descendant -- is
-    terminated through its own freshly-captured ``(pid, start_time)`` pair,
-    never a bare ``taskkill``/PID-only signal.
+    own. Descendant ancestry is enumerated via one bulk census, but each
+    descendant's ancestry AND identity token are re-verified together,
+    immediately before its own kill (see
+    ``_verify_descendant_identity_windows``) -- never a token sampled
+    separately from a stale bulk snapshot.
+
+    A failed census (vs. a genuinely empty one) is surfaced via a stderr
+    warning rather than silently treated as "no descendants" -- the root
+    is still killed (best effort), but some live children may survive
+    when the census itself could not run, and that is made visible rather
+    than silently assumed away. This never falls back to a bare,
+    unverified ``taskkill``.
     """
     from zdd import diagnostics
 
-    descendants = _enumerate_descendant_pids_windows(pid)
-    start_time = diagnostics.process_start_time(pid)
-    if start_time is not None:
-        diagnostics.terminate_pid_if_identity(pid, start_time)
-    for child_pid, child_start in descendants:
-        diagnostics.terminate_pid_if_identity(child_pid, child_start)
+    descendants, census_ok = _enumerate_descendant_pids_windows(pid)
+    if not census_ok:
+        print(
+            f"[WARN] agent-bridge: descendant-process census failed for pid {pid}; "
+            "only the root process was identity-verified and killed -- some live "
+            "children may survive",
+            file=sys.stderr,
+        )
+    diagnostics.terminate_pid_if_identity(pid, start_time)
+    for child_pid, recorded_parent_pid in descendants:
+        child_start = _verify_descendant_identity_windows(child_pid, recorded_parent_pid)
+        if child_start is not None:
+            diagnostics.terminate_pid_if_identity(child_pid, child_start)
 
 
 def _kill_pid(pid: int) -> None:
     """Terminate *pid* (and, on Windows, its live descendants), routed
     through an identity-bound OS object whenever this platform has one.
 
-    Re-verifies ``_pid_is_agent_bridge(pid)`` itself, immediately before
-    acting, even though every current caller already performed that same
-    check beforehand -- a caller's check and this function used to be two
-    separate calls, leaving a window in which the OS could reuse *pid* for
-    an unrelated process between them. Doing the check again right here,
-    directly ahead of capturing the termination token, narrows that window
-    to the smallest span this function can control (matching
-    ``worktree_manager.mux_daemon_cutover._terminate_mux_daemon_pid``'s
-    #5060 pattern of performing the ownership check and the kill inside the
-    same function). It still cannot close a theoretical reuse race between
-    *this* check and the identity-token capture a few lines below --
-    ``terminate_pid_if_identity`` itself is what makes that final, narrow
-    window safe, by binding the actual termination to the exact
-    ``(pid, start_time)`` pair captured immediately prior.
+    Captures the process-start-time identity token FIRST, before any
+    other check -- including before ``_pid_is_agent_bridge(pid)``'s own
+    (comparatively slow, subprocess-based) ownership re-verification. This
+    ordering matters: once the token is captured, ``terminate_pid_if
+    _identity`` performs its OWN final re-verification immediately before
+    the actual kill, so a pid reused at ANY point after this capture is
+    safely rejected there, regardless of how much time later operations
+    (the ownership check, Windows descendant enumeration, etc.) take.
+    Capturing the token any later -- e.g. after the ownership check, as a
+    prior version of this function did -- would instead risk capturing a
+    *replacement* process's token if reuse happened during that slower
+    check, since nothing would subsequently catch the mismatch.
 
     Falls back to a legacy, unverified kill **only** when this platform
     has no identity-bound termination primitive available at all (e.g.
-    non-Linux POSIX without ``pidfd_open``/``pidfd_send_signal`` --
-    ``_identity_termination_available()``), preserving this function's
-    prior unconditional-kill behavior there. Windows always has the
-    primitive, so it never takes this fallback. A **per-pid** lookup
-    failure (the handle/pidfd could not be opened for *this* specific pid,
-    its start-time could not be read, or the signal itself failed) is
-    different from platform incapability and must never fall back to a
-    bare, unverified kill -- a pid reused in exactly that window is the
-    hazard this exists to close, so those cases simply skip the kill
-    rather than risk signaling a replacement process.
+    non-Linux POSIX without a kernel that actually supports
+    ``pidfd_open`` -- ``_identity_termination_available()``, which
+    self-probes rather than just checking attribute existence),
+    preserving this function's prior unconditional-kill behavior there.
+    Windows always has the primitive, so it never takes this fallback. A
+    **per-pid** lookup failure (the handle/pidfd could not be opened for
+    *this* specific pid, its start-time could not be read, or the signal
+    itself failed) is different from platform incapability and must never
+    fall back to a bare, unverified kill -- a pid reused in exactly that
+    window is the hazard this exists to close, so those cases simply skip
+    the kill rather than risk signaling a replacement process.
     """
-    if not _pid_is_agent_bridge(pid):
-        return
-
-    if _identity_termination_available():
-        if sys.platform == "win32":
-            _kill_pid_tree_windows_if_identity(pid)
-            return
+    identity_available = _identity_termination_available()
+    if identity_available:
         from zdd import diagnostics
 
         start_time = diagnostics.process_start_time(pid)
-        if start_time is not None:
+    else:
+        start_time = None
+
+    if not _pid_is_agent_bridge(pid):
+        return
+
+    if identity_available:
+        if start_time is None:
+            return
+        if sys.platform == "win32":
+            _kill_pid_tree_windows_if_identity(pid, start_time)
+        else:
             diagnostics.terminate_pid_if_identity(pid, start_time)
         return
 

@@ -888,25 +888,35 @@ worktree-manager.
       across every plugin.
 - [x] **PID-reuse-safe termination (agent-bridge `_kill_pid` site).** Fixed
       the remaining site the 2026-10-05 audit above found:
-      `_kill_pid` now routes through
-      `zdd.diagnostics.terminate_pid_if_identity` with a
-      `process_start_time` token captured immediately before the kill,
-      mirroring `_terminate_mux_daemon_pid`'s design exactly — identity
+      `_kill_pid` captures its `process_start_time` identity token
+      **first**, before any other check (including its own
+      `_pid_is_agent_bridge` ownership re-verification) — so a pid reused
+      at any point after that capture is caught by
+      `zdd.diagnostics.terminate_pid_if_identity`'s own final
+      re-verification at the actual kill, rather than this function
+      racing to capture a replacement process's token during a slower
+      check. Mirrors `_terminate_mux_daemon_pid`'s design: identity
       *mismatch* (pid reuse) skips the kill entirely; an unavailable
-      identity primitive (e.g. non-Linux POSIX with no `pidfd_open`) falls
-      back to the prior unconditional signal/`taskkill`, preserving this
-      function's existing guarantee on those platforms rather than
-      silently losing kill capability there. `_kill_pid` re-verifies
-      `_pid_is_agent_bridge` itself immediately before acting (not just
-      trusting a caller's earlier check), and on Windows now enumerates
-      and identity-verifies live descendants too — the identity-bound
-      primitive only ever terminates the single named process, unlike the
-      `taskkill /T` it replaces, so tree semantics needed reconstructing
-      explicitly rather than assumed. `_kill_pid` has several callers
-      (`_service_stop`'s victim loop, `_force_kill_agent_bridge_tree`'s
-      Windows path); fixing it in the one shared function covers all of
-      them, not just the specific `_service_stop` call site the audit
-      named. **Does NOT close #5006 fully**: `_force_kill_agent_bridge_tree`'s
+      identity primitive falls back to the prior unconditional
+      signal/`taskkill`. That fallback only fires on genuine platform
+      incapability — `_identity_termination_available()` self-probes
+      `pidfd_open` against the caller's own pid rather than just checking
+      attribute existence, since an older kernel can expose the Python
+      binding yet still raise `ENOSYS` at call time. On Windows,
+      descendants are enumerated via one bulk census, but each
+      descendant's ancestry AND identity token are re-verified together,
+      immediately before its own kill (`_verify_descendant_identity_windows`)
+      — never a token sampled separately from a stale bulk snapshot; a
+      failed census (vs. a genuinely empty one) still kills the
+      identity-verified root but surfaces a stderr warning rather than
+      silently treating the gap as "no descendants". `_kill_pid` has
+      several callers (`_service_stop`'s victim loop,
+      `_force_kill_agent_bridge_tree`'s Windows path); fixing it in the
+      one shared function covers all of them, not just the specific
+      `_service_stop` call site the audit named. Landed via
+      [PR #5524](https://github.com/ThomasMichon/copilot-extensions/pull/5524)
+      after 2 rounds of Copilot review (9 findings total, all fixed).
+      **Does NOT close #5006 fully**: `_force_kill_agent_bridge_tree`'s
       own POSIX path still has a bare, unverified `os.kill(pid, SIGKILL)`
       fallback when `safe_killpg` fails — a separate call site `_kill_pid`
       is never reached from on that path, needing its own SIGKILL-capable
@@ -1192,7 +1202,39 @@ claiming discipline alone.
   to this change); `test_session_host.py` hits a pre-existing
   pytest-capture `OSError: Bad file descriptor` teardown issue on this
   machine even run alone, unrelated to this diff (no session-host code
-  touched).
+  touched). A second review round on the same PR (after pushing the
+  round-1 fixes) caught 5 more real findings, all fixed before merge: (a)
+  the Windows descendant-enumeration bulk census sampled each child's
+  identity token in a LATER, separate step — if a child exited and its
+  pid was reused in between, the replacement's token would be captured
+  and "verified" successfully — added `_verify_descendant_identity_windows`
+  to re-verify both ancestry (the recorded parent pid still matches,
+  freshly re-read) AND identity together, immediately before each child's
+  own kill, never trusting the stale bulk snapshot alone; (b) the root's
+  own `process_start_time` was still captured AFTER the (slow,
+  subprocess-based) `_pid_is_agent_bridge` ownership check — reordered so
+  the token is captured FIRST, before any other check, so a pid reused
+  during that slower check is caught by `terminate_pid_if_identity`'s own
+  final re-verification rather than racing to capture a replacement's
+  token; (c) `_identity_termination_available()` only checked that
+  `os.pidfd_open`/`signal.pidfd_send_signal` were callable, which doesn't
+  prove the running kernel actually supports the syscall (an older kernel
+  can expose the Python binding yet raise `ENOSYS`) — added a real
+  self-probe (`pidfd_open` against the caller's own, guaranteed-alive
+  pid) so genuine kernel incapability is distinguished from a per-victim
+  lookup failure; (d) the Windows descendant-census PowerShell launch
+  lacked the repo's standard no-window flags — added
+  `core.no_window_kwargs()`, matching this module's own existing pattern
+  elsewhere; (e) a failed census (the PowerShell query itself erroring or
+  timing out) was indistinguishable from a genuinely empty descendant
+  list, silently leaving live children unaccounted for — census now
+  returns an explicit success flag, and a failure surfaces a stderr
+  warning (root is still killed, best effort) rather than silently
+  proceeding as if there were no descendants. Expanded
+  `test_kill_pid_identity.py` to 10 tests covering token-before-ownership
+  ordering, descendant ancestry re-verification rejecting a stale/wrong
+  parent, the pidfd self-probe distinguishing missing-attribute from
+  kernel-ENOSYS, and census-failure visibility.
 - **2026-10-06** — Landed a preliminary, non-attributing registry listing
   for #5001's Phase 1 attribution slice: `worktree-manager daemons
   mappings [--json]` (PR
