@@ -870,34 +870,41 @@ worktree-manager.
       agent-dispatch, agent-worktrees, worktree-manager), so it's scoped as
       its own PR rather than folded into the fix above. Tracked as
       [#5006](https://github.com/ThomasMichon/copilot-extensions/issues/5006).
-- [x] **Background daemon rotation -- Phase 1 (observability).** Resident
-      per-version mux-daemons accumulate indefinitely: `activate_after_update()`'s
-      cutover is only attempted opportunistically (at whichever session's
-      `self_update()` call happens to run next) and a daemon with even one
-      long-lived client can block its own retirement forever with no retry.
-      Proposed 5-phase plan (observability → retire-idle-daemon →
-      client-side re-resolution at idle boundaries → periodic sweep →
-      validation), modeled on `agent-bridge`/`agent-dispatch`'s own
-      drain/cutover conduct and `agent-worktrees`' existing
-      cooldown-throttled resident reaper. **Phase 1 landed:**
-      `worktree-manager mux-daemon status [--json]` (aliased `daemons
-      status`) lists every resident mux-daemon for the install root --
-      pid/port/active-endpoint flag, and (when reachable, owner-verified,
-      and running compatible code) its own version/attached-client-count/
-      busy state. Landed via
-      [#5131](https://github.com/ThomasMichon/copilot-extensions/pull/5131)
-      plus a follow-up,
-      [#5392](https://github.com/ThomasMichon/copilot-extensions/pull/5392),
-      that closed 9 rounds of Copilot review findings #5131 itself merged
-      before it could absorb (see Journal) -- including a HIGH-severity
-      control-token-disclosure fix (OS-owner verification via Windows SIDs/
-      POSIX uid, plus a narrowing post-connection re-check), a coalescing
-      bug that undercounted concurrent health probes, and an alias that
-      over-exposed the internal `mux-daemon` command group. Phases 2-4 (the
-      actual retirement sweep) remain open and still need Phase 3's
-      client-side re-resolution piece scoped in `agent-worktrees` first.
-      Tracked as
+- **Background daemon rotation.** Resident per-version mux-daemons
+      accumulate indefinitely: `activate_after_update()`'s cutover is only
+      attempted opportunistically (at whichever session's `self_update()`
+      call happens to run next) and a daemon with even one long-lived
+      client can block its own retirement forever with no retry. Proposed
+      5-phase plan (observability → retire-idle-daemon → client-side
+      re-resolution at idle boundaries → periodic sweep → validation),
+      modeled on `agent-bridge`/`agent-dispatch`'s own drain/cutover
+      conduct and `agent-worktrees`' existing cooldown-throttled resident
+      reaper. Tracked as
       [#5001](https://github.com/ThomasMichon/copilot-extensions/issues/5001).
+  - [x] Phase 1, aggregate slice: `worktree-manager mux-daemon status
+        [--json]` (aliased `daemons status`) lists every resident
+        mux-daemon for the install root -- pid/port/active-endpoint flag,
+        and (when reachable, owner-verified, and running compatible code)
+        its own version/attached-client-COUNT/busy state. Landed via
+        [#5131](https://github.com/ThomasMichon/copilot-extensions/pull/5131)
+        plus a follow-up,
+        [#5392](https://github.com/ThomasMichon/copilot-extensions/pull/5392),
+        that closed 9 rounds of Copilot review findings #5131 itself
+        merged before it could absorb (see Journal) -- including a
+        HIGH-severity control-token-disclosure fix (OS-owner verification
+        via Windows SIDs/POSIX uid, plus a narrowing post-connection
+        re-check), a coalescing bug that undercounted concurrent health
+        probes, and an alias that over-exposed the internal `mux-daemon`
+        command group.
+  - [ ] Phase 1, attribution slice (still open): attributing each
+        attached client to its specific project/worktree_id/mux_session
+        identity (and that connection's own busy state) -- the issue's
+        original Phase 1 scope, explicitly deferred in #5131/#5392 since
+        no existing wire RPC or in-memory structure correlates a live
+        connection to a mapping entry yet.
+  - [ ] Phases 2-4 (the actual retirement sweep): remain open, and still
+        need Phase 3's client-side re-resolution piece scoped in
+        `agent-worktrees` first.
 - [x] `doctor`/validation breadth: plugin-catalog alignment (coverage)
       reporting landed (PR #4986), covering unmet-plugin-prerequisite/
       cross-plugin-drift detection. The governing vision
