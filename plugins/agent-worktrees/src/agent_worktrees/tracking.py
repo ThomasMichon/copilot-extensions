@@ -763,9 +763,10 @@ class WorktreeRecord:
     # unlike ``started_at`` (only second-precision), this lets a consumer
     # (``root_chain``) detect "is this the SAME incarnation of this
     # worktree id, or was it reaped and recreated within the same second?"
-    # Absent on a pre-existing record (never backfilled): such a record
-    # simply can't participate in that freeze/invalidation mechanism.
-    # Emitted only when set, so a legacy YAML stays byte-identical.
+    # Absent on a pre-existing record until ``root_chain`` lazily backfills
+    # it on first touch (``_ensure_creation_nonce``, matching ``codename``'s
+    # own first-touch backfill). Emitted only when set, so legacy YAML
+    # stays byte-identical until that first touch.
     creation_nonce: str = ""
     # worktree-finality-and-obligations Phase 2: the exact resources released by
     # the MOST RECENT `release_all_resources` finalize cascade (a snapshot, not

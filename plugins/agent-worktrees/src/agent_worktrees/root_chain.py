@@ -429,8 +429,12 @@ def resolve_root_codename(
     being reaped and recreated (a fresh ``creation_nonce``), each invalidate
     the stale freeze automatically, rather than requiring explicit cleanup
     at every tracking-record deletion call site. A chain with any hop
-    predating ``creation_nonce`` never freezes at all (always computed
-    live -- safe, just less efficient). The read-check -> compute -> write
+    predating ``creation_nonce`` (a worktree created before this field
+    existed) gets that hop's nonce lazily BACKFILLED on first touch
+    (:func:`_ensure_creation_nonce`, same first-touch pattern as the
+    primary codename) and then freezes normally from then on; only an
+    actual backfill failure this call (a lock contention or write error)
+    falls back to computing fresh, unfrozen, for that one call. The read-check -> compute -> write
     is itself serialized under this worktree's own tracking record lock
     (:class:`tracking._RecordLock`) so two concurrent publish/finalize
     processes can't both observe "not frozen," independently derive
