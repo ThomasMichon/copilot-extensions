@@ -61,16 +61,28 @@ work in-process.
   $psi.RedirectStandardError = $true
   $psi.CreateNoWindow = $true
   $p = [System.Diagnostics.Process]::Start($psi)
-  $stdout = $p.StandardOutput.ReadToEnd()
-  $stderr = $p.StandardError.ReadToEnd()
+  # Sequential ReadToEnd() on both streams can deadlock: the child blocks on a
+  # full stderr pipe while stdout's ReadToEnd() is still waiting for EOF, and
+  # neither side ever reaches the other read. ReadToEndAsync() on BOTH streams
+  # before WaitForExit() keeps both pipes draining concurrently via the .NET
+  # thread pool regardless of how much either stream writes -- this does not
+  # depend on PowerShell's own event/idle loop the way Register-ObjectEvent +
+  # BeginOutputReadLine does (that combination silently captures almost
+  # nothing here, because the queued events never get a turn to run during a
+  # single blocking script with no idle periods).
+  $stdoutTask = $p.StandardOutput.ReadToEndAsync()
+  $stderrTask = $p.StandardError.ReadToEndAsync()
   $p.WaitForExit()
+  [System.Threading.Tasks.Task]::WaitAll($stdoutTask, $stderrTask)
+  $stdout = $stdoutTask.Result
+  $stderr = $stderrTask.Result
   ```
 
   This is the PowerShell/.NET equivalent of the Python `CREATE_NO_WINDOW` route
   below -- `[System.Diagnostics.ProcessStartInfo].CreateNoWindow` plus
-  `UseShellExecute = $false` suppresses the window while
-  `RedirectStandardOutput`/`RedirectStandardError` still captures output, which
-  `conhost.exe --headless` cannot do.
+  `UseShellExecute = $false` suppresses the window while the two
+  `ReadToEndAsync()` calls still capture output, which `conhost.exe
+  --headless` cannot do.
 - `Start-Process -WindowStyle Hidden` is acceptable **only** for a true
   GUI-subsystem executable that never allocates a console of its own; it is
   not sufficient for `cmd.exe`, `powershell.exe`, `pwsh.exe`, `python.exe`,

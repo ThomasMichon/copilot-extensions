@@ -21,8 +21,14 @@ the paired skill) instead of a bare `Start-Process`, `os.system`, or unflagged
 `child_process.spawn`. When the caller needs captured output (not just
 suppression), `conhost.exe --headless` does not pipe stdout/stderr back --
 use `CREATE_NO_WINDOW` (Python) or `[System.Diagnostics.ProcessStartInfo]`
-with `CreateNoWindow = $true` + `RedirectStandardOutput`/`RedirectStandardError`
-(PowerShell) instead. Prefer
+with `CreateNoWindow = $true` plus **`ReadToEndAsync()` on both
+StandardOutput and StandardError, started before `WaitForExit()`**
+(PowerShell) instead -- sequential `StandardOutput.ReadToEnd()` then
+`StandardError.ReadToEnd()` can deadlock on a full pipe, and
+`Register-ObjectEvent` + `BeginOutputReadLine()` silently captures almost
+nothing in a single blocking script (those events need PowerShell's own idle
+loop, which a blocking `WaitForExit()` never yields to); see the paired skill
+for the full, verified pattern. Prefer
 routing to an existing local API/runtime over spawning a process at all.
 Before starting a long-lived, repeating, or backgrounded process, invoke the
 `spawning-headless-processes` skill to select the correct primitive for the
