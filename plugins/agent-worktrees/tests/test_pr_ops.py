@@ -5426,7 +5426,7 @@ class TestClassifyRecordsConvo:
         m = self._wire(monkeypatch, raw_state=git_ops.WorktreeState.UNUSED)
         rec = self._rec(tmp_path)
         ctx = sessions.SessionContext()
-        ctx.turn_count[m._normalize_path(str(tmp_path))] = 5
+        ctx.turn_count[sessions._normalize_path(str(tmp_path))] = 5
         out = m._classify_records([rec], ctx)
         assert out["wt-003"].state == git_ops.WorktreeState.CONVO
 
@@ -5442,7 +5442,7 @@ class TestClassifyRecordsConvo:
         m = self._wire(monkeypatch, raw_state=git_ops.WorktreeState.WIP)
         rec = self._rec(tmp_path)
         ctx = sessions.SessionContext()
-        ctx.turn_count[m._normalize_path(str(tmp_path))] = 9
+        ctx.turn_count[sessions._normalize_path(str(tmp_path))] = 9
         out = m._classify_records([rec], ctx)
         assert out["wt-003"].state == git_ops.WorktreeState.WIP
 

@@ -439,11 +439,6 @@ def _activity_age_str(iso: str) -> str | None:
         return None
 
 
-def _normalize_path(p: str) -> str:
-    """Normalize for comparison -- strip trailing separators."""
-    return p.rstrip("/\\")
-
-
 def _hosted_session_blocks_cleanup(record) -> bool:
     """Whether an external session may still depend on this checkout."""
     if (
@@ -470,16 +465,16 @@ def _build_active_paths(
     """
     if session_ctx is None:
         session_ctx = sessions.scan_sessions_fast(records)
-    active = {_normalize_path(p) for p, sids in session_ctx.active_sessions.items() if sids}
+    active = {sessions._normalize_path(p) for p, sids in session_ctx.active_sessions.items() if sids}
     for rec in records:
         if rec.worktree_path and _hosted_session_blocks_cleanup(rec):
-            active.add(_normalize_path(rec.worktree_path))
+            active.add(sessions._normalize_path(rec.worktree_path))
     # Live multiplexer sessions (independent of lock files), batched.
     mux_sessions = sessions._list_mux_sessions()
     if mux_sessions is not None:
         for rec in records:
             if rec.worktree_path and sessions.mux_session_name(rec.worktree_id) in mux_sessions:
-                active.add(_normalize_path(rec.worktree_path))
+                active.add(sessions._normalize_path(rec.worktree_path))
     else:
         # Batch list unavailable (mux missing or blocked): prefer the #4057
         # cached liveness hint on the record (a free read, stamped by the
@@ -495,9 +490,9 @@ def _build_active_paths(
                 continue
             hint = _fresh_mux_live_hint(rec)
             if hint is True:
-                active.add(_normalize_path(rec.worktree_path))
+                active.add(sessions._normalize_path(rec.worktree_path))
             elif sessions.has_mux_session(rec.worktree_id):
-                active.add(_normalize_path(rec.worktree_path))
+                active.add(sessions._normalize_path(rec.worktree_path))
     # #4057/#1416 bare-resume blind spot: a bare-resumed Copilot (cwd=home) is
     # invisible to BOTH the lock scan above (its session isn't registered under
     # the worktree) and the mux batch (it has no mux), so union in the cached
@@ -509,7 +504,7 @@ def _build_active_paths(
     # never-reconciled record (hint None) is a no-op.
     for rec in records:
         if rec.worktree_path and _fresh_bound_live_hint(rec) is True:
-            active.add(_normalize_path(rec.worktree_path))
+            active.add(sessions._normalize_path(rec.worktree_path))
     # #4272 bridge-lock layer: a bridge-owned Copilot writes a provable-liveness
     # ``bridge.lock`` carrying its worktree id, so union in every worktree with a
     # live one -- the cheap, cwd-independent, file-first successor to the
@@ -522,7 +517,7 @@ def _build_active_paths(
     if bridge_live:
         for rec in records:
             if rec.worktree_path and rec.worktree_id in bridge_live:
-                active.add(_normalize_path(rec.worktree_path))
+                active.add(sessions._normalize_path(rec.worktree_path))
     return active
 
 
@@ -1012,7 +1007,7 @@ def _classify_one_record(
     # Layer the session-derived CONVO refinement so this data contract
     # reports the same display state the tmux status bar does.
     if session_ctx is not None:
-        turns = session_ctx.turn_count.get(_normalize_path(rec.worktree_path), 0,)
+        turns = session_ctx.turn_count.get(sessions._normalize_path(rec.worktree_path), 0,)
         if turns:
             info = dataclasses.replace(
                 info,
@@ -1291,7 +1286,7 @@ def _worktree_to_dict(
         # never re-derive eligibility from display heuristics. The bucket is
         # flag-independent; the executor still re-checks safety per worktree.
         _turns = (
-            session_ctx.turn_count.get(_normalize_path(rec.worktree_path), 0)
+            session_ctx.turn_count.get(sessions._normalize_path(rec.worktree_path), 0)
             if session_ctx is not None
             else 0
         )
@@ -1339,7 +1334,7 @@ def _worktree_to_dict(
         d["mux_clients"] = mux_info.clients
         d["mux_attached"] = mux_info.attached
     if session_ctx is not None:
-        norm = _normalize_path(rec.worktree_path)
+        norm = sessions._normalize_path(rec.worktree_path)
         d["turn_count"] = session_ctx.turn_count.get(norm, 0)
         # Legacy records with no registry retain the scan-derived count.  Once
         # a registry exists, its journal is authoritative even when a session
@@ -4677,7 +4672,7 @@ def reap_one(
 
     session_ctx = sessions.scan_sessions_fast([rec])
     active_paths = _build_active_paths([rec], session_ctx)
-    turns = session_ctx.turn_count.get(_normalize_path(rec.worktree_path), 0)
+    turns = session_ctx.turn_count.get(sessions._normalize_path(rec.worktree_path), 0)
 
     if reconcile_prs and rec.prs:
         lookup = _make_pr_lookup(config)

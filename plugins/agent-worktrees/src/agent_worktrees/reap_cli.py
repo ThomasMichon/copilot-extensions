@@ -33,7 +33,6 @@ def _enumerate_launcher_shells(): return _core()._enumerate_launcher_shells()
 def _apply_tracking_override(*args, **kwargs): return _core()._apply_tracking_override(*args, **kwargs)
 def _build_active_paths(*args, **kwargs): return _core()._build_active_paths(*args, **kwargs)
 def _iso_epoch(*args, **kwargs): return _core()._iso_epoch(*args, **kwargs)
-def _normalize_path(*args, **kwargs): return _core()._normalize_path(*args, **kwargs)
 def _reap_worktree(*args, **kwargs): return _core()._reap_worktree(*args, **kwargs)
 def _revalidate_cleanup_safety(*args, **kwargs):
     from . import cleanup_gc_cli
@@ -243,7 +242,7 @@ def _remove_managed_worktree(
         if sessions.has_mux_session(rec.worktree_id):
             return False, ["live mux appeared before removal"]
         context = sessions.scan_sessions_fast([rec])
-        norm = _normalize_path(rec.worktree_path) if rec.worktree_path else ""
+        norm = sessions._normalize_path(rec.worktree_path) if rec.worktree_path else ""
         if norm and norm in context.active_sessions:
             return False, ["live session appeared before removal"]
         if rec.branch and rec.worktree_path and Path(rec.worktree_path).exists():
@@ -425,7 +424,7 @@ def sweep_managed_worktrees(
         name = sessions.mux_session_name(rec.worktree_id)
         has_live_mux = name in mux
         attached = bool(mux.get(name))
-        norm = _normalize_path(rec.worktree_path) if rec.worktree_path else ""
+        norm = sessions._normalize_path(rec.worktree_path) if rec.worktree_path else ""
         has_live_session = norm in session_ctx.active_sessions
 
         checkout_exists = bool(rec.worktree_path) and Path(rec.worktree_path).exists()
@@ -525,7 +524,7 @@ def sweep_managed_worktrees(
             fresh_name = sessions.mux_session_name(current.worktree_id)
             fresh_ctx = sessions.scan_sessions_fast([current])
             fresh_active_paths = _build_active_paths([current], fresh_ctx)
-            fresh_norm = _normalize_path(current.worktree_path) if current.worktree_path else ""
+            fresh_norm = sessions._normalize_path(current.worktree_path) if current.worktree_path else ""
             if current.worktree_path and Path(current.worktree_path).exists():
                 if (
                     current.branch
@@ -732,7 +731,7 @@ def sweep_finished_session_worktrees(
     candidates: list[tuple[tracking.WorktreeRecord, git_ops.WorktreeStateInfo, str]] = []
     for rec in records:
         name = sessions.mux_session_name(rec.worktree_id)
-        norm = _normalize_path(rec.worktree_path) if rec.worktree_path else ""
+        norm = sessions._normalize_path(rec.worktree_path) if rec.worktree_path else ""
         # Live guards: a bound session, or a live/attached mux, is never touched.
         if norm and norm in session_ctx.active_sessions:
             result["skipped"].append({"id": rec.worktree_id, "reason": "live session"})

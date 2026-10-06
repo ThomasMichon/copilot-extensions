@@ -262,11 +262,63 @@ Any change that makes these files slightly smaller is a win."
       through in 270s) showed zero failures before its own timeout,
       consistent with the known pre-existing timing characteristic, not a
       regression.
-- [ ] `_normalize_path`, `_find_repo_dir`, `_apply_tracking_override`,
-      `_build_active_paths` (next-highest traffic; re-measure with
-      `--progress` before picking exact order -- several of these have
-      outsized monkeypatch counts relative to call-site counts, which may
-      make them higher-value than raw call-site ranking suggests).
+- [x] `_normalize_path` (10 call sites / 1 monkeypatch site). Unlike every
+      prior slice's compat-root function, this one already had 8 scattered
+      definitions across the plugin: a real one-line implementation in
+      `__main__.py` (`p.rstrip("/\\")`), an INDEPENDENT real duplicate
+      already living in `sessions.py` (identical logic, never calling
+      through `core()`), and 6 thin re-export shims (`cleanup_gc_cli.py`,
+      `list_cli.py`, `reap_cli.py`, `resolve_picker_cli.py`,
+      `resolve_system_cli.py`, `status_bar_cli.py`) each forwarding to
+      `core()._normalize_path`. Confirmed every one of those 6 shim
+      modules, plus the 3 non-shim external callers
+      (`front_door_cli.py` x2, `maintenance_cli.py`, `status_cli.py`), and
+      3 OTHER sibling modules entirely outside this slice's own call-site
+      list (`reclaim.py`, `tracking_session_registry.py`,
+      `picker_support/data_local.py`) already called `sessions.
+      _normalize_path` directly -- i.e. `sessions.py` was already the
+      de facto canonical home across most of the codebase, just not yet
+      for these 10 holdouts. Migrated: deleted `__main__.py`'s own
+      definition and redirected its 11 in-module bare calls to
+      `sessions._normalize_path`; deleted all 6 shims and redirected each
+      shim module's own internal bare calls the same way; redirected the
+      3 non-shim external call sites from `core()._normalize_path` to
+      `sessions._normalize_path` (adding `from . import sessions` only to
+      `front_door_cli.py`, which didn't already import it -- the other two
+      already did). `sessions.py`'s own existing implementation needed no
+      code change at all. Updated the one test monkeypatch site
+      (`test_auto_clean.py`) from `agent_worktrees.__main__._normalize_path`
+      to `agent_worktrees.sessions._normalize_path`. The full test suite
+      caught 5 further gaps invisible to the static tool/grep sweep -- the
+      effort's own named, recurring risk, hit again this slice: direct
+      (non-monkeypatch) bare-attribute reads of `<alias>._normalize_path`
+      against the `__main__` module, in `test_bridge_lock.py`,
+      `test_status_segment.py` (6 sites), `test_tracking_override.py`
+      (4 sites), `test_pr_ops.py` (2 sites, inside functions with their
+      own local `from agent_worktrees import sessions`, so no new import
+      needed there), and `_cleanup_revalidation_helpers.py` -- each
+      retargeted to `sessions._normalize_path`, adding a top-level
+      `sessions` import only where no local one already existed
+      (`test_tracking_override.py`). No `_core()` accessor reached zero
+      this slice (each of the 6 ex-shim modules still routes at least one
+      other name through `core()`).
+      Validated: `tools/compat-root-migration.py --name _normalize_path`
+      reports zero call/monkeypatch sites (was 10/1); `ruff check --select
+      F,E9` clean across all 11 touched source files + 6 touched test
+      files; `check-module-size.py` clean. Targeted sweep (76 tests) green
+      on the first pass; the full suite caught the 5 bare-attribute gaps
+      above on the first full run (1 failure, 644 passed) -- fixed, then
+      re-ran clean: the bulk of the full suite (2447 tests across the
+      first 4 sequential sub-suites) green with zero failures, reaching
+      72% through the 5th sub-suite (vs. 18% on the prior slice) before
+      the bounded test-supervisor's per-call wall-clock ceiling cut the
+      run off mid `test_pr_ops.py` -- the same already-documented
+      ~22-minute-alone file, not a regression.
+- [ ] `_find_repo_dir`, `_apply_tracking_override`, `_build_active_paths`
+      (next-highest traffic; re-measure with `--progress` before picking
+      exact order -- several of these have outsized monkeypatch counts
+      relative to call-site counts, which may make them higher-value than
+      raw call-site ranking suggests).
 - [ ] Re-measure scope after each name lands; update this Plan with the next
       batch rather than pre-committing to a fixed list up front.
 
@@ -837,6 +889,104 @@ _Pending._
   `_self_override` was never implemented as one; only call sites moved,
   229 = 245 - 16.) Next-highest-traffic names per the current ranking:
   `_normalize_path` (10/1), `_find_repo_dir` (10/9),
+  `_apply_tracking_override` (9/7), `_build_active_paths` (8/17) --
+  re-measure with `--progress` before picking exact order for the next
+  slice, per the effort's own standing instruction.
+
+### 2026-10-06 -- `_normalize_path` slice (Phase 2, slice 5)
+- Re-ran `--progress` first, per the effort's own re-ranking instruction,
+  in a fresh worktree: confirmed `_normalize_path` was still top-ranked
+  (10 call sites / 1 monkeypatch site), matching the prior slice's
+  projection.
+- This slice's shape differed from every prior one again: `_normalize_path`
+  wasn't a single function living in one place waiting to move -- it had
+  **8 separate definitions** scattered across the plugin. `__main__.py`
+  owned a real one-line implementation (`p.rstrip("/\\")`); `sessions.py`
+  independently defined an IDENTICAL duplicate that never called through
+  `core()` at all; and 6 modules (`cleanup_gc_cli.py`, `list_cli.py`,
+  `reap_cli.py`, `resolve_picker_cli.py`, `resolve_system_cli.py`,
+  `status_bar_cli.py`) each carried a thin re-export shim
+  (`def _normalize_path(*args, **kwargs): return _core()._normalize_path(*args, **kwargs)`)
+  that the migration tool counted as both a "definition site" (it binds
+  the name locally) and a "call site" (it calls through `core()`).
+  Before touching anything, traced every OTHER caller of this name across
+  the whole plugin (not just the 10 flagged root-alias sites) and found
+  `reclaim.py`, `tracking_session_registry.py`, and
+  `picker_support/data_local.py` already called `sessions._normalize_path`
+  directly -- i.e. `sessions.py` was already the de facto canonical home
+  for this function across most of the codebase; these 10 holdouts (the
+  6 shims plus 3 non-shim direct-`core()` callers in `front_door_cli.py`
+  x2, `maintenance_cli.py`, `status_cli.py`) were simply the stragglers.
+  This meant zero new logic to write: `sessions.py`'s own existing
+  implementation needed no code change at all, only every other caller
+  redirected to it.
+- Migrated in order: deleted `__main__.py`'s own definition and replaced
+  its 11 in-module bare `_normalize_path(...)` calls (across
+  `_build_active_paths` and two other functions) with
+  `sessions._normalize_path(...)` via a scoped regex substitution (safe
+  here since the definition was already deleted, so every remaining bare
+  occurrence in the file was necessarily a call site, not a redefinition);
+  deleted each of the 6 shims and redirected each shim module's own
+  internal bare calls the same way (all 6 already imported `sessions`, so
+  no new imports needed); redirected the 3 non-shim `core()._normalize_path`
+  call sites to `sessions._normalize_path` (`maintenance_cli.py` and
+  `status_cli.py` already imported `sessions`; `front_door_cli.py` needed
+  the import added). Updated the sole pre-existing test monkeypatch site
+  (`test_auto_clean.py`) from `agent_worktrees.__main__._normalize_path`
+  to `agent_worktrees.sessions._normalize_path`.
+- A first global-replace attempt on `list_cli.py` via a blank-line-count-
+  sensitive regex mangled the file (merged two unrelated function bodies
+  together) -- caught immediately by re-viewing the result rather than
+  trusting the regex blind, reverted with `git checkout --`, and redone
+  with a precise `edit` substitution instead. Lesson for future slices
+  doing multi-definition cleanup: prefer targeted `edit` over a blanket
+  regex when deleting a shim sitting between two surrounding blank-line
+  blocks whose exact count isn't already known.
+- The full suite caught **5 further gaps** invisible to the static
+  tool's scan and a manual grep for the shim-call shape -- all a new
+  pattern this slice, distinct from the two "monkeypatch shape" gaps the
+  `_infer_worktree_id` slice caught: direct, non-monkeypatch
+  **bare-attribute reads** of `<alias>._normalize_path` against the
+  `__main__` module itself (tests calling the function AS a plain helper,
+  not mocking it) -- `test_bridge_lock.py` (1 site), `test_status_segment.py`
+  (6 sites, module already imported `sessions`), `test_tracking_override.py`
+  (4 sites, needed a new top-level `sessions` import), `test_pr_ops.py`
+  (2 sites, both inside test methods that already had their own local
+  `from agent_worktrees import sessions` -- so a second top-level import I
+  added turned out redundant and was reverted after `ruff check` flagged
+  the resulting F401/F811), and `_cleanup_revalidation_helpers.py` (1 site,
+  already imported `sessions`). Each confirmed via `git diff` as untouched
+  by this slice's own source edits -- these are pre-existing tests whose
+  assertions reached into the compat root for convenience, not candidates
+  that needed new behavior.
+- No `_core()` accessor reached zero this slice: each of the 6 ex-shim
+  modules still routes at least one other name through `core()` (unlike
+  the `_infer_worktree_id` slice, where 3 modules' shims were their own
+  sole remaining caller).
+- Validation: `tools/compat-root-migration.py --name _normalize_path`
+  reports zero call/monkeypatch sites (was 10/1). `ruff check --select
+  F,E9` clean across all 11 touched source files and 6 touched test
+  files. `check-module-size.py` clean (no file near its cap this slice).
+  Targeted sweep (`-k` matching every touched module + `test_lazy_dispatch`
+  + `test_auto_clean`, 76 tests) green on the first pass -- the bare-
+  attribute gaps above only surfaced once the FULL suite ran. First full
+  run: 1 failure (`test_bridge_lock.py::test_build_active_paths_unions_
+  bridge_live`, an `AttributeError: module 'agent_worktrees.__main__' has
+  no attribute '_normalize_path'`), 644 passed. Fixed all 5 gaps, re-ran:
+  the bulk of the full suite (2447 tests across the first 4 sequential
+  sub-suites) green with zero failures, reaching 72% through the 5th
+  sub-suite (vs. 18% on the `_self_override` slice) before the bounded
+  test-supervisor's per-call wall-clock ceiling cut the run off mid
+  `test_pr_ops.py` -- the same already-documented ~22-minute-alone file
+  from every prior slice's Journal, not a regression this slice introduced.
+- Final `--progress` aggregate (from this slice's own pre-check
+  39/229/159/1003): **39 accessors, 219 call sites, 158 distinct
+  monkeypatched names, 1002 patch-site occurrences.** (Accessor count
+  unchanged, matching this slice's own finding that no shim's `_core()`
+  accessor reached zero; 219 = 229 - 10 call sites migrated; -1 distinct
+  monkeypatched name and -1 patch-site occurrence match the single
+  `test_auto_clean.py` monkeypatch retarget.) Next-highest-traffic names
+  per the current ranking: `_find_repo_dir` (10/9),
   `_apply_tracking_override` (9/7), `_build_active_paths` (8/17) --
   re-measure with `--progress` before picking exact order for the next
   slice, per the effort's own standing instruction.

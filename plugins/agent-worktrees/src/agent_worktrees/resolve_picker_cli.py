@@ -62,10 +62,6 @@ def _load_remote_machines(*args, **kwargs):
     return _core()._load_remote_machines(*args, **kwargs)
 
 
-def _normalize_path(*args, **kwargs):
-    return _core()._normalize_path(*args, **kwargs)
-
-
 def _picker_profile_choice(*args, **kwargs):
     return _core()._picker_profile_choice(*args, **kwargs)
 
@@ -335,7 +331,7 @@ def run_legacy_picker(context: ResolvePickerContext) -> int:
             session_ctx: sessions.SessionContext = session_ctx,
         ) -> float:
             record, _info = pair
-            norm = _normalize_path(record.worktree_path)
+            norm = sessions._normalize_path(record.worktree_path)
             iso = session_ctx.last_activity.get(norm) or record.started_at or ""
             return _epoch_or_zero(iso)
 
@@ -358,7 +354,7 @@ def run_legacy_picker(context: ResolvePickerContext) -> int:
         ) -> str:
             age = _age_str(record.started_at)
             resume = f", {record.resume_count} resumes" if record.resume_count > 0 else ""
-            norm = _normalize_path(record.worktree_path)
+            norm = sessions._normalize_path(record.worktree_path)
             sessions_list = session_ctx.active_sessions.get(norm, [])
             tag = ""
             if len(sessions_list) > 1:
@@ -393,7 +389,7 @@ def run_legacy_picker(context: ResolvePickerContext) -> int:
             info: git_ops.WorktreeStateInfo,
             session_ctx: sessions.SessionContext = session_ctx,
         ) -> str | None:
-            norm = _normalize_path(record.worktree_path)
+            norm = sessions._normalize_path(record.worktree_path)
             turns = session_ctx.turn_count.get(norm, 0)
             pct = session_ctx.context_pct.get(norm)
             age = _activity_age_str(session_ctx.last_activity.get(norm, ""))
