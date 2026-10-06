@@ -235,46 +235,47 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     # for the next contender that opens the replacement (review finding,
     # PR #5412).
     #
-    # Scope: a HARD, blocking claim (failure to acquire returns immediately,
-    # no retry) applies only at an ORDINARY cold start (the reported bug --
-    # a burst of session-lifecycle hooks each independently deciding to
-    # spawn, with no existing owner or an existing non-superseding one).
-    # The cutover/promotion lifecycle (`_handle_control("promote")`,
-    # route-driven activation in the resident loop) still attempts the SAME
-    # lease (`_best_effort_claim_lease()` below) so every activation path
-    # exercises it, but treats failure as non-fatal there: that lifecycle
-    # relies on a genuinely different, soft (eventually-consistent,
-    # deliberately-overlapping) ownership model via self-retire/
-    # supersession polling, not a hard mutual-exclusion claim -- a
-    # predecessor's publish-then-retire cutover sequencing
-    # (`docs/patterns/graceful-daemon-cutover.md`) can legitimately still
-    # hold the lease far longer than any bounded wait would tolerate, and a
-    # retry/wait loop there surfaced multiple real correctness bugs under
-    # review (concurrent promote-handler races nulling out a held lease, a
-    # predecessor/successor overlap window far longer than any reasonable
-    # bounded wait, muxless-owner replacement never completing). A
-    # duplicate-spawn race -- the bug the hard cold-start claim protects
-    # against -- cannot happen at these transition points: each is reached
-    # by only one already-elected process (the cutover orchestrator's
-    # single routing decision, or its one explicit `promote` RPC), never a
-    # burst of independently-deciding new processes.
+    # Scope: this claim protects only an ORDINARY cold start and a
+    # replacement candidate's own startup race against its peers (the
+    # reported bug -- a burst of session-lifecycle hooks each independently
+    # deciding to spawn). It deliberately does NOT extend to the
+    # cutover/promotion lifecycle (`_handle_control("promote")`,
+    # route-driven activation in the resident loop): that lifecycle relies
+    # on a genuinely different, soft (eventually-consistent, deliberately-
+    # overlapping) ownership model via self-retire/supersession polling,
+    # not a hard mutual-exclusion claim. A predecessor's publish-then-
+    # retire cutover sequencing (`docs/patterns/graceful-daemon-cutover.md`,
+    # `libs/zdd/src/zdd/cutover.py`) means the predecessor can legitimately
+    # still hold this lease for 30+ seconds after a successor is promoted
+    # (self-retire needs two confirmations 15s apart) -- far longer than
+    # any bounded wait could tolerate -- so a hard claim there would make
+    # ordinary cutovers routinely fail, and a non-blocking "best effort"
+    # attempt doesn't actually serialize anything either. Properly closing
+    # that gap needs the cutover orchestrator ITSELF to coordinate a
+    # reversible ownership transfer at the safe drain boundary (confirming
+    # the successor before retiring the predecessor), not a change scoped
+    # to this file -- tracked separately (review findings, PR #5412).
     _OWNERSHIP_LEASE_NAME = "status-monitor-singleton.lock"
+    _REPLACEMENT_CLAIM_NAME = "status-monitor-replacement-claim.lock"
 
-    def _acquire_ownership_lease():
-        """Acquire the atomic exclusivity lease, or return ``None`` if
+    def _acquire_lease(lock_name: str):
+        """Acquire a named atomic exclusivity lease, or return ``None`` if
         another live process already holds it."""
         from single_instance_lease import AlreadyRunningError, SingleInstance
 
         lease = SingleInstance(
             status_monitor_runtime._aw_runtime_home(),
             service="status-monitor",
-            lock_name=_OWNERSHIP_LEASE_NAME,
+            lock_name=lock_name,
         )
         try:
             lease.acquire()
             return lease
         except AlreadyRunningError:
             return None
+
+    def _acquire_ownership_lease():
+        return _acquire_lease(_OWNERSHIP_LEASE_NAME)
 
     def _existing_owner_replacement_permitted() -> bool:
         """True exactly when `_other_current_monitor()` would already treat
@@ -300,29 +301,39 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         op = existing.get("prefix")
         return bool(op and runtime_superseded(prefix=op))
 
+    # The incumbent bypass above must not itself become a new TOCTOU gap: if
+    # two candidates both read the same live, replaceable (muxless or
+    # superseded) owner before either publishes, both would skip
+    # `_OWNERSHIP_LEASE_NAME` (held by the still-resident incumbent, so
+    # neither replacement candidate could acquire it anyway) and both pass
+    # `_other_current_monitor()`, duplicating exactly the bug this PR
+    # exists to fix -- just scoped to the replacement case (review finding,
+    # PR #5412). A SEPARATE, dedicated claim serializes replacement
+    # candidates against EACH OTHER (never against the incumbent, which
+    # legitimately still holds `_OWNERSHIP_LEASE_NAME` for its own
+    # lifetime): acquire it, re-read ownership under it (`_other_current_
+    # monitor()` does a fresh read), publish, then release -- a short-lived
+    # claim, not held for the life of the process like the ownership lease.
     _lease = None
-    if not passive_mode and not _existing_owner_replacement_permitted():
-        _lease = _acquire_ownership_lease()
-        if _lease is None:
-            return 0
-
-    def _best_effort_claim_lease() -> None:
-        """Attempt the same lease at a cutover/promotion transition point
-        (`_handle_control("promote")`, route-driven activation) so every
-        activation path exercises it, matching `_existing_owner_
-        replacement_permitted()`'s own sibling check -- but UNLIKE the
-        cold-start gate above, a failed attempt here is never fatal: see
-        the Scope note above `_OWNERSHIP_LEASE_NAME` for why that's safe.
-        No-op once this process already holds the lease (idempotent;
-        callers may invoke it on every transition, not just the first)."""
-        nonlocal _lease
-        if _lease is None:
+    _replacement_claim = None
+    if not passive_mode:
+        if _existing_owner_replacement_permitted():
+            _replacement_claim = _acquire_lease(_REPLACEMENT_CLAIM_NAME)
+            if _replacement_claim is None:
+                return 0
+        else:
             _lease = _acquire_ownership_lease()
+            if _lease is None:
+                return 0
 
     if _other_current_monitor():
+        if _replacement_claim is not None:
+            _replacement_claim.release()
         return 0
     if not passive_mode:
         _locks.write_lock(lock, extra={"prefix": my_prefix, "mux": bool(mux_bin)})
+    if _replacement_claim is not None:
+        _replacement_claim.release()
 
     ctx_done: set[str] = set()
 
@@ -648,7 +659,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if action == "promote":
             with state_lock:
                 _cleanup_retired_request_surfaces()
-                _best_effort_claim_lease()
                 published_lock = True
                 _start_request_surfaces()
                 _locks.write_lock(lock, extra=_lock_extra())
@@ -701,7 +711,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             if active_generation is not None and not published_lock:
                 with state_lock:
                     if not published_lock:
-                        _best_effort_claim_lease()
                         published_lock = True
                         _start_request_surfaces()
                         _locks.write_lock(lock, extra=_lock_extra())
