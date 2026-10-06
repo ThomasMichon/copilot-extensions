@@ -6,7 +6,7 @@
 - **Scope:** leaf (a child of the
   [agent-dispatch](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-09-25
+- **Last revised:** 2026-10-05
 - **Reality docs:** `worktree-manager/src/worktree_manager/production_picker/picker_tui/engine.py`
   (`TasksView`, `WorktreesView`, `_TASK_PHASE_PALETTE`) ·
   `worktree-manager/src/worktree_manager/production_picker/picker_tui/pivots.py`

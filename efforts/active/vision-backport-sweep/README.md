@@ -5,6 +5,11 @@
 - **Branch(es):** `effort/vision-backport-sweep`
 - **Created:** 2026-10-05
 - **Status:** Active <!-- Draft | Active | Blocked | Done -->
+- **Vision:** `visions/README.md` (the whole index — a repo-wide sweep,
+  not one item); scoped so far:
+  `visions/plugins/agent-dispatch/tasks-pane-ux` §Concepts/the-suspended-task-waiter,
+  `visions/plugins/agent-dispatch/reviewer` §Behaviors/stagnation-escalates,
+  `visions/plugin-services` §Behaviors/register-once-cutover-on-update
 - **Umbrella issue:** none yet filed in this repo (see Context — this effort
   itself is the tracker for the sweep; per-gap issues are filed individually
   and linked below as they're carved; `efforts/README.md`'s index Coordination
@@ -36,9 +41,22 @@ in here instead; not yet decided, see Open Questions).
 
 ## Participants
 
-Single-repo effort. No cross-machine dispatch required — each slice is a
-plain vision-file edit + issue-filing pass inside one `copilot-extensions`
-worktree.
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Primary (operator's agent) | Owns the whole sweep: reconciles visions, runs the invariant audit, carves issues | A `copilot-extensions` worktree, one per session/slice |
+
+## Coordination
+
+- **Topology:** independent per-slice PRs — each session lands one coherent
+  slice (one or a few related vision files + any issues/comments it carves)
+  through its own PR rather than a shared long-lived feature branch.
+- **Host (owns PRs):** whichever session/worktree is actively working a
+  slice; no standing owner beyond that.
+- **Delegates:** none yet — single-repo, single-agent effort so far (see
+  Guiding Intent: no cross-machine dispatch needed for a docs-only sweep).
+- **Handoff:** a session that can't finish a slice hands off via the normal
+  `context-handoff` mechanism, naming which Plan items are done and which
+  vision files/issues are mid-flight, per this effort's own Journal.
 
 ## Context
 
@@ -130,16 +148,28 @@ Operator, end of a long multi-repo session:
 - [ ] No vision file records conformance/gap-list prose — that output lives
       here or in linked issues only.
 
-## Open Questions
-- Should the user-facing material refresh fold into this effort or get its
-  own? Both are "reality has outpaced the standing record," but they have
-  different audiences (vision = contributor-facing design intent; materials
-  = adopter-facing). Deferred to Phase 4 — ask the operator if it comes up
-  before then.
+## Proposal
 
-## Decision Log
-- **2026-10-05:** Started this effort as the tracker for the operator's
-  vision-backport + material-refresh handoff directive. Landed Phase 1's
-  three targets in one slice; the full invariant audit (Phase 3) and the
-  wider vision sweep (Phase 2) are explicitly deferred to future sessions per
-  the handoff's own sequencing note.
+**Open question — not yet decided:** should the user-facing material refresh
+(docs, Picker preview screenshots, README capability claims) fold into this
+effort as a later phase, or become its own sibling effort? Both streams are
+"reality has outpaced the standing record," but they have different
+audiences (vision = contributor-facing design intent; materials =
+adopter-facing). Deferred to Phase 4 — ask the operator if it comes up before
+then rather than assuming either answer.
+
+## Journal
+
+### 2026-10-05 — Kickoff + Phase 1 slice
+- Effort created as the tracker for the operator's vision-backport +
+  material-refresh handoff directive.
+- Landed Phase 1's three session-evidenced targets in one PR: folded back
+  `#5400`'s run-waiter surfacing into the tasks-pane-ux vision, folded back
+  the reviewer recipe's standing stagnation-escalation behavior into the
+  reviewer vision, and scoped a first pass of the plugin-services invariant
+  audit (confirmed the vision already covers the applicable invariants;
+  linked the pre-existing `#5356` to it via issue comment rather than editing
+  the vision).
+- The full invariant audit (Phase 3) and the wider vision sweep (Phase 2) are
+  explicitly deferred to future sessions per the handoff's own sequencing
+  note — this effort stays open across many slices.

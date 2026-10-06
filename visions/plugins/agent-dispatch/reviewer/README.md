@@ -5,7 +5,7 @@
 - **Scope:** leaf (a child of the
   [agent-dispatch](../README.md) plugin vision)
 - **Status:** Draft
-- **Last revised:** 2026-10-04
+- **Last revised:** 2026-10-05
 - **Reality docs:** [`docs/architecture.md`](../../../../docs/architecture.md) ·
   `plugins/agent-dispatch/` · `plugins/agent-worktrees/`
 
