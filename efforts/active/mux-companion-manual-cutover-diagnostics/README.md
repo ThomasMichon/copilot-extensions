@@ -198,12 +198,11 @@ remaining items were: (1) live re-validate the #5455 predecessor-retire fix
 against real mechanism (not the old/broken code the original discovery ran
 against), and (2) triage two flagged worktree claims.
 
-**Claims triaged**: both
-(`tmichon-cloud1-win-20261003-002711-0ac7`, dead per `claimant-liveness`;
-`tmichon-cloud1-win-20261005-170627-4c2b`, live claimant but the worktree
-itself had 0 live sessions/mux and a terminal controller relation) were
-confirmed "no commits and clean tree" by `finalize`'s own dry-run and real
-run -- both empty, abandoned duplicates, now finalized/removed.
+**Claims triaged**: both flagged outbound worktree claims (one dead per
+`claimant-liveness`; the other with a live claimant but the worktree itself
+had 0 live sessions/mux and a terminal controller relation) were confirmed
+"no commits and clean tree" by `finalize`'s own dry-run and real run -- both
+empty, abandoned duplicates, now finalized/removed.
 
 **Live re-validation**: created a real throwaway `copilot-extensions`
 worktree, a real psmux session (`wt-test-predecessor`) with a genuine

@@ -155,14 +155,21 @@ more work left to do:
 1. **Sync the worktree first** -- see "Sync before triggering" below. Do this
    before collecting facts so the composed brief reflects the synced state
    (and, if the sync conflicts, the brief can say so).
-2. **Call `generate_handoff_prompt`.**
-3. **Compose the markdown brief** using the effort-backed shape when a valid
+2. **Quiesce owned background work** -- see "Quiesce owned background work
+   before triggering" below. Do this before composing too: stopping a
+   background task can itself produce new partial results or a decision to
+   ask the successor to re-arm something, and the brief composed next is
+   this session's only chance to carry that forward.
+3. **Call `generate_handoff_prompt`.**
+4. **Compose the markdown brief** using the effort-backed shape when a valid
    open active effort exists, otherwise the full standalone shape. Note the
-   sync outcome (synced cleanly / conflict left unresolved) if relevant. Run
-   the **Self-audit before declaring completion** step above first.
-4. **Call `save_handoff_prompt`.** This safely stores the baton and returns the
+   sync outcome (synced cleanly / conflict left unresolved) and the
+   quiescing outcome (what was stopped, what was captured, what needs
+   re-arming) if relevant. Run the **Self-audit before declaring
+   completion** step above first.
+5. **Call `save_handoff_prompt`.** This safely stores the baton and returns the
    short handoff seed.
-5. **Call `trigger_handoff` immediately.**
+6. **Call `trigger_handoff` immediately.**
 
 Do **not** ask the user for confirmation first on this path. Running low on
 context while work remains is sufficient justification by itself.
@@ -180,14 +187,20 @@ listing a set of follow-up ideas or questions:
 4. **Replace the usual follow-up list** with one short, low-friction offer to
    continue via handoff.
 5. **Only once the user says yes:** sync the worktree (see "Sync before
-   triggering" below), then **always re-run `generate_handoff_prompt` and
-   `save_handoff_prompt`** -- even if the sync looked like a no-op -- so the
-   stored baton reflects the post-sync state. A WIP commit, a failed sync
-   attempt, or a conflict left unresolved all matter to the successor even
-   when the branch itself didn't move; `trigger_handoff` otherwise reuses
-   the pre-sync brief and silently omits that outcome. Then **call
-   `trigger_handoff`.** Do not sync or mutate local history before the user
-   has agreed -- a decline must leave the worktree untouched.
+   triggering" below), then **quiesce owned background work** (see
+   "Quiesce owned background work before triggering" below) -- only now,
+   after the user has actually agreed to hand off, is it correct to stop
+   things the successor would otherwise inherit live. Then **always re-run
+   `generate_handoff_prompt` and `save_handoff_prompt`** -- even if the sync
+   and quiescing both looked like a no-op -- so the stored baton reflects
+   the post-sync, post-quiesce state. A WIP commit, a failed sync attempt, a
+   conflict left unresolved, a stopped background task's partial results, or
+   a schedule that needs re-arming all matter to the successor even when
+   nothing else changed; `trigger_handoff` otherwise reuses the earlier
+   brief and silently omits them. Then **call `trigger_handoff`.** Do not
+   sync, quiesce, or mutate local history before the user has agreed -- a
+   decline must leave the worktree and its running background work
+   untouched.
 
 Only this turn-end follow-up path is skippable via **autopilot** or prior
 explicit pre-authorization.
@@ -256,7 +269,12 @@ anything this session kicked off that only *it* is tracking (a background
 does not automatically transfer. Left running unacknowledged, it becomes
 either an orphan nobody is watching, or -- worse -- a second actor racing the
 successor against the same worktree/claims the successor now believes it
-owns alone. Before calling `trigger_handoff` (or the CLI equivalent):
+owns alone. **Do this before composing the brief, not merely before
+`trigger_handoff`** -- both trigger paths above place it immediately before
+`generate_handoff_prompt`/compose precisely so that whatever quiescing
+surfaces (a stopped task's partial output, a schedule that needs re-arming)
+still makes it into the stored baton; quiescing after the brief is already
+saved silently strands that information outside it:
 
 1. **Stop what you can stop.** For every background agent or async shell this
    session itself started and still owns, either wait for it to finish, or
