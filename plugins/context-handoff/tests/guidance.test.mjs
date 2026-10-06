@@ -279,12 +279,19 @@ test("quiescing owned background work is required before composing, in every sur
   assert.match(readme, /quiesc/i);
 
   // The handoff-fallback instructions (loaded when the extension itself
-  // fails to register) carry a compact version of the same requirement.
+  // fails to register) carry a compact but semantically-accurate version
+  // of the same requirement: shells can be stopped directly, agents have
+  // no stop primitive and must be waited out, and schedules are always
+  // stopped unconditionally (never deferred to an "escape hatch").
   const fallback = readFileSync(
     join(plugin, "instructions", "handoff-fallback.instructions.md"),
     "utf8",
-  );
+  ).replace(/\s+/g, " ");
   assert.match(fallback, /quiesc/i);
+  assert.match(fallback, /stop_powershell/);
+  assert.match(fallback, /stop_bash/);
+  assert.match(fallback, /wait.*out.*agent|agent.*no stop/i);
+  assert.match(fallback, /always stop owned schedules/i);
 
   // The explicit human-invoked /handoff-continue command's generated prompt
   // also mentions quiescing, not just the two session-driven trigger paths.

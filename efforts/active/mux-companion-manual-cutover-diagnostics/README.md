@@ -188,10 +188,13 @@ view highlighting whether resolved head matches the just-resumed session).
       carried forward in the brief), not silently dropped or left to race
       the successor.
 - [ ] Live-tested: a predecessor with an active, self-owned
-      `manage_schedule` entry at the moment of handoff -- confirm it gets
-      stopped before triggering (or explicitly, deliberately re-armed in the
-      brief with the exact restart command), never left ticking into a
-      worktree whose active session changed out from under it.
+      `manage_schedule` entry at the moment of handoff -- confirm it ALWAYS
+      gets stopped before triggering (never left running because it's
+      "going to be re-armed"), and -- only when the successor genuinely
+      needs it resumed -- the brief additionally, separately names the exact
+      restart command as a post-cutover action. Re-arming is never a
+      substitute for stopping it now; this item is not satisfied by a
+      re-arm note alone.
 - [x] Unit tests green per step; `tools/check-module-size.py` clean.
 
 ## Journal
