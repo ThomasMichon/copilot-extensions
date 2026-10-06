@@ -16,7 +16,7 @@ import string
 from pathlib import Path
 
 from . import claim_history, config as cfg
-from . import git_ops, hooks, obligations, push_diagnostics, tracking
+from . import git_ops, hooks, obligations, pr_publish, push_diagnostics, tracking
 from .config import Config, SourceAttribution
 from .tracking import PRRecord
 
@@ -648,9 +648,9 @@ def create_pr(
     # reconcile down to the genuinely-live (or no) active PR.
     if not new and not branch and git_ops.has_remote(remote, cwd=worktree_path):
         while active_is_live and active is not None and active.branch:
-            if git_ops.remote_branch_state(
-                remote, active.branch, cwd=worktree_path
-            ) != "absent":
+            where = pr_publish.push_remote(repo, active, worktree_path)  # a fork-headed PR's fork
+            if where is None or git_ops.remote_branch_state(
+                    where, active.branch, cwd=worktree_path) != "absent":
                 break
             active.state = "merged"
             if not active.closed_at:
@@ -750,8 +750,7 @@ def create_pr(
     # the durable confirmation check, and the fork/remote bootstrap) lives
     # in fork_pr.py -- see resolve_fork_publish's docstring for its
     # contract.
-    publish_remote = remote
-    fork_owner = ""
+    publish_remote, fork_owner, fork_head_repo, fork_head_identity = remote, "", "", ""
     if prcfg.roles:
         from . import pr_config
 
@@ -772,8 +771,8 @@ def create_pr(
             return {**base, "success": False, **fork_result}
         if fork_result.get("error"):
             return {**base, "error": fork_result["error"]}
-        publish_remote = fork_result["publish_remote"]
-        fork_owner = fork_result["fork_owner"]
+        publish_remote, fork_owner, fork_head_repo = fork_result["publish_remote"], fork_result["fork_owner"], fork_result.get("fork_head_repo", "")
+        fork_head_identity = fork_result.get("fork_head_identity", "")  # read under fork setup's lock
         if fork_result.get("warning"):
             base.setdefault("warnings", []).append(fork_result["warning"])
 
@@ -794,6 +793,10 @@ def create_pr(
                 tracking.record_repo_fetch_confirmed(record.repo)
 
     head_branch = git_ops._get_current_branch_safe(worktree_path)
+    publish_remote, fork_owner, fork_head_repo, fork_head_identity = pr_publish.update_remote(
+        repo, record, feature_branch, worktree_path, publish_remote, fork_owner, fork_head_repo, fork_head_identity)
+    if publish_remote is None:
+        return {**base, "error": pr_publish.UNREADABLE_REMOTE}
 
     # --- Re-run path: already on the feature branch -> (re)push + record. ---
     if head_branch == feature_branch:
@@ -801,7 +804,7 @@ def create_pr(
             worktree_path, feature_branch, publish_remote, repo, prcfg, record,
             base, config=config, worktree_id=worktree_id, title=eff_title,
             body=body, open_pr=open_pr, draft=want_draft, attribution=attribution,
-            pr_head=(f"{fork_owner}:{feature_branch}" if fork_owner else ""),
+            pr_head=(f"{fork_owner}:{feature_branch}" if fork_owner else ""), fork_head_repo=fork_head_repo, fork_head_identity=fork_head_identity,
         )
 
     if head_branch != wt_branch:
@@ -823,7 +826,7 @@ def create_pr(
             worktree_path, feature_branch, publish_remote, repo, prcfg, record,
             base, config=config, worktree_id=worktree_id, title=eff_title,
             body=body, open_pr=open_pr, draft=want_draft, attribution=attribution,
-            pr_head=(f"{fork_owner}:{feature_branch}" if fork_owner else ""),
+            pr_head=(f"{fork_owner}:{feature_branch}" if fork_owner else ""), fork_head_repo=fork_head_repo, fork_head_identity=fork_head_identity,
         )
 
     if not reusing:
@@ -970,8 +973,9 @@ def create_pr(
         # upstream -- it legitimately sits ahead of master while the PR is open
         # (a later `git sync` fast-forwards it clean on merge).
         with hooks.allow_pr_push():
-            pushed = git_ops.push(
-                publish_remote, f"{wt_branch}:refs/heads/{feature_branch}", cwd=worktree_path,
+            pushed = pr_publish.push_checked(
+                record, publish_remote, f"{wt_branch}:refs/heads/{feature_branch}", cwd=worktree_path,
+                expected_head_repo=fork_head_repo, expected_head_identity=fork_head_identity,
                 force_with_lease_expect=(lease_expect or None), force_with_lease=reusing,
             )
         if not pushed:
@@ -1006,9 +1010,11 @@ def create_pr(
         # stays on worktree/<id>.
         git_ops.git("branch", "-f", feature_branch, "HEAD", cwd=worktree_path, check=False)
         with hooks.allow_pr_push():
-            pushed = git_ops.push(
-                publish_remote, feature_branch, cwd=worktree_path,
-                force_with_lease_expect=(lease_expect or None), force_with_lease=reusing)
+            pushed = pr_publish.push_checked(
+                record, publish_remote, feature_branch, cwd=worktree_path,
+                expected_head_repo=fork_head_repo, expected_head_identity=fork_head_identity,
+                force_with_lease_expect=(lease_expect or None), force_with_lease=reusing,
+            )
         if not pushed:
             return {**base, "error": push_diagnostics.create_pr_push_error(
                 wt_branch=wt_branch,
@@ -1025,13 +1031,13 @@ def create_pr(
     if record is not None and target_pr is not None:
         target_pr.state = "open"
         target_pr.branch = feature_branch
+        pr_publish.record_remote_identity(target_pr, publish_remote, remote, pushed.head_repo, getattr(pushed, "head_identity", ""), fork_owner)
         target_pr.base_sha = base_sha
         target_pr.head_sha = head_sha
         target_pr.head_observed_at = ""
         target_pr.head_observed_api_base = ""
         target_pr.patch_id = patch_id
-        if not target_pr.provider:
-            target_pr.provider = prcfg.provider
+        target_pr.provider = target_pr.provider or prcfg.provider
         tracking.save_record(record)
 
     git_ops.delete_backup_ref(cwd=worktree_path)
@@ -2103,6 +2109,7 @@ def _set_pr_locked(
             api_base = ""
         parsed_repo = _repo_slug_from_pr_url(url, api_base)
 
+    reassigned = (number is not None and pr.number is not None and number != pr.number) or bool(parsed_repo and pr.repo and parsed_repo != pr.repo)
     identity_changed = (
         (number is not None and number != pr.number)
         or (provider is not None and provider != pr.provider)
@@ -2125,6 +2132,8 @@ def _set_pr_locked(
         pr.number = number
     if provider is not None:
         pr.provider = provider
+    if reassigned:  # its old fork target isn't this PR's
+        pr.remote = pr.head_repo = pr.head_identity = pr.head_owner = ""
     if identity_changed:
         pr.attribution_head = ""
         pr.head_observed_at = ""
@@ -2488,7 +2497,7 @@ def _push_existing_feature(
     open_pr: bool | None,
     draft: bool,
     attribution: SourceAttribution | None,
-    pr_head: str = "",
+    pr_head: str = "", fork_head_repo: str = "", fork_head_identity: str = "",
 ) -> dict:
     """Re-run helper: push an already-created feature branch and record state.
 
@@ -2503,10 +2512,9 @@ def _push_existing_feature(
     onto the result for ``_finish_auto_open``/``scope_from_create_result`` to
     prefer over the plain branch name.
     """
-    # Resolve the head from the feature branch ref, not HEAD: a #1804 re-run
-    # from the worktree base branch leaves HEAD off the feature branch, so
-    # reading HEAD would record the wrong commit. Invoked from the legacy
-    # on-feature-branch path these are identical.
+    # Resolve the head from the feature branch ref, not HEAD: a #1804 re-run from the worktree
+    # base branch leaves HEAD off the feature branch, so reading HEAD would record the wrong
+    # commit. Invoked from the legacy on-feature-branch path these are identical.
     head_sha = _rev(feature_branch, cwd=worktree_path)
     # Non-terminal PRRecord (#1336) for this branch, if any -- leases the reuse push below (#5298).
     existing_target = next(
@@ -2519,8 +2527,9 @@ def _push_existing_feature(
         return {**base, "error": push_diagnostics.missing_expected_sha_error(
             feature_branch=feature_branch, retry_command="agent-worktrees create-pr")}
     with hooks.allow_pr_push():
-        pushed = git_ops.push(
-            remote, feature_branch, cwd=worktree_path,
+        pushed = pr_publish.push_checked(
+            record, remote, feature_branch, cwd=worktree_path,
+            expected_head_repo=fork_head_repo, expected_head_identity=fork_head_identity,
             force_with_lease_expect=(lease_expect or None),
             force_with_lease=(existing_target is not None),
         )
@@ -2562,14 +2571,14 @@ def _push_existing_feature(
             record.prs.append(target)
         # target is always non-terminal here (a live match or a fresh record).
         target.state = "open"
+        pr_publish.record_remote_identity(target, remote, repo.remote, pushed.head_repo, getattr(pushed, "head_identity", ""), pr_head.partition(":")[0] if ":" in pr_head else "")
         target.head_sha = head_sha
         target.head_observed_at = ""
         target.head_observed_api_base = ""
         # Refresh the squash-invariant patch-id after the re-squash (#898).
         target.patch_id = _patch_id(
             target.base_sha, feature_branch, cwd=worktree_path)
-        if not target.provider:
-            target.provider = prcfg.provider
+        target.provider = target.provider or prcfg.provider
         tracking.save_record(record)
     base_sha = target.base_sha if target else ""
     patch_id = target.patch_id if target else ""

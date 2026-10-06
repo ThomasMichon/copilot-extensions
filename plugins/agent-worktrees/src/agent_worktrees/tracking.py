@@ -373,6 +373,10 @@ class PRRecord:
     number: int | None = None
     provider: str = ""
     repo: str = ""           # target repo "owner/name"; default = worktree repo
+    remote: str = ""         # local remote the head was published to, when not the repo's (a fork)
+    head_repo: str = ""      # that fork's "owner/name", checked before each push (#5346)
+    head_identity: str = ""  # that fork's "host/owner/name": same owner/name on another host isn't it
+    head_owner: str = ""     # the PR head's owner (<owner>:<branch>), kept over config changes
     opened_at: str = ""      # ISO timestamp the PR record was opened
     closed_at: str = ""      # ISO timestamp the PR reached a terminal state
     # codename-attribution-by-default (rounds 26-39): this PR's attribution decision,
@@ -1359,8 +1363,8 @@ def _parse_pr_mapping(raw: dict, default_repo: str) -> PRRecord:
         provider=str(raw.get("provider", "")),
         # A legacy record without a per-PR repo targets the worktree's repo.
         repo=str(raw.get("repo", "")) or default_repo,
-        opened_at=str(raw.get("opened_at", "")),
-        closed_at=str(raw.get("closed_at", "")),
+        remote=str(raw.get("remote", "") or ""), head_repo=str(raw.get("head_repo") or ""), head_identity=str(raw.get("head_identity") or ""), head_owner=str(raw.get("head_owner") or ""),
+        opened_at=str(raw.get("opened_at", "")), closed_at=str(raw.get("closed_at", "")),
         **_parse_frozen_attribution_pair(raw),
         pr_id=pr_id_raw if isinstance(pr_id_raw, str) else "",
         pr_revision=pr_revision,
@@ -1442,12 +1446,9 @@ def _pr_to_yaml_dict(pr: PRRecord) -> dict[str, object]:
     if pr.number is not None:
         d["number"] = pr.number
     d["provider"] = pr.provider
-    if pr.repo:
-        d["repo"] = pr.repo
-    if pr.opened_at:
-        d["opened_at"] = pr.opened_at
-    if pr.closed_at:
-        d["closed_at"] = pr.closed_at
+    for key in ("repo", "remote", "head_repo", "head_identity", "head_owner", "opened_at", "closed_at"):  # lean: only when set
+        if getattr(pr, key):
+            d[key] = getattr(pr, key)
     # codename-attribution-by-default: emit `attribution_explicit` whenever
     # `attribution_mode` is non-empty, NOT only when `attribution_explicit`
     # is itself truthy (round-34 finding) -- a `False` explicitness is a
@@ -2280,17 +2281,15 @@ def _pr_identity_match(record_pr: PRRecord, current_pr: PRRecord) -> bool:
 def _merge_pr_attribution_state(
     record: WorktreeRecord, current: WorktreeRecord,
 ) -> None:
-    """Merge the frozen attribution fields (and ``pr_id``/``pr_revision``)
-    PER-ENTRY across the full ``prs`` list, protecting a concurrently-
-    stamped frozen pair from a stale in-memory writer (design.md § Per-PR
-    attribution freeze, rounds 26-39).
+    """Merge the frozen attribution fields (and ``pr_id``/``pr_revision``) PER-ENTRY across the
+    full ``prs`` list, protecting a concurrently-stamped frozen pair from a stale in-memory writer
+    (design.md § Per-PR attribution freeze, rounds 26-39).
 
-    Runs as part of every locked ``save_record`` call (this function's
-    caller already holds the record lock), so it also backfills a
-    ``pr_id``-less on-disk entry INLINE here rather than via a separate
-    migration mechanism (round-37 finding: this repo's config-migration
-    framework explicitly excludes tracking YAML, so no such mechanism has
-    an actual entry point to invoke it).
+    Runs as part of every locked ``save_record`` call (this function's caller already holds the
+    record lock), so it also backfills a ``pr_id``-less on-disk entry INLINE here rather than via
+    a separate migration mechanism (round-37 finding: this repo's config-migration framework
+    explicitly excludes tracking YAML, so no such mechanism has an actual entry point to invoke
+    it).
 
     For each ``current.prs`` (on-disk) entry:
 
@@ -2361,6 +2360,12 @@ def _merge_pr_attribution_state(
             fresh_id = secrets.token_hex(16)
             match.pr_id = fresh_id
             current_pr.pr_id = fresh_id
+        # Field by field, only while both describe the same PR (set_pr may reassign one, clearing its
+        # fork): the same repository always, and the same number unless one side has none yet.
+        same_pr = ((match.repo or "").lower() == (current_pr.repo or "").lower()
+                   and (None in (match.number, current_pr.number) or match.number == current_pr.number))
+        for f in (("remote", "head_repo", "head_identity", "head_owner") if same_pr else ()):
+            setattr(match, f, getattr(match, f) or getattr(current_pr, f))
         # An EQUAL on-disk revision is also authoritative, not only a strictly greater one
         # (fix-PR-#3037-review finding): two concurrent first-touch freezes of the same legacy PR
         # can each independently bump their own copy from 0 to 1, so a strict `>` would let

@@ -513,12 +513,28 @@ def _ensure_fork_and_remote(
         )}
     real_owner, clone_url = fork
     owner = prcfg.fork.owner or real_owner
-    if not git_ops.ensure_remote(prcfg.fork.remote, clone_url, cwd=worktree_path):
+    from . import pr_publish
+
+    # Under the publication lock: never repoint the remote while another worktree pushes through it.
+    # The identity is read under the same lock: once it's released, another worktree may repoint
+    # the remote, so the push later checks against this one rather than a fresh read.
+    head_identity = ""
+    try:
+        with pr_publish.publish_lock(worktree_path):
+            pointed = git_ops.ensure_remote(prcfg.fork.remote, clone_url, cwd=worktree_path)
+            if pointed:
+                head_identity = pr_publish.push_identity(prcfg.fork.remote, cwd=worktree_path)
+    except pr_publish.PublishLockTimeout as exc:
+        return {"error": str(exc)}
+    if not pointed:
         return {"error": (
             f"Could not point local git remote '{prcfg.fork.remote}' at "
             f"'{clone_url}'."
         )}
-    return {"owner": owner, "real_owner": real_owner}
+    repo_name = repo_slug.rsplit("/", 1)[-1]
+    head_repo = git_ops.slug_from_url(clone_url) or f"{real_owner}/{repo_name}"
+    return {"owner": owner, "real_owner": real_owner, "head_repo": head_repo,
+            "head_identity": head_identity}
 
 
 def resolve_fork_publish(
@@ -671,7 +687,12 @@ def resolve_fork_publish(
             f"--confirm-fork (or confirm_fork=True) to approve recording "
             f"that as the new confirmed identity."
         )}
-    result = {"publish_remote": prcfg.fork.remote, "fork_owner": fork_owner}
+    result = {
+        "publish_remote": prcfg.fork.remote,
+        "fork_owner": fork_owner,
+        "fork_head_repo": fork_setup["head_repo"],
+        "fork_head_identity": fork_setup.get("head_identity", ""),
+    }
     # Re-persist whenever this is the first confirmation OR an EXPLICIT
     # confirm_fork=True call's result differs from what was stored (the
     # self-heal path for a stale entry the pre-check above caught on a
