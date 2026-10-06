@@ -394,7 +394,15 @@ class SubmitErrorScreen(ModalScreen[None]):
                     "It will be restored the next time this card is opened, "
                     "so it is safe to retry."
                 )
-            yield Static(body, id="submit-error-body")
+            # Plain text, never Rich markup: `self._detail` is an arbitrary
+            # command-failure/exception message (command output, a Python
+            # exception's own str(), a file path) that commonly contains a
+            # literal `[` (e.g. `[WinError 2] ...`) -- Static's default
+            # markup=True would try to parse that as a tag and crash with a
+            # MarkupError the moment it hits unrelated text afterward,
+            # taking down the WHOLE app since this screen IS the error
+            # surface (there's no further fallback once this crashes).
+            yield Static(Text(body), id="submit-error-body")
             yield Static("Enter / Esc / Space to dismiss", id="submit-error-hint")
 
     def on_mount(self) -> None:

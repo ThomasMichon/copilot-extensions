@@ -10659,6 +10659,47 @@ def test_tick_services_deferred_nav_refresh():
     asyncio.run(run())
 
 
+def test_submit_error_screen_survives_a_bracketed_error_detail():
+    """A live crash (operator report, 2026-10-05): ``SubmitErrorScreen`` used
+    to pass its raw ``detail`` string straight to ``Static()``, whose default
+    ``markup=True`` parses it as Rich/Textual markup. A submission failure's
+    own detail text is arbitrary command output or an exception's own
+    ``str()`` -- commonly containing a stray/mismatched bracket a real
+    operator can't control (a URL path segment, a regex character class, a
+    Windows error annotation). A markup-looking fragment with no valid match
+    (confirmed reproducing: a stray closing tag like ``[/]``) crashes the
+    WHOLE app via ``MarkupError`` the moment the compositor lays out this
+    screen -- this IS the error-reporting surface itself, so there is no
+    further fallback once it crashes, turning a recoverable submission
+    failure into a hard crash. The detail must render as literal text
+    regardless of its content."""
+    from worktree_manager.production_picker.picker_tui.engine import SubmitErrorScreen
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            await app.push_screen(
+                SubmitErrorScreen(
+                    "Steer",
+                    "command failed: unexpected token near path/[/]/segment",
+                    Path("C:/Users/tmichon/.worktree-manager/steer-drafts/wt-one.json"),
+                )
+            )
+            # The exact crash site: compositor layout/reflow of the pushed
+            # screen -- a real pilot.pause() actually exercises it, not just
+            # construction/compose().
+            await pilot.pause()
+            assert any(isinstance(s, SubmitErrorScreen) for s in app.screen_stack), (
+                "SubmitErrorScreen did not survive mounting a bracketed detail")
+
+    asyncio.run(run())
+
+
 def test_tick_pure_cosmetic_pulse_narrows_segment_refresh_to_chrome_and_body():
     """pivot-streaming-transport Phase 4: a cosmetic-only idle tick (no busy
     state, no pending nav -- the ``frame % 5 == 0`` branch firing alone) must
