@@ -6,8 +6,11 @@
 - **Created:** 2026-09-30
 - **Status:** Active (Phase 9 done; Phase 2 -- the Gitea backlog provider
   and reviewer adapter -- is now fully closed, merged via PR #5414
-  2026-10-06; only Phase 3's own tracked single-emitter-primitive
-  follow-on slice remains)
+  2026-10-06; Phase 3's own tracked single-emitter-primitive follow-on
+  slice remains, alongside this effort's own still-open Validation Plan
+  items below -- full-suite green, a real consuming-repo migration, the
+  recipe README cross-check, and a live fixture exercising each new
+  recipe)
 - **Vision:** `visions/plugins/agent-dispatch/README.md` (§*The recipe*)
   advances *loop-recipes* from "four fixed archetypes, hand-declared per
   consumer" to "named, extendable templates a consumer instantiates with a
