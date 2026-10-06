@@ -947,6 +947,11 @@ jobs:
         # call, excessive noise) without touching this step's own body.
         if: env.COVERAGE_GUIDED_SELECTION_MODE == 'shadow'
         continue-on-error: true
+        # Its own bound, well inside the job's: `continue-on-error` only keeps a
+        # step's *failure* neutral. A slow selection that ran into the job's
+        # `timeout-minutes` instead cancelled the whole job and failed the PR's
+        # required gate; timing out here fails just this step, which stays neutral.
+        timeout-minutes: 2
         env:
           GH_TOKEN: ${{ github.token }}
           BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
