@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 from pathlib import Path
 
 from zdd import routing
@@ -59,6 +61,8 @@ def test_daemon_statuses_marks_a_pre_upgrade_daemons_telemetry_unsupported(
     monkeypatch.setattr(
         daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9555 ..."
     )
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid, **kw: True)
+    monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: "fixed-start-time")
     monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
     _FakeControlClient.responses = {9555: {"status": "ready"}}
     monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", _FakeControlClient)
@@ -102,6 +106,8 @@ def test_daemon_statuses_reports_active_reachable_and_unreachable(tmp_path: Path
     monkeypatch.setattr(
         routing, "read_table", lambda config_dir: _active_table(pid=101, port=9101)
     )
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid, **kw: True)
+    monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: "fixed-start-time")
     _FakeControlClient.responses = {
         9101: {
             "status": "ready",
@@ -158,6 +164,7 @@ def test_daemon_statuses_marks_a_failed_health_request_unreachable(tmp_path: Pat
     monkeypatch.setattr(
         daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9404 ..."
     )
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid, **kw: True)
     monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
     _FakeControlClient.responses = {}
     monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", _FakeControlClient)
@@ -166,6 +173,87 @@ def test_daemon_statuses_marks_a_failed_health_request_unreachable(tmp_path: Pat
 
     assert statuses == [
         {"pid": 404, "port": 9404, "active": False, "status": "unreachable"}
+    ]
+
+
+def test_daemon_statuses_rejects_a_missing_start_time_as_unverified(
+    tmp_path: Path, monkeypatch
+):
+    """``process_start_time()`` returns ``None`` when identity lookup is
+    unavailable (e.g. macOS's POSIX path). Two ``None`` samples must never
+    compare equal to each other -- that would silently accept an unprovable
+    identity as "unchanged" and defeat the whole post-connection re-check,
+    letting a genuine PID-reuse race through as verified telemetry."""
+    root = tmp_path / "root"
+    root.mkdir()
+
+    monkeypatch.setattr(
+        daemons_status.mux_daemon_cutover, "_iter_mux_daemon_pids", lambda: {777}
+    )
+    monkeypatch.setattr(
+        daemons_status.mux_daemon_cutover,
+        "_pid_matches_root",
+        lambda pid, *, root: True,
+    )
+    monkeypatch.setattr(
+        daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9777 ..."
+    )
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid, **kw: True)
+    # Stub the module's own wrapper directly, not just the shared
+    # zdd.diagnostics helper it falls back from: _process_start_time() can
+    # still run a real `ps` lookup on macOS/BSD, and if host pid 777
+    # happens to exist and stay unchanged across both samples, that real
+    # lookup would make this test depend on (and potentially pass despite)
+    # the actual host process table instead of exercising the None/None
+    # rejection it's named for.
+    monkeypatch.setattr(daemons_status, "_process_start_time", lambda pid: None)
+    monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
+    _FakeControlClient.responses = {9777: {"status": "ready", "version": "0.1.0-dev1"}}
+    monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", _FakeControlClient)
+
+    statuses = daemons_status.daemon_statuses(root)
+
+    assert statuses[0]["status"] == "unverified-owner"
+
+
+def test_daemon_statuses_handles_a_revalidation_lookup_failure_without_aborting(
+    tmp_path: Path, monkeypatch
+):
+    """The post-health revalidation census/root-match calls can themselves
+    raise (the same subprocess calls underlying them can time out or fail
+    to start) -- a failure there must report this one candidate as
+    unverified rather than aborting the whole status report, leaving every
+    OTHER resident daemon unreported too."""
+    root = tmp_path / "root"
+    root.mkdir()
+
+    call_count = {"n": 0}
+
+    def _iter_pids():
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return {888}
+        raise OSError("census unavailable")
+
+    monkeypatch.setattr(daemons_status.mux_daemon_cutover, "_iter_mux_daemon_pids", _iter_pids)
+    monkeypatch.setattr(
+        daemons_status.mux_daemon_cutover,
+        "_pid_matches_root",
+        lambda pid, *, root: True,
+    )
+    monkeypatch.setattr(
+        daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9888 ..."
+    )
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid, **kw: True)
+    monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: "fixed-start-time")
+    monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
+    _FakeControlClient.responses = {9888: {"status": "ready", "version": "0.1.0-dev1"}}
+    monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", _FakeControlClient)
+
+    statuses = daemons_status.daemon_statuses(root)
+
+    assert statuses == [
+        {"pid": 888, "port": 9888, "active": False, "status": "unverified-owner"}
     ]
 
 
@@ -190,6 +278,7 @@ def test_daemon_statuses_requires_port_match_not_just_pid_for_active(
     monkeypatch.setattr(
         daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9999 ..."
     )
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid, **kw: True)
     # Routing table's active row still names pid 101, but on the OLD port
     # (9101) -- not the port this pid is actually listening on now (9999).
     monkeypatch.setattr(
@@ -201,6 +290,48 @@ def test_daemon_statuses_requires_port_match_not_just_pid_for_active(
     statuses = daemons_status.daemon_statuses(root)
 
     assert statuses[0]["active"] is False
+
+
+def test_daemon_statuses_never_connects_to_a_candidate_with_unverified_owner(
+    tmp_path: Path, monkeypatch
+):
+    """Another local account could run a lookalike process reporting the
+    same ``--root=`` value in its own command line and listening on a port
+    -- without an OS-owner check, a blind probe here would hand that
+    process our bearer token. A candidate whose owner cannot be confirmed
+    to be the current user must be reported without ever constructing a
+    ``ControlClient`` (and therefore never sending the token) at all."""
+    root = tmp_path / "root"
+    root.mkdir()
+
+    monkeypatch.setattr(
+        daemons_status.mux_daemon_cutover, "_iter_mux_daemon_pids", lambda: {666}
+    )
+    monkeypatch.setattr(
+        daemons_status.mux_daemon_cutover,
+        "_pid_matches_root",
+        lambda pid, *, root: True,
+    )
+    monkeypatch.setattr(
+        daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9666 ..."
+    )
+    monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid, **kw: False)
+    monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
+
+    connected = []
+
+    class _NeverCall:
+        def __init__(self, *a, **k):
+            connected.append(True)
+
+    monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", _NeverCall)
+
+    statuses = daemons_status.daemon_statuses(root)
+
+    assert not connected
+    assert statuses == [
+        {"pid": 666, "port": 9666, "active": False, "status": "unverified-owner"}
+    ]
 
 
 def test_daemon_statuses_scopes_to_requested_root(tmp_path: Path, monkeypatch):
@@ -233,3 +364,142 @@ def test_parse_listen_port_handles_missing_and_present_flag():
     assert daemons_status._parse_listen_port("--listen-port=1234") == 1234
     assert daemons_status._parse_listen_port("nothing here") is None
     assert daemons_status._parse_listen_port("--listen-port=notanumber") is None
+
+
+def test_pid_owned_by_current_user_windows_matches_and_mismatches(monkeypatch):
+    """SID-based, not env-var-based: ``USERDOMAIN``/``USERNAME`` are
+    trivially spoofable by whatever spawned this process, so the ownership
+    check must come entirely from the OS's own SID primitives, never from
+    comparing against those environment values."""
+    monkeypatch.setattr(os, "name", "nt")
+    current_sid = "S-1-5-21-1111111111-2222222222-3333333333-1001"
+    owner_sid = current_sid
+
+    def _fake_run(argv, **kwargs):
+        if "WindowsIdentity" in argv[-1]:
+            return subprocess.CompletedProcess(argv, 0, stdout=current_sid + "\n")
+        return subprocess.CompletedProcess(argv, 0, stdout=owner_sid + "\n")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    assert daemons_status._pid_owned_by_current_user(123) is True
+
+    owner_sid = "S-1-5-21-9999999999-8888888888-7777777777-1002"
+    assert daemons_status._pid_owned_by_current_user(123) is False
+
+    owner_sid = ""
+    assert daemons_status._pid_owned_by_current_user(123) is False
+
+    owner_sid = current_sid
+    current_sid = ""
+    assert daemons_status._pid_owned_by_current_user(123) is False
+
+
+def test_pid_owned_by_current_user_posix_ps_fallback_matches_and_mismatches(monkeypatch):
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(os, "getuid", lambda: 501, raising=False)
+    # Force the ps fallback deterministically regardless of this test's own
+    # host OS: a bare "/proc/<pid>" is never a real directory on a Windows
+    # test runner, but an actual Linux CI host DOES have a real /proc -- an
+    # unstubbed Path.is_dir() there would let the helper read that host's
+    # genuine process table instead of this test's injected ps output.
+    monkeypatch.setattr(daemons_status.Path, "is_dir", lambda self: False)
+
+    def _fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout="501\n")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    assert daemons_status._pid_owned_by_current_user(123) is True
+
+    def _fake_run_other(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout="999\n")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run_other)
+    assert daemons_status._pid_owned_by_current_user(123) is False
+
+    def _fake_run_garbage(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout="not-a-uid\n")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run_garbage)
+    assert daemons_status._pid_owned_by_current_user(123) is False
+
+
+def test_pid_owned_by_current_user_posix_procfs_matches_and_mismatches(monkeypatch):
+    """The primary Linux path (``/proc/<pid>`` stat ``st_uid``), exercised
+    deterministically via a stubbed directory/stat rather than the real
+    host's own ``/proc`` -- and confirming it never falls through to the
+    ``ps`` fallback at all when ``/proc`` answers directly."""
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(os, "getuid", lambda: 501, raising=False)
+    monkeypatch.setattr(daemons_status.Path, "is_dir", lambda self: True)
+
+    ps_called = []
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: ps_called.append(True) or (_ for _ in ()).throw(
+            AssertionError("ps fallback must not run when /proc answers directly")
+        )
+    )
+
+    class _Stat:
+        def __init__(self, uid):
+            self.st_uid = uid
+
+    monkeypatch.setattr(daemons_status.Path, "stat", lambda self: _Stat(501))
+    assert daemons_status._pid_owned_by_current_user(123) is True
+    assert not ps_called
+
+    monkeypatch.setattr(daemons_status.Path, "stat", lambda self: _Stat(999))
+    assert daemons_status._pid_owned_by_current_user(123) is False
+    assert not ps_called
+
+
+def test_pid_owned_by_current_user_handles_a_timed_out_probe(monkeypatch):
+    """A probe that times out or can't start must never crash the whole
+    status report (``check=False`` on ``subprocess.run`` does not suppress
+    these) -- it must be treated the same as any other unverifiable
+    ownership: ``False``, not a propagated exception."""
+    monkeypatch.setattr(os, "name", "nt")
+
+    def _raise(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, 10)
+
+    monkeypatch.setattr(subprocess, "run", _raise)
+    assert daemons_status._pid_owned_by_current_user(123) is False
+
+
+def test_process_start_time_falls_back_to_ps_lstart_on_macos(monkeypatch):
+    """``zdd.diagnostics.process_start_time()`` only implements Windows and
+    Linux (``/proc``) -- on macOS (no ``/proc``, non-Windows) it returns
+    ``None``, which would make every reachable daemon there permanently
+    unverifiable. ``ps -o lstart=`` must supply a usable fallback token."""
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: None)
+    monkeypatch.setattr(daemons_status.Path, "is_dir", lambda self: False)
+
+    def _fake_run(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, stdout="Mon Oct  6 00:00:00 2026\n")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    assert daemons_status._process_start_time(123) == "Mon Oct  6 00:00:00 2026"
+
+
+def test_process_start_time_prefers_the_shared_zdd_result_when_available(monkeypatch):
+    monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: "shared-token")
+    called = []
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: called.append(True) or 1 / 0
+    )
+    assert daemons_status._process_start_time(123) == "shared-token"
+    assert not called
+
+
+def test_process_start_time_handles_a_failed_ps_fallback(monkeypatch):
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: None)
+    monkeypatch.setattr(daemons_status.Path, "is_dir", lambda self: False)
+
+    def _raise(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, 5)
+
+    monkeypatch.setattr(subprocess, "run", _raise)
+    assert daemons_status._process_start_time(123) is None
+

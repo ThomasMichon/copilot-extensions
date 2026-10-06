@@ -25,13 +25,14 @@ import pytest
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _INSTALL_PS1 = _PLUGIN_ROOT / "scripts" / "install.ps1"
+_ENGINE_PS1 = _PLUGIN_ROOT.parents[1] / "libs" / "installer-engine" / "installer-engine.ps1"
 _PWSH = shutil.which("pwsh")
 
 pytestmark = pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
 
 
-def _extract_function(name: str) -> str:
-    text = _INSTALL_PS1.read_text(encoding="utf-8")
+def _extract_function(source: Path, name: str) -> str:
+    text = source.read_text(encoding="utf-8")
     start = text.index(f"function {name}")
     brace_start = text.index("{", start)
     depth = 0
@@ -52,10 +53,18 @@ def _run_harness(plugin_dir: Path, stub_body: str, extra_script: str) -> subproc
     harness.write_text(
         f'$PluginDir = "{plugin_dir}"\n'
         "function Write-Warn { param($msg) }\n"
-        "function Test-IsSreModuleMismatch { param($Output) return $Output -match 'SRE module mismatch' }\n"
         + stub_body
         + "\n\n"
-        + _extract_function("Invoke-UvPipInstallResilient")
+        + _extract_function(_ENGINE_PS1, "Invoke-NativeCapture")
+        + "\n\n"
+        + _extract_function(_ENGINE_PS1, "Test-IsSreModuleMismatch")
+        + "\n\n"
+        + _extract_function(_ENGINE_PS1, "Invoke-UvPipInstallResilient")
+        + "\n\n"
+        + "Set-Item -Path Function:Invoke-UvPipInstallResilientShared -Value ${function:Invoke-UvPipInstallResilient}\n\n"
+        + _extract_function(_INSTALL_PS1, "Remove-PluginBuildArtifacts")
+        + "\n\n"
+        + _extract_function(_INSTALL_PS1, "Invoke-UvPipInstallResilient")
         + "\n\n"
         + extra_script
         + "\n",

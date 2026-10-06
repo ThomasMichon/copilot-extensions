@@ -23,7 +23,8 @@ from pathlib import Path
 import pytest
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-_INSTALL_SH = _PLUGIN_ROOT / "scripts" / "install.sh"
+_INSTALL_SH = _PLUGIN_ROOT.parents[1] / "libs" / "installer-engine" / "installer-engine.sh"
+_WRAPPER_SH = _PLUGIN_ROOT / "scripts" / "install.sh"
 # A bare shutil.which("bash") can resolve to a Windows App Execution Alias
 # stub or the classic `C:\Windows\System32\bash.exe` WSL launcher (both
 # invoke an actual WSL distro rather than running this script in the
@@ -63,6 +64,13 @@ def _extract_sh_functions(*names: str) -> str:
     return "\n\n".join(chunks)
 
 
+def _extract_wrapper_function(name: str) -> str:
+    text = _WRAPPER_SH.read_text(encoding="utf-8")
+    start = text.index(f"{name}()")
+    end = text.index("\n}\n", start)
+    return text[start : end + 2]
+
+
 def _executable(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
     path.chmod(0o755)
@@ -75,7 +83,7 @@ def _run_harness(
     harness.write_text(
         "#!/bin/sh\nset -eu\n"
         + _extract_sh_functions(
-            "_is_sre_module_mismatch", "_is_venv_corruption", "_uv_venv_resilient"
+            "test_is_sre_module_mismatch", "test_is_venv_corruption", "invoke_uv_venv_resilient"
         )
         # Matches the real `_warn() { echo "  [WARN] $*" >&2; }` -- routed to
         # stderr so it never pollutes the wrapper's captured stdout payload.
@@ -135,7 +143,7 @@ uv() {{
 }}
 """
     extra = f"""
-if out=$(_uv_venv_resilient '{venv_dir}' --python 3.10 --allow-existing); then
+if out=$(invoke_uv_venv_resilient uv '{venv_dir}' --python 3.10 --allow-existing); then
     echo "EXIT:0"
 else
     echo "EXIT:1"
@@ -174,7 +182,7 @@ uv() {{
 }}
 """
     extra = f"""
-if out=$(_uv_venv_resilient '{venv_dir}' --allow-existing); then
+if out=$(invoke_uv_venv_resilient uv '{venv_dir}' --allow-existing); then
     echo "EXIT:0"
 else
     echo "EXIT:1"
@@ -204,21 +212,60 @@ uv() {{
 }}
 """
     extra = f"""
-if out=$(_uv_venv_resilient '{venv_dir}' --allow-existing); then
+if out=$(invoke_uv_venv_resilient uv '{venv_dir}' --allow-existing); then
     echo "EXIT:0"
 else
     echo "EXIT:1"
 fi
+echo "OUT:$out"
 """
     result = _run_harness(tmp_path, uv_stub, extra, delays_file)
     assert "uv venv hit a transient" not in result.stderr
     assert "pyvenv.cfg is missing" not in result.stderr
     assert "EXIT:1" in result.stdout
-    # The wrapper's final (unretried) failure payload goes to stderr.
-    assert "error: network unreachable" in result.stderr
+    assert "OUT:error: network unreachable" in result.stdout
     # Only one attempt -- an unrelated failure must not trigger the retry.
     assert counter_file.read_text(encoding="utf-8").strip() == "1"
     assert _delays(delays_file) == []
+
+
+def test_wrapper_preserves_failure_status_and_stderr_routing(tmp_path: Path) -> None:
+    venv_dir = tmp_path / "venv"
+    venv_dir.mkdir()
+    harness = tmp_path / "wrapper-harness.sh"
+    harness.write_text(
+        "#!/bin/sh\nset -eu\n"
+        + _extract_sh_functions("test_is_sre_module_mismatch", "test_is_venv_corruption", "invoke_uv_venv_resilient")
+        + "\n\n"
+        + _extract_wrapper_function("_uv_venv_resilient")
+        + """
+_warn() { echo "WARN: $*" >&2; }
+uv() {
+    echo 'wrapper failure detail'
+    return 7
+}
+if out=$(_uv_venv_resilient 'VENV_DIR_PLACEHOLDER' --allow-existing); then
+    echo "EXIT:0"
+else
+    echo "EXIT:$?"
+fi
+echo "OUT:$out"
+""".replace("VENV_DIR_PLACEHOLDER", str(venv_dir))
+        + "\n",
+        encoding="utf-8",
+    )
+    harness.chmod(0o755)
+    result = subprocess.run(
+        [_BASH, str(harness)],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=True,
+    )
+    assert "EXIT:7" in result.stdout
+    assert "OUT:" in result.stdout
+    assert "OUT:wrapper failure detail" not in result.stdout
+    assert "wrapper failure detail" in result.stderr
 
 
 def test_persisting_corruption_still_fails_after_all_retries(tmp_path: Path) -> None:
@@ -237,7 +284,7 @@ uv() {{
 }}
 """
     extra = f"""
-if out=$(_uv_venv_resilient '{venv_dir}' --allow-existing); then
+if out=$(invoke_uv_venv_resilient uv '{venv_dir}' --allow-existing); then
     echo "EXIT:0"
 else
     echo "EXIT:1"
