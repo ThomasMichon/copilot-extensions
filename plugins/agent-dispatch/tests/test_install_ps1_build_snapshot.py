@@ -34,7 +34,6 @@ explicitly in a local dev loop or a path-gated/manual CI lane, not by default.
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 from pathlib import Path

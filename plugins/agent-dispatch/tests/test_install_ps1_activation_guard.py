@@ -2,11 +2,11 @@
 activation-ordering guard (``Invoke-VersionedActivate``,
 ``Test-ActivationSupersededNow``) and the supersession-abort contracts
 ``Install-Runtime``/``Invoke-Update`` build on top of it -- split out of
-test_install_ps1_build_snapshot.py (round-29 review: TESTING.md directs
-splitting a large test module "by behavioral contract, not arbitrary line
-count" once it covers several genuinely distinct contracts; this module's
-own activation/supersession-ordering contract is unrelated to that module's
-build-snapshot/lock-reentrancy contract).
+test_install_ps1_build_snapshot.py per TESTING.md's guidance to split a
+large test module "by behavioral contract, not arbitrary line count" once
+it covers several genuinely distinct contracts; this module's own
+activation/supersession-ordering contract is unrelated to that module's
+build-snapshot/lock-reentrancy contract.
 
 This module actually EXECUTES the extracted functions under `pwsh` to prove
 the real install.ps1 behaves correctly, not a reimplementation of it.
