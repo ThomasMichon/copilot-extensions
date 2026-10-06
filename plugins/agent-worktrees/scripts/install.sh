@@ -956,15 +956,20 @@ _acquire_versioned_slot_lease() {
         _acquire_versioned_slot_lease_python_fallback "$lease_path"
         return $?
     fi
-    if ! exec {_VERSIONED_SLOT_LEASE_FD}>"$lease_path"; then
-        _VERSIONED_SLOT_LEASE_FD=""
+    # A literal fd number is required here (not the dynamic `{fd}`
+    # allocation syntax, bash 4.1+): this function runs at most once per
+    # process lifetime (guarded above), so fd 8 can't collide with another
+    # live lease in this same process. Kept bash-3.2-compatible to match
+    # the no-flock fallback below, even though a host with a real `flock`
+    # binary is unlikely to be running a bash this old.
+    if ! exec 8>"$lease_path"; then
         return 1
     fi
-    if ! flock -n "$_VERSIONED_SLOT_LEASE_FD"; then
-        exec {_VERSIONED_SLOT_LEASE_FD}>&- 2>/dev/null || true
-        _VERSIONED_SLOT_LEASE_FD=""
+    if ! flock -n 8; then
+        exec 8>&- 2>/dev/null || true
         return 1
     fi
+    _VERSIONED_SLOT_LEASE_FD=8
     return 0
 }
 
@@ -972,7 +977,7 @@ _release_versioned_slot_lease() {
     # Safe to call unconditionally (no-op) when no lease was acquired -- e.g.
     # _test_slot_already_complete skipped the build entirely this run.
     if [[ -n "$_VERSIONED_SLOT_LEASE_FD" ]]; then
-        exec {_VERSIONED_SLOT_LEASE_FD}>&- 2>/dev/null || true
+        exec 8>&- 2>/dev/null || true
         _VERSIONED_SLOT_LEASE_FD=""
     fi
     if [[ -n "$_VERSIONED_SLOT_LEASE_PY_PID" ]]; then

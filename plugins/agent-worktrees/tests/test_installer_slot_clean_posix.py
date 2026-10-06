@@ -159,21 +159,29 @@ def test_versioned_slot_lease_uses_flock_held_for_process_lifetime():
     (auto-released by the kernel on crash/exit -- never a PID-recorded
     marker file requiring staleness detection) on platforms that have it,
     and must never silently treat "couldn't lock" as "no contention" --
-    acquisition and release failures must propagate, not be swallowed."""
+    acquisition and release failures must propagate, not be swallowed. Must
+    use a literal fd number: bash's dynamic `{fd}` allocation needs bash
+    4.1+, and stock macOS -- a platform this script must still PARSE on
+    even when `flock` isn't the path taken -- ships bash 3.2."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
     acquire_body = _function_body(text, "_acquire_versioned_slot_lease")
     release_body = _function_body(text, "_release_versioned_slot_lease")
 
     assert "command -v flock" in acquire_body
-    assert 'exec {_VERSIONED_SLOT_LEASE_FD}>"$lease_path"' in acquire_body
-    assert 'flock -n "$_VERSIONED_SLOT_LEASE_FD"' in acquire_body
+    assert "{_VERSIONED_SLOT_LEASE_FD}" not in acquire_body, (
+        "dynamic fd allocation ({fd}) needs bash 4.1+ and fails to parse "
+        "under stock macOS's bash 3.2 -- use a literal fd number instead"
+    )
+    assert 'exec 8>"$lease_path"' in acquire_body
+    assert "flock -n 8" in acquire_body
     # A failed `exec` open must fail closed (return 1), never treat "we
     # couldn't even open the lease file" as a successful acquisition.
     exec_fail_branch = acquire_body.split(
-        'if ! exec {_VERSIONED_SLOT_LEASE_FD}>"$lease_path"; then', 1
+        'if ! exec 8>"$lease_path"; then', 1
     )[1][:200]
     assert "return 1" in exec_fail_branch
-    assert "exec {_VERSIONED_SLOT_LEASE_FD}>&-" in release_body
+    assert "{_VERSIONED_SLOT_LEASE_FD}" not in release_body
+    assert "exec 8>&-" in release_body
 
 
 def test_versioned_slot_lease_python_fallback_delegates_to_real_fcntl_flock():
