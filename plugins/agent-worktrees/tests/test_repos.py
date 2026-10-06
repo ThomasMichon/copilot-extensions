@@ -1210,10 +1210,9 @@ def test_sync_repo_surfaces_git_ops_fetch_error(home: Path, tmp_path: Path):
 
 def test_sync_repo_bare_anchor_already_up_to_date(home: Path, tmp_path: Path):
     """A bare worktree-class anchor already level with its upstream must
-    report ``synced`` -- previously ``git merge --ff-only`` (which
-    unconditionally fails on a bare repo with "fatal: this operation must be
-    run in a work tree") was mislabeled ``"not fast-forwardable (diverged)"``
-    even when there was no real divergence at all."""
+    report ``synced`` -- ``git merge --ff-only`` cannot run on a bare repo
+    (no work tree), so this path must never fall through to it and mistake
+    an already-synced anchor for a real divergence."""
     upstream = tmp_path / "upstream"
     _init_repo(upstream, branch="main")
     anchor = tmp_path / "anchor"

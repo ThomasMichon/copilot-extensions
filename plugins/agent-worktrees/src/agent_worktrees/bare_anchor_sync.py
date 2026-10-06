@@ -16,14 +16,11 @@ def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
 
     A bare anchor (``core.bare`` with every real edit happening in linked
     worktrees -- agent-worktrees' own worktree-class layout, e.g. its
-    managed project anchors) has no index or work tree. Both the dirty-check
-    (``git status --porcelain``) and the normal fast-forward (``git merge
-    --ff-only``) in :func:`repos.sync_repo` unconditionally fail there with
-    "fatal: this operation must be run in a work tree" -- every single call,
-    synced or not -- which is indistinguishable from a real divergence to a
-    caller that only checks the exit code. Previously that failure was
-    reported as ``"not fast-forwardable (diverged)"`` even when the anchor
-    was already fully in sync.
+    managed project anchors) has no index or work tree, so neither the
+    dirty-check (``git status --porcelain``) nor the normal fast-forward
+    (``git merge --ff-only``) in :func:`repos.sync_repo` can run there --
+    both unconditionally fail with "fatal: this operation must be run in a
+    work tree", on every call regardless of actual sync state.
 
     There is no "dirty" (uncommitted work-tree) concept without a work tree
     to hold it, but the branch ref itself can still be ahead of, or diverged
