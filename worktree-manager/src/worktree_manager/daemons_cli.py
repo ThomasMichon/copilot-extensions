@@ -5,15 +5,30 @@ from __future__ import annotations
 import json
 
 
+def _reject_unsupported_args(args: list[str], *, allowed: tuple[str, ...]) -> list[str] | None:
+    """Return ``args`` unchanged, or print an error and ``None`` if any
+    token isn't in ``allowed``. Without this, a typo (``--jsoon``) was
+    silently ignored rather than rejected -- a scripted caller expecting
+    JSON on a flag it misspelled would instead get text output and exit 0,
+    with no signal anything went wrong."""
+    unsupported = [a for a in args if a not in allowed]
+    if unsupported:
+        print(f"error: unsupported option(s): {' '.join(unsupported)}")
+        return None
+    return args
+
+
 def cmd_daemons(rest: list[str]) -> int:
     args = list(rest)
     if not args:
-        print("usage: worktree-manager daemons <status> [--json]")
+        print("usage: worktree-manager daemons <status|mappings> [--json]")
         return 2
     action = args.pop(0)
     if action == "status":
         from .daemons_status import daemon_statuses
 
+        if _reject_unsupported_args(args, allowed=("--json",)) is None:
+            return 2
         json_mode = "--json" in args
         statuses = daemon_statuses()
         if json_mode:
@@ -42,6 +57,37 @@ def cmd_daemons(rest: list[str]) -> int:
             print(f"    {marker} " + " · ".join(bits))
         print()
         print("  (* = routing table's current active endpoint)")
+        return 0
+    if action == "mappings":
+        from .daemons_status import mapping_statuses
+
+        if _reject_unsupported_args(args, allowed=("--json",)) is None:
+            return 2
+        json_mode = "--json" in args
+        mappings = mapping_statuses()
+        if json_mode:
+            print(json.dumps(mappings, indent=2))
+            return 0
+        if not mappings:
+            print("  no known mux-session mappings for this root.")
+            return 0
+        print("  known mux-session mappings (root-wide, not per-daemon; includes tombstoned/removed entries):")
+        for entry in mappings:
+            marker = "*" if entry.get("live") else " "
+            bits = [
+                f"{entry['project']}/{entry['worktree_id']}",
+                f"session {entry.get('mux_session')}",
+                f"attached {entry.get('attached_clients', 0)}",
+            ]
+            print(f"    {marker} " + " · ".join(bits))
+        print()
+        print("  (* = registry's own 'live' bit -- NOT confirmed liveness; a dead")
+        print("   session can retain live: true until the next real probe. Shared")
+        print("   across every resident daemon for this root, not attributable to")
+        print("   one specific pid)")
+        print("  (attached_clients reflects only what a register() caller supplied --")
+        print("   today's shipped launch scripts never populate it, so it reads 0")
+        print("   even for a genuinely attached session; preliminary listing only)")
         return 0
     print(f"error: unknown daemons action {action!r}")
     return 2
