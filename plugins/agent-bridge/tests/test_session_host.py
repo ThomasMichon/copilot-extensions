@@ -13,6 +13,12 @@ import asyncio
 import contextlib
 import json
 import os
+import signal
+import subprocess
+import sys
+import threading
+import time
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -818,6 +824,384 @@ async def test_unexpected_reap_disabled_when_zero():
         assert child.killed is True
     finally:
         await host.close()
+
+
+# --------------------------------------------------------------------------
+# crash-tail capture (#5384)
+# --------------------------------------------------------------------------
+def test_crash_tail_capture_decodes_output():
+    r, w = os.pipe()
+    stream = os.fdopen(r, "rb")
+    os.write(w, b"hello from the crashed process\n")
+    os.close(w)
+
+    tail = launcher._CrashTailCapture(stream)
+    # Give the background drain thread a moment to read EOF.
+    for _ in range(50):
+        if tail.tail_text():
+            break
+        time.sleep(0.02)
+    assert tail.tail_text() == "hello from the crashed process\n"
+
+
+def test_crash_tail_capture_closes_stream_on_eof():
+    """The drain thread must close its own stream once it reaches EOF, or
+    a successful launch (whose HostHandle keeps the Popen object, and so
+    this stream, alive for the host's full lifetime) leaks a frontend file
+    descriptor per launch."""
+    r, w = os.pipe()
+    stream = os.fdopen(r, "rb")
+    launcher._CrashTailCapture(stream)
+    os.close(w)
+
+    for _ in range(50):
+        if stream.closed:
+            break
+        time.sleep(0.02)
+    assert stream.closed
+
+
+def test_crash_tail_capture_is_bounded():
+    r, w = os.pipe()
+    stream = os.fdopen(r, "rb")
+    tail = launcher._CrashTailCapture(stream, cap_bytes=16)
+    os.write(w, b"0123456789" * 10)  # 100 bytes, well over the 16-byte cap
+    os.close(w)
+
+    for _ in range(50):
+        if len(tail.tail_text()) == 16:
+            break
+        time.sleep(0.02)
+    text = tail.tail_text()
+    assert len(text) == 16
+    # Only the *tail* (most recent bytes) is kept, not the head.
+    assert text == ("0123456789" * 10)[-16:]
+
+
+def test_crash_tail_capture_never_blocks_a_chatty_child():
+    """The drain thread must keep draining even past the OS pipe buffer size
+    (commonly 64KiB) so a host that writes a lot of startup noise never
+    deadlocks waiting on a full pipe that nobody is reading (#5384)."""
+    r, w = os.pipe()
+    stream = os.fdopen(r, "rb")
+    tail = launcher._CrashTailCapture(stream, cap_bytes=4096)
+
+    big_chunk = b"x" * 70_000  # larger than a typical 64KiB pipe buffer
+
+    def _writer():
+        with os.fdopen(w, "wb") as out:
+            out.write(big_chunk)
+
+    writer_thread = threading.Thread(target=_writer)
+    writer_thread.start()
+    writer_thread.join(timeout=5.0)
+    assert not writer_thread.is_alive(), "writer blocked -- drain thread stalled"
+
+    for _ in range(50):
+        if len(tail.tail_text()) == 4096:
+            break
+        time.sleep(0.02)
+    assert tail.tail_text() == "x" * 4096
+
+
+def test_crash_tail_capture_wait_until_drained_blocks_for_final_bytes():
+    """``wait_until_drained`` must block until the drain thread has actually
+    consumed a delayed final write + EOF, not return based on ``poll()``
+    alone -- otherwise a reader could observe the process as exited while
+    its last (often most diagnostic) bytes are still in flight."""
+    r, w = os.pipe()
+    stream = os.fdopen(r, "rb")
+    tail = launcher._CrashTailCapture(stream)
+
+    def _delayed_writer() -> None:
+        time.sleep(0.2)
+        with os.fdopen(w, "wb") as out:
+            out.write(b"final traceback line\n")
+
+    writer = threading.Thread(target=_delayed_writer)
+    writer.start()
+    # Immediately after spawning, the delayed writer hasn't written yet.
+    assert tail.tail_text() == ""
+    tail.wait_until_drained(timeout=5.0)
+    writer.join()
+    assert tail.tail_text() == "final traceback line\n"
+
+
+def test_launch_session_host_surfaces_crash_tail(tmp_path, monkeypatch):
+    """An early-exiting host surfaces its own stdout/stderr tail in the
+    raised RuntimeError instead of only a bare exit code (#5384)."""
+    crash_script = tmp_path / "crash.py"
+    crash_script.write_text(
+        "import sys\n"
+        "print('simulated session host startup crash')\n"
+        "print('diagnosable detail line', file=sys.stderr)\n"
+        "sys.exit(7)\n"
+    )
+
+    real_popen = subprocess.Popen
+
+    def _fake_popen(argv, **kwargs):
+        # Run the crash script instead of the real
+        # `-m agent_bridge.session_host` entry point, keeping every other
+        # kwarg (stdin/stdout/stderr redirection, env, cwd, creationflags)
+        # exactly as launch_session_host set them up.
+        return real_popen([sys.executable, str(crash_script)], **kwargs)
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", _fake_popen)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        launcher.launch_session_host(
+            ["irrelevant-child-argv"],
+            state_dir=tmp_path,
+            ready_timeout=5.0,
+        )
+    message = str(exc_info.value)
+    assert "exited early (code=7)" in message
+    assert "simulated session host startup crash" in message
+    assert "diagnosable detail line" in message
+
+
+def test_launch_session_host_timeout_kills_hung_process(tmp_path, monkeypatch):
+    """A host that neither becomes ready nor exits within ``ready_timeout``
+    must be killed rather than left running (leaking a hung process, its
+    capture thread, and its pipe file descriptor)."""
+    hang_script = tmp_path / "hang.py"
+    hang_script.write_text(
+        "import sys, time\n"
+        "print('still starting...')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(30)\n"
+    )
+
+    real_popen = subprocess.Popen
+    spawned: dict[str, subprocess.Popen] = {}
+
+    def _fake_popen(argv, **kwargs):
+        proc = real_popen([sys.executable, str(hang_script)], **kwargs)
+        spawned["proc"] = proc
+        return proc
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", _fake_popen)
+
+    with pytest.raises(TimeoutError):
+        launcher.launch_session_host(
+            ["irrelevant-child-argv"],
+            state_dir=tmp_path,
+            ready_timeout=0.5,
+        )
+
+    proc = spawned["proc"]
+    for _ in range(100):
+        if proc.poll() is not None:
+            break
+        time.sleep(0.05)
+    assert proc.poll() is not None, "hung host process was not killed"
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason=(
+        "exercises the real zdd.diagnostics.process_start_time identity "
+        "backend, which only exists on Linux (/proc) -- on macOS/other "
+        "POSIX _kill_host_process_tree's identity guard correctly refuses "
+        "to killpg with no baseline, which would fail this specific "
+        "end-to-end assertion (and leak the grandchild) despite being the "
+        "intended, safe behavior there; see TestKillHostProcessTreeIdentityGuard "
+        "below for the (mocked, platform-independent) guard-logic coverage"
+    ),
+)
+def test_kill_host_process_tree_kills_whole_posix_group(tmp_path, monkeypatch):
+    """``_kill_host_process_tree`` must reach an already-spawned grandchild
+    too, not just the host pid -- ``PR_SET_PDEATHSIG`` (used elsewhere to tie
+    a copilot child to its host) is Linux-only, so macOS/other POSIX would
+    orphan that child if only the host pid were killed."""
+    marker = tmp_path / "grandchild-pid.txt"
+    script = tmp_path / "group_probe.py"
+    script.write_text(
+        "import subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', "
+        "'import time; time.sleep(30)'])\n"
+        f"with open({str(marker)!r}, 'w') as f:\n"
+        "    f.write(str(child.pid))\n"
+        "time.sleep(30)\n"
+    )
+    # start_new_session=True mirrors host_spawn_kwargs()'s real POSIX
+    # behavior (proc.pid doubling as the process group id) -- set up
+    # directly here since contained_test_mode() suppresses it for the
+    # actual launch path under the test supervisor.
+    proc = subprocess.Popen(
+        [sys.executable, str(script)], start_new_session=True,
+    )
+    try:
+        from zdd.diagnostics import process_start_time
+
+        expected_identity = process_start_time(proc.pid)
+
+        for _ in range(100):
+            if marker.exists() and marker.read_text().strip():
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("grandchild never reported its pid")
+        child_pid = int(marker.read_text().strip())
+
+        monkeypatch.setattr(launcher, "contained_test_mode", lambda: False)
+        launcher._kill_host_process_tree(proc, expected_identity)
+        proc.wait(timeout=5)
+
+        for _ in range(100):
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("grandchild survived the process-group kill")
+    finally:
+        proc.kill()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX process-group semantics only",
+)
+class TestKillHostProcessTreeIdentityGuard:
+    """Direct, mocked tests of ``_kill_host_process_tree``'s POSIX identity-
+    verification gate -- this repository's PID-destruction rule requires a
+    dedicated mismatch/refusal unit test (mirrors
+    ``TestKillTreeIdentityGuard`` in ``test_local_cache_refresh.py``), not
+    just the real end-to-end descendant regression above (which only proves
+    the happy identity path)."""
+
+    def test_refuses_to_signal_without_an_established_baseline(
+        self, monkeypatch,
+    ) -> None:
+        """``expected_identity is None`` must fail closed -- the universal
+        case on any POSIX platform with no identity backend at all (macOS:
+        ``process_start_time`` always returns ``None`` there), not just a
+        transient miss. Never trust an unverified numeric pid."""
+        killpg_calls = []
+        monkeypatch.setattr(
+            os, "killpg", lambda pgid, sig: killpg_calls.append(pgid),
+        )
+        monkeypatch.setattr(
+            launcher, "contained_test_mode", lambda: False,
+        )
+        monkeypatch.setattr(
+            "zdd.diagnostics.process_start_time", lambda pid: None,
+        )
+
+        proc = MagicMock()
+        proc.pid = 4321
+        proc.kill = MagicMock()
+
+        launcher._kill_host_process_tree(proc, None)
+
+        assert killpg_calls == [], (
+            "os.killpg was called with no established identity baseline -- "
+            "the fail-closed guard did not hold"
+        )
+        proc.kill.assert_called_once()
+
+    def test_refuses_to_signal_on_a_confirmed_identity_mismatch(
+        self, monkeypatch,
+    ) -> None:
+        """A live, differing identity at the same numeric pid means the pid
+        has been recycled by an unrelated process -- refuse the signal
+        outright."""
+        killpg_calls = []
+        monkeypatch.setattr(
+            os, "killpg", lambda pgid, sig: killpg_calls.append(pgid),
+        )
+        monkeypatch.setattr(
+            launcher, "contained_test_mode", lambda: False,
+        )
+        monkeypatch.setattr(
+            "zdd.diagnostics.process_start_time",
+            lambda pid: "a-different-identity",
+        )
+
+        proc = MagicMock()
+        proc.pid = 4321
+        proc.kill = MagicMock()
+
+        launcher._kill_host_process_tree(proc, "the-original-identity")
+
+        assert killpg_calls == [], (
+            "os.killpg was called despite a confirmed identity mismatch"
+        )
+        proc.kill.assert_called_once()
+
+    def test_signals_when_identity_is_established_and_not_contradicted(
+        self, monkeypatch,
+    ) -> None:
+        """The common, expected-to-succeed case: a real baseline was
+        captured and the current occupant of that pid still matches it."""
+        killpg_calls = []
+        monkeypatch.setattr(
+            os, "killpg", lambda pgid, sig: killpg_calls.append((pgid, sig)),
+        )
+        monkeypatch.setattr(
+            launcher, "contained_test_mode", lambda: False,
+        )
+        monkeypatch.setattr(
+            "zdd.diagnostics.process_start_time",
+            lambda pid: "the-original-identity",
+        )
+
+        proc = MagicMock()
+        proc.pid = 4321
+        proc.kill = MagicMock()
+
+        launcher._kill_host_process_tree(proc, "the-original-identity")
+
+        assert killpg_calls == [(4321, signal.SIGKILL)]
+        proc.kill.assert_not_called()
+
+
+def test_detach_stdio_from_frontend_closes_frontend_pipe(tmp_path):
+    """Once the host calls ``_detach_stdio_from_frontend``, the frontend's
+    crash-tail pipe must see EOF (its write end closed) instead of staying
+    open for the host's full lifetime -- a host that outlives a later
+    frontend exit/restart must never depend on that pipe still being read.
+    The child stays alive well past the detach so EOF can
+    only have come from the dup2 itself, not from process exit (otherwise
+    the test would pass even if the detach did nothing)."""
+    script = tmp_path / "detach_probe.py"
+    script.write_text(
+        "import sys, time\n"
+        "from agent_bridge.session_host.launcher import ("
+        "_detach_stdio_from_frontend)\n"
+        "print('before-detach')\n"
+        "sys.stdout.flush()\n"
+        "_detach_stdio_from_frontend()\n"
+        "time.sleep(5.0)\n"  # stay alive well past the bounded read below
+        "print('after-detach-should-not-reach-the-frontend')\n"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, str(script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    try:
+        result: dict[str, bytes] = {}
+
+        def _read() -> None:
+            result["data"] = proc.stdout.read()
+
+        reader = threading.Thread(target=_read, daemon=True)
+        reader.start()
+        reader.join(timeout=5.0)
+        assert not reader.is_alive(), "pipe never reached EOF"
+        # The child's own 5s sleep hasn't elapsed yet -- it is still alive,
+        # so the EOF above came from the dup2 inside
+        # _detach_stdio_from_frontend, not from process exit.
+        assert proc.poll() is None
+        captured = result["data"]
+        assert b"before-detach" in captured
+        assert b"after-detach-should-not-reach-the-frontend" not in captured
+    finally:
+        proc.kill()
+        proc.wait(timeout=5)
 
 
 # --------------------------------------------------------------------------

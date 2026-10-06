@@ -29,9 +29,11 @@ import asyncio
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,6 +57,78 @@ _ACP_STDIO_LIMIT_BYTES = 64 * 1024 * 1024
 # copilot child is spawned so the child never inherits it.
 _NONCE_ENV = "AGENT_BRIDGE_SESSION_HOST_NONCE"
 
+# How much of the host process's combined stdout/stderr (up through
+# readiness) to retain for surfacing in an "exited early" RuntimeError. A
+# crashed host's own traceback almost always fits in a few KB.
+_CRASH_TAIL_CAP_BYTES = 4096
+
+
+class _CrashTailCapture:
+    """Drains a subprocess's combined stdout/stderr into a bounded buffer.
+
+    Continuously reads from ``stream`` on a background thread so the child
+    is never blocked on a full OS pipe buffer, keeping only the last
+    ``cap_bytes`` -- enough to show a traceback or a shell error from a
+    process that exits before reporting ready. The host redirects its own
+    stdout/stderr to ``os.devnull`` once it publishes readiness (see
+    ``_detach_stdio_from_frontend``), closing this pipe's write end and
+    ending the drain; capture is therefore bounded to the bootstrap window,
+    not the host's full lifetime.
+    """
+
+    def __init__(self, stream: Any, cap_bytes: int = _CRASH_TAIL_CAP_BYTES) -> None:
+        self._buf = bytearray()
+        self._cap = cap_bytes
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(
+            target=self._drain, args=(stream,), daemon=True,
+        )
+        self._thread.start()
+
+    def _drain(self, stream: Any) -> None:
+        try:
+            while True:
+                chunk = stream.read(4096)
+                if not chunk:
+                    break
+                with self._lock:
+                    self._buf.extend(chunk)
+                    overflow = len(self._buf) - self._cap
+                    if overflow > 0:
+                        del self._buf[:overflow]
+        except (OSError, ValueError):
+            # Stream closed/invalid underneath us (process reaped, etc.) --
+            # whatever was captured so far is still usable.
+            pass
+        finally:
+            # Own closing this fd: a successful launch's HostHandle.proc
+            # keeps the Popen object (and so this stream) alive for the
+            # host's full lifetime otherwise, leaking a frontend file
+            # descriptor per launch.
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+    def tail_text(self) -> str:
+        """The captured bytes decoded as text, most recent last."""
+        with self._lock:
+            data = bytes(self._buf)
+        return data.decode("utf-8", errors="replace")
+
+    def wait_until_drained(self, timeout: float = 2.0) -> None:
+        """Block until the drain thread has consumed the stream to EOF.
+
+        A dead process's exit (``proc.poll()``) can be observed before the
+        drain thread has read the bytes still buffered in the OS pipe, so
+        a ``tail_text()`` taken immediately after can omit (or miss
+        entirely) the process's final output. Call this first -- bounded,
+        since a process that never actually closes its stdout (unexpected,
+        but not this function's job to diagnose) must not hang the caller
+        forever.
+        """
+        self._thread.join(timeout)
+
 
 def host_spawn_kwargs() -> dict[str, Any]:
     """``subprocess`` kwargs for the FRONTEND to spawn the host so it survives.
@@ -64,6 +138,55 @@ def host_spawn_kwargs() -> dict[str, Any]:
     on POSIX it gets its own session.
     """
     return windowless_daemon_kwargs(breakaway=True)
+
+
+def _kill_host_process_tree(
+    proc: subprocess.Popen, expected_identity: str | None,
+) -> None:
+    """Kill a spawned-but-never-ready host, reaching its whole tree on POSIX.
+
+    :func:`host_spawn_kwargs` gives the host ``start_new_session=True`` (its
+    own process group, ``proc.pid`` doubling as the group id) -- except
+    under :func:`contained_test_mode`, where that is suppressed so the
+    repository test supervisor retains ownership of the process group, and
+    ``os.killpg`` here would reach *its* group instead. ``PR_SET_PDEATHSIG``
+    (tying an already-spawned copilot child to its host, see
+    ``osutil.child_preexec``) is Linux-only -- on macOS/other POSIX there is
+    no equivalent, so killing only the host's own pid can orphan a child it
+    already spawned before the timeout; ``os.killpg`` reaches the whole
+    group in one call. Windows has no equivalent process-group concept
+    here; ``proc.kill()`` (``TerminateProcess``) is used directly.
+
+    This repository's PID-destruction rule (see
+    ``local_cache_refresh._kill_tree``, which this mirrors) requires
+    identity verification before any destructive termination by numeric id,
+    since an exited pid is eventually reusable by an unrelated process.
+    ``expected_identity`` is ``process_start_time(proc.pid)`` captured
+    immediately after spawn; a ``None`` baseline -- either no identity
+    backend at all for this platform (macOS has none) or a miss at spawn
+    time -- fails this check closed, same as a confirmed, live, differing
+    identity at that pid: neither signals the group, only
+    ``proc.kill()`` (the single, still-held ``Popen`` handle, never
+    re-resolved by numeric id) runs.
+    """
+    if sys.platform != "win32" and not contained_test_mode():
+        from zdd.diagnostics import process_start_time
+
+        current_identity = process_start_time(proc.pid)
+        identity_established = expected_identity is not None
+        identity_mismatch = (
+            identity_established
+            and current_identity is not None
+            and current_identity != expected_identity
+        )
+        if identity_established and not identity_mismatch:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+                return
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+    proc.kill()
+
 
 
 @dataclass
@@ -103,6 +226,16 @@ def launch_session_host(
     process **via its environment** (not the command line, so it does not leak
     to ``ps``/Task Manager) and the host requires a matching nonce on ATTACH.
     The copilot child never sees it -- ``run_host`` strips it before spawn.
+
+    The host process's own combined stdout/stderr is drained into a small,
+    bounded in-memory tail (:class:`_CrashTailCapture`) during bootstrap: if
+    it exits early (before reporting ready), the raised ``RuntimeError``
+    includes that tail so the real crash reason (a traceback, a missing
+    dependency, a bad argv, ...) is diagnosable after the fact instead of
+    only ever surfacing a generic exit code (#5384). The host redirects its
+    own stdout/stderr to ``os.devnull`` once ready
+    (``_detach_stdio_from_frontend``), so output after that point is never
+    coupled to this frontend process's lifetime.
     """
     sd = Path(state_dir) if state_dir else Path(tempfile.mkdtemp(prefix="agbridge-host-"))
     sd.mkdir(parents=True, exist_ok=True)
@@ -129,18 +262,35 @@ def launch_session_host(
     proc = subprocess.Popen(
         host_argv,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         env=child_env,
         cwd=cwd or None,
         **host_spawn_kwargs(),
     )
+    crash_tail = _CrashTailCapture(proc.stdout)
+    expected_identity: str | None = None
+    if sys.platform != "win32" and not contained_test_mode():
+        from zdd.diagnostics import process_start_time
+
+        # Captured immediately after spawn, before any reaping could occur
+        # -- the baseline _kill_host_process_tree verifies against if a
+        # ready-timeout later needs to kill this process's group.
+        expected_identity = process_start_time(proc.pid)
 
     deadline = time.time() + ready_timeout
-    while time.time() < deadline:
+    while True:
         if proc.poll() is not None:
+            # The process has exited, but the OS pipe may still hold bytes
+            # the drain thread hasn't consumed yet -- wait for it to reach
+            # EOF before reading the tail, so the final traceback line
+            # isn't dropped by a race between poll() and the reader.
+            crash_tail.wait_until_drained()
+            tail_text = crash_tail.tail_text().strip()
+            detail = f"\n--- last output ---\n{tail_text}" if tail_text else ""
             raise RuntimeError(
-                f"session host exited early (code={proc.returncode}) before ready"
+                f"session host exited early (code={proc.returncode}) "
+                f"before ready{detail}"
             )
         if state_file.exists():
             try:
@@ -157,8 +307,25 @@ def launch_session_host(
                     protocol_version=int(data.get("protocol_version",
                                                   proto.PROTOCOL_VERSION)),
                 )
+        if time.time() >= deadline:
+            # Recheck exit/readiness one more time right at the boundary
+            # (above) before giving up -- the final sleep below can cross
+            # the deadline after the host already published a complete
+            # ready-state file or exited, and without this re-check that
+            # publication would be ignored and a now-ready host killed.
+            break
         time.sleep(0.05)
 
+    # The host neither became ready nor exited within the deadline -- stop
+    # waiting on it rather than leaking a hung process (and anything it
+    # already spawned), an unbounded-lifetime daemon thread, and its pipe
+    # file descriptor.
+    _kill_host_process_tree(proc, expected_identity)
+    try:
+        proc.wait(timeout=5.0)
+    except subprocess.TimeoutExpired:
+        pass
+    crash_tail.wait_until_drained()
     raise TimeoutError(f"session host did not become ready within {ready_timeout}s")
 
 
@@ -180,6 +347,33 @@ def apply_host_survival() -> None:
         except OSError:
             # Already a session/group leader (spawned with start_new_session).
             pass
+
+
+def _detach_stdio_from_frontend() -> None:
+    """Redirect this (host) process's own stdout/stderr to ``os.devnull``.
+
+    The frontend's :func:`launch_session_host` pipes the host's stdout/stderr
+    only to capture a crash-tail for its own ready-wait loop
+    (:class:`_CrashTailCapture`); that pipe's sole reader is a daemon thread
+    in the frontend process. The host is explicitly required to outlive the
+    frontend (module docstring), so once it has published readiness it must
+    stop depending on that pipe -- otherwise a later frontend exit/restart
+    closes the read end and any subsequent host stdout/stderr write raises
+    ``BrokenPipeError``. ``os.dup2`` over the inherited fds closes the pipe's
+    write end too, which cleanly ends the frontend's drain thread (read()
+    returns EOF) instead of leaving it blocked. Idempotent and best-effort.
+    """
+    try:
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        return
+    try:
+        os.dup2(devnull_fd, sys.stdout.fileno())
+        os.dup2(devnull_fd, sys.stderr.fileno())
+    except (OSError, ValueError):
+        pass
+    finally:
+        os.close(devnull_fd)
 
 
 def _resolve_child_exe(argv: list[str], path: str | None) -> list[str]:
@@ -302,6 +496,12 @@ async def run_host(
                 exit_code = child.returncode
             if exit_code is not None:
                 _publish_child_exit(exit_code)
+    if not contained_test_mode():
+        # Readiness published: stop depending on the frontend's crash-tail
+        # pipe (see _detach_stdio_from_frontend). Skipped under the test
+        # supervisor, where run_host executes in-process and this would
+        # devnull the test process's own stdout/stderr.
+        _detach_stdio_from_frontend()
     if ready is not None:
         ready.set()
     try:
