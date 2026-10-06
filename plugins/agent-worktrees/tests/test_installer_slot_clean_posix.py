@@ -65,3 +65,49 @@ def test_deploy_venv_retries_then_hard_fails_on_a_dirty_slot():
     )
     fail_branch = body[err_idx:uv_idx]
     assert "return 1" in fail_branch
+
+
+def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
+    """#5439 review finding: `_versioned_slot_clean`'s liveness check alone is
+    check-then-act -- two concurrent installer invocations could both
+    observe a clean slot (neither has started its external build yet) and
+    then both build into it. `deploy_venv` must acquire an OS-level exclusive
+    build lease FIRST (before even attempting slot-clean), fail immediately
+    if another live process already holds it, and `_versioned_activate` must
+    release that lease afterward regardless of outcome."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    deploy_body = _function_body(text, "deploy_venv")
+    activate_wrapper = _function_body(text, "_versioned_activate")
+
+    lease_idx = deploy_body.index("_acquire_versioned_slot_lease")
+    clean_idx = deploy_body.index("_versioned_slot_clean")
+    assert lease_idx < clean_idx, (
+        "the exclusive build lease must be acquired before the slot-clean "
+        "check, not after"
+    )
+    assert "if ! _acquire_versioned_slot_lease; then" in deploy_body
+    lease_fail_branch = deploy_body.split(
+        "if ! _acquire_versioned_slot_lease; then", 1
+    )[1][:600]
+    assert "return 1" in lease_fail_branch
+
+    # The wrapper must release the lease regardless of how the inner
+    # activation call returns.
+    assert "_versioned_activate_inner" in activate_wrapper
+    assert "_release_versioned_slot_lease" in activate_wrapper
+
+
+def test_versioned_slot_lease_uses_flock_held_for_process_lifetime():
+    """The lease primitive must be an OS-level `flock` held on an open fd
+    (auto-released by the kernel on crash/exit -- never a PID-recorded
+    marker file requiring staleness detection), and must gracefully no-op
+    (not fail installs) when `flock` isn't available on this platform."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    acquire_body = _function_body(text, "_acquire_versioned_slot_lease")
+    release_body = _function_body(text, "_release_versioned_slot_lease")
+
+    assert "command -v flock" in acquire_body
+    assert 'exec {_VERSIONED_SLOT_LEASE_FD}>"$lease_path"' in acquire_body
+    assert 'flock -n "$_VERSIONED_SLOT_LEASE_FD"' in acquire_body
+    assert "exec {_VERSIONED_SLOT_LEASE_FD}>&-" in release_body
+

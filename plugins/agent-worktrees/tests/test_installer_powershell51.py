@@ -382,6 +382,40 @@ def test_slot_clean_reports_failure_instead_of_silently_downgrading_signed_venv(
     assert "return $false" in slot_dirty_branch
 
 
+def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
+    """#5439 review finding: `Invoke-VersionedSlotClean`'s liveness check alone
+    is check-then-act -- two concurrent installer invocations could both
+    observe a clean slot (neither has started its external build yet) and
+    then both build into it. `Deploy-Venv` must acquire an OS-level exclusive
+    build lease FIRST (before even attempting slot-clean), fail immediately
+    if another live process already holds it, and `Invoke-VersionedActivate`
+    must release that lease afterward regardless of outcome."""
+    installer = INSTALLER.read_text(encoding="utf-8")
+    deploy_fn = installer.split("function Deploy-Venv", 1)[1].split(
+        "function Deploy-Wrappers", 1
+    )[0]
+    activate_wrapper = installer.split("function Invoke-VersionedActivate {", 1)[1]
+
+    lease_idx = deploy_fn.index("Enter-VersionedSlotLease")
+    clean_idx = deploy_fn.index("Invoke-VersionedSlotClean")
+    assert lease_idx < clean_idx, (
+        "the exclusive build lease must be acquired before the slot-clean "
+        "check, not after"
+    )
+    assert "if (-not (Enter-VersionedSlotLease)) {" in deploy_fn
+    lease_fail_branch = deploy_fn.split(
+        "if (-not (Enter-VersionedSlotLease)) {", 1
+    )[1][:600]
+    assert "return $false" in lease_fail_branch
+
+    # The wrapper must release the lease in a `finally`, so it runs whether
+    # Invoke-VersionedActivateInner succeeds or fails.
+    assert "try {" in activate_wrapper
+    assert "Invoke-VersionedActivateInner" in activate_wrapper
+    assert "finally {" in activate_wrapper
+    assert "Exit-VersionedSlotLease" in activate_wrapper
+
+
 def test_deploy_venv_calls_uv_retry_helper():
     """Deploy-Venv's uv fallback must go through the shared retry helper
     (behavior is covered standalone by the Invoke-UvVenvWithRetry tests

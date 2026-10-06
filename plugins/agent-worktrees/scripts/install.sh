@@ -593,7 +593,7 @@ print((entry.local_path() if entry else "") or "")
     fi
 fi
 
-_versioned_activate() {
+_versioned_activate_inner() {
     # CLI (no daemon): health-gate the freshly-built slot, publish the
     # `current-version` marker (junction-free, `--no-link`: no `.venv` symlink is
     # laid; the marker is the SINGLE source of truth and any stale legacy link is
@@ -763,6 +763,20 @@ PY
 }
 # === end install-contract:v3 versioned-venv ===
 
+_versioned_activate() {
+    # Thin wrapper: releases the exclusive build lease (if one is held --
+    # harmless no-op otherwise, e.g. when _test_slot_already_complete skipped
+    # the build entirely) regardless of how _versioned_activate_inner
+    # returns, so a lease acquired in deploy_venv is held through package
+    # deployment and completion-marker publication and ALWAYS released
+    # afterward -- never leaked past this run (#5439 review finding).
+    _versioned_activate_inner
+    local rc=$?
+    _release_versioned_slot_lease
+    return "$rc"
+}
+
+
 # ── Status output helpers ────────────────────────────────────────────────
 
 ok()      { echo "  ✓ $*"; }
@@ -820,6 +834,50 @@ _payload_hash() {
         done < <(find "$__root" -type f ! -name '*.pyc' ! -name '*.pyo' ! -path '*/__pycache__/*' 2>/dev/null | sort)
     done
     printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
+}
+
+# fd holding the exclusive build-lease lock for this process's lifetime (set
+# by _acquire_versioned_slot_lease; cleared by _release_versioned_slot_lease,
+# or automatically by the OS the instant this process exits/crashes).
+_VERSIONED_SLOT_LEASE_FD=""
+
+_versioned_slot_lease_path() {
+    printf '%s/.build-lease-%s.lock' "$INSTALL_DIR" "$SRC_VERSION"
+}
+
+_acquire_versioned_slot_lease() {
+    # Acquire an OS-level exclusive lock for building THIS version's slot,
+    # held for the remainder of this process's lifetime. This closes the
+    # check-then-act race `_versioned_slot_clean`'s liveness check alone
+    # cannot: two concurrent installer invocations could both observe a
+    # clean slot (neither has started its external build yet) and then both
+    # build into it (review finding on #5439). Returns 0 if acquired (or a
+    # no-op in legacy mode, or when `flock` isn't available on this platform
+    # -- e.g. stock macOS -- leaving the pre-existing, unguarded posture
+    # rather than failing installs that previously worked); 1 if another live
+    # process already holds it. Idempotent: a second call while already held
+    # is a no-op success.
+    [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
+    [[ -n "$_VERSIONED_SLOT_LEASE_FD" ]] && return 0
+    command -v flock >/dev/null 2>&1 || return 0
+    local lease_path
+    lease_path="$(_versioned_slot_lease_path)"
+    exec {_VERSIONED_SLOT_LEASE_FD}>"$lease_path" || { _VERSIONED_SLOT_LEASE_FD=""; return 0; }
+    if ! flock -n "$_VERSIONED_SLOT_LEASE_FD"; then
+        exec {_VERSIONED_SLOT_LEASE_FD}>&- 2>/dev/null || true
+        _VERSIONED_SLOT_LEASE_FD=""
+        return 1
+    fi
+    return 0
+}
+
+_release_versioned_slot_lease() {
+    # Safe to call unconditionally (no-op) when no lease was acquired -- e.g.
+    # _test_slot_already_complete skipped the build entirely this run.
+    if [[ -n "$_VERSIONED_SLOT_LEASE_FD" ]]; then
+        exec {_VERSIONED_SLOT_LEASE_FD}>&- 2>/dev/null || true
+        _VERSIONED_SLOT_LEASE_FD=""
+    fi
 }
 
 _versioned_slot_clean() {
@@ -1077,6 +1135,15 @@ PYEOF
 deploy_venv() {
     # Create venv via uv (--allow-existing handles re-install). Deps come from
     # pyproject at package install time -- no ad-hoc pyyaml here.
+    if ! _acquire_versioned_slot_lease; then
+        # Another live process already holds the exclusive build lease for
+        # this exact version -- it's actively building (or about to), so
+        # treat this exactly like a dirty slot and refuse to race it, rather
+        # than let two installers both pass the slot-clean check and then
+        # both build (#5439 review finding).
+        err "Another process is already building this runtime slot ($SRC_VERSION) -- refusing to race it. Re-run update once the other build finishes."
+        return 1
+    fi
     local slot_clean=0
     _versioned_slot_clean && slot_clean=1
     if [[ "$slot_clean" -ne 1 ]]; then

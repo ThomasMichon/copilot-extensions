@@ -663,7 +663,7 @@ if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VER
     }
 }
 
-function Invoke-VersionedActivate {
+function Invoke-VersionedActivateInner {
     <# CLI (no daemon): health-gate the freshly-built slot, swap the stable `.venv`
        junction onto it (first migration moves a legacy real `.venv` aside), then
        gc old slots keeping current + the previous-good. Returns $false on failure
@@ -848,6 +848,20 @@ function Invoke-VersionedActivate {
     & $LinkPython @gcArgs 2>&1 | ForEach-Object { Write-ServiceChanged "gc: $_" }
     $ErrorActionPreference = $prevEAP
     return $true
+}
+
+function Invoke-VersionedActivate {
+    <# Thin wrapper: releases the exclusive build lease (if one is held --
+       harmless no-op otherwise, e.g. when Test-SlotAlreadyComplete skipped
+       the build entirely) regardless of how Invoke-VersionedActivateInner
+       returns, so a lease acquired in Deploy-Venv is held through package
+       deployment and completion-marker publication and ALWAYS released
+       afterward -- never leaked past this run (#5439 review finding). #>
+    try {
+        Invoke-VersionedActivateInner
+    } finally {
+        Exit-VersionedSlotLease
+    }
 }
 # === end install-contract:v3 versioned-venv ===
 
@@ -1290,6 +1304,46 @@ function Get-PayloadHash {
         $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($joined))
         return (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
     } catch { return '' }
+}
+
+function Get-VersionedSlotLeasePath {
+    Join-Path $InstallDir ".build-lease-$SrcVersion.lock"
+}
+
+function Enter-VersionedSlotLease {
+    <# Acquire an OS-level exclusive lock for building THIS version's slot,
+       held for the remainder of this process's lifetime (released explicitly
+       by Exit-VersionedSlotLease, or automatically by the OS the instant this
+       process exits/crashes -- there is never a stale lease to detect or
+       reclaim, unlike a PID-recorded marker file). This closes the
+       check-then-act race `Invoke-VersionedSlotClean`'s liveness check alone
+       cannot: two concurrent installer invocations could both observe a
+       clean slot (neither has started its external build yet) and then both
+       build into it (review finding on #5439). Returns $true if acquired (or
+       a no-op in legacy mode); $false if another live process already holds
+       it -- callers must treat that exactly like a dirty slot and refuse to
+       build. Idempotent: a second call while already held is a no-op. #>
+    if (-not $VersionedRuntime) { return $true }
+    if ($script:VersionedSlotLeaseHandle) { return $true }
+    $leasePath = Get-VersionedSlotLeasePath
+    try {
+        $script:VersionedSlotLeaseHandle = [System.IO.File]::Open(
+            $leasePath, [System.IO.FileMode]::OpenOrCreate,
+            [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        return $true
+    } catch [System.IO.IOException] {
+        return $false
+    }
+}
+
+function Exit-VersionedSlotLease {
+    <# Release a lease acquired by Enter-VersionedSlotLease, if any is held.
+       Safe to call unconditionally (no-op) when no lease was acquired --
+       e.g. Test-SlotAlreadyComplete skipped the build entirely this run. #>
+    if ($script:VersionedSlotLeaseHandle) {
+        try { $script:VersionedSlotLeaseHandle.Dispose() } catch {}
+        $script:VersionedSlotLeaseHandle = $null
+    }
 }
 
 function Invoke-VersionedSlotClean {
@@ -2093,6 +2147,15 @@ function Deploy-Venv {
     # (the signed python.exe is embedded in the venv); fall back to uv when no
     # signed Python is present (fine on machines without Smart App Control).
     if (-not (Test-Path $VenvPython)) {
+        if (-not (Enter-VersionedSlotLease)) {
+            # Another live process already holds the exclusive build lease for
+            # this exact version -- it's actively building (or about to), so
+            # treat this exactly like a dirty slot and refuse to race it,
+            # rather than let two installers both pass the slot-clean check
+            # and then both build (#5439 review finding).
+            Write-ServiceErr "Another process is already building this runtime slot ($SrcVersion) -- refusing to race it. Re-run update once the other build finishes."
+            return $false
+        }
         $slotClean = Invoke-VersionedSlotClean
         if (-not $slotClean) {
             # "Still in use" is typically a transient Windows file-handle race
