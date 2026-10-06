@@ -138,6 +138,16 @@ def bound_account(codespace: str) -> str | None:
         return None
 
 
+def bound_repo(codespace: str) -> str | None:
+    """Return the ``owner/repo`` recorded with ``codespace``'s binding, or None."""
+    try:
+        with _binding_lock():
+            rec = _read().get(codespace)
+        return (rec.repo or None) if rec else None
+    except Exception:
+        return None
+
+
 def bound_account_or_raise(codespace: str, *, timeout: float = 10.0) -> str | None:
     """Like :func:`bound_account`, but propagates a lock-acquisition
     failure instead of silently degrading to "no binding" -- for a

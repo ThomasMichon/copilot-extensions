@@ -1,0 +1,9 @@
+{
+  "comment": "CodeSpace Session Host dispatch requests provision-command --codespace so repo provision hooks run on bridge dispatch, falling back to the bare command for an older agent-codespaces (#5441).",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

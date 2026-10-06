@@ -273,3 +273,65 @@ class TestBuildHarnessCommand:
         cmd = self._cmd()
         assert 'echo "[harness] clone FAILED" >&2' in cmd
         assert "exit 1" in cmd
+
+
+class TestDispatchProvisionCommand:
+    """#5441: the bridge dispatch seam carries the repo's provision hooks."""
+
+    def _cfg(self, tmp_path: Path):
+        from agent_codespaces.config import CodespacesConfig, RepoConfig
+
+        (tmp_path / "hook.sh").write_text("echo hook\n", encoding="utf-8")
+        cfg = CodespacesConfig()
+        cfg.repos["o/r"] = RepoConfig(provision=ProvisionConfig(
+            files=[ProvisionFile(src="hook.sh", dest="~/.hook.sh", repo_dir=tmp_path)],
+            on_connect=["echo on-connect"],
+            on_create=["echo on-create"],
+        ))
+        return cfg
+
+    def test_without_codespace_is_relay_only(self, tmp_path: Path, monkeypatch) -> None:
+        from agent_codespaces.provision import dispatch_provision_command
+
+        monkeypatch.setattr(
+            "agent_codespaces.codespace_assets.build_provision_command",
+            lambda **_kw: "echo relay",
+        )
+        lookups: list[str] = []
+        cmd = dispatch_provision_command(self._cfg(tmp_path), None, lookups.append)
+        assert cmd == "echo relay"
+        assert lookups == []
+
+    def test_with_codespace_appends_repo_hooks_in_subshell(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        from agent_codespaces.provision import dispatch_provision_command
+
+        monkeypatch.setattr(
+            "agent_codespaces.codespace_assets.build_provision_command",
+            lambda **_kw: "echo relay\n",
+        )
+        cmd = dispatch_provision_command(self._cfg(tmp_path), "cs-1", lambda _n: "o/r")
+        relay, hooks = cmd.split("\n", 1)
+        assert relay == "echo relay"
+        assert hooks.startswith("( set -e;") and hooks.rstrip().endswith(")")
+        assert '"$HOME/.hook.sh"' in hooks
+        assert "echo on-connect" in hooks
+        assert "echo on-create" not in hooks
+
+    def test_unknown_repo_and_lookup_failure_degrade_to_relay_only(
+        self, tmp_path: Path, monkeypatch,
+    ) -> None:
+        from agent_codespaces.provision import dispatch_provision_command
+
+        monkeypatch.setattr(
+            "agent_codespaces.codespace_assets.build_provision_command",
+            lambda **_kw: "echo relay",
+        )
+
+        def boom(_name: str) -> str:
+            raise RuntimeError("gh unavailable")
+
+        cfg = self._cfg(tmp_path)
+        assert dispatch_provision_command(cfg, "cs-1", lambda _n: "x/y") == "echo relay"
+        assert dispatch_provision_command(cfg, "cs-1", boom) == "echo relay"
