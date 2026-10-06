@@ -204,24 +204,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         op = d.get("prefix")
         return not (op and runtime_superseded(prefix=op))
 
-    def _still_own_lock_slot() -> bool:
-        """True unless a replacement candidate already published while we
-        were still running. The muxless/superseded-runtime replacement
-        bypass is keyed purely on lock-FILE metadata (`_other_current_
-        monitor()`'s own exceptions), not this loop's generation-based
-        routing/self-retire mechanism -- a replaceable incumbent can keep
-        running (and periodically renewing its own metadata) with no
-        routing generation ever telling it to retire. Blindly renewing
-        over a replacement's fresh publish would overwrite it with our
-        own stale "replaceable" record, letting a LATER contender see
-        that stale metadata and duplicate (review finding, PR #5412).
-        Checked immediately before each periodic renewal."""
-        existing = _locks.read_lock(lock)
-        if not isinstance(existing, dict):
-            return True
-        owner_pid = existing.get("pid")
-        return owner_pid is None or owner_pid == os.getpid()
-
     # Atomic exclusivity gate -- MUST run before the lock-file check below,
     # not instead of it. The lock file remains the metadata channel other
     # tooling reads (pid/prefix/mux, supersession comparisons); it was never
@@ -253,38 +235,38 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     # for the next contender that opens the replacement (review finding,
     # PR #5412).
     #
-    # Scope: this claim protects only an ORDINARY cold start and a
-    # replacement candidate's own startup race against its peers (the
-    # reported bug -- a burst of session-lifecycle hooks each independently
-    # deciding to spawn). It deliberately does NOT extend to the
-    # cutover/promotion lifecycle (`_handle_control("promote")`,
-    # route-driven activation in the resident loop): that lifecycle relies
-    # on a genuinely different, soft (eventually-consistent, deliberately-
-    # overlapping) ownership model via self-retire/supersession polling,
-    # not a hard mutual-exclusion claim. A predecessor's publish-then-
-    # retire cutover sequencing (`docs/patterns/graceful-daemon-cutover.md`,
-    # `libs/zdd/src/zdd/cutover.py`) means the predecessor can legitimately
-    # still hold this lease for 30+ seconds after a successor is promoted
-    # (self-retire needs two confirmations 15s apart) -- far longer than
-    # any bounded wait could tolerate -- so a hard claim there would make
-    # ordinary cutovers routinely fail, and a non-blocking "best effort"
-    # attempt doesn't actually serialize anything either. Properly closing
-    # that gap needs the cutover orchestrator ITSELF to coordinate a
-    # reversible ownership transfer at the safe drain boundary (confirming
-    # the successor before retiring the predecessor), not a change scoped
-    # to this file -- tracked separately (review findings, PR #5412).
+    # Scope: this claim protects only an ORDINARY cold start (the reported
+    # bug -- a burst of session-lifecycle hooks each independently deciding
+    # to spawn, with no existing owner or an existing non-superseding one).
+    # It deliberately does NOT extend to the muxless/superseded-runtime
+    # replacement path (`_other_current_monitor()`'s own two exceptions,
+    # already pre-existing code this PR doesn't touch) or the cutover/
+    # promotion lifecycle -- several attempts to extend atomic exclusivity
+    # into those paths each surfaced new, genuine concurrency/lifecycle bugs
+    # under review (dead-replacement-metadata false-positive self-retire, a
+    # second unsynchronized publish point, an abrupt exit skipping drain of
+    # in-flight work, predecessor/successor overlap far longer than any
+    # bounded wait, concurrent-handler races, and more). A replacement
+    # candidate now simply contests this SAME hard lease like any other
+    # starter: since the still-live incumbent already holds it, the
+    # replacement backs off and the incumbent keeps running until it exits
+    # on its own for an unrelated reason -- a known, disclosed regression
+    # (the muxless/superseded-runtime replacement no longer completes
+    # promptly) tracked as follow-up, not a safety bug (no duplication).
+    # Properly restoring prompt replacement needs a holistic redesign of
+    # that whole lifecycle, not incremental patches here (review findings,
+    # PR #5412; follow-up: #5453).
     _OWNERSHIP_LEASE_NAME = "status-monitor-singleton.lock"
-    _STARTUP_CLAIM_NAME = "status-monitor-startup-claim.lock"
 
-    def _acquire_lease(lock_name: str):
-        """Acquire a named atomic exclusivity lease, or return ``None`` if
+    def _acquire_ownership_lease():
+        """Acquire the atomic exclusivity lease, or return ``None`` if
         another live process already holds it."""
         from single_instance_lease import AlreadyRunningError, SingleInstance
 
         lease = SingleInstance(
             status_monitor_runtime._aw_runtime_home(),
             service="status-monitor",
-            lock_name=lock_name,
+            lock_name=_OWNERSHIP_LEASE_NAME,
         )
         try:
             lease.acquire()
@@ -292,75 +274,23 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         except AlreadyRunningError:
             return None
 
-    def _acquire_ownership_lease():
-        return _acquire_lease(_OWNERSHIP_LEASE_NAME)
-
-    def _existing_owner_replacement_permitted() -> bool:
-        """True exactly when `_other_current_monitor()` would already treat
-        an existing live, different-pid owner's claim as non-blocking -- the
-        mux exception (a muxless owner being replaced by a mux-capable
-        candidate) or a superseded-runtime takeover (an older-runtime owner
-        being replaced by a newer one). Both are deliberate, already-tested
-        replacement paths (`test_ensure_replaces_muxless_owner_when_mux_is_
-        available`, the `runtime_superseded` takeover `_other_current_
-        monitor()` itself permits) resolved via the existing soft self-
-        retire/supersession polling, not this atomic lease -- contesting
-        the lease in either case would block the replacement from ever
-        completing, since the still-resident prior owner legitimately
-        holds it until it notices supersession on its own (review findings,
-        PR #5412)."""
-        existing = _locks.read_lock(lock)
-        if not (_locks.lock_is_live(existing) and isinstance(existing, dict)):
-            return False
-        if existing.get("pid") == os.getpid():
-            return False
-        if existing.get("mux") is False and mux_bin:
-            return True
-        op = existing.get("prefix")
-        return bool(op and runtime_superseded(prefix=op))
-
-    # A hard-lease (ordinary) starter and a bypass (replacement) starter
-    # used to contest two DIFFERENT lock names, which reopened a gap: if
-    # the still-live incumbent a replacement candidate classified against
-    # then exits (and its metadata goes stale) before that candidate
-    # publishes, a second, ordinary-starting candidate can read "no live
-    # owner," acquire `_OWNERSHIP_LEASE_NAME` (nobody holds it either), and
-    # both candidates then race `_other_current_monitor()` + the write with
-    # no shared mutex between them (review finding, PR #5412). A SINGLE
-    # shared startup claim now wraps classification-through-publication for
-    # EVERY non-passive starter, ordinary or replacement alike, so only one
-    # starting candidate of either kind is ever inside that critical
-    # section at a time -- closing the incumbent-exit interleaving. It is
-    # short-lived (held only through the write, then released), unlike
-    # `_OWNERSHIP_LEASE_NAME` (held for the life of the process once an
-    # ordinary starter wins it, exactly as before).
     _lease = None
     if not passive_mode:
-        _startup_claim = _acquire_lease(_STARTUP_CLAIM_NAME)
-        if _startup_claim is None:
+        _lease = _acquire_ownership_lease()
+        if _lease is None:
             return 0
-        try:
-            if not _existing_owner_replacement_permitted():
-                _lease = _acquire_ownership_lease()
-                if _lease is None:
-                    return 0
-            if _other_current_monitor():
-                return 0
-            if not _locks.write_lock(lock, extra={"prefix": my_prefix, "mux": bool(mux_bin)}):
-                # Best-effort I/O failure (`locks.write_lock()` never
-                # raises). Continuing anyway would be especially unsafe
-                # for a replacement candidate: it holds no lifetime
-                # ownership lease, so a failed publish leaves the
-                # replaceable incumbent's stale metadata visible, letting
-                # a LATER contender take the same bypass and duplicate
-                # (review finding, PR #5412). Abort rather than risk that.
-                if _lease is not None:
-                    _lease.release()
-                return 1
-        finally:
-            _startup_claim.release()
-    elif _other_current_monitor():
+
+    if _other_current_monitor():
         return 0
+    if not passive_mode:
+        if not _locks.write_lock(lock, extra={"prefix": my_prefix, "mux": bool(mux_bin)}):
+            # Best-effort I/O failure (`locks.write_lock()` never raises).
+            # Continuing anyway would leave us believing we're the
+            # published owner when no metadata actually says so -- abort
+            # rather than run in that inconsistent state.
+            if _lease is not None:
+                _lease.release()
+            return 1
 
     ctx_done: set[str] = set()
 
@@ -799,17 +729,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             try:
                 core._status_monitor_recheck(governance, "iteration-boundary")
                 core._status_monitor_recheck(governance, "pre-mutation:lock-renewal")
-                if not _still_own_lock_slot():
-                    # A replacement candidate already published while we
-                    # were still running (the muxless/superseded-runtime
-                    # bypass is keyed purely on lock-file metadata, not
-                    # this generation-based routing/self-retire
-                    # mechanism) -- renewing now would overwrite their
-                    # fresh metadata with our own stale "replaceable"
-                    # record, letting a LATER contender see it and
-                    # duplicate (review finding, PR #5412). Self-retire
-                    # immediately instead of ever writing.
-                    break
                 _locks.write_lock(lock, extra=_lock_extra())
 
                 picker_projects = monitor_roots.live_picker_projects()
