@@ -15,7 +15,9 @@
 - **Sub-issues:** `ThomasMichon/copilot-extensions#5356` (plugin-services
   conformance gap, pre-existing, now vision-linked) ·
   `ThomasMichon/copilot-extensions#5452` (tasks-pane-ux delegated/relay
-  waiter-surfacing gap, newly filed this slice)
+  waiter-surfacing gap) ·
+  `ThomasMichon/copilot-extensions#5468` (agent-logger scheduled-task
+  cutover gap, newly filed this slice)
 
 ## Guiding Intent
 
@@ -132,15 +134,35 @@ Operator, end of a long multi-repo session:
       upfront).
 
 ### Phase 3 — Full design/service-invariant audit
-- [ ] Run the complete `plugin-services` invariant audit (not just the
-      zero-downtime-cutover angle `#5356` surfaced) against every `agent-*`
-      plugin's `install.ps1` / runtime-deploy path: self-contained-runtime,
-      immutable-versioned-runtime, self-provisioning-runtime,
-      register-once-cutover-on-update, single-instance-lease,
-      work-coalescing-singleton, and the rest of the behaviors list. Produce
-      a conformance table (invariant × plugin × status × evidence) as a
-      review artifact in this effort (not in any vision file), then file one
-      issue per genuine nonconformance, citing the specific invariant item.
+- [x] Ran the cutover/immutable-runtime slice of the `plugin-services`
+      invariant audit (`immutable-versioned-runtime`,
+      `register-once-cutover-on-update`, `zero-downtime-cutover`) against
+      every `agent-*` plugin's runtime-deploy path. Conformance table:
+
+      | Plugin | Status | Evidence |
+      |---|---|---|
+      | agent-bridge | Conforms | `Invoke-Update` explicitly handles the same-version-refresh case (downgrades to stop-and-rebuild only then), strict content-match no-op, and drains/stops *before* touching the venv (`install.ps1:2734-2855`); documents having already fixed this exact bug class (dotfiles#1612). |
+      | agent-worktrees | Conforms | Versioned-slot build + `Invoke-VersionedActivate` (`install.ps1:3829-3866`) — the originating fix pattern (#2174). |
+      | agent-vault | Conforms | `Install-Runtime` builds the new slot first; the old daemon is gracefully drained+stopped only *after* (`install.ps1:1092-1105`), never racing the rebuild. |
+      | agent-codespaces | Conforms | `Deploy-Venv`/`Deploy-Package` target a fresh versioned slot, then `Invoke-VersionedActivate` swaps the link (`install.ps1:1507-1524`). |
+      | agent-index | Conforms | Explicit `Invoke-ServiceCutover`: zdd active/passive — new slot stood up passive, routing flipped, old drained + retired (`install.ps1:2319-2345`). |
+      | agent-mcp | Conforms | Same zdd cutover shape for its `serve` daemon (`init.ps1:736-787`: "routing flipped; old drained + retired"). |
+      | agent-dispatch | **Violates** | `#5356` (pre-existing, linked to this vision item in the prior slice): `Invoke-Update` calls `Install-Runtime` *before* `Retire-SupervisorProcesses`, so a same-version (dev-iteration) reinstall can collide with the live supervisor/coordinator's open file handles; plus an undetected stale `uv.exe` hazard. |
+      | agent-logger | **Partial** | Versioned-slot build (`Invoke-VersionedSlotClean` + `New-SignedVenv`), but `update` never stops/restarts its registered Scheduled Task around a same-version rebuild — lower risk than agent-dispatch (task runs briefly/periodically, not continuously), but a real gap. Filed as `#5468`. |
+      | agent-ssh, agent-pull-requests | N/A | Explicitly "CLI (no daemon)" — nothing to cut over. |
+      | agent-containers, agent-machines | N/A | Explicitly no-daemon CLI plugins (`init.ps1` comments: "a CLI plugin has no daemon holding the link"). |
+
+      No blind spot found requiring a fold-up into the `plugin-services`
+      invariant vision itself — `self-provisioning-runtime`'s existing
+      "idempotent, version-keyed (a no-op once already matched)" language
+      already covers the same-content-no-op discipline several plugins
+      (notably agent-bridge) implement explicitly.
+- [ ] The *rest* of the `plugin-services` behaviors list (self-contained-
+      runtime, single-instance-lease, work-coalescing-singleton, discoverable-
+      local-endpoint, and the remaining ~20 invariants) is **not yet audited**
+      — this slice covered only the cutover/immutable-runtime angle `#5356`
+      originally surfaced. Tracked as a follow-up stretch of this same Phase,
+      not assumed complete.
 
 ### Phase 4 — Decide the material-refresh relationship
 - [ ] Decide whether user-facing material refresh (docs, Picker preview
@@ -184,3 +206,24 @@ then rather than assuming either answer.
 - The full invariant audit (Phase 3) and the wider vision sweep (Phase 2) are
   explicitly deferred to future sessions per the handoff's own sequencing
   note — this effort stays open across many slices.
+
+### 2026-10-05 — Phase 3 slice (cutover/immutable-runtime audit)
+- Audited every `agent-*` plugin's runtime-deploy path against the
+  cutover/immutable-runtime slice of `plugin-services`'s invariants
+  (`immutable-versioned-runtime`, `register-once-cutover-on-update`,
+  `zero-downtime-cutover`). Recorded the conformance table in Phase 3 above.
+- Result: 6 plugins conform (several — agent-bridge, agent-index, agent-mcp —
+  already implement an explicit zdd active/passive cutover), 4 are N/A
+  (no-daemon CLI plugins), `agent-dispatch`'s known `#5356` is the one real
+  violation, and `agent-logger` has a lower-risk partial gap — filed as
+  `#5468`.
+- Checked for an invariant-vision blind spot (Direction 1, upward fold):
+  none found — `self-provisioning-runtime`'s existing no-op-on-content-match
+  language already covers what agent-bridge's explicit same-content check
+  embodies.
+- **Not yet done:** the rest of `plugin-services`'s ~20+ other behaviors
+  (self-contained-runtime, single-instance-lease, work-coalescing-singleton,
+  discoverable-local-endpoint, etc.) were not audited this slice — only the
+  cutover/immutable-runtime angle `#5356` originally surfaced. A future
+  slice should widen Phase 3 to the rest of the invariant list before
+  calling it fully done.
