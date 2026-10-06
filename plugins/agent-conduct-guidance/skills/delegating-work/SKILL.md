@@ -99,18 +99,34 @@ models; current model IDs are configuration and evidence. If the helper or
 configuration is unavailable, continue with model-neutral delegation rather
 than treating an unproven candidate as demonstrated.
 
-## Scale plan detail and check-ins to model capability
+## Scale plan detail and check-ins to demonstrated supervision need
 
 Choosing a worker model is not the end of the tradeoff: the amount of explicit
 step-by-step detail in the contract, and how often you check in on progress,
-must scale with that worker's own capability — not just with task complexity.
-A bounded contract written for a highly capable model routinely lets an older
-or lower-capability one drift off the stated goal, invent unauthorized scope,
+must scale with how much supervision that specific worker has actually
+demonstrated it needs — not just with task complexity. A bounded contract
+loose enough for a worker that reliably self-corrects routinely lets one with
+no such track record drift off the stated goal, invent unauthorized scope,
 over- or under-test, or declare success without having actually verified it.
 
-Older or lower-capability models (for example GPT-5.4 and earlier, or any
-model routed at `low`/`medium` reasoning effort) need to be kept on the rails
-with:
+`reasoningEfforts` and `costRank` in the model-routing contract are not
+capability signals: `reasoningEfforts` is only the eligibility list a model is
+invoked under, and `costRank` only orders already-eligible models by cost —
+neither says how much supervision a given model needs (a strong model can be
+invoked at `medium` effort, and a cheap model can carry a low `costRank`,
+without either fact implying it drifts less). Never infer the level of
+supervision a worker needs from these fields.
+
+Instead, key the supervision level off demonstrated, observed track record for
+that worker in that kind of role — evidence that it reliably decomposed a
+goal-based contract, self-corrected without drifting, and reported completion
+accurately in past delegations — never off the model's name, generation, or
+routing metadata. Absent that evidence (a first-time assignment, a worker with
+no observed history in this role, or evidence that has gone stale), default to
+the conservative, more-supervised side below rather than assuming competence.
+
+A worker **without demonstrated unsupervised reliability in this role** needs
+to be kept on the rails with:
 
 - a literal, ordered checklist of steps rather than a single open-ended goal —
   spell out the sequence, not just the destination;
@@ -121,28 +137,22 @@ with:
   is caught at the milestone closest to where it happened, not only once the
   delegate reports the whole task "done."
 
-Higher-capability, current-generation models (for example Claude Opus/Sonnet
-5.x or GPT-6.x Sol/Astra/Luna, typically routed at `high`/`xhigh`/`max`
-reasoning effort) can be trusted with a goal-based bounded contract (scope,
-exclusions, required evidence, output shape) and background execution with a
-single check-in at completion, because they reliably decompose the goal
-themselves and self-correct along the way.
+A worker **with demonstrated unsupervised reliability in this role** (observed
+to reliably decompose a goal and self-correct, with accurate completion
+reports, across prior delegations of a similar kind) can be trusted with a
+goal-based bounded contract (scope, exclusions, required evidence, output
+shape) and background execution with a single check-in at completion.
 
-| Assigned worker's capability tier | Plan detail to give it | Check-in cadence |
+| Demonstrated supervision need for this worker/role | Plan detail to give it | Check-in cadence |
 |---|---|---|
-| Lower-capability / older (e.g. GPT-5.4 and earlier; `low`/`medium` reasoning effort) | Literal, ordered step list with a validation command and stop condition per step — not just a goal | Synchronous, or background with scheduled interim check-ins at named milestones |
-| Higher-capability / current-generation (e.g. Claude Opus/Sonnet 5.x+, GPT-6.x; `high`/`xhigh`/`max` reasoning effort) | Goal-based bounded contract (scope, exclusions, evidence, output shape) | Background with a single check-in at completion is usually sufficient |
+| Not yet demonstrated reliable (default — no observed track record, or evidence has gone stale) | Literal, ordered step list with a validation command and stop condition per step — not just a goal | Synchronous, or background with scheduled interim check-ins at named milestones |
+| Demonstrated reliable (observed self-correction and accurate completion reporting in this kind of role) | Goal-based bounded contract (scope, exclusions, evidence, output shape) | Background with a single check-in at completion is usually sufficient |
 
-When model-routing configuration is present, read the capability tier off the
-resolved model's `reasoningEfforts`/`costRank` entry rather than guessing. When
-no configuration exists, or the assigned model has no prior track record of
-staying on task unsupervised, default to the more detailed/more frequent side
-of the table.
-
-Regardless of tier, always independently re-verify a delegate's completion
-claim — the real diff, the real head commit, the actual file content — before
-accepting it. A self-report of "done" is evidence, never proof, and this
-matters most for the lower-capability tier this section exists to guard.
+Regardless of demonstrated reliability, always independently re-verify a
+delegate's completion claim — the real diff, the real head commit, the actual
+file content — before accepting it. A self-report of "done" is evidence, never
+proof, and this matters most for a worker without a demonstrated track record,
+which this section exists to guard against.
 
 ## Keep coordinator ownership
 
@@ -170,12 +180,13 @@ Each prompt to a delegate should state:
 5. **Output:** a compact result shape, including citations, paths, commands, or
    diffs needed for integration.
 6. **Plan detail:** a literal ordered step list with a validation command and
-   stop condition per step for a lower-capability/older worker; a goal-based
-   contract is enough for a higher-capability one — see "Scale plan detail and
-   check-ins to model capability" above.
+   stop condition per step for a worker without demonstrated unsupervised
+   reliability in this role; a goal-based contract is enough for one with a
+   demonstrated track record — see "Scale plan detail and check-ins to
+   demonstrated supervision need" above.
 7. **Check-ins:** the cadence to verify progress at — synchronous or
-   milestone-scheduled for a lower-capability worker, a single completion
-   check-in for a higher-capability one.
+   milestone-scheduled absent a demonstrated track record, a single
+   completion check-in once one exists.
 8. **Budget:** relevant limits on breadth, turns, files, or output size.
 9. **Authority:** whether it may edit, run tools, or only report.
 10. **Recursion:** execute directly; do not create child agents unless the
