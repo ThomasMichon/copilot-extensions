@@ -255,37 +255,34 @@ is this effort's actual Phase 1 deliverable.)
       uses for its own restore-on-failure case) -- this requires touching
       `launch-session.{ps1,sh}` directly, which is why it's deferred here
       rather than attempted in Phase 1.
-- [ ] **Deferred from Phase 1 (fifth review round):** a live-mux reattach
-      (`_resolve_resume_context`'s `verdict.mux_live` branch, Phase 1) now
-      correctly QUEUES a seed instead of losing it, but does not actually
-      DELIVER it on that exact reattach -- it is only delivered on the
-      next fresh launch/attach that reaches it. Actual delivery on the
-      reattach itself needs `launch-session.{ps1,sh}` to invoke the
-      existing send-keys mechanism (`pane_seed.mux_seed_pane`, via
-      whatever wraps it for the script's own live-session join path) after
-      its own reattach -- `resolve`'s single, fast, plan-only process has
-      no reasonable way to block synchronously on pane readiness itself
-      (`mux_seed_pane` can poll for up to minutes). Requires the same
-      launcher-script changes as the item above; fold into that work.
-- [ ] **Deferred from Phase 1 (ninth review round):** `claim_pending_seed`
-      cannot distinguish "nothing was pending" from "claim failed" (lock
-      contention, an unreadable record) -- both return `None`. With an
-      explicit seed supplied, the current code proceeds with the explicit
-      value regardless, silently leaving an old, undelivered `pending_seed`
-      queued if the claim genuinely failed rather than finding nothing --
-      that stale prompt can then surface as an unexpected turn on a LATER
-      resume. Needs a richer return contract (e.g. a small result object
-      distinguishing "empty" / "claimed" / "claim-failed") threaded through
-      every existing call site, not a narrow single-file fix -- real design
-      surgery, scoped here rather than rushed.
-- [ ] **Deferred from Phase 1 (ninth review round):** `_RecordLock.__enter__`
-      creating/opening its sidecar file can itself raise `OSError`/
-      `PermissionError`, which currently escapes `pending_seed`'s own
-      documented "degrade to False, never raise" contract in
-      `claim_pending_seed`/`set_pending_seed`/`restore_pending_seed` alike.
-      A pre-existing lock-primitive gap (not introduced by this effort),
-      but worth hardening alongside the claim-ambiguity item above since
-      both touch the same call sites.
+- [x] A live-mux reattach (`_resolve_resume_context`'s `verdict.mux_live`
+      branch, Phase 1) correctly QUEUES a seed instead of losing it, and
+      now also DELIVERS it on that exact reattach, not only on a later
+      fresh launch/attach: `launch-session.{ps1,sh}`'s "join existing
+      session" branch -- the ONE ground-truth point that actually knows a
+      reattach, not a fresh launch, is happening -- calls the same
+      `Invoke-SeedDeliverySafe`/`_aw_deliver_pending_seed` helper the
+      fresh-mux-create path already calls (a no-op when nothing is
+      queued). `test_launch_session_unwrap.py`'s drift guard asserts both
+      call sites and their relative ordering.
+- [ ] `claim_pending_seed` cannot distinguish "nothing was pending" from
+      "claim failed" (lock contention, an unreadable record) -- both
+      return `None`. With an explicit seed supplied, the current code
+      proceeds with the explicit value regardless, silently leaving an
+      old, undelivered `pending_seed` queued if the claim genuinely failed
+      rather than finding nothing -- that stale prompt can then surface as
+      an unexpected turn on a LATER resume. Needs a richer return contract
+      (e.g. a small result object distinguishing "empty" / "claimed" /
+      "claim-failed") threaded through every existing call site, not a
+      narrow single-file fix -- real design surgery, scoped here rather
+      than rushed.
+- [ ] `_RecordLock.__enter__` creating/opening its sidecar file can itself
+      raise `OSError`/`PermissionError`, which currently escapes
+      `pending_seed`'s own documented "degrade to False, never raise"
+      contract in `claim_pending_seed`/`set_pending_seed`/
+      `restore_pending_seed` alike. A pre-existing lock-primitive gap (not
+      introduced by this effort), but worth hardening alongside the
+      claim-ambiguity item above since both touch the same call sites.
 
 ## Validation Plan
 
@@ -661,3 +658,85 @@ _Pending._
   - Full re-run: `agent-worktrees` full keyword sweep including
     `sessions`/`verify_worktree_active` (430 tests) passes with no
     regressions.
+- **2026-10-06** — Operator question on resume, worth recording verbatim
+  since it's the right question to ask after watching this effort's own
+  complexity grow across ten review rounds: *"I'm worried that the seed
+  is being tracked too durably. Is `--interactive` not reliable?"*
+
+  Answer: **`--interactive` itself is fully reliable** -- live-verified
+  back in Phase 1 (a single `copilot --resume=<id> --interactive
+  "<prompt>"` process resumes full history AND auto-executes the prompt
+  as the next turn, no caveats). The complexity this effort accumulated
+  is NOT compensating for that flag's own unreliability; it exists
+  because **multiple code paths can discard the planned command before
+  ever executing it with that flag attached**:
+  1. A live-mux reattach: the launcher scripts detect an existing pane and
+     just reattach to it, NEVER exec'ing the freshly resolved `cmd` at
+     all (not a bug -- correct behavior, since spawning a second Copilot
+     process into an already-live worktree would fork the conversation).
+  2. A delegated/relocated launch: the Worktree Manager re-resolves its
+     own plan a second time inside the launcher script, discarding the
+     first plan entirely.
+  3. A pre-exec launcher failure: the script's own update/preflight work
+     can fail before ever reaching `cmd`.
+
+  `pending_seed` persistence is the necessary fallback for exactly these
+  cases -- not redundant scaffolding layered on top of an unreliable
+  primitive, but the other half of a two-part contract: `resolve` embeds
+  the seed in argv when it's confident its own `cmd` will actually run,
+  and otherwise durably queues it for whichever mechanism DOES end up
+  running. The real, now-closed gap (this session's own work, see above)
+  was that the QUEUED half of that contract had a missing link: nothing
+  ever told the live-mux-reattach branch to actually go check the queue
+  and deliver it -- it only happened to get delivered on a LATER,
+  different, fresh-launch attempt that still had the queue to re-check.
+  Confirmed and fixed directly at the root: `launch-session.{ps1,sh}`'s
+  "join existing session" branch now calls the exact same
+  `Invoke-SeedDeliverySafe`/`_aw_deliver_pending_seed` helper the
+  fresh-session branch already called -- one new call to pre-existing
+  code, not a new mechanism. This was, in fact, the deepest of the three
+  Phase-3 items the prior round deferred (the two remaining are narrower
+  defensive-programming cases: a pre-existing lock primitive's own
+  failure-mode granularity, and `claim_pending_seed`'s long-standing
+  ambiguous return contract -- neither is "seed gets silently lost in
+  ordinary operation," which is what `--interactive`'s own reliability
+  question was really asking about).
+
+  New worktree created for this slice (the Phase 1 worktree was already
+  finalized/merged). All 34 `launch_session`/
+  `launch_passthrough`/`launch_scripts`-keyword tests pass (including the
+  rewritten drift guard), and the full 1707-test `worktree-manager` suite
+  passes except 4 nondeterministic failures in `test_mux_daemon.py`/
+  `test_mux_daemon_cutover_helper.py` -- confirmed unrelated (a different
+  subsystem entirely, work-coalescing-singleton daemon IPC/file-rename
+  races, reproduced with DIFFERENT failure signatures across repeated
+  reruns with no code changes between them -- this machine's own known
+  resource-contention flakiness, not a regression from this slice's
+  2-line-per-script change).
+- **2026-10-06** — Opened PR #5514 for this slice; a first Copilot review
+  round asked for the usual review-provenance cleanup in the new
+  docstring/plan-item text (fixed) plus a Documentation-impact statement
+  (already present in the PR body). A SECOND round then caught a real,
+  narrower bug in the fix itself, in its own overview summary: the
+  Windows (`launch-session.ps1`) JOIN branch's PRE-EXISTING `$nested`
+  early-exit (true when this launcher is itself already running inside a
+  mux pane -- it just reports the session exists and exits, rather than
+  attaching from within a pane) sat ABOVE where this slice's new
+  `Invoke-SeedDeliverySafe` call landed, so a nested JOIN never reached
+  it at all -- the exact asymmetry this slice exists to close, just
+  relocated into a code path this slice's own first pass didn't
+  reproduce. The sibling CREATE branch already called
+  `Invoke-SeedDeliverySafe` BEFORE its own `$nested` check; fixed by
+  matching that same ordering in the JOIN branch (move the nested
+  early-exit to after shared setup + seed delivery, printing the
+  nested-specific message inline instead of exiting immediately).
+  `launch-session.sh` has no equivalent `$nested` concept for its own
+  JOIN branch, so bash was never affected. Rewrote the drift guard to
+  assert seed delivery precedes each branch's own nested-exit check (via
+  each branch's single `Reset-SshConptyViewport` call, which both
+  scripts place immediately after their own nested check). Re-ran the
+  full 34-test `launch_session`/`launch_passthrough`/`launch_scripts`
+  sweep: still passing. Also removed "(ninth review round)" provenance
+  from the two still-open Phase 3 backlog items above, generalizing the
+  same timeless-documentation principle the review applied to the fixed
+  item.
