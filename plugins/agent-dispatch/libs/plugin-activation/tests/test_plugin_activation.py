@@ -428,6 +428,72 @@ def test_git_environment_is_sanitized(monkeypatch):
     assert env["GIT_CONFIG_GLOBAL"] == os.devnull
 
 
+def test_git_executable_is_resolved_once_per_process(monkeypatch, tmp_path):
+    """picker-performance-and-responsiveness Phase 4 (remaining item):
+    ``_git`` must not rescan ``PATH`` on every call -- a cold Picker boot
+    calls it ~17-18 times during project/root discovery alone."""
+    resolver._GIT_WHICH_CACHE.clear()
+    which_calls = []
+
+    def fake_which(name):
+        which_calls.append(name)
+        return "/usr/bin/git"
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args, 0, stdout="ok\n")
+
+    monkeypatch.setattr(resolver.shutil, "which", fake_which)
+    monkeypatch.setattr(resolver.subprocess, "run", fake_run)
+    resolver._git(tmp_path, "status")
+    resolver._git(tmp_path, "status")
+    assert which_calls == ["git"]  # only resolved once, not once per call
+    resolver._GIT_WHICH_CACHE.clear()
+
+
+def test_bare_anchor_probe_is_one_combined_git_call(tmp_path):
+    """``git_root``'s bare-anchor fallback must fold ``--is-bare-repository``
+    and ``--absolute-git-dir`` into a single ``git rev-parse`` call rather
+    than two separate subprocess spawns."""
+    from plugin_activation.bare_anchor import git_root
+
+    root = tmp_path / "anchor"
+    root.mkdir()
+    calls: list[tuple[str, ...]] = []
+
+    def fake_git(_root: Path, *args: str) -> str:
+        calls.append(args)
+        if args == ("rev-parse", "--show-toplevel"):
+            raise subprocess.CalledProcessError(128, ["git", *args])
+        if args == ("rev-parse", "--is-bare-repository", "--absolute-git-dir"):
+            return f"true\n{root}"
+        raise AssertionError(f"unexpected git invocation: {args}")
+
+    result = git_root(root, fake_git, lambda a, b: a.samefile(b))
+    assert result == root.resolve()
+    assert calls == [
+        ("rev-parse", "--show-toplevel"),
+        ("rev-parse", "--is-bare-repository", "--absolute-git-dir"),
+    ]
+
+
+def test_bare_anchor_probe_rejects_non_bare_repo_with_one_combined_call(tmp_path):
+    from plugin_activation.bare_anchor import git_root
+
+    root = tmp_path / "not-a-bare-anchor"
+    root.mkdir()
+    calls: list[tuple[str, ...]] = []
+
+    def fake_git(_root: Path, *args: str) -> str:
+        calls.append(args)
+        if args == ("rev-parse", "--show-toplevel"):
+            raise subprocess.CalledProcessError(128, ["git", *args])
+        return f"false\n{root / '.git'}"
+
+    with pytest.raises(subprocess.CalledProcessError):
+        git_root(root, fake_git, lambda a, b: a == b)
+    assert len(calls) == 2  # still just the fallback's one combined probe
+
+
 def test_project_local_root_wins_over_convergent_installed_payload(tmp_path):
     repo = tmp_path / "src" / "demo-repo"
     remote = "https://github.com/example/demo-repo.git"

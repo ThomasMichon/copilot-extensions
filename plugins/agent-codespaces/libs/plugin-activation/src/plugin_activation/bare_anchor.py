@@ -16,12 +16,21 @@ def git_root(root: Path, git: Callable[..., str], same_file: Callable[[Path, Pat
     git directory is exactly ``root`` or ``root/.git``. Anything else -- a
     redirected gitfile, a directory inside another repository -- re-raises the
     original failure.
+
+    picker-performance-and-responsiveness Phase 4 (remaining item): the bare
+    branch used to make two separate ``git`` calls (``--is-bare-repository``
+    then ``--absolute-git-dir``) -- every worktree-class project registered
+    on a machine always takes this branch, paying both subprocess spawns on
+    every cold boot. ``git rev-parse`` answers multiple query flags in one
+    invocation (one line of output per flag, in argument order), so this
+    folds the pair into a single call.
     """
     try:
         return Path(git(root, "rev-parse", "--show-toplevel")).resolve(strict=True)
     except subprocess.CalledProcessError:
-        if git(root, "rev-parse", "--is-bare-repository") == "true":
-            git_dir = Path(git(root, "rev-parse", "--absolute-git-dir")).resolve(strict=True)
+        lines = git(root, "rev-parse", "--is-bare-repository", "--absolute-git-dir").splitlines()
+        if len(lines) >= 2 and lines[0] == "true":
+            git_dir = Path(lines[1]).resolve(strict=True)
             if same_file(git_dir, root) or same_file(git_dir, root / ".git"):
                 return root.resolve(strict=True)
         raise

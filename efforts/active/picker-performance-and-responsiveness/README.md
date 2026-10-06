@@ -286,14 +286,28 @@ not a known fix.)_
       and `python -m cProfile`. See Journal for the full before/after numbers
       and what each profile actually showed.
 - [ ] Narrow whichever cost(s) the profile actually shows dominate, to bring
-      cold boot under ~2s. **Partially done:** the single dominant cost the
-      first profile found (redundant marketplace-manifest re-parsing, see
-      Journal) is fixed and measured. Cold boot is still far over budget
-      (~7.7-9.1s, down from ~10.5-12.4s) — the *next* dominant cost the
-      post-fix profile surfaced (per-project `git` subprocess calls during
-      project discovery, ~17-18 calls still remaining) is identified but
-      NOT yet fixed; a future session should profile-then-fix that one the
-      same way before this item is checked off.
+      cold boot under ~2s. **Partially done:** the first profile's dominant
+      cost (redundant marketplace-manifest re-parsing, see Journal) is fixed
+      and measured. The *second* dominant cost it surfaced — the ~17-18
+      per-project `git` subprocess calls during project/root discovery
+      (`plugin_activation.resolver._git`, `bare_anchor.git_root`) — is now
+      also fixed: `_git`'s `shutil.which("git")` PATH-rescan is cached once
+      per process, and the bare-anchor fallback's two separate probe calls
+      (`--is-bare-repository` then `--absolute-git-dir`) are folded into one
+      `git rev-parse --is-bare-repository --absolute-git-dir` call. Isolated
+      microbenchmark (not full-process wall-clock, which is noisy at this
+      scale): resolving the cached executable is ~99.5% faster than the
+      uncached `shutil.which` scan, and the combined bare-repo probe cuts
+      that call site's own subprocess time ~53% (see Journal for numbers).
+      **Still not reflected in end-to-end cold-boot wall-clock** (still
+      ~8.4-9.2s, unchanged within noise) — profiling after this fix shows
+      the git-call cost was never actually the largest remaining piece;
+      Python module-import/`exec_module` overhead now dominates the
+      cProfile trace. That import-overhead cost is a **different, not yet
+      profiled call site** — a future session should profile *it*
+      specifically (same discipline as every other call site in this
+      phase: verify the shape, don't assume it matches a prior fix) before
+      this item can be checked off.
 
 ### Phase 5 — Hold the budgets: a timing regression harness
 
@@ -328,10 +342,13 @@ was invisible until an operator noticed it. Prevents a repeat.)_
       done, see Journal (~66-71% reduction at 120 records).
 - [ ] **Phase 4 (partial):** cold-boot wall-clock time before/after, on the
       same machine/conditions, with the profile that justified the fix
-      attached — done for the one fix landed this session (~10.5-12.4s ->
-      ~7.7-9.1s, see Journal), still open for the next dominant cost
-      (per-project `git` subprocess calls) and for reaching the <~2s budget
-      itself.
+      attached — done for the marketplace-reparse fix (~10.5-12.4s ->
+      ~7.7-9.1s, see Journal). The git-subprocess-call fix is verified with
+      an isolated microbenchmark instead (full-process wall-clock is too
+      noisy at this call site's scale — see Journal), and does not move
+      end-to-end cold boot, since profiling found a different cost
+      (module-import overhead) now dominates. Still open for that newly
+      surfaced dominant cost and for reaching the <~2s budget itself.
 - [ ] **Phase 5:** the harness itself passing, plus one deliberately
       reintroduced synchronous call (the Phase 0 bug, reverted) proving the
       harness actually catches it before trusting it as a guard.
@@ -664,4 +681,99 @@ specific shared machine from before the fix was deployed -- untangling
 which of those are genuinely dead versus still serving another live
 session's active work is a separate, higher-risk task on a shared
 machine, not undertaken here.
+
+### 2026-10-05 (new leg) — Phase 4's remaining git-subprocess cost fixed (partial)
+
+Picked up the one concrete item the prior leg's handoff left open: the
+post-first-fix profile's new top cost, ~17-18 `git` subprocess calls
+(`plugin_activation.resolver._git`, `bare_anchor.git_root`) during
+project/root discovery. Read `_verified_project_roots` (the loop that
+verifies every registered project's identity once per `resolve_active_
+plugins()` pass) and found two independent, narrow costs stacked at that
+call site, not one:
+
+1. **`_git` re-resolved `shutil.which("git")` on every single call** --
+   a full `PATH` rescan (and, on Windows, a `PATHEXT`-extension probe per
+   entry) for an answer that cannot change within a process's lifetime.
+   Cached it behind `functools.lru_cache(maxsize=1)` on a new
+   `_git_executable()` helper -- the same "same-answer-every-call"
+   reasoning as this phase's first fix (marketplace-manifest re-parsing),
+   just a different call site, and deliberately *not* threaded through a
+   per-`resolve_active_plugins()`-call memo like that fix: the git
+   executable's location is even more stable than a marketplace file (it
+   cannot change for the life of the whole CLI process, not just one
+   resolution pass), and keeping `_git`'s own signature unchanged matters
+   here specifically -- `tests/test_plugin_activation.py` already has a
+   test (`test_project_git_timeout_is_indeterminate`) that wholesale
+   monkeypatches `resolver._git` with a bare `def timeout(*_args)`; adding
+   a cache parameter to `_git`'s own signature would have broken that
+   test's call site for no benefit, since the replacement function
+   doesn't go through the real implementation at all in that test.
+2. **`bare_anchor.git_root`'s fallback path made two separate git calls**
+   (`--is-bare-repository`, then `--absolute-git-dir`) for every bare
+   worktree-class anchor -- and *every* registered worktree-class project
+   always takes this fallback (their `--show-toplevel` always fails first,
+   by design, since a bare repo has no work tree). Confirmed `git
+   rev-parse` accepts multiple query flags in one invocation, printing one
+   line of output per flag in argument order, and folded the pair into a
+   single `git rev-parse --is-bare-repository --absolute-git-dir` call,
+   splitting the two-line response instead of spawning twice.
+
+Both fixes preserve every existing caller's behavior exactly (the cache
+is transparent, and the combined call reproduces the original two-call
+decision logic line-for-line) -- verified with two new regression tests
+(`test_git_executable_is_resolved_once_per_process`,
+`test_bare_anchor_probe_is_one_combined_git_call` plus a rejection-path
+counterpart) and the full existing `test_plugin_activation.py` suite (63
+tests, all passing unchanged) in all three vendored copies, plus
+`worktree-manager`'s own `test_harness_state.py` (19 tests) and
+`agent-worktrees`'s `test_related_briefing.py`/`test_context_resolution.py`
+(81 tests) as the two real consumers most directly exercising this path.
+
+**Measured with an isolated microbenchmark** (`libs/plugin-activation/
+tests/bench_phase4_git_calls.py`, a manual non-pytest script following
+Phase 3's own bench-script precedent -- full-process wall-clock is too
+noisy to isolate a cost this small against ~8s of total boot time):
+resolving the cached git executable 200 times took 0.014-0.016s versus
+2.99-3.09s uncached (~99.5-99.6% reduction); 30 combined bare-repo probes
+against a real `git init --bare` repo took 5.895s versus 12.557s for 30
+pairs of separate calls (~53.1% reduction in that call site's own
+subprocess time).
+
+**Left open, explicitly, and NOT a disproof of this fix:** re-measuring
+full-process cold boot (`worktree-manager picker screenshot --demo
+--format text`, `Measure-Command`, 3 runs) after this change still shows
+~8.4-9.2s -- statistically unchanged from the ~7.7-9.1s the prior leg
+measured after its own fix. Re-profiling with `cProfile` explains why:
+the git-subprocess cost, while real and now smaller, was never actually
+the largest remaining piece once profiled in isolation -- Python's own
+module-import machinery (`importlib._bootstrap`'s `_find_and_load`/
+`exec_module`, and `_io.open_code` reading `.py`/`.pyc` source) now
+dominates the trace. This is a **different, not-yet-profiled-deeply call
+site** than either of Phase 4's two fixes so far -- the same caution this
+phase's own Journal has repeated at every step (Phase 0's "obviously the
+same idiom as its sibling" vs. Phase 3's "a real, audited, narrow opt-in"
+vs. the first Phase 4 fix's cache vs. this leg's cache-plus-call-folding)
+applies here too: a future session should profile the import-overhead
+cost specifically, with its own fresh `py-spy`/`cProfile` pass, rather
+than assume it shares a fixable shape with any of the three call sites
+already closed out. Propagated to all three vendored copies (`check-
+vendored-libs-sync.py` confirms), version-bumped (`plugin-activation`
+`0.1.0-dev7` -> `0.1.0-dev8`), with one changefile covering all 8 fanned-
+out consumer plugins (`agent-bridge`, `agent-codespaces`, `agent-
+dispatch`, `agent-logger`, `agent-machines`, `agent-worktrees`,
+`customizing-copilot`, `worktree-manager`). Editable installs used only
+for this leg's local profiling/testing were uninstalled before finishing,
+per the prior leg's explicit correction.
+
+`resolver.py` sits under `tools/check-module-size.py`'s shrink-only line
+cap baseline, and this fix's own caching code pushed it 7 lines past its
+exactly-at-ceiling grandfathered size. Rewrote the cache as compactly as
+possible without sacrificing clarity (a module-level dict plus a single
+comment, no new top-level function/decorator), then used the guard's own
+sanctioned escape hatch for a case like this -- a manual, reviewed
+baseline-ceiling edit (`tools/check-module-size.py`'s own docstring names
+this as one of its two intended resolutions, alongside splitting the
+module, which is out of scope for a narrow perf fix) -- raising the
+ceiling from 1276 to 1283 for exactly the three copies this PR touches.
 
