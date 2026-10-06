@@ -2671,3 +2671,63 @@ promotions observed within the hour), no manual main-bootstrap PR was
 needed this time (unlike PR #4338's one-off case, where promotion had
 genuinely stalled ~12.5h) -- the fix rides the next green-build-
 triggered promotion rather than waiting on a timer.
+
+### 2026-10-06 — Standing monitoring caught a second real bug: scope gate missing `worktree-manager/`
+
+A new, naturally-occurring `dev` failure arrived (issue #5475): a real
+test race in `worktree-manager/tests/production_picker/
+test_setup_reload_epoch.py` (asserted the second epoch before the
+worker that sets it had actually published its failure). The automatic
+chain fired correctly end to end: `issues: labeled` -> re-dispatch via
+`workflow_dispatch` -> `verify-issue` authorized -> `agent` ran.
+
+**The agent's own diagnosis and judgment were exactly right:** it
+correctly identified the race (not an implementation bug -- "the
+`post_message` AttributeError in the log is the intended wake
+failure"), drafted a minimal, disclosed, uncommitted fix (a bounded
+poll before the assertion), and declined to open a PR via
+`report_incomplete` specifically because bash/its own test-execution
+tool was denied in its sandbox and it could not verify the fix --
+exactly the charter's own "if the agent cannot confidently verify,
+escalate rather than guess" discipline working as intended.
+
+**But the `agent` job still failed outright (run 37425087227,
+conclusion `failure`, not a clean decline):** the post-steps
+change-scope gate's allowlist (`plugins/*|libs/*|tools/*|docs/*|
+.changefiles/*`) never recognized `worktree-manager/` -- a real
+top-level source tree living outside `plugins/` (confirmed via
+`tools/module-size-baseline.json`'s own tracked prefixes: `libs`,
+`plugins`, `tools`, `worktree-manager`). The agent's own working-tree
+edit to a legitimate test file in that tree tripped the gate as if it
+were an out-of-scope path, failing the whole run even though the
+agent's actual behavior (diagnose, draft, decline-when-unverifiable)
+was correct in every other respect.
+
+Fixed in PR #5502 (merged): added `worktree-manager/*` to the gate's
+allowlist, the same mention to the prompt's Changefile-requirement
+instruction, and the historical round-11 design-note comment describing
+the gate. Recompiled with the previously pinned action SHA (zero-diff
+confirmed, same discipline as #5305); all guards passed.
+
+**Real review finding on this journal PR (#5504): closing #5475 broke
+the watchdog's own dedup contract.** `tools/ci_failure_watchdog.py`'s
+`_existing_issue()` searches only OPEN issues (`--state open`) for a
+matching signature -- closing #5475 while the underlying test race
+stayed unfixed meant a recurrence would file a brand-new duplicate
+issue rather than accumulate here, exactly the gap Phase 1.5 validated
+this mechanism against. Reopened #5475, then finished the job properly
+instead of leaving it for a future pickup: re-derived the agent's own
+diagnosis independently (`_start_setup_reload_worker()` returns the
+second epoch as soon as that worker is STARTED, not once it has
+actually published its failure -- the test asserted the match
+immediately, racing the background worker), applied the same bounded-
+poll fix the agent had drafted but couldn't verify, and verified it
+myself: 11/11 passes after the fix, plus the full test file (26/26).
+Landed in the same PR (#5504) alongside this journal entry. #5475 is
+now genuinely closed -- the race is fixed, not just un-tracked.
+
+**This is a second, independent real bug the standing-monitoring
+posture caught** (distinct from #5276's crash-vs-decline gap) --
+further evidence the "watch for a real failure, fix what it reveals,
+with the same rigor as a real contribution" posture is doing real work,
+not just confirming the mechanism already works.

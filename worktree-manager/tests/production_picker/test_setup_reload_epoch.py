@@ -562,6 +562,18 @@ def test_setup_reload_wake_failure_fallback_does_not_downgrade_a_newer_failure()
     assert "second_epoch" in result
     second_epoch = result["second_epoch"]
     assert second_epoch != first_epoch
+    # Real review finding (issue #5475): `_start_setup_reload_worker()`
+    # returns the second epoch as soon as that worker is STARTED, not once
+    # it has actually published its own failure -- asserting immediately
+    # here raced the background worker and could observe the pre-failure
+    # `0` default. Poll with the same bounded pattern `_racy_discard`
+    # above already uses, rather than asserting on a single sample.
+    deadline = time.monotonic() + 5
+    while (
+        screen._setup_failed_epoch != second_epoch
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.01)
     assert screen._setup_failed_epoch == second_epoch
 
     # Give the first (older, superseded) worker's own fallback a real
