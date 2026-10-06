@@ -930,17 +930,17 @@ worktree-manager.
         across every resident daemon for a root, not owned by one specific
         pid) and lists every mapping it has ever registered -- project/
         worktree_id/mux_session/`live`/`attached_clients`. This is
-        explicitly NOT the attribution slice (confirmed through review):
-        it cannot correlate a live wire connection to an identity or that
-        connection's busy state, which still needs a wire-protocol change
-        (a client_id encoding caller identity) that doesn't exist today.
-        It also surfaced a real, pre-existing production gap:
-        `attached_clients` is only ever as accurate as what a `register()`
-        caller supplies, and neither shipped launch path
-        (`bin/launch-session.sh`/`.ps1`) ever passes `--attached-clients`,
-        so it reads `0` for every real mapping today -- populating/
-        refreshing that field at its real source remains separate,
-        untracked follow-on work.
+        explicitly NOT the attribution slice: it cannot correlate a live
+        wire connection to an identity or that connection's busy state,
+        which still needs a wire-protocol change (a client_id encoding
+        caller identity) that doesn't exist today. It also surfaced a
+        real, pre-existing production gap: `attached_clients` is only
+        ever as accurate as what a `register()` caller supplies, and
+        neither shipped launch path (`bin/launch-session.sh`/`.ps1`) ever
+        passes `--attached-clients`, so it reads `0` for every real
+        mapping today -- populating/refreshing that field at its real
+        source is tracked separately as
+        [#4564](https://github.com/ThomasMichon/copilot-extensions/issues/4564).
   - [ ] Phases 2-4 (the actual retirement sweep): remain open. **Ordering
         note for whoever picks this up:** despite the numbering, Phase 2
         (retire-idle-daemon) cannot be implemented first in isolation —
@@ -1137,19 +1137,19 @@ claiming discipline alone.
   for #5001's Phase 1 attribution slice: `worktree-manager daemons
   mappings [--json]` (PR
   [#5467](https://github.com/ThomasMichon/copilot-extensions/pull/5467),
-  3 Copilot review rounds). Confirmed through review that this does NOT
-  satisfy the attribution requirement itself (no wire-level client_id
-  encodes caller identity today, so a live connection can't be correlated
-  back to a project/worktree_id/mux_session or that connection's busy
-  state) -- reworded the docstring/changefile/tests accordingly rather
-  than overclaiming completion, and left the attribution slice itself
-  open in the Plan above. Also surfaced (not introduced) a real production
-  gap while implementing this: `attached_clients` reads `0` for every real
-  mapping today because neither shipped launch path
+  3 Copilot review rounds). This does NOT satisfy the attribution
+  requirement itself: no wire-level client_id encodes caller identity
+  today, so a live connection can't be correlated back to a project/
+  worktree_id/mux_session or that connection's busy state -- reworded the
+  docstring/changefile/tests accordingly rather than overclaiming
+  completion, and left the attribution slice itself open in the Plan
+  above. Also surfaced (not introduced) a real production gap while
+  implementing this: `attached_clients` reads `0` for every real mapping
+  today because neither shipped launch path
   (`bin/launch-session.sh`/`.ps1`) ever populates `--attached-clients` --
-  documented as a known limitation, left as separate untracked follow-on
-  work rather than silently papering over it. Merged via Maintainer admin
-  bypass after the SAME unrelated CI job
+  already tracked as
+  [#4564](https://github.com/ThomasMichon/copilot-extensions/issues/4564).
+  Merged via Maintainer admin bypass after the SAME unrelated CI job
   (`agent-worktrees (collect-only + guard tests)`, its own already-tracked
   6-minute coverage-shadow-step timeout, #5340/#5461) failed 3 consecutive
   times with the actual review verdict APPROVED and every other check
