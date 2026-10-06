@@ -905,30 +905,41 @@ _versioned_slot_lease_path() {
 }
 
 _acquire_versioned_slot_lease_mkdir_fallback() {
-    # Used only when BOTH `flock` and a bootstrap python are unavailable --
-    # the exact bootstrap scenario this plugin's own first-use binstub
-    # (bin/agent-worktrees) already permits running CONCURRENTLY with no
-    # serialization at its own level ("on git-sh/Windows (no flock)
-    # provisioning is idempotent enough to race"), so two truly simultaneous
-    # `install.sh provision` invocations ARE a real, supported scenario here
-    # -- silently proceeding without ANY lock would reopen the exact
-    # concurrent-writer hazard this whole lease exists to close.
+    # The UNIVERSAL cross-mode gate: every acquirer, regardless of whether
+    # `flock`/python end up available to it, contends on this ONE `mkdir`
+    # first (#5439 review: two concurrent invocations with DIFFERENT
+    # flock/python visibility -- e.g. the full launcher's PATH vs. the
+    # confined first-use binstub's restricted PATH -- must not each
+    # silently pick a different, non-communicating lock primitive and both
+    # build the same slot). `flock`/fcntl are layered ON TOP of this gate
+    # purely as an optional crash-safety strengthening (see
+    # _acquire_versioned_slot_lease), never as an alternate gate of their
+    # own.
     #
-    # `mkdir` is POSIX-atomic and needs neither `flock` nor python, making it
-    # the correct last-resort primitive. This is a BOUNDED retry loop with a
-    # single, flat reclaim check -- not the unbounded chain of narrowing
+    # `mkdir` is POSIX-atomic and needs neither `flock` nor python, making
+    # it the correct universal primitive. This is a BOUNDED retry loop with
+    # a single, flat reclaim check -- not the unbounded chain of narrowing
     # TOCTOU windows a nested sentinel-based dotlock produced in earlier
     # review rounds. The happy path (no earlier attempt, no stale lock) is a
     # single atomic `mkdir` with zero ambiguity; the only residual race is
     # "is the recorded holder still alive", and losing that race just means
     # looping and retrying (bounded by the loop), never a permanent deadlock
     # or false acquisition.
-    local lock_file="$1" lock_dir="${lock_file}.d" attempt holder_pid
+    local lock_file="$1"
+    local lock_dir="${lock_file}.d" attempt holder_pid
     for attempt in 1 2 3 4 5 6 7 8 9 10; do
         if mkdir "$lock_dir" 2>/dev/null; then
             printf '%s' "$$" > "$lock_dir/pid" 2>/dev/null || true
             _VERSIONED_SLOT_LEASE_MKDIR_DIR="$lock_dir"
             return 0
+        fi
+        if [[ ! -d "$lock_dir" ]]; then
+            # mkdir failed for a reason OTHER than "the dir already
+            # exists" (permission denied, parent directory missing, ...)
+            # -- a genuine, persistent machinery failure, not contention;
+            # retrying would not help.
+            _VERSIONED_SLOT_LEASE_FAILURE_REASON="could not create the lease lock directory ($lock_dir)"
+            return 1
         fi
         holder_pid="$(cat "$lock_dir/pid" 2>/dev/null || true)"
         if [[ -n "$holder_pid" ]] && ! kill -0 "$holder_pid" 2>/dev/null; then
@@ -1021,13 +1032,21 @@ _acquire_versioned_slot_lease_python_fallback() {
     fi
 
     "$py" -c '
-import fcntl, sys
+import errno, fcntl, sys
 out = open(sys.argv[2], "w")
 f = open(sys.argv[1], "a")
 try:
     fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-except OSError:
-    out.write("LOCKED\n")
+except OSError as e:
+    # Only the standard nonblocking-contention errnos mean "someone else
+    # holds it" -- anything else (ENOLCK: kernel lock table full, a
+    # filesystem/mount that does not support locking, ...) is a genuine,
+    # persistent failure of the locking primitive itself, not contention,
+    # and must not tell an operator to just retry.
+    if e.errno in (errno.EAGAIN, errno.EACCES):
+        out.write("LOCKED\n")
+    else:
+        out.write("ERROR:%s\n" % (e,))
     out.close()
     sys.exit(1)
 out.write("OK\n")
@@ -1065,6 +1084,8 @@ sys.stdin.read()  # block until the parent closes fd 9 (release)
     wait "$pid" 2>/dev/null || true
     if [[ "$line" == "LOCKED" ]]; then
         _VERSIONED_SLOT_LEASE_FAILURE_REASON="contention"
+    elif [[ "$line" == ERROR:* ]]; then
+        _VERSIONED_SLOT_LEASE_FAILURE_REASON="${line#ERROR:}"
     else
         _VERSIONED_SLOT_LEASE_FAILURE_REASON="the lease helper did not respond (timed out or failed to start)"
     fi
@@ -1072,73 +1093,71 @@ sys.stdin.read()  # block until the parent closes fd 9 (release)
 }
 
 _acquire_versioned_slot_lease() {
-    # Acquire an OS-level exclusive lock for building THIS version's slot,
-    # held for the remainder of this process's lifetime. A slot-clean
-    # liveness check alone is check-then-act: two concurrent installer
-    # invocations could both observe a clean slot (neither has started its
-    # external build yet) and then both build into it -- this lease is what
-    # actually serializes them (#5439). Returns 0 if acquired (or a no-op in
-    # legacy mode); 1 if another live process already holds it, or the
-    # lease machinery itself is unusable (e.g. the lease file/FIFOs
-    # couldn't be created). Never silently succeeds when locking can't be
-    # verified -- falls back to a real fcntl.flock via a resident Python
-    # helper when the `flock` CLI is unavailable, and when even a bootstrap
-    # python isn't available either, to a bounded mkdir-based last-resort
-    # lock (see _acquire_versioned_slot_lease_mkdir_fallback) -- NEVER to
-    # proceeding unlocked: the plugin's own first-use binstub explicitly
-    # permits running `install.sh provision` concurrently in exactly that
-    # no-flock bootstrap scenario, so skipping serialization there would
-    # reopen the concurrent-writer hazard this lease exists to close.
-    # `_VERSIONED_SLOT_LEASE_FAILURE_REASON` distinguishes genuine
-    # contention from a persistent lease-machinery failure for the
+    # Acquire an exclusive lock for building THIS version's slot, held for
+    # the remainder of this process's lifetime. A slot-clean liveness check
+    # alone is check-then-act: two concurrent installer invocations could
+    # both observe a clean slot (neither has started its external build
+    # yet) and then both build into it -- this lease is what actually
+    # serializes them (#5439). Returns 0 if acquired (or a no-op in legacy
+    # mode); 1 if another live process already holds it, or the lease
+    # machinery itself is unusable.
+    #
+    # The mkdir-based gate (_acquire_versioned_slot_lease_mkdir_fallback) is
+    # ALWAYS the first and authoritative acquisition, regardless of
+    # flock/python availability: two concurrent processes can have
+    # DIFFERENT visibility of those (e.g. the full launcher's PATH vs. the
+    # plugin's own first-use binstub's restricted PATH), so a tier picked
+    # per-process rather than one shared gate would let each side acquire a
+    # different, non-communicating lock and both build the same slot.
+    # `flock` (or, lacking that, a resident Python fcntl.flock helper) is
+    # layered ON TOP of the already-held gate purely as an optional
+    # crash-safety strengthening -- a kernel-held lock is released by the
+    # OS the instant ITS holder exits/crashes, giving a later contender
+    # faster, more certain proof that a reported holder is really gone than
+    # the gate's own pid-liveness heuristic alone. Failing to strengthen is
+    # NOT itself a failure: the gate alone is already sufficient mutual
+    # exclusion. `_VERSIONED_SLOT_LEASE_FAILURE_REASON` distinguishes
+    # genuine contention from a persistent lease-machinery failure for the
     # caller's error message. Idempotent: a second call while already held
     # is a no-op success.
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    [[ -n "$_VERSIONED_SLOT_LEASE_FD" || -n "$_VERSIONED_SLOT_LEASE_PY_PID" || -n "$_VERSIONED_SLOT_LEASE_MKDIR_DIR" ]] && return 0
+    [[ -n "$_VERSIONED_SLOT_LEASE_MKDIR_DIR" ]] && return 0
     _VERSIONED_SLOT_LEASE_FAILURE_REASON=""
     local lease_path
     lease_path="$(_versioned_slot_lease_path)"
-    if ! command -v flock >/dev/null 2>&1; then
-        _acquire_versioned_slot_lease_python_fallback "$lease_path"
-        local rc=$?
-        if [[ "$rc" -eq 0 ]]; then
-            return 0
-        fi
-        if [[ "$rc" -eq 2 ]]; then
-            # No bootstrap python resolvable at all -- fall through to the
-            # mkdir-based last-resort lock rather than proceeding unlocked.
-            _acquire_versioned_slot_lease_mkdir_fallback "$lease_path"
-            return $?
-        fi
-        return "$rc"
-    fi
-    # A literal fd number is required here (not the dynamic `{fd}`
-    # allocation syntax, bash 4.1+): this function runs at most once per
-    # process lifetime (guarded above), so fd 8 can't collide with another
-    # live lease in this same process. Kept bash-3.2-compatible to match
-    # the no-flock fallback below, even though a host with a real `flock`
-    # binary is unlikely to be running a bash this old.
-    if ! exec 8>"$lease_path"; then
-        _VERSIONED_SLOT_LEASE_FAILURE_REASON="could not open the lease file ($lease_path)"
+
+    if ! _acquire_versioned_slot_lease_mkdir_fallback "$lease_path"; then
         return 1
     fi
-    if ! flock -n 8; then
-        exec 8>&- 2>/dev/null || true
-        _VERSIONED_SLOT_LEASE_FAILURE_REASON="contention"
-        return 1
+
+    if command -v flock >/dev/null 2>&1; then
+        # A literal fd number is required here (not the dynamic `{fd}`
+        # allocation syntax, bash 4.1+): this function runs at most once
+        # per process lifetime (guarded above), so fd 8 can't collide with
+        # another live lease in this same process.
+        if exec 8>"$lease_path" 2>/dev/null && flock -n 8 2>/dev/null; then
+            _VERSIONED_SLOT_LEASE_FD=8
+        else
+            exec 8>&- 2>/dev/null || true
+        fi
+    else
+        _acquire_versioned_slot_lease_python_fallback "$lease_path" >/dev/null 2>&1 || true
     fi
-    _VERSIONED_SLOT_LEASE_FD=8
     return 0
 }
 
 _release_versioned_slot_lease() {
     # Safe to call unconditionally (no-op) when no lease was acquired -- e.g.
     # _test_slot_already_complete skipped the build entirely this run.
+    # Release order matters: the strengthening layer (flock fd / python
+    # helper) first, the universal mkdir gate LAST, so the gate stays held
+    # for the entire time this process could still be building -- never a
+    # window where the gate is gone but a strengthening layer still is (or
+    # vice versa in a way that matters).
     if [[ -n "$_VERSIONED_SLOT_LEASE_FD" ]]; then
         exec 8>&- 2>/dev/null || true
         _VERSIONED_SLOT_LEASE_FD=""
     fi
-    _release_versioned_slot_lease_mkdir_fallback
     if [[ -n "$_VERSIONED_SLOT_LEASE_PY_PID" ]]; then
         # Closing bash's held write-end of the helper's stdin pipe is the
         # release: the helper sees EOF on its blocking stdin.read(), exits,
@@ -1151,6 +1170,8 @@ _release_versioned_slot_lease() {
         wait "$_VERSIONED_SLOT_LEASE_PY_PID" 2>/dev/null || true
         _VERSIONED_SLOT_LEASE_PY_PID=""
     fi
+    # The universal gate is released LAST (see the ordering note above).
+    _release_versioned_slot_lease_mkdir_fallback
 }
 
 _versioned_slot_clean() {

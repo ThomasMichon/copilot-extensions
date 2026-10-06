@@ -1388,6 +1388,15 @@ function Enter-VersionedSlotLease {
             $script:VersionedSlotLeaseFailureReason = $_.Exception.Message
         }
         return $false
+    } catch {
+        # `File.Open` reports other persistent failures -- an ACL denial,
+        # for one -- as `UnauthorizedAccessException` or another exception
+        # type entirely, NOT `IOException`. Catching only IOException let
+        # those bypass this function's own error-reason bookkeeping and
+        # throw out of it uncaught instead of returning $false with a
+        # real reason the caller can report.
+        $script:VersionedSlotLeaseFailureReason = $_.Exception.Message
+        return $false
     }
 }
 

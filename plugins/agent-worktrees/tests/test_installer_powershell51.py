@@ -615,6 +615,14 @@ def test_versioned_slot_lease_distinguishes_contention_from_a_persistent_failure
     # Anything that ISN'T a sharing/lock violation must preserve the real
     # exception message, never collapse into the same "contention" bucket.
     assert "$script:VersionedSlotLeaseFailureReason = $_.Exception.Message" in enter_fn
+    # `File.Open` reports some persistent failures (e.g. an ACL denial) as
+    # `UnauthorizedAccessException`, NOT `IOException` -- a bare catch
+    # typed to IOException alone would let those throw straight out of
+    # this function uncaught instead of returning $false with a reason.
+    assert "} catch {" in enter_fn
+    catchall_branch = enter_fn.split("} catch {", 1)[1]
+    assert "$script:VersionedSlotLeaseFailureReason = $_.Exception.Message" in catchall_branch
+    assert "return $false" in catchall_branch
 
     assert "VersionedSlotLeaseFailureReason -and $script:VersionedSlotLeaseFailureReason -ne 'contention'" in deploy_fn
     assert "Could not acquire the build lease" in deploy_fn
