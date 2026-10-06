@@ -98,6 +98,16 @@ optional static machine metadata shared with agent-worktrees and agent-bridge:
 purpose, and `capabilities` is an ordered list of broad discovery hints. These
 fields describe topology, not live machine state.
 
+Both `mesh-status` and `refresh-mesh` resolve "the calling repository" from the
+process's current working directory (git toplevel, or walking up parents).
+Running either through agent-worktrees' `<repo> ssh …` front door (e.g.
+`<repo> ssh mesh-status`) pins this to the named `<repo>`'s own checkout
+regardless of the invoking shell's actual cwd -- agent-worktrees resolves
+`<repo>` from its own registry and launches `agent-ssh` already chdir'd there,
+rather than `agent-ssh` resolving the name itself. An unresolvable `<repo>`
+fails that routed invocation closed instead of silently falling back to the
+caller's cwd.
+
 `refresh-mesh [--path machines.yaml] [--config-d dir] [--timeout N] [--json]`
 reconciles this machine's *outbound* reach into the mesh: it re-runs the
 transport's own discovery (e.g. `dtssh discover` for the dtssh transport) to

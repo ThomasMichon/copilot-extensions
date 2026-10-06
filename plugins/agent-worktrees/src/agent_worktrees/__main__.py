@@ -139,6 +139,9 @@ _extract_project_flag = front_door_cli._extract_project_flag
 _installed_sibling_slugs = front_door_cli._installed_sibling_slugs
 _CORE_SLUGS = front_door_cli._CORE_SLUGS
 _PROJECT_ARG_SLUGS = front_door_cli._PROJECT_ARG_SLUGS
+_PROJECT_CHDIR_VERBS = front_door_cli._PROJECT_CHDIR_VERBS
+_chdir_verb_for = front_door_cli._chdir_verb_for
+_resolve_project_checkout = front_door_cli._resolve_project_checkout
 _worktrees_verbs = front_door_cli._worktrees_verbs
 _canonical_slug = front_door_cli._canonical_slug
 _sibling_binstub = front_door_cli._sibling_binstub
@@ -6672,16 +6675,25 @@ def main(argv: list[str] | None = None) -> int:
     # DERIVED: the curated core set ∪ installed agent-<slug> binstubs, excluding
     # real worktrees verbs) is a plugin namespace: `<repo> <slug> …` →
     # `agent-<slug> …`. Singular/plural variants are tolerated (`<repo> codespace`
-    # == `<repo> codespaces`). `--project <repo>` is injected only for plugins
-    # that consume it (_PROJECT_ARG_SLUGS); other slugs route as a cwd-preserving
-    # alias. `worktrees` (and `worktree`) folds back into this binstub. See the
-    # command-surface effort.
+    # == `<repo> codespaces`). The resolved project is threaded to
+    # `_route_to_sibling_plugin` for any slug that might need it -- either
+    # forwarded as `--project <repo>` for the sibling to consume itself
+    # (`_PROJECT_ARG_SLUGS`), or, for a specific verb of a slug that must not
+    # reach upward to resolve it itself, resolved+chdir'd by the router on the
+    # child's behalf (`_PROJECT_CHDIR_VERBS`; the per-verb decision is made
+    # inside `_route_to_sibling_plugin`, not here). Every other slug/verb
+    # combination routes as a cwd-preserving alias. `worktrees` (and
+    # `worktree`) folds back into this binstub. See the command-surface
+    # effort.
     if args_list:
         _canon = None if args_list[0] in _worktrees_verbs() else _canonical_slug(args_list[0])
         if _canon == "worktrees":
             args_list = args_list[1:]
         elif _canon is not None:
-            _sib_project = _proj if _canon in _PROJECT_ARG_SLUGS else None
+            _sib_project = (
+                _proj if _canon in _PROJECT_ARG_SLUGS or _canon in _PROJECT_CHDIR_VERBS
+                else None
+            )
             return _route_to_sibling_plugin(_canon, _sib_project, args_list[1:])
 
     # --project has no effect on a machine-global verb (repos/accounts/picker/
