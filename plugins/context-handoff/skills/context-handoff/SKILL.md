@@ -152,20 +152,22 @@ assuming the last turn's framing already covers everything you said earlier.
 When context pressure is the reason for handing off and the objective still has
 more work left to do:
 
-1. **Sync the worktree first** -- see "Sync before triggering" below. Do this
+1. **Quiesce owned background work first** -- see "Quiesce owned background
+   work before triggering" below. Do this before syncing: a background
+   task's own process can still write into this worktree while a sync
+   inspects, commits, or rebases it (the sync helper's own lock cannot
+   constrain an external actor still writing to the tree), so quiescing
+   after sync risks syncing a moving worktree or capturing mixed WIP from a
+   task that was still running during the sync.
+2. **Then sync the worktree** -- see "Sync before triggering" below. Do this
    before collecting facts so the composed brief reflects the synced state
    (and, if the sync conflicts, the brief can say so).
-2. **Quiesce owned background work** -- see "Quiesce owned background work
-   before triggering" below. Do this before composing too: stopping a
-   background task can itself produce new partial results or a decision to
-   ask the successor to re-arm something, and the brief composed next is
-   this session's only chance to carry that forward.
 3. **Call `generate_handoff_prompt`.**
 4. **Compose the markdown brief** using the effort-backed shape when a valid
    open active effort exists, otherwise the full standalone shape. Note the
-   sync outcome (synced cleanly / conflict left unresolved) and the
    quiescing outcome (what was stopped, what was captured, what needs
-   re-arming) if relevant. Run the **Self-audit before declaring
+   re-arming) and the sync outcome (synced cleanly / conflict left
+   unresolved) if relevant. Run the **Self-audit before declaring
    completion** step above first.
 5. **Call `save_handoff_prompt`.** This safely stores the baton and returns the
    short handoff seed.
@@ -186,14 +188,16 @@ listing a set of follow-up ideas or questions:
 3. **Call `save_handoff_prompt`.**
 4. **Replace the usual follow-up list** with one short, low-friction offer to
    continue via handoff.
-5. **Only once the user says yes:** sync the worktree (see "Sync before
-   triggering" below), then **quiesce owned background work** (see
-   "Quiesce owned background work before triggering" below) -- only now,
-   after the user has actually agreed to hand off, is it correct to stop
-   things the successor would otherwise inherit live. Then **always re-run
+5. **Only once the user says yes:** **quiesce owned background work first**
+   (see "Quiesce owned background work before triggering" below) -- only
+   now, after the user has actually agreed to hand off, is it correct to
+   stop things the successor would otherwise inherit live, and doing this
+   before the sync (next) avoids syncing a worktree a still-running task
+   could still write into. Then **sync the worktree** (see "Sync before
+   triggering" below). Then **always re-run
    `generate_handoff_prompt` and `save_handoff_prompt`** -- even if the sync
    and quiescing both looked like a no-op -- so the stored baton reflects
-   the post-sync, post-quiesce state. A WIP commit, a failed sync attempt, a
+   the post-quiesce, post-sync state. A WIP commit, a failed sync attempt, a
    conflict left unresolved, a stopped background task's partial results, or
    a schedule that needs re-arming all matter to the successor even when
    nothing else changed; `trigger_handoff` otherwise reuses the earlier
@@ -403,6 +407,25 @@ tier -- a session or operator who explicitly calls `trigger_handoff` still
 gets it stored/seeded/noted and printed manual instructions, exactly as
 under `manual-only`. Do not assume live cutover happens unless you have
 confirmed `mode: auto` is set.
+
+### Known exception: the automatic force tier does not quiesce
+
+The force tier (above) runs entirely inside the extension's own background
+code with no agent turn in the loop -- there is no live conversation for it
+to call `manage_schedule` or inspect owned background agents/shells
+from, since those are tools exposed to an acting agent, not primitives the
+extension's own process can invoke on its own. The quiescing requirement in
+this section therefore applies to every agent-driven trigger (both paths
+above, and `/handoff-continue`); it does **not** -- and structurally cannot
+-- apply to the force tier's own auto-draft/store/trigger. A schedule or
+background task this session owns can still be live when the force tier
+fires and a successor is cut over. This is a known, scoped gap, not an
+oversight: closing it would require the scheduling and background-task
+primitives themselves to expose an extension-invokable (not agent-tool-only)
+quiesce hook, which is out of this skill's scope. Until that exists, treat a
+force-tier handoff as carrying a standing caveat: check for owned schedules/
+background work on the successor side rather than assuming the predecessor
+quiesced them.
 
 ## Resume flow
 

@@ -140,19 +140,35 @@ view highlighting whether resolved head matches the just-resumed session).
 ### Step 5 — `context-handoff`: quiesce owned background work before triggering (Done 2026-10-06)
 - [x] New skill section ("Quiesce owned background work before triggering")
       in `plugins/context-handoff/skills/context-handoff/SKILL.md`, placed
-      so it runs before composing/saving the brief in both trigger paths
-      (not merely before `trigger_handoff`): capture whatever partial
-      progress a background agent/async shell produced, then stop/wait it
-      out, and always stop every `manage_schedule` entry the session
+      so it runs BEFORE syncing and composing/saving the brief in both
+      trigger paths (quiesce -> sync -> generate/compose -> save ->
+      trigger; quiescing before sync matters because a still-running task
+      can keep writing into the worktree while the sync inspects, commits,
+      or rebases it): capture whatever partial
+      progress a background agent/async shell produced, then stop an owned
+      shell directly or wait for an owned agent to actually finish
+      (an observed completion, not merely a sent closing message), and
+      always stop every `manage_schedule` entry the session
       created -- with no exception for one the brief plans to ask the
       successor to re-arm (re-arming is always a separate, successor-side,
       post-cutover action, never a reason to leave something running now).
       A context-pressure-driven handoff that must trigger immediately is
-      still not blocked on this -- same escape hatch as the sync step: note
-      what was left running and why. Mirrored into the generated
-      `save_handoff_prompt`/`generate_handoff_prompt` tool guidance in
-      `extension.mjs` and the public `plugins/context-handoff/README.md`
-      trigger-sequence docs so no surface describes a path that bypasses it.
+      still not blocked on quiescing agents/shells -- same escape hatch as
+      the sync step: note what was left running and why -- but schedules
+      have no such exception (stopping one is a single fast call). Mirrored
+      into the generated `generate_handoff_prompt`/`save_handoff_prompt`/
+      `trigger_handoff`/`/handoff-continue` tool guidance in `extension.mjs`,
+      the public `plugins/context-handoff/README.md` trigger-sequence docs,
+      the extension-free `instructions/handoff-fallback.instructions.md`,
+      and the always-on sessionStart ambient guidance
+      (`scripts/emit-guidance.sh`/`.ps1`, budget-constrained to a compact
+      "quiesce+sync first" pointer) so no surface describes a path that
+      bypasses it. Documented one explicit, scoped exception: the automatic
+      force-tier handoff (`mode: auto`, 79% threshold) runs with no agent
+      turn in the loop and structurally cannot call the agent-tool-only
+      `manage_schedule`/background-task primitives -- recorded in the
+      skill's own "Known exception" subsection rather than silently
+      left unmentioned.
 - [ ] Live-test coverage for this new step (see Validation Plan) is
       deliberately left for a follow-up leg: it needs a real predecessor
       session with a genuinely owned, still-running background task or

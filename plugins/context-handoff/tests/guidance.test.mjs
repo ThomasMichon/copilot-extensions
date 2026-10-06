@@ -299,12 +299,24 @@ test("quiescing owned background work is required before composing, in every sur
     "Call `generate_handoff_prompt`",
     "context-pressure path must quiesce before calling generate_handoff_prompt",
   );
+  assertOrdered(
+    path1,
+    "Quiesce owned background work first",
+    "Then sync the worktree",
+    "context-pressure path must quiesce before syncing (a still-running task can write into the worktree during sync)",
+  );
   const path2ReArm = path2.slice(path2.indexOf("Only once the user says yes"));
   assertOrdered(
     path2ReArm,
     "quiesce owned background work",
     "re-run",
     "turn-end path must quiesce before re-running generate_handoff_prompt",
+  );
+  assertOrdered(
+    path2ReArm,
+    "quiesce owned background work first",
+    "sync the worktree",
+    "turn-end path must quiesce before syncing",
   );
 
   // generate_handoff_prompt's own description embeds the same two-path
@@ -321,9 +333,15 @@ test("quiescing owned background work is required before composing, in every sur
   assert.match(genDesc, /ALWAYS stop.*manage_schedule.*entry/is);
   assertOrdered(
     genDesc,
-    "Also quiesce owned",
+    "quiesce owned background work",
     "ALWAYS call",
     "generate_handoff_prompt's description must quiesce before its re-run instruction",
+  );
+  assertOrdered(
+    genDesc,
+    "quiesce owned background work",
+    "THEN sync the worktree",
+    "generate_handoff_prompt's description must quiesce before syncing",
   );
 
   // The generated save_handoff_prompt tool response mentions quiescing in
@@ -344,6 +362,12 @@ test("quiescing owned background work is required before composing, in every sur
   );
   assert.match(contextPressureBranch, /quiesc/i);
   assert.match(contextPressureBranch, /stopped every owned `manage_schedule` entry/i);
+  assertOrdered(
+    contextPressureBranch,
+    "quiesced owned background",
+    "BEFORE syncing",
+    "save_handoff_prompt's context-pressure branch must quiesce before syncing",
+  );
   assert.match(followUpBranch, /quiesc/i);
   assertOrdered(
     followUpBranch,
@@ -351,15 +375,25 @@ test("quiescing owned background work is required before composing, in every sur
     "re-run generate_handoff_prompt",
     "turn-end branch text must order quiescing before the re-run instruction",
   );
+  assertOrdered(
+    followUpBranch,
+    "quiesce owned background work",
+    "THEN sync the worktree",
+    "save_handoff_prompt's turn-end branch must quiesce before syncing",
+  );
 
   // The public README's trigger sequences carry the same requirement with
   // the same ordering and unconditional-schedule semantics, so a reader
   // following only the README (not the skill) doesn't bypass it.
-  const readmeSection2 = readme.slice(
-    readme.indexOf("### 2. Context-pressure-driven handoff"),
-    readme.indexOf("### 3. Turn-end"),
-  );
-  const readmeSection3 = readme.slice(readme.indexOf("### 3. Turn-end"));
+  const readmeSection2 = readme
+    .slice(
+      readme.indexOf("### 2. Context-pressure-driven handoff"),
+      readme.indexOf("### 3. Turn-end"),
+    )
+    .replace(/\s+/g, " ");
+  const readmeSection3 = readme
+    .slice(readme.indexOf("### 3. Turn-end"))
+    .replace(/\s+/g, " ");
   for (const section of [readmeSection2, readmeSection3]) {
     assert.match(section, /quiesce owned background work/i);
   }
@@ -371,10 +405,22 @@ test("quiescing owned background work is required before composing, in every sur
     "README context-pressure section must quiesce before composing",
   );
   assertOrdered(
+    readmeSection2,
+    "quiesce owned background work first",
+    "sync the worktree",
+    "README context-pressure section must quiesce before syncing",
+  );
+  assertOrdered(
     readmeSection3,
     "quiesce owned background work",
     "recompose",
     "README turn-end section must quiesce before recomposing",
+  );
+  assertOrdered(
+    readmeSection3,
+    "quiesce owned background",
+    "sync the worktree",
+    "README turn-end section must quiesce before syncing",
   );
 
   // The handoff-fallback instructions (loaded when the extension itself
@@ -394,25 +440,64 @@ test("quiescing owned background work is required before composing, in every sur
   // The escape hatch (unsafe under time pressure -> note left-running) is
   // attached to agents/shells only, never to the unconditional schedule stop.
   assert.match(fallback, /unsafe under pressure/i);
+  assertOrdered(
+    fallback,
+    "Quiesce",
+    "THEN sync",
+    "fallback instructions must quiesce before syncing",
+  );
 
   // The explicit human-invoked /handoff-continue command's generated prompt
   // also mentions quiescing, with the capture-before-stop ordering and
-  // unconditional schedule stop, as step (2) strictly before the
-  // generate_handoff_prompt step (3).
+  // unconditional schedule stop, as step (1) strictly before the sync
+  // step (2) and the generate_handoff_prompt step (3).
   const continueStart = extension.indexOf('name: "handoff-continue"');
   const continueEnd = extension.indexOf('name: "consume-handoff"', continueStart);
   assert.ok(continueStart >= 0 && continueEnd > continueStart);
   const continuePrompt = joinConcatenatedLiterals(
     extension.slice(continueStart, continueEnd),
   );
-  assert.match(continuePrompt, /\(2\) quiesce/i);
+  assert.match(continuePrompt, /\(1\) quiesce/i);
   assert.match(continuePrompt, /capture whatever partial results/i);
   assert.match(continuePrompt, /always stop every owned `manage_schedule` entry/i);
   assertOrdered(
     continuePrompt,
-    "(2) quiesce",
-    "(3) call",
-    "/handoff-continue prompt must quiesce in step (2), before step (3)'s generate_handoff_prompt call",
+    "(1) quiesce",
+    "(2) THEN sync",
+    "/handoff-continue prompt must quiesce in step (1), before step (2)'s sync",
   );
+  assertOrdered(
+    continuePrompt,
+    "(2) THEN sync",
+    "(3) call",
+    "/handoff-continue prompt must sync in step (2), before step (3)'s generate_handoff_prompt call",
+  );
+
+  // trigger_handoff's own tool description -- the final, authoritative gate
+  // every path above eventually calls -- also names the prerequisite, so an
+  // agent reading only this tool's description doesn't miss it.
+  const triggerStart = extension.indexOf('name: "trigger_handoff"');
+  const triggerEnd = extension.indexOf('name: "handoff-continue"', triggerStart);
+  assert.ok(triggerStart >= 0 && triggerEnd > triggerStart);
+  const triggerDesc = joinConcatenatedLiterals(
+    extension.slice(triggerStart, triggerEnd),
+  );
+  assert.match(triggerDesc, /quiesce owned background work/i);
+  assert.match(triggerDesc, /always stop owned `manage_schedule` entries/i);
+
+  // The always-on sessionStart ambient guidance (emit-guidance.sh/.ps1) is
+  // read even when the context-handoff extension itself never registers --
+  // it must at least point at quiescing, not just syncing.
+  const emitSh = readFileSync(
+    join(plugin, "scripts", "emit-guidance.sh"),
+    "utf8",
+  );
+  const emitPs1 = readFileSync(
+    join(plugin, "scripts", "emit-guidance.ps1"),
+    "utf8",
+  );
+  for (const emitSource of [emitSh, emitPs1]) {
+    assert.match(emitSource, /quiesce/i);
+  }
 });
 
