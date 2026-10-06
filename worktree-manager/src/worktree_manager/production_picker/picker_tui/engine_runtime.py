@@ -381,8 +381,15 @@ class PickerScreenRuntimeMixin:
         # tick instead of firing per keystroke, so it can't outrun draining.
         nav = self._nav_dirty
         self._nav_dirty = False
-        if busy or nav:
+        if busy:
             self.refresh()
+        elif nav:
+            # pivot-streaming-transport Phase 4: this is the ONLY branch that
+            # can fire with `busy` false and `nav` true -- a pure in-list
+            # cursor move (zone "L"), nothing else changed. Narrow the
+            # segment refresh accordingly (see `_refresh_nf_segments`'s own
+            # audit of exactly which segments that's safe for).
+            self.refresh(cause="nav")
         elif self.frame % 5 == 0:
             # pivot-streaming-transport Phase 4: this is the ONLY branch that
             # can fire with `busy` and `nav` both false -- a purely

@@ -85,3 +85,43 @@ function Invoke-AwPsmuxPassthrough {
     if (-not (Test-Path $fragment)) { return }
     try { & $muxBin source-file -t $Session $fragment 2>&1 | Out-Null } catch {}
 }
+
+# Set-AwPsmuxServerPriority <session-name>
+#
+# Interim mitigation for psmux#608 (https://github.com/psmux/psmux/issues/608):
+# a multiplexer server starved at Normal priority on a loaded box drops/lags
+# keystrokes. Upstream now defaults to `set -g priority above-normal` for its
+# own server + client processes, but that fix postdates our installed (WinGet)
+# psmux build -- `psmux show-options -g` has no `priority` option yet. Until a
+# release ships with it, bump the server ourselves.
+#
+# Finds THIS session's psmux server by command line (`server -s <session>`),
+# the same ownership-proving pattern Stop-AwOwnedPsmuxSession uses for cleanup
+# -- never by parsing $env:TMUX, whose field order is easy to get backwards
+# (psmux's own docs/integration.md: the first field embeds the server PID, the
+# second is a TCP port, not a pid -- the reverse of vanilla tmux). Matching on
+# the actual `server -s <session>` arguments is unambiguous and immune to that
+# confusion. Best-effort and session-scoped: a failure (or lack of rights,
+# e.g. hitting another user's server on a shared box) never blocks the launch
+# and never touches any process outside this one session's own server.
+function Set-AwPsmuxServerPriority {
+    param([string]$Session)
+    if ([string]::IsNullOrWhiteSpace($Session)) { return }
+    try {
+        $escapedSession = [regex]::Escape($Session)
+        $servers = @(
+            Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+                $_.Name -eq 'psmux.exe' -and
+                [string]$_.CommandLine -match "(?:^|\s)server\s+-s\s+$escapedSession(?:\s|$)"
+            }
+        )
+        foreach ($server in $servers) {
+            try {
+                $proc = [Diagnostics.Process]::GetProcessById([int]$server.ProcessId)
+                if ($proc.PriorityClass -ne 'AboveNormal') {
+                    $proc.PriorityClass = 'AboveNormal'
+                }
+            } catch {}
+        }
+    } catch {}
+}
