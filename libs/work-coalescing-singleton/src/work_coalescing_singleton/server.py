@@ -31,7 +31,20 @@ _CLOSE_SERVE_WAIT_S = 2.0
 
 
 class Unavailable(Exception):
-    """A request could not complete before its caller-supplied deadline."""
+    """A request could not complete before its caller-supplied deadline.
+
+    ``reason``, when set, distinguishes *why* -- in particular
+    ``"superseded"`` marks a structured, caller-visible rejection raised by
+    :meth:`CoalescingServer.close_admission` once this daemon has stopped
+    admitting new work (a newer generation took over, or this one is
+    retiring), as opposed to an ordinary per-request deadline miss (``None``,
+    unchanged wire shape). See ``close_admission``'s own docstring for the
+    single-shot-caller admission-discipline contract this implements.
+    """
+
+    def __init__(self, reason: str | None = None):
+        super().__init__(reason or "")
+        self.reason = reason
 
 
 class _InFlight:
@@ -139,9 +152,12 @@ class _Handler(socketserver.StreamRequestHandler):
             if not isinstance(result, dict):
                 result = {}
             self._write({"version": PROTOCOL_VERSION, "result": result})
-        except Unavailable:
+        except Unavailable as exc:
             try:
-                self._write({"version": PROTOCOL_VERSION, "fallback": True})
+                response = {"version": PROTOCOL_VERSION, "fallback": True}
+                if exc.reason:
+                    response["reason"] = exc.reason
+                self._write(response)
             except OSError:
                 return
         except Exception:
@@ -185,6 +201,14 @@ class CoalescingServer:
         self._linger_timer: threading.Timer | None = None
         self._closed = False
         self._started = False
+        # Set only by close_admission() (see its own docstring) -- distinct
+        # from `_closed`, which marks the listening socket itself torn down.
+        # A superseded-but-not-yet-exited daemon sets this while leaving the
+        # socket open, so a single-shot caller connecting during the bounded
+        # drain-only window still gets a structured, reason-carrying
+        # rejection rather than a bare OS-level connection-refused.
+        self._admission_closed = False
+        self._admission_closed_reason: str | None = None
         # copilot-extensions#3798: incremented at `accept()` time (see
         # `_Server.process_request`), decremented only once the handler
         # thread has fully returned (`_Server.process_request_thread`) --
@@ -286,6 +310,48 @@ class CoalescingServer:
             # acquires that same lock -- cannot deadlock.
             self.close()
             raise
+
+    def close_admission(self, reason: str = "superseded") -> None:
+        """Stop admitting genuinely new work while leaving the listening
+        socket open and accepting connections.
+
+        This is the single-shot-caller half of superseded-daemon admission
+        discipline (see ``docs/patterns/graceful-daemon-cutover.md``'s
+        "Admission discipline once superseded" section): a daemon that has
+        been superseded or is retiring must not vanish out from under a
+        single-shot RPC caller mid-flight. Hard-closing the socket the
+        instant admission closes produces a bare, ambiguous OS-level
+        connection-refused that a caller cannot distinguish from "nothing is
+        listening at all" -- this method instead keeps the socket open so a
+        new connection during the drain-only grace window still completes a
+        round trip and receives an explicit ``{"fallback": true, "reason":
+        reason}`` response, prompting the caller to re-resolve rather than
+        retry the same now-stale endpoint blindly.
+
+        Does not affect any execution already admitted into
+        :meth:`handle_request` before this call -- those continue to run (and
+        any caller already joined onto them still receives the real result).
+        Only a request that would *start* calling :meth:`handle_request`
+        after this point is rejected. The actual socket teardown remains
+        :meth:`close`'s job, called once the owning daemon is ready to exit
+        for real (e.g. once its own bounded self-retire grace elapses).
+        """
+        with self._lock:
+            self._admission_closed = True
+            self._admission_closed_reason = reason
+
+    def open_admission(self) -> None:
+        """Reverse of :meth:`close_admission` -- resume admitting new work on
+        an already-live, not-yet-``close()``-d server.
+
+        Exists for the one legitimate un-drain path: a control-plane action
+        that aborts an in-progress drain before this daemon actually exits
+        (e.g. the resident status-monitor's ``undrain`` control action). Has
+        no effect once :meth:`close` has actually torn down the socket.
+        """
+        with self._lock:
+            self._admission_closed = False
+            self._admission_closed_reason = None
 
     def rendezvous(self) -> dict:
         host, port = self._server.server_address
@@ -436,8 +502,13 @@ class CoalescingServer:
 
         Raises ``Unavailable`` if ``deadline`` passes before a result (either
         this caller's own execution, or the in-flight one it joined) is
-        ready.
+        ready, or immediately with ``reason`` set if :meth:`close_admission`
+        was already called -- a new execution is never started past that
+        point, regardless of ``deadline``.
         """
+        with self._lock:
+            if self._admission_closed:
+                raise Unavailable(self._admission_closed_reason)
         map_key = (kind, key)
         with self._lock:
             inflight = self._inflight.get(map_key)

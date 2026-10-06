@@ -3169,6 +3169,76 @@ def test_classify_daemon_started_published_in_lock_and_closed_on_exit(
     assert closed["n"] == 4  # classify_server + worktree_status_server + managed_mux_server + tracking_write_server
 
 
+def test_self_retire_softly_closes_admission_before_hard_closing_on_final_exit(
+    tmp_path, monkeypatch
+):
+    """The single-shot-caller admission-discipline contract, wired end to
+    end through the real resident monitor: once this daemon observes itself
+    superseded (``self_retire.is_superseded``), ``_enter_drain_only_state``
+    must soft-close each live request surface (``CoalescingServer.
+    close_admission`` -- socket stays open, new callers get a structured
+    rejection) rather than immediately hard-closing it. The hard ``close()``
+    that actually tears the socket down remains reserved for the real final
+    exit in this function's own ``finally`` block, once the bounded
+    self-retire confirmation count is reached. A regression that reverts to
+    hard-closing immediately on the first superseded observation would make
+    ``close()`` fire before the loop's own break -- this test pins the
+    ordering, not just the call count.
+    """
+    from agent_worktrees import classify_daemon, self_retire
+    from agent_worktrees import status_monitor_cutover as smc
+
+    lock = tmp_path / "status-monitor.lock"
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
+    monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
+    monkeypatch.setattr(m.locks, "write_lock", lambda _path, extra=None: None)
+    monkeypatch.setattr(smc, "publish_route", lambda *a, **k: None)
+    monkeypatch.setattr(smc, "clear_route_if_owner", lambda pid: False)
+    # A fixed, non-None generation makes `self_retire_generation` non-None
+    # from the very first iteration, so the self-retire branch (not the
+    # unrelated `runtime_superseded()` early-exit) drives this test.
+    monkeypatch.setattr(smc, "active_generation_for_pid", lambda pid: 42)
+    monkeypatch.setattr(self_retire, "is_superseded", lambda *a, **k: True)
+    monkeypatch.setattr(
+        m,
+        "_monitor_sweep",
+        lambda *args, **kwargs: pytest.fail("sweep must not run once admission is closed"),
+    )
+    # Skip the real interval wait between iterations -- this test only
+    # needs the bounded (2-confirmation) self-retire loop to run its
+    # course quickly, not to exercise real wake/backstop timing.
+    monkeypatch.setattr(m.status_monitor_cli, "_wake_interruptible_wait", lambda *a, **k: None)
+
+    events: list[tuple[str, str]] = []
+    real_close_admission = classify_daemon.CoalescingServer.close_admission
+    real_close = classify_daemon.CoalescingServer.close
+
+    def _spy_close_admission(self, reason="superseded"):
+        events.append(("close_admission", reason))
+        real_close_admission(self, reason)
+
+    def _spy_close(self):
+        events.append(("close", ""))
+        real_close(self)
+
+    monkeypatch.setattr(classify_daemon.CoalescingServer, "close_admission", _spy_close_admission)
+    monkeypatch.setattr(classify_daemon.CoalescingServer, "close", _spy_close)
+
+    assert m.cmd_status_monitor(argparse.Namespace(interval=2)) == 0
+
+    kinds = [kind for kind, _ in events]
+    # Soft-close (admission rejection, socket stays open) happens at least
+    # once per confirmation iteration, strictly before any hard close.
+    assert kinds.count("close_admission") >= 1
+    assert kinds.index("close_admission") < kinds.index("close")
+    assert all(reason == "superseded" for kind, reason in events if kind == "close_admission")
+    # The hard close at real exit covers every live request surface exactly
+    # once each (classify_server + worktree_status_server + managed_mux_server
+    # + tracking_write_server), same invariant as the sibling test above --
+    # soft-closing never skips the eventual real teardown.
+    assert kinds.count("close") == 4
+
+
 def test_sweep_rechecks_before_publish_and_retains_registered_session_on_generation_change(
     tmp_path, monkeypatch
 ):

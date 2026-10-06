@@ -15,7 +15,16 @@ _READ_TIMEOUT_S = 1.0
 
 
 class HookUnavailable(Exception):
-    """The resident cannot decide before the client's bounded deadline."""
+    """The resident cannot decide before the client's bounded deadline.
+
+    ``reason``, when set, distinguishes a structured admission-closed
+    rejection (``"superseded"`` -- see ``HookIpcServer.close_admission``)
+    from an ordinary deadline miss (``None``, unchanged wire shape).
+    """
+
+    def __init__(self, reason: str | None = None):
+        super().__init__(reason or "")
+        self.reason = reason
 
 
 class _Server(socketserver.ThreadingTCPServer):
@@ -26,6 +35,13 @@ class _Server(socketserver.ThreadingTCPServer):
         self.token = token
         self.decide = decide
         self.owner = None
+        # Set only by HookIpcServer.close_admission() -- see its docstring.
+        # Distinct from actually closing the socket: a superseded-but-not-
+        # yet-exited daemon keeps listening and accepting connections, but
+        # answers every new request with a structured rejection instead of
+        # running `decide`.
+        self.admission_closed = False
+        self.admission_closed_reason: str | None = None
         super().__init__(address, handler)
 
     def process_request(self, request, client_address) -> None:
@@ -69,6 +85,8 @@ class _Handler(socketserver.StreamRequestHandler):
                 payload = {}
             if deadline <= time.time():
                 raise HookUnavailable
+            if self.server.admission_closed:
+                raise HookUnavailable(self.server.admission_closed_reason)
             result = self.server.decide(kind, payload, deadline)
             if not isinstance(result, dict):
                 result = {}
@@ -88,9 +106,14 @@ class _Handler(socketserver.StreamRequestHandler):
                 json.dumps(response, separators=(",", ":")).encode("utf-8")
                 + b"\n"
             )
-        except HookUnavailable:
+        except HookUnavailable as exc:
             try:
-                self.wfile.write(b'{"version":1,"fallback":true}\n')
+                response = {"version": 1, "fallback": True}
+                if exc.reason:
+                    response["reason"] = exc.reason
+                self.wfile.write(
+                    json.dumps(response, separators=(",", ":")).encode("utf-8") + b"\n"
+                )
             except OSError:
                 return
         except Exception:
@@ -131,6 +154,27 @@ class HookIpcServer:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=1)
+
+    def close_admission(self, reason: str = "superseded") -> None:
+        """Stop admitting genuinely new hook decisions while leaving the
+        listening socket open -- see
+        ``work_coalescing_singleton.server.CoalescingServer.close_admission``'s
+        docstring for the full single-shot-caller admission-discipline
+        rationale this mirrors. A request already inside ``decide()`` before
+        this call is unaffected; only a new connection reaching this point
+        afterward gets the structured ``reason`` rejection. Actual socket
+        teardown remains :meth:`close`'s job.
+        """
+        self.server.admission_closed = True
+        self.server.admission_closed_reason = reason
+
+    def open_admission(self) -> None:
+        """Reverse of :meth:`close_admission` for an already-live, not-yet-
+        ``close()``-d server -- see
+        ``work_coalescing_singleton.server.CoalescingServer.open_admission``.
+        """
+        self.server.admission_closed = False
+        self.server.admission_closed_reason = None
 
     def _on_request_accepted(self) -> None:
         with self._active_handlers_lock:

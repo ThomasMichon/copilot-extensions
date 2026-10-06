@@ -1,0 +1,9 @@
+{
+  "comment": "status-monitor: superseded-daemon single-shot-caller admission discipline -- close_admission/open_admission on CoalescingServer and HookIpcServer reject a new request with a structured {fallback:true, reason:'superseded'} instead of hard-closing the socket immediately, so a caller mid-flight during the bounded drain-only window gets a real response to re-resolve on instead of a bare connection-refused",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

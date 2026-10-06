@@ -356,12 +356,16 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 hook_server.start()
             except Exception:
                 hook_server = None
+        elif hook_server is not None:
+            hook_server.open_admission()
         if classify_server is None:
             try:
                 classify_server = classify_daemon.start_server(_classify_compute)
                 classify_server.start()
             except Exception:
                 classify_server = None
+        elif classify_server is not None:
+            classify_server.open_admission()
         if tracking_write_server is None:
             try:
                 tracking_write._ensure_verb_modules_loaded()
@@ -369,6 +373,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 tracking_write_server.start()
             except Exception:
                 tracking_write_server = None
+        elif tracking_write_server is not None:
+            tracking_write_server.open_admission()
 
     def _close_request_surfaces() -> None:
         nonlocal hook_server, classify_server, tracking_write_server
@@ -385,11 +391,36 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             tracking_write_server.close()
             tracking_write_server = None
 
+    def _close_request_surface_admission(reason: str = "superseded") -> None:
+        """Soft-close counterpart to :func:`_close_request_surfaces`: stops
+        admitting new requests on each live request surface while leaving
+        its socket open (see ``CoalescingServer.close_admission``'s own
+        docstring for the full rationale) -- a single-shot RPC caller
+        reaching this daemon during the bounded drain-only grace window
+        (``_SELF_RETIRE_MAX_GRACE_S`` / an explicit shutdown's own grace)
+        gets a structured ``{"fallback": true, "reason": reason}`` response
+        instead of a bare OS-level connection-refused. The server objects
+        stay the live ``hook_server``/``classify_server``/
+        ``tracking_write_server`` references (never moved into the
+        ``retired_*`` lists, never set to ``None``), so the existing
+        ``_hook_busy``/``_classify_busy``/``_tracking_write_busy`` checks
+        keep seeing their in-flight handler counts unchanged. Actual socket
+        teardown happens once, unconditionally, in ``_close_request_surfaces``
+        at real process exit (this function's own callers never close a
+        socket).
+        """
+        if hook_server is not None:
+            hook_server.close_admission(reason)
+        if classify_server is not None:
+            classify_server.close_admission(reason)
+        if tracking_write_server is not None:
+            tracking_write_server.close_admission(reason)
+
     def _enter_drain_only_state() -> None:
         nonlocal admission_closed, published_lock
         admission_closed = True
         published_lock = False
-        _close_request_surfaces()
+        _close_request_surface_admission()
         # Stop admitting new managed-mux push observations too (a genuine
         # "new source" admission vector, distinct from worktree_status_runtime's
         # stateless per-worktree reads, which stay open -- see close_admission's
