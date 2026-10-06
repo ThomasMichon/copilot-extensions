@@ -1,0 +1,9 @@
+{
+  "comment": "status-monitor: close a TOCTOU race in the single-instance guard that let duplicate resident monitors pile up (100+ observed live, double-digit CPU) -- use single_instance_lease.SingleInstance (atomic flock/msvcrt) ahead of the existing lock-file check instead of relying on a read-then-write file check alone",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
