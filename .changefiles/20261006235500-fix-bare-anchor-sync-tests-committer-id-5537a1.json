@@ -1,0 +1,9 @@
+{
+  "comment": "Fix bare-anchor sync tests failing when no git committer identity is configured.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
