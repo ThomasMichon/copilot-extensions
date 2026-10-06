@@ -1,17 +1,16 @@
-"""Live Windows regression for the headless-launch fixes in this PR.
+"""Live Windows regression for agent-mcp's headless-launch primitives.
 
 Per ``docs/patterns/windows-background-process-launch.md`` § Review and
 validation: a mocked ``creationflags`` assertion proves wiring, not
-behavior. This exercises the real ``CommandInjector`` auth-mint spawn (the
-most representative of the four sites this PR touched -- a real console
-child with real, caller-influenced args) from the real pytest parent across
-several live cycles, observing actual Win32 process/foreground state rather
-than any captured kwargs.
+behavior. This exercises the real ``CommandInjector`` auth-mint spawn (a
+real console child with real, caller-influenced args) from the real pytest
+parent across several live cycles, observing actual Win32 process/foreground
+state rather than any captured kwargs.
 
 Windows-only; skipped everywhere else. Deliberately excluded from the fast
 required lane (it needs a real Windows host and takes real wall-clock time
-for repeated cycles) -- run it explicitly on a Windows box before/alongside
-publishing a launch-path change.
+for repeated cycles) -- run it explicitly on a Windows box alongside a
+Windows launch-path change.
 """
 
 from __future__ import annotations
@@ -37,8 +36,9 @@ def _cfg(auth):
     return parse_config(doc)
 
 
-class _ProcessEntry(ctypes.Structure if sys.platform == "win32" else object):
-    if sys.platform == "win32":
+if sys.platform == "win32":
+
+    class _ProcessEntry(ctypes.Structure):
         _fields_ = [
             ("dwSize", wintypes.DWORD),
             ("cntUsage", wintypes.DWORD),
@@ -52,38 +52,55 @@ class _ProcessEntry(ctypes.Structure if sys.platform == "win32" else object):
             ("szExeFile", wintypes.WCHAR * 260),
         ]
 
+    # Declared once, module-level, and reused by every test: ctypes defaults
+    # an undeclared function's restype/argtypes to C `int`, which truncates a
+    # pointer-sized HANDLE on 64-bit -- the exact per-WinDLL-instance trap a
+    # second ad hoc `ctypes.WinDLL(...)` in another test would silently
+    # reintroduce if it skipped this declaration.
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _user32 = ctypes.WinDLL("user32", use_last_error=True)
+    _kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    _kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    _kernel32.Process32FirstW.restype = wintypes.BOOL
+    _kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(_ProcessEntry)]
+    _kernel32.Process32NextW.restype = wintypes.BOOL
+    _kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(_ProcessEntry)]
+    _kernel32.CloseHandle.restype = wintypes.BOOL
+    _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    _user32.GetForegroundWindow.restype = wintypes.HWND
+    _user32.GetWindowTextLengthW.restype = ctypes.c_int
+    _user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    _user32.GetWindowTextW.restype = ctypes.c_int
+    _user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 
-def _process_snapshot(kernel32) -> dict[int, str]:
-    snapshot = kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
+
+def _process_snapshot() -> dict[int, str]:
+    snapshot = _kernel32.CreateToolhelp32Snapshot(0x00000002, 0)
     if snapshot == wintypes.HANDLE(-1).value:
         return {}
     found: dict[int, str] = {}
     try:
         entry = _ProcessEntry()
         entry.dwSize = ctypes.sizeof(entry)
-        ok = kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+        ok = _kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
         while ok:
             found[int(entry.th32ProcessID)] = entry.szExeFile
-            ok = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+            ok = _kernel32.Process32NextW(snapshot, ctypes.byref(entry))
     finally:
-        kernel32.CloseHandle(snapshot)
+        _kernel32.CloseHandle(snapshot)
     return found
 
 
-def _foreground_state(user32) -> tuple[int, str]:
-    hwnd = int(user32.GetForegroundWindow())
-    length = user32.GetWindowTextLengthW(hwnd)
+def _foreground_state() -> tuple[int, str]:
+    hwnd = int(_user32.GetForegroundWindow())
+    length = _user32.GetWindowTextLengthW(hwnd)
     title = ctypes.create_unicode_buffer(length + 1)
-    user32.GetWindowTextW(hwnd, title, length + 1)
+    _user32.GetWindowTextW(hwnd, title, length + 1)
     return hwnd, title.value
 
 
 async def test_command_injector_mint_spawn_never_surfaces_a_window():
     # Two real cycles: a single-run flake can't be ruled out, two can.
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    user32 = ctypes.WinDLL("user32", use_last_error=True)
-    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
-
     cfg = _cfg({
         "kind": "command",
         "command": [sys.executable, "-c", "print('token=abc')"],
@@ -91,8 +108,8 @@ async def test_command_injector_mint_spawn_never_surfaces_a_window():
     })
     inj = build_injector(cfg)
 
-    baseline_processes = _process_snapshot(kernel32)
-    baseline_foreground = _foreground_state(user32)
+    baseline_processes = _process_snapshot()
+    baseline_foreground = _foreground_state()
     new_consoles: set[int] = set()
     suspicious_titles: list[str] = []
     results: list[dict] = []
@@ -112,10 +129,10 @@ async def test_command_injector_mint_spawn_never_surfaces_a_window():
     while probe.is_alive():
         new_consoles.update(
             pid
-            for pid, name in _process_snapshot(kernel32).items()
+            for pid, name in _process_snapshot().items()
             if pid not in baseline_processes and name.lower() == "openconsole.exe"
         )
-        state = _foreground_state(user32)
+        state = _foreground_state()
         if state != baseline_foreground and (
             "python" in state[1].lower() or "cmd.exe" in state[1].lower()
         ):
@@ -160,12 +177,10 @@ async def test_command_injector_timeout_reaps_the_child():
     proc = live_procs[0]
     # Give the OS a moment to finish tearing the process down, then confirm
     # it is actually gone (not merely signaled).
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     deadline = time.monotonic() + 5.0
     exited = False
     while time.monotonic() < deadline:
-        snapshot = _process_snapshot(kernel32)
-        if proc.pid not in snapshot:
+        if proc.pid not in _process_snapshot():
             exited = True
             break
         time.sleep(0.05)
