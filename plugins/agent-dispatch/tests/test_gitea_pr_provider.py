@@ -82,6 +82,25 @@ def test_adapter_rejects_an_api_base_that_normalizes_to_empty():
         GiteaPRAdapter("review-bot", api_bases={"gitea.example.com": "/"})
 
 
+def test_adapter_rejects_an_api_base_that_is_not_a_usable_url():
+    """Same shape validation as the registrar's forge.api_base -- a value
+    that is merely non-empty text (not an absolute http(s) authority, or
+    one carrying embedded credentials/query/fragment) must never
+    "validate" successfully and then either fail on every real request or
+    target an unintended authority."""
+    with pytest.raises(ValueError, match="api_bases"):
+        GiteaPRAdapter(
+            "review-bot", api_bases={"gitea.example.com": "not a URL"}
+        )
+
+
+def test_adapter_accepts_a_path_hosted_api_base():
+    adapter = GiteaPRAdapter(
+        "review-bot", api_bases={"h": "https://h.example.com/gitea"}
+    )
+    assert adapter.api_bases == {"h": "https://h.example.com/gitea"}
+
+
 def test_fetch_pr_refuses_a_key_outside_the_configured_mapping(monkeypatch):
     """A payload_ref's key is caller-supplied data, not a trusted
     credential authority -- a ref naming an unconfigured key must never

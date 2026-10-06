@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 from .registrar import RegistrarError
 
@@ -21,6 +22,40 @@ GITEA_CONNECTION_KEYS = frozenset({"api_base", "token_env"})
 #: Default environment variable a ``GiteaProvider``/``GiteaPRAdapter``
 #: reads its API token from when ``forge.token_env`` is not given.
 DEFAULT_GITEA_TOKEN_ENV = "GITEA_TOKEN"
+
+
+def normalize_gitea_api_base(value: str, *, field: str) -> str:
+    """Validate and normalize a Gitea instance base URL.
+
+    Accepts an absolute ``http``/``https`` URL with a real hostname,
+    preserving any path component so a reverse-proxied, path-hosted
+    instance (e.g. ``https://host.example.com/gitea``) still validates.
+    Rejects anything that is merely non-empty text but not a usable
+    authority -- a bare word, a non-HTTP(S) scheme, embedded
+    credentials, or a query/fragment -- all of which would otherwise
+    "validate" successfully and then either fail on every real request
+    or silently target an unintended authority (e.g. credentials meant
+    for one host leaking into the URL of another).
+    """
+    stripped = value.strip().rstrip("/")
+    if not stripped:
+        raise ValueError(f"{field}: expected a non-empty string")
+    parts = urlsplit(stripped)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError(
+            f"{field}: expected an absolute http(s) URL with a hostname "
+            f"(got {value!r})"
+        )
+    if parts.username or parts.password:
+        raise ValueError(
+            f"{field}: must not embed credentials in the URL (got {value!r})"
+        )
+    if parts.query or parts.fragment:
+        raise ValueError(
+            f"{field}: must not include a query string or fragment "
+            f"(got {value!r})"
+        )
+    return stripped
 
 
 def validate_gitea_connection(
@@ -53,13 +88,12 @@ def validate_gitea_connection(
     # "/" that rstrip("/") would otherwise collapse to "") must never slip
     # through as accepted and then fail forever on the adapter's first
     # real request.
-    normalized_base = api_base.strip().rstrip("/")
-    if not normalized_base:
-        raise RegistrarError(
-            "repository-issue-loop forge.api_base: expected a non-empty "
-            "string (the Gitea instance base URL) when forge.provider is "
-            "'gitea'"
+    try:
+        normalized_base = normalize_gitea_api_base(
+            api_base, field="repository-issue-loop forge.api_base"
         )
+    except ValueError as exc:
+        raise RegistrarError(str(exc)) from exc
     if token_env is None:
         token_env = DEFAULT_GITEA_TOKEN_ENV
     elif not isinstance(token_env, str) or not token_env.strip():

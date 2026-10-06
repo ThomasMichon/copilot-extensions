@@ -20,7 +20,7 @@ at `discover`/`setup` time; an unknown key or wrong type is a clean
 |---|---|---|---|
 | `name` | string | yes | Letters, digits, `.`, `_`, `-` only. |
 | `kind` | string | yes | Must be the literal `repository-issue-loop`. |
-| `repo` | string | yes | `owner/name` (GitHub) or `organization/project` (Azure DevOps) -- same two-segment shape either way. Any non-empty string for `forge.provider: script`, but it also routes the created task (see `forge.backlog` below if the script's own backlog label is not itself a real project). |
+| `repo` | string | yes | `owner/name` (GitHub, Gitea) or `organization/project` (Azure DevOps) -- same two-segment shape either way. Any non-empty string for `forge.provider: script`, but it also routes the created task (see `forge.backlog` below if the script's own backlog label is not itself a real project). |
 | `source` | string | yes | Free-form label for the emitter's task `source`; safe to change later without losing history. |
 | `cadence_seconds` | number ≥ 1 | yes | Occurrence period. |
 | `tick_interval_seconds` | number ≥ 1 | no (default: `min(60, cadence_seconds)`) | How often the emitter checks in, independent of the occurrence period. |
@@ -45,9 +45,11 @@ at `discover`/`setup` time; an unknown key or wrong type is a clean
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `provider` | string | yes | `github`, `azure-devops`, or `script`. |
-| `producer_login` | string | yes | The expected authenticated identity; every read/mutation is verified against it (`github`/`azure-devops`). For `script`, it is still required but only forwarded to the subprocess as `producer_login`, unverified. |
+| `provider` | string | yes | `github`, `azure-devops`, `gitea`, or `script`. |
+| `producer_login` | string | yes | The expected authenticated identity; every read/mutation is verified against it (`github`/`azure-devops`/`gitea`). For `script`, it is still required but only forwarded to the subprocess as `producer_login`, unverified. |
 | `discovery_scope` | mapping | no | **azure-devops only.** Narrows the WIQL discovery query beyond the always-applied `TeamProject` scoping. At least one of the three sub-fields is required if present: `work_item_types` (list of strings), `area_path` (string), `max_age_days` (positive number). |
+| `api_base` | string | yes for `gitea` (unsupported otherwise) | The Gitea instance's base URL (an absolute `http`/`https` URL with a real hostname, e.g. `https://gitea.example.com`; a path-hosted instance such as `https://host.example.com/gitea` is also accepted). Must not embed credentials, a query string, or a fragment. |
+| `token_env` | string | no, `gitea` only (default `GITEA_TOKEN`) | The environment variable holding the API token for `producer_login`. |
 | `command` | list of strings | yes for `script` (unsupported otherwise) | The subprocess argv; `--op <name>` is appended automatically. A relative first element resolves against the declaring repo root. |
 | `cwd` | string | no, `script` only | Subprocess working directory; relative resolves against the declaring repo root. Defaults to the declaring repo root. |
 | `timeout_seconds` | number, `0 < n <= 1800`, finite | no, `script` only (default `30`) | Per-invocation execution bound. |
@@ -162,6 +164,19 @@ else -- reservation, pool, filters, worker identity selection -- is
 identical. Add `forge.discovery_scope` only if the target project's own item
 count is large enough that the always-applied `TeamProject` scoping alone
 isn't narrow enough (see [`repository-issue-loop.md`](repository-issue-loop.md)).
+
+A Gitea-backed declaration keeps `repo` as `owner/name`, sets
+`forge.provider` to `gitea`, and adds the instance's `forge.api_base` (an
+absolute `http`/`https` URL with a real hostname; `forge.token_env`
+defaults to `GITEA_TOKEN` if omitted):
+
+```yaml
+forge:
+  provider: gitea
+  producer_login: octo-bot
+  api_base: https://gitea.example.com
+  token_env: GITEA_TOKEN
+```
 
 ## 4. `doctor`/`status` failure-mode reference
 

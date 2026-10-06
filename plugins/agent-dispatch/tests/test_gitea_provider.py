@@ -189,11 +189,11 @@ def test_all_comments_raises_past_the_bounded_scan(monkeypatch):
 
 
 def test_all_comments_stops_when_gitea_ignores_pagination(monkeypatch):
-    """Gitea's issue-comments endpoint has been observed (live, against
-    gitea.michon.ski) to silently ignore ``page``/``limit`` and return the
-    same full, unpaginated comment list on every call. Stopping only on an
-    *empty* page would never trigger here, spuriously raising the bounded-
-    scan error for any issue with at least one comment."""
+    """A live Gitea instance has been observed to let its issue-comments
+    endpoint silently ignore ``page``/``limit`` and return the same full,
+    unpaginated comment list on every call. Stopping only on an *empty*
+    page would never trigger here, spuriously raising the bounded-scan
+    error for any issue with at least one comment."""
     monkeypatch.setenv("GITEA_TOKEN", "tok")
 
     def runner(args, **kwargs):

@@ -41,7 +41,7 @@ from datetime import datetime
 from typing import Any
 
 from .github_provider_adapter import PRObservation, _has_wip_marker
-from .gitea_connection import DEFAULT_GITEA_TOKEN_ENV
+from .gitea_connection import DEFAULT_GITEA_TOKEN_ENV, normalize_gitea_api_base
 from .provider_state_machine import ApprovalStatus, HoldReason, Mergeability, Revision
 
 _REVIEW_PAGE_SIZE = 50
@@ -263,16 +263,15 @@ class GiteaPRAdapter:
             )
         self.expected_login = expected_login
         self.runner = runner
-        self.api_bases = {
-            key.strip().casefold(): base.strip().rstrip("/")
-            for key, base in api_bases.items()
-        }
-        if not all(self.api_bases.values()):
-            raise ValueError(
-                "GiteaPRAdapter api_bases: every configured base URL must "
-                "be non-empty after normalization (a bare '/' or "
-                "whitespace-only value is not a usable base)"
-            )
+        try:
+            self.api_bases = {
+                key.strip().casefold(): normalize_gitea_api_base(
+                    base, field=f"GiteaPRAdapter api_bases[{key!r}]"
+                )
+                for key, base in api_bases.items()
+            }
+        except ValueError as exc:
+            raise ValueError(f"GiteaPRAdapter api_bases: {exc}") from exc
         self.token_env = (token_env.strip() if token_env else None) or DEFAULT_GITEA_TOKEN_ENV
         self._verified_repos: set[str] = set()
 

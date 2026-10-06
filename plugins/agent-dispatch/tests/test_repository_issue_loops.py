@@ -2230,6 +2230,48 @@ def test_validate_config_rejects_gitea_api_base_that_normalizes_to_empty():
         )
 
 
+@pytest.mark.parametrize(
+    "bad_api_base",
+    [
+        "not a URL",
+        "ftp://example.com",
+        "https://user:pass@example.com",
+        "https://example.com/?query=1",
+        "https://example.com/#frag",
+    ],
+)
+def test_validate_config_rejects_gitea_api_base_that_is_not_a_usable_url(bad_api_base):
+    """A value that is merely non-empty text -- not an absolute http(s)
+    authority, or one carrying embedded credentials/query/fragment -- must
+    never "validate" successfully and then either fail on every real
+    request or target an unintended authority."""
+    with pytest.raises(RegistrarError, match="forge.api_base"):
+        validate_config(
+            _config(
+                repo="example-org/example-project",
+                forge={
+                    "provider": "gitea",
+                    "producer_login": "issue-bot",
+                    "api_base": bad_api_base,
+                },
+            )
+        )
+
+
+def test_validate_config_accepts_path_hosted_gitea_api_base():
+    config = validate_config(
+        _config(
+            repo="example-org/example-project",
+            forge={
+                "provider": "gitea",
+                "producer_login": "issue-bot",
+                "api_base": "https://example.com/gitea",
+            },
+        )
+    )
+    assert config["forge"]["api_base"] == "https://example.com/gitea"
+
+
 def test_validate_config_normalizes_gitea_token_env_whitespace():
     config = validate_config(
         _config(
