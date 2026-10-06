@@ -1040,9 +1040,19 @@ safely carry.
   purely another worktree's own already-public-safe codename -- never a raw
   identifier -- and is omitted whenever the chain has no owner, steps onto
   a different machine, is cyclic/too deep, or the resolved root's own
-  codename isn't safe to publish per its own provenance gate. A root
-  worktree (no `owner_ref` at all) never gets a `root=` field pointing at
-  itself.
+  codename isn't safe to publish per its own provenance gate -- including
+  when the root repo itself has chosen `false` (full anonymous opt-out):
+  its codename is never exposed via someone else's marker either, even
+  though `true` (raw-marker) mode is treated as already-fully-exposed and
+  still publishes its codename. A root worktree (no `owner_ref` at all)
+  never gets a `root=` field pointing at itself. **This decision is
+  PERSISTED on first resolution** (a small per-worktree sidecar, keyed to
+  the entire walked chain's own identity) and reused thereafter -- a later
+  change to the root repo's config does NOT retroactively flip an
+  already-decided `root=` field, matching this plugin's existing frozen-
+  attribution guarantee for the primary codename. A worktree claim handoff
+  or an id being reaped and recreated invalidates that persisted decision
+  automatically, so a stale root is never returned forever.
 - **`true` (raw marker).** Embeds the full raw identifiers (worktree id,
   machine, session, head SHA) directly in the hidden marker. Closed-circuit
   systems only -- never a public repo.

@@ -74,44 +74,48 @@ def _freeze_path(project: str | None, worktree_id: str):
     return cfg.tracking_dir(project) / f"{worktree_id}{_FREEZE_SUFFIX}"
 
 
-def _freeze_identity(record: tracking.WorktreeRecord) -> tuple[str, str] | None:
-    """The ``(owner_ref, creation_nonce)`` pair a frozen decision is bound
-    to, or ``None`` when *record* predates ``creation_nonce`` (never
-    backfilled -- such a record simply can't participate in freezing; every
-    call recomputes live, which is always safe, just less efficient).
-
-    ``owner_ref`` is NOT actually immutable for a worktree's whole life --
-    accepting a worktree claim handoff rewrites it (``claim_handoffs.py``).
-    ``creation_nonce`` is a random token stamped ONCE, at actual creation,
-    by ``create_new_record`` -- unlike ``started_at`` (only second-
-    precision, so a same-second reap+recreate of the same id could collide),
-    this uniquely identifies THIS incarnation of the worktree id. A frozen
-    decision is therefore valid only while BOTH still match the record's
-    current values -- a handoff or an id-reuse after a hard delete each
-    invalidate it, causing a fresh (consistent) resolution under whatever
-    is current, rather than silently publishing a stale root forever or
-    leaking a predecessor's decision into a reused id. This doubles as the
-    lifecycle-cleanup fix a dedicated sidecar-removal hook at every
-    tracking-record deletion call site would otherwise need
-    (``handoff_trace.remove_trace``'s own contract) -- self-invalidating
-    beats having to wire into ``retire_record``/``reap_cli``/the cleanup
-    command individually, and needs no changes to any of those (two of
-    which are at their own line-count ceiling).
+def _hop_identity(
+    project: str | None, record: tracking.WorktreeRecord,
+) -> tuple[str | None, str, str, str] | None:
+    """One hop's identity fingerprint: ``(project, worktree_id, owner_ref,
+    creation_nonce)``, or ``None`` when *record* predates ``creation_nonce``
+    (never backfilled -- such a hop can't be fingerprinted reliably at all,
+    so the WHOLE chain it's part of can't be frozen; every call recomputes
+    live, which is always safe, just less efficient).
     """
     if not record.creation_nonce:
         return None
-    return (record.owner_ref or "", record.creation_nonce)
+    return (project, record.worktree_id, record.owner_ref or "", record.creation_nonce)
+
+
+def _chain_identity_key(
+    chain: tuple[tuple[str | None, str, str, str], ...],
+) -> str | None:
+    """A stable, comparable fingerprint of an ENTIRE walked chain (leaf
+    through root, inclusive) -- not just the leaf. Binding only to the
+    leaf's own identity would miss a handoff or an id-reuse at an
+    INTERMEDIATE hop (claim handoffs rewrite a child's ``owner_ref`` at
+    ANY level, not only the leaf's): the leaf's own identity stays
+    unchanged while an ancestor's does, and a leaf-only freeze would then
+    keep returning a stale root forever. ``None`` when any hop couldn't be
+    fingerprinted (propagates the same "can't freeze reliably" posture
+    :func:`_hop_identity` documents).
+    """
+    if any(hop is None for hop in chain):
+        return None
+    return json.dumps([list(hop) for hop in chain])
 
 
 def _load_frozen_root(
-    project: str | None, record: tracking.WorktreeRecord,
+    project: str | None, worktree_id: str, chain_key: str,
 ) -> tuple[bool, str | None]:
     """Return ``(frozen, codename)``: ``frozen`` is True only when a prior
-    resolution was persisted AND is still bound to *record*'s CURRENT
-    ``_freeze_identity`` (``codename`` may legitimately be ``None`` --
-    "frozen: this worktree has no publishable root"). ``(False, None)``
-    means never resolved/frozen yet, or the stored identity no longer
-    matches (a handoff rewrote ``owner_ref``, or this id was reaped and
+    resolution was persisted AND is still bound to *chain_key* -- the
+    CURRENT fingerprint of the entire walked chain (``codename`` may
+    legitimately be ``None`` -- "frozen: this worktree has no publishable
+    root"). ``(False, None)`` means never resolved/frozen yet, or the
+    stored chain fingerprint no longer matches (a handoff rewrote some
+    hop's ``owner_ref``, or some hop's worktree id was reaped and
     recreated) -- a fresh walk is needed either way.
 
     Validates the EXACT sidecar schema before accepting a ``None``: a
@@ -129,17 +133,13 @@ def _load_frozen_root(
     re-freezes a clean result.
     """
     try:
-        path = _freeze_path(project, record.worktree_id)
+        path = _freeze_path(project, worktree_id)
         if not path.exists():
-            return False, None
-        identity = _freeze_identity(record)
-        if identity is None:
             return False, None
         data = json.loads(path.read_text())
         if not isinstance(data, dict) or "root_codename" not in data:
             return False, None
-        stored_identity = (data.get("owner_ref"), data.get("creation_nonce"))
-        if stored_identity != identity:
+        if data.get("chain_key") != chain_key:
             return False, None
         codename = data["root_codename"]
         if codename is None:
@@ -153,34 +153,28 @@ def _load_frozen_root(
 
 
 def _freeze_root(
-    project: str | None, record: tracking.WorktreeRecord, codename: str | None,
+    project: str | None, worktree_id: str, chain_key: str, codename: str | None,
 ) -> None:
     """Persist *codename* (or ``None``) as this worktree's root-codename
-    decision, BOUND to its current ``_freeze_identity`` (``owner_ref`` +
-    ``creation_nonce``), so a LATER change to the root's own repo config
-    (e.g. toggling ``source_attribution_configured``) can never retroactively
-    expose a previously-withheld custom-wordlist codename, or hide one
-    already published -- the same ``unconfigured-attribution-never-leaks``
-    "freeze once, never re-derive from live config" guarantee this plugin's
-    own PR-attribution design already applies to the PRIMARY codename
+    decision, BOUND to *chain_key* (the fingerprint of the entire walked
+    chain -- see :func:`_chain_identity_key`), so a LATER change to the
+    root's own repo config (e.g. toggling ``source_attribution_configured``)
+    can never retroactively expose a previously-withheld custom-wordlist
+    codename, or hide one already published -- the same
+    ``unconfigured-attribution-never-leaks`` "freeze once, never re-derive
+    from live config" guarantee this plugin's own PR-attribution design
+    already applies to the PRIMARY codename
     (``tracking.PRRecord.attribution_mode``/``attribution_explicit``) --
-    while still invalidating itself the moment the bound identity changes
-    (see :func:`_freeze_identity`). A ``None`` identity (no
-    ``creation_nonce`` -- a pre-existing record) is a no-op: such a record
-    never participates in freezing. Callers must hold this worktree's
-    freeze lock (see :func:`resolve_root_codename`) across the read-check
-    -> compute -> this write; never raises on its own: a failed write just
-    means the next call re-resolves live.
+    while still invalidating itself the moment ANY hop's bound identity
+    changes (see :func:`_chain_identity_key`). Callers must hold this
+    worktree's freeze lock (see :func:`resolve_root_codename`) across the
+    read-check -> compute -> this write; never raises on its own: a failed
+    write just means the next call re-resolves live.
     """
-    identity = _freeze_identity(record)
-    if identity is None:
-        return
-    owner_ref, creation_nonce = identity
     try:
-        _freeze_path(project, record.worktree_id).write_text(json.dumps({
+        _freeze_path(project, worktree_id).write_text(json.dumps({
             "root_codename": codename,
-            "owner_ref": owner_ref,
-            "creation_nonce": creation_nonce,
+            "chain_key": chain_key,
         }))
     except Exception:
         pass
@@ -263,16 +257,37 @@ def _ensure_publishable_root_codename(
         return None
 
     root_config = _load_root_config(root_project)
-    explicit = bool(
-        codename_tracking.allocation_policy_kwargs_for_repo(root_config)[
-            "source_attribution_configured"
-        ]
-    ) if root_config is not None else False
-    if not attr.may_publish_codename(
-        codename_source=root_record.codename_source,
-        source_attribution_configured=explicit,
-    ):
+    root_prcfg = getattr(
+        getattr(root_config, "default_repo", None), "pr", None,
+    ) if root_config is not None else None
+    # Honor the ROOT repo's own actual attribution mode first -- never just
+    # its `source_attribution_configured` opt-in flag (also True for an
+    # EXPLICIT `source_attribution: false`). A root that has chosen the
+    # fully anonymous opt-out (`false`, or any unrecognized value, which
+    # falls back to `false` the same way the primary codename-publish path
+    # does) must never have its codename exposed via someone ELSE's
+    # marker, regardless of codename provenance. `true` (raw mode) already
+    # accepts full exposure on its OWN PRs, so publishing the mere codename
+    # here is strictly less revealing -- allowed unconditionally. Only
+    # `"codename"` mode still needs the existing provenance/explicit check
+    # below (a custom wordlist requires that repo's own explicit opt-in).
+    root_attribution = (
+        getattr(root_prcfg, "source_attribution", "codename")
+        if root_prcfg is not None else "codename"
+    )
+    if root_attribution not in ("codename", True):
         return None
+    if root_attribution == "codename":
+        explicit = bool(
+            codename_tracking.allocation_policy_kwargs_for_repo(root_config)[
+                "source_attribution_configured"
+            ]
+        ) if root_config is not None else False
+        if not attr.may_publish_codename(
+            codename_source=root_record.codename_source,
+            source_attribution_configured=explicit,
+        ):
+            return None
     return codename
 
 
@@ -281,14 +296,22 @@ def _walk_to_root(
     *,
     project: str | None,
     this_machine: str | None,
-) -> tuple[tracking.WorktreeRecord, str | None] | None:
+) -> tuple[
+    tracking.WorktreeRecord, str | None,
+    tuple[tuple[str | None, str, str, str] | None, ...],
+] | None:
     """Walk *record*'s ``owner_ref`` chain to its root. Returns ``(root,
-    root_project)``, or ``None`` when there is no chain, the chain steps
-    onto a different machine, is cyclic, exceeds the depth cap, or an
-    intermediate owner record can't be loaded/is an unsafe path component.
+    root_project, chain)``, or ``None`` when there is no chain, the chain
+    steps onto a different machine, is cyclic, exceeds the depth cap, or
+    an intermediate owner record can't be loaded/is an unsafe path
+    component. ``chain`` is every hop's own :func:`_hop_identity`, leaf
+    through root inclusive, in order -- see :func:`_chain_identity_key`.
     """
     current = record
     current_project = project
+    chain: list[tuple[str | None, str, str, str] | None] = [
+        _hop_identity(project, record),
+    ]
     seen: set[tuple[str | None, str]] = set()
     # _MAX_CHAIN_DEPTH + 1: a chain of exactly the documented cap's worth of
     # ANCESTORS needs one more iteration than that to actually CONFIRM the
@@ -326,12 +349,13 @@ def _walk_to_root(
             return None  # owner record gone/unreadable; chain unresolved
         current = parent
         current_project = parent_project
+        chain.append(_hop_identity(parent_project, parent))
     else:
         return None  # exceeded depth cap; treat as unresolved
 
     if current is record:
         return None  # no chain at all -- nothing to annotate
-    return current, current_project
+    return current, current_project, tuple(chain)
 
 
 def resolve_root_codename(
@@ -358,26 +382,23 @@ def resolve_root_codename(
     field already names it.
 
     The result is FROZEN (when *ensure* is True) and reused on every later
-    call with the SAME ``owner_ref``/``creation_nonce`` identity -- see
-    :func:`_freeze_root`/:func:`_freeze_identity` -- so a later change to
+    call whose walked chain has the SAME fingerprint -- see
+    :func:`_freeze_root`/:func:`_chain_identity_key` -- so a later change to
     the root's own repo config can never retroactively expose or hide a
     previously-decided codename. A worktree claim handoff rewriting
-    ``owner_ref``, or this worktree id being reaped and recreated (a fresh
-    ``creation_nonce``), each invalidate the stale freeze automatically,
-    rather than requiring explicit cleanup at every tracking-record
-    deletion call site. A record predating ``creation_nonce`` never
-    freezes at all (always computed live -- safe, just less efficient).
-    The read-check -> compute -> write is itself serialized under this
-    worktree's own tracking record lock (:class:`tracking._RecordLock`)
-    so two concurrent publish/finalize processes can't both observe "not
-    frozen," independently derive different decisions, and clobber each
-    other -- every caller gets back the single WINNING persisted value,
-    never a locally-computed one that lost the race.
+    ``owner_ref`` at ANY hop (not only the leaf), or any hop's worktree id
+    being reaped and recreated (a fresh ``creation_nonce``), each invalidate
+    the stale freeze automatically, rather than requiring explicit cleanup
+    at every tracking-record deletion call site. A chain with any hop
+    predating ``creation_nonce`` never freezes at all (always computed
+    live -- safe, just less efficient). The read-check -> compute -> write
+    is itself serialized under this worktree's own tracking record lock
+    (:class:`tracking._RecordLock`) so two concurrent publish/finalize
+    processes can't both observe "not frozen," independently derive
+    different decisions, and clobber each other -- every caller gets back
+    the single WINNING persisted value, never a locally-computed one that
+    lost the race.
     """
-    frozen, frozen_codename = _load_frozen_root(project, record)
-    if frozen:
-        return frozen_codename
-
     if this_machine is None:
         try:
             this_machine = cfg.load_config().machine
@@ -390,22 +411,36 @@ def resolve_root_codename(
         except Exception:
             resolved_project = None
 
+    # The walk itself is cheap (local file reads only, no config/network
+    # I/O) -- always do it fresh so chain-identity drift (a handoff or an
+    # id-reuse at ANY hop) is detected even when a frozen decision already
+    # exists for the OLD chain shape. Only the expensive, config-dependent
+    # publish-safety computation below is actually gated by the freeze.
+    walked = _walk_to_root(
+        record, project=resolved_project, this_machine=this_machine,
+    )
+    if walked is None:
+        return None
+    root, root_project, chain = walked
+    chain_key = _chain_identity_key(chain)
+
     def _compute() -> str | None:
-        walked = _walk_to_root(
-            record, project=resolved_project, this_machine=this_machine,
-        )
-        if walked is None:
-            return None
-        root, root_project = walked
         return _ensure_publishable_root_codename(root, root_project, ensure=ensure)
 
-    if not ensure or _freeze_identity(record) is None:
-        # A diagnostic/peek caller (ensure=False) must never lock in a
-        # premature decision that then blocks the real publish call later.
-        # A record with no `creation_nonce` (predates this mechanism) can't
-        # be bound to a reliable identity at all -- compute fresh, no lock,
-        # no persistence, every time.
+    if chain_key is None:
+        # Some hop predates `creation_nonce` -- can't be fingerprinted
+        # reliably, so the whole chain can't freeze. Compute fresh, no
+        # lock, no persistence, every time (safe, just less efficient).
         return _compute()
+
+    if not ensure:
+        # A diagnostic/peek caller must never lock in a premature decision
+        # that then blocks the real publish call later.
+        return _compute()
+
+    frozen, frozen_codename = _load_frozen_root(project, record.worktree_id, chain_key)
+    if frozen:
+        return frozen_codename
 
     if not _is_safe_path_component(record.worktree_id) or (
         project is not None and not _is_safe_path_component(project)
@@ -418,13 +453,14 @@ def resolve_root_codename(
         _freeze_path(project, record.worktree_id), require_sidecar=True,
     ):
         # Re-check INSIDE the lock: another process may have frozen this
-        # worktree's decision while we were resolving `this_machine`/
-        # `project` above.
-        frozen, frozen_codename = _load_frozen_root(project, record)
+        # exact chain fingerprint while we were resolving the above.
+        frozen, frozen_codename = _load_frozen_root(
+            project, record.worktree_id, chain_key,
+        )
         if frozen:
             return frozen_codename
         result = _compute()
-        _freeze_root(project, record, result)
+        _freeze_root(project, record.worktree_id, chain_key, result)
         return result
 
 

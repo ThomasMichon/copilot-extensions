@@ -313,6 +313,80 @@ class TestResolveRootCodename:
             "cobalt-ember"
         )
 
+    def test_intermediate_hop_handoff_invalidates_the_freeze(
+        self, tmp_path, monkeypatch,
+    ):
+        # child -> mid -> root-A initially; a handoff rewrites MID's own
+        # owner_ref (not the leaf's) to point at a DIFFERENT root-B. The
+        # leaf's own (owner_ref, creation_nonce) is unchanged, so a
+        # leaf-only freeze would incorrectly keep returning root-A forever
+        # -- the freeze must be bound to the WHOLE chain's fingerprint.
+        _seed(tmp_path, monkeypatch, "harness-a", "wt-root-a",
+              codename="amber-thicket", codename_source="built-in")
+        _seed(tmp_path, monkeypatch, "harness-b", "wt-root-b",
+              codename="cobalt-ember", codename_source="built-in")
+        _seed(tmp_path, monkeypatch, "mid-repo", "wt-mid",
+              owner_ref="anomalous-potato/harness-a/wt-root-a#s1")
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/mid-repo/wt-mid#s2",
+        )
+        assert root_chain.resolve_root_codename(child, project="ext") == (
+            "amber-thicket"
+        )
+        # Simulate a handoff at the INTERMEDIATE hop only -- the leaf
+        # (child)'s own record is untouched.
+        mid_dir = tmp_path / ".mid-repo" / "worktrees"
+        mid = tracking.load_record(mid_dir / "wt-mid.yaml")
+        mid.owner_ref = "anomalous-potato/harness-b/wt-root-b#s3"
+        tracking.save_record(mid, mid_dir / "wt-mid.yaml")
+        assert root_chain.resolve_root_codename(child, project="ext") == (
+            "cobalt-ember"
+        )
+
+    def test_root_anonymous_opt_out_blocks_publication(
+        self, tmp_path, monkeypatch,
+    ):
+        # A root repo that has explicitly chosen the fully anonymous
+        # opt-out (source_attribution: false) must never have its codename
+        # exposed via someone ELSE's marker, even if the codename itself
+        # is otherwise valid and built-in (never needing the custom-
+        # wordlist provenance gate at all).
+        root_config = _cfg()
+        root_config.default_repo.pr.source_attribution = False
+        _seed(
+            tmp_path, monkeypatch, "harness", "wt-root",
+            codename="amber-thicket", codename_source="built-in",
+            config=root_config,
+        )
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        assert root_chain.resolve_root_codename(child, project="ext") is None
+
+    def test_root_raw_marker_mode_still_publishes_its_codename(
+        self, tmp_path, monkeypatch,
+    ):
+        # A root repo in `true` (raw marker) mode already accepts full
+        # exposure on its OWN PRs -- publishing the mere codename via
+        # someone else's marker is strictly less revealing, so it's
+        # allowed unconditionally (no custom-wordlist gate applies).
+        root_config = _cfg()
+        root_config.default_repo.pr.source_attribution = True
+        _seed(
+            tmp_path, monkeypatch, "harness", "wt-root",
+            codename="harbor-lattice", codename_source="custom",
+            config=root_config,
+        )
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        assert root_chain.resolve_root_codename(child, project="ext") == (
+            "harbor-lattice"
+        )
+
     def test_worktree_id_reuse_invalidates_a_stale_sidecar(
         self, tmp_path, monkeypatch,
     ):
@@ -434,12 +508,14 @@ class TestResolveRootCodename:
 
         def _racing_load_config(*a, **k):
             # Another process wins the race and freezes first, bound to
-            # the SAME identity this call will itself compute.
+            # the SAME chain fingerprint this call will itself compute.
             import json
-            owner_ref, creation_nonce = root_chain._freeze_identity(child)
+            walked = root_chain._walk_to_root(
+                child, project="ext", this_machine="anomalous-potato",
+            )
+            chain_key = root_chain._chain_identity_key(walked[2])
             sidecar.write_text(json.dumps({
-                "root_codename": "winner-codename",
-                "owner_ref": owner_ref, "creation_nonce": creation_nonce,
+                "root_codename": "winner-codename", "chain_key": chain_key,
             }))
             return real_load_config(*a, **k)
 
