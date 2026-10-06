@@ -447,3 +447,31 @@ def test_unregistered_provider_does_not_retry():
         _register_provider_relay(b, "agent-codespaces", sleep=sleeps.append)
     assert sleeps == []
     assert b.sources == []
+
+
+def test_registered_provider_retries_stay_within_total_budget(tmp_path, monkeypatch):
+    from agent_bridge import agent_registry_relay as relay
+
+    _register_manifest(tmp_path, monkeypatch)
+    now = [0.0]
+    probe_timeouts: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        now[0] += seconds
+
+    def hung_probe(*_args, timeout, **_kwargs):
+        # Every probe hangs for its full timeout (a wedged mid-update binstub).
+        probe_timeouts.append(timeout)
+        now[0] += timeout
+        raise subprocess.TimeoutExpired("agent-codespaces", timeout)
+
+    b = _FakeBuilder()
+    with patch("shutil.which", return_value="/bin/agent-codespaces"), \
+         patch("subprocess.run", side_effect=hung_probe):
+        relay._register_provider_relay(
+            b, "agent-codespaces", sleep=sleep, clock=lambda: now[0],
+        )
+    retry_elapsed = now[0] - probe_timeouts[0]  # exclude the initial probe
+    assert retry_elapsed <= relay._PROFILE_RETRY_BUDGET
+    assert all(t <= relay._PROFILE_RETRY_PROBE_TIMEOUT for t in probe_timeouts[1:])
+    assert b.sources == [] and b.validator is None

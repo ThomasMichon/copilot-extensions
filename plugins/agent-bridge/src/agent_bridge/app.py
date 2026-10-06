@@ -310,7 +310,7 @@ async def _start_credential_relay(app: FastAPI):
         from .agent_registry import register_credential_sources
 
         builder = RelayBuilder()
-        await asyncio.to_thread(register_credential_sources, builder)  # may retry
+        await _run_in_daemon_thread(register_credential_sources, builder)  # may retry
         if builder.empty:
             log.debug("No credential-relay sources registered -- relay disabled")
             return None
