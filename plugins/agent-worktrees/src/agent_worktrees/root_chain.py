@@ -191,7 +191,7 @@ def root_codename_for_marker(record: tracking.WorktreeRecord, config) -> str | N
     whether the PRIMARY codename marker publishes.
     """
     try:
-        repo_name = getattr(config.default_repo, "repo_name", None) or None
+        repo_name = getattr(config, "repo_name", None) or None
         return resolve_root_codename(record, project=repo_name)
     except Exception:
         return None

@@ -209,9 +209,7 @@ class TestMarkerComposition:
             tmp_path, monkeypatch, "ext", "wt-child",
             owner_ref="anomalous-potato/harness/wt-root#s1",
         )
-        config = types.SimpleNamespace(
-            default_repo=types.SimpleNamespace(repo_name="ext"),
-        )
+        config = types.SimpleNamespace(repo_name="ext")
         marker = root_chain.build_codename_marker_with_root(
             "harbor-lattice", child, config,
         )
@@ -224,9 +222,7 @@ class TestMarkerComposition:
         self, tmp_path, monkeypatch,
     ):
         child = _seed(tmp_path, monkeypatch, "ext", "wt-child")
-        config = types.SimpleNamespace(
-            default_repo=types.SimpleNamespace(repo_name="ext"),
-        )
+        config = types.SimpleNamespace(repo_name="ext")
         marker = root_chain.build_codename_marker_with_root(
             "harbor-lattice", child, config,
         )
@@ -249,9 +245,7 @@ class TestMarkerComposition:
             tmp_path, monkeypatch, "ext", "wt-child",
             owner_ref="anomalous-potato/harness/wt-root#s1",
         )
-        config = types.SimpleNamespace(
-            default_repo=types.SimpleNamespace(repo_name="ext"),
-        )
+        config = types.SimpleNamespace(repo_name="ext")
         result = root_chain.compose_codename_body(
             "hello", "harbor-lattice", True, child, config,
         )

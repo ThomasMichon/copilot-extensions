@@ -1026,12 +1026,23 @@ safely carry.
 `docs/config-reference.md`):
 
 - **`"codename"` (default, codename-attribution-by-default).** `create-pr`
-  embeds `<!-- agent-worktrees:source codename=<name> -->` and nothing else
-  -- no machine, worktree id, session id, or SHA. The marker decodes to
-  nothing on its own; it is only useful as a lookup key back into the
-  *originating* machine's own tracking store, via `resolve --codename` or
-  `embody --codename`. This is the right default for any repo whose PRs are
-  visible outside the facility.
+  embeds `<!-- agent-worktrees:source codename=<name> -->` -- no machine,
+  worktree id, session id, or SHA. The marker decodes to nothing on its own;
+  it is only useful as a lookup key back into the *originating* machine's
+  own tracking store, via `resolve --codename` or `embody --codename`. This
+  is the right default for any repo whose PRs are visible outside the
+  facility. When the worktree that opened the PR is itself an outbound
+  resource claimed by ANOTHER worktree (`tracking.WorktreeRecord.owner_ref`
+  -- e.g. a child worktree spun up to do work on behalf of a different,
+  calling repo's session), the marker also carries an optional
+  `root=<name>` field: the ROOT ancestor's own codename, resolved by
+  walking the `owner_ref` chain (`agent_worktrees.root_chain`). This is
+  purely another worktree's own already-public-safe codename -- never a raw
+  identifier -- and is omitted whenever the chain has no owner, steps onto
+  a different machine, is cyclic/too deep, or the resolved root's own
+  codename isn't safe to publish per its own provenance gate. A root
+  worktree (no `owner_ref` at all) never gets a `root=` field pointing at
+  itself.
 - **`true` (raw marker).** Embeds the full raw identifiers (worktree id,
   machine, session, head SHA) directly in the hidden marker. Closed-circuit
   systems only -- never a public repo.

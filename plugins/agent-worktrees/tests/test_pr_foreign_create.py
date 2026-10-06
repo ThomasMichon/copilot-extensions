@@ -407,6 +407,59 @@ class TestCreateForeignPrFromBranch:
         scope, _token = fake_provider.calls[0]
         assert "shimmering-quartz" in scope.body
 
+    def test_codename_marker_is_folded_with_the_root_chain_owner(
+        self, monkeypatch, _tracking_setup,
+    ):
+        """The foreign-PR path must apply the SAME root-aware codename
+        composition as the local `create_pr` path (review finding on PR
+        #5458): a calling worktree with an `owner_ref` chain must publish
+        `root=<root-codename>` alongside its own codename here too."""
+        tracking_d, wid = _tracking_setup
+        record = tracking.load_record(tracking_d / f"{wid}.yaml")
+        record.codename = "shimmering-quartz"
+        record.codename_source = "built-in"
+        record.owner_ref = "test/root-repo/root-wt#s1"
+        tracking.save_record(record)
+
+        root_project_dir = tracking_d.parent / "root-project"
+        root_tracking_d = root_project_dir / "worktrees"
+        root_tracking_d.mkdir(parents=True)
+        tracking.create_new_record(
+            "root-wt", "worktree/root-wt", str(tracking_d.parent / "root"),
+            "root-repo", "test", "linux", root_tracking_d,
+            codename="amber-thicket", codename_source="built-in",
+        )
+        monkeypatch.setattr(
+            cfg, "project_dir",
+            lambda name=None: (
+                root_project_dir if name == "root-repo" else tracking_d.parent
+            ),
+        )
+        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _config())
+        monkeypatch.setattr(
+            cfg, "load_project_config", lambda name, **k: _config(name),
+        )
+
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: _foreign_resolution(
+                source_attribution="codename", source_attribution_configured=True,
+            ),
+        )
+        fake_provider = _FakeProvider(
+            result=_FakePull(url="https://example/pr/10", number=10),
+        )
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake_provider)
+        monkeypatch.setattr(providers, "account_token_for_slug", lambda slug, prcfg: None)
+
+        pr_foreign_create.create_foreign_pr_from_branch(
+            wid, _config(), target_repo="owner/other-repo", from_branch="topic",
+            title="x", body="hello",
+        )
+        scope, _token = fake_provider.calls[0]
+        assert "codename=shimmering-quartz" in scope.body
+        assert "root=amber-thicket" in scope.body
+
     def test_raw_marker_uses_the_records_own_machine_and_latest_live_session(
         self, monkeypatch, _tracking_setup,
     ):
