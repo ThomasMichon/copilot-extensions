@@ -352,19 +352,23 @@ def _spawn_coordinator_process() -> None:
     so no rendezvous was written and discovery never converged). Running the
     interpreter directly is the reliable path.
 
-    On Windows the windowless ``pythonw.exe`` sibling is required in addition to
-    ``DETACHED_PROCESS``: a detached venv ``python.exe`` launcher re-execs a base
-    console interpreter that allocates a fresh DefTerm console.
+    On Windows the coordinator keeps a hidden console (``CREATE_NO_WINDOW``,
+    not ``DETACHED_PROCESS``/``pythonw.exe``): this daemon has RECURRING
+    console-subsystem descendants (it repeatedly shells out to
+    `agent-worktrees` etc. for repo/worktree-status queries). A
+    `DETACHED_PROCESS` root has no console for those children to inherit, so
+    each one allocates its own fresh, visible Default Terminal window
+    (confirmed via a live controlled comparison -- see
+    docs/patterns/windows-background-process-launch.md and
+    efforts/active/windows-launch-hardening/README.md).
     """
     from .install_paths import install_dir as runtime_install_dir
 
     install_dir = runtime_install_dir()
     from .install_paths import apply_service_env_overlay
     from .procutil import (
-        detached_kwargs,
         resolve_own_runtime_python,
-        windowless_python,
-        windowless_python_env,
+        windowless_daemon_kwargs,
     )
 
     # Always the canonically-resolved current-version slot (never sys.executable
@@ -372,14 +376,12 @@ def _spawn_coordinator_process() -> None:
     # docstring for the production incident this class of bug caused: a stale
     # fallback here silently spawned an entire duplicate coordinator+supervisor
     # tree under the system Python instead of the installed slot).
-    resolved_python = resolve_own_runtime_python()
-    python = windowless_python(resolved_python)
+    python = resolve_own_runtime_python()
 
     # Honor service.env (token, host/port pins) if present -- parity with the
     # installed launcher, which loads it before running `serve`.
     env = dict(os.environ)
     env.setdefault("PYTHONUTF8", "1")
-    env.update(windowless_python_env(resolved_python))
     apply_service_env_overlay(env, install_dir)
 
     try:
@@ -399,7 +401,7 @@ def _spawn_coordinator_process() -> None:
         # daemon also relocates itself (procutil.relocate_off_payload) as a belt.
         cwd=str(install_dir),
     )
-    kwargs.update(detached_kwargs())
+    kwargs.update(windowless_daemon_kwargs())
     try:
         subprocess.Popen([python, "-m", "agent_dispatch", "serve"], **kwargs)  # noqa: S603
     finally:

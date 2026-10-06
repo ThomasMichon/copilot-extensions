@@ -97,12 +97,16 @@ def _spawn_detached_waiter(spec: Any) -> dict:
     waiter that outlives this process, so the kicking worker can be torn down
     while a cheap OS-level process owns the wait and fires the resume."""
     from . import hibernation
-    from .procutil import detached_kwargs, windowless_python, windowless_python_env
+    from .procutil import resolve_own_runtime_python, windowless_daemon_kwargs
 
-    python = sys.executable
+    # Never bare `sys.executable` -- see resolve_own_runtime_python's own
+    # docstring for the production incident a self-relaunch site trusting the
+    # running interpreter instead of the canonically-resolved current-version
+    # slot already caused.
+    python = resolve_own_runtime_python()
     argv = hibernation.detached_run_argv(
         spec,
-        python=windowless_python(python),
+        python=python,
     )
     env = dict(os.environ)
     cli_args = _DETACHED_CLI_ARGS
@@ -123,14 +127,26 @@ def _spawn_detached_waiter(spec: Any) -> dict:
             env["AGENT_DISPATCH_TOKEN"] = str(cli_args.token)
         if getattr(cli_args, "control_token", None):
             env["AGENT_DISPATCH_CONTROL_TOKEN"] = str(cli_args.control_token)
-    env.update(windowless_python_env(python))
+    # NOT windowless_python()/detached_kwargs(): this waiter runs an
+    # operator-supplied blocking ``<cmd>`` (spec.command) as its own child --
+    # that inner command is itself usually a console-subsystem program (git,
+    # gh, a polling script), so this waiter DOES have a recurring/at-least-one
+    # console-subsystem descendant. A DETACHED_PROCESS root has no console for
+    # that child to inherit, so it allocates its own fresh, visible Default
+    # Terminal window even though the inner `runner()` already requests
+    # CREATE_NO_WINDOW for it (confirmed via a live controlled comparison --
+    # see docs/patterns/windows-background-process-launch.md and
+    # efforts/active/windows-launch-hardening/README.md). Keep the
+    # console-subsystem interpreter (`python`, not `pythonw.exe`) and use
+    # CREATE_NO_WINDOW so this process's own console stays hidden while still
+    # being inheritable by its child.
     proc = subprocess.Popen(  # noqa: S603 -- fixed argv (interpreter + our own module)
         argv,
         env=env,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        **detached_kwargs(),
+        **windowless_daemon_kwargs(),
     )
     return {"pid": proc.pid, "argv": argv}
 

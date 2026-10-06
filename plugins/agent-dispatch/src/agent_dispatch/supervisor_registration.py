@@ -164,13 +164,12 @@ def _spawn_self_update_successor(python_path: Any, respawn_argv: list[str]) -> N
     """
     import os
 
-    from agent_procutil import detached_kwargs, windowless_python, windowless_python_env
+    from agent_procutil import windowless_daemon_kwargs
 
-    cmd = [windowless_python(python_path), "-m", "agent_dispatch", *respawn_argv]
+    cmd = [python_path, "-m", "agent_dispatch", *respawn_argv]
     env = {
         k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONHOME")
     }
-    env.update(windowless_python_env(python_path))
     kwargs: dict[str, Any] = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
@@ -183,7 +182,18 @@ def _spawn_self_update_successor(python_path: Any, respawn_argv: list[str]) -> N
         # plugin payload" rule, generalized to every deletable checkout).
         "cwd": os.path.expanduser("~"),
     }
-    kwargs.update(detached_kwargs(breakaway=True))
+    # NOT windowless_python()/detached_kwargs(): this supervisor daemon has
+    # RECURRING console-subsystem descendants (it embodies workers, spawning
+    # headless CLI/script sessions on every claimed task). A DETACHED_PROCESS
+    # root has no console for those children to inherit, so each one
+    # allocates its own fresh, visible Default Terminal window (confirmed via
+    # a live controlled comparison -- see
+    # docs/patterns/windows-background-process-launch.md and
+    # efforts/active/windows-launch-hardening/README.md). Keep the
+    # console-subsystem interpreter (`python_path`, not `pythonw.exe`) and use
+    # CREATE_NO_WINDOW so this process's own console stays hidden while still
+    # being inheritable by its children.
+    kwargs.update(windowless_daemon_kwargs(breakaway=True))
     subprocess.Popen(cmd, **kwargs)  # noqa: S603
 
 
