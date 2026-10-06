@@ -906,19 +906,33 @@ _reclaim_versioned_slot_lease() {
     # will see the lock settled (live or freshly reclaimed) next attempt,
     # instead of this process also unlinking what that other reclaimer may
     # have already republished as its own live lock.
-    local lock_file="$1" sentinel="${lock_file}.reclaiming" tmp_sentinel holder_pid result=1
+    local lock_file="$1" sentinel="${lock_file}.reclaiming" tmp_sentinel holder_pid sentinel_pid result=1
     tmp_sentinel="${sentinel}.tmp.$$"
     printf '%s' "$$" > "$tmp_sentinel" 2>/dev/null || { rm -f "$tmp_sentinel" 2>/dev/null; return 1; }
     if ! ln "$tmp_sentinel" "$sentinel" 2>/dev/null; then
         rm -f "$tmp_sentinel" 2>/dev/null || true
-        # The sentinel itself can only be left behind by a reclaimer that
-        # died mid-critical-section -- a window normally microseconds
-        # long, so age it out rather than racing a second rm+ln dance here
-        # (which would just move this exact TOCTOU down one more level,
-        # unboundedly). This never races a LIVE reclaimer: a genuinely
-        # fresh sentinel is simply younger than the threshold, so we back
-        # off and let the caller's existing retry loop try again shortly.
-        if _versioned_lock_is_stale_by_age "$sentinel" "$_VERSIONED_RECLAIM_SENTINEL_MAX_AGE_SECONDS"; then
+        # PID liveness is authoritative, not age alone: a live holder can
+        # be legitimately SUSPENDED (process stop signal, VM pause, laptop
+        # sleep) for well over the age threshold and then resume still
+        # inside this exact critical section -- `kill -0` still succeeds
+        # for a suspended-but-alive process, so checking it first (instead
+        # of just the file's mtime) means we never steal a lease that is
+        # merely old but still genuinely held.
+        sentinel_pid="$(cat "$sentinel" 2>/dev/null || true)"
+        if [[ -n "$sentinel_pid" ]]; then
+            if kill -0 "$sentinel_pid" 2>/dev/null; then
+                return 1
+            fi
+            # Confirmed-dead owner -- clear it so a LATER, FRESH call's own
+            # `ln` (never a retry within this same call) can recreate it;
+            # `ln`'s atomicity is what keeps that recreation race-free, the
+            # same guarantee a fresh (non-reclaim) acquisition relies on.
+            rm -f "$sentinel" 2>/dev/null || true
+        elif _versioned_lock_is_stale_by_age "$sentinel" "$_VERSIONED_RECLAIM_SENTINEL_MAX_AGE_SECONDS"; then
+            # Age is only the LAST-RESORT signal, used solely when no
+            # owner pid can be determined at all (e.g. a corrupted or
+            # empty sentinel) -- it must never override a confirmed-alive
+            # pid above.
             rm -f "$sentinel" 2>/dev/null || true
         fi
         return 1
@@ -938,9 +952,9 @@ _reclaim_versioned_slot_lease() {
     return "$result"
 }
 
-# Comfortably longer than any real rm+ln critical section (microseconds)
-# but bounded enough to self-heal within a couple of minutes of a crash
-# landing exactly inside that window -- an exceedingly rare double fault.
+# Last-resort backstop ONLY for a sentinel whose owner pid can't be
+# determined at all (corrupted/empty content) -- PID liveness above is
+# always checked first and is authoritative whenever available.
 _VERSIONED_RECLAIM_SENTINEL_MAX_AGE_SECONDS=120
 
 _versioned_lock_is_stale_by_age() {
