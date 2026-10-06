@@ -360,7 +360,7 @@ def test_post_exit_sweeps_orphans_when_finalized(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_sweep_orphans_on_exit",
                         lambda: calls.__setitem__("sweep", calls["sweep"] + 1))
     monkeypatch.setattr(cli.cfg, "load_config", lambda *a, **k: object())
-    monkeypatch.setattr(cli, "_infer_worktree_id", lambda wid, config: "wt-x")
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda wid, config: "wt-x")
     monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda wid: "wt-x")
     monkeypatch.setattr(cli.cfg, "tracking_dir", lambda: tmp_path)
     (tmp_path / "wt-x.yaml").write_text("")   # record exists
@@ -377,7 +377,7 @@ def test_post_exit_sweeps_orphans_when_no_record(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_sweep_orphans_on_exit",
                         lambda: calls.__setitem__("sweep", calls["sweep"] + 1))
     monkeypatch.setattr(cli.cfg, "load_config", lambda *a, **k: object())
-    monkeypatch.setattr(cli, "_infer_worktree_id", lambda wid, config: "wt-x")
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda wid, config: "wt-x")
     monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda wid: "wt-x")
     monkeypatch.setattr(cli.cfg, "tracking_dir", lambda: tmp_path)   # no yaml -> missing
 

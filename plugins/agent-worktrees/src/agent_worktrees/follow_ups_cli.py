@@ -6,21 +6,7 @@ import argparse
 from pathlib import Path
 
 from . import config as cfg
-from . import output, tracking
-
-
-def _core():
-    from . import __main__ as core
-
-    return core
-
-
-
-
-
-
-def _infer_worktree_id(*args, **kwargs):
-    return _core()._infer_worktree_id(*args, **kwargs)
+from . import output, tracking, worktree_identity
 
 
 def add_parsers(sub) -> None:
@@ -151,13 +137,13 @@ def cmd_follow_ups(args: argparse.Namespace) -> int:
 
 
 def _follow_ups_record_path(args: argparse.Namespace, config: cfg.Config) -> tuple[str, Path]:
-    wt_id = _infer_worktree_id(getattr(args, "follow_up_worktree", None), config)
+    wt_id = worktree_identity._infer_worktree_id(getattr(args, "follow_up_worktree", None), config)
     return wt_id, cfg.tracking_dir() / f"{wt_id}.yaml"
 
 
 def _follow_ups_show(args: argparse.Namespace, worktree_id: str | None) -> int:
     config = cfg.load_config()
-    wt_id = _infer_worktree_id(worktree_id, config)
+    wt_id = worktree_identity._infer_worktree_id(worktree_id, config)
     rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
     if not rec_path.exists():
         if args.json:

@@ -26,14 +26,6 @@ def _activate_project_for_path(*args, **kwargs):
     return status_updater_cli._activate_project_for_path(*args, **kwargs)
 
 
-def _infer_worktree_id(*args, **kwargs):
-    return _core()._infer_worktree_id(*args, **kwargs)
-
-
-
-
-
-
 def resolve_worktree_id_by_codename(*args, **kwargs):
     return _core().resolve_worktree_id_by_codename(*args, **kwargs)
 
@@ -185,7 +177,7 @@ def _resolve_worktree_for_read(worktree_id, worktree_dir=None, session_id=None):
             return worktree_identity._resolve_worktree_id(worktree_id)
         wdir = worktree_dir or os.getcwd()
         _activate_project_for_path(wdir)
-        wid = _infer_worktree_id(None)
+        wid = worktree_identity._infer_worktree_id(None)
         if wid:
             return worktree_identity._resolve_worktree_id(wid)
         if session_id:
@@ -423,7 +415,7 @@ def cmd_effort_focus(args) -> int:
     if args.action == "lint":
         return _cmd_effort_focus_lint(args)
     config = cfg.load_config()
-    worktree_id = _infer_worktree_id(getattr(args, "worktree_id", None), config)
+    worktree_id = worktree_identity._infer_worktree_id(getattr(args, "worktree_id", None), config)
     if not worktree_id:
         message = "Could not determine worktree ID. Run inside a worktree or pass --worktree-id."
         if args.json:

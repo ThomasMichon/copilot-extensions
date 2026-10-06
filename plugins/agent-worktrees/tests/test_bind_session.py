@@ -461,7 +461,7 @@ class TestHistoryDigestCmd:
         activated = {}
         monkeypatch.setattr(status_updater_cli, "_activate_project_for_path",
                             lambda c: activated.update(cwd=c))
-        monkeypatch.setattr(m, "_infer_worktree_id", lambda wid, cfg=None: "wt-h")
+        monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda wid, cfg=None: "wt-h")
         monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda wid: wid)
 
         rc = m.cmd_history_digest(
@@ -477,7 +477,7 @@ class TestHistoryDigestCmd:
         self, tmp_tracking_dir, monkeypatch_config, monkeypatch, capsys
     ):
         monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
-        monkeypatch.setattr(m, "_infer_worktree_id", lambda wid, cfg=None: None)
+        monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda wid, cfg=None: None)
         rc = m.cmd_history_digest(argparse.Namespace(worktree_id=None, limit=8))
         assert rc == 0
         assert capsys.readouterr().out.strip() == ""

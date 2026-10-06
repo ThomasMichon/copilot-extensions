@@ -210,9 +210,8 @@ def _invoke_post_exit_sweep() -> None:
 
 
 def cmd_post_exit(args: argparse.Namespace) -> int:
-    core = _core()
     config = cfg.load_config()
-    worktree_id = core._infer_worktree_id(args.worktree_id, config)
+    worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         output.err(
             "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
@@ -268,7 +267,6 @@ def _post_exit_gate(record: tracking.WorktreeRecord, config: cfg.Config) -> int:
 
 
 def cmd_finalize(args: argparse.Namespace) -> int:
-    core = _core()
     use_json = getattr(args, "json", False)
     if use_json:
         ctx = output.stdout_to_stderr()
@@ -291,7 +289,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
                 return output._json_error(msg, 2)
             output.err(msg)
             return 2
-        worktree_id = core._infer_worktree_id(flagged_id or positional_id, config)
+        worktree_id = worktree_identity._infer_worktree_id(flagged_id or positional_id, config)
         if not worktree_id:
             msg = (
                 "Could not determine worktree ID. Pass it explicitly "
@@ -353,7 +351,6 @@ def cmd_finalize(args: argparse.Namespace) -> int:
 
 
 def cmd_push_changes(args: argparse.Namespace) -> int:
-    core = _core()
     use_json = getattr(args, "json", False)
     if use_json:
         ctx = output.stdout_to_stderr()
@@ -368,7 +365,7 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             if use_json:
                 return output._json_error(str(e))
             raise
-        worktree_id = core._infer_worktree_id(args.worktree_id, config)
+        worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
         if not worktree_id:
             msg = (
                 "Could not determine worktree ID. Pass it explicitly "
@@ -437,7 +434,6 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
 
 
 def cmd_create_pr(args: argparse.Namespace) -> int:
-    core = _core()
     use_json = getattr(args, "json", False)
     if use_json:
         ctx = output.stdout_to_stderr()
@@ -468,7 +464,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                     output.err(claimant_error) or 2
                 )
 
-        worktree_id = core._infer_worktree_id(args.worktree_id, config)
+        worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
         if not worktree_id:
             msg = (
                 "Could not determine worktree ID. Pass it explicitly "
@@ -706,9 +702,8 @@ def cmd_attribution_audit(args: argparse.Namespace) -> int:
 
 
 def cmd_mark_complete(args: argparse.Namespace) -> int:
-    core = _core()
     config = cfg.load_config()
-    worktree_id = core._infer_worktree_id(args.worktree_id, config)
+    worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
 
     if not worktree_id:
         output.err(

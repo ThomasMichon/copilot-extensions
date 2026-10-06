@@ -11,6 +11,7 @@ from contextlib import redirect_stdout
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import state_root, tracking
+from agent_worktrees import worktree_identity
 
 
 def _seed(tmp_path, monkeypatch):
@@ -34,7 +35,7 @@ def _seed(tmp_path, monkeypatch):
         "coordination_readiness",
         lambda config: state_root.CoordinationReadiness(True, "ready", ready_root),
     )
-    monkeypatch.setattr(m, "_infer_worktree_id", lambda wid, cfg_: wid or "wt-A")
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda wid, cfg_: wid or "wt-A")
     return tdir
 
 

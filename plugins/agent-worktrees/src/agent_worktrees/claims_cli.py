@@ -18,6 +18,7 @@ from . import (
     obligations,
     output,
     tracking,
+    worktree_identity,
 )
 from . import config as cfg, state_root as state_root_mod
 
@@ -33,14 +34,6 @@ def _core_helper(name: str, local):
     if callable(candidate) and candidate is not local:
         return candidate
     return local
-
-
-def _infer_worktree_id(*args, **kwargs):
-    return _core()._infer_worktree_id(*args, **kwargs)
-
-
-
-
 
 
 def add_parsers(sub) -> None:
@@ -255,7 +248,7 @@ def cmd_claims(args: argparse.Namespace) -> int:
             output.err("claims annotate: missing <ref>. Usage: claims annotate <ref> --note NOTE")
             return 2
         return claims_annotate.claims_annotate(
-            args, target[1], _infer_worktree_id, output._json_error, output._json_output, output,
+            args, target[1], worktree_identity._infer_worktree_id, output._json_error, output._json_output, output,
         )
     if target and target[0] == "settle":
         if len(target) < 2:
@@ -327,7 +320,7 @@ def _claim_handoff_actor(config: cfg.Config, explicit_worktree: str | None) -> s
     return claims_handoff_cli._claim_handoff_actor(
         config,
         explicit_worktree,
-        infer_worktree_id=_infer_worktree_id,
+        infer_worktree_id=worktree_identity._infer_worktree_id,
         format_claim_ref=tracking.format_claim_ref,
     )
 
@@ -384,7 +377,7 @@ def _claims_handoff(args: argparse.Namespace, target: list[str]) -> int:
         args,
         target,
         require_coordination_readiness=_require_coordination_readiness,
-        infer_worktree_id=_infer_worktree_id,
+        infer_worktree_id=worktree_identity._infer_worktree_id,
         format_claim_ref=tracking.format_claim_ref,
         json_error=output._json_error,
         json_output=output._json_output,
@@ -470,7 +463,7 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
         blocked = _require_coordination_readiness(config, json_out=args.json)
         if blocked is not None:
             return blocked
-        wt_id = _infer_worktree_id(getattr(args, "release_worktree", None), config)
+        wt_id = worktree_identity._infer_worktree_id(getattr(args, "release_worktree", None), config)
         rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
     if not rec_path.exists():
         if args.json:
@@ -567,7 +560,7 @@ def _claims_mirror_status(args: argparse.Namespace, kind: str, ref: str) -> int:
 def _claims_release(args: argparse.Namespace, ref: str) -> int:
     """Retire a single outbound resource claim by ref from a worktree's record."""
     config = cfg.load_config()
-    wt_id = _infer_worktree_id(getattr(args, "release_worktree", None), config)
+    wt_id = worktree_identity._infer_worktree_id(getattr(args, "release_worktree", None), config)
     rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
     if not rec_path.exists():
         if args.json:
@@ -639,7 +632,7 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
             )
             return 0
     else:
-        wt_id = _infer_worktree_id(getattr(args, "release_worktree", None), config)
+        wt_id = worktree_identity._infer_worktree_id(getattr(args, "release_worktree", None), config)
         rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
     if not rec_path.exists():
         if args.json:
@@ -929,7 +922,7 @@ def _claims_orphans(args: argparse.Namespace) -> int:
 def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
     """Render a worktree's full claim ledger (agent-fabric resource-claims)."""
     config = cfg.load_config()
-    wt_id = _infer_worktree_id(worktree_id, config)
+    wt_id = worktree_identity._infer_worktree_id(worktree_id, config)
     rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
     if not rec_path.exists():
         if args.json:
@@ -1005,7 +998,7 @@ def _claims_transitive(args: argparse.Namespace, worktree_id: str | None) -> int
     cap; see that module's docstring for the full design rationale)."""
     return claims_transitive_cli.cmd_claims_transitive(
         args, worktree_id,
-        infer_worktree_id=_infer_worktree_id,
+        infer_worktree_id=worktree_identity._infer_worktree_id,
         json_error=output._json_error,
         json_output=output._json_output,
     )

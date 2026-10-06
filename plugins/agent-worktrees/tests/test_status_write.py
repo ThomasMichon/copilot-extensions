@@ -32,7 +32,7 @@ def status_env(tmp_path, tmp_tracking_dir, monkeypatch):
     monkeypatch.setattr(main.cfg, "load_config", lambda: object())
     monkeypatch.setattr(main.cfg, "tracking_dir", lambda: tmp_tracking_dir)
     monkeypatch.setattr(
-        main,
+        worktree_identity,
         "_infer_worktree_id",
         lambda _worktree_id, _config=None: record.worktree_id,
     )
