@@ -1843,7 +1843,7 @@ function Install-Runtime {
                 return
             }
             # Dual-authority re-check, mirroring Invoke-Stamp's own guard
-            # (round 22) but for the OPPOSITE direction: Test-ActivationSupersededNow
+            # but for the OPPOSITE direction: Test-ActivationSupersededNow
             # above only re-reads current-version, which a STAMP action never
             # touches (stamping deliberately defers activation). A newer
             # concurrent stamp can therefore publish a newer stamped-version
