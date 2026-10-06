@@ -26,6 +26,7 @@ from .procutil import no_window_kwargs
 from .registrar_reconcile import DECLARED_ID_PREFIX
 from .registrations import RegistrationKind
 from .single_instance import SingleInstance
+from .windows_replace_retry import replace_with_retry
 
 RECEIPT_NAME = ".agent-dispatch-managed-runtime.json"
 RECEIPT_SCHEMA_VERSION = 2
@@ -455,7 +456,7 @@ def _quarantine_cell(root: Path, cell: Path) -> Path:
     _assert_safe_descendant(root, cell, description="managed runtime cell")
     failed_root = _safe_directory(root, ".failed")
     target = failed_root / uuid.uuid4().hex
-    os.replace(cell, target)
+    replace_with_retry(cell, target)
     return target
 
 
@@ -614,9 +615,7 @@ def _authority(
         registration.get("kind") != RegistrationKind.PLUGIN_COMPANION
         or registration.get("source") != DECLARED_ID_PREFIX
     ):
-        raise ManagedRuntimeError(
-            "managed runtimes require an attributed plugin declaration"
-        )
+        raise ManagedRuntimeError("managed runtimes require an attributed plugin declaration")
     plugin = registration.get("plugin")
     revision = registration.get("runtime_revision")
     spec = registration.get("spec")
@@ -1406,7 +1405,7 @@ class ManagedRuntimeMaterializer:
                 raise ManagedRuntimeError(
                     f"managed runtime publication destination already exists: {cell}"
                 )
-            os.replace(staging, cell)
+            replace_with_retry(staging, cell)
             try:
                 ready = self._ready(cell, expected, root=root, policy=policy)
             except ManagedRuntimeError:
