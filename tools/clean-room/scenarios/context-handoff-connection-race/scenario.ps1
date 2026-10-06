@@ -60,6 +60,7 @@ phase 1 "install $Plugin (marketplace source)"
 New-Item -ItemType Directory -Force -Path (Join-Path $HOME '.copilot') | Out-Null
 $settings = @{
     sandbox                = @{ enabled = $false }
+    experimental           = $true
     extraKnownMarketplaces = @{ "$MarketplaceName" = @{ source = @{ source = 'github'; repo = "$MarketplaceRepo" } } }
     enabledPlugins         = @{ "$Plugin@$MarketplaceName" = $true }
 } | ConvertTo-Json -Depth 6

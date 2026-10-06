@@ -167,7 +167,63 @@ def test_activity_phrase_prioritizes_wt_live_then_hold_then_lifecycle():
     assert board_cli._activity_phrase({"status": "abandoned"}, None) == "abandoned"
 
 
-def test_embodiment_tag_only_marks_the_non_default_cli_interface():
+def test_activity_phrase_surfaces_the_exact_run_waiter_command():
+    """2026-10-05: a suspended task's board row previously gave no insight
+    into whether/how it would ever wake up. When an active `run --detach`
+    waiter is attached to the task dict (as :func:`_build` now does from a
+    bulk `/run-waiters` fetch), the subtitle must show the exact
+    blocking-wait command instead of the generic phrase -- truncated for a
+    long command, falling back to the generic phrase when no waiter is
+    attached (a plain operator-suspended task, or an older coordinator this
+    feature predates)."""
+    waiting = board_cli._activity_phrase(
+        {
+            "status": "suspended",
+            "run_waiter": {
+                "command": ["agent-worktrees", "pr-watch", "wait", "o/r", "570"],
+            },
+        },
+        None,
+    )
+    assert waiting == "waiting: agent-worktrees pr-watch wait o/r 570"
+    long_command = ["agent-worktrees", "pr-watch", "wait"] + ["x" * 20] * 4
+    truncated = board_cli._activity_phrase(
+        {"status": "suspended", "run_waiter": {"command": long_command}}, None
+    )
+    assert truncated.startswith("waiting: ")
+    assert truncated.endswith("…")
+    assert len(truncated) < len("waiting: " + " ".join(long_command))
+    # No waiter attached (or an empty command) -- unchanged generic fallback.
+    assert board_cli._activity_phrase(
+        {"status": "suspended", "run_waiter": None}, None
+    ) == "suspended — no live session"
+    assert board_cli._activity_phrase(
+        {"status": "suspended", "run_waiter": {"command": []}}, None
+    ) == "suspended — no live session"
+    assert board_cli._activity_phrase({"status": "suspended"}, None) == (
+        "suspended — no live session"
+    )
+
+
+def test_build_attaches_run_waiter_only_for_matching_task_id():
+    """:func:`_build` must key the bulk `run_waiters` map by task id and
+    never leak one task's waiter onto another's row."""
+    tasks = [
+        {"id": "a", "status": "suspended", "repo": "o/r"},
+        {"id": "b", "status": "suspended", "repo": "o/r"},
+    ]
+    rows = board_cli._build(
+        tasks,
+        machine="m",
+        recent_mins=60,
+        run_waiters={"a": {"command": ["cmd", "a"]}},
+    )
+    by_id = {row["id"]: row for row in rows}
+    assert by_id["a"]["run_waiter"] == {"command": ["cmd", "a"]}
+    assert "run_waiter" not in by_id["b"]
+
+
+
     """`_embodiment_tag` mirrors Worktrees' `[system]`/`[delegate]`/`[acp]`
     title-prefix convention: only the NON-default interface (CLI, for a
     Task) is tagged. A confirmed headless liveness signal always wins over
@@ -523,6 +579,43 @@ def test_main_reads_local_coordinator(monkeypatch, tmp_path, capsys):
     assert json.loads(capsys.readouterr().out)[0]["id"] == "t1"
     assert captured["urls"][0].startswith("http://127.0.0.1:1234/tasks?")
     assert captured["timeout"] == 3
+
+
+def test_fetch_run_waiters_direct_returns_parsed_map(monkeypatch):
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps({"t1": {"command": ["cmd"], "state": "active"}}).encode()
+
+    captured = {}
+
+    def open_request(request, timeout):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr(board_cli.urllib.request, "urlopen", open_request)
+    result = board_cli._fetch_run_waiters_direct("http://127.0.0.1:1234")
+    assert result == {"t1": {"command": ["cmd"], "state": "active"}}
+    assert captured["url"] == "http://127.0.0.1:1234/run-waiters"
+    assert captured["timeout"] == 3
+
+
+def test_fetch_run_waiters_direct_degrades_silently_on_any_failure(monkeypatch):
+    """An older coordinator without `/run-waiters`, a timeout, or any other
+    transport failure must never take down the whole board -- it only means
+    suspended rows fall back to the generic phrase (pre-existing behavior)."""
+
+    def raises(request, timeout):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(board_cli.urllib.request, "urlopen", raises)
+    assert board_cli._fetch_run_waiters_direct("http://127.0.0.1:1234") == {}
 
 
 def test_endpoint_maps_wildcard_bind_to_loopback(monkeypatch, tmp_path):

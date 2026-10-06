@@ -108,6 +108,7 @@ mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
   "sandbox": { "enabled": false },
+  "experimental": true,
   "extraKnownMarketplaces": {
     "$MARKETPLACE_NAME": $MARKETPLACE_SOURCE
   },

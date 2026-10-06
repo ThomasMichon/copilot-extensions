@@ -101,7 +101,17 @@ def _cmd_claim_status(args: argparse.Namespace) -> int:
     except Exception as exc:
         print(f"agent-dispatch: coordinator unreachable: {exc}", file=sys.stderr)
         return 1
-    return _core()._emit({"exists": True, "state": task.get("status"), "detail": task.get("owner") or ""})
+    # A suspended task waiting on a `run --detach` waiter has no `owner` (it
+    # holds no live session) -- that previously left `detail` blank, giving a
+    # claims-ledger reader no insight into *why* the worktree still carries
+    # this claim. Prefer the waiter's exact blocking-wait command when one is
+    # active; fall back to the bare owner (an embodied task) otherwise.
+    waiter = task.get("run_waiter")
+    if waiter and waiter.get("command"):
+        detail = "waiting: " + " ".join(str(part) for part in waiter["command"])
+    else:
+        detail = task.get("owner") or ""
+    return _core()._emit({"exists": True, "state": task.get("status"), "detail": detail})
 
 
 def _cmd_show(args: argparse.Namespace) -> int:
