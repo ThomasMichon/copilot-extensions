@@ -13,6 +13,10 @@ import asyncio
 import contextlib
 import json
 import os
+import subprocess
+import sys
+import threading
+import time
 
 import pytest
 
@@ -818,6 +822,101 @@ async def test_unexpected_reap_disabled_when_zero():
         assert child.killed is True
     finally:
         await host.close()
+
+
+# --------------------------------------------------------------------------
+# crash-tail capture (#5384: "exited early" was previously undiagnosable)
+# --------------------------------------------------------------------------
+def test_crash_tail_capture_decodes_output():
+    r, w = os.pipe()
+    stream = os.fdopen(r, "rb")
+    os.write(w, b"hello from the crashed process\n")
+    os.close(w)
+
+    tail = launcher._CrashTailCapture(stream)
+    # Give the background drain thread a moment to read EOF.
+    for _ in range(50):
+        if tail.tail_text():
+            break
+        time.sleep(0.02)
+    assert tail.tail_text() == "hello from the crashed process\n"
+
+
+def test_crash_tail_capture_is_bounded():
+    r, w = os.pipe()
+    stream = os.fdopen(r, "rb")
+    tail = launcher._CrashTailCapture(stream, cap_bytes=16)
+    os.write(w, b"0123456789" * 10)  # 100 bytes, well over the 16-byte cap
+    os.close(w)
+
+    for _ in range(50):
+        if len(tail.tail_text()) == 16:
+            break
+        time.sleep(0.02)
+    text = tail.tail_text()
+    assert len(text) == 16
+    # Only the *tail* (most recent bytes) is kept, not the head.
+    assert text == ("0123456789" * 10)[-16:]
+
+
+def test_crash_tail_capture_never_blocks_a_chatty_child():
+    """The drain thread must keep draining even past the OS pipe buffer size
+    (commonly 64KiB) so a host that writes a lot of startup noise never
+    deadlocks waiting on a full pipe that nobody is reading (#5384)."""
+    r, w = os.pipe()
+    stream = os.fdopen(r, "rb")
+    tail = launcher._CrashTailCapture(stream, cap_bytes=4096)
+
+    big_chunk = b"x" * 70_000  # larger than a typical 64KiB pipe buffer
+
+    def _writer():
+        with os.fdopen(w, "wb") as out:
+            out.write(big_chunk)
+
+    writer_thread = threading.Thread(target=_writer)
+    writer_thread.start()
+    writer_thread.join(timeout=5.0)
+    assert not writer_thread.is_alive(), "writer blocked -- drain thread stalled"
+
+    for _ in range(50):
+        if len(tail.tail_text()) == 4096:
+            break
+        time.sleep(0.02)
+    assert tail.tail_text() == "x" * 4096
+
+
+def test_launch_session_host_surfaces_crash_tail(tmp_path, monkeypatch):
+    """An early-exiting host surfaces its own stdout/stderr tail in the
+    raised RuntimeError instead of only a bare exit code (#5384)."""
+    crash_script = tmp_path / "crash.py"
+    crash_script.write_text(
+        "import sys\n"
+        "print('simulated session host startup crash')\n"
+        "print('diagnosable detail line', file=sys.stderr)\n"
+        "sys.exit(7)\n"
+    )
+
+    real_popen = subprocess.Popen
+
+    def _fake_popen(argv, **kwargs):
+        # Run the crash script instead of the real
+        # `-m agent_bridge.session_host` entry point, keeping every other
+        # kwarg (stdin/stdout/stderr redirection, env, cwd, creationflags)
+        # exactly as launch_session_host set them up.
+        return real_popen([sys.executable, str(crash_script)], **kwargs)
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", _fake_popen)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        launcher.launch_session_host(
+            ["irrelevant-child-argv"],
+            state_dir=tmp_path,
+            ready_timeout=5.0,
+        )
+    message = str(exc_info.value)
+    assert "exited early (code=7)" in message
+    assert "simulated session host startup crash" in message
+    assert "diagnosable detail line" in message
 
 
 # --------------------------------------------------------------------------

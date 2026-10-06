@@ -32,6 +32,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +55,56 @@ _ACP_STDIO_LIMIT_BYTES = 64 * 1024 * 1024
 # command line so it does not leak to ps/Task Manager). Stripped before the
 # copilot child is spawned so the child never inherits it.
 _NONCE_ENV = "AGENT_BRIDGE_SESSION_HOST_NONCE"
+
+# How much of the host process's combined stdout/stderr to retain for
+# surfacing in an "exited early" RuntimeError. A crashed host's own traceback
+# almost always fits in a few KB; this is intentionally small since it is
+# captured in memory for the host's full lifetime (#5384).
+_CRASH_TAIL_CAP_BYTES = 4096
+
+
+class _CrashTailCapture:
+    """Drains a subprocess's combined stdout/stderr into a bounded buffer.
+
+    Continuously reads from ``stream`` on a background thread so the child
+    is never blocked on a full OS pipe buffer, keeping only the last
+    ``cap_bytes`` -- enough to show a traceback or a shell error from a
+    process that exits before reporting ready, without retaining an
+    unbounded amount of output for a long-lived host (#5384: previously this
+    output was discarded entirely via ``DEVNULL``, making "exited early"
+    failures undiagnosable after the fact).
+    """
+
+    def __init__(self, stream: Any, cap_bytes: int = _CRASH_TAIL_CAP_BYTES) -> None:
+        self._buf = bytearray()
+        self._cap = cap_bytes
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(
+            target=self._drain, args=(stream,), daemon=True,
+        )
+        self._thread.start()
+
+    def _drain(self, stream: Any) -> None:
+        try:
+            while True:
+                chunk = stream.read(4096)
+                if not chunk:
+                    break
+                with self._lock:
+                    self._buf.extend(chunk)
+                    overflow = len(self._buf) - self._cap
+                    if overflow > 0:
+                        del self._buf[:overflow]
+        except (OSError, ValueError):
+            # Stream closed/invalid underneath us (process reaped, etc.) --
+            # whatever was captured so far is still usable.
+            pass
+
+    def tail_text(self) -> str:
+        """The captured bytes decoded as text, most recent last."""
+        with self._lock:
+            data = bytes(self._buf)
+        return data.decode("utf-8", errors="replace")
 
 
 def host_spawn_kwargs() -> dict[str, Any]:
@@ -103,6 +154,13 @@ def launch_session_host(
     process **via its environment** (not the command line, so it does not leak
     to ``ps``/Task Manager) and the host requires a matching nonce on ATTACH.
     The copilot child never sees it -- ``run_host`` strips it before spawn.
+
+    The host process's own combined stdout/stderr is drained into a small,
+    bounded in-memory tail (:class:`_CrashTailCapture`) rather than discarded
+    via ``DEVNULL``: if it exits early (before reporting ready), the raised
+    ``RuntimeError`` includes that tail so the real crash reason (a
+    traceback, a missing dependency, a bad argv, ...) is diagnosable after
+    the fact instead of only ever surfacing a generic exit code (#5384).
     """
     sd = Path(state_dir) if state_dir else Path(tempfile.mkdtemp(prefix="agbridge-host-"))
     sd.mkdir(parents=True, exist_ok=True)
@@ -129,18 +187,22 @@ def launch_session_host(
     proc = subprocess.Popen(
         host_argv,
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         env=child_env,
         cwd=cwd or None,
         **host_spawn_kwargs(),
     )
+    crash_tail = _CrashTailCapture(proc.stdout)
 
     deadline = time.time() + ready_timeout
     while time.time() < deadline:
         if proc.poll() is not None:
+            tail_text = crash_tail.tail_text().strip()
+            detail = f"\n--- last output ---\n{tail_text}" if tail_text else ""
             raise RuntimeError(
-                f"session host exited early (code={proc.returncode}) before ready"
+                f"session host exited early (code={proc.returncode}) "
+                f"before ready{detail}"
             )
         if state_file.exists():
             try:
