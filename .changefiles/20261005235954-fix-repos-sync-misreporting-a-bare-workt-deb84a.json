@@ -1,0 +1,9 @@
+{
+  "comment": "Fix repos sync misreporting a bare worktree-class anchor as diverged",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
