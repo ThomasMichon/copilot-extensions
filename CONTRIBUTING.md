@@ -57,10 +57,15 @@ base branch.
 >    confirm your change actually shipped, watch for that candidate PR
 >    merging (`gh pr list --search "is:merged head:release/promote-"`, or just
 >    watch `main`'s commit history) rather than assuming your `dev` merge was
->    the release. A separate **"clear consumed changefiles on dev"**
->    housekeeping PR follows on its own daily (or on-demand) schedule, not per
->    promotion — routine cleanup, not something you need to review or
->    act on, but don't be surprised to see one land within a day.
+>    the release -- and never via `git merge-base --is-ancestor <your-sha>
+>    origin/main`, which can report false even after a real promotion
+>    (`promote` replays the gate's pinned, validated `dev` snapshot into a
+>    new commit, not necessarily `dev`'s current tip, so your original SHA
+>    never becomes a literal ancestor). A separate **"clear consumed
+>    changefiles on dev"** housekeeping PR follows on its own daily (or
+>    on-demand) schedule, not per promotion — routine cleanup, not something
+>    you need to review or act on, but don't be surprised to see one land
+>    within a day.
 >
 > See [docs/pipelines.md § Promotion: dev → main](docs/pipelines.md#promotion-dev--main)
 > for the full mechanics and how to preview a pending release without
