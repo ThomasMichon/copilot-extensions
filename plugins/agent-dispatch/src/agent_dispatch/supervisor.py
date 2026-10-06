@@ -955,6 +955,64 @@ class Supervisor:
 
         return _r(self, now=now)
 
+    def _reserving_unknown_past_timeout(self, res: dict) -> bool:
+        """Whether a ``reserving`` reservation's liveness verdict has sat at
+        ``UNKNOWN`` (never resolved to confirmed live or confirmed gone) past
+        this supervisor's own ``reserving_timeout`` bound.
+
+        Mirrors the aging gate already used by the handle-less and
+        live-owner-no-session branches of :meth:`reconcile_reserving` --
+        ``reserving_timeout <= 0`` disables the bound entirely, and only this
+        same stable supervisor identity may act on its own reservation (never
+        a different supervisor's in-flight attempt).
+        """
+        try:
+            age = time.time() - float(res.get("reserved_at") or 0)
+        except (TypeError, ValueError):
+            age = 0.0
+        return (
+            self.reserving_timeout > 0
+            and res.get("reserved_by") == self.supervisor_id
+            and age >= self.reserving_timeout
+        )
+
+    def _fail_unresolved_reserving(self, res: dict, reason: str) -> bool:
+        """Release a ``reserving`` reservation whose liveness verdict never
+        escalated past ``UNKNOWN`` within the bound, so a fresh attempt may be
+        reserved (confirmed live, 2026-10-05: a worktree-backed reservation
+        whose target worktree never materialized on disk at all left
+        ``verdict_fn`` unable to ever return ``GONE`` -- the GONE/LIVE tri-
+        state's own "never treat ignorance as death" safety guarantee meant
+        no sweep ever revisited it, holding the task's ``exclusive_key``
+        reservation slot indefinitely).
+
+        Never a confirmed-gone release (``release_requested`` stays unset) --
+        the verdict genuinely never resolved either way, so this is the same
+        "waited long enough, still ambiguous" semantics as the sibling
+        sessionless-worktree branch, not a positive absence proof.
+        """
+        try:
+            age = time.time() - float(res.get("reserved_at") or 0)
+        except (TypeError, ValueError):
+            age = 0.0
+        detail = f"{reason} after {age:.0f}s"
+        try:
+            if res.get("worktree_ownership") == "created":
+                self.client.request_spawn_release(
+                    res["key"],
+                    detail=detail,
+                    disposition="failed",
+                )
+            else:
+                self.client.fail_spawn(res["key"], detail=detail)
+        except DispatchError:
+            log.exception(
+                "failed to release unresolved-liveness reserving allocation %s",
+                res["key"],
+            )
+            return False
+        return True
+
     def reconcile_reserving(self) -> int:
         """Recover pre-launch reservations after a supervisor interruption.
 
@@ -992,6 +1050,13 @@ class Supervisor:
                 except Exception:
                     verdict = _tracking().UNKNOWN
                 if verdict == _tracking().UNKNOWN:
+                    if self._reserving_unknown_past_timeout(res):
+                        if self._fail_unresolved_reserving(
+                            res,
+                            "carried local body liveness never resolved past "
+                            "unknown (neither live nor confirmed gone)",
+                        ):
+                            reconciled += 1
                     continue
                 if verdict == _tracking().LIVE:
                     try:
@@ -1051,6 +1116,14 @@ class Supervisor:
                 except Exception:
                     verdict = _tracking().UNKNOWN
                 if verdict == _tracking().UNKNOWN:
+                    if self._reserving_unknown_past_timeout(res):
+                        if self._fail_unresolved_reserving(
+                            res,
+                            "script body liveness never resolved past unknown "
+                            f"(neither live nor confirmed gone, worker {worker_id}, "
+                            f"pid {pid})",
+                        ):
+                            reconciled += 1
                     continue
                 if verdict == _tracking().LIVE:
                     try:
@@ -1115,6 +1188,13 @@ class Supervisor:
             except Exception:
                 verdict = _tracking().UNKNOWN
             if verdict == _tracking().UNKNOWN:
+                if self._reserving_unknown_past_timeout(res):
+                    if self._fail_unresolved_reserving(
+                        res,
+                        "reserved worktree's owner liveness never resolved past "
+                        "unknown (neither live nor confirmed gone)",
+                    ):
+                        reconciled += 1
                 continue
             if verdict == _tracking().GONE:
                 try:

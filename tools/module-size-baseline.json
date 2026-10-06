@@ -34,7 +34,7 @@
   "plugins/agent-dispatch/src/agent_dispatch/managed_runtime.py": 1603,
   "plugins/agent-dispatch/src/agent_dispatch/registrar_registry.py": 1007,
   "plugins/agent-dispatch/src/agent_dispatch/repository_issue_loops.py": 1835,
-  "plugins/agent-dispatch/src/agent_dispatch/supervisor.py": 3780,
+  "plugins/agent-dispatch/src/agent_dispatch/supervisor.py": 3860,
   "plugins/agent-dispatch/src/agent_dispatch/supervisor_daemon.py": 2206,
   "plugins/agent-index/scripts/cell-runtime.py": 5210,
   "plugins/agent-index/scripts/resolve_effective_config.py": 1136,

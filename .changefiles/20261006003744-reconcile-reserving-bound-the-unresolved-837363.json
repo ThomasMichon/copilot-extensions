@@ -1,0 +1,9 @@
+{
+  "comment": "reconcile_reserving(): bound the unresolved-liveness (UNKNOWN-forever) gap across the worktree-verdict, local-body, and script-body branches with the same reserving_timeout escalation already used by sibling branches",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
