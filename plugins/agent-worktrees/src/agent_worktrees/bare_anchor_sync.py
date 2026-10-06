@@ -8,6 +8,8 @@ detected to be bare.
 
 from __future__ import annotations
 
+import uuid
+
 from . import git_ops
 
 
@@ -61,7 +63,7 @@ def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
     if not old_sha:
         return ("error", f"could not resolve '{target}'")
 
-    scratch_ref = f"refs/agent-worktrees/repos-sync-fetch/{target}"
+    scratch_ref = f"refs/agent-worktrees/repos-sync-fetch/{target}.{uuid.uuid4().hex}"
 
     def _cleanup_scratch() -> None:
         _git("update-ref", "-d", scratch_ref)
