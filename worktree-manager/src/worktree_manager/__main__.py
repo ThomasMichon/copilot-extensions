@@ -999,15 +999,26 @@ def _run_production_picker(project: str) -> int:
     ``"refresh"``/``"manager-update"`` apply an update and loop back to
     reopen the Picker (#4423); every other decision ends this function.
     """
+    from .process_priority import (
+        raise_current_process_priority,
+        restore_normal_process_priority,
+    )
+
     from . import picker_app
     from .production_picker import runner
 
     while True:
+        # Boost only around the interactive TUI session itself, never across
+        # a launch dispatch below: a dispatched decision (resume/restore/...)
+        # spawns the actual workload (shell, Copilot session) as a CHILD of
+        # this process, which would otherwise silently inherit the boost.
+        raise_current_process_priority()
         try:
             decision = runner.run(project)
         except Exception as error:
             print(f"error: production Picker failed: {error}")
             return 1
+        restore_normal_process_priority()
         if not decision:
             return 0
         action = str(decision.get("action") or "")
