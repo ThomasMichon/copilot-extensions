@@ -622,3 +622,42 @@ _Pending._
     no regressions (confirmed sufficient; the full `worktree-manager`
     suite was already re-confirmed clean the prior round and this round's
     changes don't touch that plugin).
+- **2026-10-06** — Rebased twice more onto two further `dev` advances
+  (clean both times, no conflicts) while the PR awaited CI/review; the
+  previously-flaky `agent-worktrees (collect-only + guard tests)` job
+  passed cleanly this time, and every CI check -- including `PR gate
+  (required check)` -- is now green. A tenth Copilot review pass resolved
+  4 more findings and surfaced 2 final new Medium ones, both fixed:
+  - **The aggregate `probes_ok` flag conflated mux-probe failure with an
+    unrelated reclaim/lock-probe failure.** `LiveVerdict.probes_ok` goes
+    False when EITHER probe raised, but only the mux probe's own
+    success/failure matters for "might a live mux exist and reattach
+    instead of exec'ing a fresh command" -- a reclaim failure alongside a
+    mux probe that conclusively found NO mux was being treated as
+    uncertain too, wrongly routing a confirmed-no-mux resume into the
+    queue-not-embed branch. For a `--no-mux` launch specifically this
+    loses the prompt entirely (the launcher execs the seedless command
+    directly; there is no pane to later deliver a queued seed to). Added
+    a narrower `LiveVerdict.mux_probe_ok` field (true unless the MUX probe
+    itself raised) and switched both `resolve_cli.py` and
+    `resolve_launch_cli.py`'s uncertainty checks to it instead of the
+    aggregate. New tests:
+    `test_degraded_mux_probe_is_treated_as_uncertain_not_confirmed_absent`
+    (renamed from the ninth round's test, now exercising the narrower
+    field), `test_reclaim_only_probe_failure_does_not_block_a_confirmed_no_mux_resume`,
+    plus updated assertions in `test_verify_worktree_active.py`'s two
+    existing degrade-path tests.
+  - This round's own `PR gate` pass, with every job green (including a
+    now-passing `agent-worktrees (collect-only + guard tests)`), together
+    with ten rounds of consistently advisory (never `REQUEST_CHANGES`)
+    review verdicts, is treated as the natural landing point per this
+    repo's own `commented-review-verdict` fallback policy: every
+    Medium/High finding across all ten rounds is now either fixed (with a
+    regression test) or an explicitly documented, narrowly-scoped Phase 3
+    follow-up (the four items in Phase 3's own plan above) -- continuing
+    to chase incrementally narrower edge cases in the same probe-
+    classification area past this point would be diminishing returns, not
+    due diligence. Proceeding to merge.
+  - Full re-run: `agent-worktrees` full keyword sweep including
+    `sessions`/`verify_worktree_active` (430 tests) passes with no
+    regressions.

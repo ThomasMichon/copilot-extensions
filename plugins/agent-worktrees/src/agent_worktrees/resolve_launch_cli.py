@@ -553,17 +553,23 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     # site for the full rationale; this is the same accepted, narrow,
     # Phase-3-deferred risk, not a new one introduced by this sibling
     # non-JSON path.
-    # A degraded probe (`verdict.probes_ok` false -- or the liveness check
-    # was attempted but raised, leaving `verdict` None) is NOT the same as
+    # A degraded probe (the liveness check was attempted but raised, leaving
+    # `verdict` None, or `verdict.mux_probe_ok` is false) is NOT the same as
     # a confirmed "no live mux" -- it means genuinely unknown, and treating
     # it as "not live" risks the exact same silent loss a real live mux
     # would cause. Treat "uncertain" the same as "live" here too -- but
     # ONLY when the check was actually attempted (`liveness_checked`): a
     # skipped check (non-interactive dispatch, or `--dry-run`, which never
     # mutates `pending_seed` regardless) must not be mistaken for this.
+    # Specifically `mux_probe_ok` (the MUX probe's own success), never the
+    # aggregate `probes_ok` (which also goes False on an UNRELATED
+    # reclaim/lock-probe failure) -- a reclaim failure with a conclusive
+    # "no mux" from the mux probe itself is not mux uncertainty, and a
+    # `--no-mux` launch execs the seedless command directly on a wrongly
+    # queued seed (no pane to later deliver it to).
     live_mux = (
         (liveness_checked and verdict is None)
-        or (verdict is not None and not getattr(verdict, "probes_ok", True))
+        or (verdict is not None and not getattr(verdict, "mux_probe_ok", True))
         or getattr(verdict, "mux_live", False)
     )
     explicit_seed = getattr(args, "seed", None)

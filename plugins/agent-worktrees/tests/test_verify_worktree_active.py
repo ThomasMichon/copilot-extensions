@@ -94,7 +94,11 @@ def test_degrades_when_reclaim_raises():
         v = sessions.verify_worktree_active(_rec())
     assert v.active is True and v.mux_live is True
     assert v.live_session_ids == [] and v.source == "mux"
-    assert v.probes_ok is False  # Copilot review finding: the reclaim probe raised
+    assert v.probes_ok is False  # the reclaim probe raised
+    # The MUX probe itself succeeded (conclusively found a live mux) --
+    # narrower than the aggregate `probes_ok` above, which also goes False
+    # here purely because of the UNRELATED reclaim failure.
+    assert v.mux_probe_ok is True
 
 
 def test_degrades_when_mux_raises():
@@ -105,4 +109,5 @@ def test_degrades_when_mux_raises():
         v = sessions.verify_worktree_active(_rec())
     assert v.active is True and v.mux_live is False
     assert v.source == "lock" and v.bare is True
-    assert v.probes_ok is False  # Copilot review finding: the mux probe raised
+    assert v.probes_ok is False  # the mux probe raised
+    assert v.mux_probe_ok is False  # the mux probe itself is what raised here

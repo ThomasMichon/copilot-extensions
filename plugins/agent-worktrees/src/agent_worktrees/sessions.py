@@ -1255,6 +1255,16 @@ class LiveVerdict:
     consumer wrapping this verdict with its own ``confirmed`` marker) should
     check this rather than assume every returned verdict is fully probed."""
 
+    mux_probe_ok: bool = True
+    """False only when the MUX probe itself (``mux_status_many``) raised --
+    narrower than the aggregate ``probes_ok`` above, which also goes False on
+    an unrelated reclaim/lock-probe failure. A caller deciding whether `a live
+    mux might exist and would reattach instead of exec'ing a fresh command`
+    (e.g. seed-delivery gating) should check THIS, not the aggregate: a
+    reclaim failure with a conclusive "no mux" from the mux probe itself is
+    not mux uncertainty -- treating it as such can wrongly queue a prompt a
+    `--no-mux` launch then never delivers (there is no pane to queue it to)."""
+
 
 def verify_worktree_active(record) -> LiveVerdict:
     """Authoritatively verify whether ONE worktree has a live session right now.
@@ -1275,11 +1285,13 @@ def verify_worktree_active(record) -> LiveVerdict:
 
     wt_id = record.worktree_id
     probes_ok = True
+    mux_probe_ok = True
     try:
         info = mux_status_many([wt_id]).get(wt_id) or MuxInfo()
     except Exception:
         info = MuxInfo()
         probes_ok = False
+        mux_probe_ok = False
     mux_live = bool(info.exists)
 
     live_ids: list[str] = []
@@ -1309,6 +1321,7 @@ def verify_worktree_active(record) -> LiveVerdict:
         bare=bare,
         source=source,
         probes_ok=probes_ok,
+        mux_probe_ok=mux_probe_ok,
     )
 
 

@@ -712,18 +712,23 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # worse than the non-JSON path's own narrow, queued-but-delayed
     # limitation -- here the seed was never queued at all.
     #
-    # A degraded probe (`verdict.probes_ok` false -- `verify_worktree_active`
-    # itself degrades to this rather than raising on a mux/reclaim hiccup)
-    # is NOT the same as a confirmed "no live mux": it means genuinely
-    # unknown, and claiming/embedding the seed on an uncertain verdict risks
-    # the exact same silent loss a real live mux would cause. Treat
-    # "uncertain" the same as "live" here -- the safer, queue-not-embed
-    # branch -- rather than only gating on the narrower `mux_live` flag.
+    # A degraded probe is NOT the same as a confirmed "no live mux": it
+    # means genuinely unknown, and claiming/embedding the seed on an
+    # uncertain verdict risks the exact same silent loss a real live mux
+    # would cause. Treat "uncertain" the same as "live" here -- the safer,
+    # queue-not-embed branch -- rather than only gating on the narrower
+    # `mux_live` flag. Specifically `mux_probe_ok` (the MUX probe's own
+    # success), never the aggregate `probes_ok` (which also goes False on
+    # an UNRELATED reclaim/lock-probe failure): a reclaim failure with a
+    # conclusive "no mux" from the mux probe itself is not mux uncertainty,
+    # and wrongly queuing in that case loses the prompt entirely on a
+    # `--no-mux` launch (which execs the seedless command directly -- there
+    # is no pane to later deliver a queued seed to).
     try:
         verdict = sessions.verify_worktree_active(record)
     except Exception:
         verdict = None
-    live_or_uncertain_mux = verdict is None or not getattr(verdict, "probes_ok", True) or getattr(verdict, "mux_live", False)
+    live_or_uncertain_mux = verdict is None or not getattr(verdict, "mux_probe_ok", True) or getattr(verdict, "mux_live", False)
     seed_claimed = False
     seed_queue_failed = False
     if not getattr(state.args, "bare_resume", False) and not live_or_uncertain_mux:

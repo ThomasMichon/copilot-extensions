@@ -254,15 +254,19 @@ def test_live_mux_seed_queue_failure_is_surfaced_not_silently_reported_success(
     assert payload["launch"]["seed_queue_failed"] is True
 
 
-def test_degraded_liveness_probe_is_treated_as_uncertain_not_confirmed_absent(
+def test_degraded_mux_probe_is_treated_as_uncertain_not_confirmed_absent(
     tmp_path: Path, monkeypatch, capfd,
 ):
-    """`verify_worktree_active` degrades to `mux_live=False, probes_ok=False`
-    on a mux/reclaim hiccup -- NOT an exception. Treating that the same as
-    a confirmed "no live mux" risks the exact same silent loss a real live
-    mux would cause if the launcher then finds the mux anyway and
-    reattaches without executing the embedded `cmd`. An uncertain probe
-    must route to the same queue-not-embed branch as a confirmed live mux."""
+    """`verify_worktree_active` degrades to `mux_live=False, mux_probe_ok=False`
+    when the MUX probe itself raised -- NOT an exception propagating out,
+    and NOT the same as a confirmed "no live mux". Treating that as
+    confirmed-absent risks the exact same silent loss a real live mux would
+    cause if the launcher then finds the mux anyway and reattaches without
+    executing the embedded `cmd`. An uncertain mux probe must route to the
+    same queue-not-embed branch as a confirmed live mux -- checked via the
+    narrower `mux_probe_ok`, never the aggregate `probes_ok` (which also
+    goes False on an unrelated reclaim/lock-probe failure that says
+    nothing about mux presence)."""
     from agent_worktrees import sessions as sessions_mod
 
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
@@ -274,7 +278,7 @@ def test_degraded_liveness_probe_is_treated_as_uncertain_not_confirmed_absent(
     _stub_launch_plumbing(monkeypatch, config)
     monkeypatch.setattr(
         sessions_mod, "verify_worktree_active",
-        lambda *_a, **_k: SimpleNamespace(mux_live=False, probes_ok=False),
+        lambda *_a, **_k: SimpleNamespace(mux_live=False, mux_probe_ok=False),
     )
 
     rc = resolve_cli.cmd_resolve(_args(seed="do the thing"))
@@ -285,6 +289,39 @@ def test_degraded_liveness_probe_is_treated_as_uncertain_not_confirmed_absent(
     assert payload["launch"]["seed_claimed"] is False
     reloaded = tracking.load_record(tmp_path / "wt-a.yaml")
     assert reloaded.pending_seed == "do the thing"
+
+
+def test_reclaim_only_probe_failure_does_not_block_a_confirmed_no_mux_resume(
+    tmp_path: Path, monkeypatch, capfd,
+):
+    """The aggregate `probes_ok` goes False on an UNRELATED reclaim/lock-probe
+    failure too, even when the mux probe itself conclusively found no mux
+    (`mux_probe_ok=True`). That is not mux uncertainty -- the seed must
+    still be embedded normally, not queued (a `--no-mux` launch execs the
+    returned command directly; queuing here would lose the prompt
+    entirely, since there is no pane to later deliver a queued seed to)."""
+    from agent_worktrees import sessions as sessions_mod
+
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    monkeypatch.setattr(
+        sessions_mod, "verify_worktree_active",
+        lambda *_a, **_k: SimpleNamespace(
+            mux_live=False, mux_probe_ok=True, probes_ok=False,
+        ),
+    )
+
+    rc = resolve_cli.cmd_resolve(_args(seed="do the thing"))
+
+    assert rc == 0
+    payload = json.loads(capfd.readouterr().out)
+    assert payload["launch"]["cmd"][-2:] == ["--interactive", "do the thing"]
+    assert payload["launch"]["seed_claimed"] is True
 
 
 def test_seed_claimed_is_true_only_when_this_call_actually_embeds_a_seed(
