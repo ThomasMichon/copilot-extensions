@@ -289,7 +289,7 @@ roster-change event stream, so its own fast path is a daemon-side cache
 (3b) first, with a roster-push SSE route (3c) deferred until 3b proves
 insufficient.)_
 
-- [ ] **3a — agent-dispatch relay** (full detail:
+- [x] **3a — agent-dispatch relay** (full detail:
       [phase-3-design.md](phase-3-design.md)): treat any `stream_events()`
       event as a wake trigger for an immediate full re-fetch-and-diff, not
       a per-event row transform. Covers: scope to the direct (non-delegated)
@@ -386,7 +386,7 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
       refresh latency (mirroring the `picker-reconcile-local` before/after
       methodology from 2026-09-30), plus a headless test proving the Picker
       repaints on a `delta`/`removed` envelope line without a poll tick.
-- [ ] **Phase 3 (design review gate):** 3a's agent-dispatch relay and 3b's
+- [x] **Phase 3 (design review gate):** 3a's agent-dispatch relay and 3b's
       agent-bridge daemon-side cache each introduce their own new internal
       failure modes beyond what the existing poll-and-diff/scan-per-call
       paths have, and each needs its own acceptance test, not one shared
@@ -1778,12 +1778,38 @@ mergeable clean, and all 6 round-28 threads addressed, merged via
 Merged at 2026-10-05T22:40:49Z. Worktree finalized; branch confirmed fully on
 `origin/dev`.
 
-**Next**: Phase 3b is done. Remaining Plan items: **3a** (agent-dispatch
-relay, full detail in `phase-3-design.md`) -- not yet started; **3c**
-(agent-bridge roster-change SSE) stays deliberately deferred per the design
-doc's own gate until 3b is measured insufficient; **Phase 4** (segment-level
-diffing in the Picker's render path) and **Phase 5** (Group C fresh-hint
-trust in `picker-reconcile-local`) are both still fully unstarted. The
-Validation Plan's "Phase 3 (design review gate)" line (3a's relay and 3b's
-cache both landed and measured) still needs 3a to close before that gate is
-satisfied.
+**Next**: Phase 3b is done. Remaining Plan items: **3c** (agent-bridge
+roster-change SSE) stays deliberately deferred per the design doc's own gate
+until 3b is measured insufficient; **Phase 4** (segment-level diffing in the
+Picker's render path) and **Phase 5** (Group C fresh-hint trust in
+`picker-reconcile-local`) are both still fully unstarted. **Correction (see
+the 2026-10-05 entry below): 3a actually landed first**, on 2026-10-03 (PR
+#4994) -- this Plan/Validation Plan pair was simply never updated to reflect
+it. The Validation Plan's "Phase 3 (design review gate)" line is therefore
+now satisfied: both 3a and 3b are landed, tested, and measured.
+
+### 2026-10-05 — Correction: Phase 3a was already landed (PR #4994, 2026-10-03) -- the Plan/Journal just never recorded it
+
+While picking up this effort from a handoff that recommended starting Phase
+3a next (reasoning: "3b is the one already done"), found that **3a had
+already shipped** two days earlier than 3b: `git log --grep
+"pivot-streaming-transport"` shows `108c49b5f "pivot-streaming-transport
+Phase 3a: agent-dispatch CLI-relayed daemon fast path (#4994)"`, merged
+2026-10-03T20:02:29-07:00 -- `board_relay.py` (42KB,
+`plugins/agent-dispatch/src/agent_dispatch/`) fully implements the design
+doc's 3a spec (wake-triggered re-fetch via `stream_events()`, the ready-frame
+handshake, debounced/trailing-fetch coalescing, the single-control-loop
+writer-serialization mechanism, bounded-backoff reconnect with fresh-client
+rebuild). Confirmed still green on this worktree after fast-forwarding to
+`origin/dev`: `test_board_relay.py` + `test_board_cli.py`, 69 passed. Neither
+the Plan checklist (`- [ ] **3a`) nor the Journal ever recorded this landing
+-- likely a different, untracked session did the work and didn't update this
+README, or an update was lost. Corrected here: Plan's 3a checkbox -> `[x]`,
+Validation Plan's "Phase 3 (design review gate)" -> `[x]` (its own
+implementation notes already cited the exact `test_board_relay.py` tests
+satisfying every 3a acceptance criterion, and they're confirmed passing).
+No code change needed -- this is a bookkeeping-only fix. Remaining open Plan
+work is now just **Phase 4** and **Phase 5** (3c stays deliberately
+deferred). Picking up **Phase 4** next (profiling `_refresh_nf_segments()` in
+the Picker, per the Plan's own ordering) since Phase 5 depends on no
+unresolved prerequisite either, and Phase 4 is listed first.

@@ -359,7 +359,11 @@ risk wedging everything").
       findings from the full-matrix pass (8 failures total, reconfirmed
       2026-10-05 via `python tools/run-plugin-tests.py agent-logger
       --timeout 600 --plugin-timeout 1200`):
-      - **`test_install_binstub.py::test_stamp_supports_first_use_provision_from_snapshot_only`**
+      - [x] **`test_scaffold.py`'s 3 `sync.local_path` failures** --
+        root-caused and **fixed, 2026-10-05** (PR #5383): test-only
+        POSIX-path-semantics assumptions, not production bugs. See
+        Journal.
+      - [ ] **`test_install_binstub.py::test_stamp_supports_first_use_provision_from_snapshot_only`**
         -- the Windows `MAX_PATH` structural issue, root-caused precisely
         this leg: `uv`'s `pip install` build of a vendored lib
         (`agent-config-migrate` this run; `agent-plugin-activation`
@@ -369,39 +373,38 @@ risk wedging everything").
         -- legacy `setuptools bdist_wheel`'s two-phase build (`build\lib\...`
         then copy into `build\bdist.win-amd64\wheel\.\...`) pushes the full
         path (snapshot dir + this relative build path) past Windows'
-        260-char `MAX_PATH`. Fix needs one of: enabling Windows long-path
-        support in the installer's own invocation (not a global registry
-        change an installer can assume), shortening the snapshot directory
-        structure, or moving these vendored libs off legacy `bdist_wheel`.
-      - **`test_chronicle.py`'s 3 failures** (`test_scan_uses_generic_provenance_when_origin_sidecar_is_absent`,
+        260-char `MAX_PATH`. **Needs an operator design call, not a quick
+        fix** -- the two realistic options have real trade-offs: (a)
+        enabling Windows long-path support in the installer's own
+        invocation (narrow, but Python's automatic `LongPathsEnabled`
+        honoring still depends on a machine-level registry policy no
+        installer can assume is set), or (b) shortening the snapshot
+        directory structure. Moving these vendored libs off legacy
+        `bdist_wheel` is a bigger, separate undertaking.
+      - [ ] **`test_chronicle.py`'s 3 failures** (`test_scan_uses_generic_provenance_when_origin_sidecar_is_absent`,
         `test_newer_rescue_capture_is_a_distinct_chronicle_unit`,
-        `test_scan_validated_provenance_overrides_conflicting_origin`) --
-        same root cause: `FileNotFoundError: [WinError 3]` creating a path
-        under `.session-sync-rescue-captures\<64-hex>\<64-hex>` -- two
-        full SHA-256 hex path segments pushes a `tmp_path`-rooted pytest
-        temp path past `MAX_PATH` on this host. Likely the same
-        long-path-support fix as above, or hashing to a shorter digest
-        (e.g. truncated/base32) for the on-disk directory name.
-      - **`test_rescue_sync.py::test_failed_rollback_retains_recovery_backup`**
-        -- also `FileNotFoundError: [Errno 2]`, same deep-path family
-        (`.session-sync-replacement\<uuid>.active\old\session-state\...`);
-        needs its own confirmation it's the same `MAX_PATH` cause and not
-        a distinct rollback-bookkeeping bug (the original hypothesis).
-      - **`test_scaffold.py`'s 3 `sync.local_path` failures** -- root-caused
-        this leg: **not flakes or production bugs.** `_validate_native_absolute_path`
-        in `config.py` deliberately uses the *host-native* `Path(...).is_absolute()`
-        (its own docstring: "a foreign-platform path must never silently
-        resolve relative"), so on a Windows test host a POSIX-style
-        `/mnt/nas/...` genuinely is not absolute (correctly rejected) and
-        a Windows-style `C:\nas\sessions` genuinely *is* absolute
-        (correctly accepted) -- opposite of what these three test cases
-        assume, since they were written assuming a POSIX CI host. Fix is
-        in the **tests**, not `config.py`: make the `/mnt/nas/...`-success
-        case and the bare-`/`-root case platform-conditional (skip or
-        swap to a native-format equivalent on Windows), and drop
-        `'C:\nas\sessions'` from the "must be an absolute path" failure
-        parametrization entirely (it is a valid native-absolute path on
-        Windows, so it cannot belong in that failure list on this host).
+        `test_scan_validated_provenance_overrides_conflicting_origin`) and
+        **`test_rescue_sync.py::test_failed_rollback_retains_recovery_backup`**
+        -- confirmed this leg to be the *same* `MAX_PATH` family, not
+        independent bugs and not the originally-hypothesized rollback
+        bookkeeping bug: all 4 pass cleanly in isolation (`pytest
+        tests/test_rescue_sync.py::test_failed_rollback_retains_recovery_backup`
+        alone: PASSED) and fail only under `run-plugin-tests.py`'s own
+        nested containment temp root
+        (`...\ce-agent-logger-<rand>\pytest\group-1\<testname>0\...`)
+        combined with agent-logger's own content-addressed directory
+        naming in `provenance.py:rescue_snapshot_path` -- **two full
+        64-char SHA-256 hex path segments**
+        (`.session-sync-rescue-captures\<hex>\<hex>`,
+        `.session-sync-replacement\<uuid>.active\...`) -- pushing the
+        combined path past 260 chars: `FileNotFoundError: [WinError 3]` /
+        `[Errno 2]`. **Also needs an operator design call**: shortening
+        `rescue_snapshot_path`'s on-disk hash length (e.g. a truncated
+        digest, or git-style 2-char-shard-plus-full-hash) is a production
+        change to a durability-sensitive, content-addressed path scheme --
+        it needs a real compatibility/migration story for any
+        already-on-disk full-length-hash snapshot, not just a one-line
+        truncation.
 - [ ] `tools/run-plugin-tests.py`'s default 300s per-sub-suite wall-clock
       budget is too tight for `agent-dispatch`'s own 3rd 25-file sub-suite
       under real full-matrix host load (observed hitting `[LIMIT]
@@ -502,6 +505,35 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-05 — Phase 3.5: agent-logger's test_scaffold.py fixed; MAX_PATH family confirmed, needs a design call
+Continued from the root-cause pass above. Fixed and **landed PR #5383**:
+`test_scaffold.py`'s 3 `sync.local_path` failures were test-only
+POSIX-path-semantics assumptions (not production bugs) -- made the
+bare-root case use this host's own native bare root (`/` on POSIX, `C:\`
+on Windows) and the "must be an absolute path" case use the file's
+existing `_foreign_absolute_path()` helper instead of a hardcoded literal
+that happens to be genuinely valid-absolute on a Windows host. Confirmed
+all 3 reproduce pre-fix on this host and pass post-fix; full
+`test_scaffold.py` (63 tests) stays green.
+
+Also confirmed (not yet fixed) that `test_chronicle.py`'s 3 failures and
+`test_rescue_sync.py::test_failed_rollback_retains_recovery_backup` are
+the *same* Windows `MAX_PATH` family as `test_install_binstub.py`'s
+failure, not independent bugs: all pass cleanly in isolation and fail only
+under `run-plugin-tests.py`'s own nested containment temp root combined
+with `provenance.py:rescue_snapshot_path`'s two full 64-char SHA-256 hex
+path segments.
+
+**Did not implement the MAX_PATH fix this leg -- it's a real design
+decision, not a quick fix,** and I don't think it's mine to make
+unilaterally: shortening `rescue_snapshot_path`'s on-disk hash needs a
+compatibility/migration story for already-on-disk full-length-hash
+snapshots (it's a durability-sensitive, content-addressed path scheme);
+enabling Windows long-path support can't be assumed safe to flip from
+inside an installer since it ultimately depends on a machine-level
+registry policy. Left as an explicit open item (now with full root cause)
+rather than guessing at a production fix under time pressure.
 
 ### 2026-10-05 — Phase 3.5: agent-logger's 8 remaining failures, root-caused (not yet fixed)
 Reconfirmed all 8 via `python tools/run-plugin-tests.py agent-logger
