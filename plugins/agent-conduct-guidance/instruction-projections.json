@@ -25,6 +25,14 @@
       "customizationKind": "instructions",
       "applyTo": "**",
       "legacyMarkers": []
+    },
+    {
+      "id": "secret-masking-fallback",
+      "template": "instructions/secret-masking-fallback.instructions.md",
+      "destination": ".github/instructions/agent-conduct-guidance/secret-masking-fallback.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
     }
   ]
 }

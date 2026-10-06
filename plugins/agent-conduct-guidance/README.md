@@ -19,6 +19,7 @@ look for "is there ambient guidance for X."
 | Process-spawn hygiene | [`process-hygiene-fallback`](instructions/process-hygiene-fallback.instructions.md) | [`spawning-headless-processes`](skills/spawning-headless-processes/SKILL.md) | Spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly — especially on Windows, where a naive spawn allocates a visible, focus-stealing console window per invocation |
 | Coordinator-first delegation | [`delegation-fallback`](instructions/delegation-fallback.instructions.md) | [`delegating-work`](skills/delegating-work/SKILL.md) | Route broad separable research, comparisons, evaluations, domain-tool calls, and disjoint bulk edits into bounded sub-agent contexts while the coordinator retains synthesis, integration, cohesive implementation, and completion |
 | Scratch-space hygiene | [`scratch-space-fallback`](instructions/scratch-space-fallback.instructions.md) | [`using-scratch-space`](skills/using-scratch-space/SKILL.md) | Resolve a portable scratch root and a timestamped per-task subfolder before writing an ad hoc working file (a draft PR body, a log, a one-off dump) outside a repository, instead of littering a drive root with undated loose files |
+| Secret-pattern masking avoidance | [`secret-masking-fallback`](instructions/secret-masking-fallback.instructions.md) | [`avoiding-secret-pattern-masking`](skills/avoiding-secret-pattern-masking/SKILL.md) | Never construct an auth header as one scheme-plus-secret literal or f-string (e.g. a bearer-scheme word concatenated or interpolated directly with a token variable) -- Copilot's own content pipeline can silently rewrite that shape into a masked placeholder, with no error and no diff marker; split the scheme word across its own concatenation instead, and verify with a non-rendering byte/boolean check, never a plain read-back |
 
 New modules are added the same way: one instruction projection entry in
 [`instruction-projections.json`](instruction-projections.json) plus one paired
@@ -39,6 +40,7 @@ skill, documented in the table above and in **What's in this plugin** below.
 | [`spawning-headless-processes`](skills/spawning-headless-processes/SKILL.md) skill | "run this in the background", authoring a script/service that shells out, "why does a window keep flashing", any CMD/PowerShell/Python/Node child-process spawn | Selects the correct windowless/headless mechanism for the target language and OS before the spawn happens |
 | [`delegating-work`](skills/delegating-work/SKILL.md) skill | "delegate this research", "use agents to compare", "parallelize the investigation", "split these bulk edits" | Chooses direct versus delegated work, defines bounded contracts, and preserves coordinator ownership |
 | [`using-scratch-space`](skills/using-scratch-space/SKILL.md) skill | writing a draft PR/issue body, a captured log, a one-off JSON dump, or any other ad hoc file outside a repository checkout | Resolves a portable scratch root (never hardcoded) and a timestamped per-task subfolder convention |
+| [`avoiding-secret-pattern-masking`](skills/avoiding-secret-pattern-masking/SKILL.md) skill | writing or reviewing an `Authorization` header, or any auth-scheme-plus-secret string construction; an auth header that still fails despite a reviewed, seemingly-correct diff | Confirms whether a credential-shaped string got silently masked, and applies the split-literal construction that avoids the rewrite |
 
 Enable it in Copilot settings:
 
@@ -82,7 +84,15 @@ operator-configured default, or the operating system's own preferred
 temporary-folder system as the final fallback) and write the draft into a
 fresh, timestamped per-task subfolder there -- never as a loose file at a
 drive root, and never inside a session-managed state folder -- per the
-scratch-space skill.
+scratch-space skill. Or:
+
+> Add an Authorization header carrying our bearer token to this HTTP client.
+
+The agent should bind the scheme word to its own variable, split across its
+own concatenation, and combine it with the token in a separate statement --
+never a single scheme-plus-secret literal or f-string -- then verify the
+real header value landed with a non-rendering byte/boolean check rather
+than a plain read-back, per the secret-masking skill.
 
 ## Model-routing configuration (delegation module)
 

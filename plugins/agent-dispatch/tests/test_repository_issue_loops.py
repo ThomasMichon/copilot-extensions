@@ -1930,7 +1930,7 @@ def test_claim_does_not_reuse_a_different_loops_comment():
         ({"batch_size": 0}, "batch_size"),
         ({"issue_numbers": [True]}, "issue_numbers: expected a list of positive integers"),
         ({"issue_numbers": ["17"]}, "issue_numbers: expected a list of positive integers"),
-        ({"forge": {"provider": "other"}}, "only \\['azure-devops', 'github', 'script'\\]"),
+        ({"forge": {"provider": "other"}}, "only \\['azure-devops', 'gitea', 'github', 'script'\\]"),
         ({"forge": {"provider": "github"}}, "producer_login"),
         ({"task_contract": False}, "task_contract: expected a mapping"),
         ({"reservation": {"label": "x", "comment": False}}, "must be true"),
@@ -2139,14 +2139,27 @@ def test_forge_provider_for_threads_discovery_scope_to_azure_devops():
     }
 
 
-def test_validate_config_rejects_gitea_provider_until_implemented():
-    """GiteaProvider is a structural stub (every op raises NotImplementedError);
-    accepting it here would let a declaration validate cleanly and then fail
-    forever on its first tick, so it must stay rejected until a real adapter
-    lands (ThomasMichon/copilot-extensions#4825)."""
-    with pytest.raises(
-        RegistrarError, match="only \\['azure-devops', 'github', 'script'\\]"
-    ):
+def test_validate_config_accepts_gitea_provider_with_connection_fields():
+    """A well-formed gitea declaration (provider, producer_login, and a
+    valid api_base) validates cleanly, with token_env defaulting to
+    GITEA_TOKEN when not given."""
+    config = validate_config(
+        _config(
+            repo="example-org/example-project",
+            forge={
+                "provider": "gitea",
+                "producer_login": "issue-bot",
+                "api_base": "https://gitea.example.com",
+            },
+        )
+    )
+    assert config["forge"]["provider"] == "gitea"
+    assert config["forge"]["api_base"] == "https://gitea.example.com"
+    assert config["forge"]["token_env"] == "GITEA_TOKEN"
+
+
+def test_validate_config_requires_api_base_for_gitea_provider():
+    with pytest.raises(RegistrarError, match="forge.api_base"):
         validate_config(
             _config(
                 repo="example-org/example-project",
@@ -2155,57 +2168,154 @@ def test_validate_config_rejects_gitea_provider_until_implemented():
         )
 
 
-def test_forge_provider_for_selects_gitea_stub():
-    """_forge_provider_for itself can already route to the stub (useful once
-    validate_config is widened to accept it) -- constructed directly here,
-    bypassing validate_config's deliberate rejection above."""
+def test_validate_config_rejects_gitea_connection_fields_for_other_providers():
+    with pytest.raises(
+        RegistrarError, match="only supported for forge.provider 'gitea'"
+    ):
+        validate_config(
+            _config(
+                forge={
+                    "provider": "github",
+                    "producer_login": "issue-bot",
+                    "api_base": "https://gitea.example.com",
+                },
+            )
+        )
+
+
+def test_validate_config_normalizes_gitea_api_base_trailing_slash():
+    config = validate_config(
+        _config(
+            repo="example-org/example-project",
+            forge={
+                "provider": "gitea",
+                "producer_login": "issue-bot",
+                "api_base": "https://gitea.example.com/",
+            },
+        )
+    )
+    assert config["forge"]["api_base"] == "https://gitea.example.com"
+
+
+def test_validate_config_normalizes_gitea_api_base_surrounding_whitespace():
+    config = validate_config(
+        _config(
+            repo="example-org/example-project",
+            forge={
+                "provider": "gitea",
+                "producer_login": "issue-bot",
+                "api_base": "  https://gitea.example.com/  ",
+            },
+        )
+    )
+    assert config["forge"]["api_base"] == "https://gitea.example.com"
+
+
+def test_validate_config_rejects_gitea_api_base_that_normalizes_to_empty():
+    """A bare '/' (or whitespace-only value) looks non-empty before
+    normalization but collapses to '' after stripping and trimming the
+    trailing slash -- it must be rejected outright, not accepted and left
+    to fail forever on the adapter's first real request."""
+    with pytest.raises(RegistrarError, match="forge.api_base"):
+        validate_config(
+            _config(
+                repo="example-org/example-project",
+                forge={
+                    "provider": "gitea",
+                    "producer_login": "issue-bot",
+                    "api_base": "/",
+                },
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_api_base",
+    [
+        "not a URL",
+        "ftp://example.com",
+        "https://user:pass@example.com",
+        "https://example.com/?query=1",
+        "https://example.com/#frag",
+    ],
+)
+def test_validate_config_rejects_gitea_api_base_that_is_not_a_usable_url(bad_api_base):
+    """A value that is merely non-empty text -- not an absolute http(s)
+    authority, or one carrying embedded credentials/query/fragment -- must
+    never "validate" successfully and then either fail on every real
+    request or target an unintended authority."""
+    with pytest.raises(RegistrarError, match="forge.api_base"):
+        validate_config(
+            _config(
+                repo="example-org/example-project",
+                forge={
+                    "provider": "gitea",
+                    "producer_login": "issue-bot",
+                    "api_base": bad_api_base,
+                },
+            )
+        )
+
+
+def test_validate_config_accepts_path_hosted_gitea_api_base():
+    config = validate_config(
+        _config(
+            repo="example-org/example-project",
+            forge={
+                "provider": "gitea",
+                "producer_login": "issue-bot",
+                "api_base": "https://example.com/gitea",
+            },
+        )
+    )
+    assert config["forge"]["api_base"] == "https://example.com/gitea"
+
+
+def test_validate_config_normalizes_gitea_token_env_whitespace():
+    config = validate_config(
+        _config(
+            repo="example-org/example-project",
+            forge={
+                "provider": "gitea",
+                "producer_login": "issue-bot",
+                "api_base": "https://gitea.example.com",
+                "token_env": "  MY_TOKEN  ",
+            },
+        )
+    )
+    assert config["forge"]["token_env"] == "MY_TOKEN"
+
+
+def test_validate_config_accepts_custom_gitea_token_env():
+    config = validate_config(
+        _config(
+            repo="example-org/example-project",
+            forge={
+                "provider": "gitea",
+                "producer_login": "issue-bot",
+                "api_base": "https://gitea.example.com",
+                "token_env": "MY_GITEA_TOKEN",
+            },
+        )
+    )
+    assert config["forge"]["token_env"] == "MY_GITEA_TOKEN"
+
+
+def test_forge_provider_for_selects_gitea_provider():
     config = {
         "repo": "example-org/example-project",
-        "forge": {"provider": "gitea", "producer_login": "issue-bot"},
+        "forge": {
+            "provider": "gitea",
+            "producer_login": "issue-bot",
+            "api_base": "https://gitea.example.com",
+            "token_env": "GITEA_TOKEN",
+        },
     }
     provider = _forge_provider_for(config)
     assert isinstance(provider, GiteaProvider)
     assert provider.expected_login == "issue-bot"
-
-
-@pytest.mark.parametrize(
-    ("operation", "args"),
-    [
-        ("list_open_issues", ("example-org/example-project",)),
-        (
-            "reserve",
-            (
-                "example-org/example-project",
-                Issue(1, "t", "url", (), 0.0, 0.0),
-                {},
-            ),
-        ),
-        (
-            "claim",
-            (
-                "example-org/example-project",
-                Issue(1, "t", "url", (), 0.0, 0.0),
-                {},
-                "task-1",
-            ),
-        ),
-        (
-            "release",
-            (
-                "example-org/example-project",
-                Issue(1, "t", "url", (), 0.0, 0.0),
-                {},
-                "reason",
-            ),
-        ),
-    ],
-)
-def test_gitea_provider_is_an_explicit_stub(operation, args):
-    """Every operation fails loud with a pointer to the tracking issue --
-    never a silent no-op a declaration could mistake for working support."""
-    provider = GiteaProvider("issue-bot")
-    with pytest.raises(NotImplementedError, match="copilot-extensions#4825"):
-        getattr(provider, operation)(*args)
+    assert provider.api_base == "https://gitea.example.com"
+    assert provider.token_env == "GITEA_TOKEN"
 
 
 # -- script forge provider (Phase 2 of agent-dispatch-recipe-composability) ---

@@ -13,7 +13,6 @@ from agent_dispatch.azure_devops_provider_adapter import (
     AzureDevOpsPRObservationError,
     observe_pr_state,
 )
-from agent_dispatch.gitea_pr_provider_stub import GiteaPRAdapter
 from agent_dispatch.github_provider_adapter import PRObservation
 from agent_dispatch.provider_state_machine import (
     ApprovalStatus,
@@ -590,7 +589,3 @@ def test_parse_review_target_ref_ignores_emitter_metadata_suffixes():
     )
 
 
-def test_gitea_pr_adapter_is_an_explicit_stub():
-    adapter = GiteaPRAdapter("review-bot")
-    with pytest.raises(NotImplementedError, match="agent-dispatch-recipe-library"):
-        adapter.observe("gitea.example.com/example-org/example-repo", 11)
