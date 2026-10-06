@@ -36,6 +36,13 @@ def cmd_mux_daemon(rest: list[str]) -> int:
                 except ValueError:
                     print("error: --listen-port must be an integer")
                     return 2
+        # Boost here, not inside run_daemon_foreground (mux_daemon.py is at
+        # its 1000-line module cap): harmlessly applies a beat early, to a
+        # losing/standing-down instance too, since that instance exits
+        # immediately after anyway. See process_priority.py's module
+        # docstring for the full psmux#608-style rationale.
+        from .process_priority import raise_current_process_priority
+        raise_current_process_priority()
         return mux_daemon.run_daemon_foreground(
             root,
             passive=passive,

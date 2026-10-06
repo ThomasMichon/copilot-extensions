@@ -613,6 +613,48 @@ def test_manager_acts_on_production_picker_manager_update_decision(monkeypatch):
     assert run_calls == ["demo", "demo"]
 
 
+def test_production_picker_restores_priority_before_dispatch_and_reboosts_on_refresh(
+    monkeypatch,
+):
+    """The priority boost must bracket ONLY the interactive TUI session:
+    raise -> runner.run -> restore -> dispatch, in that exact order, so a
+    dispatched launch (which spawns the real workload as this process's
+    child) never inherits the boost. On a refresh/manager-update loop-back,
+    the Picker must be re-boosted before its second `runner.run` call too."""
+    from worktree_manager import process_priority
+
+    events: list[str] = []
+    monkeypatch.setattr(
+        process_priority,
+        "raise_current_process_priority",
+        lambda: events.append("raise"),
+    )
+    monkeypatch.setattr(
+        process_priority,
+        "restore_normal_process_priority",
+        lambda: events.append("restore"),
+    )
+
+    run_calls = []
+
+    def fake_run(project):
+        events.append("run")
+        run_calls.append(project)
+        if len(run_calls) == 1:
+            return {"action": "refresh"}
+        return None
+
+    monkeypatch.setattr(runner, "run", fake_run)
+    monkeypatch.setattr(
+        entrypoint,
+        "_cmd_update",
+        lambda rest: events.append("dispatch") or 0,
+    )
+
+    assert entrypoint._run_production_picker("demo") == 0
+    assert events == ["raise", "run", "restore", "dispatch", "raise", "run", "restore"]
+
+
 def test_manager_acts_on_production_picker_open_venue_decision(monkeypatch):
     """picker-venue-pivots Phase 3: the "open-venue" decision hands the
     provider/venue straight to ``launcher.open_venue`` and returns its exit
