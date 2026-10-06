@@ -24,6 +24,7 @@ import pytest
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _INSTALL_SH = _PLUGIN_ROOT.parents[1] / "libs" / "installer-engine" / "installer-engine.sh"
+_WRAPPER_SH = _PLUGIN_ROOT / "scripts" / "install.sh"
 # A bare shutil.which("bash") can resolve to a Windows App Execution Alias
 # stub or the classic `C:\Windows\System32\bash.exe` WSL launcher (both
 # invoke an actual WSL distro rather than running this script in the
@@ -61,6 +62,13 @@ def _extract_sh_functions(*names: str) -> str:
         end = text.index("\n}\n", start)
         chunks.append(text[start : end + 2])
     return "\n\n".join(chunks)
+
+
+def _extract_wrapper_function(name: str) -> str:
+    text = _WRAPPER_SH.read_text(encoding="utf-8")
+    start = text.index(f"{name}()")
+    end = text.index("\n}\n", start)
+    return text[start : end + 2]
 
 
 def _executable(path: Path, text: str) -> None:
@@ -219,6 +227,45 @@ echo "OUT:$out"
     # Only one attempt -- an unrelated failure must not trigger the retry.
     assert counter_file.read_text(encoding="utf-8").strip() == "1"
     assert _delays(delays_file) == []
+
+
+def test_wrapper_preserves_failure_status_and_stderr_routing(tmp_path: Path) -> None:
+    venv_dir = tmp_path / "venv"
+    venv_dir.mkdir()
+    harness = tmp_path / "wrapper-harness.sh"
+    harness.write_text(
+        "#!/bin/sh\nset -eu\n"
+        + _extract_sh_functions("test_is_sre_module_mismatch", "test_is_venv_corruption", "invoke_uv_venv_resilient")
+        + "\n\n"
+        + _extract_wrapper_function("_uv_venv_resilient")
+        + """
+_warn() { echo "WARN: $*" >&2; }
+uv() {
+    echo 'wrapper failure detail'
+    return 7
+}
+if out=$(_uv_venv_resilient 'VENV_DIR_PLACEHOLDER' --allow-existing); then
+    echo "EXIT:0"
+else
+    echo "EXIT:$?"
+fi
+echo "OUT:$out"
+""".replace("VENV_DIR_PLACEHOLDER", str(venv_dir))
+        + "\n",
+        encoding="utf-8",
+    )
+    harness.chmod(0o755)
+    result = subprocess.run(
+        [_BASH, str(harness)],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=True,
+    )
+    assert "EXIT:7" in result.stdout
+    assert "OUT:" in result.stdout
+    assert "OUT:wrapper failure detail" not in result.stdout
+    assert "wrapper failure detail" in result.stderr
 
 
 def test_persisting_corruption_still_fails_after_all_retries(tmp_path: Path) -> None:
