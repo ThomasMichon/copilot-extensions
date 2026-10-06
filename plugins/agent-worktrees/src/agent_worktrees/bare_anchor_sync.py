@@ -53,11 +53,13 @@ def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
             "(bare anchor: switch it explicitly, e.g. `git symbolic-ref "
             f"HEAD refs/heads/{target}`)",
         )
-    old_sha = _git("rev-parse", "--verify", target).stdout.strip()
+    old_sha = _git("rev-parse", "--verify", f"refs/heads/{target}").stdout.strip()
     if not old_sha:
         return ("error", f"could not resolve '{target}'")
     git_ops.fetch("origin", cwd=path, timeout=180)
-    new_sha = _git("rev-parse", "--verify", f"origin/{target}").stdout.strip()
+    new_sha = _git(
+        "rev-parse", "--verify", f"refs/remotes/origin/{target}",
+    ).stdout.strip()
     if not new_sha:
         return ("skipped", f"origin/{target} not found after fetch")
     if new_sha == old_sha:
