@@ -476,6 +476,77 @@ Get-BootstrapPython -ExcludeVenvDir
     )
 
 
+@pytest.mark.skipif(os.name != "nt", reason="PowerShell execution is Windows-only here")
+def test_get_bootstrap_python_excludes_a_path_fallback_resolving_into_venv_dir(
+    tmp_path: Path,
+):
+    """The `py -3` launcher and `Get-ApplicationPath` PATH-search fallbacks
+    must be excluded too, not just the initial $dirs candidates: if an
+    activated target venv has put its own `Scripts` directory on PATH,
+    either fallback could still resolve straight back into $VenvDir and
+    defeat -ExcludeVenvDir entirely."""
+    pwsh = shutil.which("pwsh") or shutil.which("powershell.exe") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+
+    venv_dir = tmp_path / "slot"
+    (venv_dir / "Scripts").mkdir(parents=True)
+    excluded_python = venv_dir / "Scripts" / "python.exe"
+    excluded_python.write_bytes(b"excluded -- lives inside VenvDir's Scripts")
+
+    link_dir = tmp_path / "other-link"  # genuinely distinct from VenvDir
+    (link_dir / "Scripts").mkdir(parents=True)
+
+    script = r"""
+$tokens = $null
+$errors = $null
+$source = Get-Content -LiteralPath $env:INSTALLER -Raw
+$ast = [System.Management.Automation.Language.Parser]::ParseInput(
+    $source, [ref]$tokens, [ref]$errors
+)
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Get-BootstrapPython'
+}, $true)
+if (-not $functionAst) { throw "Missing installer function: Get-BootstrapPython" }
+Invoke-Expression $functionAst.Extent.Text
+
+$VenvDir = $env:VENV_DIR
+$LinkDir = $env:LINK_DIR   # distinct from VenvDir -- no Scripts\python.exe here
+
+function Get-Command { $true }   # `py` launcher IS resolvable
+function Invoke-NativeCapture {
+    param($ScriptBlock)
+    [pscustomobject]@{ ExitCode = 0; Output = $env:EXCLUDED_PYTHON }
+}
+function Get-ApplicationPath { $env:EXCLUDED_PYTHON }
+
+Get-BootstrapPython -ExcludeVenvDir
+"""
+    proc = subprocess.run(
+        [pwsh, "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={
+            **os.environ,
+            "INSTALLER": str(INSTALLER),
+            "VENV_DIR": str(venv_dir),
+            "LINK_DIR": str(link_dir),
+            "EXCLUDED_PYTHON": str(excluded_python),
+        },
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    result = proc.stdout.strip()
+    assert result == "", (
+        "Get-BootstrapPython -ExcludeVenvDir must reject a py-launcher/"
+        f"Get-ApplicationPath result resolving into $VenvDir; got {result!r}"
+    )
+
+
 def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
     """A slot-clean liveness check alone is check-then-act -- two concurrent
     installer invocations could both observe a clean slot (neither has

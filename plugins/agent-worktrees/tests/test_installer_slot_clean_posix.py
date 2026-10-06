@@ -160,7 +160,6 @@ set -uo pipefail
 LINK_DIR="{link_dir.as_posix()}"
 VENV_DIR="{venv_dir.as_posix()}"
 PATH="{fallback_bin.as_posix()}:$PATH"
-_bootstrap_python() {{
 {fn_body}
 }}
 _bootstrap_python exclude-venv-dir

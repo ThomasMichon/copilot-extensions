@@ -1259,7 +1259,12 @@ function Get-BootstrapPython {
        under inspection) -- in the current versioned-runtime wiring they
        are in fact always the same path -- so -ExcludeVenvDir must actively
        filter out any candidate that resolves to $VenvDir rather than
-       assuming $LinkDir alone is a safe stand-in. #>
+       assuming $LinkDir alone is a safe stand-in. This exclusion must also
+       cover the `py -3` launcher and `Get-ApplicationPath` PATH-search
+       fallbacks below, not just the initial $dirs candidates: if an
+       activated target venv has put its own `Scripts` directory on PATH,
+       either fallback could still resolve straight back into $VenvDir and
+       defeat the whole exclusion. #>
     param([switch]$ExcludeVenvDir)
     $dirs = if ($ExcludeVenvDir) { @($LinkDir) } else { @($VenvDir, $LinkDir) }
     foreach ($d in $dirs) {
@@ -1268,13 +1273,25 @@ function Get-BootstrapPython {
         $p = Join-Path $d 'Scripts\python.exe'
         if (Test-Path $p) { return $p }
     }
+    $venvFull = $null
+    if ($ExcludeVenvDir -and $VenvDir) {
+        $venvFull = [System.IO.Path]::GetFullPath($VenvDir).TrimEnd('\')
+    }
+    $isExcluded = {
+        param($candidate)
+        if (-not $venvFull -or -not $candidate) { return $false }
+        $candidateFull = [System.IO.Path]::GetFullPath($candidate)
+        return $candidateFull.StartsWith("$venvFull\", [StringComparison]::OrdinalIgnoreCase)
+    }
     if (Get-Command py -ErrorAction SilentlyContinue) {
         $result = Invoke-NativeCapture { & py -3 -c 'import sys; print(sys.executable)' }
-        if ($result.ExitCode -eq 0 -and $result.Output -and (Test-Path $result.Output)) {
+        if ($result.ExitCode -eq 0 -and $result.Output -and (Test-Path $result.Output) -and -not (& $isExcluded $result.Output)) {
             return $result.Output
         }
     }
-    return Get-ApplicationPath -Name @('python3', 'python')
+    $fallback = Get-ApplicationPath -Name @('python3', 'python')
+    if (& $isExcluded $fallback) { return $null }
+    return $fallback
 }
 
 function Get-PayloadHash {
