@@ -1040,7 +1040,12 @@ _ensure_runtime() {
             --package-dir "$pkg_dir" --plugin-dir "$PLUGIN_DIR" --git-dir "$repo_root" >/dev/null 2>&1 || true
     fi
 
-    deploy_binstub
+    # -- binstub (self-provisioning) -- moved to AFTER the versioned
+    # activation + supersession check below (not immediately after the
+    # build): a superseded (older, losing) invocation must not republish the
+    # shared binstub/resolver surface over whatever a newer, already-active
+    # build already published there -- same reasoning as the manifest/
+    # verify/PATH/pivot steps this guard already protects.
 
     # Versioned layout (#581): health-gate the freshly-built slot in isolation,
     # then swap the stable `.venv` symlink onto it. Everything below (manifest,
@@ -1089,6 +1094,11 @@ _ensure_runtime() {
             return 0
         fi
     fi
+
+    # -- binstub (self-provisioning) -- see the comment above the (now
+    # legacy-mode-only, versioned mode handled by the guard above) removed
+    # call site for why this runs here, after the supersession check.
+    deploy_binstub
 
     _write_manifest
 
@@ -1772,7 +1782,49 @@ do_stamp() {
     echo ''; echo '=== agent-dispatch stamp (defer runtime to first use) ==='; echo ''
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
+    # Serialized under the SAME global activation lock _versioned_activate/
+    # _ensure_runtime's own post-supersession-check deploy_binstub use: this
+    # fast, version-unaware stamp path has no version comparison of its own,
+    # but its deploy_binstub call still writes the identical shared
+    # binstub/resolver surface a concurrent real install/update's own
+    # (correctly version-ordered) deploy_binstub call writes -- without this
+    # lock the two writes could interleave with no defined winner at all.
+    local _stamp_lock_link=""
+    _unlock_stamp_binstub() {
+        if [[ -n "$_stamp_lock_link" ]]; then
+            local owner
+            owner="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
+            [[ "$owner" != "$$" ]] || rm -f "$_stamp_lock_link"
+        else
+            flock -u 8 2>/dev/null || true
+            exec 8>&- 2>/dev/null || true
+        fi
+    }
+    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
+        exec 8>"$INSTALL_DIR/.activate.lock"
+        flock 8
+    else
+        _stamp_lock_link="$INSTALL_DIR/.activate.lock.pid"
+        local owner
+        until ln -s "$$" "$_stamp_lock_link" 2>/dev/null; do
+            owner="$(readlink "$_stamp_lock_link" 2>/dev/null || true)"
+            if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+                sleep 1
+            elif ln -s "$$" "$_stamp_lock_link.reap" 2>/dev/null; then
+                if [[ "$(readlink "$_stamp_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
+                    rm -f "$_stamp_lock_link"
+                fi
+                rm -f "$_stamp_lock_link.reap"
+            elif [[ "$(readlink "$_stamp_lock_link.reap" 2>/dev/null || true)" =~ ^[0-9]+$ ]] &&
+                 ! kill -0 "$(readlink "$_stamp_lock_link.reap" 2>/dev/null)" 2>/dev/null; then
+                rm -f "$_stamp_lock_link.reap" 2>/dev/null || true
+            else
+                sleep 0.1
+            fi
+        done
+    fi
     deploy_binstub
+    _unlock_stamp_binstub
     _ok "Stamped: binstub on PATH; runtime provisions on first use."
 }
 

@@ -194,8 +194,17 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
                 # the next run's pid-guarded reap cleans it; its half-built slot
                 # has no completion marker, so it is tossed + rebuilt (retry).
                 # Deadline: <NAME>_INSTALL_DEADLINE_SEC, else
-                # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 480s; <=0 disables.
-                $__wdDeadline = 480
+                # COPILOT_PLUGIN_INSTALL_DEADLINE_SEC, else 650s (agent-dispatch-
+                # specific, raised from the generic 480s this boilerplate uses
+                # in every other plugin's own install.ps1 copy): this plugin's
+                # own cross-version activation/cutover lock
+                # ($script:GlobalActivationLockTimeoutSeconds) can legitimately
+                # make Install-Runtime wait up to ~450s for a concurrent
+                # invocation's real cutover to finish, ON TOP OF this
+                # invocation's own 30-120s build -- a genuine worst case near
+                # 570s that the generic 480s default would kill mid-wait,
+                # terminating a perfectly healthy newer install. <=0 disables.
+                $__wdDeadline = 650
                 $__wdEnvVar = (($__selfStageName -replace '[^A-Za-z0-9]+', '_').ToUpper()) + '_INSTALL_DEADLINE_SEC'
                 $__wdRaw = [Environment]::GetEnvironmentVariable($__wdEnvVar)
                 if (-not $__wdRaw) { $__wdRaw = $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC }
@@ -1691,8 +1700,12 @@ function Install-Runtime {
         Write-Warn "Build-info stamp skipped: $($_.Exception.Message)"
     }
 
-    # -- binstub (self-provisioning; #1393) --
-    Deploy-SelfProvisioningBinstub
+    # -- binstub (self-provisioning; #1393) -- moved to AFTER the versioned
+    # activation + supersession check below (not immediately after the
+    # build): a superseded (older, losing) invocation must not republish the
+    # shared binstub/resolver surface over whatever a newer, already-active
+    # build already published there -- same reasoning as the manifest/
+    # verify/PATH/pivot steps this guard already protects.
 
     # Versioned layout (#581): health-gate the freshly-built slot in isolation,
     # then swap the stable `.venv` link onto it. Everything below (manifest, task
@@ -1747,6 +1760,11 @@ function Install-Runtime {
             return
         }
     }
+
+    # -- binstub (self-provisioning; #1393) -- see the comment above the
+    # (now legacy-mode-only, versioned mode handled by the guard above)
+    # removed call site for why this runs here, after the supersession check.
+    Deploy-SelfProvisioningBinstub
     } finally {
         # Held through the health gate, completion marker, AND activation
         # above (not just the package build/install): a second same-version
@@ -3582,18 +3600,19 @@ function Invoke-Update {
         # Invoke-VersionedActivate itself uses to publish current-version,
         # across the ENTIRE coordinator reconciliation sequence below -- the
         # live re-check, the cutover attempt itself, AND the task
-        # reconciliation that follows (Install-CoordinatorTask, the
+        # reconciliation that follows (the boot-task refresh below, the
         # fallback Confirm-CoordinatorRunning start) -- not merely through
         # Invoke-CoordinatorCutover. Releasing it any earlier still leaves a
         # race: once this invocation's own cutover attempt returns (with
         # $didCutover possibly still $false), a NEWER invocation could
         # activate and complete its OWN cutover in the gap before this one
-        # reaches Install-CoordinatorTask -- whose existing-task path stops
-        # and restarts the task, potentially disrupting or duplicating the
-        # coordinator the newer cutover just promoted. A newer invocation's
-        # own Invoke-VersionedActivate call (needing this identical lock)
-        # cannot even start publishing its activation until this
-        # invocation's ENTIRE reconciliation sequence has finished and
+        # reaches the boot-task refresh below -- whose existing-task path
+        # stops and restarts the task, potentially disrupting or
+        # duplicating the coordinator the newer cutover just promoted. A
+        # newer invocation's own Invoke-VersionedActivate call (needing
+        # this identical lock) cannot even start publishing its activation
+        # until this invocation's ENTIRE reconciliation sequence has
+        # finished and
         # released it -- closing the window rather than merely narrowing
         # it. -TimeoutSeconds uses the shared floor every caller of this
         # identical mutex must honor (see $script:GlobalActivationLockTimeoutSeconds's
