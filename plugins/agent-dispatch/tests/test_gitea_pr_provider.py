@@ -733,8 +733,7 @@ def test_curl_failure_raises(monkeypatch):
 def test_curl_timeout_raises_sanitized_error_without_the_argv(monkeypatch):
     """A stalled Gitea request must not block the poll-path observation
     cycle indefinitely -- the call is bounded -- and the raised error
-    must never surface the raw argv, which carries the Authorization
-    header."""
+    must never echo back raw command metadata."""
     monkeypatch.setenv("GITEA_TOKEN", "super-secret-token")
 
     def runner(args, **kwargs):
@@ -747,6 +746,29 @@ def test_curl_timeout_raises_sanitized_error_without_the_argv(monkeypatch):
     with pytest.raises(RuntimeError, match="timed out") as exc_info:
         adapter.fetch_pr("gitea.example.com/example/project", 1)
     assert "super-secret-token" not in str(exc_info.value)
+
+
+def test_token_is_never_passed_as_a_literal_argv_element(monkeypatch):
+    """curl's argv is visible to any same-host process inspection (e.g.
+    /proc/<pid>/cmdline) for the entire lifetime of the request -- the
+    API token must travel via stdin (curl's `-H @-` header-from-file
+    convention), never as a literal command-line argument."""
+    monkeypatch.setenv("GITEA_TOKEN", "super-secret-token")
+    seen_inputs = []
+
+    def runner(args, **kwargs):
+        assert not any("super-secret-token" in str(arg) for arg in args)
+        seen_inputs.append(kwargs.get("input"))
+        return _status(json.dumps({"login": "review-bot"}), 200)
+
+    adapter = GiteaPRAdapter(
+        "review-bot", runner=runner, api_bases={"gitea.example.com": "https://gitea.example.com"},
+    )
+    adapter._call("https://gitea.example.com", "GET", "/user")
+    assert any(
+        inp is not None and "Authorization: token super-secret-token" in inp
+        for inp in seen_inputs
+    )
 
 
 def test_http_error_status_raises(monkeypatch):

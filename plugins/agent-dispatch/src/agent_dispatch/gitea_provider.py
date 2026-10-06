@@ -85,7 +85,13 @@ class GiteaProvider:
     ) -> tuple[int, str]:
         args = [
             "curl", "-sS", "-X", method, f"{self.api_base}/api/v1{path}",
-            "-H", f"Authorization: token {self._token()}",
+            # The Authorization header is read from stdin (`@-`), not
+            # passed as a literal argv element: curl's argv is visible to
+            # any same-host process inspection (e.g. /proc/<pid>/cmdline)
+            # for the entire lifetime of the request, which a token
+            # embedded directly in `-H` would expose. Sanitizing a raised
+            # TimeoutExpired alone would not have closed that window.
+            "-H", "@-",
             "-H", "Accept: application/json",
             "-w", "\n%{http_code}",
         ]
@@ -94,11 +100,13 @@ class GiteaProvider:
         try:
             completed = self.runner(
                 args, check=False, capture_output=True, text=True, timeout=120,
+                input=f"Authorization: token {self._token()}\n",
             )
         except subprocess.TimeoutExpired:
-            # TimeoutExpired retains and formats the complete argv, which
-            # includes the Authorization header -- never let that secret-
-            # bearing command metadata surface in a raised error.
+            # TimeoutExpired retains and formats the complete argv --
+            # never let that command metadata surface in a raised error
+            # (the token itself no longer travels via argv at all, above,
+            # but the argv is still not something to echo back verbatim).
             raise RuntimeError(
                 "Gitea operation failed: request timed out after 120s"
             ) from None
