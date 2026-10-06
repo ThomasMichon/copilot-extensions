@@ -318,3 +318,25 @@ then rather than assuming either answer.
   cutover/immutable-runtime angle `#5356` originally surfaced. A future
   slice should widen Phase 3 to the rest of the invariant list before
   calling it fully done.
+
+### 2026-10-06 — Fix-direction correction: point at the existing `dev` slot
+- The operator flagged, after PR #5469 merged, that the fix direction in
+  `#5472`/`#5468` ("port `agent-pull-requests`' refusal pattern") was
+  incomplete: a refusal alone leaves no sanctioned fast inner loop for
+  genuine same-version iteration, and a separately-corrupted (not just
+  content-mismatched) slot needs its own repair story — stop, delete the
+  whole slot, rebuild fresh at the same version, never patch in place.
+- This repo already has exactly the mechanism the operator described:
+  `efforts/active/mutable-dev-slot/` (design doc
+  `docs/patterns/mutable-dev-slot.md`) built a protected, claim-gated,
+  genuinely mutable `versions/dev` slot per plugin for precisely this case
+  — piloted on `agent-codespaces`, not yet rolled out to the other 11
+  vendoring plugins (its own Phase 3, previously unprioritized).
+- Added the operator's corruption-repair guidance as a new doc section
+  (*Repairing a broken numbered slot is a delete, never an edit*) and an
+  *Ordinary installers* refusal-guard section to
+  `docs/patterns/mutable-dev-slot.md`; updated `#5472`/`#5468` to point at
+  both; prioritized `mutable-dev-slot`'s Phase 3 rollout list with the
+  specific plugins this audit found. This is a fix-direction correction
+  only — the Phase 3 conformance table and classifications above are
+  unchanged.

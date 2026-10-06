@@ -123,6 +123,23 @@ for the full design.
       vendoring `versioned_runtime.py` (see `tools/sync-versioned-runtime.py`'s
       target list) as their own installers need it -- not a mandatory
       blanket rollout on day one.
+- [ ] **Prioritize the plugins a separate invariant audit
+      (`ThomasMichon/copilot-extensions#5472`, `#5468`,
+      `efforts/active/vision-backport-sweep/`) found still silently
+      mutating a completed numbered slot in place for a same-version,
+      changed-content update — exactly the anti-pattern this whole effort
+      exists to replace.** These need BOTH the ordinary-installer refusal
+      guard (see `docs/patterns/mutable-dev-slot.md`'s new *Ordinary
+      installers* section) AND a wired `dev`/`dev-release` verb pair as the
+      sanctioned alternative, not just one or the other:
+      `agent-dispatch` (`#5356`), `agent-vault`, `agent-worktrees`,
+      `agent-mcp`, `agent-index`, `agent-bridge`, `agent-logger`,
+      `agent-ssh`, `agent-containers`, `agent-machines`. (`agent-codespaces`
+      is the Phase 2 pilot, already wired for `dev`/`dev-release`, but per
+      that same audit still needs the ordinary-installer refusal guard
+      layered on top -- the two are independent, and wiring one does not
+      imply the other.) `agent-pull-requests` already has the refusal guard
+      but has not adopted `dev`/`dev-release`.
 
 ## Validation Plan
 
@@ -142,6 +159,21 @@ for the full design.
       this worktree mid-effort.
 
 ## Journal
+
+### 2026-10-06 — Cross-linked from a separate invariant audit
+- A separate `vision-backport-sweep` effort's design/service-invariant
+  audit (`ThomasMichon/copilot-extensions#5472`, `#5468`) independently
+  found that almost every `agent-*` plugin's ordinary `install`/`update`
+  path still silently mutates a completed numbered slot in place for a
+  same-version, changed-content update -- the exact anti-pattern this
+  effort's `dev`/`dev-release` mechanism exists to replace, still reachable
+  because no plugin's ordinary path *refuses* it. Added two new sections to
+  `docs/patterns/mutable-dev-slot.md` (*Ordinary installers: refuse, never
+  silently mutate a numbered slot*, and *Repairing a broken numbered slot is
+  a delete, never an edit* -- the latter per an operator design note: a
+  genuinely corrupted slot is stopped, deleted whole, and rebuilt fresh at
+  the same version, never patched in place) and prioritized Phase 3's
+  rollout list with the specific plugins that audit identified.
 
 ### 2026-09-23 — Phase 1 landed
 - Core primitive, tests, GC protection, finalize warning hook, and design

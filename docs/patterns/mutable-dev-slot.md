@@ -193,6 +193,81 @@ file format every adopting plugin commits to.
   `current`-protection logic would let a routine GC destroy an in-progress,
   claimed, but not-yet-activated dev build.
 
+## Ordinary installers: refuse, never silently mutate a numbered slot
+
+`dev` existing as a protected, claim-gated mutable home does not by itself
+stop a plugin's ordinary `install`/`update` path from still rebuilding a
+numbered slot in place when it happens to target the *same version string*
+with changed content (the exact anti-pattern `dev` exists to replace) — the
+two are independent unless an installer explicitly wires them together. An
+audit across this repo's own vendoring plugins
+(`ThomasMichon/copilot-extensions#5472`, `#5468`) found most installers
+still silently rewrite a completed numbered slot in this case — some of
+them racing a live daemon's open file handles in the process, which is a
+correctness bug on top of the immutability violation.
+
+**The required behavior for every plugin's ordinary installer path:**
+
+- If the target version's slot does not exist yet, build it — ordinary,
+  unremarkable first install.
+- If the target version's slot exists, is marked complete, and its recorded
+  payload hash matches the current source tree, this is a true no-op:
+  activate it (or leave it active) and do nothing else — never re-run the
+  package install step "just in case."
+- If the target version's slot exists, is marked complete, but its payload
+  hash does **not** match the current source tree (the dev-iteration
+  anti-pattern: same version string, genuinely different content), **refuse**
+  — exit non-zero with a message naming the mismatch and pointing at `dev`/
+  `dev-release` as the correct path for iterating without a version bump.
+  `agent-pull-requests`' installer (`install.ps1`) is the reference
+  implementation of this refusal. A `--force` override must not bypass this
+  check; forcing a rebuild over a live, completed slot is exactly what this
+  guard exists to prevent, not an escape hatch from it.
+
+This refusal is what actually closes the loop `dev` opened: without it, a
+contributor (or an impatient automation) can still reach for "just run
+install.ps1 again" and silently re-trigger the old hot-patch-equivalent
+hazard against a numbered slot, bypassing `dev` entirely.
+
+## Repairing a broken numbered slot is a delete, never an edit
+
+A numbered slot can end up broken at runtime despite having a seemingly
+valid completion marker — a partial write survived a crash in a way
+`is_complete()`'s marker+hash check didn't catch, a dependency's own cache
+corrupted independently of this plugin's payload, or a Windows file-lock
+timeout left a half-updated interpreter. This is a **distinct case** from
+the ordinary refuse-on-mismatch above: the payload hash may still match (so
+the ordinary no-op/refuse logic sees nothing wrong), yet the slot is
+provably unhealthy by a direct check (an import smoke-test, a health
+endpoint, a corrupted trampoline).
+
+Recovering from this is explicitly **not** a routine update, and must not
+be handled by patching files inside the existing directory — that is
+editing an immutable slot in place by another name, just triggered by a
+health check instead of a version bump. The correct repair sequence is:
+
+1. **Confirm the slot is genuinely broken** via a direct check (import
+   smoke-test, signature/trampoline validation, a declared health probe) —
+   never assume brokenness from an absent marker alone; `toss_incomplete()`
+   already handles the markerless case.
+2. **Stop whatever is live on that slot first**, if anything — the same
+   daemon-stop step an ordinary cutover would use, since the slot is about
+   to be destroyed out from under it.
+3. **Delete the entire slot directory**, not selected files within it — a
+   partial, surgical patch cannot prove it removed every trace of whatever
+   corrupted the slot in the first place.
+4. **Rebuild fresh at the same version number**, exactly as a first install
+   would, then re-run the completion marker + health gate before
+   activating.
+
+Because this sequence razes and rebuilds the whole directory rather than
+editing any file in it, it satisfies `immutable-versioned-runtime` by
+construction — a repaired slot is a **new build that happens to share its
+predecessor's version number**, not a mutation of the old one. Treat it as
+a rare, logged, operator-visible event (this is infrastructure self-repair,
+not silent-and-routine), distinct from both the ordinary install/update
+path above and from `dev`'s deliberately-mutable, claim-gated exception.
+
 ## Rationale
 
 The instinct this pattern satisfies is exactly the durable-vs-versioned
@@ -217,6 +292,11 @@ adding a second, uncontrolled mutability posture to the runtime.
 - `plugins/agent-worktrees/src/agent_worktrees/finalize.py` --
   `_warn_of_dev_slot_claims_for_worktree`.
 - `efforts/active/mutable-dev-slot/README.md` — rollout status per plugin.
+- `ThomasMichon/copilot-extensions#5472` / `#5468` — the audit that found
+  most vendoring plugins' ordinary install/update path still mutates a
+  numbered slot in place for a same-version, changed-content update,
+  motivating this doc's *Ordinary installers* and *Repairing a broken
+  numbered slot* sections.
 - `CONTRIBUTING.md`'s *Hot-patching a deployed venv for fast pre-merge
   iteration* gotcha — the ad hoc technique this pattern is meant to
   eventually supersede once a plugin adopts `dev-claim`/`dev-release`.
