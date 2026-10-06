@@ -17,6 +17,17 @@ from . import config as cfg
 #: block a shutdown indefinitely (2026-09-26 PR review finding).
 _TRACKING_WRITE_SHUTDOWN_GRACE_S = 10.0
 
+#: Bounded grace period the promotion control action waits to acquire the
+#: ownership lease still held by its predecessor. A cutover publishes the
+#: new (passive-spawned) monitor as active BEFORE retiring the old one
+#: (`docs/patterns/graceful-daemon-cutover.md`'s publish-then-retire
+#: sequencing), so promotion can briefly race a predecessor that is still
+#: alive and holding the lease -- a real, expected overlap, not a genuine
+#: duplicate. The predecessor's own shutdown is just a process exit (the
+#: lease auto-releases the instant it does), so this only needs to cover
+#: that brief in-flight window, not anything open-ended.
+_PROMOTION_LEASE_GRACE_S = 10.0
+
 #: Same bounded-grace discipline, applied to the self-retire path itself.
 #: Once this daemon observes a live, strictly-newer generation has taken over
 #: (self_retire.is_superseded), it stops admitting new work and should exit
@@ -224,14 +235,53 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     # number of concurrent callers racing the same name, exactly one ever
     # wins -- every loser raises immediately here, never reaching the
     # expensive setup below, let alone running to completion.
-    _lease = None
-    if not passive_mode:
+    #
+    # Deliberately a SEPARATE file from `lock` (`status-monitor.lock`, the
+    # metadata channel written below): `SingleInstance.acquire()` writes its
+    # own pid bytes into the first 20 bytes of whatever file it locks, and
+    # `_locks.write_lock()` separately replaces `lock`'s entire contents with
+    # JSON metadata -- sharing one path means either write corrupts the
+    # other, and on POSIX a metadata replace (a new inode at the same path)
+    # strands the held flock on the OLD inode, silently defeating the gate
+    # for the next contender that opens the replacement (review finding,
+    # PR #5412).
+    _OWNERSHIP_LEASE_NAME = "status-monitor-singleton.lock"
+
+    def _acquire_ownership_lease(*, wait_s: float = 0.0):
+        """Acquire the atomic exclusivity lease, optionally retrying for up
+        to ``wait_s`` seconds. Returns the held lease, or ``None`` if it
+        could not be acquired within the budget (immediately, when
+        ``wait_s`` is 0). A nonzero ``wait_s`` exists only for the
+        promotion path below: a cutover's publish-then-retire sequencing
+        (`docs/patterns/graceful-daemon-cutover.md`) means a newly-promoted
+        successor can briefly race its still-live predecessor for this same
+        lease -- a real, expected overlap, not a genuine duplicate -- so
+        promotion gets a bounded grace period for that predecessor's
+        in-flight shutdown to complete and release it, instead of either
+        failing promotion outright or (far worse) silently skipping the
+        lease and reintroducing the exact race this gate exists to close.
+        """
         from single_instance_lease import AlreadyRunningError, SingleInstance
 
-        _lease = SingleInstance(status_monitor_runtime._aw_runtime_home(), service="status-monitor")
-        try:
-            _lease.acquire()
-        except AlreadyRunningError:
+        deadline = time.monotonic() + wait_s
+        while True:
+            lease = SingleInstance(
+                status_monitor_runtime._aw_runtime_home(),
+                service="status-monitor",
+                lock_name=_OWNERSHIP_LEASE_NAME,
+            )
+            try:
+                lease.acquire()
+                return lease
+            except AlreadyRunningError:
+                if time.monotonic() >= deadline:
+                    return None
+                time.sleep(0.2)
+
+    _lease = None
+    if not passive_mode:
+        _lease = _acquire_ownership_lease()
+        if _lease is None:
             return 0
 
     if _other_current_monitor():
@@ -553,7 +603,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     max_empty_strikes = 3
 
     def _handle_control(action: str, payload: dict) -> dict:
-        nonlocal admission_closed, published_lock
+        nonlocal admission_closed, published_lock, _lease
         if action == "health":
             return {
                 "status": "draining" if admission_closed else "ready",
@@ -561,6 +611,19 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 "pid": os.getpid(),
             }
         if action == "promote":
+            if _lease is None:
+                # Started passive (per graceful-daemon-cutover etiquette: a
+                # passive instance must not seize shared singletons until
+                # promoted) and has never held the lease -- acquire it now,
+                # tolerating the predecessor's brief in-flight shutdown.
+                _lease = _acquire_ownership_lease(wait_s=_PROMOTION_LEASE_GRACE_S)
+                if _lease is None:
+                    return {
+                        "adopted": False,
+                        "error": "could not acquire the ownership lease -- a "
+                        "predecessor appears to still be live past the "
+                        "promotion grace period",
+                    }
             with state_lock:
                 _cleanup_retired_request_surfaces()
                 published_lock = True

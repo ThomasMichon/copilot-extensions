@@ -131,6 +131,51 @@ def test_status_monitor_passive_mode_skips_the_lease_entirely(monkeypatch):
     assert constructed == [], "passive mode must not construct a SingleInstance at all"
 
 
+def test_status_monitor_lease_does_not_collide_with_metadata_file(tmp_path):
+    """Real-interaction regression for a High-severity review finding
+    (PR #5412): the ownership lease and the pre-existing metadata lock file
+    must be genuinely separate files. `SingleInstance.acquire()` writes its
+    own pid bytes into the first bytes of whatever file it locks, and
+    `_locks.write_lock()` separately replaces its target file's entire
+    contents via `os.replace` (a new inode at the same path) -- sharing one
+    path would have either write corrupt the other, and on POSIX a metadata
+    replace would strand the held flock on the old inode, silently
+    defeating the gate for the next contender that opens the replacement.
+    No mocking of `single_instance_lease` here -- this exercises the real
+    primitive against a real temp directory, exactly as the review
+    requested."""
+    lease = single_instance_lease.SingleInstance(
+        tmp_path, service="status-monitor", lock_name="status-monitor-singleton.lock"
+    )
+    lease.acquire()
+    try:
+        metadata_path = tmp_path / "status-monitor.lock"
+        assert metadata_path != lease.lock_path, "lease and metadata must be distinct files"
+
+        # Metadata writes (and the repeated os.replace churn a live monitor
+        # does on every sweep) must never disturb the held lease.
+        assert m.locks.write_lock(metadata_path, extra={"prefix": "/fake", "mux": True})
+        data = m.locks.read_lock(metadata_path)
+        assert data is not None and data["prefix"] == "/fake", "metadata must survive acquisition"
+
+        # A second attempt on the SAME lease name, while the first is held,
+        # must be rejected -- the actual exclusivity guarantee under test.
+        contender = single_instance_lease.SingleInstance(
+            tmp_path, service="status-monitor", lock_name="status-monitor-singleton.lock"
+        )
+        with pytest.raises(single_instance_lease.AlreadyRunningError):
+            contender.acquire()
+
+        # ... and a further metadata write/read after the contention attempt
+        # must still work -- proving the earlier replace never touched the
+        # lease's inode.
+        assert m.locks.write_lock(metadata_path, extra={"prefix": "/fake2", "mux": False})
+        data2 = m.locks.read_lock(metadata_path)
+        assert data2 is not None and data2["prefix"] == "/fake2"
+    finally:
+        lease.release()
+
+
 def test_resident_lifecycle_requests_wait_for_their_deadline():
     assert m._resident_hook_lock_timeout("sessionStart", 4.75) == 3.75
     assert m._resident_hook_lock_timeout("sessionStart", 0.75) == 0.0
