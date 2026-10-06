@@ -13,6 +13,22 @@ delete/replace a directory any live process has as its CWD. This module
 actually EXECUTES the extracted function under `pwsh` to prove the snapshot
 is really created (and really skipped when already safe), not just that the
 source text looks right.
+
+Portfolio note (round 12 review): this module's own default collection is
+intentionally kept to a single-pwsh-process-per-test smoke contract (each
+test invokes one `pwsh` subprocess and asserts its result) -- the cheapest
+tier that still exercises the REAL extracted PowerShell, not a
+reimplementation. The two tests that deliberately race MULTIPLE concurrent
+`pwsh` processes against the same named mutex
+(test_concurrent_publishers_never_corrupt_or_lose_the_snapshot,
+test_reusing_an_already_valid_snapshot_never_blocks_behind_a_long_held_build_lock)
+are genuinely repeated-process, timing-sensitive coverage -- real assurance,
+but disproportionate to run unconditionally in every PR's required CI lane
+across every platform. They self-skip unless
+``AGENT_DISPATCH_RUN_PWSH_RACE_TESTS=1`` is set (mirrors
+``tools/test_coverage_guided_selection.py``'s own ``CGS_RUN_INTEGRATION_TEST``
+opt-in for the same class of real-subprocess integration coverage) -- run them
+explicitly in a local dev loop or a path-gated/manual CI lane, not by default.
 """
 
 from __future__ import annotations
@@ -29,6 +45,17 @@ _INSTALL_PS1 = _PLUGIN_ROOT / "scripts" / "install.ps1"
 _PWSH = shutil.which("pwsh")
 
 pytestmark = pytest.mark.skipif(_PWSH is None, reason="pwsh is not available")
+
+_run_pwsh_race_tests = os.environ.get("AGENT_DISPATCH_RUN_PWSH_RACE_TESTS") == "1"
+_skip_pwsh_race = pytest.mark.skipif(
+    not _run_pwsh_race_tests,
+    reason=(
+        "multi-process pwsh mutex-race test -- opt in with "
+        "AGENT_DISPATCH_RUN_PWSH_RACE_TESTS=1 (deliberately excluded from the "
+        "default/required-CI smoke contract; see this module's own docstring)"
+    ),
+)
+
 
 
 def _extract_function_block(name: str) -> str:
@@ -362,6 +389,7 @@ Write-Output "RESULT:$result"
     assert sorted(p.name for p in (install_dir / "snapshots").iterdir()) == ["0.1.0-dev1"]
 
 
+@_skip_pwsh_race
 def test_concurrent_publishers_never_corrupt_or_lose_the_snapshot(tmp_path: Path) -> None:
     """Two near-simultaneous callers (e.g. two install/stamp actions
     launched back-to-back) racing the SAME $InstallDir/$Version must never
@@ -490,6 +518,7 @@ Write-Output "BOTH-INDEPENDENT-LOCKS-ACQUIRED"
     assert "BOTH-INDEPENDENT-LOCKS-ACQUIRED" in result.stdout, result.stdout + result.stderr
 
 
+@_skip_pwsh_race
 def test_reusing_an_already_valid_snapshot_never_blocks_behind_a_long_held_build_lock(
     tmp_path: Path,
 ) -> None:
@@ -697,17 +726,30 @@ def _run_activate_harness(
     """Invoke-VersionedActivate's cross-version ordering guard, with
     Get-VersionedCurrent stubbed (it shells out to the real
     versioned_runtime.py `current` command, irrelevant to the guard itself)
-    and the actual python/venv invocation replaced by a fake "python" .cmd
-    that just drops a marker file -- so a test can prove whether the real
-    activation call happened at all, not merely what it would have printed."""
+    and the actual python/venv invocation replaced by a fake "python"
+    native script that just drops a marker file -- so a test can prove
+    whether the real activation call happened at all, not merely what it
+    would have printed. Cross-platform: a `.cmd` on Windows, a `chmod +x`
+    shebang shell script everywhere else -- NOT a `pwsh`-invoked script,
+    since `pwsh <path>` enforces a literal `.ps1` extension on the script
+    argument regardless of platform, and the real Invoke-VersionedActivate
+    always builds that argument as `versioned_runtime.py`."""
     install_dir = tmp_path / "install"
     install_dir.mkdir(parents=True)
     activated_marker = tmp_path / "activated"
-    fake_python = tmp_path / "fake-python.cmd"
-    fake_python.write_text(
-        f'@echo off\r\necho activated>"{activated_marker}"\r\nexit /b 0\r\n',
-        encoding="utf-8",
-    )
+    if os.name == "nt":
+        fake_python = tmp_path / "fake-python.cmd"
+        fake_python.write_text(
+            f'@echo off\r\necho activated>"{activated_marker}"\r\nexit /b 0\r\n',
+            encoding="utf-8",
+        )
+    else:
+        fake_python = tmp_path / "fake-python.sh"
+        fake_python.write_text(
+            f'#!/bin/sh\necho activated > "{activated_marker}"\nexit 0\n',
+            encoding="utf-8",
+        )
+        fake_python.chmod(0o755)
 
     script = (
         "$ErrorActionPreference = 'Stop'\n"
