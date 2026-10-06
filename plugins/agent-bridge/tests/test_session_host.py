@@ -13,10 +13,12 @@ import asyncio
 import contextlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
 import time
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -846,7 +848,7 @@ def test_crash_tail_capture_closes_stream_on_eof():
     """The drain thread must close its own stream once it reaches EOF, or
     a successful launch (whose HostHandle keeps the Popen object, and so
     this stream, alive for the host's full lifetime) leaks a frontend file
-    descriptor per launch (#5487 review)."""
+    descriptor per launch."""
     r, w = os.pipe()
     stream = os.fdopen(r, "rb")
     launcher._CrashTailCapture(stream)
@@ -906,8 +908,7 @@ def test_crash_tail_capture_wait_until_drained_blocks_for_final_bytes():
     """``wait_until_drained`` must block until the drain thread has actually
     consumed a delayed final write + EOF, not return based on ``poll()``
     alone -- otherwise a reader could observe the process as exited while
-    its last (often most diagnostic) bytes are still in flight (#5487
-    review)."""
+    its last (often most diagnostic) bytes are still in flight."""
     r, w = os.pipe()
     stream = os.fdopen(r, "rb")
     tail = launcher._CrashTailCapture(stream)
@@ -963,7 +964,7 @@ def test_launch_session_host_surfaces_crash_tail(tmp_path, monkeypatch):
 def test_launch_session_host_timeout_kills_hung_process(tmp_path, monkeypatch):
     """A host that neither becomes ready nor exits within ``ready_timeout``
     must be killed rather than left running (leaking a hung process, its
-    capture thread, and its pipe file descriptor) (#5487 review)."""
+    capture thread, and its pipe file descriptor)."""
     hang_script = tmp_path / "hang.py"
     hang_script.write_text(
         "import sys, time\n"
@@ -1004,7 +1005,7 @@ def test_kill_host_process_tree_kills_whole_posix_group(tmp_path, monkeypatch):
     """``_kill_host_process_tree`` must reach an already-spawned grandchild
     too, not just the host pid -- ``PR_SET_PDEATHSIG`` (used elsewhere to tie
     a copilot child to its host) is Linux-only, so macOS/other POSIX would
-    orphan that child if only the host pid were killed (#5487 review)."""
+    orphan that child if only the host pid were killed."""
     marker = tmp_path / "grandchild-pid.txt"
     script = tmp_path / "group_probe.py"
     script.write_text(
@@ -1023,6 +1024,10 @@ def test_kill_host_process_tree_kills_whole_posix_group(tmp_path, monkeypatch):
         [sys.executable, str(script)], start_new_session=True,
     )
     try:
+        from zdd.diagnostics import process_start_time
+
+        expected_identity = process_start_time(proc.pid)
+
         for _ in range(100):
             if marker.exists() and marker.read_text().strip():
                 break
@@ -1032,7 +1037,7 @@ def test_kill_host_process_tree_kills_whole_posix_group(tmp_path, monkeypatch):
         child_pid = int(marker.read_text().strip())
 
         monkeypatch.setattr(launcher, "contained_test_mode", lambda: False)
-        launcher._kill_host_process_tree(proc)
+        launcher._kill_host_process_tree(proc, expected_identity)
         proc.wait(timeout=5)
 
         for _ in range(100):
@@ -1047,12 +1052,109 @@ def test_kill_host_process_tree_kills_whole_posix_group(tmp_path, monkeypatch):
         proc.kill()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX process-group semantics only",
+)
+class TestKillHostProcessTreeIdentityGuard:
+    """Direct, mocked tests of ``_kill_host_process_tree``'s POSIX identity-
+    verification gate -- this repository's PID-destruction rule requires a
+    dedicated mismatch/refusal unit test (mirrors
+    ``TestKillTreeIdentityGuard`` in ``test_local_cache_refresh.py``), not
+    just the real end-to-end descendant regression above (which only proves
+    the happy identity path)."""
+
+    def test_refuses_to_signal_without_an_established_baseline(
+        self, monkeypatch,
+    ) -> None:
+        """``expected_identity is None`` must fail closed -- the universal
+        case on any POSIX platform with no identity backend at all (macOS:
+        ``process_start_time`` always returns ``None`` there), not just a
+        transient miss. Never trust an unverified numeric pid."""
+        killpg_calls = []
+        monkeypatch.setattr(
+            os, "killpg", lambda pgid, sig: killpg_calls.append(pgid),
+        )
+        monkeypatch.setattr(
+            launcher, "contained_test_mode", lambda: False,
+        )
+        monkeypatch.setattr(
+            "zdd.diagnostics.process_start_time", lambda pid: None,
+        )
+
+        proc = MagicMock()
+        proc.pid = 4321
+        proc.kill = MagicMock()
+
+        launcher._kill_host_process_tree(proc, None)
+
+        assert killpg_calls == [], (
+            "os.killpg was called with no established identity baseline -- "
+            "the fail-closed guard did not hold"
+        )
+        proc.kill.assert_called_once()
+
+    def test_refuses_to_signal_on_a_confirmed_identity_mismatch(
+        self, monkeypatch,
+    ) -> None:
+        """A live, differing identity at the same numeric pid means the pid
+        has been recycled by an unrelated process -- refuse the signal
+        outright."""
+        killpg_calls = []
+        monkeypatch.setattr(
+            os, "killpg", lambda pgid, sig: killpg_calls.append(pgid),
+        )
+        monkeypatch.setattr(
+            launcher, "contained_test_mode", lambda: False,
+        )
+        monkeypatch.setattr(
+            "zdd.diagnostics.process_start_time",
+            lambda pid: "a-different-identity",
+        )
+
+        proc = MagicMock()
+        proc.pid = 4321
+        proc.kill = MagicMock()
+
+        launcher._kill_host_process_tree(proc, "the-original-identity")
+
+        assert killpg_calls == [], (
+            "os.killpg was called despite a confirmed identity mismatch"
+        )
+        proc.kill.assert_called_once()
+
+    def test_signals_when_identity_is_established_and_not_contradicted(
+        self, monkeypatch,
+    ) -> None:
+        """The common, expected-to-succeed case: a real baseline was
+        captured and the current occupant of that pid still matches it."""
+        killpg_calls = []
+        monkeypatch.setattr(
+            os, "killpg", lambda pgid, sig: killpg_calls.append((pgid, sig)),
+        )
+        monkeypatch.setattr(
+            launcher, "contained_test_mode", lambda: False,
+        )
+        monkeypatch.setattr(
+            "zdd.diagnostics.process_start_time",
+            lambda pid: "the-original-identity",
+        )
+
+        proc = MagicMock()
+        proc.pid = 4321
+        proc.kill = MagicMock()
+
+        launcher._kill_host_process_tree(proc, "the-original-identity")
+
+        assert killpg_calls == [(4321, signal.SIGKILL)]
+        proc.kill.assert_not_called()
+
+
 def test_detach_stdio_from_frontend_closes_frontend_pipe(tmp_path):
     """Once the host calls ``_detach_stdio_from_frontend``, the frontend's
     crash-tail pipe must see EOF (its write end closed) instead of staying
     open for the host's full lifetime -- a host that outlives a later
-    frontend exit/restart must never depend on that pipe still being read
-    (#5487 review). The child stays alive well past the detach so EOF can
+    frontend exit/restart must never depend on that pipe still being read.
+    The child stays alive well past the detach so EOF can
     only have come from the dup2 itself, not from process exit (otherwise
     the test would pass even if the detach did nothing)."""
     script = tmp_path / "detach_probe.py"

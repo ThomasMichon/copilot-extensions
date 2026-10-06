@@ -140,7 +140,9 @@ def host_spawn_kwargs() -> dict[str, Any]:
     return windowless_daemon_kwargs(breakaway=True)
 
 
-def _kill_host_process_tree(proc: subprocess.Popen) -> None:
+def _kill_host_process_tree(
+    proc: subprocess.Popen, expected_identity: str | None,
+) -> None:
     """Kill a spawned-but-never-ready host, reaching its whole tree on POSIX.
 
     :func:`host_spawn_kwargs` gives the host ``start_new_session=True`` (its
@@ -154,14 +156,37 @@ def _kill_host_process_tree(proc: subprocess.Popen) -> None:
     already spawned before the timeout; ``os.killpg`` reaches the whole
     group in one call. Windows has no equivalent process-group concept
     here; ``proc.kill()`` (``TerminateProcess``) is used directly.
+
+    This repository's PID-destruction rule (see
+    ``local_cache_refresh._kill_tree``, which this mirrors) requires
+    identity verification before any destructive termination by numeric id,
+    since an exited pid is eventually reusable by an unrelated process.
+    ``expected_identity`` is ``process_start_time(proc.pid)`` captured
+    immediately after spawn; a ``None`` baseline -- either no identity
+    backend at all for this platform (macOS has none) or a miss at spawn
+    time -- fails this check closed, same as a confirmed, live, differing
+    identity at that pid: neither signals the group, only
+    ``proc.kill()`` (the single, still-held ``Popen`` handle, never
+    re-resolved by numeric id) runs.
     """
     if sys.platform != "win32" and not contained_test_mode():
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-            return
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
+        from zdd.diagnostics import process_start_time
+
+        current_identity = process_start_time(proc.pid)
+        identity_established = expected_identity is not None
+        identity_mismatch = (
+            identity_established
+            and current_identity is not None
+            and current_identity != expected_identity
+        )
+        if identity_established and not identity_mismatch:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+                return
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
     proc.kill()
+
 
 
 @dataclass
@@ -244,9 +269,17 @@ def launch_session_host(
         **host_spawn_kwargs(),
     )
     crash_tail = _CrashTailCapture(proc.stdout)
+    expected_identity: str | None = None
+    if sys.platform != "win32" and not contained_test_mode():
+        from zdd.diagnostics import process_start_time
+
+        # Captured immediately after spawn, before any reaping could occur
+        # -- the baseline _kill_host_process_tree verifies against if a
+        # ready-timeout later needs to kill this process's group.
+        expected_identity = process_start_time(proc.pid)
 
     deadline = time.time() + ready_timeout
-    while time.time() < deadline:
+    while True:
         if proc.poll() is not None:
             # The process has exited, but the OS pipe may still hold bytes
             # the drain thread hasn't consumed yet -- wait for it to reach
@@ -274,13 +307,20 @@ def launch_session_host(
                     protocol_version=int(data.get("protocol_version",
                                                   proto.PROTOCOL_VERSION)),
                 )
+        if time.time() >= deadline:
+            # Recheck exit/readiness one more time right at the boundary
+            # (above) before giving up -- the final sleep below can cross
+            # the deadline after the host already published a complete
+            # ready-state file or exited, and without this re-check that
+            # publication would be ignored and a now-ready host killed.
+            break
         time.sleep(0.05)
 
     # The host neither became ready nor exited within the deadline -- stop
     # waiting on it rather than leaking a hung process (and anything it
     # already spawned), an unbounded-lifetime daemon thread, and its pipe
     # file descriptor.
-    _kill_host_process_tree(proc)
+    _kill_host_process_tree(proc, expected_identity)
     try:
         proc.wait(timeout=5.0)
     except subprocess.TimeoutExpired:
