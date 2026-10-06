@@ -349,6 +349,91 @@ and ordering before Phase 0 work begins.)_
 - [ ] If validation does not hold: record exactly which track failed and
       why, and leave every contested vision's current language untouched.
 
+### Phase 6 — ACP fidelity investigation (idle / background-task state)
+
+Forward-looking, **not a gate on Phase 5's default-promotion decision** for
+this effort's current narrow scope — captured here because it directly
+feeds Validation Plan track (d)'s side-by-side ACP comparison and because
+the underlying gap is real and already evidenced (see Journal entry below).
+Confirmed fact set this phase starts from: `agent-remote-driver`'s SDK-based
+path gets the Copilot SDK's own typed `assistant.idle` / `session.idle` /
+`subagent.started|completed|failed` / `session.background_tasks_changed`
+events for free (it forwards the raw event stream verbatim). The ACP path
+`agent-bridge` actually drives (`plugins/agent-bridge/src/agent_bridge/acp_client.py`)
+does not surface this — ACP extensions do NOT load in ACP-mode sessions, and
+`agent-bridge`'s own receiver side (`_BridgeClientImpl.session_update(self,
+session_id, update, **kwargs)`) silently **discards** `**kwargs` entirely,
+so even an already-present `_meta` payload on the wire would currently be
+thrown away unobserved. This is a confirmed **client-observability gap**,
+not proof that the wire traffic itself carries nothing — without a packet
+capture or the (closed-source) ACP-agent implementation's own source, it is
+not established whether Copilot's `--acp --stdio` process already attaches
+`_meta` metadata that `agent-bridge` simply never looks at. What IS directly
+confirmed: `acp_client.py` currently **reconstructs** both idle/background
+signals heuristically regardless — a synthesized `session_state_changed:
+idle` via a quiescence timer bracketing "out-of-turn" content, and
+background-sub-agent tracking by **regex-scraping the `task` tool's own
+human-readable text output** (`"started in background with agent_id: <id>"`
+/ `"status: idle|completed|failed|..."` — the code's own comment: *"There is
+no structured ACP field for this... Copilot exposes no structured
+background-task signal"*).
+
+Two candidate tracks to investigate — **do both, they are not mutually
+exclusive** — before deciding which (if either) to execute:
+
+- [ ] **(a) "Widen the pipe": a custom ACP extension payload.** The real
+      `agent-client-protocol` package (Zed's ACP, what `copilot --acp --stdio`
+      speaks; an ordinary installed pip dependency of `agent-bridge`'s —
+      `plugins/agent-bridge/pyproject.toml`'s `agent-client-protocol>=0.12.0,<1`
+      — not vendored source)
+      already has a genuine, spec-level vendor-extension mechanism that goes
+      unused here today:
+      - every ACP message type carries an optional `_meta` field
+        (`field_meta` in the Python bindings) reserved for exactly this kind
+        of additional metadata — already used by `acp_agent.py` for the
+        delegation-contract's owner/guest role tag
+        (`_meta["agent-bridge"].role`), just never for idle/background state;
+      - a formal underscore-prefixed extension-**method** dispatch exists in
+        `acp.router.MessageRouter.__call__` (`method.startswith("_")` routes
+        to a dedicated extension handler instead of "method not found") —
+        `agent-bridge` never registers `handle_extension_request`/
+        `handle_extension_notification` anywhere.
+      Investigate whether the Copilot CLI's own `--acp --stdio` ACP agent
+      implementation could be taught to emit a custom `_`-prefixed
+      notification (or attach `_meta` to its existing `session/update`
+      notifications) carrying the SDK's own idle/background-task event data
+      structurally, replacing `acp_client.py`'s text-scraping heuristic with
+      something authoritative. **This track is NOT bounded to the ACP-agent
+      side alone — confirmed, not assumed:** `agent-bridge`'s own receiver,
+      `_BridgeClientImpl.session_update`, currently registers no extension
+      handler at all and discards `session_update`'s `**kwargs` (where a
+      `_meta` payload would land) unconditionally. Either transport choice
+      (a new `_`-prefixed notification, or `_meta` on the existing
+      `session/update`) requires a matching **receiver-side change in
+      `agent-bridge` itself** before the text-scraping heuristic can be
+      removed — a known, already-identified requirement to carry into the
+      investigation, even though the detailed mechanism (new handler vs.
+      stop discarding kwargs vs. both) is left to it.
+- [ ] **(b) Switch `agent-bridge`'s own driving mechanism off `--acp --stdio`
+      onto `@github/copilot-sdk` directly** (the same SDK `agent-remote-driver`
+      and the CLI's own interactive-mode extensions already use), getting
+      `assistant.idle`/`session.idle`/`subagent.*` natively with no
+      reconstruction needed at all. **Explicitly flagged as a large,
+      structural undertaking** — likely its own effort, not a
+      `cli-default-bridging` execution task — since it would mean
+      `agent-bridge` no longer spawns/drives Copilot via the ACP JSON-RPC
+      protocol at all, a change with implications well beyond this one
+      fidelity gap (the operator's own framing: "it might let us fix many
+      structural issues with agent-bridge"). This phase's job is only to
+      **investigate and scope** that possibility — name which of
+      `agent-bridge`'s other known structural pain points an SDK-based
+      driving mechanism would or wouldn't actually fix, and produce enough
+      of a sketch that a real go/no-go decision (and, if "go," a proper
+      effort of its own) can be made — not to execute the migration here.
+- [ ] Bring both tracks' findings back here (or spin an SDK-migration
+      candidate into its own effort if track (b) looks worth pursuing) before
+      this phase is considered closed.
+
 ## Validation Plan
 
 Directly mirrors the `cli-default-bridging` vision's
@@ -820,3 +905,88 @@ and the effort doc updated.
 **Phase 1 checklist status:** local machine + container both done; **only
 a CodeSpace venue remains** before this item closes. Phase 2
 (driver-exclusivity arbitration) still has not been started.
+
+### 2026-10-05 (cont'd) — Idle/background-task fidelity: SDK path vs. ACP path (new Phase 6)
+
+Operator asked whether `agent-remote-driver` can detect an agent going idle
+— and specifically idle-with-background-work-still-active vs. truly idle.
+Investigated by reading the actual Copilot SDK type definitions installed
+on this machine (`copilot-sdk/generated/session-events.d.ts`, not
+guessed): the SDK's event model draws exactly this distinction natively —
+`assistant.idle` fires for the main/root agent's loop pausing "**including
+while related background work (running agents or in-flight attached shell
+commands) is still pending**," deferring the stricter `session.idle`
+("idle with **no** background agents or attached shell commands in
+flight"). Plus explicit `subagent.started`/`.completed`/`.failed` lifecycle
+events (each carrying a non-empty `agentId`) and `session.background_tasks_changed`.
+`agent-remote-driver`'s `extension.mjs` forwards the **full, unfiltered**
+SDK event stream to `/events` (confirmed: its `session.on((event) => {...})`
+subscribes with no `eventType` filter) — so a consumer attached to that
+stream gets all of this for free, with zero additional work from the
+plugin itself (it does no interpretation; it's a pure relay).
+
+Follow-up: does `agent-bridge`'s own ACP relay (the thing that actually
+drives sessions for agent-bridge/agent-dispatch today, via
+`copilot --acp --stdio`) reflect the same states? Investigated
+`plugins/agent-bridge/src/agent_bridge/acp_client.py` directly. Answer: not
+via the SDK's typed events — confirmed via the extension's own top-of-file
+comment (`extensions/agent-bridge/extension.mjs`): "extensions do NOT load
+in ACP-mode sessions," so ACP-mode sessions never get that event stream;
+agent-bridge only ever sees raw `session/update` JSON-RPC notifications.
+What is **not** established (caught in PR review, a real overclaim on my
+part): whether the wire traffic itself carries zero structured
+idle/background metadata. `agent-bridge`'s own receiver,
+`_BridgeClientImpl.session_update(self, session_id, update, **kwargs)`,
+discards `**kwargs` unconditionally — so even an already-present `_meta`
+payload on the wire would be thrown away unobserved today. This is a
+confirmed client-observability gap, not proof of absence; confirming the
+latter needs a wire capture or the (closed-source) ACP-agent
+implementation's own source, neither of which this session had. What IS
+directly confirmed regardless: `acp_client.py` reconstructs both signals
+heuristically today — a synthesized `session_state_changed: idle` via a
+quiescence/settle timer bracketing "out-of-turn" content bursts, and
+background-sub-agent tracking by literally **regex-scraping the `task`
+tool's own human-readable text output** — the module's own comment states
+outright: *"There is no structured ACP field for this... Copilot exposes
+no structured background-task signal."* This reconstructed state is
+genuinely surfaced externally too (confirmed: `routes/sessions.py`'s
+session-status endpoint includes `active_background_tasks` from
+`session.active_background_tasks`), just built on a materially weaker
+foundation (text-pattern matching + a settle timer) than the SDK path's
+typed events.
+
+Second follow-up: does ACP itself have a real extension mechanism that
+could carry this more faithfully, the way the operator suspected ("an
+x-____ extensions payload or event system")? Confirmed yes, by reading the
+actual installed `agent-client-protocol` Python package (v0.12.1, Zed's
+real ACP spec) directly rather than guessing: (1) every ACP message type
+carries a reserved `_meta` field (`field_meta`) for exactly this kind of
+vendor metadata — already used by `acp_agent.py` for the delegation
+contract's owner/guest role tag, just never for idle/background state; (2)
+`acp.router.MessageRouter.__call__` has a genuine underscore-prefixed
+extension-method dispatch (`method.startswith("_")` routes to a dedicated
+handler instead of erroring) that `agent-bridge` never registers a handler
+for at all. So the protocol-level plumbing for a cleaner fix already
+exists and goes completely unused on both the mechanism agent-bridge
+registers and (as far as can be told without access to its closed-source
+implementation) the extension notifications Copilot's own `--acp --stdio`
+process emits.
+
+Operator's framing in response: worth investigating **two** tracks before
+deciding what (if anything) to build — (a) the narrower "widen the pipe"
+fix (teach the ACP agent side to emit a custom `_`-prefixed notification or
+`_meta`-attached idle/background-task payload, replacing the text-scraping
+heuristic with something structural), and (b) the much larger possibility
+of switching `agent-bridge`'s own driving mechanism off `--acp --stdio`
+entirely onto `@github/copilot-sdk` directly (the same SDK
+`agent-remote-driver` and the CLI's own interactive-mode extensions
+already use) — explicitly flagged by the operator as "a pretty large
+effort" that "might let us fix many structural issues with agent-bridge,"
+i.e. a possible SEPARATE future effort, not a `cli-default-bridging`
+execution task, with this phase's job limited to investigating and scoping
+it rather than executing it. Added as this effort's new **Phase 6** (not a
+gate on Phase 5's default-promotion decision for the current narrow scope)
+rather than losing the thread — see the Plan section above for the two
+checklist tracks. Neither track has been started; this entry is the
+evidentiary record a future session should start from, not a substitute
+for actually doing either investigation.
