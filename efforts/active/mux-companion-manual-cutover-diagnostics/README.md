@@ -199,17 +199,20 @@ view highlighting whether resolved head matches the just-resumed session).
 - [x] Live-tested: a predecessor with an owned, still-running background
       task/agent (a `task` tool invocation, an async shell) at the moment of
       handoff -- confirmed the new "Quiesce owned background work before
-      triggering" skill step is actually followed. Started a real
-      background `task` agent (a 5-minute sleep-then-report job) while
-      composing this handoff, then -- per the skill's capture-before-stop
-      ordering -- waited for its OBSERVED completion (`read_agent` showed
+      triggering" skill step is actually followed. As test setup (before any
+      handoff composition began), started a real
+      background `task` agent (a 5-minute sleep-then-report job), then --
+      per the skill's capture-before-stop
+      ordering, and before composing anything -- waited for its OBSERVED
+      completion (`read_agent` showed
       `status: idle`, turn output `"done"`) rather than sending it a
       closing message and assuming it finished. Captured here, not
       silently dropped.
 - [x] Live-tested: a predecessor with an active, self-owned
       `manage_schedule` entry at the moment of handoff -- confirmed it gets
       stopped unconditionally. Created a real `manage_schedule` entry
-      (10-minute interval) alongside the background task above, then
+      (10-minute interval) alongside the background task above (same test
+      setup, before composing anything), then
       stopped it (`manage_schedule action: stop`) before composing/
       triggering -- no re-arm was requested since it was a test artifact
       with no successor-side purpose, matching the "re-arm is a deliberate,
@@ -223,7 +226,7 @@ Continuing the same day's work after PR #5491 merged: picked up the two
 remaining quiesce-specific Validation Plan items (owned background task /
 owned schedule present at handoff time). Rather than simulate these,
 exercised the actual new skill requirement live, in this very session,
-immediately before composing this handoff:
+as test setup before any handoff composition began:
 - Started a real background `task` agent (a 5-minute sleep-then-report job)
   and a real `manage_schedule` entry (10-minute interval) to stand in for
   genuinely owned background work.
