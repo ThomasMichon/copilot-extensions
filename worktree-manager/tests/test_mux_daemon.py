@@ -572,14 +572,29 @@ def test_apply_status_options_false_on_exception(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _fake_run_factory(*, has_session=True, set_option_ok=True):
+def _fake_run_factory(
+    *,
+    has_session=True,
+    set_option_ok=True,
+    list_clients_lines=None,
+    list_clients_ok=True,
+):
     """A ``subprocess.run`` stand-in distinguishing ``has-session`` (the
-    session-liveness revalidation probe) from ``set-option`` (the actual
-    apply), so tests can control each independently."""
+    session-liveness revalidation probe), ``list-clients`` (the
+    attached-clients refresh probe), and ``set-option`` (the actual apply),
+    so tests can control each independently. ``list_clients_lines``
+    defaults to an empty listing (zero attached clients) when
+    ``list_clients_ok`` is ``True``."""
 
     def _fake_run(argv, **kwargs):
         if "has-session" in argv:
             return subprocess.CompletedProcess(argv, 0 if has_session else 1)
+        if "list-clients" in argv:
+            if not list_clients_ok:
+                return subprocess.CompletedProcess(argv, 1, stdout="")
+            lines = list_clients_lines if list_clients_lines is not None else []
+            stdout = "\n".join(lines) + ("\n" if lines else "")
+            return subprocess.CompletedProcess(argv, 0, stdout=stdout)
         return subprocess.CompletedProcess(argv, 0 if set_option_ok else 1)
 
     return _fake_run
@@ -740,6 +755,91 @@ def test_compute_invalidates_a_mapping_whose_mux_session_has_died(tmp_path, monk
     # the dead mapping must be invalidated (tombstoned), not left "live"
     invalidated = registry.get("proj", "wt-1")
     assert invalidated["live"] is False
+
+
+def test_compute_refreshes_attached_clients_from_list_clients(tmp_path, monkeypatch):
+    """Closes #4564: a routed status push now opportunistically refreshes
+    the registry's stale ``attached_clients`` (0, since no shipped launch
+    path ever populates it at register() time) from a real ``list-clients``
+    probe, converging it onto the true count within one status-render
+    cycle."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(attached_clients=0))
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        _fake_run_factory(list_clients_lines=["/dev/pts/1: wt-1", "/dev/pts/2: wt-1"]),
+    )
+    compute = mux_daemon.build_compute(registry)
+    result = compute(
+        mux_daemon.KIND,
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "x"},
+            "rendered_at": "2026-09-25T00:00:00Z",
+        },
+    )
+    assert result == {"applied": True}
+    refreshed = registry.get("proj", "wt-1")
+    assert refreshed["attached_clients"] == 2
+    # the in-place refresh must not bump the mapping's own revision
+    assert refreshed["mapping_revision"] == 1
+
+
+def test_compute_leaves_attached_clients_unchanged_on_probe_failure(tmp_path, monkeypatch):
+    """A transient list-clients probe hiccup (unknown count) must never
+    stomp a previously-observed, real attached-client count with a
+    misleading 0."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(attached_clients=3))
+    monkeypatch.setattr(subprocess, "run", _fake_run_factory(list_clients_ok=False))
+    compute = mux_daemon.build_compute(registry)
+    result = compute(
+        mux_daemon.KIND,
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "x"},
+            "rendered_at": "2026-09-25T00:00:00Z",
+        },
+    )
+    assert result == {"applied": True}
+    refreshed = registry.get("proj", "wt-1")
+    assert refreshed["attached_clients"] == 3
+
+
+def test_compute_skips_registry_write_when_attached_clients_already_matches(tmp_path, monkeypatch):
+    """No in-place refresh write (and no revision/observed_at churn) when
+    the probed count already matches what's stored."""
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry(attached_clients=1, observed_at="2026-09-25T00:00:00Z"))
+    monkeypatch.setattr(
+        subprocess, "run", _fake_run_factory(list_clients_lines=["/dev/pts/1: wt-1"])
+    )
+    original_register = registry.register
+    calls = []
+
+    def _tracking_register(payload):
+        calls.append(payload)
+        return original_register(payload)
+
+    monkeypatch.setattr(registry, "register", _tracking_register)
+    compute = mux_daemon.build_compute(registry)
+    result = compute(
+        mux_daemon.KIND,
+        {
+            "project": "proj",
+            "worktree_id": "wt-1",
+            "values": {"@aw_ctx": "x"},
+            "rendered_at": "2026-09-25T00:00:00Z",
+        },
+    )
+    assert result == {"applied": True}
+    assert calls == []
+    refreshed = registry.get("proj", "wt-1")
+    assert refreshed["attached_clients"] == 1
+    assert refreshed["observed_at"] == "2026-09-25T00:00:00Z"
 
 
 def test_status_push_key_requires_project_worktree_id_and_rendered_at():
