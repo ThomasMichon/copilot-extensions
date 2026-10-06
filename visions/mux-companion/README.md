@@ -4,8 +4,8 @@
   hotkey-summoned companion dialog, and the Mux-bind layer that delivers it and
   any future custom Mux-side command.
 - **Scope:** leaf
-- **Status:** Draft
-- **Last revised:** 2026-09-27
+- **Status:** Active
+- **Last revised:** 2026-10-05
 - **Reality docs:** [plugins/agent-worktrees/docs/cli-reference.md](../../plugins/agent-worktrees/docs/cli-reference.md) (status-segment / status-updater), [plugins/agent-worktrees/docs/mux.md](../../plugins/agent-worktrees/docs/mux.md), [plugins/agent-worktrees/docs/worktree-lifecycle.md](../../plugins/agent-worktrees/docs/worktree-lifecycle.md)
 
 ## Purpose & Intent
@@ -44,6 +44,15 @@ the Worktree Manager, not to `agent-worktrees` directly.
   performs today). It has no opinion on *what* a status means; it only
   delivers it. It is also where a Mux-side custom command — a hotkey today,
   potentially other Mux-native triggers later — is registered and dispatched.
+  Its key-table registration mechanism is necessarily platform-asymmetric:
+  psmux runs one server PER session, so a worktree-scoped root-table binding
+  (`source-file -t <session>`) is inherently session-scoped and safe by
+  construction; tmux runs ONE SHARED server for every session on the machine,
+  so an unscoped worktree-specific binding would leak onto the operator's own
+  unrelated tmux sessions too -- the existing opt-in
+  `apply-mux-keybinds.sh`/`.ps1` precedent (and `psmux-passthrough.conf`'s own
+  "psmux-only" note) already draws this boundary; Mux-bind's tmux delivery
+  must honor it (e.g. a session-name-conditioned bind), not bypass it.
 - **The Companion** — a small, separate program (a Worktree Manager
   subcommand), launched on demand inside a Mux popup pane by a Mux-bind
   hotkey. It reads the status core's data for the current worktree, renders
@@ -93,6 +102,26 @@ Mux-bind's command-registration seam is general, not a one-off wire for the
 Companion. Any current or future custom Mux-side trigger is registered through
 the same seam and dispatched the same way, so adding another is a
 registration, not a bespoke integration.
+
+### mux-bind-keybind-relay
+Mux-bind delivers the hotkey-summoned-status-explainer Feature concretely: a
+session-scoped root-key-table binding (Ctrl+K) registered on every muxed
+worktree session at launch/join, dispatching a Mux popup that runs the
+Companion. Session-scoped means it is applied per-session (psmux: one server
+per session, via `source-file`; tmux: the server-wide opt-in passthrough
+already required for any worktree-specific root-table binding) and never
+leaks onto a non-worktree Mux session.
+
+### mux-bind-clickable-status-region
+The status-right segment Mux-bind pushes carries a named, mouse-clickable
+range (tmux/psmux `#[range=user|...]` + a conditional `MouseDown1Status`
+dispatch keyed on `#{mouse_status_range}`) that launches the same Companion
+popup the Ctrl+K hotkey does — an additional, discoverable summon path for an
+operator who has not learned the hotkey, not a replacement for it. Revises the
+prior "Not a general status-bar click framework" boundary (see Provenance):
+the Companion itself stays a single, specific popup, not a click-framework for
+arbitrary status-bar regions, but THIS one region's click behavior is now in
+scope.
 
 ### manual-cutover-trigger
 While `.context-handoff/config.yaml`'s `mode` is not `auto`, the automatic
@@ -184,9 +213,11 @@ not its only possible one.
   second way to author or arm a handoff; it is a second way to TRIGGER one
   someone (or something) else already prepared.
 - **Not a general status-bar click framework.** The Companion is
-  hotkey-summoned. Whether Mux-bind's command seam ever extends to clickable
-  status-bar regions is future scope for Mux-bind, not a requirement this
-  vision depends on.
+  hotkey-summoned, and now ALSO click-summoned from one specific, named
+  status-right region (mux-bind-clickable-status-region) — but Mux-bind's
+  command seam extending to a GENERAL, arbitrary status-bar click framework
+  (every segment independently clickable, a menu of click targets, etc.)
+  remains out of scope and unrequired by this vision.
 - **Not a replacement for the Worktree Picker.** The Companion is a narrow,
   single-worktree, single-purpose view — explain, show lineage, recover, or
   break-glass override — not a multi-worktree management surface.
@@ -202,6 +233,17 @@ not its only possible one.
 
 ## Provenance
 
+- **2026-10-05** — Added *mux-bind-keybind-relay* and
+  *mux-bind-clickable-status-region* Features (effort `mux-bind-relay`): the
+  actual Ctrl+K root-key-table binding and the status-right clickable region,
+  giving `hotkey-summoned-status-explainer` its first concrete delivery
+  mechanism (previously specified but unimplemented -- no bind-key/
+  display-popup wiring existed anywhere in the codebase). Revised the "Not a
+  general status-bar click framework" Non-Goal: it previously read as
+  forbidding ANY status-bar click behavior; the actual, narrower boundary is
+  that the Companion's one clickable region is in scope, a general click
+  framework across arbitrary segments is not. Status promoted Draft -> Active
+  now that a real implementation effort is underway.
 - **2026-09-27** — Added *manual-cutover-trigger* and
   *post-cutover-head-verification* (effort
   `mux-companion-manual-cutover-diagnostics`, #4369): an explicit,
