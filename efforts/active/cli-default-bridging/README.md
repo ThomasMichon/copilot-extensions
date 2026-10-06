@@ -360,15 +360,23 @@ path gets the Copilot SDK's own typed `assistant.idle` / `session.idle` /
 `subagent.started|completed|failed` / `session.background_tasks_changed`
 events for free (it forwards the raw event stream verbatim). The ACP path
 `agent-bridge` actually drives (`plugins/agent-bridge/src/agent_bridge/acp_client.py`)
-gets none of this — ACP extensions do NOT load in ACP-mode sessions, so
-there is no structured idle/background-task signal in the protocol traffic
-at all. `acp_client.py` currently **reconstructs** both signals heuristically:
-a synthesized `session_state_changed: idle` via a quiescence timer bracketing
-"out-of-turn" content, and background-sub-agent tracking by **regex-scraping
-the `task` tool's own human-readable text output** (`"started in background
-with agent_id: <id>"` / `"status: idle|completed|failed|..."` — the code's
-own comment: *"There is no structured ACP field for this... Copilot exposes
-no structured background-task signal"*).
+does not surface this — ACP extensions do NOT load in ACP-mode sessions, and
+`agent-bridge`'s own receiver side (`_BridgeClientImpl.session_update(self,
+session_id, update, **kwargs)`) silently **discards** `**kwargs` entirely,
+so even an already-present `_meta` payload on the wire would currently be
+thrown away unobserved. This is a confirmed **client-observability gap**,
+not proof that the wire traffic itself carries nothing — without a packet
+capture or the (closed-source) ACP-agent implementation's own source, it is
+not established whether Copilot's `--acp --stdio` process already attaches
+`_meta` metadata that `agent-bridge` simply never looks at. What IS directly
+confirmed: `acp_client.py` currently **reconstructs** both idle/background
+signals heuristically regardless — a synthesized `session_state_changed:
+idle` via a quiescence timer bracketing "out-of-turn" content, and
+background-sub-agent tracking by **regex-scraping the `task` tool's own
+human-readable text output** (`"started in background with agent_id: <id>"`
+/ `"status: idle|completed|failed|..."` — the code's own comment: *"There is
+no structured ACP field for this... Copilot exposes no structured
+background-task signal"*).
 
 Two candidate tracks to investigate — **do both, they are not mutually
 exclusive** — before deciding which (if either) to execute:
@@ -393,9 +401,17 @@ exclusive** — before deciding which (if either) to execute:
       notification (or attach `_meta` to its existing `session/update`
       notifications) carrying the SDK's own idle/background-task event data
       structurally, replacing `acp_client.py`'s text-scraping heuristic with
-      something authoritative. This is the smaller, more surgical track —
-      bounded to the ACP agent side's own notification surface, no
-      architecture change to `agent-bridge` itself.
+      something authoritative. **This track is NOT bounded to the ACP-agent
+      side alone — confirmed, not assumed:** `agent-bridge`'s own receiver,
+      `_BridgeClientImpl.session_update`, currently registers no extension
+      handler at all and discards `session_update`'s `**kwargs` (where a
+      `_meta` payload would land) unconditionally. Either transport choice
+      (a new `_`-prefixed notification, or `_meta` on the existing
+      `session/update`) requires a matching **receiver-side change in
+      `agent-bridge` itself** before the text-scraping heuristic can be
+      removed — a known, already-identified requirement to carry into the
+      investigation, even though the detailed mechanism (new handler vs.
+      stop discarding kwargs vs. both) is left to it.
 - [ ] **(b) Switch `agent-bridge`'s own driving mechanism off `--acp --stdio`
       onto `@github/copilot-sdk` directly** (the same SDK `agent-remote-driver`
       and the CLI's own interactive-mode extensions already use), getting
@@ -910,22 +926,32 @@ plugin itself (it does no interpretation; it's a pure relay).
 Follow-up: does `agent-bridge`'s own ACP relay (the thing that actually
 drives sessions for agent-bridge/agent-dispatch today, via
 `copilot --acp --stdio`) reflect the same states? Investigated
-`plugins/agent-bridge/src/agent_bridge/acp_client.py` directly. Answer: no
-— confirmed via the extension's own top-of-file comment
-(`extensions/agent-bridge/extension.mjs`): "extensions do NOT load in
-ACP-mode sessions." ACP-mode sessions never get the SDK event stream at
-all; agent-bridge only sees raw `session/update` JSON-RPC notifications.
-`acp_client.py` reconstructs both signals heuristically: a synthesized
-`session_state_changed: idle` via a quiescence/settle timer bracketing
-"out-of-turn" content bursts, and background-sub-agent tracking by literally
-**regex-scraping the `task` tool's own human-readable text output** — the
-module's own comment states outright: *"There is no structured ACP field
-for this... Copilot exposes no structured background-task signal."* This
-reconstructed state is genuinely surfaced externally too (confirmed:
-`routes/sessions.py`'s session-status endpoint includes
-`active_background_tasks` from `session.active_background_tasks`), just
-built on a materially weaker foundation (text-pattern matching + a settle
-timer) than the SDK path's typed events.
+`plugins/agent-bridge/src/agent_bridge/acp_client.py` directly. Answer: not
+via the SDK's typed events — confirmed via the extension's own top-of-file
+comment (`extensions/agent-bridge/extension.mjs`): "extensions do NOT load
+in ACP-mode sessions," so ACP-mode sessions never get that event stream;
+agent-bridge only ever sees raw `session/update` JSON-RPC notifications.
+What is **not** established (caught in PR review, a real overclaim on my
+part): whether the wire traffic itself carries zero structured
+idle/background metadata. `agent-bridge`'s own receiver,
+`_BridgeClientImpl.session_update(self, session_id, update, **kwargs)`,
+discards `**kwargs` unconditionally — so even an already-present `_meta`
+payload on the wire would be thrown away unobserved today. This is a
+confirmed client-observability gap, not proof of absence; confirming the
+latter needs a wire capture or the (closed-source) ACP-agent
+implementation's own source, neither of which this session had. What IS
+directly confirmed regardless: `acp_client.py` reconstructs both signals
+heuristically today — a synthesized `session_state_changed: idle` via a
+quiescence/settle timer bracketing "out-of-turn" content bursts, and
+background-sub-agent tracking by literally **regex-scraping the `task`
+tool's own human-readable text output** — the module's own comment states
+outright: *"There is no structured ACP field for this... Copilot exposes
+no structured background-task signal."* This reconstructed state is
+genuinely surfaced externally too (confirmed: `routes/sessions.py`'s
+session-status endpoint includes `active_background_tasks` from
+`session.active_background_tasks`), just built on a materially weaker
+foundation (text-pattern matching + a settle timer) than the SDK path's
+typed events.
 
 Second follow-up: does ACP itself have a real extension mechanism that
 could carry this more faithfully, the way the operator suspected ("an
