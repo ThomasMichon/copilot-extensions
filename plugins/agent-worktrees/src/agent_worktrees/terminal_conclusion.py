@@ -307,7 +307,22 @@ def _sibling_ancestry_reason(sibling: tracking.WorktreeRecord) -> str | None:
     (in the sibling project's own anchor) with unpushed commits.
     """
     try:
-        sibling_config = cfg.load_config(project=sibling.repo)
+        # Must be `load_project_config`, not `load_config(project=...)`: the
+        # latter's `project` kwarg only overrides `repo_name` inside an
+        # already-resolved config load -- it does NOT influence which
+        # machine-local `config.yaml` gets read, since `load_config`'s own
+        # `path` default (`default_config_path()`) resolves purely from the
+        # process's CWD-inferred active project, ignoring `project`
+        # entirely. In a process with no CWD-resolved active project (e.g.
+        # a long-running coordinator that never `chdir`s into any one
+        # managed repo), that falls through to `project_name()` and raises
+        # `RuntimeError` before ever reaching the sibling's own registry
+        # entry -- silently caught below and misreported as the sibling's
+        # config being unavailable, when it was never attempted.
+        # `load_project_config` sets the active project explicitly and
+        # passes the matching path itself, so it resolves correctly
+        # regardless of the caller's own CWD/active-project state.
+        sibling_config = cfg.load_project_config(sibling.repo)
         default_repo = sibling_config.default_repo
         remote = default_repo.remote
         default_branch = default_repo.default_branch
