@@ -1,9 +1,0 @@
-{
-  "comment": "Implement real Gitea backlog-provider (ThomasMichon/copilot-extensions#4825) and reviewer-recipe PR adapters, validated against a live Gitea instance",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

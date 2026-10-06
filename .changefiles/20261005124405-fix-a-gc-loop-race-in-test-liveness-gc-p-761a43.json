@@ -1,9 +1,0 @@
-{
-  "comment": "Fix a GC-loop race in test_liveness_gc_publishes_a_bus_event_for_auto_suspend_with_zero_requeued that could requeue (and eventually dead-letter) the test's task before claim+start completed under heavy host load",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

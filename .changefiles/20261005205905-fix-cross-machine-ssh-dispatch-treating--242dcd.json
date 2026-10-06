@@ -1,9 +1,0 @@
-{
-  "comment": "Fix cross-machine SSH dispatch treating this machine as remote when a claim/codename/bundle records a different-but-equivalent spelling (alias vs key vs raw COMPUTERNAME) of the same machine -- add is_local_machine() and route claimant-liveness, resolve --machine, cross-machine codename lookup, and claim-handoff accept through it",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

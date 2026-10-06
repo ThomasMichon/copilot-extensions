@@ -1,9 +1,0 @@
-{
-  "comment": "Shorten rescue-capture content-hash directory names and transaction IDs to get real headroom below Windows MAX_PATH; also shorten run-plugin-tests.py's own containment sandbox naming",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

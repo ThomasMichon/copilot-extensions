@@ -1,9 +1,0 @@
-{
-  "comment": "pr-workflow.md: add guidance against asserting what masked/redacted tool output literally contains (content-exclusion/secret-redaction incident).",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

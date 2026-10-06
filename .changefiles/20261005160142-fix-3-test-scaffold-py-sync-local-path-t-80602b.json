@@ -1,9 +1,0 @@
-{
-  "comment": "Fix 3 test_scaffold.py sync.local_path tests that assumed POSIX-only path semantics on a Windows test host",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

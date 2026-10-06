@@ -1,9 +1,0 @@
-{
-  "comment": "pivot-streaming-transport Phase 4: narrow the idle cosmetic-pulse refresh to chrome + body-data segments only",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "manager_launch_cli: contain the Windows Picker-launch seam in a kill-on-close Job Object (fixes zombie worktree_manager process trees surviving an abruptly-closed owning process); zdd.diagnostics (vendored): _validated_owner trusts the routing table as a fallback when it disagrees with a stale lock, fixing doctor's duplicate-resident repair path",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}

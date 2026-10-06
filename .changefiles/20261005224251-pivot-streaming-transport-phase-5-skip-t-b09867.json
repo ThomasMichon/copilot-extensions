@@ -1,9 +1,0 @@
-{
-  "comment": "pivot-streaming-transport Phase 5: skip the unfiltered bound-copilot scan for a scoped refine call with a fresh live hint",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

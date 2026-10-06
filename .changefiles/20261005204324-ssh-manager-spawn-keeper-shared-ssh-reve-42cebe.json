@@ -1,9 +1,0 @@
-{
-  "comment": "ssh-manager: spawn_keeper (shared SSH reverse-forward keeper spawn) no longer inherits the caller's ambient cwd -- consumer-only version bump, no behavior change for agent-ssh itself",
-  "changes": [
-    {
-      "plugin": "agent-ssh",
-      "type": "dev"
-    }
-  ]
-}

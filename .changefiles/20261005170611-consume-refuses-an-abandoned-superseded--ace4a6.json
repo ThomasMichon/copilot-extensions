@@ -1,9 +1,0 @@
-{
-  "comment": "consume refuses an abandoned (superseded or aborted) handoff with exit 3 instead of delivering its out-of-date brief",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

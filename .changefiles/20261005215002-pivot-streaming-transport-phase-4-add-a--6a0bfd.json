@@ -1,9 +1,0 @@
-{
-  "comment": "pivot-streaming-transport Phase 4: add a content-only fast path to the worktrees list, patching changed rows instead of a full rebuild",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

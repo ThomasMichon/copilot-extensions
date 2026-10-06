@@ -1,9 +1,0 @@
-{
-  "comment": "status-monitor: bound self-retire/shutdown grace to a hard deadline so a confirmed-superseded or shutdown-requested daemon can never linger past ~120s regardless of ongoing hook/classify/tracking-write/sweep traffic",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "minor"
-    }
-  ]
-}

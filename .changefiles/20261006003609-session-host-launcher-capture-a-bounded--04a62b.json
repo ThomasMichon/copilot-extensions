@@ -1,9 +1,0 @@
-{
-  "comment": "session_host launcher: capture a bounded tail of the host process's own stdout/stderr and surface it in the 'exited early' RuntimeError, instead of discarding it via DEVNULL (#5384)",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

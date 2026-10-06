@@ -1,9 +1,0 @@
-{
-  "comment": "daemons mappings: preliminary mapping-registry listing (#5001) -- surfaces every known mux-session mapping (project/worktree_id/mux_session/live/attached_clients) from the shared registry, read-only; does not correlate a live wire connection to an identity or busy state",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

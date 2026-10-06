@@ -1,9 +1,0 @@
-{
-  "comment": "picker-performance-and-responsiveness Phase 4: plugin-activation's resolve_active_plugins no longer re-reads the same marketplace manifest once per enabled plugin sharing it -- fixes the dominant cold-boot cost a py-spy/cProfile capture measured (~10.5-12.4s -> ~7.7-9.1s for a cold Picker launch)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "work-coalescing-singleton: CoalescingServer gains close_admission/open_admission (Unavailable now carries an optional reason) -- consumer-only version bump, no behavior change for worktree-manager itself",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "dev"
-    }
-  ]
-}

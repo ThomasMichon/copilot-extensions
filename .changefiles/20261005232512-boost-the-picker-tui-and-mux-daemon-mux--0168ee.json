@@ -1,9 +1,0 @@
-{
-  "comment": "Boost the Picker/TUI and mux-daemon (Mux Companion) processes to AboveNormal priority",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}
