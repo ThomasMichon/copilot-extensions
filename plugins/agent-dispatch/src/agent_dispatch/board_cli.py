@@ -174,6 +174,7 @@ def _repo_name(value: object) -> str | None:
 #: with an optional bracketed interface tag (mirroring Worktrees'
 #: `[system]`/`[delegate]`/`[acp]` title-prefix convention in `derive.py`).
 _MAX_HOLD_REASON_CHARS = 40
+_MAX_WAITER_COMMAND_CHARS = 60
 
 
 def _embodiment_tag(task: dict, wt_live: str | None) -> str | None:
@@ -220,6 +221,13 @@ def _activity_phrase(task: dict, wt_live: str | None) -> str:
         return "awaiting your steer"
     status = task.get("status")
     if status == "suspended":
+        waiter = task.get("run_waiter")
+        command = waiter.get("command") if waiter else None
+        if command:
+            text = " ".join(str(part) for part in command)
+            if len(text) > _MAX_WAITER_COMMAND_CHARS:
+                text = text[: _MAX_WAITER_COMMAND_CHARS - 1].rstrip() + "…"
+            return f"waiting: {text}"
         return "suspended — no live session"
     if status == "queued":
         return "queued for a worker" if task.get("pool") else "queued"
@@ -391,6 +399,7 @@ def _build(
     recent_mins: int,
     relay_fetch=None,
     relay_fetch_many=None,
+    run_waiters: dict[str, dict] | None = None,
 ) -> list[dict]:
     now = time.time()
     cutoff = now - max(0, recent_mins) * 60
@@ -414,6 +423,8 @@ def _build(
                 continue
         row = dict(task)
         row["group"] = group
+        if run_waiters and task.get("id") in run_waiters:
+            row["run_waiter"] = run_waiters[task["id"]]
         row["activity"] = _activity(task, now)
         row["wt_live"] = _wt_live(row["activity"], task, now)
         _claimed_machine, claimed_worktree = claimed_identity(task)
@@ -577,6 +588,28 @@ def _fetch_raw_tasks_direct(
     return tasks
 
 
+def _fetch_run_waiters_direct(endpoint: str | None = None) -> dict[str, dict]:
+    """Best-effort bulk fetch of every currently-active `run --detach`
+    waiter, keyed by task id, from this machine's own coordinator. Enriches
+    a suspended task's board row with the exact blocking-wait command
+    (Operator feedback 2026-10-05: a suspended row previously gave no
+    insight into whether/how it would ever wake up). Never raises -- an
+    older coordinator build without `/run-waiters`, a transient network
+    blip, or any other failure here must never take down the whole board;
+    it only means suspended rows fall back to the generic "no live session"
+    phrase, same as before this feature existed."""
+    try:
+        endpoint = endpoint or _RELAY_ENDPOINT or _endpoint()
+        request = urllib.request.Request(f"{endpoint}/run-waiters")
+        token = os.environ.get("AGENT_DISPATCH_TOKEN")
+        if token:
+            request.add_header("Authorization", "******")
+        with urllib.request.urlopen(request, timeout=3) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return {}
+
+
 def _fetch_rows_direct(args: argparse.Namespace) -> list[dict]:
     """Direct path (this host IS ``args.machine``, the common case): query this
     machine's own coordinator ``/tasks`` endpoint and run the board through
@@ -584,13 +617,24 @@ def _fetch_rows_direct(args: argparse.Namespace) -> list[dict]:
     one-shot query) because ``--subscribe`` needs to call it repeatedly from
     inside one long-lived process, never re-exec'ing the CLI per re-scan.
     Raises on any fetch/parse failure -- same contract as
-    :func:`_fetch_rows_delegated`."""
+    :func:`_fetch_rows_delegated`. The run-waiters fetch (unlike the task
+    fetch above it) degrades silently on failure -- see
+    :func:`_fetch_run_waiters_direct` -- rather than sharing that contract,
+    since it is a pure enrichment, never the row source of truth.
+
+    Known gap, not yet covered: a delegated cross-machine fetch
+    (:func:`_fetch_rows_delegated`) and the relay/subscribe path
+    (``board_relay.py``) do not yet thread `run_waiters` through, so a
+    suspended row viewed via ``--machine <peer>`` or over the relay still
+    shows the generic phrase. Tracked as a follow-up, not silently assumed
+    covered."""
     tasks = _fetch_raw_tasks_direct(args)
     return _build(
         tasks,
         machine=args.machine,
         recent_mins=args.recent_mins,
         relay_fetch_many=_relay_fetch_many,
+        run_waiters=_fetch_run_waiters_direct(),
     )
 
 
@@ -836,6 +880,7 @@ def main(argv: list[str] | None = None) -> int:
             machine=args.machine,
             recent_mins=args.recent_mins,
             relay_fetch_many=_relay_fetch_many,
+            run_waiters=_fetch_run_waiters_direct(endpoint),
         ),
         sys.stdout,
         indent=2,
