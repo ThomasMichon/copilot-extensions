@@ -1373,6 +1373,32 @@ class TestIsAncestor:
         with pytest.raises(ar.AncestorResolutionError):
             ar.is_ancestor(repo, "0" * 40, c1)
 
+    def test_private_git_helper_raises_on_timeout(self, tmp_path, monkeypatch):
+        repo = _init_repo(tmp_path)
+
+        def _raise_timeout(*args, **kwargs):
+            raise ar.subprocess.TimeoutExpired(
+                cmd=args[0] if args else ["git"], timeout=kwargs.get("timeout", 0)
+            )
+
+        monkeypatch.setattr(ar.subprocess, "run", _raise_timeout)
+
+        with pytest.raises(ar.AncestorResolutionError, match="timed out after 30.0s"):
+            ar._git(["rev-parse", "HEAD"], cwd=repo)
+
+    def test_is_ancestor_raises_on_timeout(self, tmp_path, monkeypatch):
+        repo = _init_repo(tmp_path)
+
+        def _raise_timeout(*args, **kwargs):
+            raise ar.subprocess.TimeoutExpired(
+                cmd=args[0] if args else ["git"], timeout=kwargs.get("timeout", 0)
+            )
+
+        monkeypatch.setattr(ar.subprocess, "run", _raise_timeout)
+
+        with pytest.raises(ar.AncestorResolutionError, match="timed out after 30.0s"):
+            ar.is_ancestor(repo, "a" * 40, "b" * 40)
+
 
 class TestResolveNearestBaseline:
     def test_finds_the_newest_qualifying_generation(self, tmp_path):
@@ -1788,6 +1814,28 @@ class TestCoverageGuidedSelectionCli:
         assert payload["mode"] == "error"
         assert payload["selected_tests"] is None
 
+    def test_commit_resolution_timeout_is_reported_as_error_not_a_crash(
+        self, tmp_path, monkeypatch,
+    ):
+        repo, measured_commit, _head = self._repo_with_a_pointer_and_a_diff(tmp_path)
+
+        import subprocess as subprocess_module
+
+        def _raise_timeout(*_args, **_kwargs):
+            raise subprocess_module.TimeoutExpired(cmd=["git", "rev-parse"], timeout=30.0)
+
+        monkeypatch.setattr(subprocess_module, "run", _raise_timeout)
+
+        payload = cli_mod.build_decision_payload(
+            repo_root=repo, repo="owner/repo", plugin="demo-plugin",
+            cov_source="src", base_ref=measured_commit, head_ref="HEAD",
+            main_ref="main",
+        )
+
+        assert payload["mode"] == "error"
+        assert payload["selected_tests"] is None
+        assert payload["reason"] == "RuntimeError: git rev-parse HEAD timed out after 30.0s"
+
     def test_render_summary_reports_error_mode_distinctly_from_fallback(self):
         error_summary = cli_mod.render_summary(
             "demo-plugin",
@@ -2017,6 +2065,21 @@ class TestAssessDebt:
 
         with pytest.raises(debt.CoverageDebtError):
             debt.assess_debt(repo, "0" * 40, self._GENERATED_AT)
+
+    def test_raises_for_a_timed_out_git_history_probe(self, tmp_path, monkeypatch):
+        repo = _init_repo(tmp_path)
+        (repo / "a.txt").write_text("1\n")
+        c1 = _commit(repo, "first")
+
+        def _raise_timeout(*args, **kwargs):
+            raise debt.subprocess.TimeoutExpired(
+                cmd=args[0] if args else ["git"], timeout=kwargs.get("timeout", 0)
+            )
+
+        monkeypatch.setattr(debt.subprocess, "run", _raise_timeout)
+
+        with pytest.raises(debt.CoverageDebtError, match="timed out after 30.0s"):
+            debt.assess_debt(repo, c1, self._GENERATED_AT)
 
 
 class TestDecide:
@@ -2350,7 +2413,6 @@ class TestDecide:
         result = decide_mod.decide(tmp_path, "owner/repo", "plugin", "fork", {})
 
         json.dumps(result.as_dict())  # must not raise
-
 
 
 
