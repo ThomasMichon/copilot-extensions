@@ -11,6 +11,7 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import claim_handoffs, finalize, state_root, tracking
+from agent_worktrees import worktree_identity
 
 
 MACHINE = "anomalous-potato"
@@ -307,7 +308,7 @@ def test_offered_claim_cannot_settle_sweep_or_release(
     monkeypatch.setattr(m.cfg, "load_config", lambda: config)
     monkeypatch.setattr(m.cfg, "tracking_dir", lambda: source_path.parent)
     monkeypatch.setattr(
-        m, "_infer_worktree_id", lambda explicit, config: "wt-source")
+        worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-source")
     args = argparse.Namespace(
         release_worktree=None, remove=False, json=True)
     assert m._claims_release(args, ref) == 1
@@ -519,7 +520,7 @@ def test_cli_offer_rejects_unready_coordination_without_side_effects(
 ):
     config = types.SimpleNamespace(machine=MACHINE, repo_name="source-project")
     monkeypatch.setattr(m.cfg, "load_config", lambda: config)
-    monkeypatch.setattr(m, "_infer_worktree_id", lambda explicit, config: "wt-source")
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-source")
     root = state_root.StateRoot(
         None,
         "knowledge_repo",
@@ -567,7 +568,7 @@ def test_cli_decline_remains_available_when_coordination_is_unready(
     bundle = _offer([handoff_state[0].ref])[0]
     config = types.SimpleNamespace(machine=MACHINE, repo_name="consumer-project")
     monkeypatch.setattr(m.cfg, "load_config", lambda: config)
-    monkeypatch.setattr(m, "_infer_worktree_id", lambda explicit, config: "wt-consumer")
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-consumer")
     monkeypatch.setattr(
         m.state_root_mod,
         "coordination_readiness",
@@ -585,7 +586,7 @@ def test_cli_decline_remains_available_when_coordination_is_unready(
 def test_cli_offer_show_decline_cancel(handoff_state, monkeypatch, capfd):
     config = types.SimpleNamespace(machine=MACHINE, repo_name="source-project")
     monkeypatch.setattr(m.cfg, "load_config", lambda: config)
-    monkeypatch.setattr(m, "_infer_worktree_id", lambda explicit, config: "wt-source")
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-source")
     ref = handoff_state[0].ref
     logged = []
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
@@ -601,7 +602,7 @@ def test_cli_offer_show_decline_cancel(handoff_state, monkeypatch, capfd):
     assert m.cmd_claims(_args(["handoff", "show", bundle_id])) == 0
     assert json.loads(capfd.readouterr().out)["id"] == bundle_id
     assert len(logged) == 1  # show is read-only -- never logs a mutation
-    monkeypatch.setattr(m, "_infer_worktree_id", lambda explicit, config: "wt-consumer")
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-consumer")
     config.repo_name = "consumer-project"
     assert m.cmd_claims(_args(
         ["handoff", "decline", bundle_id], reason="busy"
@@ -618,7 +619,7 @@ def test_cli_offer_show_decline_cancel(handoff_state, monkeypatch, capfd):
     assert source.resources[0].state == "active"
 
     config.repo_name = "source-project"
-    monkeypatch.setattr(m, "_infer_worktree_id", lambda explicit, config: "wt-source")
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-source")
     assert m.cmd_claims(_args(
         ["handoff", "offer", handoff_state[1].ref],
         handoff_to=[CONSUMER],

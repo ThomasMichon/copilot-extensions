@@ -23,6 +23,12 @@ from agent_worktrees import git_ops
 from agent_worktrees import installer as inst
 from agent_worktrees import repos
 
+# Captured at import time, before conftest.py's autouse
+# `_assume_valid_claimant_worktree` fixture ever gets a chance to patch it --
+# this is the real implementation the `adopted_repo` fixture below restores
+# for every test in this file that needs genuine CWD-based resolution.
+_REAL_INFER_WORKTREE_ID_FROM_CWD = worktree_identity._infer_worktree_id_from_cwd
+
 
 def _git(*args: str, cwd) -> str:
     return git_ops.git(*args, cwd=str(cwd)).stdout.strip()
@@ -76,6 +82,18 @@ def adopted_repo(tmp_path: Path, monkeypatch):
         )},
     )
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: conf)
+
+    # This file deliberately exercises REAL CWD-based git identity resolution
+    # (copilot-extensions#59 and friends) -- override conftest.py's autouse
+    # `_assume_valid_claimant_worktree` fixture, which defaults
+    # `worktree_identity._infer_worktree_id_from_cwd` to a fixed fake id for
+    # every other test suite-wide. Restoring the real implementation here
+    # (not just undoing the patch) is what lets `_infer_worktree_id`'s own
+    # git-dir-based resolution run for real against this fixture's repo.
+    monkeypatch.setattr(
+        worktree_identity, "_infer_worktree_id_from_cwd",
+        _REAL_INFER_WORKTREE_ID_FROM_CWD,
+    )
 
     return anchor, wt_root, wt_path, wt_id, conf
 
@@ -236,14 +254,14 @@ def test_safe_cwd_survives_deleted_directory(monkeypatch):
 def test_worktree_id_from_worktree_cwd(adopted_repo, monkeypatch):
     _anchor, _wt_root, wt_path, wt_id, conf = adopted_repo
     monkeypatch.chdir(wt_path)
-    assert m._infer_worktree_id(None, conf) == wt_id
+    assert worktree_identity._infer_worktree_id(None, conf) == wt_id
 
 
 def test_worktree_id_none_at_anchor(adopted_repo, monkeypatch):
     anchor, _wt_root, _wt_path, _wt_id, conf = adopted_repo
     monkeypatch.chdir(anchor)
     # The anchor is not under worktree_root -> no worktree id.
-    assert m._infer_worktree_id(None, conf) is None
+    assert worktree_identity._infer_worktree_id(None, conf) is None
 
 
 def test_worktree_id_resolves_under_foreign_worktree_root(adopted_repo, monkeypatch):
@@ -270,7 +288,7 @@ def test_worktree_id_resolves_under_foreign_worktree_root(adopted_repo, monkeypa
     assert worktree_identity._infer_worktree_id_from_worktree_root(
         bad_conf, Path(wt_path)
     ) is None
-    assert m._infer_worktree_id(None, bad_conf) == wt_id
+    assert worktree_identity._infer_worktree_id(None, bad_conf) == wt_id
 
 
 def test_worktree_id_auto_adopts_untracked_linked_worktree(adopted_repo, active_myproj, monkeypatch):
@@ -290,7 +308,7 @@ def test_worktree_id_auto_adopts_untracked_linked_worktree(adopted_repo, active_
 
     monkeypatch.chdir(wt_path)
     assert not yaml_path.exists()
-    assert m._infer_worktree_id(None, conf) == wt_id
+    assert worktree_identity._infer_worktree_id(None, conf) == wt_id
     # The call must have created a real tracking record, not merely returned
     # git's raw id without persisting anything.
     assert yaml_path.exists()
@@ -301,7 +319,7 @@ def test_project_override_yields_no_worktree_id_at_anchor(adopted_repo, monkeypa
     # After main() chdir's to the anchor for a cross-project --project call, the
     # CWD is the anchor (not under worktree_root) -> no worktree id.
     monkeypatch.chdir(anchor)
-    assert m._infer_worktree_id(None, conf) is None
+    assert worktree_identity._infer_worktree_id(None, conf) is None
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +333,7 @@ def test_worktree_id_ignores_wrong_env(adopted_repo, monkeypatch):
     monkeypatch.setenv("WORKTREE_ID", "some-other-worktree")
     monkeypatch.setenv("WORKTREE_REPO", "/nonexistent/other/repo")
     monkeypatch.chdir(wt_path)
-    assert m._infer_worktree_id(None, conf) == wt_id
+    assert worktree_identity._infer_worktree_id(None, conf) == wt_id
 
 
 def test_project_resolution_ignores_wrong_env(adopted_repo, monkeypatch):

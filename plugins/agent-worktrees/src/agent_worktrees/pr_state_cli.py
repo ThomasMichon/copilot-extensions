@@ -10,12 +10,6 @@ from . import config as cfg, output, pr_ops, tracking, worktree_identity
 from . import context_cli, pr_config
 
 
-def _core():
-    from . import __main__ as core
-
-    return core
-
-
 def add_parsers(sub) -> None:
     p = sub.add_parser("set-pr", help="Record PR metadata (URL/number/state) on a worktree")
     p.add_argument("worktree_id", nargs="?", default=None)
@@ -184,7 +178,6 @@ def add_parsers(sub) -> None:
 
 
 def cmd_set_pr(args: argparse.Namespace) -> int:
-    core = _core()
     use_json = getattr(args, "json", False)
     try:
         config = cfg.load_config(Path(args.config) if args.config else None)
@@ -192,7 +185,7 @@ def cmd_set_pr(args: argparse.Namespace) -> int:
         if use_json:
             return output._json_error(str(e))
         raise
-    worktree_id = core._infer_worktree_id(args.worktree_id, config)
+    worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
         return output._json_error(msg) if use_json else (output.err(msg) or 1)
@@ -259,7 +252,6 @@ def cmd_pr_abandon(args: argparse.Namespace) -> int:
     stern, alternatives-first warning and mutates nothing; only a second,
     explicit ``--confirm`` call (after real operator sign-off) proceeds.
     """
-    core = _core()
     use_json = getattr(args, "json", False)
     try:
         config = cfg.load_config(Path(args.config) if args.config else None)
@@ -267,7 +259,7 @@ def cmd_pr_abandon(args: argparse.Namespace) -> int:
         if use_json:
             return output._json_error(str(e))
         raise
-    worktree_id = core._infer_worktree_id(args.worktree_id, config)
+    worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
         return output._json_error(msg) if use_json else (output.err(msg) or 1)
@@ -302,7 +294,6 @@ def cmd_pr_abandon(args: argparse.Namespace) -> int:
 
 
 def cmd_pr_ready(args: argparse.Namespace) -> int:
-    core = _core()
     use_json = getattr(args, "json", False)
     if use_json:
         ctx = output.stdout_to_stderr()
@@ -317,7 +308,7 @@ def cmd_pr_ready(args: argparse.Namespace) -> int:
             if use_json:
                 return output._json_error(str(e))
             raise
-        worktree_id = core._infer_worktree_id(args.worktree_id, config)
+        worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
         if not worktree_id:
             msg = (
                 "Could not determine worktree ID. Pass it explicitly "
@@ -362,7 +353,6 @@ def cmd_pr_ready(args: argparse.Namespace) -> int:
 
 
 def cmd_pr_status(args: argparse.Namespace) -> int:
-    core = _core()
     use_json = getattr(args, "json", False)
     try:
         config = cfg.load_config(Path(args.config) if args.config else None)
@@ -370,7 +360,7 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         if use_json:
             return output._json_error(str(e))
         raise
-    worktree_id = core._infer_worktree_id(args.worktree_id, config)
+    worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
         return output._json_error(msg) if use_json else (output.err(msg) or 1)
@@ -529,7 +519,6 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
 
 
 def cmd_pr_nudge(args: argparse.Namespace) -> int:
-    core = _core()
     from . import pr_nudge_ops
 
     use_json = getattr(args, "json", False)
@@ -539,7 +528,7 @@ def cmd_pr_nudge(args: argparse.Namespace) -> int:
         if use_json:
             return output._json_error(str(e))
         raise
-    worktree_id = core._infer_worktree_id(args.worktree_id, config)
+    worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
         return output._json_error(msg) if use_json else (output.err(msg) or 1)
@@ -570,7 +559,6 @@ def cmd_pr_nudge(args: argparse.Namespace) -> int:
 
 
 def cmd_pr_complete(args: argparse.Namespace) -> int:
-    core = _core()
     from . import pr_complete
 
     use_json = getattr(args, "json", False)
@@ -580,7 +568,7 @@ def cmd_pr_complete(args: argparse.Namespace) -> int:
         if use_json:
             return output._json_error(str(e))
         raise
-    worktree_id = core._infer_worktree_id(args.worktree_id, config)
+    worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
         return output._json_error(msg) if use_json else (output.err(msg) or 1)
@@ -606,7 +594,6 @@ def cmd_pr_complete(args: argparse.Namespace) -> int:
 
 
 def cmd_pr_diff(args: argparse.Namespace) -> int:
-    core = _core()
     from . import pr_reviewer_ops
 
     use_json = getattr(args, "json", False)
@@ -616,7 +603,7 @@ def cmd_pr_diff(args: argparse.Namespace) -> int:
         if use_json:
             return output._json_error(str(e))
         raise
-    worktree_id = core._infer_worktree_id(args.worktree_id, config)
+    worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
         return output._json_error(msg) if use_json else (output.err(msg) or 1)
@@ -640,7 +627,6 @@ def cmd_pr_diff(args: argparse.Namespace) -> int:
 
 
 def cmd_pr_comment(args: argparse.Namespace) -> int:
-    core = _core()
     from . import pr_reviewer_ops
 
     use_json = getattr(args, "json", False)
@@ -650,7 +636,7 @@ def cmd_pr_comment(args: argparse.Namespace) -> int:
         if use_json:
             return output._json_error(str(e))
         raise
-    worktree_id = core._infer_worktree_id(args.worktree_id, config)
+    worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
         return output._json_error(msg) if use_json else (output.err(msg) or 1)
@@ -671,7 +657,6 @@ def cmd_pr_comment(args: argparse.Namespace) -> int:
 
 
 def cmd_pr_review(args: argparse.Namespace) -> int:
-    core = _core()
     from . import pr_reviewer_ops
 
     use_json = getattr(args, "json", False)
@@ -681,7 +666,7 @@ def cmd_pr_review(args: argparse.Namespace) -> int:
         if use_json:
             return output._json_error(str(e))
         raise
-    worktree_id = core._infer_worktree_id(args.worktree_id, config)
+    worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass it explicitly or run from inside a worktree."
         return output._json_error(msg) if use_json else (output.err(msg) or 1)
