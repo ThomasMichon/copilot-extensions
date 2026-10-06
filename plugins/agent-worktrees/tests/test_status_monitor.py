@@ -23,9 +23,11 @@ from unittest.mock import patch
 
 import agent_procutil
 import pytest
+import single_instance_lease
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import output
+from agent_worktrees import session_catalog
 from agent_worktrees import worktree_identity
 
 
@@ -36,6 +38,97 @@ def test_status_monitor_registered():
     # and the launcher reap must never kill the resident tracker.
     assert "status-monitor" in m._NO_PROJECT_COMMANDS
     assert "status-monitor" in m._LAUNCHER_REAP_VETOES
+
+
+def test_status_monitor_exits_immediately_when_lease_already_held(monkeypatch, tmp_path):
+    """The atomic exclusivity gate (aperture-labs#8036 follow-up) must run
+    BEFORE the existing lock-file liveness check, and losing the race must
+    return before any lock-file write or further setup -- a losing caller
+    exits in microseconds instead of running on as an undetected duplicate
+    until some later periodic re-check happens to notice a sibling."""
+
+    class _AlwaysHeld:
+        def __init__(self, *_a, **_kw) -> None:
+            pass
+
+        def acquire(self) -> None:
+            raise single_instance_lease.AlreadyRunningError(tmp_path / "status-monitor.lock", 999)
+
+    monkeypatch.setattr(single_instance_lease, "SingleInstance", _AlwaysHeld)
+    write_calls: list = []
+    monkeypatch.setattr(m.locks, "write_lock", lambda *a, **kw: write_calls.append((a, kw)))
+
+    args = argparse.Namespace(interval=15, passive=False, control_port=None)
+    assert m.cmd_status_monitor(args) == 0
+    assert write_calls == [], "must return before the lock-file write, not just before the main loop"
+
+
+def test_status_monitor_proceeds_when_lease_is_won(monkeypatch, tmp_path):
+    """The inverse: winning the atomic gate must not itself block the
+    existing lock-file publish (so other tooling -- the status bar, a
+    sibling's supersession check -- still sees this monitor's metadata)."""
+    acquired: list = []
+
+    class _AlwaysWins:
+        def __init__(self, *_a, **_kw) -> None:
+            pass
+
+        def acquire(self) -> None:
+            acquired.append(True)
+
+    monkeypatch.setattr(single_instance_lease, "SingleInstance", _AlwaysWins)
+    write_calls: list = []
+    monkeypatch.setattr(m.locks, "write_lock", lambda *a, **kw: write_calls.append((a, kw)))
+    # No OTHER monitor owns the lock-file side either, so `_other_current_
+    # monitor` is False and we reach the write.
+    monkeypatch.setattr(m.locks, "read_lock", lambda *a, **kw: None)
+    monkeypatch.setattr(m.locks, "lock_is_live", lambda *a, **kw: False)
+
+    def _raise_to_exit_before_the_loop(*_a, **_kw):
+        raise RuntimeError("reached the resident loop -- test stops here by design")
+
+    # `session_catalog.ResidentSessionReconciler` is the first real
+    # object construction reached AFTER the gate + lock-file write this
+    # test cares about, well before the actual indefinite sweep loop
+    # (`threading.Event()`, used for `shutdown_requested`, fires much
+    # EARLIER in this function -- before the gate even runs -- so it can't
+    # serve as a "stop here" marker for this test).
+    monkeypatch.setattr(session_catalog, "ResidentSessionReconciler", _raise_to_exit_before_the_loop)
+
+    args = argparse.Namespace(interval=15, passive=False, control_port=None)
+    with pytest.raises(RuntimeError, match="reached the resident loop"):
+        m.cmd_status_monitor(args)
+    assert acquired == [True]
+    assert len(write_calls) == 1
+    assert write_calls[0][0][0] == m._monitor_lock_path(), "wrote the real monitor lock path"
+
+
+def test_status_monitor_passive_mode_skips_the_lease_entirely(monkeypatch):
+    """Passive mode never competes for ownership (matches the pre-existing
+    `_other_current_monitor` early return for `passive_mode`) -- it must not
+    even attempt to acquire the lease."""
+    constructed: list = []
+
+    class _Tracking:
+        def __init__(self, *a, **kw) -> None:
+            constructed.append((a, kw))
+
+        def acquire(self) -> None:
+            raise AssertionError("passive mode must never acquire the lease")
+
+    monkeypatch.setattr(single_instance_lease, "SingleInstance", _Tracking)
+
+    def _raise_to_exit_before_the_loop(*_a, **_kw):
+        raise RuntimeError("reached the resident loop -- test stops here by design")
+
+    monkeypatch.setattr(session_catalog, "ResidentSessionReconciler", _raise_to_exit_before_the_loop)
+    monkeypatch.setattr(m.locks, "read_lock", lambda *a, **kw: None)
+    monkeypatch.setattr(m.locks, "lock_is_live", lambda *a, **kw: False)
+
+    args = argparse.Namespace(interval=15, passive=True, control_port=None)
+    with pytest.raises(RuntimeError, match="reached the resident loop"):
+        m.cmd_status_monitor(args)
+    assert constructed == [], "passive mode must not construct a SingleInstance at all"
 
 
 def test_resident_lifecycle_requests_wait_for_their_deadline():

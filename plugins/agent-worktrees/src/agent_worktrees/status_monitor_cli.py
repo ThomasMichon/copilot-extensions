@@ -204,6 +204,36 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         op = d.get("prefix")
         return not (op and runtime_superseded(prefix=op))
 
+    # Atomic exclusivity gate -- MUST run before the lock-file check below,
+    # not instead of it. The lock file remains the metadata channel other
+    # tooling reads (pid/prefix/mux, supersession comparisons); it was never
+    # sufficient alone for exclusivity, because "read the file, decide it's
+    # not live, then write it" has a real gap between the read and the
+    # write. Any number of monitors launched in the same narrow window (many
+    # sessions' lifecycle hooks firing close together, which is exactly what
+    # a burst of `agent-worktrees create`/`resume` calls or several mux panes
+    # restarting in quick succession produces) could all pass that check
+    # before any of them committed a write, and each surviving duplicate then
+    # ran indefinitely until a periodic re-check happened to notice a sibling
+    # -- observed in the wild as 100+ live `status-monitor` processes eating
+    # double-digit percent CPU (aperture-labs#8036 follow-up). A
+    # :class:`single_instance_lease.SingleInstance` (the same proven,
+    # OS-level flock/msvcrt primitive already used for the `classify`
+    # coalescing lock and the cutover orchestrator elsewhere in this plugin)
+    # closes the gap: acquisition is one atomic kernel call, so of any
+    # number of concurrent callers racing the same name, exactly one ever
+    # wins -- every loser raises immediately here, never reaching the
+    # expensive setup below, let alone running to completion.
+    _lease = None
+    if not passive_mode:
+        from single_instance_lease import AlreadyRunningError, SingleInstance
+
+        _lease = SingleInstance(status_monitor_runtime._aw_runtime_home(), service="status-monitor")
+        try:
+            _lease.acquire()
+        except AlreadyRunningError:
+            return 0
+
     if _other_current_monitor():
         return 0
     if not passive_mode:
