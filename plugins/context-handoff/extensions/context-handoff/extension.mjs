@@ -1062,11 +1062,18 @@ const session = await joinSession({
             "sync`) -- see the context-handoff skill's 'Sync before " +
             "triggering' section for the exact invocation; it shares the " +
             "same lock and rebase guard as the force-tier path; note any " +
-            "conflict in the brief rather than blocking on it); (2) call " +
-            "generate_handoff_prompt to collect session facts; (3) compose " +
+            "conflict in the brief rather than blocking on it); (2) quiesce " +
+            "owned background work -- capture whatever partial results an " +
+            "owned background agent/async shell produced, then stop or wait " +
+            "it out (`stop_powershell`/`stop_bash`), and always stop every " +
+            "owned `manage_schedule` entry (re-arming, if the successor " +
+            "needs it, is a separate, named, post-cutover action -- never a " +
+            "reason to leave one running now; see the skill's 'Quiesce " +
+            "owned background work before triggering' section); (3) call " +
+            "generate_handoff_prompt to collect session facts; (4) compose " +
             "continuation markdown per the context-handoff skill -- use its " +
             "compact effort-backed shape when a valid open active effort exists, " +
-            "otherwise the full standalone shape; (4) call trigger_handoff with " +
+            "otherwise the full standalone shape; (5) call trigger_handoff with " +
             "that markdown as `prompt_text` and a short specific `title`. " +
             "trigger_handoff always stores/refreshes the baton and ends with " +
             "the final short handoff prompt/seed; it only signals pending " +

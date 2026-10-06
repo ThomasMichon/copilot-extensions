@@ -277,5 +277,20 @@ test("quiescing owned background work is required before composing, in every sur
   // The public README's trigger sequences carry the same requirement, so a
   // reader following only the README (not the skill) doesn't bypass it.
   assert.match(readme, /quiesc/i);
+
+  // The handoff-fallback instructions (loaded when the extension itself
+  // fails to register) carry a compact version of the same requirement.
+  const fallback = readFileSync(
+    join(plugin, "instructions", "handoff-fallback.instructions.md"),
+    "utf8",
+  );
+  assert.match(fallback, /quiesc/i);
+
+  // The explicit human-invoked /handoff-continue command's generated prompt
+  // also mentions quiescing, not just the two session-driven trigger paths.
+  const continueStart = extension.indexOf('name: "handoff-continue"');
+  const continueEnd = extension.indexOf('name: "consume-handoff"', continueStart);
+  assert.ok(continueStart >= 0 && continueEnd > continueStart);
+  assert.match(extension.slice(continueStart, continueEnd), /quiesc/i);
 });
 
