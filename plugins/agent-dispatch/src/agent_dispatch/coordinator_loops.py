@@ -53,10 +53,16 @@ _ABANDONED_PASSIVE_REAP_DEFAULT_GRACE_S = 600.0
 # lets the existing self-retire loop above own its own graceful exit once
 # that spawned deploy flips the routing table to the new generation.
 #
-# Opt-in (default-OFF), unlike self-retire: self-retire only ever *reacts* to
-# a cutover someone else already committed, so it is safe to arm everywhere.
-# This loop *initiates* one on its own, so a first release stays opt-in
-# (``AGENT_DISPATCH_SELF_UPDATE=1``) until it has soaked in the field.
+# Default-ON (opt-out), like self-retire and the supervisor daemon's own
+# analogous loop (``AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE``): a payload
+# update that never reaches the live coordinator leaves it running stale
+# code indefinitely (an `update` that silently doesn't take effect is worse
+# than the small risk this loop carries), and the underlying cutover
+# mechanism (`deploy`) is the same already-validated drain-and-flip dance
+# self-retire's own tests exercise. This loop initially shipped opt-in
+# pending field soak; it has since soaked (mirrors the supervisor daemon's
+# own now-default-on loop) and defaults on. Set
+# ``AGENT_DISPATCH_SELF_UPDATE=0`` (or false/no/off) to disable it.
 _SELF_UPDATE_DEFAULT_POLL_S = 60.0
 _SELF_UPDATE_DEFAULT_CONFIRMATIONS = 3
 _SELF_UPDATE_DEFAULT_COOLDOWN_S = 900.0
@@ -145,8 +151,8 @@ def _self_update_settings() -> tuple[bool, float, int, float]:
     """``(enabled, poll_seconds, confirmations, cooldown_seconds)``."""
     import math
 
-    enabled = os.environ.get("AGENT_DISPATCH_SELF_UPDATE", "").strip().lower() in (
-        "1", "true", "yes", "on",
+    enabled = os.environ.get("AGENT_DISPATCH_SELF_UPDATE", "").strip().lower() not in (
+        "0", "false", "no", "off",
     )
     try:
         poll = float(

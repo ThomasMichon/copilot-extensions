@@ -605,7 +605,7 @@ def register_coordinator_commands(sub) -> None:
             "`install.sh update` on POSIX) -- either by hand, "
             "or it is invoked automatically by a running coordinator's own "
             "self-update loop once it notices a newer version has been "
-            "published (opt-in via AGENT_DISPATCH_SELF_UPDATE=1)."
+            "published (default-on; opt out with AGENT_DISPATCH_SELF_UPDATE=0)."
         ),
     )
     _add_cutover_flags(p)

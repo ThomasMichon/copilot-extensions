@@ -1,4 +1,4 @@
-"""Tests for the coordinator's live self-update settings/opt-in gate.
+"""Tests for the coordinator's live self-update settings/opt-out gate.
 
 ``_self_update_settings`` is the environment-var parsing seam for the
 self-update loop wired into ``coordinator.create_app``'s lifespan (see
@@ -10,21 +10,21 @@ from __future__ import annotations
 from agent_dispatch.coordinator import _self_update_settings
 
 
-def test_self_update_disabled_by_default(monkeypatch):
+def test_self_update_enabled_by_default(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_SELF_UPDATE", raising=False)
     enabled, poll, k, cooldown = _self_update_settings()
-    assert enabled is False
+    assert enabled is True
 
 
-def test_self_update_opt_in_truthy_values(monkeypatch):
+def test_self_update_truthy_values_stay_enabled(monkeypatch):
     for value in ("1", "true", "TRUE", "yes", "on"):
         monkeypatch.setenv("AGENT_DISPATCH_SELF_UPDATE", value)
         enabled, *_ = _self_update_settings()
         assert enabled is True, value
 
 
-def test_self_update_falsy_values_stay_disabled(monkeypatch):
-    for value in ("0", "false", "no", "off", ""):
+def test_self_update_falsy_values_disable(monkeypatch):
+    for value in ("0", "false", "no", "off"):
         monkeypatch.setenv("AGENT_DISPATCH_SELF_UPDATE", value)
         enabled, *_ = _self_update_settings()
         assert enabled is False, value

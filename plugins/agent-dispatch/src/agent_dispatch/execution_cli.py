@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from agent_procutil import no_window_kwargs
+
 from .loop_commands import _resolve_cli_module
 
 
@@ -357,7 +359,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     def runner(cmd: tuple[str, ...]) -> int:
         try:
-            proc = subprocess.run(list(cmd), check=False)  # noqa: S603 -- operator-supplied wait
+            proc = subprocess.run(  # noqa: S603 -- operator-supplied wait
+                list(cmd), check=False, **no_window_kwargs()
+            )
             return proc.returncode
         except (OSError, subprocess.SubprocessError) as exc:
             print(f"agent-dispatch: run: could not execute the wait: {exc}", file=sys.stderr)

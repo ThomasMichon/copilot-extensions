@@ -1130,8 +1130,12 @@ def test_cold_resume_preserves_worktree_on_stat_error(q, client, monkeypatch):
     q.record_cold(reservation.key)
     q.submit_steer(blocked.id, fields={"decision": "continue"}, sender="operator")
 
-    def deny_stat(_path):
-        raise PermissionError("temporarily inaccessible")
+    real_stat = supervisor_module.Path.stat
+
+    def deny_stat(path, *args, **kwargs):
+        if str(path) == "/inaccessible/worktree":
+            raise PermissionError("temporarily inaccessible")
+        return real_stat(path, *args, **kwargs)
 
     monkeypatch.setattr(supervisor_module.Path, "stat", deny_stat)
     resumed: list[str] = []

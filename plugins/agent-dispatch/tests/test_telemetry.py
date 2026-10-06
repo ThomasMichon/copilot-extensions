@@ -187,10 +187,15 @@ def test_load_sink_from_config_fail_open_on_missing_or_bad_sink(tmp_path) -> Non
         assert telemetry.has_sink() is False
 
 
-def test_load_sink_from_config_default_path_is_convention() -> None:
+def test_load_sink_from_config_default_path_is_convention(monkeypatch) -> None:
     _reset()
     from pathlib import Path
 
+    # This suite's own hermeticity fixture now pins AGENT_DISPATCH_INSTALL_DIR
+    # suite-wide (isolating against a real machine's installed service.env);
+    # clear it here so _default_config_path() falls through to the real
+    # Path.home() this test is actually exercising.
+    monkeypatch.delenv("AGENT_DISPATCH_INSTALL_DIR", raising=False)
     expected = Path.home() / ".agent-dispatch" / telemetry.CONFIG_FILENAME
     assert telemetry._default_config_path() == expected
 

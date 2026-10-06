@@ -70,16 +70,17 @@ def supervisor_lease_scope(machine: str | None, env: str) -> str:
 # marker or an incomplete slot.
 #
 # Default-ON / opt-out, like the coordinator's generation self-retire
-# (``AGENT_DISPATCH_SELF_RETIRE``) -- NOT opt-in like the coordinator's own
-# self-update loop. There is no operator-facing protocol in this harness's
-# launch paths to set an opt-in env var before a daemon's first boot, so an
-# opt-in flag here would simply never get flipped and the gap in #2259 would
-# persist unfixed for everyone. ``AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE=0`` (or
-# false/no/off) is the escape hatch. Deliberately a *separate* flag from the
-# coordinator's ``AGENT_DISPATCH_SELF_UPDATE`` -- one arms the coordinator's
-# routing-table cutover, the other this daemon's respawn; sharing a flag would
-# couple two independently-soaked mechanisms. Validated end-to-end (real
-# process spawn, real single-instance lease handoff) by the clean-room
+# (``AGENT_DISPATCH_SELF_RETIRE``) and, since it has since soaked too, the
+# coordinator's own self-update loop. There is no operator-facing protocol in
+# this harness's launch paths to set an opt-in env var before a daemon's
+# first boot, so an opt-in flag here would simply never get flipped and the
+# gap in #2259 would persist unfixed for everyone.
+# ``AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE=0`` (or false/no/off) is the escape
+# hatch. Deliberately a *separate* flag from the coordinator's
+# ``AGENT_DISPATCH_SELF_UPDATE`` -- one arms the coordinator's routing-table
+# cutover, the other this daemon's respawn; sharing a flag would couple two
+# independently-controllable mechanisms. Validated end-to-end (real process
+# spawn, real single-instance lease handoff) by the clean-room
 # ``agent-dispatch-supervisor-self-update`` scenario before defaulting on.
 _SELF_UPDATE_DEFAULT_POLL_S = 60.0
 _SELF_UPDATE_DEFAULT_COOLDOWN_S = 900.0

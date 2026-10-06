@@ -1586,7 +1586,12 @@ def test_capture_keeps_console_descendants_off_default_terminal(capture):
     assert suspicious_titles == []
 
 
-def test_runtime_root_is_under_home_not_payload():
+def test_runtime_root_is_under_home_not_payload(monkeypatch):
+    # This suite's own hermeticity fixture now pins AGENT_DISPATCH_INSTALL_DIR
+    # suite-wide (isolating against a real machine's installed service.env);
+    # clear it here so runtime_root() falls through to the real Path.home()
+    # this test is actually exercising.
+    monkeypatch.delenv("AGENT_DISPATCH_INSTALL_DIR", raising=False)
     root = procutil.runtime_root()
     assert root == Path.home() / ".agent-dispatch"
     # The runtime root must never be inside the Copilot plugin payload tree.
@@ -1594,6 +1599,8 @@ def test_runtime_root_is_under_home_not_payload():
 
 
 def test_relocate_off_payload_chdirs_to_runtime_root(tmp_path, monkeypatch):
+    # See test_runtime_root_is_under_home_not_payload's comment above.
+    monkeypatch.delenv("AGENT_DISPATCH_INSTALL_DIR", raising=False)
     # Simulate a daemon lazy-started with the plugin payload as its CWD.
     payload = tmp_path / ".copilot" / "installed-plugins" / "x" / "agent-dispatch"
     payload.mkdir(parents=True)
