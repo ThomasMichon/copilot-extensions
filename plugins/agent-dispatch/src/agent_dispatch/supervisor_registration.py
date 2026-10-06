@@ -175,6 +175,12 @@ def _spawn_self_update_successor(python_path: Any, respawn_argv: list[str]) -> N
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
         "env": env,
+        # Never the caller's ambient cwd: this respawned successor is a
+        # long-lived supervised daemon that may outlive whatever repo/
+        # worktree checkout the current (stale) process happened to be
+        # running from (service-lifecycle-supervision's "nothing pins the
+        # plugin payload" rule, generalized to every deletable checkout).
+        "cwd": os.path.expanduser("~"),
     }
     kwargs.update(detached_kwargs(breakaway=True))
     subprocess.Popen(cmd, **kwargs)  # noqa: S603

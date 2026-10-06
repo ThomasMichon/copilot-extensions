@@ -110,6 +110,7 @@ def test_spawn_detached_happy_path_is_breakaway(monkeypatch, tmp_path):
 
     def _popen_ok(argv, **kwargs):
         seen["flags"] = kwargs.get("creationflags")
+        seen["cwd"] = kwargs.get("cwd")
         return object()
 
     monkeypatch.setattr(subprocess, "Popen", _popen_ok)
@@ -124,6 +125,9 @@ def test_spawn_detached_happy_path_is_breakaway(monkeypatch, tmp_path):
     # Breakaway succeeded -> the WMI broker is never reached.
     assert seen["wmi"] == 0
     assert seen["flags"] == 0x09000000
+    # Never the caller's ambient cwd -- this is a long-lived supervised
+    # daemon rooted at its own durable install dir instead.
+    assert seen["cwd"] == str(tmp_path)
 
 
 def test_watchdog_replacement_uses_delayed_versioned_start(monkeypatch):

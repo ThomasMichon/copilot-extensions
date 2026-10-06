@@ -1,0 +1,9 @@
+{
+  "comment": "docker_proxy's detached SSH-over-docker-exec broker daemon no longer inherits the caller's ambient cwd -- rooted at HOME instead (service-lifecycle-supervision CWD-compliance sweep)",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

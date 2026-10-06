@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 from ssh_manager import forward_keeper as fk
 
@@ -88,6 +89,9 @@ def test_spawn_keeper_detaches_and_returns_state(monkeypatch):
     assert seen["argv"] == ["python", "-m", "x"]
     assert seen["kwargs"]["stdin"] is not None
     assert seen["kwargs"]["creationflags"] == 99
+    # Never the caller's cwd -- a detached keeper may outlive the repo/
+    # worktree checkout its caller happened to be running from.
+    assert seen["kwargs"]["cwd"] == os.path.expanduser("~")
 
 
 def test_keeper_store_reaps_child_pids_when_keeper_pid_is_gone(tmp_path, monkeypatch):

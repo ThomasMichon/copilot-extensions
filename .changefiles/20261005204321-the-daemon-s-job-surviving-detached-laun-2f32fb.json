@@ -1,0 +1,9 @@
+{
+  "comment": "the daemon's job-surviving detached launch path no longer inherits the caller's ambient cwd -- rooted at its own durable install dir instead (service-lifecycle-supervision CWD-compliance sweep)",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
