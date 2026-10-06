@@ -387,6 +387,13 @@ test("quiescing owned background work is required before composing, in every sur
     "THEN sync the worktree",
     "save_handoff_prompt's turn-end branch must quiesce before syncing",
   );
+  // The turn-end branch must be explicitly bounded to one required second
+  // save, not an unconditional "ask again and repeat" loop -- a literal
+  // agent reading the same returned text on the second call must be told
+  // to stop and trigger, not ask the user again.
+  assert.match(followUpBranch, /do not ask again/i);
+  assert.match(followUpBranch, /stop here and call trigger_handoff now/i);
+  assert.match(followUpBranch, /ONE MORE TIME/);
 
   // The public README's trigger sequences carry the same requirement with
   // the same ordering and unconditional-schedule semantics, so a reader
@@ -490,6 +497,12 @@ test("quiescing owned background work is required before composing, in every sur
   );
   assert.match(triggerDesc, /quiesce owned background work/i);
   assert.match(triggerDesc, /always stop owned `manage_schedule` entries/i);
+  // Mirrors the skill's context-pressure escape hatch: agents/shells may be
+  // left running when neither is safely stoppable in the time available for
+  // an urgent handoff (noted, not silently dropped); schedules get no such
+  // exception.
+  assert.match(triggerDesc, /unless neither is safe/i);
+  assert.match(triggerDesc, /this exception never applies to schedules/i);
 
   // The always-on sessionStart ambient guidance (emit-guidance.sh/.ps1) is
   // read even when the context-handoff extension itself never registers --

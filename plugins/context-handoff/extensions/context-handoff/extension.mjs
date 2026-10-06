@@ -771,16 +771,24 @@ const session = await joinSession({
           "worktree a still-running task could still write into -- call " +
           "`trigger_handoff` directly now.\n\n" +
           "If this is a turn-end follow-up handoff, ask the user whether to " +
-          "continue via handoff. Only after they say yes: quiesce owned " +
+          "continue via handoff -- but only if they have not already said yes " +
+          "since this baton was first saved; if you are calling this a SECOND " +
+          "time because the user already agreed, skip straight to 'If they " +
+          "already agreed' below instead of asking again. Only after they say " +
+          "yes (the first time): quiesce owned " +
           "background work FIRST (same section as above -- only now that " +
           "the user has agreed is it correct to stop things the successor " +
           "would otherwise inherit live), THEN sync the worktree " +
           "(inspect the tree first -- never blanket-commit; skip the sync " +
           "entirely if anything looks unfamiliar or unsafe to commit), then " +
-          "ALWAYS re-run generate_handoff_prompt and save_handoff_prompt again " +
+          "re-run generate_handoff_prompt and call save_handoff_prompt ONE " +
+          "MORE TIME (this is the one required second save -- do not ask " +
+          "again or repeat this cycle a third time) " +
           "-- even if the sync and quiescing both looked like a no-op -- so " +
-          "the stored baton reflects the post-quiesce, post-sync state before " +
-          "calling trigger_handoff. Never " +
+          "the stored baton reflects the post-quiesce, post-sync state. " +
+          "If they already agreed: this is that required second save -- stop " +
+          "here and call trigger_handoff now; do not ask again, "+
+          "re-quiesce, re-sync, or re-save. Never " +
           "quiesce, sync, or commit before the user has agreed, unless " +
           "autopilot or prior authorization already covers that turn-end " +
           "follow-up path.\n\n" +
@@ -891,7 +899,10 @@ const session = await joinSession({
         "Signal that THIS session is ready for a handoff pickup, without " +
         "performing any process management. Before calling this, quiesce " +
         "owned background work (stop/wait out owned agents and shells after " +
-        "capturing their results, and always stop owned `manage_schedule` " +
+        "capturing their results -- unless neither is safe to do in the time " +
+        "available for an urgent context-pressure handoff, in which case note " +
+        "what was left running and why instead of delaying; this exception " +
+        "never applies to schedules -- always stop owned `manage_schedule` " +
         "entries) and sync the worktree -- in that order -- per the " +
         "context-handoff skill's quiescing and sync sections. Call this only " +
         "after the user said " +
