@@ -277,28 +277,36 @@ still makes it into the stored baton; quiescing after the brief is already
 saved silently strands that information outside it:
 
 1. **Stop what you can stop.** For every background agent or async shell this
-   session itself started and still owns, either wait for it to finish, or
-   stop it (`stop_powershell`, or the agent equivalent) if it is not near
-   done. Do not leave one running on the assumption "the successor will
-   notice" -- it inherits the worktree, not your task list.
+   session itself started and still owns: an async shell can be stopped
+   directly (`stop_powershell` for a PowerShell-backed shell, `stop_bash` for
+   a bash-backed one -- use whichever matches how it was started); a
+   background agent generally has no cancel primitive, so wait for it to
+   finish (or send it a closing message) instead of assuming a stop call
+   exists for it. Do not leave either running on the assumption "the
+   successor will notice" -- it inherits the worktree, not your task list.
 2. **Check in whatever progress is checkoutable before stopping it.** If a
    background task has useful partial results (a file written, a commit
    staged, findings worth keeping), capture that into the handoff brief or
    the repo itself before tearing it down -- stopping a task is not licence
    to silently discard what it already produced.
-3. **Clear schedules you own.** Stop (`manage_schedule` `action: "stop"`)
-   every schedule this session created, unless the schedule's entire purpose
-   is to keep running independent of this conversation (rare -- e.g. an
-   operator-requested recurring reminder with its own lifecycle). A
-   self-paced `/every`-style loop schedule is exactly the kind that should be
-   stopped here, not left ticking into a worktree whose active session is
-   about to change out from under it.
+3. **Clear schedules you own, always.** Stop (`manage_schedule` `action:
+   "stop"`) every schedule this session created -- with no exception for one
+   the brief plans to ask the successor to re-arm. A stopped schedule can
+   still be *named* for re-arming in step 4 below; a schedule left running
+   because it will supposedly be re-armed later is exactly the race this
+   section exists to prevent (the predecessor's schedule firing again before
+   the successor ever re-arms anything). A self-paced `/every`-style loop
+   schedule is exactly the kind that must be stopped here, not left ticking
+   into a worktree whose active session is about to change out from under
+   it.
 4. **Explicitly re-arm only what the successor genuinely needs.** If a
    stopped schedule or background task must resume after cutover, say so
    plainly in **Outstanding Background Flows & External State** --
    name the exact schedule/task, its purpose, and the exact command to
    restart it. The default is quiesce-and-report; re-arming is a deliberate,
-   named exception the brief must ask for, not an inertia-driven carryover.
+   named exception the brief must ask for -- and always a separate,
+   successor-side action taken after cutover, never a reason to leave
+   something running now.
 
 This still is not a reason to delay a context-pressure-driven handoff that
 must trigger immediately: if stopping something cleanly isn't safe to do in
