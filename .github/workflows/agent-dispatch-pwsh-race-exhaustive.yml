@@ -12,11 +12,11 @@ name: agent-dispatch pwsh mutex-race exhaustive suite
 # that race MULTIPLE concurrent real `pwsh` processes against the same
 # named mutex -- genuine, but disproportionate to run unconditionally in
 # every PR's required smoke lane. They self-skip unless
-# AGENT_DISPATCH_RUN_PWSH_RACE_TESTS=1 is set. Before this workflow
-# existed, nothing in the repo ever set that flag, so these tests never
-# actually ran anywhere (round-26 review finding on #5378) despite
-# concurrent snapshot publication/reuse being a core correctness guarantee
-# of the build-snapshot fix. This workflow is what actually runs them, on
+# AGENT_DISPATCH_RUN_PWSH_RACE_TESTS=1 is set, and no other workflow in
+# this repo ever sets that flag, so without a dedicated lane these tests
+# would never actually run anywhere despite concurrent snapshot
+# publication/reuse being a core correctness guarantee of the
+# build-snapshot fix. This workflow is what actually runs them, on
 # both ubuntu-latest and windows-latest (two separate jobs, not a
 # templated `runs-on`, which this repo's check-trusted-ci.py guard
 # forbids as a "dynamic runner route") since `pwsh` mutex/named-lock
