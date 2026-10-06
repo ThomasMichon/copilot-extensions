@@ -1730,6 +1730,62 @@ def test_mcp_server_empty_tool_list_is_flagged(tmp_path: Path):
 
 
 @pytest.mark.guard
+def test_mcp_server_narrow_tool_list_with_reasoned_marker_is_suppressed(tmp_path: Path):
+    # The documented escape hatch: a narrowed list with a trailing reasoned
+    # `# mcp-tools-allowlist: allow <reason>` comment is not flagged.
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    tools: ['example_search']  # mcp-tools-allowlist: allow admin-tool gating\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert not any(
+        f.check == "mcp-server-tools-allowlist" for f in report.findings
+    )
+
+
+@pytest.mark.guard
+def test_mcp_server_narrow_tool_list_with_bare_marker_still_flags(tmp_path: Path):
+    # A marker with no stated reason does not count -- same contract as
+    # check-headless-launch.py's own escape-hatch comment.
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "    command: agent-mcp\n"
+        "    tools: ['example_search']  # mcp-tools-allowlist: allow\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert any(f.check == "mcp-server-tools-allowlist" for f in report.findings)
+
+
+@pytest.mark.guard
 def test_mcp_server_nested_env_key_is_not_mistaken_for_tools(tmp_path: Path):
     # A same-named key nested one level deeper than the server's own direct
     # fields (e.g. inside an `env:` mapping) must never be mistaken for the

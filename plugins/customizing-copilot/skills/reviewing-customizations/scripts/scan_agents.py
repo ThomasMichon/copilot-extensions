@@ -19,8 +19,32 @@ from scan_skills import (
 # `.ps1`/`.cmd`) is unusable without it.
 SHELL_EXECUTION_TOOL = "execute"
 
+# Inline-comment escape hatch for a deliberately narrowed per-server tools
+# allow-list -- same convention as tools/check-headless-launch.py's own
+# `headless-guard: allow <reason>` marker.
+_MCP_TOOLS_ALLOW_MARKER = "mcp-tools-allowlist: allow"
+
 BLOCKING = "blocking"
 WARNING = "warning"
+
+
+def _mcp_tools_allow_reason(raw_value: str) -> str | None:
+    """Return the stated reason if ``raw_value`` carries the allow marker.
+
+    Mirrors ``check-headless-launch.py``'s ``_allowed`` comment contract: the
+    marker must be followed by ``:``/space and a non-empty reason, or it does
+    not count -- a bare marker with no reason still trips the finding.
+    """
+    if "#" not in raw_value:
+        return None
+    comment = raw_value.split("#", 1)[1].strip()
+    if not comment.startswith(_MCP_TOOLS_ALLOW_MARKER):
+        return None
+    suffix = comment[len(_MCP_TOOLS_ALLOW_MARKER):]
+    if not suffix or suffix[0] not in " :":
+        return None
+    reason = suffix.lstrip(" :").strip()
+    return reason or None
 
 
 def plugin_root_for_agent(
@@ -425,20 +449,23 @@ def scan_agents(
                 token.lower()
                 for token in re.findall(r"[A-Za-z*][A-Za-z0-9_.*:/-]*", without_comments)
             }
-            if "*" not in tokens:
-                rendered = ", ".join(sorted(tokens)) if tokens else "(none)"
-                add(
-                    "mcp-server-tools-allowlist",
-                    f"mcp-servers.{server_name}.tools is a hand-enumerated "
-                    f"list ({rendered}) instead of [\"*\"] "
-                    "-- the upstream server's own tool catalog can add, "
-                    "rename, or retire tools independent of this repo's "
-                    "release cycle, and a stale/misspelled entry can make "
-                    "the whole allow-list reject every name in it, silently "
-                    "denying the agent that server's tools entirely (a real "
-                    "regression seen in the wild: two agents hand-"
-                    "enumerating one MCP server's tools drifted out of sync "
-                    "with its catalog and broke MCP session startup for "
-                    "both). Use [\"*\"] unless withholding one specific tool "
-                    "for a documented reason.",
-                )
+            if "*" in tokens or _mcp_tools_allow_reason(raw_tools):
+                continue
+            rendered = ", ".join(sorted(tokens)) if tokens else "(none)"
+            add(
+                "mcp-server-tools-allowlist",
+                f"mcp-servers.{server_name}.tools is a hand-enumerated "
+                f"list ({rendered}) instead of [\"*\"] "
+                "-- the upstream server's own tool catalog can add, "
+                "rename, or retire tools independent of this repo's "
+                "release cycle, and a stale/misspelled entry can make "
+                "the whole allow-list reject every name in it, silently "
+                "denying the agent that server's tools entirely (a real "
+                "regression seen in the wild: two agents hand-"
+                "enumerating one MCP server's tools drifted out of sync "
+                "with its catalog and broke MCP session startup for "
+                "both). Use [\"*\"] unless withholding one specific tool "
+                "for a documented reason (add a trailing "
+                "`# mcp-tools-allowlist: allow <reason>` comment to "
+                "suppress this finding).",
+            )
