@@ -199,7 +199,14 @@ def test_daemon_statuses_rejects_a_missing_start_time_as_unverified(
         daemons_status, "_cmdline_for_pid", lambda pid: "... --listen-port=9777 ..."
     )
     monkeypatch.setattr(daemons_status, "_pid_owned_by_current_user", lambda pid, **kw: True)
-    monkeypatch.setattr(daemons_status, "process_start_time", lambda pid: None)
+    # Stub the module's own wrapper directly, not just the shared
+    # zdd.diagnostics helper it falls back from: _process_start_time() can
+    # still run a real `ps` lookup on macOS/BSD, and if host pid 777
+    # happens to exist and stay unchanged across both samples, that real
+    # lookup would make this test depend on (and potentially pass despite)
+    # the actual host process table instead of exercising the None/None
+    # rejection it's named for.
+    monkeypatch.setattr(daemons_status, "_process_start_time", lambda pid: None)
     monkeypatch.setattr(routing, "read_table", lambda config_dir: None)
     _FakeControlClient.responses = {9777: {"status": "ready", "version": "0.1.0-dev1"}}
     monkeypatch.setattr(daemons_status.mux_daemon_cutover, "ControlClient", _FakeControlClient)
