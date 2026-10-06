@@ -12,13 +12,32 @@ import {
 const plugin = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 // extension.mjs's generated prompts/descriptions are built from adjacent
-// string-literal concatenation (`"a " +\n  "b"`); reading the file as raw
-// source therefore leaves the quote marks and `+` operators embedded
-// between words. Joining concatenated literals here lets assertions match
-// the actual rendered text (what an agent reading the tool's returned
-// string sees) instead of the source-level JS syntax.
+// string literals -- either `"a " +\n  "b"` concatenation, or a
+// comma-separated array of lines joined with `.join("\n")` at runtime.
+// Reading the file as raw source leaves the quote marks, `+` operators,
+// and line-array commas embedded between words. Normalizing here lets
+// assertions match the actual rendered text (what an agent reading the
+// tool's returned string sees), not the source-level JS syntax.
 function joinConcatenatedLiterals(source) {
-  return source.replace(/"\s*\+\s*\r?\n\s*"/g, "");
+  return source
+    .replace(/"\s*\+\s*\r?\n\s*"/g, " ") // "a " + \n "b" -> "a b"
+    .replace(/",\s*\r?\n\s*"/g, " ") // "a", \n "b" -> "a b" (joined-array style)
+    .replace(/^\s*"/gm, "")
+    .replace(/"\s*,?\s*$/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Asserts `before` occurs strictly before `after` in `text`, AND that both
+// substrings actually exist -- a bare `indexOf(a) < indexOf(b)` silently
+// passes if either is missing (indexOf returns -1), which would let a
+// regression that deletes the required step through undetected.
+function assertOrdered(text, before, after, message) {
+  const beforeIndex = text.indexOf(before);
+  const afterIndex = text.indexOf(after);
+  assert.ok(beforeIndex >= 0, `${message} (missing: ${JSON.stringify(before)})`);
+  assert.ok(afterIndex >= 0, `${message} (missing: ${JSON.stringify(after)})`);
+  assert.ok(beforeIndex < afterIndex, message);
 }
 
 test("successor directive drives the parent objective across context windows", () => {
@@ -274,16 +293,37 @@ test("quiescing owned background work is required before composing, in every sur
     skill.indexOf("### 2. Turn-end"),
     skill.indexOf("## Sync before triggering"),
   );
-  assert.ok(
-    path1.indexOf("Quiesce owned background work") <
-      path1.indexOf("Call `generate_handoff_prompt`"),
+  assertOrdered(
+    path1,
+    "Quiesce owned background work",
+    "Call `generate_handoff_prompt`",
     "context-pressure path must quiesce before calling generate_handoff_prompt",
   );
   const path2ReArm = path2.slice(path2.indexOf("Only once the user says yes"));
-  assert.ok(
-    path2ReArm.indexOf("quiesce owned background work") <
-      path2ReArm.indexOf("re-run"),
+  assertOrdered(
+    path2ReArm,
+    "quiesce owned background work",
+    "re-run",
     "turn-end path must quiesce before re-running generate_handoff_prompt",
+  );
+
+  // generate_handoff_prompt's own description embeds the same two-path
+  // instructions as numbered steps; its context-pressure branch must also
+  // mirror the skill's escape hatch (agents/shells only, never schedules).
+  const genDescStart = extension.indexOf('name: "generate_handoff_prompt"');
+  const genDescEnd = extension.indexOf('name: "save_handoff_prompt"', genDescStart);
+  assert.ok(genDescStart >= 0 && genDescEnd > genDescStart);
+  const genDesc = joinConcatenatedLiterals(
+    extension.slice(genDescStart, genDescEnd),
+  );
+  assert.match(genDesc, /stop_powershell.*stop_bash/is);
+  assert.match(genDesc, /isn't safe in the time available/i);
+  assert.match(genDesc, /ALWAYS stop.*manage_schedule.*entry/is);
+  assertOrdered(
+    genDesc,
+    "Also quiesce owned",
+    "ALWAYS call",
+    "generate_handoff_prompt's description must quiesce before its re-run instruction",
   );
 
   // The generated save_handoff_prompt tool response mentions quiescing in
@@ -305,9 +345,10 @@ test("quiescing owned background work is required before composing, in every sur
   assert.match(contextPressureBranch, /quiesc/i);
   assert.match(contextPressureBranch, /stopped every owned `manage_schedule` entry/i);
   assert.match(followUpBranch, /quiesc/i);
-  assert.ok(
-    followUpBranch.indexOf("quiesce owned background work") <
-      followUpBranch.indexOf("re-run generate_handoff_prompt"),
+  assertOrdered(
+    followUpBranch,
+    "quiesce owned background work",
+    "re-run generate_handoff_prompt",
     "turn-end branch text must order quiescing before the re-run instruction",
   );
 
@@ -323,14 +364,16 @@ test("quiescing owned background work is required before composing, in every sur
     assert.match(section, /quiesce owned background work/i);
   }
   assert.match(readmeSection2, /stop every owned `manage_schedule` entry/i);
-  assert.ok(
-    readmeSection2.indexOf("quiesce owned background work") <
-      readmeSection2.indexOf("compose/save the"),
+  assertOrdered(
+    readmeSection2,
+    "quiesce owned background work",
+    "compose/save the",
     "README context-pressure section must quiesce before composing",
   );
-  assert.ok(
-    readmeSection3.indexOf("quiesce owned background work") <
-      readmeSection3.indexOf("recompose"),
+  assertOrdered(
+    readmeSection3,
+    "quiesce owned background work",
+    "recompose",
     "README turn-end section must quiesce before recomposing",
   );
 
@@ -347,7 +390,10 @@ test("quiescing owned background work is required before composing, in every sur
   assert.match(fallback, /stop_powershell/);
   assert.match(fallback, /stop_bash/);
   assert.match(fallback, /wait.*out.*agent|agent.*no stop/i);
-  assert.match(fallback, /always stop owned schedules/i);
+  assert.match(fallback, /always stop owned schedules, no exception/i);
+  // The escape hatch (unsafe under time pressure -> note left-running) is
+  // attached to agents/shells only, never to the unconditional schedule stop.
+  assert.match(fallback, /unsafe under pressure/i);
 
   // The explicit human-invoked /handoff-continue command's generated prompt
   // also mentions quiescing, with the capture-before-stop ordering and
@@ -362,9 +408,10 @@ test("quiescing owned background work is required before composing, in every sur
   assert.match(continuePrompt, /\(2\) quiesce/i);
   assert.match(continuePrompt, /capture whatever partial results/i);
   assert.match(continuePrompt, /always stop every owned `manage_schedule` entry/i);
-  assert.ok(
-    continuePrompt.indexOf("(2) quiesce") <
-      continuePrompt.indexOf("(3) call"),
+  assertOrdered(
+    continuePrompt,
+    "(2) quiesce",
+    "(3) call",
     "/handoff-continue prompt must quiesce in step (2), before step (3)'s generate_handoff_prompt call",
   );
 });
