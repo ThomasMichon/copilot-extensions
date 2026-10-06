@@ -143,7 +143,7 @@ def mcp_server_tool_entries(frontmatter: str) -> list[tuple[str, str]]:
                 continue
             flush_pending()
 
-        if indent == 0 and re.match(r"(?i)^mcp-servers\s*:\s*$", stripped):
+        if indent == 0 and re.match(r"(?i)^mcp-servers\s*:\s*(?:#.*)?$", stripped):
             in_mcp_servers = True
             mcp_indent = indent
             server_name = None
@@ -159,7 +159,7 @@ def mcp_server_tool_entries(frontmatter: str) -> list[tuple[str, str]]:
             field_indent = None
             continue
 
-        server_match = re.match(r"^([A-Za-z0-9_.-]+)\s*:\s*$", stripped)
+        server_match = re.match(r"^([A-Za-z0-9_.-]+)\s*:\s*(?:#.*)?$", stripped)
         if server_match and (server_indent is None or indent <= server_indent):
             server_name = server_match.group(1)
             server_indent = indent

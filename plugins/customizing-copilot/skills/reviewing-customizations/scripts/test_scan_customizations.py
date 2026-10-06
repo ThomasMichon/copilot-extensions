@@ -1786,6 +1786,37 @@ def test_mcp_server_narrow_tool_list_with_bare_marker_still_flags(tmp_path: Path
 
 
 @pytest.mark.guard
+def test_mcp_server_tools_entries_parsed_despite_trailing_comments(tmp_path: Path):
+    # A trailing YAML comment on either the `mcp-servers:` opener or a
+    # server-name line must not prevent the parser from entering that block
+    # at all -- every narrowed list beneath it would otherwise silently
+    # bypass the check entirely, not just the commented line itself.
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:  # agent-mcp bridges\n"
+        "  svc-a:  # the example service\n"
+        "    command: agent-mcp\n"
+        "    tools: ['example_search', 'example_status']\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    findings = [f for f in report.findings if f.check == "mcp-server-tools-allowlist"]
+    assert len(findings) == 1
+    assert "example_search" in findings[0].message
+
+
+@pytest.mark.guard
 def test_mcp_server_nested_env_key_is_not_mistaken_for_tools(tmp_path: Path):
     # A same-named key nested one level deeper than the server's own direct
     # fields (e.g. inside an `env:` mapping) must never be mistaken for the
