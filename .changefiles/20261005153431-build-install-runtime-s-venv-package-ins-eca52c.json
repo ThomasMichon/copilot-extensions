@@ -1,5 +1,5 @@
 {
-  "comment": "Build Install-Runtime's venv/package install from a durable, version-pinned snapshot (New-PluginBuildSnapshot) instead of the live marketplace payload, so a uv/setuptools build subprocess's own CWD can never block copilot plugin update with a Windows file-sharing violation.",
+  "comment": "Build Install-Runtime's venv/package install from a durable, version-pinned snapshot (New-PluginBuildSnapshot) instead of the live marketplace payload, so a uv/setuptools build subprocess's own CWD no longer blocks copilot plugin update with a Windows file-sharing violation on the default snapshot-based path (the -BestEffort/local-checkout fallback still builds directly from the live payload and keeps that pre-existing exposure).",
   "changes": [
     {
       "plugin": "agent-dispatch",

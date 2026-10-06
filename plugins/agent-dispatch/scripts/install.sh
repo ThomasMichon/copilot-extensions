@@ -1902,15 +1902,27 @@ do_stamp() {
     # older payload could acquire this lock after a newer install/update (or
     # a newer stamp) had already published and silently overwrite the shared
     # resolver/binstub surface. Check BOTH authorities a real install/update
-    # or a prior stamp could have advanced -- the live active version
-    # (_versioned_current) and this dedicated stamped-version marker --
-    # mirroring _downgrade_guard's own --force/AGENT_DISPATCH_ALLOW_DOWNGRADE
-    # override for a deliberate rollback.
+    # or a prior stamp could have advanced -- the live active version and
+    # this dedicated stamped-version marker -- mirroring _downgrade_guard's
+    # own --force/AGENT_DISPATCH_ALLOW_DOWNGRADE override for a deliberate
+    # rollback.
     local stamped_version_marker="$INSTALL_DIR/stamped-version"
     local current_stamped=""
     [[ -f "$stamped_version_marker" ]] && current_stamped="$(cat "$stamped_version_marker" 2>/dev/null || true)"
-    local current_active
-    current_active="$(_versioned_current)"
+    # Read `current-version` DIRECTLY as a plain marker file rather than via
+    # _versioned_current: that helper resolves an interpreter from
+    # $LINK_DIR/bin/python or $VENV_DIR/bin/python, both of which name THIS
+    # invocation's OWN source-version slot -- a `stamp` deliberately defers
+    # provisioning that slot (that's the whole point of the fast path), so
+    # it may not exist at all, and _versioned_current would silently return
+    # empty even when a newer direct install HAS published current-version,
+    # defeating this exact guard for the realistic stamp scenario it exists
+    # to protect. The marker is a plain atomically-written text file
+    # (versioned_runtime.py's own CURRENT_VERSION_FILE) -- reading it needs
+    # no interpreter at all.
+    local current_version_marker="$INSTALL_DIR/current-version"
+    local current_active=""
+    [[ -f "$current_version_marker" ]] && current_active="$(cat "$current_version_marker" 2>/dev/null || true)"
     if [[ -n "$current_active" ]] && _version_lt "$SRC_VERSION" "$current_active" && [[ "$FORCE" -ne 1 ]]; then
         _skip "Not publishing: source $SRC_VERSION is older than already-active $current_active (a newer install/update activated first; --force to override)"
         _unlock_stamp_binstub

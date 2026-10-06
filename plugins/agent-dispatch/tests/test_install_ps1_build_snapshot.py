@@ -678,19 +678,27 @@ def _run_stamp_harness(
     """Invoke-Stamp's version-ordering guard, with everything it depends on
     OTHER than Test-VersionLt/Enter-PluginSnapshotLock/Publish-FileAtomically
     stubbed out (a real snapshot build is irrelevant to the guard itself and
-    heavy to construct here). Get-VersionedCurrent is stubbed to return
-    `existing_active_version` -- the REAL `current-version` authority a
-    direct install/update advances, independent of (and never read by) the
-    stamped-version marker this guard also checks. The
-    Deploy-SelfProvisioningBinstub stub writes a marker file instead of a
-    plain no-op, so a test can prove whether it ran (and thus whether it
-    ran INSIDE the lock, before a guard-triggered early return)."""
+    heavy to construct here). `existing_active_version`, when given, is
+    written directly to a `current-version` marker file -- the REAL
+    `current-version` authority a direct install/update advances,
+    independent of (and never touched by) the stamped-version marker this
+    guard also checks. Deliberately NOT routed through a stubbed
+    Get-VersionedCurrent: the real Invoke-Stamp reads this marker directly
+    as plain text (no interpreter resolution at all), precisely so this
+    guard still works when no venv/slot has ever been provisioned -- this
+    harness must exercise that exact real behavior, not paper over it with
+    a function stub. The Deploy-SelfProvisioningBinstub stub writes a
+    marker file instead of a plain no-op, so a test can prove whether it
+    ran (and thus whether it ran INSIDE the lock, before a guard-triggered
+    early return)."""
     install_dir = tmp_path / "install"
     install_dir.mkdir(parents=True)
     plugin_dir = _marketplace_plugin_dir(tmp_path)
     _seed_plugin_dir(plugin_dir)
     if existing_stamped_version is not None:
         (install_dir / "stamped-version").write_text(existing_stamped_version, encoding="utf-8")
+    if existing_active_version is not None:
+        (install_dir / "current-version").write_text(existing_active_version, encoding="utf-8")
     deployed_marker = tmp_path / "binstub-deployed"
 
     script = (
@@ -702,7 +710,6 @@ def _run_stamp_harness(
         # Stubbed: irrelevant to the version-ordering guard under test.
         "function New-PluginBuildSnapshot { param($PluginDir, $InstallDir, $Version) return Join-Path $InstallDir \"snapshots/$Version\" }\n"
         f'function Deploy-SelfProvisioningBinstub {{ Set-Content -Path "{deployed_marker}" -Value "deployed" }}\n'
-        f'function Get-VersionedCurrent {{ return "{existing_active_version or ""}" }}\n'
         + _extract_function_block("Get-VerTuple")
         + "\n\n"
         + _extract_function_block("Test-VersionLt")

@@ -3507,7 +3507,22 @@ function Invoke-Stamp {
         # has since activated a newer build. Check BOTH authorities (still
         # under this same lock, so this reads the true latest of each) and
         # skip if the source is older than EITHER one.
-        $currentActive = Get-VersionedCurrent
+        #
+        # Read `current-version` DIRECTLY as a plain marker file rather than
+        # via Get-VersionedCurrent: that helper resolves an interpreter from
+        # $LinkPython/$VenvPython, both of which point at THIS invocation's
+        # OWN source-version slot -- a `stamp` deliberately has no
+        # provisioned slot yet (that's the whole point of deferring the
+        # build), so Get-VersionedCurrent would silently return empty here
+        # even when a newer direct install HAS published current-version,
+        # defeating this exact guard for the realistic stamp scenario it
+        # exists to protect. The marker is a plain atomically-written text
+        # file (versioned_runtime.py's own CURRENT_VERSION_FILE) -- reading
+        # it needs no interpreter at all.
+        $currentVersionMarker = Join-Path $InstallDir 'current-version'
+        $currentActive = if (Test-Path $currentVersionMarker) {
+            (Get-Content -LiteralPath $currentVersionMarker -Raw -ErrorAction SilentlyContinue).Trim()
+        } else { $null }
         if ($currentActive -and (Test-VersionLt -A $SrcVersion -B $currentActive) -and -not $Force) {
             Write-Skip "Not publishing: source $SrcVersion is older than already-active $currentActive (a newer install/update activated first; -Force to override)"
             return

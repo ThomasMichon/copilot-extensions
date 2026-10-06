@@ -228,18 +228,26 @@ def _run_do_stamp_harness(
     force: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """do_stamp's version-ordering guard (parity with install.ps1's
-    Invoke-Stamp), with `_versioned_current` stubbed to return
-    `existing_active_version` (the real `current-version` authority a
-    direct install/update advances, independent of the dedicated
-    stamped-version marker this guard also checks) and `deploy_binstub`
-    stubbed to drop a marker file -- so a test can prove whether the real
-    binstub deploy happened, not just what it printed."""
+    Invoke-Stamp). `existing_active_version`, when given, is written
+    directly to a `current-version` marker file -- the REAL
+    `current-version` authority a direct install/update advances,
+    independent of the dedicated stamped-version marker this guard also
+    checks. Deliberately NOT routed through a stubbed _versioned_current:
+    the real do_stamp reads this marker directly as plain text (no
+    interpreter resolution at all), precisely so this guard still works
+    when no venv/slot has ever been provisioned -- this harness must
+    exercise that exact real behavior, not paper over it with a function
+    stub. `deploy_binstub` is stubbed to drop a marker file -- so a test
+    can prove whether the real binstub deploy happened, not just what it
+    printed."""
     install_dir = tmp_path / "install"
     install_dir.mkdir(parents=True)
     plugin_dir = tmp_path / "plugin"
     plugin_dir.mkdir(parents=True)
     if existing_stamped_version is not None:
         (install_dir / "stamped-version").write_text(existing_stamped_version, encoding="utf-8")
+    if existing_active_version is not None:
+        (install_dir / "current-version").write_text(existing_active_version, encoding="utf-8")
     deployed_marker = tmp_path / "binstub-deployed"
 
     script = "\n".join([
@@ -248,8 +256,6 @@ def _run_do_stamp_harness(
         '_ok() { printf "OK: %s\\n" "$1"; }',
         '_skip() { printf "SKIP: %s\\n" "$1"; }',
         '_fail() { printf "FAIL: %s\\n" "$1" >&2; }',
-        # Stubbed: irrelevant to the version-ordering guard under test.
-        f'_versioned_current() {{ printf \'%s\' "{existing_active_version or ""}"; }}',
         f'deploy_binstub() {{ : > "{deployed_marker}"; }}',
         _extract_function_block("_version_lt"),
         _extract_function_block("do_stamp"),
