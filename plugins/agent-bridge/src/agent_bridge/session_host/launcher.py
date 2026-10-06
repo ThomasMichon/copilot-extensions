@@ -56,10 +56,9 @@ _ACP_STDIO_LIMIT_BYTES = 64 * 1024 * 1024
 # copilot child is spawned so the child never inherits it.
 _NONCE_ENV = "AGENT_BRIDGE_SESSION_HOST_NONCE"
 
-# How much of the host process's combined stdout/stderr to retain for
-# surfacing in an "exited early" RuntimeError. A crashed host's own traceback
-# almost always fits in a few KB; this is intentionally small since it is
-# captured in memory for the host's full lifetime (#5384).
+# How much of the host process's combined stdout/stderr (up through
+# readiness) to retain for surfacing in an "exited early" RuntimeError. A
+# crashed host's own traceback almost always fits in a few KB.
 _CRASH_TAIL_CAP_BYTES = 4096
 
 
@@ -69,10 +68,11 @@ class _CrashTailCapture:
     Continuously reads from ``stream`` on a background thread so the child
     is never blocked on a full OS pipe buffer, keeping only the last
     ``cap_bytes`` -- enough to show a traceback or a shell error from a
-    process that exits before reporting ready, without retaining an
-    unbounded amount of output for a long-lived host (#5384: previously this
-    output was discarded entirely via ``DEVNULL``, making "exited early"
-    failures undiagnosable after the fact).
+    process that exits before reporting ready. The host redirects its own
+    stdout/stderr to ``os.devnull`` once it publishes readiness (see
+    ``_detach_stdio_from_frontend``), closing this pipe's write end and
+    ending the drain; capture is therefore bounded to the bootstrap window,
+    not the host's full lifetime.
     """
 
     def __init__(self, stream: Any, cap_bytes: int = _CRASH_TAIL_CAP_BYTES) -> None:
@@ -156,11 +156,14 @@ def launch_session_host(
     The copilot child never sees it -- ``run_host`` strips it before spawn.
 
     The host process's own combined stdout/stderr is drained into a small,
-    bounded in-memory tail (:class:`_CrashTailCapture`) rather than discarded
-    via ``DEVNULL``: if it exits early (before reporting ready), the raised
-    ``RuntimeError`` includes that tail so the real crash reason (a
-    traceback, a missing dependency, a bad argv, ...) is diagnosable after
-    the fact instead of only ever surfacing a generic exit code (#5384).
+    bounded in-memory tail (:class:`_CrashTailCapture`) during bootstrap: if
+    it exits early (before reporting ready), the raised ``RuntimeError``
+    includes that tail so the real crash reason (a traceback, a missing
+    dependency, a bad argv, ...) is diagnosable after the fact instead of
+    only ever surfacing a generic exit code (#5384). The host redirects its
+    own stdout/stderr to ``os.devnull`` once ready
+    (``_detach_stdio_from_frontend``), so output after that point is never
+    coupled to this frontend process's lifetime.
     """
     sd = Path(state_dir) if state_dir else Path(tempfile.mkdtemp(prefix="agbridge-host-"))
     sd.mkdir(parents=True, exist_ok=True)
@@ -242,6 +245,33 @@ def apply_host_survival() -> None:
         except OSError:
             # Already a session/group leader (spawned with start_new_session).
             pass
+
+
+def _detach_stdio_from_frontend() -> None:
+    """Redirect this (host) process's own stdout/stderr to ``os.devnull``.
+
+    The frontend's :func:`launch_session_host` pipes the host's stdout/stderr
+    only to capture a crash-tail for its own ready-wait loop
+    (:class:`_CrashTailCapture`); that pipe's sole reader is a daemon thread
+    in the frontend process. The host is explicitly required to outlive the
+    frontend (module docstring), so once it has published readiness it must
+    stop depending on that pipe -- otherwise a later frontend exit/restart
+    closes the read end and any subsequent host stdout/stderr write raises
+    ``BrokenPipeError``. ``os.dup2`` over the inherited fds closes the pipe's
+    write end too, which cleanly ends the frontend's drain thread (read()
+    returns EOF) instead of leaving it blocked. Idempotent and best-effort.
+    """
+    try:
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        return
+    try:
+        os.dup2(devnull_fd, sys.stdout.fileno())
+        os.dup2(devnull_fd, sys.stderr.fileno())
+    except (OSError, ValueError):
+        pass
+    finally:
+        os.close(devnull_fd)
 
 
 def _resolve_child_exe(argv: list[str], path: str | None) -> list[str]:
@@ -364,6 +394,12 @@ async def run_host(
                 exit_code = child.returncode
             if exit_code is not None:
                 _publish_child_exit(exit_code)
+    if not contained_test_mode():
+        # Readiness published: stop depending on the frontend's crash-tail
+        # pipe (see _detach_stdio_from_frontend). Skipped under the test
+        # supervisor, where run_host executes in-process and this would
+        # devnull the test process's own stdout/stderr.
+        _detach_stdio_from_frontend()
     if ready is not None:
         ready.set()
     try:

@@ -825,7 +825,7 @@ async def test_unexpected_reap_disabled_when_zero():
 
 
 # --------------------------------------------------------------------------
-# crash-tail capture (#5384: "exited early" was previously undiagnosable)
+# crash-tail capture (#5384)
 # --------------------------------------------------------------------------
 def test_crash_tail_capture_decodes_output():
     r, w = os.pipe()
@@ -917,6 +917,36 @@ def test_launch_session_host_surfaces_crash_tail(tmp_path, monkeypatch):
     assert "exited early (code=7)" in message
     assert "simulated session host startup crash" in message
     assert "diagnosable detail line" in message
+
+
+def test_detach_stdio_from_frontend_closes_frontend_pipe(tmp_path):
+    """Once the host calls ``_detach_stdio_from_frontend``, the frontend's
+    crash-tail pipe must see EOF (its write end closed) instead of staying
+    open for the host's full lifetime -- a host that outlives a later
+    frontend exit/restart must never depend on that pipe still being read
+    (#5487 review)."""
+    script = tmp_path / "detach_probe.py"
+    script.write_text(
+        "import sys\n"
+        "from agent_bridge.session_host.launcher import ("
+        "_detach_stdio_from_frontend)\n"
+        "print('before-detach')\n"
+        "sys.stdout.flush()\n"
+        "_detach_stdio_from_frontend()\n"
+        "print('after-detach-should-not-reach-the-frontend')\n"
+        "sys.stdout.flush()\n"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, str(script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    # Blocks only until EOF -- i.e. until the pipe's write end is closed by
+    # the dup2 inside _detach_stdio_from_frontend, not until the child exits.
+    captured = proc.stdout.read()
+    proc.wait(timeout=5)
+    assert b"before-detach" in captured
+    assert b"after-detach-should-not-reach-the-frontend" not in captured
 
 
 # --------------------------------------------------------------------------
