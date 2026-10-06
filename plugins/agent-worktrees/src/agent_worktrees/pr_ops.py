@@ -955,13 +955,14 @@ def create_pr(
     # falls back to snapshotting onto a separate feature branch, WITHOUT
     # resetting worktree/<id> (#1815 Phase 3). The single-PR serial flow (no
     # parallel) stays pure refspec.
-    parallel_snapshot = bool(
-        prcfg.head_scheme == "refspec" and new and active_is_live
-    )
+    parallel_snapshot = bool(prcfg.head_scheme == "refspec" and new and active_is_live)
     use_refspec = prcfg.head_scheme == "refspec" and not parallel_snapshot
 
     # Reuse-lease guard (#5298): see push_diagnostics.reuse_lease_expect.
     lease_expect = push_diagnostics.reuse_lease_expect(target_pr, active) if reusing else ""
+    if reusing and not lease_expect:
+        return {**base, "error": push_diagnostics.missing_expected_sha_error(
+            feature_branch=feature_branch, retry_command="agent-worktrees pr-status")}
 
     if use_refspec:
         # Refspec mode (#1815): keep the squashed work ON worktree/<id> and push
@@ -971,9 +972,8 @@ def create_pr(
         # (a later `git sync` fast-forwards it clean on merge).
         with hooks.allow_pr_push():
             pushed = git_ops.push(
-                publish_remote, f"{wt_branch}:refs/heads/{feature_branch}",
-                cwd=worktree_path, force_with_lease_expect=(lease_expect or None),
-                force_with_lease=reusing,
+                publish_remote, f"{wt_branch}:refs/heads/{feature_branch}", cwd=worktree_path,
+                force_with_lease_expect=(lease_expect or None), force_with_lease=reusing,
             )
         if not pushed:
             return {**base, "error": push_diagnostics.create_pr_push_error(
@@ -1009,8 +1009,7 @@ def create_pr(
         with hooks.allow_pr_push():
             pushed = git_ops.push(
                 publish_remote, feature_branch, cwd=worktree_path,
-                force_with_lease_expect=(lease_expect or None), force_with_lease=reusing,
-            )
+                force_with_lease_expect=(lease_expect or None), force_with_lease=reusing)
         if not pushed:
             return {**base, "error": push_diagnostics.create_pr_push_error(
                 wt_branch=wt_branch,
@@ -2507,14 +2506,16 @@ def _push_existing_feature(
     # reading HEAD would record the wrong commit. Invoked from the legacy
     # on-feature-branch path these are identical.
     head_sha = _rev(feature_branch, cwd=worktree_path)
-    # Non-terminal PRRecord (#1336) for this branch, if any -- leases the
-    # reuse push below (#5298); `target` is (re)built post-push below.
+    # Non-terminal PRRecord (#1336) for this branch, if any -- leases the reuse push below (#5298).
     existing_target = next(
         (p for p in (record.prs if record is not None else [])
          if p.branch == feature_branch and not tracking._pr_is_terminal(p)),
         None,
     )
     lease_expect = push_diagnostics.reuse_lease_expect(existing_target)
+    if existing_target is not None and not lease_expect:
+        return {**base, "error": push_diagnostics.missing_expected_sha_error(
+            feature_branch=feature_branch, retry_command="agent-worktrees pr-status")}
     with hooks.allow_pr_push():
         pushed = git_ops.push(
             remote, feature_branch, cwd=worktree_path,

@@ -893,26 +893,27 @@ def push(
 
     Auto-authenticates when the remote is owned by a different ``gh`` account than the active one,
     without persisting a token in ``.git/config`` (#29). *force_with_lease_expect*, when given,
-    takes precedence with an expected-old-object lease (``--force-with-lease=<dest-ref>:<expect>``)
-    so a divergent/deleted remote fails atomically (#5298/#5300); ``branch`` may be ``src:dest``.
-
+    takes precedence with an expected-old-object lease (``--force-with-lease=<dest-ref>:<expect>``,
+    verified as an ancestor of the source ref first) so a divergent, deleted, or locally
+    rebased/reset branch all fail atomically rather than silently dropping commits (#5298/#5300).
     The result carries git's ``stderr`` and a ``retryable`` classification so a caller's retry loop
     can surface the real error (a pre-push hook decline, an auth 403, a protected-branch block) and
     fail fast instead of masking every failure as a generic "rejected" and retrying a doomed push
     (#993). Bounded by ``timeout`` (:mod:`push_timeout`); a stall kills the whole process tree.
-
     Unlike ``rebase``, this is NEVER given ``no_hooks=True`` (#3561): a real pre-push release guard
     must be allowed to block a non-compliant push. Worktree-originated callers wrap this with
     ``hooks.allow_pr_push()``.
     """
+    if force_with_lease_expect is not None and not is_branch_merged(
+        force_with_lease_expect, branch.split(":", 1)[0] if ":" in branch else branch, cwd=cwd):
+        return PushResult(ok=False, stderr=f"Refusing: {force_with_lease_expect} not an ancestor.")
     extra = ([f"--force-with-lease={branch.rsplit(':', 1)[-1]}:{force_with_lease_expect}"]
              if force_with_lease_expect is not None else
              ["--force-with-lease"] if force_with_lease else [])
     auth_args = _auth_config_args(remote, cwd=cwd)
     # Retry without an injected auth override on failure (#900).
     attempts = [auth_args, []] if auth_args else [[]]
-    last_stderr = ""
-    last_stdout = ""
+    last_stderr = last_stdout = ""
     for prefix in attempts:
         try:
             result = git(
@@ -923,8 +924,7 @@ def push(
             return PushResult(ok=False, stderr=push_timeout.message(exc, timeout))
         if result.returncode == 0:
             return PushResult(ok=True)
-        last_stderr = result.stderr or last_stderr
-        last_stdout = result.stdout or last_stdout
+        last_stderr, last_stdout = result.stderr or last_stderr, result.stdout or last_stdout
     return PushResult(ok=False, stderr=last_stderr, stdout=last_stdout)
 
 

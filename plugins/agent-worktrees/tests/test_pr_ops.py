@@ -587,6 +587,31 @@ class TestCreatePR:
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec.pr.patch_id
 
+    def test_reused_open_pr_refuses_reuse_push_with_no_persisted_head_sha(self, pr_repo):
+        """#5298 follow-up: a legacy/manually-registered (`set-pr`) record can
+        have no persisted `head_sha` at all. Falling back to a plain bool
+        `--force-with-lease` there would adopt whatever this call's own
+        just-completed fetch recorded as the remote tip and force past it --
+        the same live-requery flaw the reuse-lease guard exists to close,
+        just one step removed. Refuse instead of guessing."""
+        config, wid, wt_path, _ = pr_repo
+        first = pr_ops.create_pr(wid, config, title="Add feature")
+        assert first["success"], first
+
+        rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        rec.pr.head_sha = ""
+        tracking.save_record(rec)
+
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        rerun = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert rerun["success"] is False
+        assert "No persisted expected tip" in rerun["error"]
+
     def test_reused_open_pr_refuses_to_overwrite_divergent_remote_head(self, pr_repo):
         config, wid, wt_path, remote_dir = pr_repo
         first = pr_ops.create_pr(wid, config, title="Add feature")

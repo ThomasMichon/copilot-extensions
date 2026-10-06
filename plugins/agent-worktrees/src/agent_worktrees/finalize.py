@@ -843,19 +843,20 @@ def _push_changes_pr(
             tracking.record_repo_fetch_confirmed(record.repo)
 
         if on_wt:
-            git_ops.git(
-                "branch", "-f", feature, "HEAD", cwd=worktree_path, check=False
-            )
+            git_ops.git("branch", "-f", feature, "HEAD", cwd=worktree_path, check=False)
 
         # push-changes always updates an already-published PR head -- lease
         # the push against its LAST-OBSERVED tip, never a live re-query
         # (#5298; see pr_ops.create_pr's matching guard for the rationale).
         lease_expect = pushed_pr.head_sha if pushed_pr is not None else ""
+        if not lease_expect:
+            output.err(push_diagnostics.missing_expected_sha_error(
+                feature_branch=feature, retry_command="agent-worktrees pr-status"))
+            return False
         with hooks.allow_pr_push():
             pushed = git_ops.push(
                 remote, feature, cwd=worktree_path,
-                force_with_lease_expect=(lease_expect or None),
-                force_with_lease=True,
+                force_with_lease_expect=(lease_expect or None), force_with_lease=True,
             )
         if not pushed:
             output.err(f"Failed to push {feature} to {remote}.")
@@ -1001,6 +1002,10 @@ def _push_changes_pr_refspec(
 
         # Same reuse-lease guard as `_push_changes_pr` above (#5298).
         lease_expect = pushed_pr.head_sha if pushed_pr is not None else ""
+        if not lease_expect:
+            output.err(push_diagnostics.missing_expected_sha_error(
+                feature_branch=feature, retry_command="agent-worktrees pr-status"))
+            return False
         with hooks.allow_pr_push():
             pushed = git_ops.push(
                 remote, f"{wt_branch}:refs/heads/{feature}",
