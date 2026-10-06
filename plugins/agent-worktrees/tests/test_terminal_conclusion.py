@@ -1378,7 +1378,7 @@ def _pair_sibling(
         "project_dir",
         lambda name=None: project_root if name == project else original_project_dir(name),
     )
-    original_load_config = tc.cfg.load_config
+    original_load_project_config = tc.cfg.load_project_config
     this_project = project
     sibling_config = types.SimpleNamespace(
         default_repo=types.SimpleNamespace(
@@ -1387,9 +1387,10 @@ def _pair_sibling(
     )
     monkeypatch.setattr(
         tc.cfg,
-        "load_config",
-        lambda project=None: (
-            sibling_config if project == this_project else original_load_config(project=project)
+        "load_project_config",
+        lambda name, **kwargs: (
+            sibling_config if name == this_project
+            else original_load_project_config(name, **kwargs)
         ),
     )
     return record, record_path, worktree
