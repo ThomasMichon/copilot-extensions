@@ -851,7 +851,7 @@ def _push_changes_pr(
         lease_expect = pushed_pr.head_sha if pushed_pr is not None else ""
         if not lease_expect:
             output.err(push_diagnostics.missing_expected_sha_error(
-                feature_branch=feature, retry_command="agent-worktrees pr-status"))
+                feature_branch=feature, retry_command="agent-worktrees push-changes"))
             return False
         with hooks.allow_pr_push():
             pushed = git_ops.push(
@@ -1004,7 +1004,7 @@ def _push_changes_pr_refspec(
         lease_expect = pushed_pr.head_sha if pushed_pr is not None else ""
         if not lease_expect:
             output.err(push_diagnostics.missing_expected_sha_error(
-                feature_branch=feature, retry_command="agent-worktrees pr-status"))
+                feature_branch=feature, retry_command="agent-worktrees push-changes"))
             return False
         with hooks.allow_pr_push():
             pushed = git_ops.push(

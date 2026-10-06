@@ -32,15 +32,16 @@ def missing_expected_sha_error(*, feature_branch: str, retry_command: str) -> st
     there would adopt whatever this call's own just-completed fetch recorded
     as the remote tip and force past it -- the same live-requery flaw the
     reuse-lease guard (#5298) exists to close, just one step removed. Refuse
-    instead of guessing; the caller must re-observe the branch's real head
-    (e.g. re-run ``pr-status``) before a reuse push can safely proceed.
+    instead of guessing; ``pr-status`` genuinely repairs this (it backfills a
+    missing ``head_sha`` from an identity-checked provider read in
+    ``_reconcile_active_pr``), so the message points callers there.
     """
     return (
         f"No persisted expected tip is recorded for '{feature_branch}', so this "
         f"reuse push cannot safely lease against it -- falling back to a plain "
         f"force-with-lease would just re-adopt whatever the remote happens to be "
-        f"right now. Re-run {retry_command} (or pr-status) to reconcile the "
-        f"tracked head first."
+        f"right now. Run `agent-worktrees pr-status` to backfill the tracked head "
+        f"from the provider, then retry {retry_command}."
     )
 
 

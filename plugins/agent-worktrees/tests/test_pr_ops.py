@@ -3257,6 +3257,42 @@ class TestPRFinalizeAndPush:
         assert rec.pr.head_sha == local_head
         assert rec.pr.state == "open"
 
+    def test_push_changes_refuses_divergent_remote_feature_branch(self, pr_repo):
+        """Medium finding (#5298 follow-up): push-changes' lease safety was
+        only integration-tested through create_pr; add parametrized-in-spirit
+        coverage for the snapshot scheme too -- a divergent remote head must
+        reject the push, not force-overwrite it."""
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, remote_dir = pr_repo
+        first = pr_ops.create_pr(wid, config, title="Add feature")
+        assert first["success"], first
+
+        other = remote_dir.parent / "other-clone-push-changes"
+        _git("clone", str(remote_dir), str(other), cwd=remote_dir.parent)
+        _git("config", "user.email", "other@example.com", cwd=other)
+        _git("config", "user.name", "Other", cwd=other)
+        _git(
+            "checkout", "-B", "feature/add-feature-aaaa",
+            "origin/feature/add-feature-aaaa", cwd=other,
+        )
+        (other / "remote.txt").write_text("other actor\n")
+        _git("add", "-A", cwd=other)
+        _git("commit", "-m", "remote update", cwd=other)
+        _git("push", "origin", "feature/add-feature-aaaa", cwd=other)
+        remote_head = _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=other)
+
+        _git("checkout", "feature/add-feature-aaaa", cwd=wt_path)
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        ok = fin.push_changes(wid, config)
+
+        assert ok is False
+        assert _git(
+            "rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path
+        ) == remote_head  # not overwritten
+
     def test_push_changes_is_blocked_by_a_real_client_side_pre_push_hook(self, pr_repo):
         """#3561: push() must not silently disable a repo's own release-guard
         pre-push hook (e.g. this repo's check-changefile-presence.py). Install
@@ -4077,6 +4113,40 @@ class TestPRFinalizeAndPush:
         rec = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
         assert rec.pr.head_sha == _git("rev-parse", "HEAD", cwd=wt_path)
         assert rec.pr.state == "open"
+
+    def test_push_changes_refspec_refuses_divergent_remote_head(self, pr_repo):
+        """Medium finding (#5298 follow-up): refspec-scheme counterpart of
+        test_push_changes_refuses_divergent_remote_feature_branch above."""
+        from agent_worktrees import finalize as fin
+        config, wid, wt_path, remote_dir = pr_repo
+        config = self._refspec_config(config)
+        first = pr_ops.create_pr(wid, config, title="Add feature")
+        assert first["success"], first
+
+        other = remote_dir.parent / "other-clone-push-changes-refspec"
+        _git("clone", str(remote_dir), str(other), cwd=remote_dir.parent)
+        _git("config", "user.email", "other@example.com", cwd=other)
+        _git("config", "user.name", "Other", cwd=other)
+        _git(
+            "checkout", "-B", "pr/add-feature-aaaa", "origin/pr/add-feature-aaaa",
+            cwd=other,
+        )
+        (other / "remote.txt").write_text("other actor\n")
+        _git("add", "-A", cwd=other)
+        _git("commit", "-m", "remote update", cwd=other)
+        _git("push", "origin", "pr/add-feature-aaaa", cwd=other)
+        remote_head = _git("rev-parse", "origin/pr/add-feature-aaaa", cwd=other)
+
+        (wt_path / "c.txt").write_text("feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "address feedback", cwd=wt_path)
+
+        ok = fin.push_changes(wid, config)
+
+        assert ok is False
+        assert _git(
+            "rev-parse", "origin/pr/add-feature-aaaa", cwd=wt_path
+        ) == remote_head  # not overwritten
 
     def test_push_changes_refspec_rejects_wrong_branch(self, pr_repo):
         from agent_worktrees import finalize as fin

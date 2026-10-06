@@ -957,12 +957,11 @@ def create_pr(
     # parallel) stays pure refspec.
     parallel_snapshot = bool(prcfg.head_scheme == "refspec" and new and active_is_live)
     use_refspec = prcfg.head_scheme == "refspec" and not parallel_snapshot
-
     # Reuse-lease guard (#5298): see push_diagnostics.reuse_lease_expect.
     lease_expect = push_diagnostics.reuse_lease_expect(target_pr, active) if reusing else ""
     if reusing and not lease_expect:
         return {**base, "error": push_diagnostics.missing_expected_sha_error(
-            feature_branch=feature_branch, retry_command="agent-worktrees pr-status")}
+            feature_branch=feature_branch, retry_command="agent-worktrees create-pr")}
 
     if use_refspec:
         # Refspec mode (#1815): keep the squashed work ON worktree/<id> and push
@@ -1815,8 +1814,11 @@ def _reconcile_active_pr(
         # claim) -- never for an already-active no-op.
         if active.state != "open":
             active.state = "open"
+        # Backfill a missing head_sha (#5298): adopt the identity-checked `get_pull` read's head.
+        head_backfilled = bool(not active.head_sha and pull.head_sha)
+        active.head_sha = active.head_sha or pull.head_sha
         claimed_ref = _ensure_pr_claim(record, active)
-        if claimed_ref:
+        if claimed_ref or head_backfilled:
             persisted = False
             if best_effort:
                 with tracking._RecordLock(record.yaml_path, blocking=False) as lk:
@@ -1826,7 +1828,7 @@ def _reconcile_active_pr(
             else:
                 tracking.save_record(record)
                 persisted = True
-            if persisted:
+            if persisted and claimed_ref:
                 claim_history.record_pr_event(
                     claimed_ref, worktree_id=record.worktree_id,
                     machine=record.machine, event="claimed", project=record.repo)
@@ -2515,11 +2517,12 @@ def _push_existing_feature(
     lease_expect = push_diagnostics.reuse_lease_expect(existing_target)
     if existing_target is not None and not lease_expect:
         return {**base, "error": push_diagnostics.missing_expected_sha_error(
-            feature_branch=feature_branch, retry_command="agent-worktrees pr-status")}
+            feature_branch=feature_branch, retry_command="agent-worktrees create-pr")}
     with hooks.allow_pr_push():
         pushed = git_ops.push(
             remote, feature_branch, cwd=worktree_path,
-            force_with_lease_expect=(lease_expect or None), force_with_lease=(existing_target is not None),
+            force_with_lease_expect=(lease_expect or None),
+            force_with_lease=(existing_target is not None),
         )
     if not pushed:
         error = f"Failed to (re)push '{feature_branch}' to '{remote}'."
