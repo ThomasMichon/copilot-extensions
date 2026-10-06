@@ -1,9 +1,0 @@
-{
-  "comment": "plugin-activation (vendored): resolve_active_plugins shares one marketplace-manifest read across every enabled plugin naming it per resolution pass, instead of re-reading per plugin (picker-performance-and-responsiveness Phase 4)",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "dev"
-    }
-  ]
-}

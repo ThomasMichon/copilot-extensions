@@ -1,9 +1,0 @@
-{
-  "comment": "Connection Owner on-demand spin-up no longer inherits the caller's ambient cwd -- rooted at HOME instead (service-lifecycle-supervision CWD-compliance sweep)",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

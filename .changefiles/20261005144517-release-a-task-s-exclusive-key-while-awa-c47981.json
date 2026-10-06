@@ -1,9 +1,0 @@
-{
-  "comment": "Release a task's exclusive_key while awaiting_steer, so a sibling task sharing the same resource key can spawn instead of sitting queued behind a task that is purely waiting on an operator steering-card answer.",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

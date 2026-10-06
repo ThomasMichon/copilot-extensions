@@ -1,9 +1,0 @@
-{
-  "comment": "Retry relay-profile registration for a registered provider whose CLI seam is momentarily unavailable (e.g., mid-update), warn loudly if it never answers, and run registration off the event loop (#5405).",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

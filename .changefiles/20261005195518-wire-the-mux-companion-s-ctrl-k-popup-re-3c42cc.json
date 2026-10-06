@@ -1,9 +1,0 @@
-{
-  "comment": "Wire the Mux Companion's Ctrl+K popup relay (mux-bind-relay Step 1): a session-scoped psmux root-key-table binding that opens the Companion, applied at session create and join.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "minor"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "doc-only: record live verification of the daemon-lifecycle fixes (PR #5411) in the effort journal",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "dev"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "provision-command --codespace <name> appends the adopted repo's provision hooks (files + on_connect) so the agent-bridge dispatch path applies them (#5441).",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

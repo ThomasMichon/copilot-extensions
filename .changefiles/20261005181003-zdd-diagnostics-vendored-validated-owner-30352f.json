@@ -1,9 +1,0 @@
-{
-  "comment": "zdd.diagnostics (vendored): _validated_owner now falls back to the routing table's active pid when the lock file disagrees with it but a live candidate holds that exact pid -- fixes doctor refusing to pick a winner among duplicate resident daemons (picker-performance-and-responsiveness diagnosis)",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "dev"
-    }
-  ]
-}

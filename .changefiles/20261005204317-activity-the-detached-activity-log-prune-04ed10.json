@@ -1,9 +1,0 @@
-{
-  "comment": "activity: the detached activity-log prune worker no longer inherits the caller's ambient cwd (service-lifecycle-supervision CWD-compliance sweep) -- rooted at HOME instead, since a long-lived detached worker must never pin whatever repo/worktree checkout happened to be current when it was dispatched",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

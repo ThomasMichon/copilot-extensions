@@ -1,9 +1,0 @@
-{
-  "comment": "Surface the active run-waiter command on a suspended task's board row and claim-status detail (GET /tasks/{id}/run_waiter, new bulk GET /run-waiters).",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "minor"
-    }
-  ]
-}

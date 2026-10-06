@@ -1,9 +1,0 @@
-{
-  "comment": "Fix SubmitErrorScreen crashing the whole app when a submission failure's error text contains markup-like characters",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

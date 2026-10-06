@@ -1,9 +1,0 @@
-{
-  "comment": "status-monitor: close managed-mux push admission (not just hook/classify/tracking-write) once drain-only/superseded, so no new mux-mapping source can be admitted after supersession",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "minor"
-    }
-  ]
-}

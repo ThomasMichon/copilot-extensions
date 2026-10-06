@@ -1,9 +1,0 @@
-{
-  "comment": "supervisor self-update respawn and self-triggered deploy spawns no longer inherit the caller's ambient cwd -- rooted at HOME instead (service-lifecycle-supervision CWD-compliance sweep)",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}
