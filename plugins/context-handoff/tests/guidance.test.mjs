@@ -227,3 +227,55 @@ test("consume command remains the canonical resume surface", () => {
   assert.match(handler, /task remains owned and the durable delivery checkpoint can retry it/);
   assert.doesNotMatch(handler, /completeHandoffLifecycle|handoff-cutover|retired/);
 });
+
+test("quiescing owned background work is required before composing, in every surface", () => {
+  const skill = readFileSync(
+    join(plugin, "skills", "context-handoff", "SKILL.md"),
+    "utf8",
+  );
+  const readme = readFileSync(join(plugin, "README.md"), "utf8");
+  const extension = readFileSync(
+    join(plugin, "extensions", "context-handoff", "extension.mjs"),
+    "utf8",
+  );
+
+  // The dedicated skill section exists and is unconditional about schedules.
+  assert.match(skill, /## Quiesce owned background work before triggering/);
+  assert.match(skill, /stop_powershell/);
+  assert.match(skill, /stop_bash/);
+  assert.doesNotMatch(
+    skill,
+    /unless the (?:schedule's entire purpose|brief plans to ask)/i,
+  );
+
+  // Both trigger paths in the skill mention quiescing before compose/save,
+  // not merely before trigger_handoff.
+  const triggerSection = skill.slice(
+    skill.indexOf("## Two triggers, two gates"),
+    skill.indexOf("## Sync before triggering"),
+  );
+  assert.match(triggerSection, /Quiesce owned background work/);
+
+  // The generated save_handoff_prompt tool response mentions quiescing in
+  // BOTH branches (context-pressure direct-trigger, and turn-end
+  // follow-up), not just the dedicated skill doc -- a live agent following
+  // only the tool's own returned text must still see the requirement.
+  const saveStart = extension.indexOf('name: "save_handoff_prompt"');
+  const saveEnd = extension.indexOf('name: "trigger_handoff"', saveStart);
+  assert.ok(saveStart >= 0 && saveEnd > saveStart);
+  const saveHandler = extension.slice(saveStart, saveEnd);
+  const contextPressureBranch = saveHandler.slice(
+    0,
+    saveHandler.indexOf("If this is a turn-end follow-up handoff,"),
+  );
+  const followUpBranch = saveHandler.slice(
+    saveHandler.indexOf("If this is a turn-end follow-up handoff,"),
+  );
+  assert.match(contextPressureBranch, /quiesc/i);
+  assert.match(followUpBranch, /quiesc/i);
+
+  // The public README's trigger sequences carry the same requirement, so a
+  // reader following only the README (not the skill) doesn't bypass it.
+  assert.match(readme, /quiesc/i);
+});
+

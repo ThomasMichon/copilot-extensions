@@ -276,19 +276,23 @@ surfaces (a stopped task's partial output, a schedule that needs re-arming)
 still makes it into the stored baton; quiescing after the brief is already
 saved silently strands that information outside it:
 
-1. **Stop what you can stop.** For every background agent or async shell this
-   session itself started and still owns: an async shell can be stopped
-   directly (`stop_powershell` for a PowerShell-backed shell, `stop_bash` for
-   a bash-backed one -- use whichever matches how it was started); a
-   background agent generally has no cancel primitive, so wait for it to
-   finish (or send it a closing message) instead of assuming a stop call
-   exists for it. Do not leave either running on the assumption "the
-   successor will notice" -- it inherits the worktree, not your task list.
-2. **Check in whatever progress is checkoutable before stopping it.** If a
-   background task has useful partial results (a file written, a commit
-   staged, findings worth keeping), capture that into the handoff brief or
-   the repo itself before tearing it down -- stopping a task is not licence
-   to silently discard what it already produced.
+1. **Check in whatever progress is capturable, first.** Before stopping
+   anything, see whether the background agent or async shell has useful
+   partial results available right now (a file written, a commit staged,
+   findings worth keeping, a partial transcript `read_agent` can still
+   retrieve) and capture that into the handoff brief or the repo itself.
+   Stopping a live worker first can discard output that was only ever
+   available while it was still running -- capture before you stop, not
+   after.
+2. **Then stop what you can stop.** For every background agent or async
+   shell this session itself started and still owns: an async shell can be
+   stopped directly (`stop_powershell` for a PowerShell-backed shell,
+   `stop_bash` for a bash-backed one -- use whichever matches how it was
+   started); a background agent generally has no cancel primitive, so wait
+   for it to finish (or send it a closing message) instead of assuming a
+   stop call exists for it. Do not leave either running on the assumption
+   "the successor will notice" -- it inherits the worktree, not your task
+   list.
 3. **Clear schedules you own, always.** Stop (`manage_schedule` `action:
    "stop"`) every schedule this session created -- with no exception for one
    the brief plans to ask the successor to re-arm. A stopped schedule can

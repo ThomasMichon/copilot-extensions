@@ -744,16 +744,25 @@ const session = await joinSession({
           "still remains: you should already have synced the worktree onto the " +
           "latest default branch before calling generate_handoff_prompt (see " +
           "the context-handoff skill's 'Sync before triggering' section) -- " +
-          "call `trigger_handoff` directly now.\n\n" +
+          "and also quiesced owned background work (stopped or waited out " +
+          "owned background agents/async shells after capturing their " +
+          "partial results, and stopped every owned `manage_schedule` entry " +
+          "-- see the skill's 'Quiesce owned background work before " +
+          "triggering' section) -- call `trigger_handoff` directly now.\n\n" +
           "If this is a turn-end follow-up handoff, ask the user whether to " +
           "continue via handoff. Only after they say yes: sync the worktree " +
           "(inspect the tree first -- never blanket-commit; skip the sync " +
           "entirely if anything looks unfamiliar or unsafe to commit), then " +
+          "quiesce owned background work (same section as above -- only now " +
+          "that the user has agreed is it correct to stop things the " +
+          "successor would otherwise inherit live), then " +
           "ALWAYS re-run generate_handoff_prompt and save_handoff_prompt again " +
-          "-- even if the sync looked like a no-op -- so the stored baton " +
-          "reflects the post-sync state before calling trigger_handoff. Never " +
-          "sync or commit before the user has agreed, unless autopilot or " +
-          "prior authorization already covers that turn-end follow-up path.\n\n" +
+          "-- even if the sync and quiescing both looked like a no-op -- so " +
+          "the stored baton reflects the post-sync, post-quiesce state before " +
+          "calling trigger_handoff. Never " +
+          "sync, quiesce, or commit before the user has agreed, unless " +
+          "autopilot or prior authorization already covers that turn-end " +
+          "follow-up path.\n\n" +
           "If you later need manual continuation, open the successor session and " +
           "run `/consume-handoff`; if that command is unavailable, use the " +
           "payload-local context-handoff CLI with the recovery locator embedded " +

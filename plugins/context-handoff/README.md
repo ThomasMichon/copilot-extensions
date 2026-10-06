@@ -115,9 +115,12 @@ If the reason for the handoff is **context pressure** and the objective still
 has more work left to do, the agent should sync the worktree onto the latest
 default branch first (see "Sync before triggering" in the `context-handoff`
 skill -- never blanket-commits, and skips cleanly rather than blocking if
-anything looks unsafe), *then* compose/save the brief so it reflects the
-synced (or un-synced/conflicted) state, then call `trigger_handoff`. This
-path does **not** ask for confirmation first.
+anything looks unsafe), then **quiesce owned background work** (stop or wait
+out owned background agents/async shells after capturing their partial
+results, and stop every owned `manage_schedule` entry -- see "Quiesce owned
+background work before triggering" in the skill), *then* compose/save the
+brief so it reflects the synced and quiesced state, then call
+`trigger_handoff`. This path does **not** ask for confirmation first.
 
 ### 3. Turn-end follow-ups ask before triggering
 
@@ -127,10 +130,13 @@ listing follow-up ideas or questions, the flow is different:
 - **compose + save** the baton,
 - **ask the user** whether to continue via handoff,
 - only after a brief yes (for example, "sure"), **sync the worktree** (same
-  rule as above), then **always recompose and re-save** the baton -- even if
-  the sync looked like a no-op, since a WIP commit or a failed sync still
-  changes what the successor needs to know -- so it reflects the post-sync
-  state, then call `trigger_handoff`.
+  rule as above), then **quiesce owned background work** (same rule as
+  above -- only correct once the user has actually agreed to hand off),
+  then **always recompose and re-save** the baton -- even if the sync and
+  quiescing both looked like a no-op, since a WIP commit, a failed sync, or
+  a stopped background task's results still change what the successor needs
+  to know -- so it reflects the post-sync, post-quiesce state, then call
+  `trigger_handoff`.
 
 Only this turn-end follow-up path is skipped by autopilot mode or prior user
 pre-authorization.
