@@ -2702,7 +2702,7 @@ class TestCmdHandoffCutover:
         out = json.loads(capfd.readouterr().out)
         assert out["dry_run"] is True
         assert out["headless"] is True
-        assert out["cmd"] == ["copilot", "-i", "<seed>"]
+        assert out["cmd"] == ["copilot", "--interactive", "<seed>"]
 
 
 class TestHandoffRepairDispatchArgs:

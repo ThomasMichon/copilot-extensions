@@ -532,8 +532,8 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     # own fallback claim-and-send-keys delivery never finds it again and
     # double-delivers the same turn.
     #
-    # Known, accepted scope boundary (review finding, PR #5442): claiming
-    # happens here, at PLAN-BUILD time -- before the external launcher
+    # Known, accepted scope boundary: claiming happens here, at
+    # PLAN-BUILD time -- before the external launcher
     # (launch-session.{ps1,sh}) has actually exec'd this `launch_cmd`. See
     # the identical note at `resolve_cli.py`'s own claim site for the full
     # rationale; this is the same accepted, narrow, Phase-3-deferred risk,

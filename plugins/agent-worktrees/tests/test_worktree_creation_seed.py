@@ -3,12 +3,12 @@ returned launch plan does NOT also embed a queued ``pending_seed`` as a
 ``--interactive`` argument -- only `resolve_launch_cli._resolve_resume_context`/
 `resolve_cli._resolve_json_mode` (the Picker's own two-hop flow's real
 delivery point, re-resolving by ``--worktree-id`` -- see
-``test_resolve_seed_delivery.py``) do that. Review finding (PR #5442):
-embedding it in BOTH this plan's argv AND leaving it persisted would create
-two live delivery paths for the same prompt (a direct caller execs this
-plan's `cmd` once, then a later `embody`/resume fallback claims the still-
-persisted `pending_seed` and delivers it AGAIN). `pending_seed` persistence
-stays the single, unambiguous owner of "queued but not yet delivered."
+``test_resolve_seed_delivery.py``) do that. Embedding it in BOTH this
+plan's argv AND leaving it persisted would create two live delivery paths
+for the same prompt (a direct caller execs this plan's `cmd` once, then a
+later `embody`/resume fallback claims the still-persisted `pending_seed`
+and delivers it AGAIN). `pending_seed` persistence stays the single,
+unambiguous owner of "queued but not yet delivered."
 Reuses ``test_codename_cli.py``'s established internals-stubbing pattern to
 drive the real function end to end against a real tracking record.
 """
@@ -71,11 +71,11 @@ def _stub_create_worktree_core_internals(monkeypatch, tmp_path: Path, config: cf
 def test_create_worktree_core_does_not_embed_pending_seed_in_its_own_launch_cmd(
     tmp_path: Path, monkeypatch,
 ):
-    """Single-owner fix (PR #5442 review): this plan's own `cmd` must NOT
-    also carry `--interactive <pending_seed>` -- only the Picker's real
-    delivery point (the later --worktree-id re-resolve) does, so there is
-    never a window where both this plan's direct execution AND a later
-    fallback claim could deliver the same prompt twice."""
+    """Single-owner invariant: this plan's own `cmd` must NOT also carry
+    `--interactive <pending_seed>` -- only the Picker's real delivery point
+    (the later --worktree-id re-resolve) does, so there is never a window
+    where both this plan's direct execution AND a later fallback claim
+    could deliver the same prompt twice."""
     config = _create_config(tmp_path)
     monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
     _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)

@@ -182,10 +182,15 @@ is this effort's actual Phase 1 deliverable.)
       double-delivers the same turn.
 - [x] `worktree_creation._create_worktree_core`'s OWN returned launch plan
       (used by a DIRECT `resolve --new --json`/`create`-then-exec caller that
-      bypasses the Picker's two-hop dance entirely) ALSO gets the seed
-      embedded via `with_seed` for consistency -- `pending_seed` stays
-      persisted on the record regardless (the Picker's own flow still needs
-      it there for the later re-resolve).
+      bypasses the Picker's two-hop dance entirely) deliberately does NOT
+      also embed the seed -- it only persists `pending_seed` on the
+      record, unchanged from pre-Phase-1 behavior. `pending_seed` stays
+      the single, unambiguous owner of "queued but not yet delivered";
+      embedding it in both this plan's argv and leaving it persisted would
+      create two live delivery paths for the same prompt. A direct caller
+      that wants immediate, synchronous delivery follows up with
+      `resolve --worktree-id --seed` (the real delivery point, above)
+      instead.
 - [x] `sessions.headless_new_session`'s pre-existing (and already
       argv-based, already-correct-in-spirit) seed delivery updated from the
       short `-i` to the full `--interactive`, for the same PowerShell-safety
@@ -195,8 +200,9 @@ is this effort's actual Phase 1 deliverable.)
       `_resolve_json_mode`'s real end-to-end argv construction against a
       real tracking record (explicit seed, pending-seed pickup +
       clear-not-double-delivered, no-seed-unchanged, and the no-mux-parity
-      case explicitly), `_create_worktree_core`'s own direct-caller argv,
-      and `headless_new_session`'s updated flag.
+      case explicitly), `_create_worktree_core`'s own direct-caller plan
+      (confirming it does NOT embed the seed), and `headless_new_session`'s
+      updated flag.
 
 ### Phase 2 — Picker UI: "Resume prompt…" Actions-menu entry (Not started)
 - [ ] Add a "Resume prompt…" entry to the worktree row's Actions submenu
@@ -228,18 +234,17 @@ is this effort's actual Phase 1 deliverable.)
       green unit-test suite.
 
 ### Phase 3 — Migrate "New worktree"'s own delivery onto the durable path (Not started)
-- [ ] Now that Phase 1 makes `_create_worktree_core`'s own plan carry the
-      seed in argv too, evaluate whether `launch-session.{ps1,sh}`'s
-      post-create `Invoke-SeedDeliverySafe`/`agent-worktrees embody
-      --worktree-id <id> --json` call (the pending_seed claim-and-send-keys
-      fallback) can be simplified or retired now that the Picker's own
-      two-hop re-resolve (`_resolve_json_mode`'s worktree-id branch, Phase 1)
-      already delivers the SAME `pending_seed` via argv before that script
-      ever runs -- i.e. is the send-keys fallback now provably always a
-      no-op for the Picker's own flow, kept only for a genuinely
-      out-of-band attach? Confirm with a live trace before touching the
-      script; do not remove a safety-net fallback on an assumption.
-- [ ] **Deferred from Phase 1's review (PR #5442):** `_resolve_json_mode`/
+- [ ] `_create_worktree_core`'s own plan deliberately does NOT carry the
+      seed in argv (Phase 1 -- single-owner, no double-delivery); evaluate
+      whether `launch-session.{ps1,sh}`'s post-create
+      `Invoke-SeedDeliverySafe`/`agent-worktrees embody --worktree-id <id>
+      --json` call (the pending_seed claim-and-send-keys fallback) could
+      instead be simplified by having THAT call itself follow up with a
+      `resolve --worktree-id --seed`-style durable delivery, rather than
+      the send-keys mechanism, now that the durable-argv path exists for
+      resume. Confirm with a live trace before touching the script; do not
+      remove a safety-net fallback on an assumption.
+- [ ] **Deferred from Phase 1:** `_resolve_json_mode`/
       `_resolve_resume_context` claim (clear) a persisted `pending_seed` at
       PLAN-BUILD time, before the external launcher script has actually
       exec'd the returned command -- a failure in that script before exec
@@ -328,3 +333,37 @@ _Pending._
     directly** (not just referenced via this README) -- fixed.
   - 213 tests across the full seed/resolve/worktree_creation/handoff-cutover
     keyword sweep pass with no regressions after all fixes.
+- **2026-10-06** — Pushed the review-round fixes above; a second Copilot
+  review pass (after a CI timeout flake on an unrelated `worktrees-smoke`
+  job, re-run) returned 3 resolved + 12 new findings, all addressed:
+  - **Real bug, fixed:** `handoff_cutover.py`'s headless `--dry-run` plan
+    still previewed the stale short `-i <seed>` instead of the full
+    `--interactive <seed>` the actual headless launch now sends (a
+    different call site than Phase 1 touched) -- `handoff-cutover
+    --headless --dry-run` no longer matched the command that would
+    actually execute. Fixed the dry-run `cmd` construction and its pinned
+    test assertion.
+  - **Help text correction:** `--seed`'s own `--help` text claimed `--new`
+    carries the seed on the returned launch command "ALSO" (implying
+    argv-embedding), contradicting the Phase-1-review decision to revert
+    `_create_worktree_core` to persisted-only. Rewrote the help text to
+    distinguish `--worktree-id` (argv-based, real delivery) from `--new`
+    (persisted-only, since this command never launches Copilot itself for
+    `--new`).
+  - **Effort doc correction:** the Phase 1 plan's own checklist (4
+    locations) still described `_create_worktree_core` as embedding the
+    seed, contradicting both the actual (reverted) implementation and this
+    Journal's own prior entry. Rewrote those checklist items and Phase 3's
+    corresponding follow-up to match reality.
+  - **Review-provenance cleanup (10 Low findings):** removed "review
+    finding"/"PR #5442" language from source comments and test docstrings
+    throughout (`resolve_cli.py`, `resolve_launch_cli.py`,
+    `worktree_creation.py`, both seed-guard/creation test files) --
+    comments and test documentation now describe the invariant directly,
+    without baking in review-round provenance that goes stale once the PR
+    merges. (The Documentation-impact finding and the two Medium
+    premature-consumption findings were already addressed/accepted in the
+    prior entry; the bot's comments API still surfaces resolved findings
+    alongside new ones, which is expected.)
+  - Re-ran the full 213-test keyword sweep after these edits: still
+    passing, no regressions.

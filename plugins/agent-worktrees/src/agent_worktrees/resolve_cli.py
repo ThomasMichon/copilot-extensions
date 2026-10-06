@@ -320,17 +320,18 @@ def add_parsers(sub) -> None:
         "--seed",
         default=None,
         help="With --new or --worktree-id (not supported alongside "
-        "--machine): a prompt delivered as the session's first (--new) "
-        "or next (--worktree-id resume) interactive turn once Copilot is "
-        "actually ready. Carried durably as a `--interactive` argument on "
-        "the launched Copilot command line itself -- works identically "
-        "whether the launch is muxed or --no-mux, since it never depends "
-        "on a mux pane to type into. With --new, ALSO persisted on the "
-        "record as a fallback for a caller that creates the worktree "
-        "without immediately launching it (e.g. `agent-worktrees create "
-        "--seed`): delivered and cleared by `agent-worktrees embody`/"
-        "`copilot` on a later first attach when nothing already consumed "
-        "it at launch time.",
+        "--machine or --bare-resume): a prompt delivered as the session's "
+        "first (--new) or next (--worktree-id resume) interactive turn "
+        "once Copilot is actually ready. With --worktree-id, carried "
+        "durably as a `--interactive` argument on the resume launch's own "
+        "Copilot command line -- works identically whether the launch is "
+        "muxed or --no-mux, since it never depends on a mux pane to type "
+        "into. With --new, this command does not launch Copilot itself, "
+        "so the seed is only ever persisted on the record (never embedded "
+        "in a returned launch plan): delivered and cleared by "
+        "`agent-worktrees embody`/`copilot` on a later first attach, or by "
+        "a subsequent `resolve --worktree-id` resume re-resolve picking up "
+        "the same persisted value.",
     )
     parser.add_argument("copilot_args", nargs="*", default=[])
 
@@ -376,14 +377,14 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         return 2
 
     if requested_seed and getattr(state.args, "bare_resume", False):
-        # Review finding (PR #5442): bare-resume deliberately skips seed
-        # injection in BOTH resume code paths (it launches Copilot in HOME
-        # with no --resume at all, to dodge a cwd-start bug -- there is no
-        # resumed conversation, and arguably no well-defined "worktree
-        # session," for the seed to join). Without this guard, a caller
-        # combining --bare-resume with --seed got a silent, confusing
-        # partial success: the command exits 0 but the prompt is quietly
-        # dropped. Reject the combination explicitly instead.
+        # --bare-resume deliberately skips seed injection in BOTH resume
+        # code paths (it launches Copilot in HOME with no --resume at all,
+        # to dodge a cwd-start bug -- there is no resumed conversation, and
+        # arguably no well-defined "worktree session," for the seed to
+        # join). Without this guard, a caller combining --bare-resume with
+        # --seed got a silent, confusing partial success: the command
+        # exits 0 but the prompt is quietly dropped. Reject the
+        # combination explicitly instead.
         message = "--seed is not supported together with --bare-resume."
         if state.use_json:
             return output._json_error(message)
@@ -673,8 +674,8 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     # own fallback claim-and-send-keys delivery never finds it again and
     # double-delivers the same turn.
     #
-    # Known, accepted scope boundary (review finding, PR #5442): claiming
-    # happens here, at PLAN-BUILD time -- before the external launcher
+    # Known, accepted scope boundary: claiming happens here, at
+    # PLAN-BUILD time -- before the external launcher
     # (launch-session.{ps1,sh}) has actually exec'd this `cmd`. That script
     # still performs its own update/preflight work and (for a muxed launch)
     # mux-session creation AFTER this process already returned; a failure

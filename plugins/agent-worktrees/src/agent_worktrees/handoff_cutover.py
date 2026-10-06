@@ -307,16 +307,17 @@ def _handoff_cutover_spawn_result(
 
     if headless:
         # No pane, no mux session, no seed-typing choreography: the seed is
-        # passed as a native ``-i <seed>`` argument directly by
-        # headless_new_session itself (headless has no pane-wrapper argv
-        # mangling to route around).
+        # passed as a native ``--interactive <seed>`` argument directly by
+        # headless_new_session itself (the full flag name, never the short
+        # ``-i``, which PowerShell can intercept -- headless has no
+        # pane-wrapper argv mangling to route around).
         if getattr(args, "dry_run", False):
             dry_result: dict[str, object] = {
                 "ok": True,
                 "dry_run": True,
                 "headless": True,
                 "work_dir": work_dir,
-                "cmd": [*launch_cmd, "-i", "<seed>"],
+                "cmd": [*launch_cmd, "--interactive", "<seed>"],
                 "seed_len": len(seed),
             }
             if selection.assignment is not None:

@@ -162,12 +162,12 @@ def test_resolve_base_with_seed_is_still_rejected_json(capfd):
 
 
 def test_resolve_worktree_id_with_bare_resume_and_seed_is_rejected_json(capfd):
-    """Review finding (PR #5442): --bare-resume launches Copilot in HOME
-    with no --resume at all (dodging a cwd-start bug) -- there is no
-    resumed conversation, and arguably no well-defined worktree session,
-    for a seed to join. Without this guard the combination used to exit 0
-    while silently discarding the prompt; it must now be rejected
-    explicitly, the same as --base and a remote --machine target."""
+    """--bare-resume launches Copilot in HOME with no --resume at all
+    (dodging a cwd-start bug) -- there is no resumed conversation, and
+    arguably no well-defined worktree session, for a seed to join. Without
+    this guard the combination used to exit 0 while silently discarding
+    the prompt; it must now be rejected explicitly, the same as --base and
+    a remote --machine target."""
     rc = resolve_cli.cmd_resolve(
         _args(
             new_worktree=False, worktree_id="some-wt", seed="do the thing",
