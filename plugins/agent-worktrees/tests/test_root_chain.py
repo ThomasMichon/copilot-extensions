@@ -198,6 +198,81 @@ class TestResolveRootCodename:
                     codename="amber-thicket", codename_source="built-in")
         assert root_chain.resolve_root_codename(rec, project="ext") is None
 
+    def test_frozen_decision_survives_a_later_config_change_to_withhold(
+        self, tmp_path, monkeypatch,
+    ):
+        _seed(
+            tmp_path, monkeypatch, "harness", "wt-root",
+            codename="harbor-lattice", codename_source="custom",
+            config=_cfg(source_attribution_configured=True),
+        )
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        assert root_chain.resolve_root_codename(child, project="ext") == (
+            "harbor-lattice"
+        )
+        # The root repo later tightens its config -- the ALREADY-FROZEN
+        # decision for this worktree must not retroactively hide the
+        # codename it already published.
+        _PROJECT_CONFIGS["harness"] = _cfg(source_attribution_configured=False)
+        assert root_chain.resolve_root_codename(child, project="ext") == (
+            "harbor-lattice"
+        )
+
+    def test_frozen_decision_survives_a_later_config_change_to_permit(
+        self, tmp_path, monkeypatch,
+    ):
+        _seed(
+            tmp_path, monkeypatch, "harness", "wt-root",
+            codename="harbor-lattice", codename_source="custom",
+            config=_cfg(source_attribution_configured=False),
+        )
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        assert root_chain.resolve_root_codename(child, project="ext") is None
+        # The root repo later opts in -- the ALREADY-FROZEN "withheld"
+        # decision for this worktree must not retroactively expose it.
+        _PROJECT_CONFIGS["harness"] = _cfg(source_attribution_configured=True)
+        assert root_chain.resolve_root_codename(child, project="ext") is None
+
+    def test_ensure_false_peek_never_freezes_a_premature_decision(
+        self, tmp_path, monkeypatch,
+    ):
+        root = _seed(tmp_path, monkeypatch, "harness", "wt-root")
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        assert root.codename is None
+        # A diagnostic peek (ensure=False) finds nothing to publish yet --
+        # must NOT lock that in.
+        assert root_chain.resolve_root_codename(
+            child, project="ext", ensure=False,
+        ) is None
+        # The REAL publish call (ensure=True, the default) must still be
+        # free to backfill + resolve fresh, not inherit the peek's None.
+        result = root_chain.resolve_root_codename(child, project="ext")
+        assert isinstance(result, str) and result
+
+    def test_cross_machine_owner_fails_closed_when_this_machine_unresolvable(
+        self, tmp_path, monkeypatch,
+    ):
+        child = _seed(
+            tmp_path, monkeypatch, "ext", "wt-child",
+            owner_ref="anomalous-potato/harness/wt-root#s1",
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.config.load_config",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("unresolvable")),
+        )
+        assert root_chain.resolve_root_codename(
+            child, project="ext", this_machine=None,
+        ) is None
+
 
 class TestMarkerComposition:
     def test_build_codename_marker_with_root_includes_root_field(

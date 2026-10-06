@@ -30,12 +30,64 @@ further -- both are at their ``tools/check-module-size.py`` ceiling (see
 
 from __future__ import annotations
 
+import json
+
 from . import config as cfg
 from . import tracking
 
 #: Defensive cap on chain depth -- protects against a corrupted/cyclic
 #: owner_ref graph (hand-edited YAML, a bug elsewhere) looping forever.
 _MAX_CHAIN_DEPTH = 32
+
+#: Sidecar suffix for a per-worktree frozen root-codename decision (see
+#: ``_load_frozen_root``/``_freeze_root``). Kept alongside the worktree's
+#: own tracking YAML, never inside it -- this is a NEW, independently-added
+#: concern that doesn't need ``tracking.py``'s own schema/migration rigor
+#: (that module is at its line-count ceiling; see module docstring).
+_FREEZE_SUFFIX = ".root-attribution.json"
+
+
+def _freeze_path(project: str | None, worktree_id: str):
+    return cfg.tracking_dir(project) / f"{worktree_id}{_FREEZE_SUFFIX}"
+
+
+def _load_frozen_root(project: str | None, worktree_id: str) -> tuple[bool, str | None]:
+    """Return ``(frozen, codename)``: ``frozen`` is True only when a prior
+    resolution was persisted (``codename`` may legitimately be ``None`` --
+    "frozen: this worktree has no publishable root"). ``(False, None)``
+    means never resolved/frozen yet -- a fresh walk is needed.
+    """
+    try:
+        path = _freeze_path(project, worktree_id)
+        if not path.exists():
+            return False, None
+        data = json.loads(path.read_text())
+        return True, data.get("root_codename")
+    except Exception:
+        return False, None
+
+
+def _freeze_root(project: str | None, worktree_id: str, codename: str | None) -> None:
+    """Persist *codename* (or ``None``) as this worktree's PERMANENT root-
+    codename decision, so a LATER change to the root's own repo config
+    (e.g. toggling ``source_attribution_configured``) can never retroactively
+    expose a previously-withheld custom-wordlist codename, or hide one
+    already published -- the same ``unconfigured-attribution-never-leaks``
+    "freeze once, never re-derive from live config" guarantee this plugin's
+    own PR-attribution design already applies to the PRIMARY codename
+    (``tracking.PRRecord.attribution_mode``/``attribution_explicit``).
+    Scoped to the WORKTREE rather than one PR entry (simpler: a worktree's
+    ``owner_ref`` is set at creation and practically never changes, so one
+    worktree-lifetime freeze is sufficient and self-contained -- it doesn't
+    require extending ``tracking.py``'s own capped PR-entry schema). Never
+    raises: a failed write just means the next call re-resolves live.
+    """
+    try:
+        _freeze_path(project, worktree_id).write_text(
+            json.dumps({"root_codename": codename})
+        )
+    except Exception:
+        pass
 
 
 def _load_local_record(
@@ -144,7 +196,16 @@ def resolve_root_codename(
     Never returns *record*'s own codename: a childless/root worktree has no
     chain worth annotating -- the caller's existing ``codename=`` marker
     field already names it.
+
+    The result is FROZEN per-worktree on first resolution (when *ensure* is
+    True) and reused on every later call -- see :func:`_freeze_root` --
+    so a subsequent change to the root's own repo config can never
+    retroactively expose or hide a previously-decided codename.
     """
+    frozen, frozen_codename = _load_frozen_root(project, record.worktree_id)
+    if frozen:
+        return frozen_codename
+
     if this_machine is None:
         try:
             this_machine = cfg.load_config().machine
@@ -163,8 +224,15 @@ def resolve_root_codename(
         parsed = current.owner_claim_ref
         if parsed is None:
             break
-        if parsed.machine and this_machine and parsed.machine != this_machine:
-            return None  # chain leaves this machine; not resolvable here
+        if parsed.machine:
+            # Fail CLOSED when this machine's own identity can't be
+            # resolved: an unresolved `this_machine` must never be treated
+            # as "matches any qualified owner machine" -- that would let a
+            # cross-machine ref masquerade as same-machine and load
+            # whatever happens to live locally under that project/worktree
+            # id. Only a POSITIVELY confirmed match proceeds.
+            if not this_machine or parsed.machine != this_machine:
+                return None
         parent_project = parsed.project or current_project
         key = (parent_project, parsed.worktree_id)
         if key in seen:
@@ -181,7 +249,13 @@ def resolve_root_codename(
     if current is record:
         return None  # no chain at all -- nothing to annotate
 
-    return _ensure_publishable_root_codename(current, current_project, ensure=ensure)
+    result = _ensure_publishable_root_codename(current, current_project, ensure=ensure)
+    if ensure:
+        # Only the real publish path (ensure=True, the default) freezes --
+        # a diagnostic/peek caller (ensure=False) must never lock in a
+        # premature decision that then blocks the real publish call later.
+        _freeze_root(project, record.worktree_id, result)
+    return result
 
 
 def root_codename_for_marker(record: tracking.WorktreeRecord, config) -> str | None:

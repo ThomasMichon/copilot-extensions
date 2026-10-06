@@ -411,9 +411,9 @@ class TestCreateForeignPrFromBranch:
         self, monkeypatch, _tracking_setup,
     ):
         """The foreign-PR path must apply the SAME root-aware codename
-        composition as the local `create_pr` path (review finding on PR
-        #5458): a calling worktree with an `owner_ref` chain must publish
-        `root=<root-codename>` alongside its own codename here too."""
+        composition as the local `create_pr` path: a calling worktree with
+        an `owner_ref` chain must publish `root=<root-codename>` alongside
+        its own codename here too."""
         tracking_d, wid = _tracking_setup
         record = tracking.load_record(tracking_d / f"{wid}.yaml")
         record.codename = "shimmering-quartz"
