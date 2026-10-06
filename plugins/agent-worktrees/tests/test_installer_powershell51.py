@@ -578,7 +578,7 @@ def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
     assert "if (-not (Enter-VersionedSlotLease)) {" in deploy_fn
     lease_fail_branch = deploy_fn.split(
         "if (-not (Enter-VersionedSlotLease)) {", 1
-    )[1][:600]
+    )[1][:1400]
     assert "return $false" in lease_fail_branch
 
     # The wrapper must release the lease in a `finally`, so it runs whether
@@ -587,6 +587,38 @@ def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
     assert "Invoke-VersionedActivateInner" in activate_wrapper
     assert "finally {" in activate_wrapper
     assert "Exit-VersionedSlotLease" in activate_wrapper
+
+
+def test_versioned_slot_lease_distinguishes_contention_from_a_persistent_failure():
+    """Catching bare `[System.IO.IOException]` and always reporting
+    "another process is building this slot" would misattribute EVERY
+    lease-file failure (permission denied, path too long, disk full, ...)
+    to contention, sending an operator chasing a retry loop instead of the
+    real, persistent failure. `Enter-VersionedSlotLease` must distinguish
+    a genuine sharing/lock violation (ERROR_SHARING_VIOLATION /
+    ERROR_LOCK_VIOLATION) from anything else via
+    `$script:VersionedSlotLeaseFailureReason`, and `Deploy-Venv`'s error
+    message must branch on it."""
+    installer = INSTALLER.read_text(encoding="utf-8")
+    enter_fn = installer.split("function Enter-VersionedSlotLease {", 1)[1].split(
+        "function Exit-VersionedSlotLease {", 1
+    )[0]
+    deploy_fn = installer.split("function Deploy-Venv", 1)[1].split(
+        "function Deploy-Wrappers", 1
+    )[0]
+
+    assert "$script:VersionedSlotLeaseFailureReason = $null" in enter_fn
+    assert "catch [System.IO.IOException] {" in enter_fn
+    assert "$ERROR_SHARING_VIOLATION = 32" in enter_fn
+    assert "$ERROR_LOCK_VIOLATION = 33" in enter_fn
+    assert "$script:VersionedSlotLeaseFailureReason = 'contention'" in enter_fn
+    # Anything that ISN'T a sharing/lock violation must preserve the real
+    # exception message, never collapse into the same "contention" bucket.
+    assert "$script:VersionedSlotLeaseFailureReason = $_.Exception.Message" in enter_fn
+
+    assert "VersionedSlotLeaseFailureReason -and $script:VersionedSlotLeaseFailureReason -ne 'contention'" in deploy_fn
+    assert "Could not acquire the build lease" in deploy_fn
+    assert "Another process is already building this runtime slot" in deploy_fn
 
 
 def test_versioned_slot_lease_handle_initialized_before_use_under_strict_mode():

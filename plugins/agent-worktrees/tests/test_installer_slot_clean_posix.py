@@ -290,7 +290,7 @@ def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
     assert "if ! _acquire_versioned_slot_lease; then" in deploy_body
     lease_fail_branch = deploy_body.split(
         "if ! _acquire_versioned_slot_lease; then", 1
-    )[1][:600]
+    )[1][:1400]
     assert "return 1" in lease_fail_branch
 
     # The wrapper must release the lease regardless of how the inner
@@ -329,30 +329,170 @@ def test_versioned_slot_lease_uses_flock_held_for_process_lifetime():
     assert "exec 8>&-" in release_body
 
 
-def test_versioned_slot_lease_degrades_without_hard_failing_on_a_brand_new_machine():
+def test_versioned_slot_lease_falls_back_to_mkdir_when_neither_flock_nor_python_exist():
     """A brand-new machine with neither `flock` NOR any bootstrap python
     yet (uv itself can provision a Python with no system interpreter
-    present at all -- that's the whole point of `uv venv`) must still be
-    able to complete a FIRST install: hard-failing here would mean the
-    installer can never get off the ground on such a host. That narrow
-    case (fallback rc 2, distinct from rc 1 genuine lock contention)
-    degrades to "no lease" with a loud `warn`, never a silent one -- a
-    first-ever install has no prior version to race against yet either,
-    so the hazard this lease defends against doesn't exist there."""
+    present at all -- that's the whole point of `uv venv`) is NOT a case
+    where serialization can simply be skipped: this plugin's own first-use
+    binstub (bin/agent-worktrees) explicitly permits running `install.sh
+    provision` CONCURRENTLY in exactly this no-flock bootstrap scenario, so
+    two simultaneous first installs are a real, supported race here.
+    Fallback rc 2 (no bootstrap python, distinct from rc 1 genuine
+    contention) must fall through to the mkdir-based last-resort lock --
+    `mkdir` is POSIX-atomic and needs neither flock nor python -- never to
+    proceeding unlocked."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
     acquire_body = _function_body(text, "_acquire_versioned_slot_lease")
     fallback_body = _function_body(
         text, "_acquire_versioned_slot_lease_python_fallback"
+    )
+    mkdir_fallback_body = _function_body(
+        text, "_acquire_versioned_slot_lease_mkdir_fallback"
     )
 
     assert 'py="$(_bootstrap_python exclude-venv-dir)" || return 2' in fallback_body
 
     no_flock_branch = acquire_body.split(
         "if ! command -v flock >/dev/null 2>&1; then", 1
-    )[1][:400]
+    )[1][:600]
     assert 'if [[ "$rc" -eq 2 ]]; then' in no_flock_branch
-    assert "warn " in no_flock_branch
-    assert "return 0" in no_flock_branch.split('if [[ "$rc" -eq 2 ]]; then', 1)[1][:200]
+    rc2_branch = no_flock_branch.split('if [[ "$rc" -eq 2 ]]; then', 1)[1][:300]
+    assert "_acquire_versioned_slot_lease_mkdir_fallback" in rc2_branch
+    assert "return 0" not in rc2_branch, (
+        "the rc-2 (no bootstrap python) branch must defer to the mkdir "
+        "fallback's own return code, never hardcode success/no-op"
+    )
+
+    # The mkdir fallback itself: atomic acquire, bounded retry, and a
+    # single flat (not nested/unbounded) staleness check.
+    assert 'if mkdir "$lock_dir" 2>/dev/null; then' in mkdir_fallback_body
+    assert "kill -0 \"$holder_pid\"" in mkdir_fallback_body
+    # The stale-reclaim removal must be recursive: the lock dir holds a
+    # "pid" marker file, so a plain `rmdir` silently no-ops on it (non-empty
+    # directory) instead of actually clearing a stale lock.
+    assert 'rm -rf "$lock_dir"' in mkdir_fallback_body
+    assert 'rmdir "$lock_dir"' not in mkdir_fallback_body, (
+        "rmdir silently no-ops on the lock dir (it's non-empty -- it holds "
+        "the pid marker file), so a stale lock would never actually clear"
+    )
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
+def test_versioned_slot_lease_mkdir_fallback_behavioral(tmp_path: Path):
+    """Behavioral (not just textual) regression guard: a concurrent second
+    acquire must be refused while the first holds the mkdir-based lock, a
+    later acquire must succeed once released, AND a lock abandoned by a
+    dead process (stale pid marker) must be reclaimed rather than
+    deadlocking forever -- proving the bounded retry/reclaim loop actually
+    works, not just that its source text looks right."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    acquire_fn = _function_body(
+        text, "_acquire_versioned_slot_lease_mkdir_fallback"
+    )
+    release_fn = _function_body(
+        text, "_release_versioned_slot_lease_mkdir_fallback"
+    )
+
+    harness = f"""
+set -uo pipefail
+_VERSIONED_SLOT_LEASE_MKDIR_DIR=""
+_VERSIONED_SLOT_LEASE_FAILURE_REASON=""
+{acquire_fn}
+}}
+{release_fn}
+}}
+
+lock_file="$1"
+
+echo "--- first acquire ---"
+_acquire_versioned_slot_lease_mkdir_fallback "$lock_file" && echo "FIRST=OK" || echo "FIRST=FAIL"
+
+(
+    _VERSIONED_SLOT_LEASE_MKDIR_DIR=""
+    if _acquire_versioned_slot_lease_mkdir_fallback "$lock_file"; then
+        echo "SECOND=BUG"
+    else
+        echo "SECOND=REFUSED"
+    fi
+)
+
+_release_versioned_slot_lease_mkdir_fallback
+
+(
+    _VERSIONED_SLOT_LEASE_MKDIR_DIR=""
+    if _acquire_versioned_slot_lease_mkdir_fallback "$lock_file"; then
+        echo "THIRD=OK"
+        _release_versioned_slot_lease_mkdir_fallback
+    else
+        echo "THIRD=FAIL"
+    fi
+)
+
+echo "--- stale lock (dead holder pid) ---"
+rm -rf "${{lock_file}}.d"
+mkdir "${{lock_file}}.d"
+( : ) &
+dead_pid=$!
+wait "$dead_pid"
+printf '%s' "$dead_pid" > "${{lock_file}}.d/pid"
+(
+    _VERSIONED_SLOT_LEASE_MKDIR_DIR=""
+    if _acquire_versioned_slot_lease_mkdir_fallback "$lock_file"; then
+        echo "RECLAIM=OK"
+        _release_versioned_slot_lease_mkdir_fallback
+    else
+        echo "RECLAIM=FAIL"
+    fi
+)
+"""
+    with tempfile.TemporaryDirectory() as td:
+        harness_path = Path(td) / "harness.sh"
+        harness_path.write_text(harness, encoding="utf-8")
+        lock_file = str(Path(td) / "lease.lock")
+        r = subprocess.run(
+            [_BASH, str(harness_path), lock_file],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert r.returncode == 0, f"harness failed: {r.stdout} {r.stderr}"
+        events = [line for line in r.stdout.splitlines() if "=" in line]
+        assert events == [
+            "FIRST=OK", "SECOND=REFUSED", "THIRD=OK", "RECLAIM=OK",
+        ], events
+
+
+def test_versioned_slot_lease_distinguishes_contention_from_a_persistent_failure():
+    """Hardcoding "another process is building this slot" for EVERY
+    acquisition failure would hide a genuinely persistent lease-machinery
+    failure (lease file/FIFOs couldn't be created, the no-flock helper
+    didn't respond, ...) behind a message that just tells an operator to
+    retry -- `_VERSIONED_SLOT_LEASE_FAILURE_REASON` must distinguish the
+    two so `deploy_venv`'s error message can too."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    acquire_body = _function_body(text, "_acquire_versioned_slot_lease")
+    fallback_body = _function_body(
+        text, "_acquire_versioned_slot_lease_python_fallback"
+    )
+    mkdir_fallback_body = _function_body(
+        text, "_acquire_versioned_slot_lease_mkdir_fallback"
+    )
+    deploy_body = _function_body(text, "deploy_venv")
+
+    assert '_VERSIONED_SLOT_LEASE_FAILURE_REASON="contention"' in acquire_body
+    assert '_VERSIONED_SLOT_LEASE_FAILURE_REASON="could not open the lease file' in acquire_body
+    assert '_VERSIONED_SLOT_LEASE_FAILURE_REASON="contention"' in mkdir_fallback_body
+    for phrase in (
+        "could not create a temp dir",
+        "could not create the lease fallback's FIFOs",
+        "could not open the lease status FIFO",
+        "could not open the lease keep-alive FIFO",
+    ):
+        assert phrase in fallback_body, f"missing failure-reason text: {phrase!r}"
+    assert '_VERSIONED_SLOT_LEASE_FAILURE_REASON="contention"' in fallback_body
+    assert "did not respond" in fallback_body
+
+    assert '"$_VERSIONED_SLOT_LEASE_FAILURE_REASON" != "contention"' in deploy_body
+    assert "Could not acquire the build lease" in deploy_body
+    assert "Another process is already building this runtime slot" in deploy_body
 
 
 def test_versioned_slot_lease_python_fallback_bounds_the_status_read_even_if_the_helper_never_starts():
@@ -409,18 +549,6 @@ def test_versioned_slot_lease_python_fallback_delegates_to_real_fcntl_flock():
         "if ! command -v flock >/dev/null 2>&1; then", 1
     )[1][:400]
     assert "_acquire_versioned_slot_lease_python_fallback" in no_flock_branch
-    # A brand-new machine with neither `flock` NOR any bootstrap python is
-    # the one deliberate exception (rc 2): uv itself can still provision a
-    # Python with no system interpreter present, and a first-ever install
-    # has no prior version to race against -- that specific rc degrades to
-    # "no lease" with a loud warning rather than hardcoding success for
-    # every outcome.
-    assert 'if [[ "$rc" -eq 2 ]]; then' in no_flock_branch
-    assert "return 0" not in no_flock_branch.split('if [[ "$rc" -eq 2 ]]; then', 1)[0], (
-        "the no-flock branch must defer to the python fallback's own "
-        "return code (except the dedicated rc-2 bootstrap case), never "
-        "hardcode success"
-    )
 
     # No bootstrap python resolvable at all must be distinguishable (rc 2)
     # from genuine lock contention (rc 1) -- never silently succeed either

@@ -1357,9 +1357,19 @@ function Enter-VersionedSlotLease {
        could both observe a clean slot (neither has started its external
        build yet) and then both build into it -- this lease is what actually
        serializes them (#5439). Returns $true if acquired (or a no-op in
-       legacy mode); $false if another live process already holds it --
-       callers must treat that exactly like a dirty slot and refuse to
-       build. Idempotent: a second call while already held is a no-op. #>
+       legacy mode); $false if another live process already holds it, OR the
+       lease file itself couldn't be opened for some OTHER reason (a
+       permission/path/storage failure) -- callers must treat both exactly
+       like a dirty slot and refuse to build, but should tell those two
+       causes apart in their own message: `$script:VersionedSlotLeaseFailureReason`
+       is 'contention' for a genuine sharing violation (ERROR_SHARING_VIOLATION
+       /ERROR_LOCK_VIOLATION), or the raw exception message for anything else --
+       catching bare `[System.IO.IOException]` would otherwise misreport every
+       cause (disk full, permission denied, path too long, ...) as "another
+       process is building this slot", sending an operator chasing a retry
+       loop instead of the real, persistent failure. Idempotent: a second call
+       while already held is a no-op. #>
+    $script:VersionedSlotLeaseFailureReason = $null
     if (-not $VersionedRuntime) { return $true }
     if ($script:VersionedSlotLeaseHandle) { return $true }
     $leasePath = Get-VersionedSlotLeasePath
@@ -1369,6 +1379,14 @@ function Enter-VersionedSlotLease {
             [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
         return $true
     } catch [System.IO.IOException] {
+        $ERROR_SHARING_VIOLATION = 32
+        $ERROR_LOCK_VIOLATION = 33
+        $nativeCode = $_.Exception.HResult -band 0xFFFF
+        if ($nativeCode -eq $ERROR_SHARING_VIOLATION -or $nativeCode -eq $ERROR_LOCK_VIOLATION) {
+            $script:VersionedSlotLeaseFailureReason = 'contention'
+        } else {
+            $script:VersionedSlotLeaseFailureReason = $_.Exception.Message
+        }
         return $false
     }
 }
@@ -2182,7 +2200,16 @@ function Deploy-Venv {
         # Another live process already holds the exclusive build lease for
         # this exact version -- it's actively building (or about to), so
         # treat this exactly like a dirty slot and refuse to race it.
-        Write-ServiceErr "Another process is already building this runtime slot ($SrcVersion) -- refusing to race it. Re-run update once the other build finishes."
+        # Enter-VersionedSlotLease distinguishes that genuine contention
+        # from any OTHER lease-file failure (permission/path/storage) via
+        # $script:VersionedSlotLeaseFailureReason -- never attribute the
+        # latter to "another process" and send an operator chasing a
+        # retry loop instead of the real, persistent failure.
+        if ($script:VersionedSlotLeaseFailureReason -and $script:VersionedSlotLeaseFailureReason -ne 'contention') {
+            Write-ServiceErr "Could not acquire the build lease for runtime slot ($SrcVersion): $script:VersionedSlotLeaseFailureReason"
+        } else {
+            Write-ServiceErr "Another process is already building this runtime slot ($SrcVersion) -- refusing to race it. Re-run update once the other build finishes."
+        }
         return $false
     }
 
