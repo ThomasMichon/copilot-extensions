@@ -313,7 +313,22 @@ class GiteaProvider:
             "POST", f"/repos/{repo}/issues/{issue.number}/labels",
             payload={"labels": [label_id]}, ok=(200, 201),
         )
-        self._comment(repo, issue, {**reservation, "issue": issue.number})
+        try:
+            self._comment(repo, issue, {**reservation, "issue": issue.number})
+        except Exception:
+            # The label is now live but the marker comment that is supposed
+            # to accompany it never landed. Best-effort roll the label back
+            # so a transient/permanent comment failure never leaks a
+            # labeled-but-unmarked reservation that discovery would then
+            # treat as reserved with no record of by whom/when/why.
+            try:
+                self._call(
+                    "DELETE", f"/repos/{repo}/issues/{issue.number}/labels/{label_id}",
+                    ok=(200, 204),
+                )
+            except Exception:
+                pass
+            raise
 
     def claim(
         self, repo: str, issue: "Issue", reservation: dict[str, Any], task_id: str

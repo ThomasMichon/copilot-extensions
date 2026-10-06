@@ -336,6 +336,47 @@ def test_label_id_resolution_raises_when_label_absent(monkeypatch):
         )
 
 
+def test_reserve_rolls_back_the_label_when_the_marker_comment_fails(monkeypatch):
+    """The label add can succeed and then the marker-comment write can
+    fail (transiently or permanently). Left alone, that leaves a labeled
+    issue with no marker recording who reserved it or why -- a leaked
+    reservation discovery can never distinguish from a real one. The
+    label add must be rolled back so the failure leaves no state."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+    deleted_label_ids = []
+
+    def runner(args, **kwargs):
+        method = args[args.index("-X") + 1]
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status({"login": "issue-bot"}, 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status({"full_name": "example/project"}, 200)
+        if "/labels?page=1" in url and method == "GET":
+            return _status([{"id": 7, "name": "backlog-active"}], 200)
+        if "/labels?page=" in url and method == "GET":
+            return _status([], 200)
+        if url.endswith("/issues/1/labels") and method == "POST":
+            return _status([{"id": 7, "name": "backlog-active"}], 201)
+        if "/issues/1/comments?" in url and method == "GET":
+            return _status([], 200)
+        if url.endswith("/issues/1/comments") and method == "POST":
+            return _status("server error", 500)
+        if url.endswith("/issues/1/labels/7") and method == "DELETE":
+            deleted_label_ids.append(7)
+            return _status("", 204)
+        raise AssertionError(f"unexpected curl invocation: {method} {url}")
+
+    provider = _provider(runner)
+    issue = Issue(1, "t", "url", (), 0.0, 0.0)
+    with pytest.raises(RuntimeError, match="HTTP 500"):
+        provider.reserve(
+            "example/project", issue,
+            {"loop": "backlog", "occurrence": 1, "label": "backlog-active"},
+        )
+    assert deleted_label_ids == [7]
+
+
 def test_http_error_status_raises(monkeypatch):
     monkeypatch.setenv("GITEA_TOKEN", "tok")
     provider = _provider(lambda *a, **k: _status("server error", 500))

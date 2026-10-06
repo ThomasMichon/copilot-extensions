@@ -129,9 +129,20 @@ def _approval_status(reviews: list[Mapping[str, Any]]) -> ApprovalStatus:
     return ApprovalStatus.NONE
 
 
-def _mergeability(pull_request: Mapping[str, Any], status_rollup: str | None) -> Mergeability:
+def _mergeability(
+    pull_request: Mapping[str, Any], status_rollup: str | None, *, is_draft: bool
+) -> Mergeability:
     mergeable = pull_request.get("mergeable")
     if mergeable is False:
+        # Gitea can report `mergeable: false` for a draft PR even when it
+        # has no real merge conflict -- draft status alone is enough to
+        # make Gitea withhold a clean mergeability verdict. Classifying
+        # that as CONFLICTED would incorrectly trigger conflict-handling
+        # behavior on top of the separate DRAFT hold; UNKNOWN preserves
+        # the hold alone until Gitea can report actual mergeability (once
+        # the PR is marked ready).
+        if is_draft:
+            return Mergeability.UNKNOWN
         return Mergeability.CONFLICTED
     if mergeable is None:
         return Mergeability.UNKNOWN
@@ -147,12 +158,16 @@ def _mergeability(pull_request: Mapping[str, Any], status_rollup: str | None) ->
         ) from None
 
 
+def _is_draft(pull_request: Mapping[str, Any]) -> bool:
+    return bool(pull_request.get("draft") or pull_request.get("is_draft"))
+
+
 def _holds(
     pull_request: Mapping[str, Any],
     review_comment_groups: list[list[Mapping[str, Any]]],
 ) -> frozenset[HoldReason]:
     holds: set[HoldReason] = set()
-    if pull_request.get("draft") or pull_request.get("is_draft"):
+    if _is_draft(pull_request):
         holds.add(HoldReason.DRAFT)
     title = str(pull_request.get("title") or "")
     labels = tuple(
@@ -207,7 +222,9 @@ def observe_pr_state(
     return PRObservation(
         number=number,
         approval_status=_approval_status(list(reviews or ())),
-        mergeability=_mergeability(pull_request, status_rollup),
+        mergeability=_mergeability(
+            pull_request, status_rollup, is_draft=_is_draft(pull_request)
+        ),
         holds=_holds(pull_request, list(review_comment_groups or ())),
         revision=Revision(diff_hash=head_sha, base_sha=base_sha),
         last_commit_at=_last_commit_at(pull_request),
