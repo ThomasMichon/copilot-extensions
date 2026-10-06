@@ -502,9 +502,13 @@ credentials (`pr.api_base`, `pr.token_command`/`pr.token_env`) and
 -- via the provider CLI (`curl` for Gitea, `gh` for GitHub, `az` for Azure
 DevOps) -- and **auto-records** the url/number on the worktree (no manual
 `set-pr`). By default (codename-attribution-by-default), `create-pr` embeds a
-public-safe marker carrying **only** the worktree's assigned codename --
-resolve it back via `resolve --codename` (or `embody --codename`) on the same
-machine, or on a *different* machine it now runs a cross-machine SSH scan
+public-safe marker carrying the worktree's assigned codename -- plus an
+optional `root=<name>` field (another worktree's own codename, never a raw
+identifier) when this worktree is itself claimed as an outbound resource by a
+different, calling worktree; see `docs/architecture.md`'s *PR Attribution &
+Codenames* section for the full detail -- resolve the primary codename back
+via `resolve --codename` (or `embody --codename`) on the same machine, or on a
+*different* machine it now runs a cross-machine SSH scan
 automatically (effort `pr-attribution-codenames` Phase 3): every other known,
 ssh-ready machine is asked over SSH whether its own tracking store has that
 codename. A match on a different machine still fails closed -- it reports the

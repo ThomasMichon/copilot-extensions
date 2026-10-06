@@ -1334,13 +1334,9 @@ def _open_via_provider(
                 source_attribution_configured=target_pr.attribution_explicit,
             )
         )
-        full_body = (
-            attr.append_marker(body or "", attr.build_codename_marker(codename))
-            if marker_published
-            # Never leave a stale/caller-supplied source marker in place when
-            # publication is skipped -- it could still carry raw identifiers
-            # from some other source (a copy-pasted body, an older template).
-            else attr.strip_marker(body or "")
+        from . import root_chain
+        full_body = root_chain.compose_codename_body(
+            body, codename, marker_published, record, config,
         )
     elif attribution is True:
         marker = attr.build_marker(
@@ -1497,7 +1493,8 @@ def refresh_source_attribution(
             source_attribution_configured=target_pr.attribution_explicit,
         ):
             return ""
-        marker = attribution.build_codename_marker(record.codename)
+        from . import root_chain
+        marker = root_chain.build_codename_marker_with_root(record.codename, record, config)
     elif target_pr.attribution_mode == "true":
         marker = attribution.build_marker(
             worktree_id,

@@ -1026,12 +1026,39 @@ safely carry.
 `docs/config-reference.md`):
 
 - **`"codename"` (default, codename-attribution-by-default).** `create-pr`
-  embeds `<!-- agent-worktrees:source codename=<name> -->` and nothing else
-  -- no machine, worktree id, session id, or SHA. The marker decodes to
-  nothing on its own; it is only useful as a lookup key back into the
-  *originating* machine's own tracking store, via `resolve --codename` or
-  `embody --codename`. This is the right default for any repo whose PRs are
-  visible outside the facility.
+  embeds `<!-- agent-worktrees:source codename=<name> -->` -- no machine,
+  worktree id, session id, or SHA. The marker decodes to nothing on its own;
+  it is only useful as a lookup key back into the *originating* machine's
+  own tracking store, via `resolve --codename` or `embody --codename`. This
+  is the right default for any repo whose PRs are visible outside the
+  facility. When the worktree that opened the PR is itself an outbound
+  resource claimed by ANOTHER worktree (`tracking.WorktreeRecord.owner_ref`
+  -- e.g. a child worktree spun up to do work on behalf of a different,
+  calling repo's session), the marker also carries an optional
+  `root=<name>` field: the ROOT ancestor's own codename, resolved by
+  walking the `owner_ref` chain (`agent_worktrees.root_chain`). This is
+  purely another worktree's own already-public-safe codename -- never a raw
+  identifier -- and is omitted whenever the chain has no owner, steps onto
+  a different machine, is cyclic/too deep, or the resolved root's own
+  codename isn't safe to publish per its own provenance gate -- including
+  when the root repo itself has chosen `false` (full anonymous opt-out):
+  its codename is never exposed via someone else's marker either. A root
+  in `true` (raw-marker) mode already accepts full exposure on its own
+  PRs, so its **built-in** codename still publishes here too -- but a
+  **custom**-wordlist codename does not: `true` is a closed-circuit
+  setting for that repo's own PRs, not cross-repo consent to publish a
+  custom alias (not inherently public-safe) into a different, possibly
+  public child repo -- that still requires the root to have explicitly
+  selected `"codename"` mode specifically, with its own opt-in. A root
+  worktree (no `owner_ref` at all) never gets a `root=` field pointing at
+  itself. **This decision is PERSISTED on first resolution** (a small
+  per-worktree sidecar, keyed to the entire walked chain's own identity)
+  and reused thereafter -- a later change to the root repo's config does
+  NOT retroactively flip an already-decided `root=` field, matching this
+  plugin's existing frozen-
+  attribution guarantee for the primary codename. A worktree claim handoff
+  or an id being reaped and recreated invalidates that persisted decision
+  automatically, so a stale root is never returned forever.
 - **`true` (raw marker).** Embeds the full raw identifiers (worktree id,
   machine, session, head SHA) directly in the hidden marker. Closed-circuit
   systems only -- never a public repo.

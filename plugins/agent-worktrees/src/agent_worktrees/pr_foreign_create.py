@@ -143,7 +143,11 @@ def create_foreign_pr_from_branch(
             ),
             source_attribution_configured=prcfg.source_attribution_configured,
         ):
-            full_body = attr.append_marker(body or "", attr.build_codename_marker(codename))
+            from . import root_chain
+            marker = root_chain.build_codename_marker_with_root(
+                codename, pre_record, config,
+            )
+            full_body = attr.append_marker(body or "", marker)
         else:
             full_body = attr.strip_marker(body or "")
     elif effective_attribution is True:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -628,6 +629,7 @@ def create_new_record(
         codename_source=codename_source or None,
         bound_agent=normalized_bound_agent,
         pending_seed=pending_seed or None,
+        creation_nonce=secrets.token_hex(8),
     )
     _mark_controller_projection_dirty(
         record, *(relation.controller_session_id for relation in controllers)
@@ -678,6 +680,7 @@ def create_new_record_if_absent(
             interface=interface,
             origin=origin,
             checkout_managed=checkout_managed,
+            creation_nonce=secrets.token_hex(8),
         )
         tracking._save_record_unlocked(record, path)
     tracking._flush_session_projections(record)

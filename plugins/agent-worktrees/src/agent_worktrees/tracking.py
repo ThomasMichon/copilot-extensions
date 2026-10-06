@@ -758,6 +758,16 @@ class WorktreeRecord:
     #     byte-identically.
     owner_ref: str | None = None
     resources: list[ResourceClaim] = field(default_factory=list)
+    # pr-attribution-codenames root-chain-capture: a random token stamped
+    # ONCE at ``create_new_record`` time, unique per actual creation --
+    # unlike ``started_at`` (only second-precision), this lets a consumer
+    # (``root_chain``) detect "is this the SAME incarnation of this
+    # worktree id, or was it reaped and recreated within the same second?"
+    # Absent on a pre-existing record until ``root_chain`` lazily backfills
+    # it on first touch (``_ensure_creation_nonce``, matching ``codename``'s
+    # own first-touch backfill). Emitted only when set, so legacy YAML
+    # stays byte-identical until that first touch.
+    creation_nonce: str = ""
     # worktree-finality-and-obligations Phase 2: the exact resources released by
     # the MOST RECENT `release_all_resources` finalize cascade (a snapshot, not
     # a second ledger -- the same claims remain in `resources` above with
@@ -2145,6 +2155,7 @@ def _load_record_uncached(path: Path) -> WorktreeRecord:
                          if data.get("caller_worktree") else None),
         owner_ref=(str(data["owner_ref"])
                    if data.get("owner_ref") else None),
+        creation_nonce=str(data.get("creation_nonce", "") or ""),
         resources=resources_list,
         last_finalize_released=last_finalize_released_list,
         bound_agent=(str(data["bound_agent"]).strip() or None
@@ -2863,6 +2874,8 @@ def _save_record_unlocked(
     # set, so an unclaimed worktree's YAML stays byte-identical.
     if record.owner_ref:
         content += f"owner_ref: {_yaml_scalar(record.owner_ref)}\n"
+    if record.creation_nonce:
+        content += f"creation_nonce: {_yaml_scalar(record.creation_nonce)}\n"
     # agent-bridge-worktree-native-agents: the bound charter. Emitted only
     # when set, so an unbound worktree's YAML stays byte-identical.
     if record.bound_agent:
