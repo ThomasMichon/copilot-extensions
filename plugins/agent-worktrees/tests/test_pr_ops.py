@@ -642,12 +642,19 @@ class TestCreatePR:
         assert "another actor updating the remote branch" in rerun["error"]
         assert _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path) == remote_head
 
-    def test_reused_open_pr_refuses_to_resurrect_deleted_remote_head(self, pr_repo):
+    def test_reused_open_pr_refuses_to_resurrect_deleted_remote_head(self, pr_repo, monkeypatch):
         """#5298: a concurrently merged+auto-pruned PR branch must not be
         silently recreated by a later create-pr call that still believes the
         PR is open. A plain push would read "ref absent" as "create a new
         branch" and happily resurrect it, reporting the merged PR as freshly
         updated -- this must fail instead, leaving the branch deleted.
+
+        The earlier "second line of defense" (#1984) `remote_branch_state`
+        preflight would otherwise detect the same deletion first and mark the
+        PR terminal before the reuse-lease push is ever reached, making this
+        regression pass for the wrong reason. Patch that preflight to report
+        "present" so the test actually exercises the lease guard this PR adds,
+        with the real deletion still in place for the push itself to hit.
         """
         config, wid, wt_path, remote_dir = pr_repo
         first = pr_ops.create_pr(wid, config, title="Add feature")
@@ -660,6 +667,7 @@ class TestCreatePR:
             "push", "origin", "--delete", "feature/add-feature-aaaa",
             cwd=wt_path,
         )
+        monkeypatch.setattr(pr_ops.git_ops, "remote_branch_state", lambda *a, **k: "present")
 
         _git("checkout", f"worktree/{wid}", cwd=wt_path)
         (wt_path / "local.txt").write_text("local feedback\n")
@@ -3258,10 +3266,10 @@ class TestPRFinalizeAndPush:
         assert rec.pr.state == "open"
 
     def test_push_changes_refuses_divergent_remote_feature_branch(self, pr_repo):
-        """Medium finding (#5298 follow-up): push-changes' lease safety was
-        only integration-tested through create_pr; add parametrized-in-spirit
-        coverage for the snapshot scheme too -- a divergent remote head must
-        reject the push, not force-overwrite it."""
+        """push-changes' lease safety (#5298) was only integration-tested
+        through create_pr; add parametrized-in-spirit coverage for the
+        snapshot scheme too -- a divergent remote head must reject the push,
+        not force-overwrite it."""
         from agent_worktrees import finalize as fin
         config, wid, wt_path, remote_dir = pr_repo
         first = pr_ops.create_pr(wid, config, title="Add feature")
@@ -4115,8 +4123,8 @@ class TestPRFinalizeAndPush:
         assert rec.pr.state == "open"
 
     def test_push_changes_refspec_refuses_divergent_remote_head(self, pr_repo):
-        """Medium finding (#5298 follow-up): refspec-scheme counterpart of
-        test_push_changes_refuses_divergent_remote_feature_branch above."""
+        """Refspec-scheme counterpart of
+        test_push_changes_refuses_divergent_remote_feature_branch above (#5298)."""
         from agent_worktrees import finalize as fin
         config, wid, wt_path, remote_dir = pr_repo
         config = self._refspec_config(config)
