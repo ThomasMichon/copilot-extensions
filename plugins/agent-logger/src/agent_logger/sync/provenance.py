@@ -7,12 +7,34 @@ import json
 import os
 import platform
 import stat
+import uuid
 from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = 1
 MAX_PROVENANCE_BYTES = 1024 * 1024
 RESCUE_SNAPSHOT_PROVENANCE = ".rescue-provenance.json"
+
+# Hex chars of a SHA-256 digest kept for a rescue-snapshot directory name.
+# 16 hex chars (64 bits) is ample collision resistance for a per-machine
+# cache keyed by session/capture id -- a full 64-char digest (two of them,
+# nested) was the single largest contributor to a real Windows MAX_PATH
+# (260-char) failure under a deep snapshot/containment root (see
+# coverage-guided-ci effort notes, 2026-10-05). Every reader of a rescue
+# snapshot path must derive it the same way, so route through
+# rescue_session_key()/rescue_capture_key() below rather than hashing
+# inline.
+RESCUE_KEY_HEX_LENGTH = 16
+
+# Hex chars of a uuid4 kept for a transaction/temp-file suffix elsewhere in
+# session-sync (filesystem.py) -- same MAX_PATH rationale as above; shared
+# here since this module already carries the sibling short-ID budget.
+SHORT_ID_HEX_LENGTH = 16
+
+
+def short_unique_id() -> str:
+    return uuid.uuid4().hex[:SHORT_ID_HEX_LENGTH]
+
 
 _REQUIRED_TEXT = {
     "session_id",
@@ -58,14 +80,28 @@ def _mkdir(path: Path) -> None:
     os.mkdir(_windows_extended_path(path))
 
 
+def rescue_session_key(session_id: str) -> str:
+    """Return the (truncated) directory key for one session's rescue
+    snapshots. Every writer/reader must derive this the same way -- see
+    RESCUE_KEY_HEX_LENGTH."""
+    return hashlib.sha256(session_id.encode()).hexdigest()[:RESCUE_KEY_HEX_LENGTH]
+
+
+def rescue_capture_key(capture_id: str) -> str:
+    """Return the (truncated) directory key for one rescued capture. Every
+    writer/reader must derive this the same way -- see
+    RESCUE_KEY_HEX_LENGTH."""
+    return hashlib.sha256(capture_id.encode()).hexdigest()[:RESCUE_KEY_HEX_LENGTH]
+
+
 def rescue_snapshot_path(
     machine_root: Path,
     session_id: str,
     capture_id: str,
 ) -> Path:
     """Return the hidden immutable snapshot path for one rescued capture."""
-    session_key = hashlib.sha256(session_id.encode()).hexdigest()
-    capture_key = hashlib.sha256(capture_id.encode()).hexdigest()
+    session_key = rescue_session_key(session_id)
+    capture_key = rescue_capture_key(capture_id)
     return (
         machine_root
         / ".session-sync-rescue-captures"
