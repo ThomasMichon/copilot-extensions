@@ -2119,3 +2119,85 @@ etc.) still stay fully unnarrowed -- and now that this correction is in,
 narrowing any of them going forward will actually achieve its intended
 effect. Phase 5 remains fully unstarted.
 
+### 2026-10-05 — Phase 4: a more valuable re-segmentation than the outer 7 segments -- generalizing the data body's own fast-path pattern to content-only changes
+
+Picked up intending to audit the next outer `refresh()` cause (machine-switch
+or pivot-switch) -- but reconsidered first, per the operator's own steer:
+"seriously consider ensuring we're properly segmenting our UX into their
+widget system to take advantage of these targeted updates." Sketched out
+what narrowing machine-switch/pivot-switch would actually buy: a pivot
+switch changes nearly every outer segment's content (pivot tabs, chrome
+counts, button set, the whole data body, footer hint) -- only `nf-title` is
+provably untouched, a marginal win. Machine-switch is a little better (skip
+`nf-title`+`nf-pivots`, keep the other 5) but still small. Neither comes
+close to the pulse/nav wins, because the outer 7-segment split is already
+about as fine as it can usefully get for those *whole-screen-state* causes.
+
+**The actual higher-value segmentation gap was inside `nf-body-data`, not
+the outer 7.** `_PickerNativeData.refresh_data()` already has two per-row
+fast paths (selection-only, #171; pulse-only, #4719/2026-09-30) that patch
+just the affected rows via `replace_option_prompt_at_index` instead of a
+full `clear_options()`+rebuild -- but ANY OTHER signature delta (the common
+case: a background reconcile/poll updating one or a few rows' `title`/
+`age_secs`/`sess` fields, e.g. the Group C mux-reconcile landing
+asynchronously, a PR-state refresh, a git-status poll) still fell through to
+a full O(rows) rebuild, exactly the inefficiency #4719 fixed for the pulse
+case specifically, left unfixed for every other per-row content update.
+
+**Added `_try_content_repaint()`**, a third fast path alongside the existing
+two: applies when the signature's `fp` fingerprint (the per-row
+id/title/state/age_secs/sess tuple) is the ONLY thing that changed, row
+COUNT and ORDER (the id sequence) are unchanged, and -- the safety condition
+that matters most -- no differing row's `state` field itself changed (a
+state change can move a row into a different section, shifting every
+subsequent row's index, which a text-only patch can't express; this fast
+path falls back to a full rebuild whenever that's even possible). Includes
+a defensive re-check: the fast path re-fetches `list_records()` separately
+from `_signature()`'s own call and re-derives the same fingerprint from it
+before trusting positional indices, falling back to a full rebuild on any
+mismatch rather than risk patching the wrong row.
+
+**A real debugging detour, worth recording**: the first test-writing attempt
+mutated the raw *source* records (`raws[2]["mux_session"] = True`) and saw
+no effect at all -- `live=False` never re-invokes `src.load()`, and more
+importantly, `sess` is a field `derive.norm()` PRECOMPUTES once at load
+time, not something `_signature()`/`row_text()` recompute live from
+`mux_session`/`mux_attached` on each read. A real background reconcile lands
+by replacing the normalized record in `scr.data` outright (the "~2 call
+sites doing `self.data[i] = row`" the 2026-09-30 investigation's root cause
+#2 already named) -- the test needed to mutate the ALREADY-NORMALIZED
+`scr.data` entry's precomputed `sess` field directly, matching that real
+path, not the raw upstream source.
+
+**Validation**:
+`test_native_data_content_repaint_patches_one_row_without_a_full_rebuild` --
+mutates one row's precomputed `sess` field (mux attachment landing), asserts
+`_rebuild()` is never called, `replace_option_prompt_at_index` is called
+exactly once at the right index, and the patched text reflects the new
+value; a companion state-changing mutation on a different row asserts the
+fast path correctly declines and falls back to a full rebuild. Full
+`test_picker_tui.py` green (297/297) on one run; a prior run's single
+failure was the same already-documented pre-existing flake family.
+
+**Answering the operator's broader question**: the data body (`nf-body-data`)
+is already the right UNIT of segmentation for row-level content -- the
+pattern (signature-diff -> classify the delta -> patch exactly the affected
+rows via `replace_option_prompt_at_index`, falling back to a full rebuild
+whenever the delta isn't provably safe to patch) is sound and now covers
+three distinct causes (selection, pulse, content). The outer 7-segment split
+(`_refresh_nf_segments`) is a DIFFERENT axis (which whole CHROME/HEADER/
+FOOTER widgets need any re-render at all) and is already about as granular
+as it's worth being for the causes that actually vary per-cause (pulse,
+nav); further outer-segment narrowing for reload/pivot-switch has
+little room left to find, since those causes genuinely touch nearly every
+segment. Future row-level segmentation headroom, if ever needed, would most
+plausibly come from narrowing `_try_content_repaint`'s own STATE-change
+exclusion (e.g., detecting when a state change's NEW section is adjacent/
+compatible enough to patch rather than always falling back) -- not
+attempted here, flagged as a possible future slice if content-repaint's
+fallback rate in practice turns out to matter.
+
+**Next**: the outer 7-segment `refresh()` causes (reload/pivot-switch/
+machine-switch) remain unnarrowed, now understood to offer only marginal
+further wins. Phase 5 remains fully unstarted.
+

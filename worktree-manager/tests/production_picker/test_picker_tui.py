@@ -10789,6 +10789,120 @@ def test_tick_narrowed_cause_never_marks_the_whole_screen_region_dirty():
     asyncio.run(run())
 
 
+def test_native_data_content_repaint_patches_one_row_without_a_full_rebuild():
+    """pivot-streaming-transport Phase 4: a background reconcile that changes
+    one row's ``sess`` (LIVE column -- e.g. a mux attachment landing
+    asynchronously, same id order, same state) must patch just that row via
+    ``replace_option_prompt_at_index`` -- never a full ``_rebuild()``
+    clear+reconstruct -- and the patched text must actually reflect the new
+    value. A companion state-changing edit (which can move a row to a
+    different section) must still fall back to a full rebuild -- the safety
+    guard `_try_content_repaint` exists to enforce."""
+    import datetime
+    import types
+
+    from worktree_manager.production_picker.picker_tui import derive
+
+    def _multi_row_src():
+        derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+        local = ("anomalous-potato", "Win")
+        raws = [
+            {"id": f"anomalous-potato-win-20260627-{i:04d}",
+             "title": f"Row {i}", "status": "active",
+             "started_at": "2026-06-27T17:00:00", "turn_count": i,
+             "state": "wip"}
+            for i in range(5)
+        ]
+        s = types.SimpleNamespace()
+        s.LOCAL = local
+        s.LOCAL_LABEL = "lc"
+        s.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+        s.bucket = derive.bucket
+        s.for_machine = derive.for_machine
+        s.load = lambda: [derive.norm(w, *local) for w in raws]
+        return s
+
+    async def run():
+        src = _multi_row_src()
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            nl = scr.query_one("#nf-body-data")
+
+            rebuild_calls = []
+            original_rebuild = nl._rebuild
+
+            def _tracked_rebuild():
+                rebuild_calls.append(1)
+                return original_rebuild()
+
+            patch_calls = []
+            original_patch = nl.replace_option_prompt_at_index
+
+            def _tracked_patch(index, prompt):
+                patch_calls.append(index)
+                return original_patch(index, prompt)
+
+            object.__setattr__(nl, "_rebuild", _tracked_rebuild)
+            object.__setattr__(nl, "replace_option_prompt_at_index", _tracked_patch)
+            try:
+                # Capture row 2's key BEFORE mutating it, from the current,
+                # already-rendered data (not a post-hoc search by new value).
+                row2_before = next(r for r in scr.list_records()
+                                    if r.get("id4", "").endswith("0002"))
+                rid2 = scr._row_key(row2_before)
+                idx2_before = nl._l_rows[rid2][0]
+                assert "-" in nl.get_option_at_index(idx2_before).prompt.plain
+
+                # Content-only change: row 2's mux attachment lands
+                # asynchronously (sess flips "-" -> "MUX(1)"), state
+                # untouched. Mutate the screen's own already-normalized
+                # ``scr.data`` directly (the real path a background
+                # reconcile/poll actually uses, e.g. `_apply_loader_records()`
+                # / `self.data[i] = row`), not the raw source -- `live=False`
+                # never re-invokes `src.load()` on its own.
+                row2_live = next(w for w in scr.data
+                                  if scr._row_key(w) == rid2)
+                row2_live["mux_session"] = True
+                row2_live["mux_attached"] = True
+                row2_live["mux_clients"] = 1
+                row2_live["sess"] = "MUX(1)"
+                rebuild_calls.clear()
+                patch_calls.clear()
+                nl.refresh_data()
+                assert not rebuild_calls, (
+                    "a content-only sess change triggered a full _rebuild() "
+                    "-- the content-repaint fast path should have handled it")
+                assert patch_calls == [idx2_before], (
+                    f"expected exactly one patch at index {idx2_before}, "
+                    f"got {patch_calls}")
+                idx2 = nl._l_rows[rid2][0]
+                option = nl.get_option_at_index(idx2)
+                assert "MUX(1)" in option.prompt.plain, (
+                    "the patched row's displayed text doesn't reflect the "
+                    "new sess value -- the content-repaint fast path ran "
+                    "but didn't actually update what's on screen")
+
+                # A STATE change (not just content) must NOT take this fast
+                # path -- it can move the row to a different section.
+                row3_live = next(w for w in scr.data
+                                  if (w.get("id4") or "").endswith("0003"))
+                row3_live["state"] = "unused"
+                rebuild_calls.clear()
+                nl.refresh_data()
+                assert rebuild_calls, (
+                    "a state change incorrectly took the content-repaint "
+                    "fast path instead of falling back to a full rebuild")
+            finally:
+                object.__setattr__(nl, "_rebuild", original_rebuild)
+                object.__setattr__(nl, "replace_option_prompt_at_index",
+                                   original_patch)
+
+    asyncio.run(run())
+
+
 def test_tick_pure_nav_narrows_segment_refresh_to_body_and_footer():
     """pivot-streaming-transport Phase 4: a pure in-list nav tick (``_nav_
     dirty`` set, no busy condition) must refresh ONLY ``nf-body-data`` and
