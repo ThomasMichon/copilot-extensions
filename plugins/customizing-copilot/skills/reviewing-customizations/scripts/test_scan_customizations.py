@@ -1851,6 +1851,41 @@ def test_mcp_server_tools_entries_parsed_despite_trailing_comments(tmp_path: Pat
 
 
 @pytest.mark.guard
+def test_mcp_server_deeply_indented_comment_does_not_corrupt_field_indent(
+    tmp_path: Path,
+):
+    # A standalone full-line comment indented deeper than the server's real
+    # fields must not be mistaken for establishing `field_indent` -- that
+    # would make the real `tools:` line (at the server's actual field
+    # indent) look "more deeply nested than the server's own fields" and
+    # get silently skipped.
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        "  svc-a:\n"
+        "        # a deeply indented standalone comment\n"
+        "    command: agent-mcp\n"
+        "    tools: ['example_search']\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    findings = [f for f in report.findings if f.check == "mcp-server-tools-allowlist"]
+    assert len(findings) == 1
+    assert "example_search" in findings[0].message
+
+
+@pytest.mark.guard
 def test_mcp_server_nested_env_key_is_not_mistaken_for_tools(tmp_path: Path):
     # A same-named key nested one level deeper than the server's own direct
     # fields (e.g. inside an `env:` mapping) must never be mistaken for the

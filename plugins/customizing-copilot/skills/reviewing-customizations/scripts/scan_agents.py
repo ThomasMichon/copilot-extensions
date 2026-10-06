@@ -106,10 +106,15 @@ def mcp_server_tool_entries(frontmatter: str) -> list[tuple[str, str]]:
     ``tools:`` match -- a more deeply indented line (a nested ``env:``
     mapping's own children, for example) is skipped, so a coincidentally
     named nested key can never be mistaken for the server's own ``tools``
-    field. Both an inline value (``tools: ["*"]``) and a block sequence
-    (``tools:`` followed by indented ``- name`` items) are captured; a
-    folded/multi-line scalar is not, since every shipped example writes this
-    field as one of those two short forms.
+    field. A full-line comment (any indentation) is structurally
+    transparent and skipped before any indentation tracking sees it --
+    never consulted for ``field_indent``, server detection, or pending
+    block-sequence state, so a stray commented line can never corrupt
+    parsing of the real fields around it. Both an inline value
+    (``tools: ["*"]``) and a block sequence (``tools:`` followed by
+    indented ``- name`` items) are captured; a folded/multi-line scalar is
+    not, since every shipped example writes this field as one of those two
+    short forms.
     """
     lines = frontmatter.splitlines()
     out: list[tuple[str, str]] = []
@@ -136,12 +141,14 @@ def mcp_server_tool_entries(frontmatter: str) -> list[tuple[str, str]]:
     for line in lines:
         if not line.strip():
             continue
-        indent = len(line) - len(line.lstrip(" "))
         stripped = line.strip()
+        if stripped.startswith("#"):
+            continue  # a full-line comment is structurally transparent --
+                      # never affects pending-sequence state, field_indent,
+                      # or any other indentation tracking below
+        indent = len(line) - len(line.lstrip(" "))
 
         if pending_indent is not None:
-            if stripped.startswith("#") and indent > pending_indent:
-                continue  # a comment inside the pending sequence block
             seq_match = re.match(r"^-\s*(.+)$", stripped)
             if seq_match and indent > pending_indent:
                 pending_items.append(seq_match.group(1).strip())
