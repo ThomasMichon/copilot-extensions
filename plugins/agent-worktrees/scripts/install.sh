@@ -652,8 +652,8 @@ _versioned_activate_inner() {
     fi
     # Determine the just-superseded slot by calling the CANONICAL resolver
     # (resolve-runtime.sh) directly, rather than reimplementing its tiered
-    # marker/last-known-good/newest-slot validity logic here (review finding,
-    # round 5): reading `current`/last-known-good as raw strings only checks
+    # marker/last-known-good/newest-slot validity logic here: reading
+    # `current`/last-known-good as raw strings only checks
     # for EMPTINESS, not whether the resolver actually considers that slot
     # valid/complete -- a nonempty but incomplete marker or last-known-good
     # value makes the resolver reject it and fall through to a further tier,
@@ -663,8 +663,8 @@ _versioned_activate_inner() {
     # resolve()/launch would use, so whatever slot it returns here is exactly
     # what a plan resolved moments earlier would have pinned.
     #
-    # MUST run BEFORE _versioned_mark_complete (review finding, round 6):
-    # marking $SRC_VERSION complete makes IT a valid tier-3 candidate too: if
+    # MUST run BEFORE _versioned_mark_complete: marking $SRC_VERSION
+    # complete makes IT a valid tier-3 candidate too: if
     # both the marker and last-known-good are invalid at this exact moment,
     # a resolve AFTER mark-complete could have the newest-slot scan pick the
     # brand-new $SRC_VERSION itself (its own version number sorts newest)
@@ -697,7 +697,7 @@ _versioned_activate_inner() {
     fi
     _versioned_mark_complete
     # Touch the just-superseded slot's mtime IMMEDIATELY after resolving it,
-    # BEFORE activate() runs (review finding on #4451): installs run
+    # BEFORE activate() runs (see #4451): installs run
     # concurrently by design, so a delay here (activate + status-monitor-
     # restart + last-known-good write all used to run first) leaves a window
     # where a CONCURRENT installer can activate the NEXT generation and run
@@ -840,36 +840,40 @@ _payload_hash() {
 # by _acquire_versioned_slot_lease; cleared by _release_versioned_slot_lease,
 # or automatically by the OS the instant this process exits/crashes).
 _VERSIONED_SLOT_LEASE_FD=""
-# Fallback lock directory when `flock` isn't available (e.g. stock macOS) --
-# a PID-liveness-checked mkdir lock instead (mkdir is atomic on POSIX
-# filesystems, so this never silently runs multiple builders unlocked).
-_VERSIONED_SLOT_LEASE_DIR=""
+# Fallback lock FILE when `flock` isn't available (e.g. stock macOS) -- a
+# PID-liveness-checked `noclobber` lock instead.
+_VERSIONED_SLOT_LEASE_FILE=""
 
 _versioned_slot_lease_path() {
     printf '%s/.build-lease-%s.lock' "$INSTALL_DIR" "$SRC_VERSION"
 }
 
-_acquire_versioned_slot_lease_mkdir_fallback() {
-    # PID-liveness-checked mkdir lock: used only when `flock` is unavailable.
-    # mkdir is atomic on POSIX filesystems, so two processes racing this can
-    # never both succeed; a lock directory left behind by a dead holder
-    # (crash) is detected via `kill -0` on its recorded pid and reclaimed.
-    local lock_dir="$1" pid_file holder_pid
-    pid_file="$lock_dir/pid"
-    if mkdir "$lock_dir" 2>/dev/null; then
-        printf '%s' "$$" > "$pid_file" 2>/dev/null || true
-        _VERSIONED_SLOT_LEASE_DIR="$lock_dir"
+_acquire_versioned_slot_lease_noclobber_fallback() {
+    # PID-liveness-checked `noclobber` lock: used only when `flock` is
+    # unavailable. `set -C; echo "$$" > "$lock_file"` CREATES and PUBLISHES
+    # ownership (the holder's pid) in a single atomic open(O_EXCL|O_CREAT)
+    # -- unlike a separate mkdir-then-write-pid-file sequence, there is no
+    # window where the lock exists but its ownership hasn't been published
+    # yet for a contender to misread as stale and reclaim. A lock file left
+    # behind by a dead holder (crash) is detected via `kill -0` on its
+    # recorded pid and reclaimed; any failure to (re)create it -- including a
+    # persistent one, e.g. a read-only directory -- falls through to the
+    # final `return 1` rather than reporting success.
+    local lock_file="$1" holder_pid
+    if (set -C; echo "$$" > "$lock_file") 2>/dev/null; then
+        _VERSIONED_SLOT_LEASE_FILE="$lock_file"
         return 0
     fi
-    holder_pid="$(cat "$pid_file" 2>/dev/null || true)"
+    holder_pid="$(cat "$lock_file" 2>/dev/null || true)"
     if [[ -n "$holder_pid" ]] && kill -0 "$holder_pid" 2>/dev/null; then
         return 1
     fi
-    # Stale (holder dead, or unrecorded) -- reclaim.
-    rmdir "$lock_dir" 2>/dev/null || true
-    if mkdir "$lock_dir" 2>/dev/null; then
-        printf '%s' "$$" > "$pid_file" 2>/dev/null || true
-        _VERSIONED_SLOT_LEASE_DIR="$lock_dir"
+    # Stale (holder dead, or unrecorded) -- reclaim. If another process wins
+    # this same race, its atomic create below succeeds and ours correctly
+    # fails (that process's pid is now the legitimately-recorded owner).
+    rm -f "$lock_file" 2>/dev/null || true
+    if (set -C; echo "$$" > "$lock_file") 2>/dev/null; then
+        _VERSIONED_SLOT_LEASE_FILE="$lock_file"
         return 0
     fi
     return 1
@@ -884,15 +888,15 @@ _acquire_versioned_slot_lease() {
     # actually serializes them (#5439). Returns 0 if acquired (or a no-op in
     # legacy mode); 1 if another live process already holds it. Never
     # silently succeeds when locking can't be verified -- falls back to a
-    # portable mkdir-based lock when `flock` is unavailable, rather than
+    # portable noclobber-based lock when `flock` is unavailable, rather than
     # treating "couldn't lock" as "no contention". Idempotent: a second call
     # while already held is a no-op success.
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    [[ -n "$_VERSIONED_SLOT_LEASE_FD" || -n "$_VERSIONED_SLOT_LEASE_DIR" ]] && return 0
+    [[ -n "$_VERSIONED_SLOT_LEASE_FD" || -n "$_VERSIONED_SLOT_LEASE_FILE" ]] && return 0
     local lease_path
     lease_path="$(_versioned_slot_lease_path)"
     if ! command -v flock >/dev/null 2>&1; then
-        _acquire_versioned_slot_lease_mkdir_fallback "$lease_path.d"
+        _acquire_versioned_slot_lease_noclobber_fallback "$lease_path"
         return $?
     fi
     if ! exec {_VERSIONED_SLOT_LEASE_FD}>"$lease_path"; then
@@ -914,9 +918,9 @@ _release_versioned_slot_lease() {
         exec {_VERSIONED_SLOT_LEASE_FD}>&- 2>/dev/null || true
         _VERSIONED_SLOT_LEASE_FD=""
     fi
-    if [[ -n "$_VERSIONED_SLOT_LEASE_DIR" ]]; then
-        rmdir "$_VERSIONED_SLOT_LEASE_DIR" 2>/dev/null || true
-        _VERSIONED_SLOT_LEASE_DIR=""
+    if [[ -n "$_VERSIONED_SLOT_LEASE_FILE" ]]; then
+        rm -f "$_VERSIONED_SLOT_LEASE_FILE" 2>/dev/null || true
+        _VERSIONED_SLOT_LEASE_FILE=""
     fi
 }
 

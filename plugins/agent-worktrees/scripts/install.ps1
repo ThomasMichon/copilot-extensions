@@ -728,8 +728,8 @@ function Invoke-VersionedActivateInner {
     }
     # Determine the just-superseded slot by calling the CANONICAL resolver
     # (resolve-runtime.ps1) directly, rather than reimplementing its tiered
-    # marker/last-known-good/newest-slot validity logic here (review finding,
-    # round 5): `current`/reading last-known-good as raw strings only checks
+    # marker/last-known-good/newest-slot validity logic here: `current`/
+    # reading last-known-good as raw strings only checks
     # for EMPTINESS, not whether the resolver actually considers that slot
     # valid/complete -- a nonempty but incomplete marker or last-known-good
     # value makes the resolver reject it and fall through to a further tier,
@@ -739,8 +739,8 @@ function Invoke-VersionedActivateInner {
     # resolve()/launch would use, so whatever slot it returns here is exactly
     # what a plan resolved moments earlier would have pinned.
     #
-    # MUST run BEFORE Invoke-VersionedMarkComplete (review finding, round 6):
-    # marking $SrcVersion complete makes IT a valid tier-3 candidate too: if
+    # MUST run BEFORE Invoke-VersionedMarkComplete: marking $SrcVersion
+    # complete makes IT a valid tier-3 candidate too: if
     # both the marker and last-known-good are invalid at this exact moment,
     # a resolve AFTER mark-complete could have the newest-slot scan pick the
     # brand-new $SrcVersion itself (its own version number sorts newest)
@@ -766,7 +766,7 @@ function Invoke-VersionedActivateInner {
     }
     Invoke-VersionedMarkComplete
     # Touch the just-superseded slot's mtime IMMEDIATELY after resolving it,
-    # BEFORE activate() runs (review finding on #4451): installs run
+    # BEFORE activate() runs (see #4451): installs run
     # concurrently by design, so a delay here (activate + status-monitor-
     # restart + last-known-good write all used to run first) leaves a window
     # where a CONCURRENT installer can activate the NEXT generation and run
@@ -2144,6 +2144,36 @@ function Deploy-Venv {
         return $false
     }
 
+    # Validate the slot's liveness/cleanliness immediately after acquiring
+    # the lease, UNCONDITIONALLY -- regardless of whether $VenvPython
+    # already exists. An incomplete slot from a crashed prior build can
+    # still contain a stale python.exe, which would otherwise let it skip
+    # this check entirely and be deleted or handed to Deploy-Package without
+    # ever confirming no live process still owns it.
+    $slotClean = Invoke-VersionedSlotClean
+    if (-not $slotClean) {
+        # "Still in use" is typically a transient Windows file-handle race
+        # (a just-exited process hasn't released the slot yet) -- retry
+        # briefly before giving up.
+        for ($i = 0; $i -lt 3 -and -not $slotClean; $i++) {
+            Start-Sleep -Milliseconds 750
+            $slotClean = Invoke-VersionedSlotClean
+        }
+    }
+    if (-not $slotClean) {
+        # A still-dirty slot after retries means another process may
+        # genuinely own (or still be building into) $VenvDir right now.
+        # Building ANYTHING here -- signed or unsigned -- races that
+        # writer and risks a corrupted, partially-overlapping venv, which
+        # is a worse outcome than failing this deploy and leaving the
+        # previously-installed, working version in place untouched.
+        # Signing status is irrelevant to this hazard (#5416): refuse to
+        # write into a contended slot at all, rather than silently
+        # downgrading to an unsigned uv-built interpreter (#2413).
+        Write-ServiceErr "Runtime slot still in use after retries -- refusing to build into a possibly-contended slot: $VenvDir. This is a concurrent-writer safety guard, not a code-signing fallback. Re-run update once the prior process has exited."
+        return $false
+    }
+
     # Rebuild an existing venv whose python.exe is unsigned (Smart App Control
     # blocks it) when a signed base Python is available to rebuild from.
     if (Test-Path $VenvPython) {
@@ -2162,29 +2192,6 @@ function Deploy-Venv {
     # (the signed python.exe is embedded in the venv); fall back to uv when no
     # signed Python is present (fine on machines without Smart App Control).
     if (-not (Test-Path $VenvPython)) {
-        $slotClean = Invoke-VersionedSlotClean
-        if (-not $slotClean) {
-            # "Still in use" is typically a transient Windows file-handle race
-            # (a just-exited process hasn't released the slot yet) -- retry
-            # briefly before giving up.
-            for ($i = 0; $i -lt 3 -and -not $slotClean; $i++) {
-                Start-Sleep -Milliseconds 750
-                $slotClean = Invoke-VersionedSlotClean
-            }
-        }
-        if (-not $slotClean) {
-            # A still-dirty slot after retries means another process may
-            # genuinely own (or still be building into) $VenvDir right now.
-            # Building ANYTHING here -- signed or unsigned -- races that
-            # writer and risks a corrupted, partially-overlapping venv, which
-            # is a worse outcome than failing this deploy and leaving the
-            # previously-installed, working version in place untouched.
-            # Signing status is irrelevant to this hazard (#5416): refuse to
-            # write into a contended slot at all, rather than silently
-            # downgrading to an unsigned uv-built interpreter (#2413).
-            Write-ServiceErr "Runtime slot still in use after retries -- refusing to build into a possibly-contended slot: $VenvDir. This is a concurrent-writer safety guard, not a code-signing fallback. Re-run update once the prior process has exited."
-            return $false
-        }
         $signedBase = Get-SignedBasePython
         $created = $false
         if ($signedBase) {

@@ -387,11 +387,13 @@ def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
     """A slot-clean liveness check alone is check-then-act -- two concurrent
     installer invocations could both observe a clean slot (neither has
     started its external build yet) and then both build into it (#5439).
-    `Deploy-Venv` must acquire an OS-level exclusive build lease FIRST --
-    before even its existing-unsigned-venv-removal logic, let alone
-    `Invoke-VersionedSlotClean` -- fail immediately if another live process
-    already holds it, and `Invoke-VersionedActivate` must release that lease
-    afterward regardless of outcome."""
+    `Deploy-Venv` must acquire an OS-level exclusive build lease FIRST, then
+    validate slot liveness/cleanliness UNCONDITIONALLY (before the
+    existing-unsigned-venv-removal logic, regardless of whether $VenvPython
+    already exists -- an incomplete slot can still contain a stale
+    python.exe), fail immediately if another live process already holds the
+    lease, and `Invoke-VersionedActivate` must release that lease afterward
+    regardless of outcome."""
     installer = INSTALLER.read_text(encoding="utf-8")
     deploy_fn = installer.split("function Deploy-Venv", 1)[1].split(
         "function Deploy-Wrappers", 1
@@ -401,10 +403,13 @@ def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
     lease_idx = deploy_fn.index("Enter-VersionedSlotLease")
     clean_idx = deploy_fn.index("Invoke-VersionedSlotClean")
     rebuild_idx = deploy_fn.index("Rebuild an existing venv")
-    assert lease_idx < rebuild_idx < clean_idx, (
-        "the exclusive build lease must be acquired before ANY slot "
-        "inspection or mutation, including the existing-unsigned-venv "
-        "removal logic -- not just before the slot-clean check"
+    assert lease_idx < clean_idx < rebuild_idx, (
+        "the exclusive build lease must be acquired first, and slot "
+        "liveness/cleanliness validated immediately afterward -- "
+        "UNCONDITIONALLY, before the existing-unsigned-venv removal logic "
+        "(which is gated on Test-Path $VenvPython and so would otherwise "
+        "skip validation for an incomplete slot that still has a stale "
+        "python.exe)"
     )
     assert "if (-not (Enter-VersionedSlotLease)) {" in deploy_fn
     lease_fail_branch = deploy_fn.split(
@@ -514,11 +519,16 @@ Exit-VersionedSlotLease
             if holder.poll() is not None:
                 break
             time.sleep(0.1)
-        assert ready_marker.exists(), (
-            "holder process never reported readiness: "
-            f"{holder.stdout.read() if holder.stdout else ''} "
-            f"{holder.stderr.read() if holder.stderr else ''}"
-        )
+        if not ready_marker.exists():
+            # Only read captured output once the holder has actually
+            # exited -- reading a live process's pipe blocks until it
+            # closes (EOF), which would hang this assertion indefinitely
+            # if the holder were still running rather than crashed.
+            if holder.poll() is None:
+                holder.kill()
+                holder.wait(timeout=30)
+            out, err = holder.communicate(timeout=5)
+            pytest.fail(f"holder process never reported readiness: {out} {err}")
         assert ready_marker.read_text().strip() == "True,True", (
             "the lease must be acquirable (idempotently, no strict-mode "
             "crash) by its own holder"

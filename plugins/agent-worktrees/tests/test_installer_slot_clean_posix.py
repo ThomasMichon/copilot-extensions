@@ -119,27 +119,32 @@ def test_versioned_slot_lease_uses_flock_held_for_process_lifetime():
     assert "exec {_VERSIONED_SLOT_LEASE_FD}>&-" in release_body
 
 
-def test_versioned_slot_lease_mkdir_fallback_fails_closed_without_flock():
+def test_versioned_slot_lease_noclobber_fallback_fails_closed_without_flock():
     """When `flock` isn't available (e.g. stock macOS), the lease must fall
-    back to a portable, PID-liveness-checked `mkdir` lock -- never silently
-    succeed (fail-open) just because the preferred primitive is missing,
-    which would let every lockless host build the same slot unlocked."""
+    back to a portable, PID-liveness-checked `noclobber` lock -- never
+    silently succeed (fail-open) just because the preferred primitive is
+    missing, which would let every lockless host build the same slot
+    unlocked. The fallback must CREATE and PUBLISH ownership (the holder's
+    pid) in a single atomic operation (`set -C; echo "$$" > file`), never a
+    separate create-then-write sequence that leaves a window where a
+    contender could see an unpublished, ownerless lock and misread it as
+    stale."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
     acquire_body = _function_body(text, "_acquire_versioned_slot_lease")
     fallback_body = _function_body(
-        text, "_acquire_versioned_slot_lease_mkdir_fallback"
+        text, "_acquire_versioned_slot_lease_noclobber_fallback"
     )
 
     assert "if ! command -v flock >/dev/null 2>&1; then" in acquire_body
     no_flock_branch = acquire_body.split(
         "if ! command -v flock >/dev/null 2>&1; then", 1
     )[1][:200]
-    assert "_acquire_versioned_slot_lease_mkdir_fallback" in no_flock_branch
+    assert "_acquire_versioned_slot_lease_noclobber_fallback" in no_flock_branch
     assert "return 0" not in no_flock_branch, (
         "the no-flock branch must defer to the mkdir fallback's own return "
         "code, never hardcode success"
     )
 
-    assert 'mkdir "$lock_dir"' in fallback_body
+    assert 'if (set -C; echo "$$" > "$lock_file") 2>/dev/null; then' in fallback_body
     assert 'kill -0 "$holder_pid"' in fallback_body
 
