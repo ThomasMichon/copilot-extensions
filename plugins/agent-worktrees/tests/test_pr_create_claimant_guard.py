@@ -78,7 +78,7 @@ class TestCreatePrClaimantGuard:
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: None
         )
-        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: candidate)
+        monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda candidate, _config: candidate)
         monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
 
         monkeypatch.setattr(
@@ -102,7 +102,7 @@ class TestCreatePrForeignRepoRefusal:
     ):
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
-        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
+        monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda candidate, _config: wid)
         monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
@@ -129,7 +129,7 @@ class TestCreatePrForeignRepoRefusal:
     def test_same_active_repo_is_not_refused(self, pr_repo, monkeypatch):
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
-        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
+        monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda candidate, _config: wid)
         monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
@@ -166,7 +166,7 @@ class TestCreatePrFromBranch:
     ):
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
-        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
+        monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda candidate, _config: wid)
         monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
@@ -215,7 +215,7 @@ class TestCreatePrFromBranch:
     def test_reports_the_claim_warning_when_unclaimed(self, pr_repo, monkeypatch, capsys):
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
-        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
+        monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda candidate, _config: wid)
         monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
@@ -248,7 +248,7 @@ class TestCreatePrFromBranch:
     def test_propagates_a_foreign_create_error(self, pr_repo, monkeypatch):
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
-        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
+        monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda candidate, _config: wid)
         monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
@@ -279,7 +279,7 @@ class TestCreatePrFromBranch:
         --from-branch) -- now also mentions the new escape hatch."""
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
-        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
+        monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda candidate, _config: wid)
         monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
@@ -305,7 +305,7 @@ class TestCreatePrFromBranch:
         through to it."""
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
-        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
+        monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda candidate, _config: wid)
         monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
@@ -330,7 +330,7 @@ class TestCreatePrFromBranch:
     def test_from_branch_rejects_dry_run(self, pr_repo, monkeypatch):
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
-        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
+        monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda candidate, _config: wid)
         monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid
@@ -359,7 +359,7 @@ class TestCreatePrFromBranch:
     def test_from_branch_requires_a_non_blank_title(self, pr_repo, monkeypatch):
         config, wid, _wt_path, _ = pr_repo
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
-        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: wid)
+        monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda candidate, _config: wid)
         monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
         monkeypatch.setattr(
             worktree_identity, "_infer_worktree_id_from_cwd", lambda config=None: wid

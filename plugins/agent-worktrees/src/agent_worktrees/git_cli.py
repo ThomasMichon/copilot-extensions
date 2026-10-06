@@ -7,16 +7,6 @@ from pathlib import Path
 from . import config as cfg, output, worktree_identity
 
 
-def _core():
-    from . import __main__ as core
-
-    return core
-
-
-def _infer_worktree_id(*args, **kwargs):
-    return _core()._infer_worktree_id(*args, **kwargs)
-
-
 def add_parsers(sub) -> None:
     sub.add_parser("git", help="Git collaboration primitives (run 'git' for usage)")
 
@@ -60,7 +50,7 @@ def _git_resolve_target(rest: list[str], use_json: bool):
         if use_json:
             return None, output._json_error(str(exc))
         raise
-    worktree_id = _infer_worktree_id(worktree_id_arg, config)
+    worktree_id = worktree_identity._infer_worktree_id(worktree_id_arg, config)
     if not worktree_id:
         msg = "Could not determine worktree ID. Pass --worktree-id or run from inside a worktree."
         if use_json:

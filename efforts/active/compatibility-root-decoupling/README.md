@@ -156,12 +156,80 @@ Any change that makes these files slightly smaller is a win."
       `from . import config as cfg` into the existing tuple import and
       trimming a redundant blank line, net zero lines added, same fix
       shape as the prior slice's own module-size save).
-- [ ] `_infer_worktree_id`, `_self_override`, `_normalize_path`,
-      `_find_repo_dir`, `_apply_tracking_override`, `_build_active_paths`
-      (next-highest traffic; re-measure with `--progress` before picking
-      exact order — several of these have outsized monkeypatch counts
-      relative to call-site counts, which may make them higher-value than
-      raw call-site ranking suggests).
+- [x] `_infer_worktree_id` (18 call sites / 30 monkeypatch sites).
+      Unlike the prior two slices, the real implementation did NOT already
+      live in a shared module -- it was a plain function body in
+      `__main__.py` with zero dependency on anything `__main__`-specific
+      (it only called `_infer_worktree_id_from_cwd`, already resident in
+      `worktree_identity.py`), so this slice moved the function body itself
+      into `worktree_identity.py` (next to the helper it calls) before
+      doing the usual call-site/patch-site migration. Every caller does
+      `from . import worktree_identity` + `worktree_identity._infer_
+      worktree_id(...)`; every test (`monkeypatch.setattr`, all root-alias
+      shapes -- `m`, `cli`, `main`) targets `worktree_identity` directly.
+      8 source files + 12 test files touched (the 4 sibling shims this
+      name lived in -- `claims_cli.py`, `follow_ups_cli.py`, `git_cli.py`,
+      `session_metadata_cli.py` -- plus 2 modules that called through the
+      root directly with no local shim at all -- `finalize_cli.py`
+      (5 call sites), `pr_state_cli.py` (9 call sites) -- plus `__main__.py`
+      itself, which had 2 bare in-module calls of its own: not re-exported
+      (nothing else in `__main__.py` needed the bare name), repointed to
+      `worktree_identity._infer_worktree_id(...)` directly since
+      `worktree_identity` was already imported there for other names).
+      Every now-fully-unused `_core()` accessor retired outright:
+      `follow_ups_cli.py` and `git_cli.py`'s shims were each the only
+      remaining caller of their own `_core()`, so both the shim and the
+      accessor were deleted; `pr_state_cli.py`'s `_core()` accessor turned
+      out to have ALREADY had zero other callers before this slice even
+      started (it existed only to serve this one name) -- caught by
+      grepping for remaining `_core(` usage after the call-site migration,
+      not predicted up front, and deleted too even though it wasn't one of
+      the 4 modules originally scoped to lose a shim. `claims_cli.py` and
+      `session_metadata_cli.py` keep their `_core()` accessors (each still
+      routes at least one other name through it: `_core_helper`'s generic
+      lookup, and `resolve_worktree_id_by_codename`, respectively).
+      `__main__._CLUSTER_FREE_MODULES` re-run via `test_lazy_dispatch.py`
+      directly (per the test's own drift-check): all 28 tests passed
+      unchanged -- no module newly qualified as cluster-free (`git_cli`
+      now defines no `_core()` at all, but wasn't in the candidate set the
+      drift check tracks, so no update was needed). Two further test-file
+      gaps surfaced only by the real full suite, neither visible to the
+      tool's static scan nor the manual sibling-shim-patch grep sweep: a
+      direct (non-monkeypatch) test call to the moved function started
+      observing a suite-wide `autouse` fixture's fake once the function's
+      body moved into the fixture's own patched module
+      (`test_context_resolution.py`), and a `SimpleNamespace`-faked whole
+      `_core()` return value split its keyword arguments across multiple
+      lines, defeating a same-line grep
+      (`test_pr_actor_flow_surfaces.py`) -- see the Journal for the full
+      mechanics of both.
+      Validated: `tools/compat-root-migration.py --name
+      _infer_worktree_id` reports zero call/monkeypatch sites; manual
+      sibling-shim-patch grep sweep (step 6 of this slice's own
+      instructions) found zero remaining patches against anything other
+      than `worktree_identity`; full targeted test sweep (`test_pr_ops.py`
+      alone needed ~22 minutes at 252 tests) all green; full plugin suite
+      green in one pass with 4 confirmed pre-existing, unrelated,
+      system-load-sensitive subprocess-timing tests deselected: **6926
+      passed, 58 skipped, 4 deselected**, zero failures introduced; `ruff
+      check --select F,E9` clean across all touched source and test files
+      (one incidental fix: the function's removal from `__main__.py` left
+      `_infer_worktree_id_from_cwd` as an F401 unused import there, since
+      it was only ever used by the now-moved function -- fixed with the
+      same `# noqa: F401 -- re-exported for unit tests` annotation its
+      sibling re-export already carries, since test suites still patch it
+      on the root); `ruff format --diff` on every file where a shim was
+      deleted showed only one real blank-line drift (`claims_cli.py`, 3
+      blank lines left behind by the shim deletion, trimmed to 2) --
+      every other reported diff in those files was pre-existing
+      line-length drift unrelated to this change; `check-module-size.py`
+      clean.
+- [ ] `_self_override`, `_normalize_path`, `_find_repo_dir`,
+      `_apply_tracking_override`, `_build_active_paths` (next-highest
+      traffic; re-measure with `--progress` before picking exact order --
+      several of these have outsized monkeypatch counts relative to
+      call-site counts, which may make them higher-value than raw
+      call-site ranking suggests).
 - [ ] Re-measure scope after each name lands; update this Plan with the next
       batch rather than pre-committing to a fixed list up front.
 
@@ -501,3 +569,158 @@ _Pending._
   proactively: all four patterns now accept `["']` for every quoted
   name/path argument. Added 4 more regression tests (one per shape) plus
   one `--progress` single-quote test (22 total).
+
+### 2026-10-05 — Phase 2 slice 3: `_infer_worktree_id` migrated
+- Re-ran `tools/compat-root-migration.py --name _infer_worktree_id` first;
+  counts matched the prior slice's recorded 18 call sites / 30 monkeypatch
+  sites exactly.
+- Unlike the prior two slices, the real implementation did NOT already
+  live in a shared module: it was a plain function body resident in
+  `__main__.py`, with zero dependency on anything `__main__`-specific (it
+  only called `_infer_worktree_id_from_cwd`, already in
+  `worktree_identity.py`). Moved the function body itself into
+  `worktree_identity.py` (placed directly after the helper it calls,
+  keeping the full docstring), then did the usual call-site/patch-site
+  migration on top. Every caller now does `from . import
+  worktree_identity` + `worktree_identity._infer_worktree_id(...)`.
+- Migrated all 4 sibling shims (`claims_cli.py`, `follow_ups_cli.py`,
+  `git_cli.py`, `session_metadata_cli.py`) plus 2 modules that called
+  through the root directly with no local shim at all (`finalize_cli.py`,
+  5 call sites; `pr_state_cli.py`, 9 call sites). `claims_cli.py` also
+  passed the bare function as a first-class callback value into several
+  sibling modules (`claims_annotate`, `claims_handoff_cli`,
+  `claims_transitive_cli`) -- those call sites needed the same
+  `worktree_identity._infer_worktree_id` repoint, not just the direct-call
+  shape.
+- `__main__.py` itself had 2 bare in-module calls (`_cmd_status_write`,
+  `_cmd_status_history`) resolving through its own re-export of
+  `_infer_worktree_id_from_cwd`-adjacent names -- but **not** a re-export
+  of `_infer_worktree_id` itself, since nothing else needed the bare name
+  once it moved. Repointed both call sites to
+  `worktree_identity._infer_worktree_id(...)` (the module already imports
+  `worktree_identity` for other names). Removing the function also left
+  `_infer_worktree_id_from_cwd` as an F401 unused import in `__main__.py`
+  (it was only ever used by the now-moved function's body) -- fixed with
+  the same `# noqa: F401 -- re-exported for unit tests` annotation its
+  sibling re-export already carries, since test suites still patch it on
+  the root.
+- **One real surprise the tool's static scan couldn't predict:** after
+  migrating `pr_state_cli.py`'s 9 call sites, its `_core()` accessor
+  turned out to have **already had zero other callers** before this slice
+  even started -- it existed solely to serve this one name, unlike the
+  plan's framing (which only named `claims_cli.py`, `follow_ups_cli.py`,
+  `git_cli.py`, `session_metadata_cli.py` as the shim-losing modules).
+  Caught by grepping for remaining `_core(` usage in `pr_state_cli.py`
+  after the call-site migration, not predicted up front. Deleted the
+  accessor outright. `follow_ups_cli.py` and `git_cli.py`'s own `_core()`
+  accessors were each the sole remaining caller of their own `_infer_
+  worktree_id` shim, so both accessor and shim were deleted together for
+  those two. `claims_cli.py` and `session_metadata_cli.py` keep their
+  `_core()` accessors: each still routes at least one other name through
+  it (`_core_helper`'s generic lookup for `claims_cli.py`;
+  `resolve_worktree_id_by_codename` for `session_metadata_cli.py`).
+- Ran `test_lazy_dispatch.py` directly (per its own drift-check
+  instruction) rather than hand-editing `__main__._CLUSTER_FREE_MODULES`:
+  all 28 tests passed unchanged. `git_cli.py` now defines no `_core()` at
+  all, but it was never in the `_LAZY_DISPATCH_TABLE` candidate set the
+  drift check scores against, so no update was needed or possible.
+- All 30 test monkeypatch sites were the single
+  `monkeypatch.setattr(<alias>, "_infer_worktree_id", ...)` shape across
+  all three root-alias spellings seen in this repo (`m`, `cli`, `main`) --
+  repointed to `worktree_identity` directly across 10 test files, adding
+  `from agent_worktrees import worktree_identity` only where not already
+  imported. Careful not to touch the unrelated `_infer_worktree_id_from_
+  cwd` patches living in several of the same files (a distinct name this
+  slice does not migrate) -- confirmed via the manual sibling-shim-patch
+  grep sweep that every remaining `_infer_worktree_id` (exact name) patch
+  targets `worktree_identity` and nothing else.
+  `tools/compat-root-migration.py --name _infer_worktree_id` now reports
+  zero call sites and zero monkeypatch sites.
+- **Two more genuine gaps found only by running the real full suite, both
+  invisible to the tool's static scan and to the manual sibling-shim-patch
+  grep sweep:**
+  1. `test_context_resolution.py` calls `worktree_identity._infer_
+     worktree_id(...)` (formerly `m._infer_worktree_id(...)`) as a
+     **direct function call in test assertions**, not a monkeypatch target
+     -- a call shape neither the tool's scan nor the "setattr/mock.patch"
+     grep looks for at all. These tests deliberately exercise REAL
+     CWD-based git identity resolution, but `conftest.py` has an
+     `autouse=True` fixture (`_assume_valid_claimant_worktree`) that
+     defaults `worktree_identity._infer_worktree_id_from_cwd` to a fixed
+     fake id for every test in the suite. Before this slice, `__main__.py`
+     bound `_infer_worktree_id_from_cwd` as its own module-global at
+     import time, so its resident `_infer_worktree_id` body's bare-name
+     call resolved through THAT binding -- unaffected by the autouse
+     fixture patching the separate `worktree_identity` module object.
+     Moving the function's body into `worktree_identity.py` made its
+     internal bare-name call resolve through `worktree_identity`'s OWN
+     globals instead, which the autouse fixture **does** reach -- so
+     these 6 tests started silently observing the suite-wide fake id
+     instead of exercising real resolution (6 failures, each asserting
+     the wrong id). This is the exact "bare-name call inside the moved
+     band stops observing/starts observing a monkeypatch" gotcha the
+     pattern doc calls out, just in the opposite direction from the usual
+     case (a patch that was previously invisible became visible once the
+     code moved into the patched module). Fixed by having the `adopted_
+     repo` fixture (which every one of these tests already uses) restore
+     the REAL `_infer_worktree_id_from_cwd` -- captured at module import
+     time, before any monkeypatching -- as its own `monkeypatch.setattr`
+     on `worktree_identity`, overriding the autouse default back to real
+     behavior for this file's tests specifically.
+  2. `test_pr_actor_flow_surfaces.py` faked `pr_state_cli`'s **entire
+     `_core()` return value** via `monkeypatch.setattr(pr_state_cli,
+     "_core", lambda: SimpleNamespace(_infer_worktree_id=..., _resolve_
+     worktree_id=...))` -- exactly the "`SimpleNamespace`-faked whole
+     `_core()` return value" shape the Validation Plan's own checklist
+     names as invisible to the tool's static scan. It was ALSO invisible
+     to the manual sibling-shim-patch grep sweep from this slice's own
+     step 6, because the grep required `_infer_worktree_id` and
+     `setattr`/`patch(` to appear on the **same line** -- here the
+     `_infer_worktree_id=lambda ...` keyword argument lives several lines
+     below the `monkeypatch.setattr(pr_state_cli, "_core",` call that
+     opens the statement, so the single-line pattern silently missed it.
+     Only surfaced once `pr_state_cli._core` was deleted (this slice's
+     surprise retirement, see above) and the full suite hit a real
+     `AttributeError`. Fixed by repointing the fake directly onto
+     `worktree_identity._infer_worktree_id`/`worktree_identity._resolve_
+     worktree_id` instead of faking the now-gone accessor. **Takeaway for
+     future slices:** the manual sweep instruction needs multi-line
+     awareness -- grep for the bare name across the whole file (or with
+     generous `-C` context) and eyeball every hit, not just lines where
+     the patch verb and the name happen to share a line.
+- Validation: full targeted test sweep across every touched file
+  (`test_pr_ops.py` run separately with an extended `--subsuite-timeout`
+  since it alone needed ~22 minutes at 252 tests under the bounded
+  runner's default window) all green; then the FULL plugin suite,
+  attempted several times -- each attempt that didn't complete hit one of
+  four distinct **pre-existing, system-load-sensitive subprocess-timing
+  tests** (`test_handoff_trace.py::test_concurrent_appends_across_real_
+  processes_produce_no_corruption`, `test_invoke_payload_runtime_windows.
+  py::test_background_prune_dispatch_launches_no_visible_window`, `test_
+  local_cache_refresh.py::TestRefreshLocalCache::test_descendant_of_a_
+  timed_out_cli_does_not_survive`, `test_git_ops.py::TestPushTimeoutTree
+  Kill::test_run_bounded_kills_grandchild_on_timeout`) -- each confirmed
+  via `git diff` as a file this slice never touched, each self-documented
+  by its own test author as a setup-timing race (two literally assert
+  with the message "test setup issue, not a real assertion"), and each
+  reproducibly green in isolation. A full run with those four tests
+  explicitly deselected (`-k "not ... and not ..."`) completed clean in
+  one pass: **6926 passed, 58 skipped, 4 deselected**, zero failures.
+  `ruff check --select F,E9` clean across all 10 touched source files
+  (8 CLI/identity modules + the 2 test files fixed for the gaps above
+  count separately). `ruff format --diff` on every file where a shim was
+  deleted showed exactly one real blank-line drift (`claims_cli.py`: 3
+  blank lines left behind by the shim deletion, trimmed to 2) -- every
+  other reported diff in those files (and the large diff on
+  `__main__.py`) was pre-existing line-length/wrapping drift unrelated to
+  this change, left alone. `check-module-size.py` clean; `__main__.py`
+  lost 36 lines, `worktree_identity.py` gained 30.
+- Final `--progress` aggregate (from the prior slice's 42/263/158/1007):
+  **39 accessors, 245 call sites, 157 distinct monkeypatched names, 977
+  patch-site occurrences.** The -3 accessors (`follow_ups_cli.py`,
+  `git_cli.py`, `pr_state_cli.py`) match this slice's 3 full shim
+  retirements exactly. Next-highest-traffic names per the current
+  ranking: `_self_override` (16 calls/0 patches), `_normalize_path`
+  (10/1), `_find_repo_dir` (10/9), `_apply_tracking_override` (9/7),
+  `_build_active_paths` (8/17) -- matches the Plan's pre-named next batch
+  minus `_infer_worktree_id`, now done.

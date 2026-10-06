@@ -2458,36 +2458,6 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 # resolve launch helpers are componentized into resolve_cli.py,
 # resolve_launch_cli.py, resolve_machine_cli.py, resolve_picker_cli.py, and resolve_system_cli.py.
 
-def _infer_worktree_id(
-    explicit: str | None,
-    config: cfg.Config | None = None,
-) -> str | None:
-    """Return the worktree ID from an explicit arg or the current directory.
-
-    Resolution order:
-      1. Explicit value passed on the CLI
-      2. The current working directory under the configured ``worktree_root``
-
-    Identity is resolved **purely from the directory**, the way git resolves
-    its repo. The ambient ``$WORKTREE_ID`` is **not**
-    consulted -- it was the source of cross-session/cross-repo contamination.
-    Git branch is likewise never used: worktrees may switch to feature branches,
-    so the branch name is not a reliable indicator of which worktree we are in.
-
-    When ``--project`` targets a project the caller is not already inside,
-    ``main()`` has ``chdir``-ed to that project's anchor -- which is not under
-    ``worktree_root`` -- so cross-project calls yield ``None`` (name the worktree
-    explicitly). When the caller *is* inside one of the project's worktrees, the
-    real CWD identifies it.
-
-    Returns None if neither source yields a worktree ID.
-    """
-    if explicit:
-        return explicit
-
-    return _infer_worktree_id_from_cwd(config)
-
-
 # Worktree-identity resolution (git-dir-based ID inference, short-suffix
 # resolution, external-worktree adoption) moved to worktree_identity.py --
 # no dependency on this entry-point module, so sibling CLI modules (pr_cli.py
@@ -2495,7 +2465,7 @@ def _infer_worktree_id(
 from . import worktree_identity  # noqa: E402 -- re-export position matches original definition site
 from .worktree_identity import (  # noqa: E402 -- re-export position matches original definition site
     _adopt_linked_worktree,  # noqa: F401 -- session_binding_cli accesses via __main__
-    _infer_worktree_id_from_cwd,
+    _infer_worktree_id_from_cwd,  # noqa: F401 -- re-exported for unit tests
     _infer_worktree_id_from_worktree_root,  # noqa: F401 -- re-exported for unit tests
     _worktree_id_from_git,
     _worktree_path_for_id,  # noqa: F401 -- re-exported for context_cli
@@ -2675,7 +2645,7 @@ def _cmd_status_write(
     (disposition-is-asserted-pulse-is-derived).
     """
     config = cfg.load_config()
-    worktree_id = _infer_worktree_id(getattr(args, "worktree_id", None), config)
+    worktree_id = worktree_identity._infer_worktree_id(getattr(args, "worktree_id", None), config)
     if not worktree_id:
         output.err(
             "Could not determine worktree ID. Run from inside a worktree or pass --worktree-id."
@@ -2783,7 +2753,7 @@ def _cmd_status_history(args: argparse.Namespace) -> int:
     trajectory (summary / title / follow-up over time), newest last. Resolves the
     worktree from CWD (or --worktree-id). Honors --json / --limit."""
     config = cfg.load_config()
-    worktree_id = _infer_worktree_id(getattr(args, "worktree_id", None), config)
+    worktree_id = worktree_identity._infer_worktree_id(getattr(args, "worktree_id", None), config)
     if not worktree_id:
         output.err(
             "Could not determine worktree ID. Run from inside a worktree or pass --worktree-id."

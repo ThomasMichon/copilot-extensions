@@ -5289,7 +5289,7 @@ class TestCreatePRCLIArgs:
         captured: dict[str, object] = {}
 
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
-        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: candidate)
+        monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda candidate, _config: candidate)
         monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
 
         def _fake_create_pr(worktree_id, passed_config, **kwargs):
@@ -5325,7 +5325,7 @@ class TestCreatePRCLIArgs:
         captured: dict[str, object] = {}
 
         monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
-        monkeypatch.setattr(m, "_infer_worktree_id", lambda candidate, _config: candidate)
+        monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda candidate, _config: candidate)
         monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda candidate: candidate)
 
         def _fake_create_pr(_worktree_id, _config, **kwargs):

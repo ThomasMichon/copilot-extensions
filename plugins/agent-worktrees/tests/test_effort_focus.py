@@ -107,7 +107,7 @@ def cli_env(tmp_path, tmp_tracking_dir, monkeypatch_config, monkeypatch):
     record = _record(repo)
     tracking.save_record(record, tmp_tracking_dir / f"{record.worktree_id}.yaml")
     monkeypatch.setattr(m.cfg, "load_config", lambda: object())
-    monkeypatch.setattr(m, "_infer_worktree_id", lambda _wid, _config=None: record.worktree_id)
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda _wid, _config=None: record.worktree_id)
     monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda wid: wid)
     monkeypatch.setattr(ef, "repository_root", lambda _path: repo)
     return repo, record, tmp_tracking_dir
@@ -486,7 +486,7 @@ def test_bind_show_resolves_effort_against_paired_knowledge_worktree(
 
     fake_config = _FakeConfig()
     monkeypatch.setattr(m.cfg, "load_config", lambda: fake_config)
-    monkeypatch.setattr(m, "_infer_worktree_id", lambda _wid, _config=None: record.worktree_id)
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda _wid, _config=None: record.worktree_id)
     monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda wid: wid)
     monkeypatch.setattr(ef, "repository_root", lambda _path: harness_repo)
 
