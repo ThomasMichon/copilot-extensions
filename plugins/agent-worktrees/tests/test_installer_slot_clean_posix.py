@@ -215,13 +215,15 @@ def test_versioned_slot_lease_python_fallback_delegates_to_real_fcntl_flock():
     # failure, never be swallowed into a false "acquired".
     assert "sys.exit(1)" in fallback_body
     # The resident helper must hold the lock for exactly its own lifetime
-    # (blocking on its own stdin until closed), not acquire-then-exit --
-    # an exited helper's fd closing is what releases the kernel lock. It
-    # must be started via `coproc`: a plain background job whose stdin is
-    # redirected from `/dev/null` hands the helper an immediate EOF, so its
-    # `stdin.read()` returns at once and the lease releases right after
-    # acquisition instead of being held for the caller's lifetime.
-    assert "coproc _VERSIONED_LEASE_HELPER" in fallback_body
+    # (blocking until its stdin is closed), not acquire-then-exit -- an
+    # exited helper's fd closing is what releases the kernel lock. A plain
+    # background job redirected from `/dev/null` would hand the helper an
+    # immediate EOF (instant release); a pair of FIFOs plus a literal fd
+    # number (bash 3.2 has neither `coproc` -- a 4.0+ reserved word -- nor
+    # dynamic `{fd}` allocation -- 4.1+) is what keeps the write end open
+    # for the caller's lifetime on stock macOS, the one platform this
+    # fallback exists for.
+    assert "mkfifo" in fallback_body
     assert "sys.stdin.read()" in fallback_body
     assert "_VERSIONED_SLOT_LEASE_PY_PID" in fallback_body
     assert "_VERSIONED_SLOT_LEASE_PY_STDIN_FD" in fallback_body

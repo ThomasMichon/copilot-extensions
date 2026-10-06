@@ -1253,11 +1253,20 @@ function Get-BootstrapPython {
        census) -- using that slot's own interpreter to run the census would
        make the helper process itself show up as "a live process running
        from this slot", permanently self-reporting an incomplete slot with
-       a stale python.exe as still in use on every retry. #>
+       a stale python.exe as still in use on every retry. $LinkDir is NOT
+       guaranteed to be a different directory from $VenvDir (e.g. legacy
+       mode, or a retry where the active link already points at the slot
+       under inspection) -- in the current versioned-runtime wiring they
+       are in fact always the same path -- so -ExcludeVenvDir must actively
+       filter out any candidate that resolves to $VenvDir rather than
+       assuming $LinkDir alone is a safe stand-in. #>
     param([switch]$ExcludeVenvDir)
     $dirs = if ($ExcludeVenvDir) { @($LinkDir) } else { @($VenvDir, $LinkDir) }
     foreach ($d in $dirs) {
-        if ($d) { $p = Join-Path $d 'Scripts\python.exe'; if (Test-Path $p) { return $p } }
+        if (-not $d) { continue }
+        if ($ExcludeVenvDir -and $VenvDir -and ($d -eq $VenvDir)) { continue }
+        $p = Join-Path $d 'Scripts\python.exe'
+        if (Test-Path $p) { return $p }
     }
     if (Get-Command py -ErrorAction SilentlyContinue) {
         $result = Invoke-NativeCapture { & py -3 -c 'import sys; print(sys.executable)' }

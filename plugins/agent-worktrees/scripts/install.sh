@@ -864,43 +864,75 @@ _acquire_versioned_slot_lease_python_fallback() {
     # SAME real kernel advisory lock the `flock` CLI path above uses, with
     # none of those races, and Python is already a hard dependency here
     # (versioned_runtime.py). A resident helper process holds the lock
-    # (acquired non-blocking, so it fails fast like `flock -n`) and blocks
-    # reading its own stdin until EOF -- via `coproc`, so bash holds the
-    # WRITE end of that pipe open for exactly as long as the lease should
-    # be held (a plain background job redirected from `/dev/null` would
-    # hand the helper an immediate EOF and have it release right away,
-    # which this specifically avoids). Closing bash's held fd (release) or
-    # this process exiting for any reason closes the pipe, the helper sees
-    # EOF and exits, and the kernel releases its flock automatically.
-    # Returns 0 (helper pid + stdin fd recorded) or 1.
-    local lock_file="$1" py line
+    # (acquired non-blocking, so it fails fast like `flock -n`) for exactly
+    # as long as this shell holds open its write end of a FIFO the helper
+    # blocks reading -- closing that fd (release) or this process exiting
+    # for any reason closes the pipe, the helper sees EOF on its blocking
+    # read and exits, and the kernel releases its flock automatically.
+    #
+    # `coproc` would give the same keep-alive shape with less code, but
+    # `coproc` is a bash-4.0+ reserved word (and its dynamic-FD array needs
+    # 4.1+) while stock macOS -- the one platform this fallback exists
+    # for -- ships bash 3.2. Bash parses `coproc` at script-LOAD time, so
+    # using it here would fail the ENTIRE installer with a syntax error on
+    # exactly the host this path is supposed to support. A pair of FIFOs
+    # plus a literal fd number (no dynamic `{fd}` allocation either) is
+    # bash-3.2-safe. The second FIFO carries the helper's OK/LOCKED status
+    # back via a blocking `read` (no polling): it unblocks the instant the
+    # helper opens its own write end.
+    #
+    # Returns 0 (helper pid + keep-alive fd recorded) or 1.
+    local lock_file="$1" py tmp_dir in_fifo out_fifo pid line
     py="$(_bootstrap_python)" || return 1
     [[ -n "$py" ]] || return 1
-    # shellcheck disable=SC2030,SC2031 # coproc's array/PID vars are
-    # intentionally process-local to this acquire call.
-    coproc _VERSIONED_LEASE_HELPER {
-        "$py" -c '
+    tmp_dir="$(mktemp -d 2>/dev/null)" || return 1
+    in_fifo="$tmp_dir/in"
+    out_fifo="$tmp_dir/out"
+    if ! mkfifo "$in_fifo" "$out_fifo" 2>/dev/null; then
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    "$py" -c '
 import fcntl, sys
+out = open(sys.argv[2], "w")
 f = open(sys.argv[1], "a")
 try:
     fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
 except OSError:
-    print("LOCKED", flush=True)
+    out.write("LOCKED\n")
+    out.close()
     sys.exit(1)
-print("OK", flush=True)
-sys.stdin.read()  # block until the parent closes our stdin (release)
-' "$lock_file"
-    }
-    if ! IFS= read -r -u "${_VERSIONED_LEASE_HELPER[0]}" -t 10 line; then
+out.write("OK\n")
+out.close()
+sys.stdin.read()  # block until the parent closes fd 9 (release)
+' "$lock_file" "$out_fifo" <"$in_fifo" &
+    pid=$!
+
+    # A fixed fd number is required here (bash 3.2 has no dynamic `{fd}`
+    # allocation); this function runs at most once per process lifetime
+    # (guarded by the caller), so fd 9 can't collide with another live
+    # lease in this same process.
+    if ! exec 9>"$in_fifo"; then
+        rm -rf "$tmp_dir"
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+        return 1
+    fi
+
+    if ! IFS= read -r -t 10 line <"$out_fifo"; then
         line=""
     fi
+    rm -rf "$tmp_dir"
+
     if [[ "$line" == "OK" ]]; then
-        _VERSIONED_SLOT_LEASE_PY_PID="$_VERSIONED_LEASE_HELPER_PID"
-        _VERSIONED_SLOT_LEASE_PY_STDIN_FD="${_VERSIONED_LEASE_HELPER[1]}"
+        _VERSIONED_SLOT_LEASE_PY_PID="$pid"
+        _VERSIONED_SLOT_LEASE_PY_STDIN_FD=9
         return 0
     fi
-    eval "exec ${_VERSIONED_LEASE_HELPER[1]}>&-" 2>/dev/null || true
-    wait "$_VERSIONED_LEASE_HELPER_PID" 2>/dev/null || true
+    exec 9>&- 2>/dev/null || true
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
     return 1
 }
 

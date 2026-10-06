@@ -345,15 +345,14 @@ def test_venv_install_invokes_resolved_uv_path():
 
 
 def test_slot_clean_reports_failure_instead_of_silently_downgrading_signed_venv():
-    """#5416 regression guard (supersedes the #2413 guard this test used to
-    cover): a stale/still-in-use runtime slot means another process may
-    genuinely own (or still be building into) $VenvDir right now, so
-    `Deploy-Venv` must refuse to build ANYTHING into it -- signed or
-    unsigned -- rather than racing that writer. `Invoke-VersionedSlotClean`
-    must surface success/failure via its exit code, `Deploy-Venv` must retry
-    before giving up, and must hard-fail (return $false, loud error) instead
-    of falling through to any venv build when the slot is still dirty after
-    retries."""
+    """#5416 regression guard: a stale/still-in-use runtime slot means
+    another process may genuinely own (or still be building into) $VenvDir
+    right now, so `Deploy-Venv` must refuse to build ANYTHING into it --
+    signed or unsigned -- rather than racing that writer.
+    `Invoke-VersionedSlotClean` must surface success/failure via its exit
+    code, `Deploy-Venv` must retry before giving up, and must hard-fail
+    (return $false, loud error) instead of falling through to any venv
+    build when the slot is still dirty after retries."""
     installer = INSTALLER.read_text(encoding="utf-8")
     clean_fn = installer.split("function Invoke-VersionedSlotClean", 1)[1].split(
         "function Invoke-VersionedMarkComplete", 1
@@ -406,6 +405,75 @@ def test_slot_clean_uses_an_interpreter_outside_the_target_slot():
 
     assert "[switch]$ExcludeVenvDir" in bootstrap_fn
     assert "$dirs = if ($ExcludeVenvDir) { @($LinkDir) } else { @($VenvDir, $LinkDir) }" in bootstrap_fn
+    # $LinkDir is not guaranteed to differ from $VenvDir (in the current
+    # versioned-runtime wiring they are in fact always the same path), so
+    # the exclude branch must not simply trust $LinkDir as a safe stand-in
+    # -- it must actively filter out any candidate equal to $VenvDir.
+    assert "if ($ExcludeVenvDir -and $VenvDir -and ($d -eq $VenvDir)) { continue }" in bootstrap_fn
+
+
+@pytest.mark.skipif(os.name != "nt", reason="PowerShell execution is Windows-only here")
+def test_get_bootstrap_python_excludes_the_target_slot_even_when_link_dir_equals_venv_dir(
+    tmp_path: Path,
+):
+    """Reproduces the exact production invariant a purely textual check
+    can't: $LinkDir can equal $VenvDir (the current versioned-runtime
+    wiring always sets them equal), so `Get-BootstrapPython -ExcludeVenvDir`
+    must never select that shared directory's own python.exe -- it must
+    fall through to the `py` launcher / `Get-ApplicationPath` instead."""
+    pwsh = shutil.which("pwsh") or shutil.which("powershell.exe") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+
+    target_dir = tmp_path / "slot"
+    (target_dir / "Scripts").mkdir(parents=True)
+    (target_dir / "Scripts" / "python.exe").write_bytes(
+        b"target slot python -- must never be selected by -ExcludeVenvDir"
+    )
+
+    script = r"""
+$tokens = $null
+$errors = $null
+$source = Get-Content -LiteralPath $env:INSTALLER -Raw
+$ast = [System.Management.Automation.Language.Parser]::ParseInput(
+    $source, [ref]$tokens, [ref]$errors
+)
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Get-BootstrapPython'
+}, $true)
+if (-not $functionAst) { throw "Missing installer function: Get-BootstrapPython" }
+Invoke-Expression $functionAst.Extent.Text
+
+# The exact production invariant: $LinkDir equals $VenvDir.
+$VenvDir = $env:TARGET_DIR
+$LinkDir = $env:TARGET_DIR
+
+function Get-Command { $null }               # no `py` launcher resolvable
+function Get-ApplicationPath { 'FALLBACK-USED' }
+
+Get-BootstrapPython -ExcludeVenvDir
+"""
+    proc = subprocess.run(
+        [pwsh, "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={
+            **os.environ,
+            "INSTALLER": str(INSTALLER),
+            "TARGET_DIR": str(target_dir),
+        },
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    result = proc.stdout.strip()
+    assert result == "FALLBACK-USED", (
+        "Get-BootstrapPython -ExcludeVenvDir must never select the target "
+        f"slot's own interpreter even when $LinkDir == $VenvDir; got {result!r}"
+    )
 
 
 def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
