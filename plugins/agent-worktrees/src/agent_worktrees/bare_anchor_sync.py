@@ -25,8 +25,11 @@ def sync_bare_anchor(path: str, declared_branch: str | None) -> tuple[str, str]:
     reported as ``"not fast-forwardable (diverged)"`` even when the anchor
     was already fully in sync.
 
-    There is no "dirty" or "ahead" concept without a work tree to hold the
-    difference, so this fetches ``origin`` (through the same credential-aware
+    There is no "dirty" (uncommitted work-tree) concept without a work tree
+    to hold it, but the branch ref itself can still be ahead of, or diverged
+    from, its upstream -- refs advance independently of any work tree, which
+    is exactly what the ancestry check below detects and refuses to clobber.
+    This fetches ``origin`` (through the same credential-aware
     ``git_ops.fetch`` the non-bare path uses) and moves the branch ref
     forward with an atomic compare-and-swap ``update-ref`` once confirmed to
     be a strict fast-forward -- mirroring
