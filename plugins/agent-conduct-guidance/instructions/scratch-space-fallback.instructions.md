@@ -4,7 +4,7 @@ applyTo: "**"
 
 # Scratch-space hygiene fallback
 
-**Fallback policy `[owner: agent-conduct-guidance@0.1.4-dev1]`:** Any ad hoc
+**Fallback policy `[owner: agent-conduct-guidance@0.1.5-dev1]`:** Any ad hoc
 working file an agent creates outside a repository checkout -- a downloaded
 artifact, an intermediate log, a draft PR/issue body, a one-off JSON/text
 dump, a captured command's output -- must never be written as a loose file

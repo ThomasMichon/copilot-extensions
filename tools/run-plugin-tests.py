@@ -323,12 +323,19 @@ def run_plugin(
     sandbox_parent = Path(os.environ.get("TEMP", tempfile.gettempdir()))
     sandbox_parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
-        prefix=f"ce-{name[:12]}-",
+        # Deliberately short: this sandbox root sits at the top of a path
+        # whose depth (home/.agent-logger/snapshots/<ver>/libs/<lib>/
+        # build/bdist.win-amd64/wheel/...) can approach Windows' 260-char
+        # MAX_PATH for a plugin with deep installer-provisioned content
+        # (coverage-guided-ci effort, 2026-10-05) -- every char saved here
+        # is real headroom, and this prefix is purely a disposable
+        # per-run temp dir, never read by anything outside this process.
+        prefix=f"ce-{name[:4]}-",
         dir=sandbox_parent,
         ignore_cleanup_errors=True,
     ) as raw_sandbox:
         sandbox = Path(raw_sandbox)
-        basetemp = sandbox / "pytest"
+        basetemp = sandbox / "t"
         env = isolated_environment(
             os.environ,
             sandbox,
@@ -359,7 +366,7 @@ def run_plugin(
                 max_temp_mb=limits.max_temp_mb,
                 poll_seconds=limits.poll_seconds,
             )
-            group_temp = basetemp / f"group-{index}"
+            group_temp = basetemp / f"g{index}"
             group_temp.parent.mkdir(parents=True, exist_ok=True)
             cmd = [
                 str(py),
