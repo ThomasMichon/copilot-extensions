@@ -12,6 +12,7 @@ import types
 
 import agent_worktrees.__main__ as m
 from agent_worktrees import git_ops
+from agent_worktrees import sessions
 from agent_worktrees import tracking
 
 
@@ -186,7 +187,7 @@ class TestRevalidateCleanupSafety:
             _rec("finalized"), worktree_id="wt1", worktree_path=str(wt)))
         monkeypatch.setattr(
             m, "_build_active_paths",
-            lambda records, ctx=None: {m._normalize_path(str(wt))})
+            lambda records, ctx=None: {sessions._normalize_path(str(wt))})
         monkeypatch.setattr(
             m.sessions, "scan_sessions_fast",
             lambda records: m.sessions.SessionContext())
@@ -226,7 +227,7 @@ class TestRevalidateCleanupSafety:
         monkeypatch.setattr(
             m.sessions, "scan_sessions_fast",
             lambda records: m.sessions.SessionContext(
-                turn_count={m._normalize_path(str(wt)): 3}))
+                turn_count={sessions._normalize_path(str(wt)): 3}))
         monkeypatch.setattr(m, "_hosted_session_blocks_cleanup", lambda rec: False)
         fresh = _info(git_ops.WorktreeState.UNUSED)
         monkeypatch.setattr(git_ops, "classify_worktree", lambda *a, **k: fresh)
@@ -315,7 +316,7 @@ class TestRevalidateCleanupSafety:
             _rec("active"), worktree_id="wt1", worktree_path=str(wt)))
         monkeypatch.setattr(
             m, "_build_active_paths",
-            lambda records, ctx=None: {m._normalize_path(str(wt))})
+            lambda records, ctx=None: {sessions._normalize_path(str(wt))})
         monkeypatch.setattr(
             m.sessions, "scan_sessions_fast",
             lambda records: m.sessions.SessionContext())
@@ -336,7 +337,7 @@ class TestRevalidateCleanupSafety:
             _rec("active"), worktree_id="wt1", worktree_path=str(wt)))
         monkeypatch.setattr(
             m, "_build_active_paths",
-            lambda records, ctx=None: {m._normalize_path(str(wt))})
+            lambda records, ctx=None: {sessions._normalize_path(str(wt))})
         monkeypatch.setattr(
             m.sessions, "scan_sessions_fast",
             lambda records: m.sessions.SessionContext())

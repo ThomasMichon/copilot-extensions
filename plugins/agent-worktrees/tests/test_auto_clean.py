@@ -118,7 +118,7 @@ def _sweep(records, *, dry_run=True, mux=None, activity=None, now=None,
                return_value=(activity or {})), \
          patch("agent_worktrees.sessions.scan_sessions_fast", return_value=ctx), \
          patch("agent_worktrees.__main__._build_active_paths", return_value=set()), \
-         patch("agent_worktrees.__main__._normalize_path", side_effect=lambda p: p), \
+         patch("agent_worktrees.sessions._normalize_path", side_effect=lambda p: p), \
          patch("agent_worktrees.__main__._hosted_session_blocks_cleanup",
                return_value=False), \
          patch("agent_worktrees.git_ops.is_branch_merged", return_value=branch_merged), \

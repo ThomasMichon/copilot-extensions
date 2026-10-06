@@ -56,7 +56,7 @@ def _wire(monkeypatch, target, *, state, turns, rec=None):
     monkeypatch.setattr(m, "_apply_tracking_override", lambda r, i: i)
     ctx = sessions.SessionContext()
     if turns:
-        ctx.turn_count[m._normalize_path(target)] = turns
+        ctx.turn_count[sessions._normalize_path(target)] = turns
     monkeypatch.setattr(m.sessions, "scan_sessions_fast", lambda recs: ctx)
     return rec
 
@@ -398,7 +398,7 @@ def test_status_segment_json_reports_turn_count(monkeypatch, capfd):
 def test_worktree_to_dict_title_falls_back_to_summary():
     rec = _record(worktree_path="/w/wt", title=None)
     ctx = sessions.SessionContext()
-    ctx.latest_summary[m._normalize_path("/w/wt")] = "Resume PushChannel E2E"
+    ctx.latest_summary[sessions._normalize_path("/w/wt")] = "Resume PushChannel E2E"
     d = m._worktree_to_dict(rec, session_ctx=ctx)
     assert d["title"] == "Resume PushChannel E2E"
 
@@ -406,7 +406,7 @@ def test_worktree_to_dict_title_falls_back_to_summary():
 def test_worktree_to_dict_title_prefers_persisted():
     rec = _record(worktree_path="/w/wt", title="Curated Title")
     ctx = sessions.SessionContext()
-    ctx.latest_summary[m._normalize_path("/w/wt")] = "Live Summary"
+    ctx.latest_summary[sessions._normalize_path("/w/wt")] = "Live Summary"
     d = m._worktree_to_dict(rec, session_ctx=ctx)
     assert d["title"] == "Curated Title"
 
@@ -456,7 +456,7 @@ def test_worktree_to_dict_keeps_head_over_newer_transcript_and_mux():
         head_session="successor",
     )
     ctx = sessions.SessionContext()
-    norm = m._normalize_path(rec.worktree_path)
+    norm = sessions._normalize_path(rec.worktree_path)
     ctx.session_count[norm] = 1
     ctx.last_session_id[norm] = "predecessor"
 
@@ -485,7 +485,7 @@ def test_worktree_to_dict_no_mismatch_when_scan_agrees_with_head():
         head_session="successor",
     )
     ctx = sessions.SessionContext()
-    norm = m._normalize_path(rec.worktree_path)
+    norm = sessions._normalize_path(rec.worktree_path)
     ctx.session_count[norm] = 1
     ctx.last_session_id[norm] = "successor"
 
@@ -507,7 +507,7 @@ def test_worktree_to_dict_does_not_resurrect_concluded_session():
         head_session="finished",
     )
     ctx = sessions.SessionContext()
-    norm = m._normalize_path(rec.worktree_path)
+    norm = sessions._normalize_path(rec.worktree_path)
     ctx.session_count[norm] = 1
     ctx.last_session_id[norm] = "finished"
 
@@ -551,7 +551,7 @@ def _wire_persist(monkeypatch, target, *, rec, summary):
     monkeypatch.setattr(m, "_apply_tracking_override", lambda r, i: i)
     ctx = sessions.SessionContext()
     if summary is not None:
-        ctx.latest_summary[m._normalize_path(target)] = summary
+        ctx.latest_summary[sessions._normalize_path(target)] = summary
     monkeypatch.setattr(m.sessions, "scan_sessions_fast", lambda recs: ctx)
     saved: list[str | None] = []
     monkeypatch.setattr(
