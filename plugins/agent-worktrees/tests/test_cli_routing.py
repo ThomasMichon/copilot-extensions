@@ -1339,13 +1339,18 @@ def test_manager_handoff_binds_exact_engine_runtime(monkeypatch):
         def wait(self, timeout=None):
             return 0
 
-    def fake_popen(argv, **kwargs):
+        def kill(self):
+            pass
+
+    def fake_spawn(argv, **kwargs):
         seen["argv"] = argv
         seen["env"] = kwargs["env"]
-        return _Proc()
+        return _Proc(), None
 
     monkeypatch.setattr(m.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(m.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        "agent_procutil.spawn_sync_in_kill_on_close_job", fake_spawn
+    )
     monkeypatch.setattr(m.sys, "executable", r"C:\runtime\python.exe")
 
     with pytest.raises(SystemExit) as exc:
@@ -1359,6 +1364,76 @@ def test_manager_handoff_binds_exact_engine_runtime(monkeypatch):
     assert json.loads(
         seen["env"][m._WORKTREE_MANAGER_ENGINE_ARGV_ENV]
     ) == [r"C:\runtime\python.exe", "-m", "agent_worktrees"]
+
+
+def test_exec_worktree_manager_closes_job_on_windows_clean_exit(monkeypatch):
+    """picker-performance-and-responsiveness follow-up: a plain
+    ``subprocess.Popen`` on Windows left the whole Worktree Manager launch
+    chain (a ``.cmd`` shim -> ``uv run`` -> venv interpreter -> the real
+    module, sometimes re-exec'd through yet another interpreter) parentless
+    and running forever if THIS process was torn down abruptly -- nothing
+    ever watched that descendant tree or signaled it to exit. Containing the
+    launch in a Windows kill-on-close Job Object (the same primitive
+    ``agent_machines.fleet_update`` already uses for this exact failure
+    class) fixes it: the OS kills everything still in the job the moment
+    this process's own handle to it closes, for ANY reason, clean or not.
+
+    This test proves the containment call happens and its handle is closed
+    once the child exits cleanly -- not just that some process got spawned."""
+    calls = {"closed": False}
+
+    class _Proc:
+        def wait(self, timeout=None):
+            return 0
+
+    class _FakeJobHandle:
+        def close(self):
+            calls["closed"] = True
+
+    def fake_spawn(argv, **kwargs):
+        return _Proc(), _FakeJobHandle()
+
+    monkeypatch.setattr(m.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        "agent_procutil.spawn_sync_in_kill_on_close_job", fake_spawn
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        m._exec_worktree_manager(("worktree-manager",), None)
+    assert exc.value.code == 0
+    assert calls["closed"] is True, (
+        "the job handle must be closed once the direct child exits, so any "
+        "descendant that never broke away from the job (one that failed to "
+        "clean itself up) is reaped immediately rather than left orphaned"
+    )
+
+
+def test_exec_worktree_manager_falls_back_to_kill_without_a_job(monkeypatch):
+    """If Job creation/assignment itself failed, ``spawn_sync_in_kill_on_close_job``
+    already documents returning ``job_handle=None`` so the caller's own
+    cleanup path stays in charge -- this is that fallback path: a direct
+    ``proc.kill()``, not a silent no-op."""
+    calls = {"killed": False}
+
+    class _Proc:
+        def wait(self, timeout=None):
+            return 0
+
+        def kill(self):
+            calls["killed"] = True
+
+    def fake_spawn(argv, **kwargs):
+        return _Proc(), None
+
+    monkeypatch.setattr(m.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        "agent_procutil.spawn_sync_in_kill_on_close_job", fake_spawn
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        m._exec_worktree_manager(("worktree-manager",), None)
+    assert exc.value.code == 0
+    assert calls["killed"] is True
 
 
 def test_bare_shows_install_trigger_when_picker_retired(monkeypatch):
