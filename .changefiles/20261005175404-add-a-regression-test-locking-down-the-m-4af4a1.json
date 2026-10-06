@@ -1,0 +1,9 @@
+{
+  "comment": "Add a regression test locking down the manual-cutover safety boundary (ordinary trigger_handoff calls never arm a live cutover on their own).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

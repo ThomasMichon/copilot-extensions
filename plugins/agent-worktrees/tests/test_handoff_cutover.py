@@ -3307,6 +3307,52 @@ class TestCmdHandoffCutoverTrigger:
         out = capsys.readouterr().out
         assert "no actionable pending handoff" in out
 
+    def test_automatic_sweep_path_never_arms_an_ordinary_trigger_handoff_call(
+        self, monkeypatch, tmp_path, tmp_tracking_dir, monkeypatch_config,
+    ):
+        """Safety boundary: an ordinary (non-``force``) ``trigger_handoff``
+        MCP tool call in ``mode: manual-only`` must never result in a live
+        cutover on its own -- only the Mux Companion's "Cut over" button (or
+        a direct ``handoff-cutover-trigger`` call) may arm one. On the JS
+        side, an ordinary call never reaches ``noteHandoffInRecord``, so it
+        creates NO entry in ``record.handoffs`` -- only the unconditional
+        session-state marker file. This proves the Python-side half of that
+        boundary: ``_monitor_maybe_process_handoff_record`` -- the EXACT
+        function the resident status-monitor's automatic per-tick sweep
+        calls for every tracked worktree, with no human action involved --
+        must not itself read that marker and arm anything. Only
+        ``_arm_pending_handoff_from_session_state`` (reached exclusively via
+        ``cmd_handoff_cutover_trigger``, i.e. an explicit human action) may
+        do that. Exercises the real function directly, bypassing the CLI
+        verb entirely, so a future change that made the automatic sweep
+        path ALSO consult session-state markers would be caught here."""
+        from agent_worktrees import tracking as _tracking
+
+        monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "1")
+        path = self._record(tmp_tracking_dir, "wt-trigger-6")
+        _tracking.register_session("wt-trigger-6", "predecessor-6")
+        record = _tracking.load_record(path)
+        # Exactly what an ordinary, non-force trigger_handoff call leaves
+        # behind in manual-only mode: the unconditional session-state
+        # marker, and nothing in record.handoffs at all.
+        marker_path = tmp_path / "handoff-request.json"
+        marker_path.write_text(json.dumps({
+            "handoffId": "handoff-predecessor-6", "sessionId": "predecessor-6",
+            "consumed": False,
+        }), encoding="utf-8")
+        monkeypatch.setattr(
+            m, "_monitor_session_state_handoff_path",
+            lambda sid: marker_path if sid == "predecessor-6" else None,
+        )
+        assert record.handoffs == []
+
+        m._monitor_maybe_process_handoff_record(record)
+
+        reloaded = _tracking.load_record(path)
+        assert reloaded.handoffs == []
+        assert reloaded.pending_handoffs == []
+        assert reloaded.resolved_head_session == record.resolved_head_session
+
 
 def test_retire_stamps_predecessor_session_state_with_successor_id(monkeypatch):
     predecessor_state = sessions._session_state_dir() / "old-sess"
