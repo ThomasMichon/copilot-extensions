@@ -13,6 +13,7 @@ from agent_worktrees import __main__ as m
 from agent_worktrees import claim_providers, claims_owner
 from agent_worktrees import state_root
 from agent_worktrees import tracking
+from agent_worktrees import worktree_identity
 
 
 # --- parser + registration --------------------------------------------------
@@ -223,7 +224,7 @@ def _seed(tmp_path, monkeypatch, *, owner_ref=None, resources=None):
         lambda config: state_root.CoordinationReadiness(
             True, "ready", ready_root),
     )
-    monkeypatch.setattr(m, "_infer_worktree_id", lambda wid, cfg_: wid or "wt-A")
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda wid, cfg_: wid or "wt-A")
     monkeypatch.setattr(m, "_dispatch_assigned_tasks",
                         lambda machine, wid, cwd: {"available": False,
                                                    "reason": "stubbed"})
@@ -303,7 +304,7 @@ def test_claims_missing_worktree(monkeypatch, tmp_path):
     import types
     monkeypatch.setattr("agent_worktrees.config.load_config",
                         lambda *a, **k: types.SimpleNamespace(machine="m"))
-    monkeypatch.setattr(m, "_infer_worktree_id", lambda wid, cfg_: "ghost")
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda wid, cfg_: "ghost")
     rc = m.cmd_claims(argparse.Namespace(target=["ghost"], json=True))
     assert rc == 1
 

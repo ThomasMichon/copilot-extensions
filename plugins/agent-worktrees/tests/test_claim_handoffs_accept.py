@@ -18,6 +18,7 @@ from agent_worktrees import (
     tracking,
     tracking_claim_write,
 )
+from agent_worktrees import worktree_identity
 from agent_worktrees.lease_config import LeaseSettings
 from agent_worktrees.lease_store import GitLeaseStore
 
@@ -557,7 +558,7 @@ def test_cli_accept_source_returns_json_without_logging_main_accept(
     bundle = _offer_cross_machine(world, [world["claims"][1].ref])
     config = types.SimpleNamespace(machine="ember", repo_name="source-project")
     monkeypatch.setattr(m.cfg, "load_config", lambda: config)
-    monkeypatch.setattr(m, "_infer_worktree_id", lambda explicit, config: "wt-source")
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-source")
 
     assert m.cmd_claims(
         _args(
@@ -576,7 +577,7 @@ def test_cli_accept_logs_and_returns_accepted_bundle(handoff_world, monkeypatch,
     bundle = _offer(world, [world["claims"][1].ref])[0]
     config = types.SimpleNamespace(machine=MACHINE, repo_name="consumer-project")
     monkeypatch.setattr(m.cfg, "load_config", lambda: config)
-    monkeypatch.setattr(m, "_infer_worktree_id", lambda explicit, config: "wt-consumer")
+    monkeypatch.setattr(worktree_identity, "_infer_worktree_id", lambda explicit, config: "wt-consumer")
     logged = []
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: logged.append((a, k)))
 

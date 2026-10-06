@@ -237,6 +237,36 @@ def _infer_worktree_id_from_cwd(
     return _infer_worktree_id_from_worktree_root(config, cwd)
 
 
+def _infer_worktree_id(
+    explicit: str | None,
+    config: cfg.Config | None = None,
+) -> str | None:
+    """Return the worktree ID from an explicit arg or the current directory.
+
+    Resolution order:
+      1. Explicit value passed on the CLI
+      2. The current working directory under the configured ``worktree_root``
+
+    Identity is resolved **purely from the directory**, the way git resolves
+    its repo. The ambient ``$WORKTREE_ID`` is **not**
+    consulted -- it was the source of cross-session/cross-repo contamination.
+    Git branch is likewise never used: worktrees may switch to feature branches,
+    so the branch name is not a reliable indicator of which worktree we are in.
+
+    When ``--project`` targets a project the caller is not already inside,
+    ``main()`` has ``chdir``-ed to that project's anchor -- which is not under
+    ``worktree_root`` -- so cross-project calls yield ``None`` (name the worktree
+    explicitly). When the caller *is* inside one of the project's worktrees, the
+    real CWD identifies it.
+
+    Returns None if neither source yields a worktree ID.
+    """
+    if explicit:
+        return explicit
+
+    return _infer_worktree_id_from_cwd(config)
+
+
 def _resolve_worktree_id(raw_id: str) -> str:
     """Canonicalize a worktree ID, resolving short suffixes.
 
