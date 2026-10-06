@@ -105,16 +105,19 @@ async def test_command_filter_passes_no_window_creationflags(monkeypatch):
     # sentinel so this proves the production code actually calls it and
     # merges its result in, rather than comparing against a value that is
     # also `0`/absent off Windows and would pass identically even if the
-    # real `**no_window_kwargs()` call were deleted.
+    # real `**no_window_kwargs()` call were deleted. Fakes the spawn
+    # entirely (never calls the real subprocess.run) because a non-zero
+    # sentinel `creationflags` is only accepted by Windows -- forwarding it
+    # to a real POSIX Popen raises ValueError.
     sentinel = {"creationflags": 0xFEEDFACE}
     monkeypatch.setattr("agent_mcp.decorators.transform.no_window_kwargs", lambda: sentinel)
 
     captured: dict = {}
-    real_run = __import__("subprocess").run
+    import subprocess as _subprocess
 
     def fake_run(*args, **kwargs):
         captured["kwargs"] = kwargs
-        return real_run(*args, **kwargs)
+        return _subprocess.CompletedProcess(args, 0, stdout="[1, 2]", stderr="")
 
     monkeypatch.setattr("agent_mcp.decorators.transform.subprocess.run", fake_run)
 
