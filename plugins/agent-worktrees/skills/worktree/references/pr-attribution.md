@@ -22,9 +22,19 @@ repo's `pr.source_attribution` config key. Its shape depends on the mode:
   ```html
   <!-- agent-worktrees:source codename=<name> -->
   ```
-  A public-safe marker carrying **only** the worktree's assigned codename --
-  a random label with no decodable meaning on its own. This is the marker
+  A public-safe marker carrying the worktree's assigned codename -- a
+  random label with no decodable meaning on its own. This is the marker
   you'll actually encounter on almost every repo, since it's the default.
+  When the opening worktree is itself claimed as an outbound resource by
+  ANOTHER worktree (e.g. a child worktree spun up on behalf of a
+  different, calling repo's session), the marker may also carry an
+  optional `root=<name>` field: the ROOT ancestor's own codename,
+  resolved by walking that ownership chain. Just as public-safe as the
+  main codename -- never a raw identifier -- and present only when the
+  whole chain resolves safely (see `docs/architecture.md`'s *PR
+  Attribution & Codenames* section for the full detail: same-machine-only
+  resolution, each root's own provenance gate, and the `false` anonymous
+  opt-out always withholding a root's codename too).
 - **`true` (raw marker, closed-circuit repos only).** Embeds the full raw
   worktree id, machine name, session id, and head SHA directly. Never used
   on a public repo.

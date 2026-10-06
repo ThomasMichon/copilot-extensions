@@ -1042,14 +1042,20 @@ safely carry.
   a different machine, is cyclic/too deep, or the resolved root's own
   codename isn't safe to publish per its own provenance gate -- including
   when the root repo itself has chosen `false` (full anonymous opt-out):
-  its codename is never exposed via someone else's marker either, even
-  though `true` (raw-marker) mode is treated as already-fully-exposed and
-  still publishes its codename. A root worktree (no `owner_ref` at all)
-  never gets a `root=` field pointing at itself. **This decision is
-  PERSISTED on first resolution** (a small per-worktree sidecar, keyed to
-  the entire walked chain's own identity) and reused thereafter -- a later
-  change to the root repo's config does NOT retroactively flip an
-  already-decided `root=` field, matching this plugin's existing frozen-
+  its codename is never exposed via someone else's marker either. A root
+  in `true` (raw-marker) mode already accepts full exposure on its own
+  PRs, so its **built-in** codename still publishes here too -- but a
+  **custom**-wordlist codename does not: `true` is a closed-circuit
+  setting for that repo's own PRs, not cross-repo consent to publish a
+  custom alias (not inherently public-safe) into a different, possibly
+  public child repo -- that still requires the root to have explicitly
+  selected `"codename"` mode specifically, with its own opt-in. A root
+  worktree (no `owner_ref` at all) never gets a `root=` field pointing at
+  itself. **This decision is PERSISTED on first resolution** (a small
+  per-worktree sidecar, keyed to the entire walked chain's own identity)
+  and reused thereafter -- a later change to the root repo's config does
+  NOT retroactively flip an already-decided `root=` field, matching this
+  plugin's existing frozen-
   attribution guarantee for the primary codename. A worktree claim handoff
   or an id being reaped and recreated invalidates that persisted decision
   automatically, so a stale root is never returned forever.
