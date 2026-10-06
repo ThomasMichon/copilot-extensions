@@ -3865,6 +3865,42 @@ def test_consume_completed_non_handoff_still_prints_payload(monkeypatch, capsys)
     assert "PAYLOAD-XYZZY" in out
     # Terminal task: no re-claim transitions, just the payload read.
     assert fake.transitions == ["payload"]
+
+
+def test_consume_abandoned_handoff_is_not_delivered(monkeypatch, capsys):
+    """A handoff abandoned because a newer one superseded it (or because it
+    was aborted) is refused with exit 3 -- its stale brief is never handed to
+    the successor that was seeded with it."""
+    from agent_dispatch import __main__, identity
+
+    fake = _SpentHandoffClient(labels=["handoff"], status="abandoned")
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    for argv in (["consume", "T1"], ["consume", "T1", "--defer-complete"]):
+        args = build_parser().parse_args(argv)
+        assert args.func(args) == 3
+        out = capsys.readouterr().out
+        assert "was abandoned" in out
+        assert "PAYLOAD-XYZZY" not in out
+    assert fake.transitions == []
+
+
+def test_consume_abandoned_non_handoff_still_prints_payload(monkeypatch, capsys):
+    """The refusal is scoped to handoffs: an abandoned non-handoff task still
+    just prints its payload."""
+    from agent_dispatch import __main__, identity
+
+    fake = _SpentHandoffClient(labels=[], source=None, status="abandoned")
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 0
+    assert "PAYLOAD-XYZZY" in capsys.readouterr().out
+    assert fake.transitions == ["payload"]
     a = build_parser().parse_args(["focus", "working on X"])
     assert a.focus_text == "working on X" and a.list is False
     b = build_parser().parse_args(["focus", "--list", "--machine", "emancipation-cube"])
@@ -4021,21 +4057,49 @@ def test_consume_claim_lost_to_winner_who_completed_a_non_handoff_prints_payload
     assert "THE-ACTUAL-BRIEF-CONTENT" in out
 
 
-def test_consume_claim_failure_with_concurrent_abandon_prints_payload(
+def test_consume_claim_failure_with_concurrent_abandon_refuses_handoff(
     monkeypatch, capsys
 ):
     """``abandoned`` must be classified the same way the initial-snapshot
-    check classifies it (terminal, never a spent-handoff baton): if another
-    caller abandons the task between the initial ``get()`` and this failed
-    claim, the refreshed task has no owner, same as a completed task --
-    this must idempotently print the payload (exit 0), not fall through to
-    the "could not claim" real-error path (exit 1)."""
+    check classifies it: if another caller abandons (supersedes or aborts)
+    the handoff between the initial ``get()`` and this failed claim, the
+    refreshed task has no owner, same as a completed task -- this must be
+    the retired-handoff refusal (exit 3, brief not delivered), neither the
+    "could not claim" real-error path (exit 1) nor a delivered brief."""
     from agent_dispatch import __main__, identity
     from agent_dispatch.client import DispatchError
 
     fake = _PickupClient(
         "proposed",
         labels=["handoff"],
+        claim_error=DispatchError(409, "conflict"),
+        status_after_claim_failure="abandoned",
+    )
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 3
+    captured = capsys.readouterr()
+    assert "was abandoned" in captured.out
+    assert "THE-ACTUAL-BRIEF-CONTENT" not in captured.out
+    assert "could not claim" not in captured.err
+    assert "payload" not in fake.transitions
+
+
+def test_consume_claim_failure_with_concurrent_abandon_prints_non_handoff_payload(
+    monkeypatch, capsys
+):
+    """The retired-handoff refusal is scoped to handoffs: a non-handoff task
+    abandoned before the re-fetch still gets idempotent payload delivery."""
+    from agent_dispatch import __main__, identity
+    from agent_dispatch.client import DispatchError
+
+    fake = _PickupClient(
+        "proposed",
+        labels=None,
+        source=None,
         claim_error=DispatchError(409, "conflict"),
         status_after_claim_failure="abandoned",
     )

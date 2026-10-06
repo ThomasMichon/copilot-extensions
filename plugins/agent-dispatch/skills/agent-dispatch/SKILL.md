@@ -846,7 +846,10 @@ to `machine` only when the mismatch is machine-wide.
 > An already-terminal **non-handoff** task just has its payload re-printed
 > (idempotent); an already-terminal **handoff** (`submitted`/`completed`,
 > labeled `handoff` or sourced from `context-handoff`) is refused instead
-> (exit `3`) -- see the replay-debounce note above. Claiming can likewise
+> (exit `3`) -- see the replay-debounce note above. So is an `abandoned`
+> handoff (superseded by a newer handoff for its worktree, or aborted): its
+> brief is out of date, so a successor seeded with it stands down rather
+> than working alongside the newer handoff's successor. Claiming can likewise
 > fail two ways: a genuine failure (nobody owns the task, not even a
 > concurrent claimant) is a real error (exit `1`); losing a claim race to a
 > concurrent claimant refuses to replay the payload to the loser (exit `3`,

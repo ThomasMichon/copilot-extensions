@@ -419,7 +419,9 @@ external `payload_ref` (e.g. `pr/123`) is left opaque for the caller.
 `agent-dispatch consume <id>` is the resume-and-consume shortcut: it idempotently
 drives the task to `submitted` (approve → claim → start → complete) and then
 prints the payload, so a handoff successor's single command both loads the brief
-and spends the baton.
+and spends the baton. A handoff that is already spent, or was abandoned because a
+newer handoff superseded it (or it was aborted), is refused with exit `3`
+instead of delivered.
 
 ### Dedup & scheduling
 

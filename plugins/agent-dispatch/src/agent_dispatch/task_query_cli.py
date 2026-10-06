@@ -450,6 +450,29 @@ def _consume_already_spent(task_id: str, task: dict) -> int:
     )
     return 3
 
+def _consume_retired(task_id: str, task: dict) -> int:
+    """Refuse to deliver a retired (abandoned) handoff baton.
+
+    A handoff is abandoned for several reasons: a newer handoff for the same
+    worktree superseded it, it was aborted, or liveness cleanup retired it. Its
+    payload stays readable, but a successor seeded with it must not act on it.
+    The notice names no cause; the event log records the actual one.
+    """
+    worktree = task.get("target_worktree")
+    where = f" (worktree {worktree})" if worktree else ""
+    print(
+        f"[agent-dispatch] Handoff task {task_id}{where} was abandoned, so it "
+        f"is retired. NOT delivering the brief. Do NOT act on this task; end "
+        f"your turn.\n"
+        f"See why with: agent-dispatch events {task_id}"
+    )
+    print(
+        f"agent-dispatch: handoff {task_id} was abandoned (retired); not "
+        f"delivered -- do not act on it. See why: agent-dispatch events {task_id}",
+        file=sys.stderr,
+    )
+    return 3
+
 def _cmd_result(args: argparse.Namespace) -> int:
     with _core()._client(args) as c:
         result = c.result(args.task_id)
@@ -506,7 +529,10 @@ def _cmd_consume(args: argparse.Namespace) -> int:
     let two successors both believe they are the one continuing a baton
     meant for exactly one. A still-in-flight handoff (``started`` -- e.g. a
     legitimate takeover recovery) is unaffected; only ``submitted`` is
-    treated as spent. A genuine failure to claim at all (no owner, no
+    treated as spent. An ``abandoned`` handoff (superseded by a newer
+    handoff, or aborted) is likewise refused with exit ``3`` rather than
+    delivered, so a successor seeded with an out-of-date brief stands down.
+    A genuine failure to claim at all (no owner, no
     concurrent claimant either) is a real error (exit ``1``), never a silent
     success.
     """
@@ -524,10 +550,13 @@ def _cmd_consume(args: argparse.Namespace) -> int:
             print(f"agent-dispatch: {exc}", file=sys.stderr)
             return 1
         status = task.get("status")
-        # Debounce a spent baton: a submitted/completed handoff is never replayed.
+        # Debounce a spent baton: a submitted/completed handoff is never
+        # replayed, and neither is a retired (abandoned) one.
         is_handoff = _task_is_handoff(task)
         if is_handoff and status in ("submitted", "completed"):
             return _core()._consume_already_spent(task_id, task)
+        if is_handoff and status == "abandoned":
+            return _core()._consume_retired(task_id, task)
         if status not in ("submitted", "completed", "abandoned"):
             owner: str | None = None
             if status == "proposed":
@@ -575,18 +604,15 @@ def _cmd_consume(args: argparse.Namespace) -> int:
                         # clears the owner, so checking ownership alone would
                         # misread this exact case as a genuine claim failure
                         # instead of the terminal state it actually is.
-                        if refreshed_status != "abandoned" and _task_is_handoff(
-                            refreshed
-                        ):
+                        if _task_is_handoff(refreshed):
+                            if refreshed_status == "abandoned":
+                                return _core()._consume_retired(task_id, refreshed)
                             return _core()._consume_already_spent(task_id, refreshed)
-                        # Either a non-handoff submitted/completed task, or
-                        # an abandoned task (never treated as a spent
-                        # handoff baton, matching the initial-snapshot check
-                        # above, which only debounces submitted/completed):
-                        # the documented contract is idempotent payload
-                        # delivery (the same path a terminal task takes when
-                        # observed terminal from the very first get() above),
-                        # never the handoff's exit-3 replay refusal.
+                        # A non-handoff terminal task: the documented
+                        # contract is idempotent payload delivery (the same
+                        # path a terminal task takes when observed terminal
+                        # from the very first get() above), never the
+                        # handoff's exit-3 replay refusal.
                         result = c.payload(task_id)
                         content = result.get("payload")
                         if content is None:
