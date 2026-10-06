@@ -1834,17 +1834,64 @@ do_update() {
     # in-flight requests, so the invariant holds either way). The supervisor is a
     # SEPARATE unit -- never stopped here; it outlives the swap + re-adopts.
     #
-    # One more LIVE re-check, immediately before the actual cutover decision
-    # -- the smallest possible gap between validating and acting, closing
-    # the window where this invocation won its own activation but was
-    # overtaken before reaching this call.
+    # Hold the SAME global (version-independent) lock _versioned_activate
+    # itself uses to publish current-version, across BOTH the live re-check
+    # AND the entire cutover call below -- not just the re-check alone. A
+    # re-check immediately before calling _coordinator_cutover still leaves
+    # a gap: this invocation's own cutover subprocess has its own internal
+    # cross-version cutover lease, and a NEWER invocation could activate and
+    # complete its ENTIRE cutover while this (older) invocation is merely
+    # queued waiting on that internal lease -- once it finally acquires it,
+    # it would route the coordinator back to this invocation's own stale
+    # build. Holding this lock across the whole span means a newer
+    # invocation's own _versioned_activate call (which needs this identical
+    # lock) cannot even START publishing its activation until this
+    # invocation's cutover attempt has fully finished and released it --
+    # closing the window rather than merely narrowing it.
+    local _cutover_lock_link=""
+    _unlock_cutover() {
+        if [[ -n "$_cutover_lock_link" ]]; then
+            local owner
+            owner="$(readlink "$_cutover_lock_link" 2>/dev/null || true)"
+            [[ "$owner" != "$$" ]] || rm -f "$_cutover_lock_link"
+        else
+            flock -u 8 2>/dev/null || true
+            exec 8>&- 2>/dev/null || true
+        fi
+    }
+    if command -v flock >/dev/null 2>&1 && [[ "${COPILOT_EXT_NO_FLOCK:-}" != 1 ]]; then
+        exec 8>"$INSTALL_DIR/.activate.lock"
+        flock 8
+    else
+        _cutover_lock_link="$INSTALL_DIR/.activate.lock.pid"
+        local owner
+        until ln -s "$$" "$_cutover_lock_link" 2>/dev/null; do
+            owner="$(readlink "$_cutover_lock_link" 2>/dev/null || true)"
+            if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+                sleep 1
+            elif ln -s "$$" "$_cutover_lock_link.reap" 2>/dev/null; then
+                if [[ "$(readlink "$_cutover_lock_link" 2>/dev/null || true)" == "$owner" ]]; then
+                    rm -f "$_cutover_lock_link"
+                fi
+                rm -f "$_cutover_lock_link.reap"
+            elif [[ "$(readlink "$_cutover_lock_link.reap" 2>/dev/null || true)" =~ ^[0-9]+$ ]] &&
+                 ! kill -0 "$(readlink "$_cutover_lock_link.reap" 2>/dev/null)" 2>/dev/null; then
+                rm -f "$_cutover_lock_link.reap" 2>/dev/null || true
+            else
+                sleep 0.1
+            fi
+        done
+    fi
     if _activation_superseded_now; then
         _skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/unit refresh for this invocation'
+        _unlock_cutover
         return 0
     fi
     if _coordinator_cutover; then
+        _unlock_cutover
         _install_service --no-restart
     else
+        _unlock_cutover
         _install_service
     fi
     _install_supervisor_service

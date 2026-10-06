@@ -937,14 +937,21 @@ def test_invoke_update_aborts_cutover_when_superseded() -> None:
     between the Install-Runtime call and the cutover block, AND again
     immediately before the actual Invoke-CoordinatorCutover call (the live
     re-check closing the "won activation, then overtaken" window a
-    one-time post-activation snapshot alone cannot catch)."""
+    one-time post-activation snapshot alone cannot catch), and that the
+    SAME lock Invoke-VersionedActivate uses wraps the second re-check
+    through the real cutover call -- closing the window where a newer
+    invocation could activate and complete ITS OWN cutover while this one
+    is merely queued on the cutover subprocess's own internal lease."""
     text = _INSTALL_PS1.read_text(encoding="utf-8")
     idx = text.index("function Invoke-Update")
     body = text[idx : text.index("\nfunction Invoke-Start", idx)]
     install_idx = body.index("Install-Runtime")
     guard_idx = body.index("Test-ActivationSupersededNow", install_idx)
     return_idx = body.index("return", guard_idx)
-    cutover_idx = body.index("Invoke-CoordinatorCutover")
+    # The literal call site ("$didCutover = Invoke-CoordinatorCutover"), not
+    # just any mention of the name -- the surrounding comments legitimately
+    # reference it by name too.
+    cutover_idx = body.index("= Invoke-CoordinatorCutover")
     assert install_idx < guard_idx < return_idx < cutover_idx
     # A SECOND guard, strictly between the first one and the actual cutover
     # call -- the live re-check right at the point of action. Search for it
@@ -956,6 +963,17 @@ def test_invoke_update_aborts_cutover_when_superseded() -> None:
         "a second, immediate Test-ActivationSupersededNow re-check must sit "
         "directly before Invoke-CoordinatorCutover, not just once right after "
         "Install-Runtime"
+    )
+    # The cutover mutex must be ACQUIRED before the second guard and only
+    # RELEASED after the real cutover call -- i.e. it wraps both.
+    lock_acquire_idx = body.index("$cutoverMutex = Enter-PluginSnapshotLock")
+    lock_release_idx = body.index("$cutoverMutex.ReleaseMutex()")
+    assert lock_acquire_idx < second_guard_idx, (
+        "the cutover mutex must be acquired BEFORE the second live re-check"
+    )
+    assert cutover_idx < lock_release_idx, (
+        "the cutover mutex must still be held THROUGH the real "
+        "Invoke-CoordinatorCutover call, not released before it"
     )
 
 

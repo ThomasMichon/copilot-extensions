@@ -3558,25 +3558,43 @@ function Invoke-Update {
     if (-not $NoService) {
         $didCutover = $false
         if (Test-CoordinatorHealthy) {
-            # One more LIVE re-check, immediately before the actual cutover
-            # decision -- the smallest possible gap between validating and
-            # acting, closing the window where this invocation won its own
-            # activation but was overtaken before reaching this call.
-            if (Test-ActivationSupersededNow) {
-                Write-Skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/task refresh for this invocation'
-                return
-            }
-            if (Test-CoordinatorRouted) {
-                # A Thread-B coordinator (routed, /drain seam) -> graceful cutover.
-                $didCutover = Invoke-CoordinatorCutover
-            } else {
-                # Pre-Thread-B coordinator (unrouted, no /drain): one-time
-                # stop-and-swap (invariant #2 fallback). Every future update from a
-                # Thread-B build is graceful. The supervisor is left running.
-                $stopped = Stop-DispatchProcess -Subcommand serve
-                if ($stopped -gt 0) {
-                    Write-Step "Stopped $stopped pre-cutover coordinator process(es) -- one-time transition to graceful cutover"
+            # Hold the SAME global (version-independent) lock
+            # Invoke-VersionedActivate itself uses to publish current-version,
+            # across BOTH the live re-check AND the entire cutover call below
+            # -- not just the re-check alone. A re-check immediately before
+            # calling Invoke-CoordinatorCutover still leaves a gap: this
+            # invocation's own cutover subprocess has its own internal
+            # cross-version cutover lease, and a NEWER invocation could
+            # activate and complete its ENTIRE cutover while this (older)
+            # invocation is merely queued waiting on that internal lease --
+            # once it finally acquires it, it would route the coordinator
+            # back to this invocation's own stale build. Holding this lock
+            # across the whole span means a newer invocation's own
+            # Invoke-VersionedActivate call (which needs this identical
+            # lock) cannot even START publishing its activation until this
+            # invocation's cutover attempt has fully finished and released
+            # it -- closing the window rather than merely narrowing it.
+            $cutoverMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir
+            try {
+                if (Test-ActivationSupersededNow) {
+                    Write-Skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/task refresh for this invocation'
+                    return
                 }
+                if (Test-CoordinatorRouted) {
+                    # A Thread-B coordinator (routed, /drain seam) -> graceful cutover.
+                    $didCutover = Invoke-CoordinatorCutover
+                } else {
+                    # Pre-Thread-B coordinator (unrouted, no /drain): one-time
+                    # stop-and-swap (invariant #2 fallback). Every future update from a
+                    # Thread-B build is graceful. The supervisor is left running.
+                    $stopped = Stop-DispatchProcess -Subcommand serve
+                    if ($stopped -gt 0) {
+                        Write-Step "Stopped $stopped pre-cutover coordinator process(es) -- one-time transition to graceful cutover"
+                    }
+                }
+            } finally {
+                [void]$cutoverMutex.ReleaseMutex()
+                $cutoverMutex.Dispose()
             }
         }
         Remove-CoordinatorFirewallRule

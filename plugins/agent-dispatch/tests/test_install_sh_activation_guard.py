@@ -183,3 +183,33 @@ def test_activate_force_overrides_the_cross_version_ordering_guard(tmp_path: Pat
     assert "RETURNED:0" in result.stdout, result.stdout + result.stderr
     assert activated.exists()
     assert "SUPERSEDED:0" in result.stdout, result.stdout + result.stderr
+
+
+def test_do_update_holds_cutover_lock_through_the_real_cutover_call() -> None:
+    """Structural check: do_update must hold the SAME global
+    (.activate.lock) lock _versioned_activate itself uses, across BOTH the
+    live _activation_superseded_now re-check AND the entire
+    _coordinator_cutover call -- not release it right after the re-check.
+    A newer invocation could otherwise activate and complete its ENTIRE
+    cutover while this (older) invocation is merely queued on
+    _coordinator_cutover's own internal cross-version cutover lease; once it
+    finally acquires that lease, it would route the coordinator back to its
+    own stale build. Holding this lock across the whole span means a newer
+    invocation's own _versioned_activate call (needing this identical lock)
+    cannot even start publishing its activation until this invocation's
+    cutover attempt has fully finished and released it."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    idx = text.index("do_update() {")
+    body = text[idx : text.index("\ndo_start() {", idx)]
+    ensure_idx = body.index("_ensure_runtime")
+    first_guard_idx = body.index("_activation_superseded_now", ensure_idx)
+    lock_acquire_idx = body.index('ln -s "$$" "$_cutover_lock_link"')
+    # The real call site (the `if` test), not the function definition.
+    cutover_call_idx = body.index("if _coordinator_cutover; then")
+    second_guard_idx = body.index("_activation_superseded_now", lock_acquire_idx)
+    unlock_before_cutover_idx = body.index("_unlock_cutover", cutover_call_idx)
+    assert ensure_idx < first_guard_idx < lock_acquire_idx < second_guard_idx < cutover_call_idx
+    # _unlock_cutover must be called INSIDE each branch of the
+    # `if _coordinator_cutover; then ... else ... fi`, i.e. AFTER
+    # _coordinator_cutover has already run to completion -- not before it.
+    assert unlock_before_cutover_idx > cutover_call_idx
