@@ -2408,6 +2408,74 @@ def test_claim_status_exists(monkeypatch):
     assert out == {"exists": True, "state": "started", "detail": "m/wt-abc"}
 
 
+def test_claim_status_prefers_run_waiter_command_over_bare_owner(monkeypatch):
+    """2026-10-05: a suspended task has no `owner` (no live session), which
+    previously left `detail` blank -- giving a claims-ledger reader (e.g.
+    `agent-worktrees claims show`) no insight into *why* the worktree still
+    carries this claim. When an active `run --detach` waiter is attached to
+    the task (as the coordinator's `/tasks/{id}` now does), `detail` must
+    show the exact blocking-wait command instead."""
+    import argparse
+    import contextlib
+    import io
+    import json
+
+    from agent_dispatch import __main__
+
+    class _FakeClient:
+        def get(self, task_id):
+            return {
+                "id": task_id,
+                "status": "suspended",
+                "owner": None,
+                "run_waiter": {
+                    "command": ["agent-worktrees", "pr-watch", "wait", "o/r", "570"],
+                },
+            }
+
+    @contextlib.contextmanager
+    def _fake_client(args, **kw):
+        yield _FakeClient()
+
+    monkeypatch.setattr(__main__, "_client", _fake_client)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = __main__._cmd_claim_status(argparse.Namespace(task_id="t1"))
+    assert rc == 0
+    out = json.loads(buf.getvalue())
+    assert out == {
+        "exists": True,
+        "state": "suspended",
+        "detail": "waiting: agent-worktrees pr-watch wait o/r 570",
+    }
+
+
+def test_claim_status_falls_back_to_owner_without_a_waiter(monkeypatch):
+    import argparse
+    import contextlib
+    import io
+    import json
+
+    from agent_dispatch import __main__
+
+    class _FakeClient:
+        def get(self, task_id):
+            return {"id": task_id, "status": "started", "owner": "m/wt-abc",
+                     "run_waiter": None}
+
+    @contextlib.contextmanager
+    def _fake_client(args, **kw):
+        yield _FakeClient()
+
+    monkeypatch.setattr(__main__, "_client", _fake_client)
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = __main__._cmd_claim_status(argparse.Namespace(task_id="t1"))
+    assert rc == 0
+    out = json.loads(buf.getvalue())
+    assert out == {"exists": True, "state": "started", "detail": "m/wt-abc"}
+
+
 def test_claim_status_not_found(monkeypatch):
     import argparse
     import contextlib
