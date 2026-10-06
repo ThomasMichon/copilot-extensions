@@ -77,6 +77,22 @@ TOOLS_DIR = REPO / "tools"
 # alongside any change, not merely when their own files are touched.
 _CROSS_PLUGIN_CONTRACT_TESTERS = {"copilot-extensions-harness"}
 
+# Per-plugin wall-clock budget overrides, applied only when the caller does
+# NOT pass an explicit --timeout/--plugin-timeout (so a deliberate manual
+# override always wins). agent-dispatch's own full suite genuinely needs more
+# headroom than the global default under real full-matrix host load: its
+# 3rd 25-file sub-suite was empirically measured at ~436s (coverage-guided-ci
+# effort, Phase 3.5, 2026-10-05) -- well past the global 300s default, but a
+# real, passing runtime rather than a hang. These are scoped to this one
+# plugin rather than raised globally so every OTHER plugin keeps the tighter
+# default's fast-fail protection against a genuinely wedged test.
+_SUBSUITE_TIMEOUT_OVERRIDES: dict[str, float] = {
+    "agent-dispatch": 600.0,
+}
+_PLUGIN_TIMEOUT_OVERRIDES: dict[str, float] = {
+    "agent-dispatch": 1800.0,
+}
+
 # The runner is a repository tool, so consume the canonical shared source
 # directly rather than growing another lock implementation.
 sys.path.insert(0, str(LEASE_LIB))
@@ -450,10 +466,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--pre-push", action="store_true",
                     help="hook mode: skip (exit 0) if uv is absent instead of failing")
     ap.add_argument("--timeout", "--subsuite-timeout", dest="subsuite_timeout",
-                    type=float, default=300.0, metavar="SECONDS",
-                    help="wall-clock budget per file-group sub-suite (default: 300)")
-    ap.add_argument("--plugin-timeout", type=float, default=900.0, metavar="SECONDS",
-                    help="aggregate wall-clock budget per plugin (default: 900)")
+                    type=float, default=None, metavar="SECONDS",
+                    help="wall-clock budget per file-group sub-suite (default: 300, "
+                         "higher for certain plugins -- see _SUBSUITE_TIMEOUT_OVERRIDES; "
+                         "an explicit value here always wins)")
+    ap.add_argument("--plugin-timeout", type=float, default=None, metavar="SECONDS",
+                    help="aggregate wall-clock budget per plugin (default: 900, higher "
+                         "for certain plugins -- see _PLUGIN_TIMEOUT_OVERRIDES; an "
+                         "explicit value here always wins)")
     ap.add_argument("--test-timeout", type=float, default=30.0, metavar="SECONDS",
                     help="timeout for each individual pytest item (default: 30)")
     ap.add_argument("--max-files-per-sub-suite", type=int, default=25,
@@ -469,14 +489,18 @@ def main(argv: list[str] | None = None) -> int:
                     help="allow T3/T4 tests that are otherwise skipped by default")
     args = ap.parse_args(argv)
     limits = Limits(
-        wall_seconds=args.subsuite_timeout,
+        wall_seconds=(
+            args.subsuite_timeout if args.subsuite_timeout is not None else 300.0
+        ),
         max_processes=args.max_processes,
         max_memory_mb=args.max_memory_mb,
         max_temp_mb=args.max_temp_mb,
     )
     try:
         limits.validate()
-        if args.plugin_timeout <= 0:
+        if args.subsuite_timeout is not None and args.subsuite_timeout <= 0:
+            raise ValueError("subsuite_timeout must be positive")
+        if args.plugin_timeout is not None and args.plugin_timeout <= 0:
             raise ValueError("plugin_timeout must be positive")
         if args.test_timeout <= 0:
             raise ValueError("test_timeout must be positive")
@@ -547,13 +571,30 @@ def main(argv: list[str] | None = None) -> int:
         failed: list[str] = []
         for name in targets:
             try:
+                effective_subsuite_timeout = (
+                    args.subsuite_timeout
+                    if args.subsuite_timeout is not None
+                    else _SUBSUITE_TIMEOUT_OVERRIDES.get(name, 300.0)
+                )
+                effective_plugin_timeout = (
+                    args.plugin_timeout
+                    if args.plugin_timeout is not None
+                    else _PLUGIN_TIMEOUT_OVERRIDES.get(name, 900.0)
+                )
+                plugin_limits = Limits(
+                    wall_seconds=effective_subsuite_timeout,
+                    max_processes=limits.max_processes,
+                    max_memory_mb=limits.max_memory_mb,
+                    max_temp_mb=limits.max_temp_mb,
+                    poll_seconds=limits.poll_seconds,
+                )
                 rc = run_plugin(
                     name,
                     uv,
                     reinstall=args.reinstall,
                     kexpr=args.kexpr,
-                    limits=limits,
-                    plugin_timeout=args.plugin_timeout,
+                    limits=plugin_limits,
+                    plugin_timeout=effective_plugin_timeout,
                     test_timeout=args.test_timeout,
                     max_files_per_subsuite=args.max_files_per_sub_suite,
                     guards=args.guards,
