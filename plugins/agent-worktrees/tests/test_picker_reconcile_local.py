@@ -136,6 +136,7 @@ def test_picker_reconcile_local_json_reports_group_c_payload(
         "bound_visible_change_count": 2,
         "had_unresolved_bound": False,
         "mux_scan_ok": True,
+        "bound_scan_skipped": False,
     }
     assert payload["rows"] == [
         {
@@ -223,6 +224,142 @@ def test_picker_reconcile_local_skips_load_config_when_no_pr_to_reconcile(
 
     assert payload["summary"]["record_count"] == 2
     assert payload["summary"]["pr_terminal_count"] == 0
+
+
+def test_picker_reconcile_local_skips_bound_scan_for_scoped_fresh_live_hint(
+    monkeypatch, tmp_path
+):
+    """pivot-streaming-transport Phase 5: a scoped (single-worktree) refine
+    call -- the Picker's per-row Actions-dialog case -- must skip the
+    ~4.8s unfiltered `reclaim.resolve_bound_copilots()` scan entirely when
+    the one requested record already carries a fresh, affirmatively-True
+    `bound_live` hint. The asymmetric trust rule (a fresh True short-
+    circuits; a fresh False, stale, or absent hint never does) means the
+    scan must still run for every other case."""
+    import datetime as _dt
+
+    fresh_ts = _dt.datetime.now().isoformat()
+
+    def _forbidden_scan():
+        raise AssertionError(
+            "resolve_bound_copilots() must not run when the scoped "
+            "record's bound_live hint is already fresh and True")
+
+    def _setup_common(monkeypatch, tmp_path, rec):
+        Path(rec.worktree_path).mkdir()
+        monkeypatch.setattr(picker_reconcile_cli.cfg, "tracking_dir",
+                             lambda: tmp_path / "tracking")
+        monkeypatch.setattr(picker_reconcile_cli.cfg, "detect_platform",
+                             lambda: "windows")
+        monkeypatch.setattr(picker_reconcile_cli.tracking, "list_records",
+                             lambda *a, **k: [rec])
+        monkeypatch.setattr(
+            picker_reconcile_cli.sessions, "mux_status_many",
+            lambda ids: {wid: types.SimpleNamespace(exists=False, clients=0,
+                                                      attached=False)
+                         for wid in ids})
+        monkeypatch.setattr(
+            picker_reconcile_cli.sessions, "worktree_session_lock_state",
+            lambda rec: (False, []))
+        monkeypatch.setattr(picker_reconcile_cli.tracking, "stamp_bound_live",
+                             lambda *a, **k: None)
+        monkeypatch.setattr(picker_reconcile_cli.tracking, "stamp_mux_live",
+                             lambda *a, **k: None)
+
+    # Case 1: scoped request, fresh True hint -> scan skipped entirely.
+    rec = _Record("wt-live", tmp_path / "wt-live", bound_live=True)
+    rec.bound_live_at = fresh_ts
+    _setup_common(monkeypatch, tmp_path, rec)
+    monkeypatch.setattr(picker_reconcile_cli.reclaim, "resolve_bound_copilots",
+                         _forbidden_scan)
+
+    payload = picker_reconcile_cli.build_payload(worktree_ids=["wt-live"])
+    assert payload["summary"]["bound_scan_skipped"] is True
+    assert payload["rows"][0]["session_bound_live"] is True
+
+
+def test_picker_reconcile_local_never_skips_bound_scan_on_stale_hint(
+    monkeypatch, tmp_path
+):
+    """The asymmetric half of the same rule: a STALE (TTL-expired) True hint
+    must never be trusted to skip the scan -- only a genuinely fresh one
+    can."""
+    import datetime as _dt
+
+    stale_ts = (_dt.datetime.now() - _dt.timedelta(seconds=9999)).isoformat()
+    rec = _Record("wt-stale", tmp_path / "wt-stale", bound_live=True)
+    rec.bound_live_at = stale_ts
+    Path(rec.worktree_path).mkdir()
+    monkeypatch.setattr(picker_reconcile_cli.cfg, "tracking_dir",
+                         lambda: tmp_path / "tracking")
+    monkeypatch.setattr(picker_reconcile_cli.cfg, "detect_platform",
+                         lambda: "windows")
+    monkeypatch.setattr(picker_reconcile_cli.tracking, "list_records",
+                         lambda *a, **k: [rec])
+    scan_calls = []
+    monkeypatch.setattr(
+        picker_reconcile_cli.reclaim, "resolve_bound_copilots",
+        lambda: scan_calls.append(1) or [])
+    monkeypatch.setattr(
+        picker_reconcile_cli.sessions, "mux_status_many",
+        lambda ids: {wid: types.SimpleNamespace(exists=False, clients=0,
+                                                  attached=False)
+                     for wid in ids})
+    monkeypatch.setattr(
+        picker_reconcile_cli.sessions, "worktree_session_lock_state",
+        lambda rec: (False, []))
+    monkeypatch.setattr(picker_reconcile_cli.tracking, "stamp_bound_live",
+                         lambda *a, **k: None)
+    monkeypatch.setattr(picker_reconcile_cli.tracking, "stamp_mux_live",
+                         lambda *a, **k: None)
+
+    payload = picker_reconcile_cli.build_payload(worktree_ids=["wt-stale"])
+
+    assert scan_calls, "a stale hint incorrectly skipped the authoritative scan"
+    assert payload["summary"]["bound_scan_skipped"] is False
+
+
+def test_picker_reconcile_local_general_sweep_never_skips_bound_scan(
+    monkeypatch, tmp_path
+):
+    """The general (unscoped) periodic sweep -- no `--worktree-id` filter --
+    must never take the skip-scan path even when every record already has a
+    fresh True hint: its own job includes catching a previously-live record
+    that has since gone away (a negative transition), which an
+    affirmative-only hint can never prove on its own."""
+    import datetime as _dt
+
+    fresh_ts = _dt.datetime.now().isoformat()
+    rec = _Record("wt-live", tmp_path / "wt-live", bound_live=True)
+    rec.bound_live_at = fresh_ts
+    Path(rec.worktree_path).mkdir()
+    monkeypatch.setattr(picker_reconcile_cli.cfg, "tracking_dir",
+                         lambda: tmp_path / "tracking")
+    monkeypatch.setattr(picker_reconcile_cli.cfg, "detect_platform",
+                         lambda: "windows")
+    monkeypatch.setattr(picker_reconcile_cli.tracking, "list_records",
+                         lambda *a, **k: [rec])
+    scan_calls = []
+    monkeypatch.setattr(
+        picker_reconcile_cli.reclaim, "resolve_bound_copilots",
+        lambda: scan_calls.append(1) or [{"worktree_id": "wt-live"}])
+    monkeypatch.setattr(
+        picker_reconcile_cli.sessions, "mux_status_many",
+        lambda ids: {wid: types.SimpleNamespace(exists=False, clients=0,
+                                                  attached=False)
+                     for wid in ids})
+    monkeypatch.setattr(
+        picker_reconcile_cli.sessions, "worktree_session_lock_state",
+        lambda rec: (False, []))
+    monkeypatch.setattr(picker_reconcile_cli.tracking, "stamp_bound_live",
+                         lambda *a, **k: None)
+    monkeypatch.setattr(picker_reconcile_cli.tracking, "stamp_mux_live",
+                         lambda *a, **k: None)
+
+    payload = picker_reconcile_cli.build_payload()  # no worktree_ids
+
+    assert scan_calls, "the general sweep incorrectly skipped the scan"
+    assert payload["summary"]["bound_scan_skipped"] is False
 
 
 def test_picker_reconcile_local_avoids_batch_wide_record_lock(monkeypatch, tmp_path):

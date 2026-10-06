@@ -386,20 +386,33 @@ positive here is harmless — the session really is live), but a fresh `False`
 or missing hint **always** falls through to the authoritative probe, because
 "a cached negative is not proof a session hasn't attached since the stamp."
 This phase adopts that exact asymmetry, not a new, weaker rule.)_
-- [ ] In `picker_reconcile_cli.py`, when `_fresh_bound_live_hint(rec)` (and an
+- [x] In `picker_reconcile_cli.py`, when `_fresh_bound_live_hint(rec)` (and an
       analogous fresh-hint read for `mux_live`/`mux_live_at`, mirroring the
       same fields `tracking.stamp_mux_live` already stamps) is **affirmatively
       `True` and fresh**, trust it and skip `reclaim.resolve_bound_copilots()`
       for that record. A `False`, stale, or absent hint **always** falls
       through to the live rescan — never trusted to skip it.
-- [ ] Keep the mux **client-count** scan (`sessions.mux_status_many()`)
+      — **Landed 2026-10-05**, scoped more narrowly than the literal bullet
+      text, deliberately: the skip applies only to a **scoped** request
+      (`--worktree-id` narrows to specific records, the Picker's per-row
+      Actions-dialog refine the module's own docstring already names as the
+      target) when **every** record in that narrow scope has a fresh
+      `_fresh_bound_live_hint` of `True`. The general (unscoped) periodic
+      sweep never skips — its own job includes confirming a previously-live
+      record has gone away, which an affirmative-only hint can never prove.
+      `_fresh_mux_live_hint` was added as the requested analogous helper, but
+      deliberately does **not** participate in the skip gate itself (see the
+      next item) — `mux_live` and `bound_live` are different signals, and
+      trusting one to skip the OTHER's own scan would be exactly the
+      silent-desync risk this phase's own Validation Plan item warns against.
+- [x] Keep the mux **client-count** scan (`sessions.mux_status_many()`)
       unconditional regardless of the bound-live hint: the boolean hint has no
       `mux_clients`/`mux_attached` granularity, and Group C's row payload needs
       those fields. The hint only ever short-circuits
       `resolve_bound_copilots()` (the ~4.8s unfiltered scan) for the
       already-known-live case — it does not replace the (already cheap, ~tens
       of ms) mux session-count probe.
-- [ ] Preserve every existing safety note from Phase 3's own history (never
+- [x] Preserve every existing safety note from Phase 3's own history (never
       infer a conclusion from liveness alone; this hint-trust is a latency
       optimization for a confirmed-positive case only, never a new source of
       truth for a negative or unknown one).
@@ -2200,4 +2213,77 @@ fallback rate in practice turns out to matter.
 **Next**: the outer 7-segment `refresh()` causes (reload/pivot-switch/
 machine-switch) remain unnarrowed, now understood to offer only marginal
 further wins. Phase 5 remains fully unstarted.
+
+### 2026-10-05 — Phase 5 landed: skip the unfiltered bound-copilot scan for a scoped, already-confirmed-live refine
+
+Operator confirmed the Phase 4 assessment (a pivot/machine switch is
+expected to redraw most things -- not worth further outer-segment chasing)
+and said to continue driving. Picked up Phase 5, the other deferred
+render-perf item from the 2026-09-30 investigation: `resolve_bound_
+copilots()`'s own ~4.8s unfiltered, system-wide session-state-dir walk,
+called unconditionally on every `picker-reconcile-local` invocation
+(including the Picker's own per-row Actions-dialog refine, a single-
+worktree call that pays the SAME machine-wide cost as the general sweep).
+
+**Resolved an ambiguity in the Plan's own bullet text before implementing,
+not after:** the bullet names BOTH `_fresh_bound_live_hint` and an
+"analogous fresh-hint read for `mux_live`/`mux_live_at`" as inputs to the
+skip decision, but the very next bullet requires the mux scan to stay
+unconditional regardless. Read literally, trusting a fresh `mux_live=True`
+hint to skip the BOUND-copilot scan would conflate two genuinely different
+liveness signals (a bare/un-muxed Copilot has no mux to attach, and a mux
+session doesn't by itself prove a *bound* Copilot process) -- exactly the
+silent-desync risk this phase's own Validation Plan item warns against.
+Implemented `_fresh_mux_live_hint` as the requested parallel helper (parity
+with the shipped `__main__.py` precedent, available for a future caller),
+but deliberately excluded it from the skip gate itself, which reads
+`_fresh_bound_live_hint` only -- the exact field the scan it's skipping
+would itself produce.
+
+**A second scoping decision, also made explicit rather than silently
+assumed**: the skip only applies to a *scoped* request (`--worktree-id`
+narrows `records` to specific ids -- the per-row Actions-dialog refine the
+module's own docstring already names as the target use case) when **every**
+record in that narrow scope already has a fresh, affirmatively-`True`
+`bound_live` hint. The general (unscoped) periodic sweep never takes this
+path, by construction: its own job includes confirming a previously-live
+record has gone *away* (a negative transition), which an affirmative-only
+hint can never prove -- the asymmetric rule from the precedent (`a fresh
+False or missing hint always falls through`) means an unscoped batch will
+essentially always contain at least one record without a trusted
+affirmative hint anyway, so this restriction costs nothing in practice
+while closing an otherwise-real correctness gap (skipping the scan for the
+general sweep would silently stop detecting sessions that went away).
+
+**Change**: `build_payload()` now computes `skip_bound_scan = bool(
+requested_set) and all(_fresh_bound_live_hint(rec) is True for rec in
+records)` before calling `reclaim.resolve_bound_copilots()`. When true,
+`bound_scan_ok`/`had_unresolved_bound`/`live_ids` are populated directly
+from the trusted hints (`bound_scan_ok=True`, `had_unresolved_bound=False`,
+`live_ids` = every record's id, since all are already confirmed) --
+downstream row-building and stamping logic is completely unchanged, since
+it already branches on exactly those three values. Added `bound_scan_
+skipped` to the summary payload for observability/testability.
+
+**Validation**: three new tests --
+`test_picker_reconcile_local_skips_bound_scan_for_scoped_fresh_live_hint`
+(the scan function raises if called; proves the skip actually happens and
+the row still reports `session_bound_live: True`),
+`test_picker_reconcile_local_never_skips_bound_scan_on_stale_hint` (the
+asymmetric half: a TTL-expired `True` hint still triggers the real scan),
+and `test_picker_reconcile_local_general_sweep_never_skips_bound_scan` (an
+unscoped call with a fresh True hint still scans, proving the scoping
+restriction holds). The existing `..._json_reports_group_c_payload` test's
+expected summary dict was updated for the new `bound_scan_skipped` key.
+`test_picker_reconcile_local.py` + `test_reclaim.py` green (59/59) -- a
+full-suite run of `agent-worktrees` is impractically slow on this machine
+(this repo's own established precedent), so targeted modules plus CI's
+dedicated per-plugin job are the gate here, matching that precedent.
+
+**Next**: Phase 5's own Plan checklist is now fully landed. Remaining open
+Plan work: the deliberately-deferred Phase 3c, and the outer 7-segment
+`refresh()` causes assessed in the prior entry as low-value. The effort's
+Plan has no further un-started, clearly-scoped items without a design
+decision from the operator (Phase 3c's own gate: "do not start until 3b is
+shipped and measured insufficient" -- not yet revisited).
 
