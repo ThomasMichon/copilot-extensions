@@ -453,23 +453,22 @@ def _consume_already_spent(task_id: str, task: dict) -> int:
 def _consume_retired(task_id: str, task: dict) -> int:
     """Refuse to deliver a retired (abandoned) handoff baton.
 
-    A handoff is abandoned when a newer handoff for the same worktree
-    supersedes it, or when it is aborted. Its payload stays readable, but a
-    successor seeded with it must not act on it: the brief is out of date, and
-    a newer handoff may already have a successor of its own.
+    A handoff is abandoned for several reasons: a newer handoff for the same
+    worktree superseded it, it was aborted, or liveness cleanup retired it. Its
+    payload stays readable, but a successor seeded with it must not act on it.
+    The notice names no cause; the event log records the actual one.
     """
     worktree = task.get("target_worktree")
-    where = f" for worktree {worktree}" if worktree else ""
+    where = f" (worktree {worktree})" if worktree else ""
     print(
-        f"[agent-dispatch] Handoff task {task_id} was retired (abandoned) -- "
-        f"a newer handoff{where} superseded it, or it was aborted. NOT "
-        f"delivering the brief. Do NOT act on this task; end your turn.\n"
+        f"[agent-dispatch] Handoff task {task_id}{where} was abandoned, so it "
+        f"is retired. NOT delivering the brief. Do NOT act on this task; end "
+        f"your turn.\n"
         f"See why with: agent-dispatch events {task_id}"
     )
     print(
-        f"agent-dispatch: handoff {task_id} was retired (abandoned: superseded "
-        f"by a newer handoff{where}, or aborted); not delivered -- do not act "
-        f"on it. See: agent-dispatch events {task_id}",
+        f"agent-dispatch: handoff {task_id} was abandoned (retired); not "
+        f"delivered -- do not act on it. See why: agent-dispatch events {task_id}",
         file=sys.stderr,
     )
     return 3

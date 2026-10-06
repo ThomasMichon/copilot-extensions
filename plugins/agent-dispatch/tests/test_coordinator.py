@@ -2828,11 +2828,13 @@ def test_cli_consume_refuses_superseded_handoff(server_url, client, monkeypatch,
     assert __main__._cmd_consume(args) == 3
     captured = capsys.readouterr()
     out = captured.out
-    assert "retired (abandoned)" in out
+    assert "was abandoned" in out
     assert "wt-1" in out
     assert "STALE-BRIEF" not in out
+    # The notice names no cause (abandonment has several); the event log does.
+    assert "superseded" not in out and "superseded" not in captured.err
     # context-handoff surfaces stderr first when consume fails.
-    assert "retired" in captured.err and "do not act" in captured.err
+    assert "abandoned" in captured.err and "do not act" in captured.err
     assert client.get(tid)["status"] == Status.ABANDONED
 
 

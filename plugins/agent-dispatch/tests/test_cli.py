@@ -3882,7 +3882,7 @@ def test_consume_abandoned_handoff_is_not_delivered(monkeypatch, capsys):
         args = build_parser().parse_args(argv)
         assert args.func(args) == 3
         out = capsys.readouterr().out
-        assert "retired (abandoned)" in out
+        assert "was abandoned" in out
         assert "PAYLOAD-XYZZY" not in out
     assert fake.transitions == []
 
@@ -4082,7 +4082,7 @@ def test_consume_claim_failure_with_concurrent_abandon_refuses_handoff(
     args = build_parser().parse_args(["consume", "T1"])
     assert args.func(args) == 3
     captured = capsys.readouterr()
-    assert "retired (abandoned)" in captured.out
+    assert "was abandoned" in captured.out
     assert "THE-ACTUAL-BRIEF-CONTENT" not in captured.out
     assert "could not claim" not in captured.err
     assert "payload" not in fake.transitions
