@@ -1218,6 +1218,153 @@ def test_run_launch_relocated_script_uses_base_flag_for_anchor_mode(
     assert "--worktree-id" not in argv
 
 
+def test_run_launch_relocated_script_forwards_already_claimed_seed(
+    monkeypatch, tmp_path,
+):
+    """resume-prompt-durable-seed-and-mux-fix review finding: the relocated
+    script re-resolves the launch plan ITSELF rather than reusing
+    ``plan.cmd`` -- so a seed the earlier ``_resolve_for`` call already
+    claimed (persisted ``pending_seed`` cleared) and embedded as
+    ``--interactive <seed>`` into that now-discarded ``plan.cmd`` must be
+    recovered and forwarded as ``--seed`` to this re-invocation, or it is
+    silently lost (claimed once, delivered never)."""
+    from worktree_manager import ahp_provider, engine_client, launcher
+
+    plan = type(
+        "Plan",
+        (),
+        {
+            "action": "exec", "exit_code": 0, "worktree_id": "resolved-id-1234",
+            "cmd": ["copilot", "--resume=sess1", "--interactive", "do the thing"],
+        },
+    )()
+    script = tmp_path / "launch-session.ps1"
+    script.write_text("# stub\n", encoding="utf-8")
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
+    monkeypatch.setattr(
+        engine_client,
+        "execution_leg_get",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            engine_client.EngineFeatureUnavailable("older engine")
+        ),
+    )
+    monkeypatch.setattr(
+        ahp_provider,
+        "ensure_session",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("AHP is opt-in")),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "launch",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("must not fall back to launcher.py")
+        ),
+    )
+    calls = []
+
+    class _FakeProc:
+        def wait(self, timeout=None):
+            return 0
+
+    def fake_popen(argv, **_kwargs):
+        calls.append(argv)
+        return _FakeProc()
+
+    monkeypatch.setattr(entrypoint, "_is_windows", lambda: True)
+    monkeypatch.setattr(entrypoint.subprocess, "Popen", fake_popen)
+    request = type(
+        "Request",
+        (),
+        {
+            "project": "demo",
+            "worktree_id": "resolved-id-1234",
+            "mode": "resume",
+            "machine": None,
+            "no_mux": False,
+            "ahp": False,
+            "seed_prompt": None,
+        },
+    )()
+
+    assert entrypoint._run_launch(request) == 0
+    assert len(calls) == 1
+    argv = calls[0]
+    assert argv[-2:] == ["--seed", "do the thing"]
+
+
+def test_run_launch_relocated_script_bare_resume_never_forwards_seed(
+    monkeypatch, tmp_path,
+):
+    """Bare resume never carries a seed through to the relocated script,
+    even if ``plan.cmd`` somehow carried one -- matching the engine's own
+    rejection of --seed alongside --bare-resume."""
+    from worktree_manager import ahp_provider, engine_client, launcher
+
+    plan = type(
+        "Plan",
+        (),
+        {
+            "action": "exec", "exit_code": 0, "worktree_id": "resolved-id-1234",
+            "cmd": ["copilot"],
+        },
+    )()
+    script = tmp_path / "launch-session.ps1"
+    script.write_text("# stub\n", encoding="utf-8")
+    monkeypatch.setattr(entrypoint, "_resolve_for", lambda request: (plan, 0))
+    monkeypatch.setattr(entrypoint, "_relocated_launch_script", lambda: script)
+    monkeypatch.setattr(
+        engine_client,
+        "execution_leg_get",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            engine_client.EngineFeatureUnavailable("older engine")
+        ),
+    )
+    monkeypatch.setattr(
+        ahp_provider,
+        "ensure_session",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("AHP is opt-in")),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "launch",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("must not fall back to launcher.py")
+        ),
+    )
+    calls = []
+
+    class _FakeProc:
+        def wait(self, timeout=None):
+            return 0
+
+    def fake_popen(argv, **_kwargs):
+        calls.append(argv)
+        return _FakeProc()
+
+    monkeypatch.setattr(entrypoint, "_is_windows", lambda: True)
+    monkeypatch.setattr(entrypoint.subprocess, "Popen", fake_popen)
+    request = type(
+        "Request",
+        (),
+        {
+            "project": "demo",
+            "worktree_id": "resolved-id-1234",
+            "mode": "bare-resume",
+            "machine": None,
+            "no_mux": False,
+            "ahp": False,
+            "seed_prompt": None,
+        },
+    )()
+
+    assert entrypoint._run_launch(request) == 0
+    assert len(calls) == 1
+    argv = calls[0]
+    assert "--seed" not in argv
+    assert "--bare-resume" in argv
+
+
 def test_run_launch_relocated_script_sets_no_mux_env(monkeypatch, tmp_path):
     from worktree_manager import ahp_provider, engine_client, launcher
 

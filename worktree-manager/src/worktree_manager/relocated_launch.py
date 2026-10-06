@@ -40,6 +40,20 @@ def _relocated_launch_script():
     return script if script.exists() else None
 
 
+def _seed_already_claimed_in(plan) -> str | None:
+    """Recover a seed ``_resolve_for``'s own ``resolve --json`` call already
+    claimed/embedded into ``plan.cmd`` as ``--interactive <value>`` --
+    covering BOTH an explicit ``--seed`` AND a persisted ``pending_seed``
+    the engine claims (clears) unconditionally on every resolve, regardless
+    of whether this specific call supplied an explicit one. Returns ``None``
+    when no ``--interactive`` argument is present."""
+    cmd = list(getattr(plan, "cmd", None) or [])
+    for index, token in enumerate(cmd[:-1]):
+        if token == "--interactive":
+            return cmd[index + 1]
+    return None
+
+
 def _run_relocated_mux_launch(req, plan, script) -> int:
     """Delegate an ordinary local launch to the relocated launch-session
     script -- the ONE canonical muxed-launch implementation. The script
@@ -64,6 +78,22 @@ def _run_relocated_mux_launch(req, plan, script) -> int:
         args += ["--worktree-id", worktree_id]
         if req.mode == "bare-resume":
             args.append("--bare-resume")
+        else:
+            # resume-prompt-durable-seed-and-mux-fix: this script re-resolves
+            # the launch plan ITSELF (its own internal ``resolve --worktree-id
+            # --json`` call) rather than reusing ``plan.cmd`` above -- the
+            # ``plan`` this function receives already had any seed claimed
+            # (a persisted ``pending_seed`` cleared, same as an explicit one)
+            # and embedded by the earlier ``_resolve_for`` call, but that
+            # embedded argv is discarded here, never reaching this
+            # re-invocation. Recover the already-claimed seed straight out of
+            # ``plan.cmd`` (covers both an explicit seed and a claimed
+            # persisted one uniformly) and forward it so the script's own
+            # resolve call can embed it again -- bare-resume and base are
+            # excluded, matching the engine's own rejection for both.
+            seed = _seed_already_claimed_in(plan)
+            if seed:
+                args += ["--seed", seed]
 
     is_windows = _core()._is_windows()
     no_mux = bool(getattr(req, "no_mux", False))

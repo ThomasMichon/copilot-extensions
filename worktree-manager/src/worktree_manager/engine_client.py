@@ -570,10 +570,13 @@ def resolve_launch_plan(
     launch a fresh worktree), or ``base`` (launch the anchor checkout) must be
     given. ``target_machine`` asks the engine to return an environment-specific
     remote SSH handoff plan for that same selection. ``seed`` is an optional
-    prompt queued as the fresh session's first interactive turn (picker-new-
-    session-prompt-and-composer Phase A); only meaningful with ``new=True`` --
-    the engine's own CLI already rejects it otherwise (and alongside
-    ``target_machine``), so this is intentionally NOT re-validated here.
+    prompt queued as the session's first (``new=True``) or next
+    (``worktree_id`` resume, resume-prompt-durable-seed-and-mux-fix) interactive
+    turn, delivered as a durable ``--interactive`` argument on the returned
+    launch command -- meaningful with either ``new=True`` or a plain resume
+    (``worktree_id`` set, ``bare_resume=False``); the engine's own CLI already
+    rejects it with ``base=True``, ``bare_resume=True``, or alongside
+    ``target_machine``, so this is intentionally NOT re-validated here.
 
     Version-skew tolerant: an older engine that does not know ``--bare-resume`` is
     retried as a plain resume (degrade the feature, don't fail) -- the same contract
@@ -607,7 +610,11 @@ def resolve_launch_plan(
         obj = run_json(project, args, timeout=timeout)
     except EngineError as e:
         detail = _engine_error_detail(e)
-        if bare_resume and "--bare-resume" in detail:
+        if (
+            bare_resume
+            and "unrecognized arguments" in detail
+            and "--bare-resume" in detail
+        ):
             return resolve_launch_plan(
                 project, worktree_id=worktree_id, new=new,
                 base=base, target_machine=target_machine,

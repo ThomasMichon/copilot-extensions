@@ -160,13 +160,13 @@ def test_no_mux_launch_still_gets_the_seed(tmp_path: Path, monkeypatch, capfd):
 def test_bare_resume_leaves_a_persisted_pending_seed_queued_in_json_mode(
     tmp_path: Path, monkeypatch, capfd,
 ):
-    """Review finding: a persisted `pending_seed` must stay queued (never
-    claimed/injected) for a `--bare-resume --json` resume, the same as the
-    non-JSON `_resolve_resume_context` path already guarantees -- bare
-    resume launches Copilot in HOME with no resumed conversation for a
-    seed to join. Without this guard the JSON path's own claim-and-embed
-    block ran unconditionally and silently consumed the queued seed even
-    though `--bare-resume` never delivers it."""
+    """A persisted `pending_seed` must stay queued (never claimed/injected)
+    for a `--bare-resume --json` resume, the same as the non-JSON
+    `_resolve_resume_context` path already guarantees -- bare resume
+    launches Copilot in HOME with no resumed conversation for a seed to
+    join. Without this guard the JSON path's own claim-and-embed block ran
+    unconditionally and silently consumed the queued seed even though
+    `--bare-resume` never delivers it."""
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
     config = _create_config(tmp_path)
     tracking.create_new_record(
@@ -187,14 +187,14 @@ def test_bare_resume_leaves_a_persisted_pending_seed_queued_in_json_mode(
 def test_live_mux_resume_queues_explicit_seed_instead_of_embedding_unused_argv(
     tmp_path: Path, monkeypatch, capfd,
 ):
-    """Review finding: when a live mux session already exists, the external
-    launcher reattaches it and never execs the returned launch command at
-    all (see ``worktree-manager/bin/launch-session.{sh,ps1}``'s own
-    live-mux handling) -- so embedding/claiming a seed into that unused argv
-    would silently lose it. The non-JSON `_resolve_resume_context` path
-    must instead persist an explicit `--seed` as `pending_seed` (for the
-    older send-keys delivery, which CAN reach an already-live pane) rather
-    than clearing/embedding it into the command nobody will run."""
+    """When a live mux session already exists, the external launcher
+    reattaches it and never execs the returned launch command at all (see
+    ``worktree-manager/bin/launch-session.{sh,ps1}``'s own live-mux
+    handling) -- so embedding/claiming a seed into that unused argv would
+    silently lose it. The non-JSON `_resolve_resume_context` path must
+    instead persist an explicit `--seed` as `pending_seed` (for the older
+    send-keys delivery, which CAN reach an already-live pane) rather than
+    clearing/embedding it into the command nobody will run."""
     from agent_worktrees import resolve_launch_cli as rlc
 
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)

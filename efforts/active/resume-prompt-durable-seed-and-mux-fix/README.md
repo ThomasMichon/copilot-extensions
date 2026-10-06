@@ -255,6 +255,18 @@ is this effort's actual Phase 1 deliverable.)
       uses for its own restore-on-failure case) -- this requires touching
       `launch-session.{ps1,sh}` directly, which is why it's deferred here
       rather than attempted in Phase 1.
+- [ ] **Deferred from Phase 1 (fifth review round):** a live-mux reattach
+      (`_resolve_resume_context`'s `verdict.mux_live` branch, Phase 1) now
+      correctly QUEUES a seed instead of losing it, but does not actually
+      DELIVER it on that exact reattach -- it is only delivered on the
+      next fresh launch/attach that reaches it. Actual delivery on the
+      reattach itself needs `launch-session.{ps1,sh}` to invoke the
+      existing send-keys mechanism (`pane_seed.mux_seed_pane`, via
+      whatever wraps it for the script's own live-session join path) after
+      its own reattach -- `resolve`'s single, fast, plan-only process has
+      no reasonable way to block synchronously on pane readiness itself
+      (`mux_seed_pane` can poll for up to minutes). Requires the same
+      launcher-script changes as the item above; fold into that work.
 
 ## Validation Plan
 
@@ -398,3 +410,63 @@ _Pending._
     `test_live_mux_resume_queues_explicit_seed_instead_of_embedding_unused_argv`.
   - Re-ran the full keyword sweep: 215 tests passing (213 + 2 new), no
     regressions.
+- **2026-10-06** — A fifth Copilot review pass surfaced 2 genuinely new
+  **High**-severity findings (the deepest yet -- both trace into
+  `worktree-manager`, not just `agent-worktrees`), plus 2 Low nits and 2
+  "Previously missed" findings against this PR's own earlier (unchanged
+  since) commits:
+  - **A relocated/delegated launch discarded the already-claimed seed
+    entirely.** `worktree_manager.relocated_launch._run_relocated_mux_launch`
+    re-invokes `launch-session.{sh,ps1}` with only `--project`/
+    `--worktree-id`/`--bare-resume` -- it never reused the `plan.cmd` the
+    earlier `_resolve_for` call already built (with the seed claimed and
+    embedded into it), so the script's own SECOND, actually-exec'd
+    `resolve --worktree-id --json` call ran with no seed at all: an
+    explicit `--seed` was never forwarded, and a persisted `pending_seed`
+    had already been claimed (cleared) by the first, discarded resolve.
+    Fixed by extracting the already-claimed seed straight out of
+    `plan.cmd`'s own `--interactive <value>` pair
+    (`relocated_launch._seed_already_claimed_in`) and forwarding it as
+    `--seed` on the delegated re-invocation -- covering both the explicit
+    and the persisted-and-claimed case uniformly, excluding bare-resume
+    (matching the engine's own rejection). Two new tests:
+    `test_run_launch_relocated_script_forwards_already_claimed_seed`,
+    `test_run_launch_relocated_script_bare_resume_never_forwards_seed`.
+  - **A live mux reattach only queued the seed, never actually delivered
+    it.** The immediately-prior round's own live-mux fix (above) prevents
+    permanent loss, but the reviewer correctly noted it does not actually
+    deliver the seed on THIS reattach -- the engine process returns a plan
+    and exits; it has no mechanism to type into an already-live pane
+    itself (`pane_seed.mux_seed_pane` can block up to minutes polling for
+    readiness, which is the wrong shape for a fast, plan-only `resolve`
+    call to perform synchronously). Actually delivering on this exact
+    reattach needs the external launcher script itself to invoke the
+    existing send-keys delivery after its own reattach, not something
+    `resolve`'s single process can do from inside this phase's scope --
+    **accepted as an explicit Phase 3 follow-up** (the queued seed is
+    still delivered correctly on the NEXT fresh launch/attach that reaches
+    it, so nothing is lost, only delayed versus the ideal "deliver on this
+    exact reattach").
+  - **Compatibility-fallback false match (Medium, "Previously missed" --
+    pre-existing code from the second round, not yet re-reviewed until
+    now):** `worktree_manager.engine_client.resolve_launch_plan`'s
+    version-skew retry matched ANY error containing the substring
+    `--bare-resume`, including this PR's own deliberate
+    `--seed is not supported together with --bare-resume` rejection --
+    silently retrying without `--bare-resume` (keeping the seed) instead
+    of surfacing the rejection, exactly defeating the guard the second
+    round added. Fixed by requiring `"unrecognized arguments"` in the
+    error text too, mirroring the sibling `target_machine` fallback's own
+    stricter check a few lines below. New test
+    `test_resolve_bare_resume_plus_seed_rejection_is_not_treated_as_skew`.
+  - **Stale docstring (Low):** `resolve_launch_plan`'s own seed-kwarg
+    docstring still said "only meaningful with `new=True`" -- updated to
+    describe `worktree_id`-resume seeding too.
+  - **Review-provenance nits (Low, x2):** removed "review finding"/"review
+    process" language from two test docstrings
+    (`test_resolve_seed_delivery.py`), same cleanup as the third round.
+  - New changefile for `worktree-manager` (the engine_client/
+    relocated_launch fixes land in a different plugin than
+    `agent-worktrees`).
+  - Full `worktree-manager` suite (1693 tests) and the `agent-worktrees`
+    keyword sweep (215 tests) both pass with no regressions.
