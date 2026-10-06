@@ -3307,50 +3307,86 @@ class TestCmdHandoffCutoverTrigger:
         out = capsys.readouterr().out
         assert "no actionable pending handoff" in out
 
+    @pytest.mark.parametrize("seed_ledger_entry", [False, True])
     def test_automatic_sweep_path_never_arms_an_ordinary_trigger_handoff_call(
-        self, monkeypatch, tmp_path, tmp_tracking_dir, monkeypatch_config,
+        self, monkeypatch, tmp_tracking_dir, monkeypatch_config,
+        seed_ledger_entry,
     ):
         """Safety boundary: an ordinary (non-``force``) ``trigger_handoff``
         MCP tool call in ``mode: manual-only`` must never result in a live
         cutover on its own -- only the Mux Companion's "Cut over" button (or
-        a direct ``handoff-cutover-trigger`` call) may arm one. On the JS
-        side, an ordinary call never reaches ``noteHandoffInRecord``, so it
-        creates NO entry in ``record.handoffs`` -- only the unconditional
-        session-state marker file. This proves the Python-side half of that
-        boundary: ``_monitor_maybe_process_handoff_record`` -- the EXACT
-        function the resident status-monitor's automatic per-tick sweep
-        calls for every tracked worktree, with no human action involved --
-        must not itself read that marker and arm anything. Only
-        ``_arm_pending_handoff_from_session_state`` (reached exclusively via
-        ``cmd_handoff_cutover_trigger``, i.e. an explicit human action) may
-        do that. Exercises the real function directly, bypassing the CLI
+        a direct ``handoff-cutover-trigger`` call) may arm one.
+
+        On the JS side (``handoff-core.mjs``'s ``triggerHandoff``), ``note-
+        handoff`` is called UNCONDITIONALLY regardless of mode/force -- an
+        ordinary manual-only call DOES create a real ``record.handoffs``
+        entry, just with ``live_cutover=False`` (``seed_ledger_entry=True``
+        models this, the realistic shape). ``seed_ledger_entry=False`` also
+        covers the degenerate case of no ledger entry at all (e.g. a
+        ``note-handoff`` failure).
+
+        This proves the Python-side half of the boundary:
+        ``_monitor_maybe_process_handoff_record`` -- the EXACT function the
+        resident status-monitor's automatic per-tick sweep calls for every
+        tracked worktree, with no human action involved -- must not itself
+        read the session-state marker and arm (or act on) an unarmed entry.
+        Only ``_arm_pending_handoff_from_session_state`` (reached exclusively
+        via ``cmd_handoff_cutover_trigger``, i.e. an explicit human action)
+        may do that. Exercises the real function directly, bypassing the CLI
         verb entirely, so a future change that made the automatic sweep
-        path ALSO consult session-state markers would be caught here."""
+        path ALSO consult session-state markers -- or act on an unarmed
+        ledger entry -- would be caught here."""
+        from pathlib import Path as _Path
         from agent_worktrees import tracking as _tracking
 
         monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "1")
         path = self._record(tmp_tracking_dir, "wt-trigger-6")
         _tracking.register_session("wt-trigger-6", "predecessor-6")
         record = _tracking.load_record(path)
-        # Exactly what an ordinary, non-force trigger_handoff call leaves
-        # behind in manual-only mode: the unconditional session-state
-        # marker, and nothing in record.handoffs at all.
-        marker_path = tmp_path / "handoff-request.json"
+        token = "handoff-predecessor-6"
+        if seed_ledger_entry:
+            # The realistic shape: noteHandoff() already ran unconditionally
+            # with liveCutover=False, so a real entry exists but is unarmed.
+            _tracking.open_handoff(record, "predecessor-6", token, save=False)
+            _tracking.save_record(record, path)
+            record = _tracking.load_record(path)
+        # Exactly what an ordinary trigger_handoff call also leaves behind
+        # regardless of mode: the unconditional session-state marker, with a
+        # nonempty seed (as a real handoff would carry). Written to the REAL
+        # resolved path (``_monitor_session_state_handoff_path`` is a plain,
+        # non-overridable function along this call path -- unlike
+        # ``_arm_pending_handoff_from_session_state``'s own call site, it
+        # cannot be monkeypatched here), relying on the suite's own global
+        # ``Path.home()`` sandbox redirection for isolation.
+        marker_path = _Path.home() / ".copilot" / "session-state" / "predecessor-6" / "handoff-request.json"
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
         marker_path.write_text(json.dumps({
-            "handoffId": "handoff-predecessor-6", "sessionId": "predecessor-6",
+            "handoffId": token, "sessionId": "predecessor-6",
+            "seed": "Task: example | Resume: /consume-handoff to take over",
             "consumed": False,
         }), encoding="utf-8")
+        # Spying on the claim step directly (rather than only inferring from
+        # head/session-count side effects) proves the live_cutover filter
+        # itself rejects an unarmed entry BEFORE any claim is even
+        # attempted -- not merely that a claim happened to fail for an
+        # unrelated reason (e.g. a nonexistent worktree path in this
+        # fixture).
+        claim_calls = []
         monkeypatch.setattr(
-            m, "_monitor_session_state_handoff_path",
-            lambda sid: marker_path if sid == "predecessor-6" else None,
+            m, "_monitor_claim_handoff_cutover",
+            lambda request_data: (claim_calls.append(request_data), {"ok": False})[1],
         )
-        assert record.handoffs == []
+        before_handoffs = list(record.handoffs)
 
         m._monitor_maybe_process_handoff_record(record)
 
+        assert claim_calls == []
         reloaded = _tracking.load_record(path)
-        assert reloaded.handoffs == []
-        assert reloaded.pending_handoffs == []
+        assert len(reloaded.handoffs) == len(before_handoffs)
+        for handoff in reloaded.handoffs:
+            assert handoff.live_cutover is False
+            assert handoff.successor is None
+            assert handoff.candidate is None
         assert reloaded.resolved_head_session == record.resolved_head_session
 
 
