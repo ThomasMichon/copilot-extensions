@@ -355,74 +355,40 @@ risk wedging everything").
       `test_liveness_gc_publishes_a_bus_event_for_auto_suspend_with_zero_requeued`
       (HTTP 409 in liveness-GC/board-relay interaction). **Landed
       2026-10-05**, PR #5355 -- see Journal.
-- [ ] Fix (or file) the remaining real, reproducible `agent-logger`
+- [x] Fix (or file) the remaining real, reproducible `agent-logger`
       findings from the full-matrix pass (8 failures total, reconfirmed
       2026-10-05 via `python tools/run-plugin-tests.py agent-logger
-      --timeout 600 --plugin-timeout 1200`):
+      --timeout 600 --plugin-timeout 1200`): **all 8 now fixed.**
       - [x] **`test_scaffold.py`'s 3 `sync.local_path` failures** --
         root-caused and **fixed, 2026-10-05** (PR #5383): test-only
         POSIX-path-semantics assumptions, not production bugs. See
         Journal.
-      - [ ] **`test_install_binstub.py::test_stamp_supports_first_use_provision_from_snapshot_only`**
-        -- the Windows `MAX_PATH` structural issue, root-caused precisely
-        this leg: `uv`'s `pip install` build of a vendored lib
-        (`agent-config-migrate` this run; `agent-plugin-activation`
-        previously -- confirms it's structural, not one library) fails
-        with `error: [Errno 2] No such file or directory:
-        'build\bdist.win-amd64\wheel\.\agent_config_migrate-0.1.0.dev2-py3.12.egg-info\dependency_links.txt'`
-        -- legacy `setuptools bdist_wheel`'s two-phase build (`build\lib\...`
-        then copy into `build\bdist.win-amd64\wheel\.\...`) pushes the full
-        path (snapshot dir + this relative build path) past Windows'
-        260-char `MAX_PATH`. **The operator-chosen "long-path opt-in"
-        direction was attempted 2026-10-05 and reverted -- see Journal for
-        the full empirical trail.** Confirmed NOT viable without further
-        work: neither a `\\?\`-prefixed argument nor the machine-wide
-        `LongPathsEnabled` registry policy helps (the former is stripped
-        by `uv` before the build backend sees it; the latter can't be
-        assumed set), and a short-named NTFS junction -- while it DOES fix
-        a clean, hand-built repro -- runs into a cascade of real
-        environment obstacles under this plugin's actual test/containment
-        setup: vendored libs' own sibling `[tool.uv.sources]` path
-        dependencies break unless ALL of them are junctioned through one
-        shared ancestor (not each lib independently); TEMP/TMP/
-        LOCALAPPDATA/USERPROFILE are all deliberately overridden to an
-        equally-deep root by both the real containment wrapper and this
-        plugin's own test-level isolation, so there is no env-derived
-        anchor point immune to that; `[Environment]::GetFolderPath(...)`
-        bypasses the override under Windows PowerShell 5.1 but NOT under
-        PowerShell 7/.NET Core (which `install.ps1` prefers); and a fixed
-        system path like `C:\Windows\Temp` can be created but not reliably
-        *deleted* again on this (EDR/policy-governed) machine. Remaining
-        realistic options: (b) shortening the snapshot directory
-        structure (the operator's non-preferred option, still available),
-        or a smaller-scoped version of (a) that accepts a known gap (e.g.
-        detect-and-warn rather than silently attempt a workaround).
-        Moving these vendored libs off legacy `bdist_wheel` remains a
-        bigger, separate undertaking.
-      - [ ] **`test_chronicle.py`'s 3 failures** (`test_scan_uses_generic_provenance_when_origin_sidecar_is_absent`,
-        `test_newer_rescue_capture_is_a_distinct_chronicle_unit`,
-        `test_scan_validated_provenance_overrides_conflicting_origin`) and
-        **`test_rescue_sync.py::test_failed_rollback_retains_recovery_backup`**
-        -- confirmed this leg to be the *same* `MAX_PATH` family, not
-        independent bugs and not the originally-hypothesized rollback
-        bookkeeping bug: all 4 pass cleanly in isolation (`pytest
-        tests/test_rescue_sync.py::test_failed_rollback_retains_recovery_backup`
-        alone: PASSED) and fail only under `run-plugin-tests.py`'s own
-        nested containment temp root
-        (`...\ce-agent-logger-<rand>\pytest\group-1\<testname>0\...`)
-        combined with agent-logger's own content-addressed directory
-        naming in `provenance.py:rescue_snapshot_path` -- **two full
-        64-char SHA-256 hex path segments**
-        (`.session-sync-rescue-captures\<hex>\<hex>`,
-        `.session-sync-replacement\<uuid>.active\...`) -- pushing the
-        combined path past 260 chars: `FileNotFoundError: [WinError 3]` /
-        `[Errno 2]`. **Also needs an operator design call**: shortening
-        `rescue_snapshot_path`'s on-disk hash length (e.g. a truncated
-        digest, or git-style 2-char-shard-plus-full-hash) is a production
-        change to a durability-sensitive, content-addressed path scheme --
-        it needs a real compatibility/migration story for any
-        already-on-disk full-length-hash snapshot, not just a one-line
-        truncation.
+      - [x] **The Windows `MAX_PATH` family (5 failures):
+        `test_install_binstub.py::test_stamp_supports_first_use_provision_from_snapshot_only`,
+        `test_chronicle.py` x3, and
+        `test_rescue_sync.py::test_failed_rollback_retains_recovery_backup`**
+        -- all the same structural issue: legacy `setuptools bdist_wheel`'s
+        own relative build-output path, plus two full 64-char SHA-256
+        hex rescue-capture directory segments, plus a full 32-char
+        uuid4-hex transaction directory, combined with a deep snapshot/
+        containment root, pushed several real paths past Windows' 260-char
+        `MAX_PATH`. The operator-chosen "long-path opt-in" direction
+        (`\\?\` prefix, NTFS junctions, `LongPathsEnabled`) was attempted
+        and reverted first -- see Journal for the full empirical trail of
+        why each variant failed in this plugin's actual environment.
+        **Fixed instead, 2026-10-05** (PR #5440), by shortening the
+        MAX_PATH-contributing names directly for real headroom, not just
+        enough to squeak under 260: truncated `provenance.py`'s
+        `rescue_snapshot_path` hash segments and `filesystem.py`'s
+        `uuid4().hex` transaction/temp IDs to 16 hex chars each (64 bits
+        -- ample collision resistance for a per-machine cache/transaction
+        id; both are recomputed fresh by the same function on every read,
+        so there is no separately-persisted mapping and no migration
+        concern), plus shortened `run-plugin-tests.py`'s own disposable
+        containment sandbox naming (zero compatibility risk -- regenerated
+        fresh every run). Confirmed under the real containment scenario,
+        not just in isolation: full agent-logger suite now 749 passed, 18
+        skipped, 0 failed.
 - [ ] `tools/run-plugin-tests.py`'s default 300s per-sub-suite wall-clock
       budget is too tight for `agent-dispatch`'s own 3rd 25-file sub-suite
       under real full-matrix host load (observed hitting `[LIMIT]
@@ -523,6 +489,57 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-05 — Phase 3.5: MAX_PATH fixed by shortening directory/ID names (all 8 agent-logger failures now fixed)
+After the long-path opt-in attempt below was reverted, operator explicitly
+chose shortening instead: "we shouldn't be getting anywhere *near* to
+MAX_PATH in normal course of business" -- real headroom, not a bare pass.
+**Landed PR #5440.**
+
+- `provenance.py`'s `rescue_snapshot_path` hashed `session_id`/`capture_id`
+  into two FULL 64-char SHA-256 hex digests, nested as two directory
+  levels (128+ combined chars). Truncated both to 16 hex chars (64 bits --
+  for a per-machine cache keyed by session/capture id, the birthday bound
+  for a 50% collision chance is ~4.3 billion entries; not a realistic
+  concern). Added `rescue_session_key()`/`rescue_capture_key()` as the
+  single source of truth, since `filesystem.py`'s own `prune()` computes
+  the identical session-level hash independently to clean up matching
+  snapshot dirs -- it now calls `rescue_session_key()` instead of
+  duplicating the raw `hashlib.sha256(...)` call, so the two can never
+  drift apart.
+- `filesystem.py` separately used a full 32-char `uuid4().hex` in 4 places
+  for transaction/temp-file suffixes -- most importantly the
+  `.session-sync-replacement/<id>.active` transaction directory, a real
+  extra nesting level. Truncated the same way via a new
+  `short_unique_id()` helper.
+- Neither truncation is migration-sensitive: every path is recomputed
+  fresh by the same function on every read, never looked up through a
+  separately-persisted mapping, so there's nothing to migrate for
+  already-on-disk state -- a materially simpler story than the "needs a
+  real compatibility/migration story" concern raised when this was first
+  deferred (see the two Journal entries below).
+- Also shortened `tools/run-plugin-tests.py`'s own disposable containment
+  sandbox naming (`ce-<plugin>-<rand>/pytest/group-N/` -> a few chars
+  shorter) -- zero compatibility risk, since it's regenerated fresh every
+  run and never read by anything outside that one process. ~23 chars of
+  headroom, and this is what actually flipped
+  `test_stamp_supports_first_use_provision_from_snapshot_only` from a
+  7-char-over failure to a clean pass.
+- **Module-size guard caught a real regression along the way**: the first
+  version of this fix added the new `short_unique_id()` helper directly in
+  `filesystem.py`, pushing it to 2000 lines against its grandfathered,
+  shrink-only 1989-line ceiling (`tools/check-module-size.py`,
+  pre-push-enforced). Widening that ceiling is explicitly reserved for a
+  separate, scheduled post-merge job, never a PR's own diff (per the
+  script's own docstring) -- so moved the new helper into `provenance.py`
+  instead (409 lines, nowhere near its 1000-line generic cap) and had
+  `filesystem.py` import it, which nets out as a small shrink instead of a
+  growth.
+
+Confirmed under the real containment scenario (not just in isolation):
+`python tools/run-plugin-tests.py agent-logger` now reports 749 passed, 18
+skipped, 0 failed -- all 8 originally-reported Phase 3.5 failures are
+fixed (3 via PR #5383, 5 via this PR).
 
 ### 2026-10-05 — Phase 3.5: MAX_PATH "long-path opt-in" attempted and reverted
 Operator picked "have the installer/test harness opt into Windows

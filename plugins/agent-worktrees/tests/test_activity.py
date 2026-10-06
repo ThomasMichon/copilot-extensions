@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -285,12 +286,17 @@ def test_dispatch_background_prune_reaps_the_child_without_blocking(monkeypatch)
     import time
 
     wait_called = threading.Event()
+    seen_kwargs: dict = {}
 
     class FakeProc:
         def wait(self):
             wait_called.set()
 
-    monkeypatch.setattr(activity.subprocess, "Popen", lambda *a, **k: FakeProc())
+    def _fake_popen(*a, **k):
+        seen_kwargs.update(k)
+        return FakeProc()
+
+    monkeypatch.setattr(activity.subprocess, "Popen", _fake_popen)
 
     start = time.monotonic()
     activity._dispatch_background_prune(Path("/does/not/matter/activity.jsonl"))
@@ -298,6 +304,9 @@ def test_dispatch_background_prune_reaps_the_child_without_blocking(monkeypatch)
 
     assert elapsed < 1, "dispatch itself must return immediately"
     assert wait_called.wait(timeout=2), "the child must be reaped via a background thread"
+    # Never the caller's cwd -- this detached worker may outlive the repo/
+    # worktree checkout log_event() happened to be called from.
+    assert seen_kwargs.get("cwd") == os.path.expanduser("~")
 
 
 def test_prune_concurrent_invocations_never_corrupt_the_log(tmp_path: Path):

@@ -264,6 +264,14 @@ def ensure_broker(
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        # Never the caller's ambient cwd: this is a long-lived detached
+        # proxy daemon that may outlive whatever repo/worktree checkout the
+        # caller happened to be running from (service-lifecycle-
+        # supervision's "nothing pins the plugin payload" rule, generalized
+        # to every deletable checkout). It locates everything it needs via
+        # absolute arguments (`endpoint_file`), so its cwd is irrelevant to
+        # its job -- root it at HOME.
+        cwd=os.path.expanduser("~"),
         **windowless_daemon_kwargs(breakaway=True),
     )
     deadline = time.monotonic() + timeout

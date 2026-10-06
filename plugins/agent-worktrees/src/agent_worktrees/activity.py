@@ -483,6 +483,12 @@ def _dispatch_background_prune(path: Path) -> None:
             ],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL, env=env,
+            # Never the caller's cwd: this detached worker may outlive the
+            # repo/worktree checkout log_event() happened to be called from
+            # (service-lifecycle-supervision's "nothing pins the plugin
+            # payload" rule) -- it works entirely off the absolute `path`
+            # argument, so its cwd is irrelevant to its job; root it at HOME.
+            cwd=os.path.expanduser("~"),
             **detached_kwargs(breakaway=True),
         )
         threading.Thread(target=proc.wait, daemon=True).start()

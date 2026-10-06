@@ -420,6 +420,12 @@ def _spawn_detached_argv(argv: list[str]) -> None:
     import subprocess as _sp
 
     core = _core()
+    # Never the caller's ambient cwd: this is a long-lived supervised daemon
+    # that may outlive whatever repo/worktree checkout the caller happened
+    # to be running from (service-lifecycle-supervision's "nothing pins the
+    # plugin payload" rule, generalized to every deletable checkout). Its
+    # own log files already live under the durable install dir -- root cwd
+    # there too.
     try:
         logf = open(os.path.join(core._INSTALL_DIR, "agent-bridge.log"), "ab")
         errf = open(os.path.join(core._INSTALL_DIR, "agent-bridge-err.log"), "ab")
@@ -428,6 +434,7 @@ def _spawn_detached_argv(argv: list[str]) -> None:
             stdout=logf,
             stderr=errf,
             stdin=_sp.DEVNULL,
+            cwd=core._INSTALL_DIR,
             **core.windowless_daemon_kwargs(breakaway=True),
         )
         return
@@ -441,6 +448,7 @@ def _spawn_detached_argv(argv: list[str]) -> None:
             stdout=logf,
             stderr=errf,
             stdin=_sp.DEVNULL,
+            cwd=core._INSTALL_DIR,
             **core.windowless_daemon_kwargs(),
         )
 

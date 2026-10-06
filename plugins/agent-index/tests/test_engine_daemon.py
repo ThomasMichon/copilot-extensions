@@ -148,7 +148,7 @@ def test_start_default_wait_timeout_is_300_seconds(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENT_INDEX_ENGINE_START_TIMEOUT", raising=False)
     _prepare_venv(tmp_path)
     monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: False)
-    monkeypatch.setattr(daemon, "_spawn", lambda cmd, *, python: FakeProc(alive=True))
+    monkeypatch.setattr(daemon, "_spawn", lambda cmd, *, python, home: FakeProc(alive=True))
     monkeypatch.setattr(daemon, "_write_pid", lambda *a, **k: None)
 
     clock = {"t": 0.0}
@@ -168,7 +168,7 @@ def test_start_wait_timeout_is_overridable_via_env(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_INDEX_ENGINE_START_TIMEOUT", "5")
     _prepare_venv(tmp_path)
     monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: False)
-    monkeypatch.setattr(daemon, "_spawn", lambda cmd, *, python: FakeProc(alive=True))
+    monkeypatch.setattr(daemon, "_spawn", lambda cmd, *, python, home: FakeProc(alive=True))
     monkeypatch.setattr(daemon, "_write_pid", lambda *a, **k: None)
 
     clock = {"t": 0.0}
@@ -197,7 +197,7 @@ def test_start_spawns_and_waits_for_health(monkeypatch, tmp_path):
         return calls["n"] >= 2  # unhealthy at the guard, healthy while waiting
 
     monkeypatch.setattr(daemon, "is_healthy", health)
-    monkeypatch.setattr(daemon, "_spawn", lambda cmd, *, python: FakeProc())
+    monkeypatch.setattr(daemon, "_spawn", lambda cmd, *, python, home: FakeProc())
     monkeypatch.setattr(daemon.time, "sleep", lambda _s: None)
 
     out = daemon.start(tmp_path)
@@ -205,7 +205,7 @@ def test_start_spawns_and_waits_for_health(monkeypatch, tmp_path):
     assert daemon._read_pid(tmp_path) == 5150
 
 
-def test_spawn_uses_windowless_daemon_contract(monkeypatch):
+def test_spawn_uses_windowless_daemon_contract(monkeypatch, tmp_path):
     captured = {}
     monkeypatch.setattr(
         daemon,
@@ -218,12 +218,17 @@ def test_spawn_uses_windowless_daemon_contract(monkeypatch):
         lambda cmd, **kwargs: captured.update(cmd=cmd, kwargs=kwargs) or FakeProc(),
     )
 
-    daemon._spawn(["pythonw.exe", "-m", "agent_index_engine.app"], python="python.exe")
+    daemon._spawn(
+        ["pythonw.exe", "-m", "agent_index_engine.app"], python="python.exe", home=tmp_path
+    )
 
     assert captured["kwargs"]["creationflags"] == 0x08000000
     assert captured["kwargs"]["stdin"] is daemon.subprocess.DEVNULL
     assert captured["kwargs"]["stdout"] is daemon.subprocess.DEVNULL
     assert captured["kwargs"]["stderr"] is daemon.subprocess.DEVNULL
+    # Never the caller's ambient cwd -- this is a long-lived, detached
+    # daemon rooted at its own durable engine home instead.
+    assert captured["kwargs"]["cwd"] == str(tmp_path)
 
 
 def test_start_raises_on_early_exit(monkeypatch, tmp_path):
@@ -232,7 +237,7 @@ def test_start_raises_on_early_exit(monkeypatch, tmp_path):
     py.write_text("", encoding="ascii")
     monkeypatch.setattr(daemon, "is_healthy", lambda *a, **k: False)
     monkeypatch.setattr(
-        daemon, "_spawn", lambda cmd, *, python: FakeProc(alive=False, returncode=1)
+        daemon, "_spawn", lambda cmd, *, python, home: FakeProc(alive=False, returncode=1)
     )
     monkeypatch.setattr(daemon.time, "sleep", lambda _s: None)
     with pytest.raises(RuntimeError, match="exited early"):
