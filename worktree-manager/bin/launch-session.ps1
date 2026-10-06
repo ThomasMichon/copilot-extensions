@@ -1660,6 +1660,17 @@ function Set-AwPsmuxServerPrioritySafe {
         catch { Write-SetupLog "psmux: priority boost failed: $($_.Exception.Message)" 'WARN' }
     }
 }
+# Apply the Mux Companion's Ctrl+K popup binding (visions/mux-companion
+# §mux-bind-keybind-relay) to this session's server via source-file. Called
+# AFTER Invoke-AwPsmuxPassthroughSafe at every call site -- passthrough's own
+# `unbind-key -a -T root` would otherwise wipe this binding if applied first.
+function Invoke-AwMuxCompanionBindSafe {
+    param([string]$Session)
+    if (Get-Command Invoke-AwMuxCompanionBind -ErrorAction SilentlyContinue) {
+        try { Invoke-AwMuxCompanionBind -Session $Session -ManagerRoot (Split-Path -Parent $PSScriptRoot) }
+        catch { Write-SetupLog "psmux: companion keybind apply failed: $($_.Exception.Message)" 'WARN' }
+    }
+}
 if (-not $noMux) {
     $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
     # `.` is the window/pane separator in a mux target -- keep in sync with
@@ -1698,6 +1709,9 @@ if (-not $noMux) {
         # arrow passthrough.
         Invoke-AwPsmuxPassthroughSafe $sessName
         Set-AwPsmuxServerPrioritySafe $sessName
+        # Apply the Companion's Ctrl+K popup bind AFTER passthrough -- see
+        # Invoke-AwMuxCompanionBindSafe's own comment for why ordering matters.
+        Invoke-AwMuxCompanionBindSafe $sessName
         Invoke-ManagedMuxRegister $sessName $muxStatusPath
         # Write last_session immediately before attach: the 3.3.6 attach
         # regression reads that file instead of honoring -t, so this must
@@ -2002,6 +2016,9 @@ if (-not $noMux) {
         # (per-session source-file) so PageUp/wheel/arrows reach Copilot.
         Invoke-AwPsmuxPassthroughSafe $sessName
         Set-AwPsmuxServerPrioritySafe $sessName
+        # Apply the Companion's Ctrl+K popup bind AFTER passthrough -- see
+        # Invoke-AwMuxCompanionBindSafe's own comment for why ordering matters.
+        Invoke-AwMuxCompanionBindSafe $sessName
         Invoke-ManagedMuxRegister $sessName $muxStatusPath
         Invoke-SeedDeliverySafe $plan.worktree_id
         if ($nested) {
