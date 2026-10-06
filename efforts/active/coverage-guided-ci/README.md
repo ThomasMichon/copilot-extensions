@@ -389,14 +389,39 @@ risk wedging everything").
         fresh every run). Confirmed under the real containment scenario,
         not just in isolation: full agent-logger suite now 749 passed, 18
         skipped, 0 failed.
-- [ ] `tools/run-plugin-tests.py`'s default 300s per-sub-suite wall-clock
+- [x] `tools/run-plugin-tests.py`'s default 300s per-sub-suite wall-clock
       budget is too tight for `agent-dispatch`'s own 3rd 25-file sub-suite
       under real full-matrix host load (observed hitting `[LIMIT]
       wall-clock limit exceeded (300s)` once sub-suites 1-2 started
       passing cleanly after the fix above -- previously masked because an
       earlier sub-suite's failure always short-circuited the run before
-      reaching it). Needs its own root-cause pass: a genuinely slow
-      sub-suite vs. a budget too tight for this host's current load.
+      reaching it). **Root-caused and fixed, 2026-10-05**: genuinely
+      slow (not a bug/hang) -- see Journal. Also surfaced, and fixed in
+      the same leg, a pre-existing bug this budget fix exposed: a
+      duplicated `@pytest.mark.skipif` decorator on one POSIX-only test
+      in `test_procutil.py` left the *next* POSIX-only test unmarked,
+      so it ran (and failed) on Windows.
+- [ ] A newly-surfaced class of intermittent, host-environment flakes in
+      `agent-dispatch`, each reproducing cleanly in isolation but failing
+      once under real full-matrix back-to-back load, in a *different*
+      test/sub-suite each run -- not fixed this leg, out of the wall-clock
+      budget item's own scope:
+      - `test_namespaced_peer_from_windowless_parent` (sub-suite 4):
+        asserts no window becomes visible/focused while a windowless
+        subprocess runs; failed once with one surfaced window, passed
+        cleanly in isolation 3x.
+      - `test_managed_companion.py::test_prepare_failure_never_stops_healthy_companion[install]`
+        and `test_managed_retention.py::test_managed_retention_count_and_age_bounds_do_not_count_protected_cells`
+        (both sub-suite 3, on a separate run): both failed on Windows
+        `[WinError 5] Access is denied` during a file rename/move inside
+        the test's own temp sandbox -- consistent with transient external
+        interference (e.g. AV/indexing) briefly holding a file handle,
+        not a deterministic product bug.
+      Needs its own root-cause pass (desktop/AV interference from
+      concurrently running heavy sub-suites under full-matrix load, vs. a
+      genuine production race) before deciding whether to harden these
+      tests, add retry-on-WinError-5 at the containment layer, or mark
+      them host-state-sensitive.
 - [ ] Complete a full `--all` run once the Phase 3.5 items above
       are addressed, to reach the ~13 plugins never attempted across either
       prior attempt (`agent-machines`, `agent-mcp`,
@@ -489,6 +514,63 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-05 — Phase 3.5: agent-dispatch wall-clock budget root-caused and fixed; a masked skip-marker bug caught too
+Picked up the handoff for the sole remaining open item: `agent-dispatch`'s
+3rd 25-file sub-suite hitting `[LIMIT] wall-clock limit exceeded (300s)`.
+
+**Root-cause first**, per the handoff's own instructions: reproduced with
+`python tools/run-plugin-tests.py agent-dispatch --timeout 600
+--plugin-timeout 1200`. Sub-suite 3 passed cleanly at 435.87s/382.90s/
+257.59s across repeated runs -- consistently well past the 300s default,
+but a real, passing runtime, not a hang or something quadratic. Confirmed
+genuinely a budget-too-tight problem, not a test bug.
+
+**Fix:** added a per-plugin override mechanism to `run-plugin-tests.py`
+(`_SUBSUITE_TIMEOUT_OVERRIDES`/`_PLUGIN_TIMEOUT_OVERRIDES`, keyed by
+plugin name) rather than raising the global 300s/900s defaults for every
+plugin -- the operator's original "if any are flaky we risk wedging
+everything" concern means every OTHER plugin should keep the tighter
+default's fast-fail protection against a genuinely wedged test.
+`agent-dispatch` now defaults to 600s/1800s; an explicit `--timeout`/
+`--plugin-timeout` on the command line still always wins over the
+override. Confirmed the override applies with *no* explicit flags
+(`python tools/run-plugin-tests.py agent-dispatch` alone) -- sub-suite 3
+passed at 382.90s under the new default.
+
+**Caught along the way:** fixing the budget let the run reach sub-suite 4
+for the first time, which surfaced `test_procutil.py::
+test_terminate_process_tree_reaps_a_descendant_that_outlives_its_leader`
+failing on Windows (`DID NOT RAISE TimeoutExpired`) -- it uses POSIX-only
+`os.fork()`. Root cause: the *previous* test in the file had a literally
+duplicated `@pytest.mark.skipif(sys.platform == "win32", ...)` decorator
+(copy-paste artifact), leaving the next POSIX-only test with none at all.
+Fixed by removing the duplicate and adding the (missing) decorator to the
+actually-affected test, matching every neighboring POSIX-only test's own
+pattern exactly. Low-risk, obvious fix -- same precedent as this effort's
+other "previously masked, newly-surfaced" findings.
+
+**New finding, NOT fixed this leg (out of this item's scope):** with both
+of the above fixed, ran the full suite 3 more times to confirm
+(`python tools/run-plugin-tests.py agent-dispatch`, no explicit flags, so
+the new override is what's in effect) and hit a *different* intermittent
+failure each time, never the same test twice:
+- `test_namespaced_peer_from_windowless_parent` (sub-suite 4): `assert
+  surfaced == focus_changes == set()` -- one window became visible/
+  focused during the probe. Re-ran in isolation 3x and it passed every
+  time (`-k test_namespaced_peer_from_windowless_parent`).
+- `test_managed_companion.py::test_prepare_failure_never_stops_healthy_companion[install]`
+  and `test_managed_retention.py::test_managed_retention_count_and_age_bounds_do_not_count_protected_cells`
+  (both sub-suite 3, same run): both failed with Windows `[WinError 5]
+  Access is denied` renaming a file inside the test's own temp sandbox.
+
+None of these reproduce in isolation or trace to anything touched this
+leg -- they look like transient host interference (AV/indexing briefly
+holding a file handle; desktop focus churn) surfacing only under the
+real back-to-back I/O load of a full-matrix run, not a regression from
+either fix above or a reproducible product bug. Logged as their own Plan
+item rather than chased further, per the handoff's explicit scope
+boundary (the wall-clock budget item only).
 
 ### 2026-10-05 — Phase 3.5: MAX_PATH fixed by shortening directory/ID names (all 8 agent-logger failures now fixed)
 After the long-path opt-in attempt below was reverted, operator explicitly

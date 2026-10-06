@@ -1169,7 +1169,6 @@ def test_background_capture_charges_the_start_token_probe_against_the_timeout(
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group semantics")
-@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group semantics")
 def test_terminate_process_tree_reaps_a_lone_leader_promptly_without_the_full_grace(
     tmp_path,
 ):
@@ -1200,6 +1199,7 @@ def test_terminate_process_tree_reaps_a_lone_leader_promptly_without_the_full_gr
     assert not procutil._posix_process_group_alive(proc.pid)
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process-group semantics")
 def test_terminate_process_tree_reaps_a_descendant_that_outlives_its_leader(tmp_path):
     """High-severity regression guard: a leader that exits almost
     immediately while a forked descendant keeps the leader's own stdout

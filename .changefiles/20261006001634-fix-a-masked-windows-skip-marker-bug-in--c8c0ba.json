@@ -1,0 +1,9 @@
+{
+  "comment": "Fix a masked Windows skip-marker bug in test_procutil.py (a duplicated skipif decorator left a POSIX-only os.fork() test unmarked on Windows).",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
