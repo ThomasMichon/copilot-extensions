@@ -10,7 +10,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import activity, codename_tracking, git_ops, local_cache_refresh, output, profile_assignment, sessions, tracking
+from . import activity, codename_tracking, embody_resume, git_ops, local_cache_refresh, output, pending_seed as pending_seed_mod, profile_assignment, sessions, tracking
 from . import config as cfg
 
 
@@ -513,6 +513,31 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         merged_env[_session_bind_project_key()] = config.repo_name
         merged_env[_session_bind_worktree_key()] = record.worktree_id
         merged_env[_session_bind_session_key()] = resume_target
+
+    # Seed delivery (resume-prompt-durable-seed-and-mux-fix): carried
+    # durably as a `--interactive` argument on the Copilot command line
+    # itself, never a mux pane send-keys side-channel -- works identically
+    # muxed or `--no-mux` since there is no pane to target either way.
+    # Excluded for `bare_resume`, matching its existing minimal/manual
+    # "no auto-resume, run /resume yourself" contract -- injecting a seed
+    # there is out of scope for this change. An explicit `--seed` on THIS
+    # call wins; either way, any record-persisted `pending_seed` (queued at
+    # creation time by `resolve --new --seed`, for the Picker's own
+    # two-hop new-worktree flow, which re-resolves by --worktree-id here)
+    # is claimed (cleared) under the existing race-safe write-guard so
+    # `agent-worktrees embody`'s own fallback claim-and-send-keys delivery
+    # never finds it again and double-delivers the same turn.
+    explicit_seed = getattr(args, "seed", None)
+    delivered_seed = explicit_seed
+    if not bare_resume:
+        if args.dry_run:
+            delivered_seed = explicit_seed or getattr(record, "pending_seed", None)
+        else:
+            claimed = pending_seed_mod.claim_pending_seed(record.yaml_path)
+            delivered_seed = explicit_seed or claimed
+        if delivered_seed:
+            launch_cmd = embody_resume.with_seed(launch_cmd, delivered_seed)
+            print("   Seeding first turn once ready.")
 
     print()
 

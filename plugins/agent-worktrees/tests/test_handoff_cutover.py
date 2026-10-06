@@ -666,9 +666,11 @@ class TestHeadlessNewSession:
             "wtH", "/work/dir", ["copilot"], {"FOO": "bar"}, seed="continue please",
         )
         assert out == {"ok": True, "pid": 4242, "error": None}
-        # The seed is a native -i arg -- headless has no pane-wrapper argv
-        # mangling to route around, unlike the mux path.
-        assert captured["argv"] == ["copilot", "-i", "continue please"]
+        # The seed is a native --interactive arg (never the short -i, which
+        # PowerShell's own argument parser can intercept before it reaches
+        # copilot on Windows) -- headless has no pane-wrapper argv mangling
+        # to route around, unlike the mux path.
+        assert captured["argv"] == ["copilot", "--interactive", "continue please"]
         assert captured["kwargs"]["cwd"] == "/work/dir"
         assert captured["kwargs"]["env"]["FOO"] == "bar"
         assert captured["kwargs"]["stdin"] == subprocess.DEVNULL

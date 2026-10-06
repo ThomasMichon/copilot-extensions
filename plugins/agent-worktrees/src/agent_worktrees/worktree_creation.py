@@ -33,6 +33,7 @@ from pathlib import Path
 from . import (
     activity,
     codename_tracking,
+    embody_resume,
     git_ops,
     local_cache_refresh,
     obligations,
@@ -860,6 +861,18 @@ def _create_worktree_core(
         profile=selection.profile,
         preflight=launch_preflight,
     )
+    # Durable seed delivery (resume-prompt-durable-seed-and-mux-fix): a
+    # DIRECT caller of this plan (one that execs `result["launch"]["cmd"]`
+    # itself, rather than the Picker's own two-hop flow -- which discards
+    # this plan and re-resolves by --worktree-id through
+    # `resolve_launch_cli._resolve_resume_context`, the mechanism's real
+    # delivery point for that flow -- see there for the full rationale)
+    # gets the queued seed as a durable `--interactive` argument on this
+    # exec'd command line too, not only via `pending_seed`'s own
+    # best-effort claim-on-first-attach fallback. `pending_seed` itself is
+    # deliberately left persisted on the record either way -- the Picker's
+    # own flow still needs it there for the later re-resolve to pick up.
+    launch_cmd = embody_resume.with_seed(launch_cmd, pending_seed)
     env = _apply_assignment_env(
         core._build_env(
             selection.profile,

@@ -2055,9 +2055,11 @@ def headless_new_session(
     POSIX -- the same shape ``agent_dispatch``'s own coordinator autostart
     uses for its detached ``serve`` process), with no pane, no session
     registry entry, and no seed-typing choreography: the seed, when given, is
-    passed as a **native** ``-i <seed>`` argument directly, since headless has
-    no pane-wrapper argv-mangling to route around (unlike the mux path, which
-    must inject the seed as post-launch keystrokes -- see
+    passed as a **native** ``--interactive <seed>`` argument directly (the
+    full flag name, never the short ``-i`` -- see
+    :func:`embody_resume.with_seed`'s own docstring for why), since headless
+    has no pane-wrapper argv-mangling to route around (unlike the mux path,
+    which must inject the seed as post-launch keystrokes -- see
     :func:`build_mux_new_window_argv`'s ``initial_prompt`` handling).
 
     Returns ``{ok, pid, error}``. The caller is responsible for verifying the
@@ -2068,9 +2070,12 @@ def headless_new_session(
 
     from agent_procutil import detached_kwargs
 
-    argv = list(cmd)
-    if seed:
-        argv += ["-i", seed]
+    # Inlined rather than calling embody_resume.with_seed (the same one-line
+    # append): embody_resume imports this module, so a module-level import
+    # here would be circular, and a lazy import inside this function body
+    # would pull in a fresh platform.system() call under whatever
+    # subprocess.Popen a caller's test may have already monkeypatched.
+    argv = [*cmd, "--interactive", seed] if seed else list(cmd)
 
     full_env = {**os.environ, **(env or {})}
     kwargs: dict[str, object] = {

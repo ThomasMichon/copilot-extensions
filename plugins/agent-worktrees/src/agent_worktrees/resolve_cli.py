@@ -8,7 +8,7 @@ import platform
 import sys
 import threading
 
-from . import activity, output, profile_assignment, sessions, tracking, worktree_identity
+from . import activity, embody_resume, output, pending_seed as pending_seed_mod, profile_assignment, sessions, tracking, worktree_identity
 from . import codename_tracking, config as cfg
 from .launch_trace import append_launch_event
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
@@ -319,15 +319,18 @@ def add_parsers(sub) -> None:
     parser.add_argument(
         "--seed",
         default=None,
-        help="With --new (not supported alongside --machine): an optional "
-        "prompt queued as the session's first interactive turn once "
-        "Copilot is actually ready, fire-and-forget past the "
-        "auto-update/bootstrap flow. Persisted on the new record (this "
-        "command never launches Copilot itself, so it can only be "
-        "stored here); delivered and cleared by `agent-worktrees "
-        "embody`/`copilot` on the first attach -- an arbitrary direct "
-        "tmux/psmux attach, or a launch that bypasses embody, will not "
-        "deliver it.",
+        help="With --new or --worktree-id (not supported alongside "
+        "--machine): a prompt delivered as the session's first (--new) "
+        "or next (--worktree-id resume) interactive turn once Copilot is "
+        "actually ready. Carried durably as a `--interactive` argument on "
+        "the launched Copilot command line itself -- works identically "
+        "whether the launch is muxed or --no-mux, since it never depends "
+        "on a mux pane to type into. With --new, ALSO persisted on the "
+        "record as a fallback for a caller that creates the worktree "
+        "without immediately launching it (e.g. `agent-worktrees create "
+        "--seed`): delivered and cleared by `agent-worktrees embody`/"
+        "`copilot` on a later first attach when nothing already consumed "
+        "it at launch time.",
     )
     parser.add_argument("copilot_args", nargs="*", default=[])
 
@@ -341,26 +344,28 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         return exc.exit_code
 
     requested_seed = getattr(state.args, "seed", None)
-    if requested_seed and not state.use_new:
-        # --seed is documented as valid only with --new (it persists onto
-        # a NEWLY created worktree's record) -- without it, --worktree-id/
-        # --base resolve calls would otherwise silently succeed and
-        # discard the value.
-        message = "--seed is only valid with --new."
+    if requested_seed and not state.use_new and not state.worktree_id:
+        # --seed is valid with --new (persisted onto a newly created
+        # record -- resume-prompt-durable-seed-and-mux-fix) and with
+        # --worktree-id (appended directly to the resume launch's own argv
+        # -- see below); without either, --base and the interactive picker
+        # path would otherwise silently succeed and discard the value.
+        message = "--seed is only valid with --new or --worktree-id."
         if state.use_json:
             return output._json_error(message)
         output.err(message)
         return 2
 
-    if state.use_new and state.requested_machine and requested_seed:
+    if state.requested_machine and requested_seed:
         # Validated here, before the JSON/non-JSON split: the non-JSON
         # dispatcher checks state.use_new before state.requested_machine
-        # (below) and would otherwise silently create a LOCAL seeded
-        # worktree instead of honoring (or rejecting) --machine -- a
-        # confusing result regardless of --seed. The JSON path's own
+        # (below) and would otherwise silently create/resume a LOCAL
+        # seeded worktree instead of honoring (or rejecting) --machine --
+        # a confusing result regardless of --seed. The JSON path's own
         # reason still applies too: its remote dispatch relays a naively
         # space-joined command string with zero shell quoting, unsafe for
-        # an arbitrary --seed value.
+        # an arbitrary --seed value. Applies to both --new and
+        # --worktree-id (resume) targets alike.
         message = (
             "--seed is not yet supported for a remote --machine target; "
             "use --seed on this machine only, or omit --machine."
@@ -638,6 +643,25 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         launch_cmd.append(f"--resume={last_session}")
     elif not no_resume:
         _emit_parent_context_hint(record, to_stderr=True)
+
+    # Durable seed delivery (resume-prompt-durable-seed-and-mux-fix): a
+    # `--interactive` argument on this SAME returned command line, never a
+    # mux pane send-keys side-channel -- works identically whether the real
+    # launcher (launch-session.{ps1,sh}, which wraps or doesn't wrap this
+    # exact `cmd` in a mux pane independently of anything decided here)
+    # ends up muxed or `--no-mux`, since there is no pane to target either
+    # way. An explicit `--seed` on this call wins; either way, any
+    # record-persisted `pending_seed` (queued at creation time by
+    # `resolve --new --seed`, for the Picker's own two-hop new-worktree
+    # flow, which re-resolves by --worktree-id here) is claimed (cleared)
+    # under the existing race-safe write-guard so `agent-worktrees embody`'s
+    # own fallback claim-and-send-keys delivery never finds it again and
+    # double-delivers the same turn.
+    explicit_seed = getattr(state.args, "seed", None)
+    claimed_seed = pending_seed_mod.claim_pending_seed(yaml_path)
+    delivered_seed = explicit_seed or claimed_seed
+    if delivered_seed:
+        launch_cmd = embody_resume.with_seed(launch_cmd, delivered_seed)
 
     launch = {
         "action": "exec",
