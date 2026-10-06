@@ -1,0 +1,9 @@
+{
+  "comment": "Fix predecessor pane never retiring after a real cutover: promoteSuccessorHead now passes the real handoff token through to link-succession instead of letting it invent a synthetic placeholder that silently cancels the real entry.",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}

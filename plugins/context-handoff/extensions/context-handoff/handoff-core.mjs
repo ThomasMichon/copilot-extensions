@@ -2612,6 +2612,7 @@ export function consumeDispatchHandoffTask(
     decoded.metadata?.worktree || null,
     predecessorSessionId,
     sid,
+    taskId,
   );
   return {
     ok: true,
@@ -2644,7 +2645,7 @@ export function consumeFileHandoff(
     predecessorSessionId,
     { consumedBySession: sid, handoffId: record.id },
   );
-  safePromoteHead(promoteHead, cwd, record.worktree || null, predecessorSessionId, sid);
+  safePromoteHead(promoteHead, cwd, record.worktree || null, predecessorSessionId, sid, record.id);
   return {
     ok: true,
     id: record.id,
@@ -2870,7 +2871,7 @@ function worktreeHeadState(cwd, worktreeId, execute = runCli) {
 // this only proceeds when the *live* head still matches the *expected*
 // predecessor -- anything else is left untouched rather than guessed at.
 export function promoteSuccessorHead(
-  cwd, worktreeId, predecessorSessionId, sid, execute = runCli,
+  cwd, worktreeId, predecessorSessionId, sid, execute = runCli, handoffToken = null,
 ) {
   if (!worktreeId || !predecessorSessionId || !sid) {
     return { promoted: false, reason: "missing-ids" };
@@ -2892,14 +2893,26 @@ export function promoteSuccessorHead(
     };
   }
   try {
-    execute("agent-worktrees", [
+    const args = [
       "link-succession",
       "--worktree", worktreeId,
       "--predecessor", predecessorSessionId,
       "--successor", sid,
       "--predecessor-state", "handed-off",
       "--json",
-    ], { cwd, timeout: 10000 });
+    ];
+    // Without this, link-succession's own "handed-off" branch invents a
+    // synthetic `manual-<N>` placeholder token (tracking_lifecycle.py
+    // link_succession's own fallback) instead of linking the REAL handoff
+    // this consume call is for -- opening that placeholder cancels the real
+    // entry as a side effect (open_handoff's own "cancel sibling pending for
+    // this predecessor" rule), silently stranding it at state=cancelled
+    // forever: never linked, therefore never eligible for predecessor-pane
+    // retirement (_pending_handoff_retire_requests excludes cancelled
+    // entries). Passing the real token here is the fix -- confirmed live
+    // (mux-companion-manual-cutover-diagnostics' predecessor-retire gap).
+    if (handoffToken) args.push("--handoff-token", handoffToken);
+    execute("agent-worktrees", args, { cwd, timeout: 10000 });
     return { promoted: true, predecessor: predecessorSessionId, successor: sid };
   } catch (error) {
     return { promoted: false, reason: "link-failed", error: describeCliError(error) };
@@ -2907,9 +2920,9 @@ export function promoteSuccessorHead(
 }
 
 
-function safePromoteHead(promoteHead, cwd, worktreeId, predecessorSessionId, sid) {
+function safePromoteHead(promoteHead, cwd, worktreeId, predecessorSessionId, sid, handoffToken = null) {
   try {
-    return promoteHead(cwd, worktreeId, predecessorSessionId, sid);
+    return promoteHead(cwd, worktreeId, predecessorSessionId, sid, undefined, handoffToken);
   } catch (error) {
     return { promoted: false, reason: "promote-head-threw", error: describeCliError(error) };
   }
