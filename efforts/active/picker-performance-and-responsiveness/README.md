@@ -548,3 +548,99 @@ all 18 current modal CSS declarations back to `background: $background
 file list, reasoning, and the explicit trade-off this re-introduces).
 Recorded here only as a pointer -- this effort does not own that finding
 or its reversal, and does not re-litigate it.
+
+### 2026-10-05 (later still) — Real crash diagnosed and fixed: stale payload + two durable process-lifecycle bugs
+
+Not a numbered Plan phase either -- the operator reported the real Picker
+crashing (or failing to open at all) after waiting ~30s, on the machine
+this whole effort has been profiling against. Diagnosis, in order:
+
+1. **Immediate cause: a stale installed payload.** This machine's real
+   `worktree-manager`/`agent-worktrees` install (a versioned-slot payload
+   under `~/.worktree-manager`/`~/.agent-worktrees`, NOT the pip-editable
+   dev pointers this session had been using for profiling/testing -- those
+   are a separate, parallel install path that was never what actually runs
+   from `PATH`) predated all three of today's merged fixes. `worktree-manager
+   update` (the real self-update/payload-install flow) brought it current
+   (0.5.7-dev2 -> 0.5.7-dev3) from the now-auto-promoted `main`. Confirmed
+   live (`psmux`, 35s wait) that the Picker now opens cleanly against
+   `odsp-web-harness`.
+
+2. **A durable bug, found while diagnosing: zombie Picker process trees
+   with no owning terminal.** This machine had 7 such trees piled up (some
+   days old) across 4 different installed-version generations. Root cause:
+   `agent_worktrees.manager_launch_cli._exec_worktree_manager`'s Windows
+   branch (`platform.system() == "Windows"`) used a plain
+   `subprocess.Popen` + `wait()` -- unlike the POSIX branch, which really
+   does `os.execvpe` and becomes the child (so the whole tree lives and
+   dies as one process tied to its own console). If THIS process is torn
+   down abruptly (console closed, owning session/worktree killed, anything
+   that skips normal Python exception unwinding) nothing ever signals or
+   waits on that multi-process launch chain (a `.cmd` shim -> `uv run` ->
+   a venv interpreter -> the real module, sometimes re-exec'd through yet
+   another interpreter) again -- it just runs forever. Fixed by containing
+   the Windows launch in a `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` Windows Job
+   Object via `agent_procutil.spawn_sync_in_kill_on_close_job` -- the exact
+   same primitive `agent_machines.fleet_update` already uses for this
+   identical failure class, just not yet applied to this call site. The OS
+   itself kills everything still in the job the moment this process's own
+   handle to it closes, for any reason, clean or not. Verified safe for the
+   mux-daemon (a legitimately long-lived descendant of this same launch):
+   it already uses `windowless_daemon_kwargs(breakaway=True)`/
+   `detached_kwargs(breakaway=True)` everywhere it's spawned, specifically
+   so it escapes a containing job and outlives any single Picker
+   invocation -- confirmed by reading every status-monitor and mux-daemon
+   spawn site, not assumed. Two new regression tests
+   (`test_exec_worktree_manager_closes_job_on_windows_clean_exit`,
+   `test_exec_worktree_manager_falls_back_to_kill_without_a_job`) prove the
+   containment call happens and its handle is closed/killed on exit, not
+   just that some process got spawned. One pre-existing test
+   (`test_manager_handoff_binds_exact_engine_runtime`) patched
+   `subprocess.Popen` directly and needed updating to patch the new
+   interception point (`agent_procutil.spawn_sync_in_kill_on_close_job`)
+   instead -- same behavior proven, different call site.
+
+3. **A second durable bug, found via `agent-worktrees doctor`: two
+   resident status-monitor daemons claiming the same "active" slot, and
+   `doctor --fix` refusing to pick a winner.** Root-caused with a direct,
+   in-process call to `daemon_health.doctor_report(apply=False)` (not
+   guesswork from the CLI's own summarized output): the routing table's
+   `active` entry correctly pointed at the new daemon generation this
+   machine's `worktree-manager update` had just cut over to (pid 3356,
+   generation 47) -- but the *separate* `status-monitor.lock` file still
+   named the OLD generation (pid 11048), which a live `py-spy dump` showed
+   stuck busy-looping inside its own pending-handoff-retire sweep, never
+   reaching the point of relinquishing (or rewriting) its lock claim.
+   `zdd.diagnostics._validated_owner` treated ANY disagreement between the
+   lock and the routing table as fatal -- "no validated live owner" --
+   refusing to vouch for *either* candidate, which is exactly backwards
+   for `doctor`'s own job (restore a pristine state, not shrug at an
+   ambiguous one): the routing table's `active` entry IS this service's
+   own single, generation-numbered source of truth for who is currently
+   being routed to, and is strictly fresher than a lock a stuck old
+   generation never got around to updating. Fixed by giving
+   `_validated_owner` a fallback: when the lock doesn't vouch for anyone,
+   trust the routing table's `active` pid directly, but ONLY if a live,
+   freshly-censused candidate actually holds that exact pid right now (no
+   fabricating an owner nothing can back up -- covered by its own
+   regression test). This also incidentally covers a related gap:
+   `_inspect_superseded_generations` only ever checks the table's
+   `active`/`previous` two-slot history, so a daemon stuck more than one
+   generation behind (exactly pid 11048's case here) was invisible to it
+   too, with no other path to ever being reaped. Three new
+   `zdd.diagnostics` tests (previously an entirely untested module at the
+   unit level -- only its rendered-finding-dict *output* had test
+   coverage, not the validation logic producing those dicts) cover: the
+   fallback firing on real disagreement, the ordinary agreeing case still
+   using the lock alone (no behavior change for the common path), and the
+   fallback correctly refusing to fabricate an owner when the table names
+   a pid nothing currently holds.
+
+`agent_procutil`, `manager_launch_cli.py`'s containing plugin
+(`agent-worktrees`), and `zdd` are all vendored libs with multiple
+consumer copies in this repo -- both fixes were propagated to every
+existing copy (`check-vendored-libs-sync.py` confirms), with a version
+bump per lib and a changefile per fanned-out consumer plugin, the same
+discipline Phase 4's plugin-activation fix already established this
+session.
+
