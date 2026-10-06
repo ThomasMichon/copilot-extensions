@@ -12,6 +12,10 @@ adapted for install.sh's bash implementation.
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -19,6 +23,28 @@ import pytest
 pytestmark = pytest.mark.guard
 
 _INSTALL_SH = Path(__file__).resolve().parents[1] / "scripts" / "install.sh"
+
+# A bare shutil.which("bash") can resolve to a Windows App Execution Alias
+# stub or the classic `C:\Windows\System32\bash.exe` WSL launcher, which
+# invoke an actual WSL distro (a different filesystem namespace) rather than
+# running this script in the environment under test -- see
+# test_installer_pipefail.py for the full rationale. Prefer the real Git
+# Bash location when present; otherwise filter both known WSL-launcher
+# locations out of PATH before falling back to shutil.which.
+_GIT_BASH = Path(r"C:\Program Files\Git\bin\bash.exe")
+def _resolve_bash() -> str | None:
+    if _GIT_BASH.is_file():
+        return str(_GIT_BASH)
+    path = os.environ.get("PATH")
+    if not path:
+        return None
+    filtered = os.pathsep.join(
+        part for part in path.split(os.pathsep)
+        if "windowsapps" not in part.lower()
+        and part.rstrip("\\").lower() != r"c:\windows\system32"
+    )
+    return shutil.which("bash", path=filtered)
+_BASH = _resolve_bash()
 
 
 def _function_body(text: str, name: str) -> str:
@@ -121,19 +147,22 @@ def test_versioned_slot_lease_uses_flock_held_for_process_lifetime():
 
 def test_versioned_slot_lease_noclobber_fallback_fails_closed_without_flock():
     """When `flock` isn't available (e.g. stock macOS), the lease must fall
-    back to a portable, PID-liveness-checked `noclobber` lock -- never
-    silently succeed (fail-open) just because the preferred primitive is
-    missing, which would let every lockless host build the same slot
-    unlocked. The fallback must CREATE and PUBLISH ownership (the holder's
-    pid) in a single atomic operation (`set -C; echo "$$" > file`), never a
-    separate create-then-write sequence that leaves a window where a
-    contender could see an unpublished, ownerless lock and misread it as
-    stale."""
+    back to a portable, PID-liveness-checked lock -- never silently succeed
+    (fail-open) just because the preferred primitive is missing, which
+    would let every lockless host build the same slot unlocked. Ownership
+    (the holder's pid) must already be fully committed to disk at the
+    instant the lock file becomes visible under its final name -- via
+    write-to-temp-then-`ln` (atomic hard-link creation), never a
+    create-then-write-into-place sequence (even `set -C; echo $$ > file`
+    is NOT atomic for this: the O_CREAT|O_EXCL open and the PID write are
+    two separate syscalls, leaving a window where a contender sees an
+    empty, apparently-unowned file and misreads it as stale)."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
     acquire_body = _function_body(text, "_acquire_versioned_slot_lease")
     fallback_body = _function_body(
         text, "_acquire_versioned_slot_lease_noclobber_fallback"
     )
+    publish_body = _function_body(text, "_try_publish_versioned_slot_lease")
 
     assert "if ! command -v flock >/dev/null 2>&1; then" in acquire_body
     no_flock_branch = acquire_body.split(
@@ -145,6 +174,84 @@ def test_versioned_slot_lease_noclobber_fallback_fails_closed_without_flock():
         "code, never hardcode success"
     )
 
-    assert 'if (set -C; echo "$$" > "$lock_file") 2>/dev/null; then' in fallback_body
+    assert "_try_publish_versioned_slot_lease" in fallback_body
     assert 'kill -0 "$holder_pid"' in fallback_body
+    assert 'printf \'%s\' "$$" > "$tmp_file"' in publish_body
+    assert 'ln "$tmp_file" "$lock_file"' in publish_body
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
+def test_versioned_slot_lease_fallback_grants_exactly_one_winner_under_real_contention():
+    """Behavioral (not just textual) regression guard for the no-`flock`
+    fallback: launch many real, concurrently-forked OS processes (bash
+    background subshells -- genuine `fork()`s, not a simulation) racing to
+    acquire the SAME fresh lock via the extracted
+    `_try_publish_versioned_slot_lease` / `_acquire_versioned_slot_lease_
+    noclobber_fallback` functions, and assert exactly one of them ever
+    reports success -- proving the write-to-temp-then-`ln` protocol is a
+    real atomic exclusion primitive, not merely a textual contract.
+
+    All racers run as background jobs of ONE bash invocation (rather than
+    each spawned as its own independent `bash.exe` process) deliberately:
+    cross-process `kill -0` liveness checks between independently-launched
+    MSYS2/Git-Bash instances on Windows proved unreliable in practice (each
+    separately-invoked `bash.exe` builds its own local pid-mapping table,
+    so one instance's `kill -0 <pid>` can false-negative on a pid a
+    genuinely-still-running sibling `bash.exe` reported as its own `$$`) --
+    a Windows test-environment artifact of that specific case, not a
+    property of the real target platforms (native Linux/macOS, where `$$`
+    and `kill -0` operate on real, globally-consistent kernel pids with no
+    such per-process table). Background subshells of one bash process are
+    still genuine, independently-scheduled forked processes -- they just
+    share that one process's pid-table scope, which is exactly what makes
+    the liveness check reliable here without masking the real exclusion
+    property under test."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    publish_fn = _function_body(text, "_try_publish_versioned_slot_lease")
+    fallback_fn = _function_body(text, "_acquire_versioned_slot_lease_noclobber_fallback")
+
+    harness = f"""
+set -uo pipefail
+{publish_fn}
+}}
+{fallback_fn}
+}}
+
+lock_file="$1"
+out_file="$2"
+_racer() {{
+    if _acquire_versioned_slot_lease_noclobber_fallback "$lock_file"; then
+        echo "WIN $BASHPID" >> "$out_file"
+        # Hold the lock briefly, like a real build would -- a winner that
+        # exits instantly would let a later racer correctly reclaim it as
+        # crash-abandoned (a DIFFERENT, also-correct property), which
+        # would mask whether genuinely concurrent attempts are excluded.
+        sleep 2
+    fi
+}}
+for _i in $(seq 1 30); do
+    _racer &
+done
+wait
+"""
+    with tempfile.TemporaryDirectory() as td:
+        harness_path = Path(td) / "harness.sh"
+        harness_path.write_text(harness, encoding="utf-8")
+        lock_file = str(Path(td) / "race.lock")
+        out_file = Path(td) / "winners.txt"
+        out_file.write_text("")
+
+        r = subprocess.run(
+            [_BASH, str(harness_path), lock_file, str(out_file)],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert r.returncode == 0, f"harness failed: {r.stdout} {r.stderr}"
+
+        winners = [
+            line for line in out_file.read_text().splitlines() if line.strip()
+        ]
+        assert len(winners) == 1, (
+            f"expected exactly one winner of the lock race, got {len(winners)}: "
+            f"{winners}"
+        )
 

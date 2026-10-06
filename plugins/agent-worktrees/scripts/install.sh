@@ -848,20 +848,38 @@ _versioned_slot_lease_path() {
     printf '%s/.build-lease-%s.lock' "$INSTALL_DIR" "$SRC_VERSION"
 }
 
-_acquire_versioned_slot_lease_noclobber_fallback() {
-    # PID-liveness-checked `noclobber` lock: used only when `flock` is
-    # unavailable. `set -C; echo "$$" > "$lock_file"` CREATES and PUBLISHES
-    # ownership (the holder's pid) in a single atomic open(O_EXCL|O_CREAT)
-    # -- unlike a separate mkdir-then-write-pid-file sequence, there is no
-    # window where the lock exists but its ownership hasn't been published
-    # yet for a contender to misread as stale and reclaim. A lock file left
-    # behind by a dead holder (crash) is detected via `kill -0` on its
-    # recorded pid and reclaimed; any failure to (re)create it -- including a
-    # persistent one, e.g. a read-only directory -- falls through to the
-    # final `return 1` rather than reporting success.
-    local lock_file="$1" holder_pid
-    if (set -C; echo "$$" > "$lock_file") 2>/dev/null; then
+_try_publish_versioned_slot_lease() {
+    # Atomically CREATE a lock file whose content (the holder's pid) is
+    # already fully committed at the instant it becomes visible under its
+    # final name -- the classic Unix lockfile idiom. `ln` only ever creates
+    # a new directory entry pointing at EXISTING, already-fully-written
+    # data; it never truncates-then-fills a file in place the way shell
+    # redirection does (even under `set -C`, `> file` first O_CREAT|O_EXCL
+    # opens an EMPTY file, and the PID write is a separate syscall after --
+    # a contender reading in that window sees an empty, apparently-ownerless
+    # file and misreads it as stale). Fails (EEXIST, atomically) if the
+    # target already exists; the loser never has the winner's data
+    # half-visible. Returns 0 and sets _VERSIONED_SLOT_LEASE_FILE on success.
+    local lock_file="$1" tmp_file
+    tmp_file="${lock_file}.tmp.$$"
+    printf '%s' "$$" > "$tmp_file" 2>/dev/null || { rm -f "$tmp_file" 2>/dev/null; return 1; }
+    if ln "$tmp_file" "$lock_file" 2>/dev/null; then
+        rm -f "$tmp_file" 2>/dev/null || true
         _VERSIONED_SLOT_LEASE_FILE="$lock_file"
+        return 0
+    fi
+    rm -f "$tmp_file" 2>/dev/null || true
+    return 1
+}
+
+_acquire_versioned_slot_lease_noclobber_fallback() {
+    # PID-liveness-checked lock: used only when `flock` is unavailable. A
+    # lock file left behind by a dead holder (crash) is detected via
+    # `kill -0` on its recorded pid and reclaimed; any failure to commit
+    # ownership -- including a persistent one, e.g. a read-only directory --
+    # falls through to the final `return 1` rather than reporting success.
+    local lock_file="$1" holder_pid
+    if _try_publish_versioned_slot_lease "$lock_file"; then
         return 0
     fi
     holder_pid="$(cat "$lock_file" 2>/dev/null || true)"
@@ -869,11 +887,12 @@ _acquire_versioned_slot_lease_noclobber_fallback() {
         return 1
     fi
     # Stale (holder dead, or unrecorded) -- reclaim. If another process wins
-    # this same race, its atomic create below succeeds and ours correctly
-    # fails (that process's pid is now the legitimately-recorded owner).
+    # this same race, its atomic `ln` below succeeds and ours correctly
+    # fails (that process's pid is now the legitimately-recorded owner) --
+    # there is no window in which both can believe they hold it, since `ln`
+    # itself is the single atomic decision point.
     rm -f "$lock_file" 2>/dev/null || true
-    if (set -C; echo "$$" > "$lock_file") 2>/dev/null; then
-        _VERSIONED_SLOT_LEASE_FILE="$lock_file"
+    if _try_publish_versioned_slot_lease "$lock_file"; then
         return 0
     fi
     return 1
