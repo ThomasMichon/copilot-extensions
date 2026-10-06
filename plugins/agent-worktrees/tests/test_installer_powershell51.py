@@ -383,6 +383,31 @@ def test_slot_clean_reports_failure_instead_of_silently_downgrading_signed_venv(
     assert "return $false" in slot_dirty_branch
 
 
+def test_slot_clean_uses_an_interpreter_outside_the_target_slot():
+    """`Invoke-VersionedSlotClean` inspects whether a live process is
+    running FROM the target slot -- using that slot's OWN interpreter to
+    run the census would make the helper process itself show up as such a
+    process, permanently self-reporting an incomplete slot with a stale
+    python.exe as still in use on every retry. Must resolve its interpreter
+    via `Get-BootstrapPython -ExcludeVenvDir`, and must fail CLOSED (not
+    silently report clean) for an EXISTING slot when no such interpreter
+    can be found at all -- an ABSENT slot needs no validation and is
+    trivially, correctly clean."""
+    installer = INSTALLER.read_text(encoding="utf-8")
+    clean_fn = installer.split("function Invoke-VersionedSlotClean", 1)[1].split(
+        "function Invoke-VersionedMarkComplete", 1
+    )[0]
+    bootstrap_fn = installer.split("function Get-BootstrapPython {", 1)[1].split(
+        "\n}\n", 1
+    )[0]
+
+    assert "$py = Get-BootstrapPython -ExcludeVenvDir" in clean_fn
+    assert "if (-not $py) { return -not (Test-Path $VenvDir) }" in clean_fn
+
+    assert "[switch]$ExcludeVenvDir" in bootstrap_fn
+    assert "$dirs = if ($ExcludeVenvDir) { @($LinkDir) } else { @($VenvDir, $LinkDir) }" in bootstrap_fn
+
+
 def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
     """A slot-clean liveness check alone is check-then-act -- two concurrent
     installer invocations could both observe a clean slot (neither has

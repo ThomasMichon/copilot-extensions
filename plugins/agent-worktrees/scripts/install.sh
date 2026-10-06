@@ -911,6 +911,16 @@ _reclaim_versioned_slot_lease() {
     printf '%s' "$$" > "$tmp_sentinel" 2>/dev/null || { rm -f "$tmp_sentinel" 2>/dev/null; return 1; }
     if ! ln "$tmp_sentinel" "$sentinel" 2>/dev/null; then
         rm -f "$tmp_sentinel" 2>/dev/null || true
+        # The sentinel itself can only be left behind by a reclaimer that
+        # died mid-critical-section -- a window normally microseconds
+        # long, so age it out rather than racing a second rm+ln dance here
+        # (which would just move this exact TOCTOU down one more level,
+        # unboundedly). This never races a LIVE reclaimer: a genuinely
+        # fresh sentinel is simply younger than the threshold, so we back
+        # off and let the caller's existing retry loop try again shortly.
+        if _versioned_lock_is_stale_by_age "$sentinel" "$_VERSIONED_RECLAIM_SENTINEL_MAX_AGE_SECONDS"; then
+            rm -f "$sentinel" 2>/dev/null || true
+        fi
         return 1
     fi
     rm -f "$tmp_sentinel" 2>/dev/null || true
@@ -926,6 +936,23 @@ _reclaim_versioned_slot_lease() {
     fi
     rm -f "$sentinel" 2>/dev/null || true
     return "$result"
+}
+
+# Comfortably longer than any real rm+ln critical section (microseconds)
+# but bounded enough to self-heal within a couple of minutes of a crash
+# landing exactly inside that window -- an exceedingly rare double fault.
+_VERSIONED_RECLAIM_SENTINEL_MAX_AGE_SECONDS=120
+
+_versioned_lock_is_stale_by_age() {
+    # True iff $1 exists and is at least $2 seconds old. Portable across
+    # GNU (`stat -c %Y`) and BSD/macOS (`stat -f %m`) stat flavors. Returns
+    # false (not stale) if the age can't be determined at all -- never
+    # assume staleness from a read failure.
+    local path="$1" max_age="$2" mtime now
+    mtime="$(stat -c %Y "$path" 2>/dev/null || stat -f %m "$path" 2>/dev/null || true)"
+    [[ -n "$mtime" ]] || return 1
+    now="$(date +%s)"
+    (( now - mtime >= max_age ))
 }
 
 _acquire_versioned_slot_lease() {
@@ -982,8 +1009,20 @@ _versioned_slot_clean() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
+    py="$(_bootstrap_python)"
+    if [[ -z "$py" ]]; then
+        # No bootstrap python to run the actual census with (e.g. a
+        # uv-only machine with no system python on PATH yet and no prior
+        # `venv` link to borrow from). An ABSENT slot needs no validation
+        # at all -- genuinely clean, return 0. But an EXISTING slot (e.g.
+        # abandoned/incomplete from a prior attempt) must fail CLOSED here
+        # rather than silently reporting "clean": returning success would
+        # let the caller proceed straight to `uv venv --allow-existing`
+        # over it without ever having actually validated it, defeating the
+        # whole point of this check.
+        [[ -e "$VENV_DIR" ]] && return 1
+        return 0
+    fi
     # Propagate the underlying python call's real exit code (never the
     # trailing `sed`'s, and never force-succeed via `|| true`) -- callers
     # must be able to tell a genuinely dirty/contended slot from a clean one

@@ -1246,8 +1246,17 @@ function Get-BootstrapPython {
        Prefers the freshly-built slot venv python ($VenvDir, present at
        mark-complete before the link is swapped), then the active link's
        python, then a real base python via the `py` launcher -- avoiding the
-       Windows Store 'python' alias stub. Returns $null if none. #>
-    foreach ($d in @($VenvDir, $LinkDir)) {
+       Windows Store 'python' alias stub. Returns $null if none.
+
+       -ExcludeVenvDir skips $VenvDir entirely: used when the helper is
+       about to INSPECT $VenvDir itself (e.g. the slot-clean liveness
+       census) -- using that slot's own interpreter to run the census would
+       make the helper process itself show up as "a live process running
+       from this slot", permanently self-reporting an incomplete slot with
+       a stale python.exe as still in use on every retry. #>
+    param([switch]$ExcludeVenvDir)
+    $dirs = if ($ExcludeVenvDir) { @($LinkDir) } else { @($VenvDir, $LinkDir) }
+    foreach ($d in $dirs) {
         if ($d) { $p = Join-Path $d 'Scripts\python.exe'; if (Test-Path $p) { return $p } }
     }
     if (Get-Command py -ErrorAction SilentlyContinue) {
@@ -1356,14 +1365,21 @@ function Invoke-VersionedSlotClean {
 
        Returns $true iff the slot is confirmed clean (or cleaning was a no-op);
        $false when the underlying `slot --clean-incomplete` call failed (e.g.
-       "incomplete runtime slot is still in use") -- callers must not build a
-       signed-Python venv straight into a slot this reports dirty (#2413): a
-       still-populated $VenvDir predictably fails `--copies` and silently
-       downgrades to an unsigned uv-built interpreter. #>
+       "incomplete runtime slot is still in use"), OR when an EXISTING slot
+       can't be verified at all because no bootstrap Python could be
+       resolved (an absent slot needs no validation and is trivially clean)
+       -- callers must not build a signed-Python venv straight into a slot
+       this reports dirty (#2413): a still-populated $VenvDir predictably
+       fails `--copies` and silently downgrades to an unsigned uv-built
+       interpreter. Uses -ExcludeVenvDir: running the census with the
+       TARGET slot's own interpreter would make the helper process itself
+       show up as "a live process running from this slot", permanently
+       self-reporting an incomplete slot with a stale python.exe as still
+       in use on every retry. #>
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
-    if (-not $py) { return $true }
+    $py = Get-BootstrapPython -ExcludeVenvDir
+    if (-not $py) { return -not (Test-Path $VenvDir) }
     & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
         ForEach-Object { Write-Host "  ...    $_" }
     return ($LASTEXITCODE -eq 0)

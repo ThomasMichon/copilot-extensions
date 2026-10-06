@@ -69,6 +69,25 @@ def test_versioned_slot_clean_propagates_real_exit_code():
     assert "| sed 's/^/  ...    /' || true" not in body
 
 
+def test_versioned_slot_clean_fails_closed_for_an_existing_slot_without_bootstrap_python():
+    """When no bootstrap python can be resolved at all (e.g. a uv-only
+    machine with no system python yet and no prior `venv` link to borrow
+    from), `_versioned_slot_clean` must fail CLOSED (return 1, "can't
+    verify") for an EXISTING $VENV_DIR -- never silently report "clean"
+    and let the caller proceed straight to `uv venv --allow-existing` over
+    a possibly-abandoned, never-actually-validated directory. An ABSENT
+    slot needs no validation at all and is trivially, correctly clean."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    body = _function_body(text, "_versioned_slot_clean")
+
+    assert 'py="$(_bootstrap_python)"' in body
+    no_py_branch = body.split('if [[ -z "$py" ]]; then', 1)[1].split(
+        "\n    fi\n", 1
+    )[0]
+    assert '[[ -e "$VENV_DIR" ]] && return 1' in no_py_branch
+    assert "return 0" in no_py_branch
+
+
 def test_deploy_venv_retries_then_hard_fails_on_a_dirty_slot():
     """`deploy_venv` must capture `_versioned_slot_clean`'s result, retry
     briefly on failure, and refuse to call `uv venv` at all when the slot is
@@ -200,7 +219,7 @@ def test_versioned_slot_lease_reclaim_is_itself_serialized():
     # Losing the sentinel race must back off, never force past it.
     sentinel_fail_branch = reclaim_body.split(
         'if ! ln "$tmp_sentinel" "$sentinel" 2>/dev/null; then', 1
-    )[1][:200]
+    )[1].split("\n    fi\n", 1)[0]
     assert "return 1" in sentinel_fail_branch
     # Staleness must be re-checked AFTER winning the sentinel, not assumed
     # from the caller's earlier (now possibly stale) observation.
@@ -213,6 +232,39 @@ def test_versioned_slot_lease_reclaim_is_itself_serialized():
     release_idx = reclaim_body.rindex('rm -f "$sentinel" 2>/dev/null || true')
     reverify_idx = reclaim_body.index('kill -0 "$holder_pid"')
     assert release_idx > reverify_idx
+
+
+def test_versioned_slot_lease_reclaim_sentinel_recovers_from_a_crashed_reclaimer():
+    """A reclaim sentinel can ONLY be left behind by a reclaimer that died
+    mid-critical-section (a window normally microseconds long) -- if
+    nothing ever recovered it, every future installer would lose the
+    sentinel `ln` forever and the slot would become permanently
+    unbuildable. It must be aged out (via a portable GNU/BSD `stat` mtime
+    check) rather than retried with another unconditioned rm+ln dance,
+    which would just move the exact same TOCTOU this guards against down
+    one more level."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    reclaim_body = _function_body(text, "_reclaim_versioned_slot_lease")
+    age_check_body = _function_body(text, "_versioned_lock_is_stale_by_age")
+
+    sentinel_fail_branch = reclaim_body.split(
+        'if ! ln "$tmp_sentinel" "$sentinel" 2>/dev/null; then', 1
+    )[1].split("\n        return 1\n    fi\n", 1)[0]
+    assert "_versioned_lock_is_stale_by_age" in sentinel_fail_branch
+    assert "_VERSIONED_RECLAIM_SENTINEL_MAX_AGE_SECONDS" in sentinel_fail_branch
+    assert 'rm -f "$sentinel"' in sentinel_fail_branch
+    # It must never retry _try_publish_versioned_slot_lease (or re-attempt
+    # the sentinel ln) within this same call -- clearing an aged-out
+    # sentinel only clears the way for a LATER attempt (the caller's
+    # existing retry loop), never a nested re-race here.
+    assert "_try_publish_versioned_slot_lease" not in sentinel_fail_branch
+    assert 'ln "$tmp_sentinel" "$sentinel"' not in sentinel_fail_branch
+
+    assert "stat -c %Y" in age_check_body
+    assert "stat -f %m" in age_check_body
+    # A read failure must never be treated as "stale" -- only a
+    # successfully-determined, sufficiently old mtime is.
+    assert '[[ -n "$mtime" ]] || return 1' in age_check_body
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
