@@ -6882,6 +6882,78 @@ def test_reconcile_young_reserving_carried_local_session_unknown_verdict_stays_r
     assert q.get_reservation(carried.key).state == SpawnState.RESERVING
 
 
+def test_reconcile_stale_reserving_carried_script_session_unknown_verdict_fails(
+    q, client,
+):
+    """Same gap, the script-body shape (Copilot review on #5489: this branch
+    lacked its own coverage). A ``fail_spawn`` on an otherwise-live reservation
+    (no ``release_requested``) is not "retired", so its ``script-body:``
+    handle carries forward into the next ``reserve_spawn`` on the same
+    ``exclusive_key``, landing straight in ``reserving``."""
+    old_task = q.create("old", exclusive_key="review:repo:43")
+    old_reservation, _ = q.reserve_spawn(old_task.id)
+    q.record_spawn(
+        old_reservation.key,
+        session_handle='script-body:{"pid":4321,"start_token":"tok","worker_id":"script-1"}',
+        worktree="wt-script",
+    )
+    q.fail_spawn(old_reservation.key, detail="prior attempt ended")
+
+    new_task = q.create("new", exclusive_key="review:repo:43")
+    carried, acquired = q.reserve_spawn(
+        new_task.id, reserved_by="supervisor-test", now=time.time() - 601
+    )
+    assert acquired is True
+    assert carried.session_handle == (
+        'script-body:{"pid":4321,"start_token":"tok","worker_id":"script-1"}'
+    )
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        supervisor_id="supervisor-test",
+        script_body_verdict_fn=lambda _pid, _token: tracking.UNKNOWN,
+        reserving_timeout=600,
+        nudge=False,
+    )
+
+    assert sup.reconcile_reserving() == 1
+    failed = q.get_reservation(carried.key)
+    assert failed.state == SpawnState.FAILED
+    assert "never resolved past unknown" in failed.detail
+
+
+def test_reconcile_young_reserving_carried_script_session_unknown_verdict_stays_reserved(
+    q, client,
+):
+    old_task = q.create("old", exclusive_key="review:repo:43")
+    old_reservation, _ = q.reserve_spawn(old_task.id)
+    q.record_spawn(
+        old_reservation.key,
+        session_handle='script-body:{"pid":4321,"start_token":"tok","worker_id":"script-1"}',
+        worktree="wt-script",
+    )
+    q.fail_spawn(old_reservation.key, detail="prior attempt ended")
+
+    new_task = q.create("new", exclusive_key="review:repo:43")
+    carried, acquired = q.reserve_spawn(new_task.id, reserved_by="supervisor-test")
+    assert acquired is True
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        supervisor_id="supervisor-test",
+        script_body_verdict_fn=lambda _pid, _token: tracking.UNKNOWN,
+        reserving_timeout=600,
+        nudge=False,
+    )
+
+    assert sup.reconcile_reserving() == 0
+    assert q.get_reservation(carried.key).state == SpawnState.RESERVING
+
+
 @pytest.mark.parametrize(
     ("session_handle", "body_kind"),
     [
