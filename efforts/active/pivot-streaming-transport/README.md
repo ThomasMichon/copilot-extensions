@@ -343,6 +343,21 @@ insufficient.)_
       change that refreshes the screen must re-render the child segments too"
       invariant and its current test coverage so this narrowing can't silently
       desync a segment from the screen state it reads.
+  - [x] **Cosmetic-pulse cause, landed 2026-10-05**: the idle `_tick()`'s
+        purely clock-driven branch (`frame % 5 == 0`, no busy state, no
+        pending nav) now passes `cause="pulse"` into
+        `refresh()`/`_refresh_nf_segments()`, which narrows to exactly
+        `nf-chrome` + `nf-body-data` for that cause — the only two segments
+        audited (by tracing every `self.pulse`/`self.spin()` consumer
+        reachable from each segment's own `render()`) to have any
+        pulse-driven content when nothing else is concurrently busy. Every
+        other `refresh()` call site (all ~35 of them) is unchanged: no
+        `cause` passed, every segment still refreshed, identical to
+        pre-Phase-4 behavior.
+  - [ ] **Remaining causes (nav/reload/pivot-switch/etc.)** are NOT narrowed
+        yet — every other `refresh()` call site still refreshes all 7
+        segments. A full per-site audit (36 call sites total) is deferred as
+        its own follow-up slice, not attempted in one unreviewed pass.
 
 ### Phase 5 — Group C: trust the resident monitor's fresh hint before rescanning
 ### Phase 5 — Group C: trust an affirmative fresh hint, never a negative one
@@ -1858,4 +1873,68 @@ not a mechanical change -- scoped as Phase 4's own next slice, following the
 same measure-first, design-before-code discipline Phase 3 (and the
 2026-09-30 investigation itself) already set as this effort's norm, rather
 than attempting an unaudited 36-site refactor in one unreviewed pass.
+
+### 2026-10-05 — Phase 4: landed the cosmetic-pulse narrowing (first of 36 refresh() call sites)
+
+Picked the single highest-value, lowest-risk slice of the narrowing work
+scoped in the entry above: the idle cosmetic-pulse tick specifically, since
+it's both the dominant real-world cost (fires continuously whenever the
+Picker is open and otherwise idle, unlike nav/reload/pivot-switch which only
+fire on actual input) and the one cause provably safe to narrow without
+touching any other call site.
+
+**Audit (the actual work, not the diff):** traced every consumer of
+`self.pulse`/`self.spin()` reachable from each of the 7 segment widgets'
+`render()`. Result: only `nf-chrome` (`_stats_row()` -> `status_text()`
+always appends a pulse-colored `●`) and `nf-body-data` (already fast-paths a
+pulse-only repaint internally, #4719, but still needs invoking so that path
+runs) have ANY pulse/spin dependency -- **conditional on nothing else being
+concurrently busy**: `nf-title`'s topbar shows a spinner only while
+`update_state == "checking"`, and `_tick()`'s own code already forces
+`busy = True` whenever `update_state == "checking"` (and whenever a live
+loader is still loading, and whenever `_busy_label` is set for a background
+action's footer spinner) -- so the *specific* branch this change narrows
+(`not busy and not nav`, i.e. `_tick()`'s `elif self.frame % 5 == 0:`) can
+never coincide with any of those other spinner states by construction, not
+by assumption. `nf-pivots`/`nf-machine`/`nf-buttons`/`nf-footer` have zero
+pulse/spin dependency under any condition.
+
+**Change:** `PickerScreen.refresh()` gained a keyword-only `cause: str |
+None = None` parameter (never forwarded to Textual's own `Widget.refresh()`,
+whose signature has no such parameter -- confirmed via
+`inspect.signature(Widget.refresh)`), threaded through to
+`_refresh_nf_segments(cause=...)`. `cause=None` (every pre-existing call
+site, unchanged) refreshes all 7 segments exactly as before. `cause="pulse"`
+(passed only by `_tick()`'s own `not busy and not nav` branch) narrows to
+`_PULSE_ONLY_SEGMENTS = ("nf-chrome", "nf-body-data")`. Any other string
+value falls back to refreshing everything -- a typo or an un-audited future
+cause degrades to today's behavior, never to silently skipping a segment
+nothing proved was safe to skip.
+
+**Validation**: added
+`test_tick_pure_cosmetic_pulse_narrows_segment_refresh_to_chrome_and_body`
+(`test_picker_tui.py`) -- monkeypatches `.refresh()`/`.refresh_data()` on
+all 7 live segment widgets with a call-tracking wrapper, drives `_tick()`
+directly under both conditions, and asserts the pure-pulse tick touches
+exactly `{nf-chrome, nf-body-data}` while a competing nav-dirty tick (same
+cadence boundary) still touches all 7 -- proving the narrowing never
+silently applies when something else also triggered the refresh. Full
+`test_picker_tui.py` green in isolation (294/294, including the new test).
+A full-suite run surfaced 4 failures, all in the already-documented
+`test_registered_pivot_*`/`test_steering_card_*` modal-opening family (the
+`_open_task_menu_and_wait` helper's own docstring already calls this "a
+pre-existing, load-sensitive flake independent of any particular test's own
+content, reproduces identically on an unmodified checkout") -- confirmed
+genuinely pre-existing, not caused by this change, by running the clean
+(stashed) baseline through the identical full-suite invocation twice: one
+run surfaced the same failure family (1 failure), the other surfaced zero --
+inherently flaky in both directions, and every individual failing test
+passed on its own in isolation (5/5 for one of them, specifically rerun to
+check). No code this change touches (segment-refresh narrowing in the idle
+tick) is anywhere near the action-menu/modal-opening code path these flaky
+tests exercise.
+
+**Next**: the remaining ~35 `refresh()` call sites (nav/reload/pivot-switch/
+etc.) stay fully unnarrowed, per the explicit scoping above -- their own
+per-cause audit is a separate future slice. Phase 5 remains fully unstarted.
 
