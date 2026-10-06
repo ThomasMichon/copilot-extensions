@@ -404,7 +404,7 @@ def test_clean_status_rollup_does_not_override_an_ambiguous_mergeable_value(stat
         ("success", Mergeability.CLEAN),
         ("skipped", Mergeability.CLEAN),
         ("pending", Mergeability.CHECKS_PENDING),
-        ("warning", Mergeability.CHECKS_FAILED),
+        ("warning", Mergeability.CHECKS_PENDING),
         ("failure", Mergeability.CHECKS_FAILED),
         ("error", Mergeability.CHECKS_FAILED),
     ],

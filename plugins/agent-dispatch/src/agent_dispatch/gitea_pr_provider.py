@@ -58,7 +58,13 @@ _COMMIT_STATUS_TO_MERGEABILITY: dict[str, Mergeability] = {
     "success": Mergeability.CLEAN,
     "skipped": Mergeability.CLEAN,
     "pending": Mergeability.CHECKS_PENDING,
-    "warning": Mergeability.CHECKS_FAILED,
+    # "warning" is not a failed Gitea check state -- this repo's own
+    # production agent-worktrees Gitea adapter maps it to pending (newer
+    # Gitea releases may even allow a warning to merge). Classifying it as
+    # CHECKS_FAILED would report failure even when the PR payload itself
+    # says mergeable=True, potentially holding reviewer polling on a PR
+    # that was never actually blocked.
+    "warning": Mergeability.CHECKS_PENDING,
     "failure": Mergeability.CHECKS_FAILED,
     "error": Mergeability.CHECKS_FAILED,
 }

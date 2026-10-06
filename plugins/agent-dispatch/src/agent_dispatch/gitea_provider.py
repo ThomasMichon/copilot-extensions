@@ -411,6 +411,24 @@ class GiteaProvider:
                 except Exception:
                     pass
             raise
+        # The label add and the marker write are not atomic with a
+        # concurrent release() (or another failed reserve()'s own
+        # rollback): either can observe this call's label add, scan for
+        # an active reservation, find none yet (this marker hasn't landed
+        # yet), and delete the label -- all before this marker write
+        # completes. Pre-election overlap is intentionally supported, so
+        # this window is real, not hypothetical. Re-check that the label
+        # survived; if a concurrent delete won the race, re-add it so the
+        # reservation this marker now records is never left unlabeled.
+        current_issue = self._call("GET", f"/repos/{repo}/issues/{issue.number}", ok=(200,))
+        if not any(
+            isinstance(label, dict) and label.get("id") == label_id
+            for label in (current_issue.get("labels") or [])
+        ):
+            self._call(
+                "POST", f"/repos/{repo}/issues/{issue.number}/labels",
+                payload={"labels": [label_id]}, ok=(200, 201),
+            )
 
     def claim(
         self, repo: str, issue: "Issue", reservation: dict[str, Any], task_id: str

@@ -466,6 +466,59 @@ def test_label_id_resolution_re_fetches_after_a_miss_instead_of_caching_forever(
     assert label_list_calls["count"] == 2
 
 
+def test_reserve_re_adds_the_label_when_a_concurrent_release_races_the_marker_write(
+    monkeypatch,
+):
+    """The label add and the marker write are not atomic with a
+    concurrent release() (or another failed reserve()'s own rollback):
+    either can observe this call's label add, scan for an active
+    reservation, find none yet (this marker hasn't landed yet), and
+    delete the label -- all before this marker write completes.
+    Pre-election overlap is intentionally supported, so this window is
+    real. The label must be re-added once the marker successfully lands,
+    so the reservation it now records is never left unlabeled."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+    get_issue_calls = {"count": 0}
+    relabeled = []
+
+    def runner(args, **kwargs):
+        method = args[args.index("-X") + 1]
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status({"login": "issue-bot"}, 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status({"full_name": "example/project"}, 200)
+        if url.endswith("/issues/1") and method == "GET":
+            get_issue_calls["count"] += 1
+            if get_issue_calls["count"] == 1:
+                return _status({"labels": []}, 200)  # pre-add check: not present yet
+            # post-marker re-check: a concurrent release() won the race and
+            # removed it in between.
+            return _status({"labels": []}, 200)
+        if "/labels?page=1" in url and method == "GET":
+            return _status([{"id": 7, "name": "backlog-active"}], 200)
+        if "/labels?page=" in url and method == "GET":
+            return _status([], 200)
+        if url.endswith("/issues/1/labels") and method == "POST":
+            relabeled.append(7)
+            return _status([{"id": 7, "name": "backlog-active"}], 201)
+        if "/issues/1/comments?" in url and method == "GET":
+            return _status([], 200)
+        if url.endswith("/issues/1/comments") and method == "POST":
+            return _status({"id": 2}, 201)
+        raise AssertionError(f"unexpected curl invocation: {method} {url}")
+
+    provider = _provider(runner)
+    issue = Issue(1, "t", "url", (), 0.0, 0.0)
+    provider.reserve(
+        "example/project", issue,
+        {"loop": "backlog", "occurrence": 1, "label": "backlog-active"},
+    )
+    # One add from the normal happy path, one more from the post-marker
+    # re-check discovering the concurrent release() won the race.
+    assert relabeled == [7, 7]
+
+
 def test_reserve_rolls_back_the_label_when_the_marker_comment_fails(monkeypatch):
     """The label add can succeed and then the marker-comment write can
     fail (transiently or permanently). Left alone, that leaves a labeled
