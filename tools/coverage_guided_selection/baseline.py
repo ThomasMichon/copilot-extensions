@@ -1,6 +1,6 @@
 """Collect a portable coverage baseline from a real pytest run.
 
-Spawns a single ephemeral `uv run --with coverage --with pytest-cov --with
+Spawns a single ephemeral `uv run --with coverage --with
 pytest-json-report` subprocess running a small in-process driver (written
 to a temp file and executed in that same ephemeral venv) so baseline
 collection needs no ambient dependency beyond `uv` itself: the driver runs
@@ -9,7 +9,13 @@ result -- `coverage` and `pytest-json-report` are only ever imported inside
 that ephemeral venv, never in this module's own caller process. This was
 validated directly against a downstream consumer repository's own small
 test suite during this effort's originating low-risk spike (see this
-effort's own 2026-10-01 Journal entry).
+effort's own 2026-10-01 Journal entry), and against a much larger,
+multi-threaded downstream suite when the coverage-attach race below
+surfaced and was fixed.
+
+The driver manages a `coverage.Coverage` object directly (not
+`pytest-cov`'s own `--cov=`/`--cov-context=test` CLI options) -- see
+`_DRIVER_SCRIPT`'s own comment on the coverage-attach race this avoids.
 
 The resulting baseline is deliberately pure JSON (`BASELINE_SCHEMA_VERSION`):
 no live `coverage.py` database is carried past collection, so `selection` and
@@ -72,6 +78,7 @@ _DRIVER_SCRIPT = textwrap.dedent(
     import sys
     from pathlib import Path
 
+    import coverage
     import pytest
 
     # Every statement below must stay inside this guard. A plugin's own
@@ -86,7 +93,7 @@ _DRIVER_SCRIPT = textwrap.dedent(
     # `agent-worktrees`' own real cross-process file-lock tests spawn
     # exactly such a child, which died at bootstrap with that exact error
     # (observable as the spawned process simply never living), and the
-    # doomed re-execution's own half-started pytest-cov instance is what
+    # doomed re-execution's own half-started coverage instance is what
     # corrupted the real coverage data file the parent process was still
     # writing to (`coverage.exceptions.DataError: ... no such table:
     # context`). This is the same "Safe importing of main module" hazard
@@ -118,13 +125,50 @@ _DRIVER_SCRIPT = textwrap.dedent(
                         else None
                     )
 
+        class _ContextSwitcher:
+            # One switch_context() per test (at setup, covering setup +
+            # call + teardown under the same context) rather than a
+            # phase-level split -- this baseline only ever needed "which
+            # test" per line, never phase-level granularity.
+            def pytest_runtest_setup(self, item):
+                cov = coverage.Coverage.current()
+                if cov is not None:
+                    cov.switch_context(item.nodeid)
+
+        # Managed directly via the `coverage` API rather than
+        # pytest-cov's own `--cov=`/`--cov-context=test` CLI options --
+        # confirmed root cause of an intermittent (at scale, close to
+        # constant) `sqlite3.OperationalError: unable to open database
+        # file` inside coverage.py's own internal data file against a
+        # large, multi-threaded downstream consumer suite:
+        # `pytest-cov`'s own `CoverageData` always suffixes its data file
+        # (host+pid+random, unconditional, not just for `pytest-xdist`),
+        # and coverage.py creates its sqlite schema *lazily*, on whichever
+        # thread's data flushes first (one internal `SqliteDb` handle per
+        # `threading.get_ident()`) -- multiple threads' first-ever flush
+        # can race that lazy schema creation. Two targeted experiments
+        # ruled out a live-thread-write race specifically (the identical
+        # failure reproduced with zero dynamic context switching at all,
+        # and reproduced even after explicitly joining every non-main
+        # thread before the final save) before finding this. Managing
+        # `Coverage` ourselves fixes the data file to one exact,
+        # caller-controlled path (no suffix to race against) and forces
+        # the schema to exist via one single-threaded `save()`
+        # immediately after `start()`, before `pytest.main()` launches any
+        # test or thread -- eliminating the race window entirely rather
+        # than narrowing it. Validated against the real downstream suite
+        # that surfaced this: fully clean and reproducible across three
+        # separate runs, where the pytest-cov-driven version failed on
+        # almost every attempt.
+        cov = coverage.Coverage(data_file=cov_data_file, source=[cov_source])
+        cov.start()
+        cov.save()  # force schema creation now, single-threaded
+
         exit_code = pytest.main(
             [
                 *test_paths,
                 "-q",
                 f"--basetemp={basetemp}",
-                f"--cov={cov_source}",
-                "--cov-context=test",
                 "--json-report",
                 f"--json-report-file={json_report_file}",
                 "-p",
@@ -140,33 +184,44 @@ _DRIVER_SCRIPT = textwrap.dedent(
                 "-o",
                 "addopts=",
             ],
-            plugins=[_TierCollector()],
+            plugins=[_TierCollector(), _ContextSwitcher()],
         )
+
+        cov.stop()
+        cov.save()
 
         if exit_code != 0:
             sys.exit(exit_code)
 
-        import coverage
-
-        cov = coverage.CoverageData(basename=cov_data_file)
-        cov.read()
+        cov_data = coverage.CoverageData(basename=cov_data_file)
+        cov_data.read()
 
         cwd_path = Path(cwd).resolve()
+        # `_ContextSwitcher` above records one context per test (the bare
+        # nodeid, no phase suffix) -- but tolerate the `|run`/`|setup`/
+        # `|teardown` suffixes pytest-cov's own TestContextPlugin would
+        # have produced too, so a baseline measured with that plugin
+        # instead (or an older one of this driver's own baselines) still
+        # reads back correctly.
         phase_suffixes = ("|run", "|setup", "|teardown")
         coverage_map = {}
-        for measured_file in cov.measured_files():
+        for measured_file in cov_data.measured_files():
             try:
                 rel = str(Path(measured_file).resolve().relative_to(cwd_path))
             except ValueError:
                 rel = measured_file
             per_line = {}
-            for lineno, contexts in cov.contexts_by_lineno(measured_file).items():
+            for lineno, contexts in cov_data.contexts_by_lineno(measured_file).items():
                 tests = set()
                 for ctx in contexts:
+                    if not ctx:
+                        continue
                     for suffix in phase_suffixes:
                         if ctx.endswith(suffix):
                             tests.add(ctx[: -len(suffix)])
                             break
+                    else:
+                        tests.add(ctx)
                 if tests:
                     per_line[str(lineno)] = sorted(tests)
             if per_line:
@@ -270,7 +325,7 @@ def _prepare_project_venv(project_dir: Path, tmp_path: Path, *, timeout_s: float
         subprocess.run(
             [
                 "uv", "pip", "install", "--python", str(python_exe),
-                "coverage", "pytest-cov", "pytest-json-report",
+                "coverage", "pytest-json-report",
             ],
             check=True, capture_output=True, text=True, timeout=timeout_s,
         )
@@ -433,7 +488,6 @@ def collect_baseline(
         else:
             command_prefix = [
                 "uv", "run",
-                "--with", "pytest-cov",
                 "--with", "coverage",
                 "--with", "pytest-json-report",
                 "python", str(driver_file),
@@ -541,10 +595,9 @@ def _subprocess_env(cov_data_file: Path, sandbox: Path) -> dict:
     # state/credentials, not pytest-specific selection overrides).
     for var in _AMBIENT_PYTEST_SELECTION_ENV_VARS:
         env.pop(var, None)
-    # Direct pytest-cov's own data file to our temp path -- without this,
-    # it defaults to "./.coverage" relative to the subprocess's cwd (the
-    # caller's own repo checkout), which both pollutes that checkout and
-    # means the driver reads back nothing from its own intended path.
+    # Unused now that the driver passes `data_file=cov_data_file` explicitly
+    # to `coverage.Coverage()` -- kept as a harmless, redundant default in
+    # case any future code path falls back to env-var discovery.
     env["COVERAGE_FILE"] = str(cov_data_file)
     return env
 
