@@ -280,8 +280,8 @@ and ordering before Phase 0 work begins.)_
       exit, bypassing JS exit handlers entirely — confirmed via the
       extension's own per-process debug log showing
       `disposition=stopped-normally` alongside a dead pid and a still-present
-      descriptor). **Precision correction (review-caught):** clean-room's
-      own SIGTERM-cleanup phase signals the extension's pid *directly*, not
+      descriptor). **Note:** clean-room's own SIGTERM-cleanup phase signals
+      the extension's pid *directly*, not
       via a normal CLI-exit path (the scenario never submits a prompt, so
       there is no natural session end to test against) — so that 10/10 PASS
       establishes only that **direct-SIGTERM cleanup** works on Linux, not
