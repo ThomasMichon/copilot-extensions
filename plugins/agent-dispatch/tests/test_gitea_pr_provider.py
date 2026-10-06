@@ -840,6 +840,54 @@ def test_fetch_pr_paginates_past_a_full_first_page_of_review_comments(monkeypatc
     assert HoldReason.BLOCKING_THREADS not in observation.holds
 
 
+def test_fetch_pr_treats_distinct_file_locations_in_one_review_as_separate_threads(
+    monkeypatch,
+):
+    """A single Gitea review can carry multiple independent inline
+    conversations (one per file/line it comments on). Grouping the whole
+    review as one thread would let ONE resolved conversation's
+    `any(resolver)` clear BLOCKING_THREADS even while another conversation
+    in the SAME review stays open -- comments must be partitioned by their
+    (path, position) diff location before that rule applies."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+
+    def runner(args, **kwargs):
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status(json.dumps({"login": "review-bot"}), 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status(json.dumps({"full_name": "example/project"}), 200)
+        if url.endswith("/pulls/7"):
+            return _status(json.dumps(_pr(number=7)), 200)
+        if "/pulls/7/reviews?page=1" in url:
+            return _status(json.dumps([_review(state="COMMENT", review_id=1)]), 200)
+        if "/pulls/7/reviews?page=" in url:
+            return _status(json.dumps([]), 200)
+        if "/reviews/1/comments?page=1" in url:
+            return _status(
+                json.dumps([
+                    {"id": 1, "path": "a.py", "position": 10, "resolver": {"login": "x"}},
+                    {"id": 2, "path": "b.py", "position": 20, "resolver": None},
+                ]),
+                200,
+            )
+        if "/reviews/1/comments?page=" in url:
+            return _status(json.dumps([]), 200)
+        if "/commits/head-sha/status" in url:
+            return _status(json.dumps({"state": "success", "total_count": 1}), 200)
+        if url.endswith("/git/commits/head-sha"):
+            return _status(json.dumps({}), 200)
+        raise AssertionError(f"unexpected curl invocation: {url}")
+
+    adapter = GiteaPRAdapter(
+        "review-bot", runner=runner, api_bases={"gitea.example.com": "https://gitea.example.com"},
+    )
+    observation = adapter.observe("gitea.example.com/example/project", 7)
+    # a.py's own conversation is resolved, but b.py's is not -- the review
+    # as a whole must still block.
+    assert HoldReason.BLOCKING_THREADS in observation.holds
+
+
 def test_all_review_comments_raises_past_the_bounded_scan(monkeypatch):
     monkeypatch.setenv("GITEA_TOKEN", "tok")
 
@@ -849,10 +897,37 @@ def test_all_review_comments_raises_past_the_bounded_scan(monkeypatch):
             return _status(json.dumps({"login": "review-bot"}), 200)
         if url.endswith("/api/v1/repos/example/project"):
             return _status(json.dumps({"full_name": "example/project"}), 200)
-        return _status(json.dumps([{"id": n} for n in range(50)]), 200)  # always full
+        # Every page returns a full page of genuinely new ids, so the scan
+        # legitimately never terminates within the bounded page count.
+        page = int(url.rsplit("page=", 1)[1].split("&", 1)[0])
+        start = (page - 1) * 50
+        return _status(json.dumps([{"id": n} for n in range(start, start + 50)]), 200)
 
     adapter = GiteaPRAdapter(
         "review-bot", runner=runner, api_bases={"gitea.example.com": "https://gitea.example.com"},
     )
     with pytest.raises(RuntimeError, match="bounded"):
         adapter._all_review_comments("https://gitea.example.com", "example", "project", 7, 1)
+
+
+def test_all_review_comments_stops_when_gitea_ignores_pagination(monkeypatch):
+    """A live Gitea instance has been observed to let its review-comments
+    endpoint silently ignore ``page``/``limit`` and return the same full,
+    unpaginated comment list on every call. Stopping only on an *empty*
+    page would never trigger here, spuriously raising the bounded-scan
+    error for every observation of a review with at least one comment."""
+    monkeypatch.setenv("GITEA_TOKEN", "tok")
+
+    def runner(args, **kwargs):
+        url = args[4]
+        if url.endswith("/api/v1/user"):
+            return _status(json.dumps({"login": "review-bot"}), 200)
+        if url.endswith("/api/v1/repos/example/project"):
+            return _status(json.dumps({"full_name": "example/project"}), 200)
+        return _status(json.dumps([{"id": 1}, {"id": 2}]), 200)
+
+    adapter = GiteaPRAdapter(
+        "review-bot", runner=runner, api_bases={"gitea.example.com": "https://gitea.example.com"},
+    )
+    comments = adapter._all_review_comments("https://gitea.example.com", "example", "project", 7, 1)
+    assert [c["id"] for c in comments] == [1, 2]

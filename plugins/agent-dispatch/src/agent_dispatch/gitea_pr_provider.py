@@ -382,11 +382,20 @@ class GiteaPRAdapter:
 
         A single unpaginated page can hide an unresolved comment sitting on
         a later page, silently clearing :data:`HoldReason.BLOCKING_THREADS`
-        for a review that still has open feedback. Stops on a genuinely
-        empty page, for the same server-clamped-``limit`` reason
-        :meth:`_all_reviews` does.
+        for a review that still has open feedback.
+
+        Gitea's review-comments endpoint has been observed to silently
+        ignore ``page``/``limit`` and return the full, unpaginated comment
+        list on every call (mirroring the same quirk the backlog adapter's
+        ``GiteaProvider._all_comments`` works around) -- stopping only on
+        an *empty* page would then never trigger once a review has any
+        inline comment, looping through the bounded page ceiling and
+        raising for every observation of that PR. Stop as soon as a page
+        contributes no new comment id, which is correct whether the
+        server paginates normally or ignores pagination entirely.
         """
         comments: list[dict[str, Any]] = []
+        seen_ids: set[Any] = set()
         for _page_index in range(_MAX_REVIEW_PAGES):
             page = _page_index + 1
             rows = self._call(
@@ -396,7 +405,12 @@ class GiteaPRAdapter:
             ) or []
             if not rows:
                 return comments
-            comments.extend(rows)
+            new_rows = [row for row in rows if row.get("id") not in seen_ids]
+            if not new_rows:
+                return comments
+            for row in new_rows:
+                seen_ids.add(row.get("id"))
+            comments.extend(new_rows)
         raise RuntimeError(
             f"Gitea review-comment listing for {owner}/{name}#{number} review "
             f"{review_id} exceeded the bounded "
@@ -441,7 +455,19 @@ class GiteaPRAdapter:
                 continue
             group = self._all_review_comments(api_base, owner, name, number, review_id)
             if group:
-                review_comment_groups.append(group)
+                # A single Gitea review can carry multiple independent
+                # inline conversations (one per file/line it comments on).
+                # Resolution is per-thread, so grouping an entire review's
+                # comments as one unit would let any ONE resolved
+                # conversation's `any(resolver)` clear BLOCKING_THREADS even
+                # while another conversation in the same review stays open.
+                # Partition by (path, position) -- the diff location Gitea
+                # itself threads replies under -- before applying that rule.
+                threads: dict[tuple[Any, Any], list[dict[str, Any]]] = {}
+                for comment in group:
+                    key = (comment.get("path"), comment.get("position"))
+                    threads.setdefault(key, []).append(comment)
+                review_comment_groups.extend(threads.values())
         head_sha = (pull_request.get("head") or {}).get("sha")
         status_rollup = None
         if isinstance(head_sha, str) and head_sha:
