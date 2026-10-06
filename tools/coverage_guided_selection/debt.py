@@ -39,9 +39,12 @@ from datetime import datetime
 from pathlib import Path
 
 try:
-    from ancestor_resolution import scrubbed_git_env
+    from ancestor_resolution import scrubbed_git_env, _GIT_TIMEOUT_S
 except ModuleNotFoundError:
-    from tools.coverage_guided_selection.ancestor_resolution import scrubbed_git_env
+    from tools.coverage_guided_selection.ancestor_resolution import (
+        scrubbed_git_env,
+        _GIT_TIMEOUT_S,
+    )
 
 
 class CoverageDebtError(RuntimeError):
@@ -49,10 +52,15 @@ class CoverageDebtError(RuntimeError):
 
 
 def _git(args: list[str], *, cwd: Path) -> str:
-    proc = subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True, check=False,
-        env=scrubbed_git_env(),
-    )
+    try:
+        proc = subprocess.run(
+            ["git", *args], cwd=cwd, capture_output=True, text=True, check=False,
+            env=scrubbed_git_env(), timeout=_GIT_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise CoverageDebtError(
+            f"git {' '.join(args)} timed out after {_GIT_TIMEOUT_S}s"
+        ) from exc
     if proc.returncode != 0:
         raise CoverageDebtError(
             f"git {' '.join(args)} failed (exit {proc.returncode}): "
