@@ -770,8 +770,15 @@ _versioned_activate() {
     # returns, so a lease acquired in deploy_venv is held through package
     # deployment and completion-marker publication and ALWAYS released
     # afterward -- never leaked past this run (#5439).
-    _versioned_activate_inner
-    local rc=$?
+    #
+    # `_versioned_activate_inner` as a bare command would trip `set -e` on
+    # its nonzero return (e.g. a genuine health-gate failure) and exit the
+    # whole installer BEFORE `local rc=$?`/`_release_versioned_slot_lease`
+    # next ever ran -- the release would be skipped entirely on exactly
+    # the failure path this wrapper exists to cover. `&& rc=0 || rc=$?` is
+    # itself a compound command, exempt from errexit.
+    local rc
+    _versioned_activate_inner && rc=0 || rc=$?
     _release_versioned_slot_lease
     return "$rc"
 }
@@ -1545,8 +1552,15 @@ _deploy_venv_and_package() {
     # twice on every call (confirmed directly: real-world runs under
     # ~15s for this payload) -- paying it exactly once, protected, is
     # simultaneously correct and no slower than before.
-    deploy_venv
-    local rc=$?
+    #
+    # `deploy_venv` as a bare command would trip `set -e` on ANY nonzero
+    # return (rc 1 failure, or the intentional rc-2 "already complete"
+    # signal) and exit the whole installer BEFORE `rc=$?` next line ever
+    # ran -- a bare simple command's exit status is exactly what errexit
+    # watches, regardless of what follows it. `deploy_venv && rc=0 ||
+    # rc=$?` is itself a compound (`&&`/`||`) command, which is exempt.
+    local rc
+    deploy_venv && rc=0 || rc=$?
     if [[ "$rc" -eq 2 ]]; then
         skipped "Slot $SRC_VERSION already complete and unchanged -- skipping venv/package (re)install"
         return 0

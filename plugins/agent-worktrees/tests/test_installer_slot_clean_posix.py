@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -267,6 +268,53 @@ def test_deploy_venv_retries_then_hard_fails_on_a_dirty_slot():
     )
     fail_branch = body[err_idx:uv_idx]
     assert "return 1" in fail_branch
+
+
+def test_deploy_venv_and_package_survives_set_e_on_the_already_complete_signal():
+    """`deploy_venv` returning 2 (already complete, no-op) is a NONZERO
+    exit from a bare command -- under this file's own `set -euo pipefail`,
+    a bare `deploy_venv` statement followed by a separate `local rc=$?`
+    line would trip errexit and terminate the whole installer at that
+    point, before the next line ever captured the real exit code. The
+    call must be made as part of a compound (`&&`/`||`) command, which is
+    exempt from errexit, so rc 2 is actually observed and handled (skip
+    the package install, continue to activation) instead of silently
+    killing the process."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    body = _function_body(text, "_deploy_venv_and_package")
+
+    assert "deploy_venv && rc=0 || rc=$?" in body
+    assert re.search(r"(?<!&& )(?<!\|\| )^\s*deploy_venv\s*$", body, re.MULTILINE) is None, (
+        "deploy_venv must never appear as a bare statement on its own "
+        "line -- set -e would trip on its nonzero 'already complete' (2) "
+        "return before the next line could capture it"
+    )
+
+
+def test_versioned_activate_releases_the_lease_even_on_set_e(): 
+    """The SAME `set -e` hazard applies to `_versioned_activate`'s own
+    wrapper: a bare `_versioned_activate_inner` statement whose health
+    gate genuinely fails (a real, non-hypothetical path -- see
+    test_posix_health_gate_rejects_namespace_package_slot) would trip
+    errexit and exit the installer BEFORE `_release_versioned_slot_lease`
+    on the next line ever ran, leaking the universal mkdir gate (the
+    flock/fcntl strengthening layers are kernel-auto-released on process
+    exit either way, but the mkdir gate has no such auto-release)."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    body = _function_body(text, "_versioned_activate")
+
+    assert "_versioned_activate_inner && rc=0 || rc=$?" in body
+    assert re.search(r"(?<!&& )(?<!\|\| )^\s*_versioned_activate_inner\s*$", body, re.MULTILINE) is None, (
+        "_versioned_activate_inner must never appear as a bare statement "
+        "on its own line -- set -e would trip on a genuine health-gate "
+        "failure before the lease release on the next line ever ran"
+    )
+    rc_idx = body.index("rc=0 || rc=$?")
+    release_idx = body.index("_release_versioned_slot_lease", rc_idx)
+    assert rc_idx < release_idx, (
+        "the lease must be released AFTER capturing the inner result, "
+        "regardless of what that result was"
+    )
 
 
 def test_deploy_venv_acquires_exclusive_build_lease_before_slot_clean():
