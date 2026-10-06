@@ -896,12 +896,24 @@ worktree-manager.
       identity primitive (e.g. non-Linux POSIX with no `pidfd_open`) falls
       back to the prior unconditional signal/`taskkill`, preserving this
       function's existing guarantee on those platforms rather than
-      silently losing kill capability there. `_kill_pid` has several
-      callers (`_service_stop`'s victim loop, `_force_kill_agent_bridge_tree`'s
+      silently losing kill capability there. `_kill_pid` re-verifies
+      `_pid_is_agent_bridge` itself immediately before acting (not just
+      trusting a caller's earlier check), and on Windows now enumerates
+      and identity-verifies live descendants too — the identity-bound
+      primitive only ever terminates the single named process, unlike the
+      `taskkill /T` it replaces, so tree semantics needed reconstructing
+      explicitly rather than assumed. `_kill_pid` has several callers
+      (`_service_stop`'s victim loop, `_force_kill_agent_bridge_tree`'s
       Windows path); fixing it in the one shared function covers all of
       them, not just the specific `_service_stop` call site the audit
-      named. Closes [#5006](https://github.com/ThomasMichon/copilot-extensions/issues/5006)
-      fully (no further known sites).
+      named. **Does NOT close #5006 fully**: `_force_kill_agent_bridge_tree`'s
+      own POSIX path still has a bare, unverified `os.kill(pid, SIGKILL)`
+      fallback when `safe_killpg` fails — a separate call site `_kill_pid`
+      is never reached from on that path, needing its own SIGKILL-capable
+      identity-bound primitive (today's `terminate_pid_if_identity` only
+      supports SIGTERM) before it can close too. Left open on
+      [#5006](https://github.com/ThomasMichon/copilot-extensions/issues/5006)
+      for that one remaining site.
 - **Background daemon rotation.** Resident per-version mux-daemons
       accumulate indefinitely: `activate_after_update()`'s cutover is only
       attempted opportunistically (at whichever session's `self_update()`
@@ -1150,19 +1162,37 @@ claiming discipline alone.
   `_kill_pid` now routes through `zdd.diagnostics
   .terminate_pid_if_identity` with a freshly-captured `process_start_time`
   token, mirroring `worktree_manager.mux_daemon_cutover
-  ._terminate_mux_daemon_pid`'s #5060 design exactly (identity mismatch
-  skips the kill; an unavailable identity primitive falls back to the
-  prior unconditional signal/`taskkill` rather than regressing kill
-  capability on platforms without `pidfd_open`). Fixed in the single
-  shared `_kill_pid` function rather than only its `_service_stop` call
-  site, so every caller benefits. Added `test_kill_pid_identity.py`
-  covering all three outcomes directly. PR: pending. Full `agent-bridge`
-  suite run locally: 3099 passed, 2 unrelated pre-existing timing flakes
-  (`test_host_index_claims.py`, `test_local_cache_refresh.py`, both
-  process-timing assertions unrelated to this change); `test_session_host.py`
-  hits a pre-existing pytest-capture `OSError: Bad file descriptor`
-  teardown issue on this machine even run alone, unrelated to this diff
-  (no session-host code touched).
+  ._terminate_mux_daemon_pid`'s #5060 design. Review (PR #5524) caught 4
+  real findings before merge, all fixed: (1) the ownership check
+  (`_pid_is_agent_bridge`) was only done by the caller, leaving a window
+  before this function's own token capture — `_kill_pid` now re-verifies
+  ownership itself, immediately before acting; (2) the identity-bound
+  Windows primitive only terminates the single named process, unlike the
+  `taskkill /T` it replaced, silently dropping tree-kill semantics — added
+  `_enumerate_descendant_pids_windows`/`_kill_pid_tree_windows_if_identity`
+  to enumerate and identity-verify live descendants (captured before the
+  root is killed) so the tree-kill guarantee is preserved, safely; (3) the
+  original fallback condition triggered on ANY non-"mismatch" failure,
+  including a per-pid lookup failure (e.g. `pidfd-open-failed`) that is
+  NOT platform incapability — narrowed to only fall back to a legacy kill
+  when `_identity_termination_available()` reports the platform has no
+  identity-bound primitive at all (always true on Windows; POSIX only
+  when `pidfd_open`/`pidfd_send_signal` exist), never on a per-pid lookup
+  failure; (4) the initial Plan/Journal text overclaimed #5006 fully
+  closed — narrowed to name the one still-open site,
+  `_force_kill_agent_bridge_tree`'s POSIX `os.kill(pid, SIGKILL)` fallback
+  (a different call site `_kill_pid` is never reached from, needing its
+  own SIGKILL-capable identity-bound primitive first). Added
+  `test_kill_pid_identity.py` covering ownership-recheck,
+  identity-verified kill, identity mismatch, per-pid lookup failure,
+  platform-incapability fallback, and Windows tree-descendant
+  termination. Full `agent-bridge` suite run locally: 3099 passed, 2
+  unrelated pre-existing timing flakes (`test_host_index_claims.py`,
+  `test_local_cache_refresh.py`, both process-timing assertions unrelated
+  to this change); `test_session_host.py` hits a pre-existing
+  pytest-capture `OSError: Bad file descriptor` teardown issue on this
+  machine even run alone, unrelated to this diff (no session-host code
+  touched).
 - **2026-10-06** — Landed a preliminary, non-attributing registry listing
   for #5001's Phase 1 attribution slice: `worktree-manager daemons
   mappings [--json]` (PR
