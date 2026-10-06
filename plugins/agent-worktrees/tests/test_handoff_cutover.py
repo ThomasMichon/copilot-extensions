@@ -3239,12 +3239,21 @@ class TestCmdHandoffCutoverTrigger:
         assert len(seen_records) == 1
         tokens = {h.token for h in seen_records[0].handoffs}
         assert "handoff-predecessor-2" in tokens
+        # `live_cutover` must be set: `_monitor_pending_handoff_request`'s
+        # own `not handoff.live_cutover` filter would otherwise silently
+        # skip this entry forever, making the whole on-demand trigger a
+        # permanent no-op for exactly the manual-only-mode scenario it
+        # exists to serve.
+        armed = next(h for h in seen_records[0].handoffs if h.token == "handoff-predecessor-2")
+        assert armed.live_cutover is True
         # The ledger entry is durable -- reloading the record from disk
         # (not just the in-memory object passed to the stub) shows it too.
         reloaded = _tracking.load_record(path)
         assert any(h.token == "handoff-predecessor-2" for h in reloaded.handoffs)
+        reloaded_armed = next(h for h in reloaded.handoffs if h.token == "handoff-predecessor-2")
+        assert reloaded_armed.live_cutover is True
 
-    def test_does_not_rearm_an_already_open_token(
+    def test_does_not_duplicate_an_already_open_token_but_upgrades_live_cutover(
         self, monkeypatch, tmp_path, tmp_tracking_dir, monkeypatch_config,
     ):
         from agent_worktrees import tracking as _tracking
@@ -3252,6 +3261,11 @@ class TestCmdHandoffCutoverTrigger:
         path = self._record(tmp_tracking_dir, "wt-trigger-5")
         _tracking.register_session("wt-trigger-5", "predecessor-3")
         loaded = _tracking.load_record(path)
+        # Opened WITHOUT live_cutover -- exactly what an ordinary (non-force)
+        # `trigger_handoff` call leaves behind: a real ledger entry that is
+        # nonetheless invisible to `_monitor_pending_handoff_request`'s own
+        # filter. A human pressing "Cut over" (or calling this verb) must
+        # still be able to arm and recover it.
         _tracking.open_handoff(loaded, "predecessor-3", "handoff-predecessor-3")
         _tracking.save_record(loaded, path)
         marker_path = tmp_path / "handoff-request.json"
@@ -3266,14 +3280,19 @@ class TestCmdHandoffCutoverTrigger:
         seen_records = []
         monkeypatch.setattr(
             m, "_monitor_maybe_process_handoff_record",
-            lambda record: seen_records.append(len(record.handoffs)),
+            lambda record: seen_records.append(record),
         )
 
         rc = m.cmd_handoff_cutover_trigger(
             argparse.Namespace(worktree_id="wt-trigger-5", json=True))
 
         assert rc == 0
-        assert seen_records == [1]  # still exactly one entry -- not duplicated
+        assert len(seen_records[0].handoffs) == 1  # still exactly one entry -- not duplicated
+        armed = next(h for h in seen_records[0].handoffs if h.token == "handoff-predecessor-3")
+        assert armed.live_cutover is True
+        reloaded = _tracking.load_record(path)
+        reloaded_armed = next(h for h in reloaded.handoffs if h.token == "handoff-predecessor-3")
+        assert reloaded_armed.live_cutover is True
 
     def test_human_readable_output_when_nothing_changed(
         self, monkeypatch, capsys, tmp_tracking_dir, monkeypatch_config,

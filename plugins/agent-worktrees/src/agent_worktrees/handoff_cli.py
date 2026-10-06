@@ -890,21 +890,22 @@ def cmd_handoffs_check(args: argparse.Namespace) -> int:
 
 def _arm_pending_handoff_from_session_state(record) -> bool:
     """Best-effort: if a registered session's session-state
-    ``handoff-request.json`` marker names an unconsumed handoff with no
-    matching entry in ``record.handoffs`` yet, open it now
-    (``tracking.open_handoff``) -- mirroring exactly what ``note-handoff``
-    (called from context-handoff's ``trigger_handoff`` when ``mode: auto``,
-    or its ``force`` bypass) would have done. This is what lets
-    ``handoff-cutover-trigger`` work end-to-end even when the operator never
-    ran a ``--force`` trigger separately: the session-state marker
-    (``writeSessionStateHandoff``) is written UNCONDITIONALLY by
-    ``triggerHandoff()`` regardless of mode, so it is always available here;
-    only the ledger entry ``_monitor_pending_handoff_request`` scans was
-    ever mode-gated. Idempotent (``open_handoff`` returns the existing entry
-    for a token already present) and scoped to a session actually tracked on
-    THIS record. Returns whether an entry was (already, or newly) armed."""
+    ``handoff-request.json`` marker names an unconsumed handoff, (re-)open it
+    now (``tracking.open_handoff``) with ``live_cutover=True`` -- mirroring
+    what ``note-handoff`` (called when ``mode: auto``, or ``force``) would
+    have done. This is what lets ``handoff-cutover-trigger`` work end-to-end
+    even without a separate ``--force`` call: the session-state marker is
+    written UNCONDITIONALLY regardless of mode; only the ledger entry
+    ``_monitor_pending_handoff_request`` scans was ever mode-gated.
+    ``open_handoff`` is idempotent AND upgrade-safe (an existing entry for
+    the same token is returned as-is, with ``live_cutover`` promoted
+    False -> True if not already armed, never downgraded) -- so this ALWAYS
+    calls it for every unconsumed marker found, rather than skipping tokens
+    already present in ``record.handoffs``, which would leave an entry
+    opened without the flag permanently unarmed. Scoped to a session
+    actually tracked on THIS record. Returns whether an entry was (already,
+    or newly) armed."""
     open_handoff = tracking.open_handoff
-    existing_tokens = {h.token for h in record.handoffs}
     armed = False
     for entry in getattr(record, "sessions", None) or []:
         sid = entry.session_id
@@ -917,14 +918,13 @@ def _arm_pending_handoff_from_session_state(record) -> bool:
         token = str(request.get("handoffId") or "").strip()
         if not token:
             continue
-        if token in existing_tokens:
-            armed = True
-            continue
+        # live_cutover=True: reaching this call site IS the explicit human
+        # gate (Companion "Cut over", or a direct CLI call) -- without it,
+        # `_monitor_pending_handoff_request`'s filter always skips the entry.
         try:
-            open_handoff(record, sid, token, save=False)
+            open_handoff(record, sid, token, save=False, live_cutover=True)
         except Exception:
             continue
-        existing_tokens.add(token)
         armed = True
     return armed
 
