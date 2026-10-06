@@ -835,6 +835,47 @@ function Remove-PluginBuildArtifacts {
     }
 }
 
+function Publish-FileAtomically {
+    <# Atomically replace (or first-create) a marker file -- ported from
+       agent-machines' own scripts/init.ps1 (same helper, same semantics).
+       Invoke-Stamp's payload-dir/stamped-version markers are read by the
+       self-provisioning binstub OUTSIDE any lock, so a plain WriteAllText
+       could be observed mid-write (a torn, partially-written file) by a
+       racing reader. #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Content,
+        [Parameter(Mandatory)]$Encoding
+    )
+    # File.Replace requires fully-qualified paths -- a relative path throws
+    # "The path is not of a legal form."
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $tmp = "$fullPath.tmp-$PID"
+    [System.IO.File]::WriteAllText($tmp, $Content, $Encoding)
+    for ($attempt = 1; $true; $attempt++) {
+        try {
+            if (Test-Path -LiteralPath $fullPath) {
+                $backup = "$fullPath.bak-$PID"
+                [System.IO.File]::Replace($tmp, $fullPath, $backup)
+                Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+            } else {
+                # Two racing first-time installs can both pass the Test-Path
+                # check above before either publishes. Omit -Force here: a
+                # plain Move-Item throws if a concurrent writer created the
+                # destination in that gap, instead of silently -Force
+                # deleting+recreating the very no-file window this helper
+                # exists to prevent. Caught below and retried, which
+                # re-checks Test-Path and takes the safe Replace() branch.
+                Move-Item -LiteralPath $tmp -Destination $fullPath
+            }
+            return
+        } catch {
+            if ($attempt -ge 20) { throw }
+            Start-Sleep -Milliseconds 15
+        }
+    }
+}
+
 function Enter-PluginSnapshotLock {
     <# Serializes New-PluginBuildSnapshot's check/copy/publish sequence
        against concurrent invocations (two near-simultaneous install/stamp
@@ -956,6 +997,11 @@ function New-PluginBuildSnapshot {
         return $PluginDir
     }
     try {
+        # Initialized before any failure-prone step (mutex acquisition
+        # included) so the outer catch below can safely check it under this
+        # script's Set-StrictMode without an "uninitialized variable" error
+        # when a failure happens before $snapTmp is ever assigned.
+        $snapTmp = $null
         # Serialize the whole check/copy/publish sequence below against a
         # concurrent caller racing the same $InstallDir (see
         # Enter-PluginSnapshotLock's own docstring for the exact race this
@@ -1011,6 +1057,15 @@ function New-PluginBuildSnapshot {
             $snapMutex.Dispose()
         }
     } catch {
+        # A failure mid-copy/move (disk full, permissions) can leave this
+        # attempt's own $snapTmp behind. Every attempt uses a fresh PID
+        # suffix, so on the -BestEffort path (which swallows this and lets
+        # the caller retry on its next invocation) nothing else would ever
+        # remove it -- a repeatedly-failing degrade would accumulate a
+        # distinct, never-reaped partial tree on every single attempt.
+        if ($snapTmp -and (Test-Path $snapTmp)) {
+            Remove-Item -LiteralPath $snapTmp -Recurse -Force -ErrorAction SilentlyContinue
+        }
         if (-not $BestEffort) { throw }
         Write-Warn "Could not create build snapshot ($($_.Exception.Message)) -- building from the live payload"
         return $PluginDir
@@ -3129,10 +3184,30 @@ function Invoke-Stamp {
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
-    $snapDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
-    Write-Ok "Snapshot: $snapDir"
+    # Hold ONE lock across snapshot creation AND both marker writes -- not
+    # just New-PluginBuildSnapshot's own internal (narrower) acquisition.
+    # Without this outer scope, two overlapping stamps for DIFFERENT
+    # versions could each finish their own (separately-locked) snapshot,
+    # then race the UNLOCKED marker writes below: an older, slower
+    # invocation could publish its markers AFTER a newer one already
+    # finished, pointing payload-dir/stamped-version at stale content, or
+    # leaving the two markers naming different versions. Mutex is
+    # thread-reentrant, so New-PluginBuildSnapshot's own inner
+    # Enter-PluginSnapshotLock call (same $InstallDir key) re-enters
+    # harmlessly rather than deadlocking.
+    $stampMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir
+    try {
+        $snapDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion
+        # Publish-FileAtomically guards the binstub's self-provisioning read
+        # (which never takes this mutex) against observing a torn,
+        # partially-written marker file.
+        Publish-FileAtomically -Path (Join-Path $InstallDir 'payload-dir') -Content $snapDir -Encoding $utf8NoBom
+        Publish-FileAtomically -Path (Join-Path $InstallDir 'stamped-version') -Content $SrcVersion -Encoding $utf8NoBom
+        Write-Ok "Snapshot: $snapDir"
+    } finally {
+        [void]$stampMutex.ReleaseMutex()
+        $stampMutex.Dispose()
+    }
     Deploy-SelfProvisioningBinstub
     Write-Ok 'Stamped: agent-dispatch binstub on PATH; runtime provisions on first use.'
 }

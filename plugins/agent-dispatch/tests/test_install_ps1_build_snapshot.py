@@ -413,3 +413,81 @@ Write-Output "RESULT:$result"
     assert len(list((expected / "src" / "bulk").glob("file_*.py"))) == 300
     assert sorted(p.name for p in (install_dir / "snapshots").iterdir()) == ["0.1.0-dev1"]
 
+
+def _run_lock_harness(extra_script: str) -> subprocess.CompletedProcess[str]:
+    script = (
+        "$ErrorActionPreference = 'Stop'\n"
+        + _extract_function_block("Enter-PluginSnapshotLock")
+        + "\n\n"
+        + _extract_function_block("Publish-FileAtomically")
+        + "\n\n"
+        + extra_script
+        + "\n"
+    )
+    return subprocess.run(
+        [_PWSH, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True,
+        text=True,
+        env=os.environ,
+        timeout=30,
+        check=True,
+    )
+
+
+def test_snapshot_lock_is_reentrant_on_the_same_thread(tmp_path: Path) -> None:
+    """Invoke-Stamp holds an OUTER Enter-PluginSnapshotLock across both
+    snapshot creation AND marker publication, while New-PluginBuildSnapshot
+    (which it calls) takes its OWN inner lock with the same $InstallDir key
+    -- this is only deadlock-free because named-mutex ownership is
+    thread-affine (a second WaitOne from the SAME thread re-enters rather
+    than blocking on itself). Proves that assumption directly: two nested
+    acquisitions for the same install dir, from the same thread/process,
+    both succeed without blocking, and the inner release leaves the outer
+    acquisition still held."""
+    install_dir = tmp_path / "install"
+
+    extra = f"""
+$outer = Enter-PluginSnapshotLock -InstallDir "{install_dir}"
+$inner = Enter-PluginSnapshotLock -InstallDir "{install_dir}"
+Write-Output "BOTH-ACQUIRED"
+[void]$inner.ReleaseMutex()
+$inner.Dispose()
+# Still held by the outer acquisition -- a third WaitOne from a DIFFERENT
+# process would time out here; same-thread re-entry would not exercise
+# that at all, so this only proves inner release didn't fully unlock it
+# by checking the outer release still succeeds cleanly below.
+[void]$outer.ReleaseMutex()
+$outer.Dispose()
+Write-Output "OUTER-RELEASED"
+"""
+    result = _run_lock_harness(extra)
+    assert "BOTH-ACQUIRED" in result.stdout, result.stdout + result.stderr
+    assert "OUTER-RELEASED" in result.stdout, result.stdout + result.stderr
+
+
+def test_publish_file_atomically_creates_a_new_file(tmp_path: Path) -> None:
+    target = tmp_path / "install" / "payload-dir"
+    target.parent.mkdir(parents=True)
+
+    extra = f"""
+Publish-FileAtomically -Path "{target}" -Content "C:\\snap\\v1" -Encoding ([System.Text.UTF8Encoding]::new($false))
+"""
+    _run_lock_harness(extra)
+    assert target.read_text(encoding="utf-8") == "C:\\snap\\v1"
+    # No leftover .tmp-<pid>/.bak-<pid> siblings.
+    assert sorted(p.name for p in target.parent.iterdir()) == ["payload-dir"]
+
+
+def test_publish_file_atomically_replaces_an_existing_file(tmp_path: Path) -> None:
+    target = tmp_path / "install" / "payload-dir"
+    target.parent.mkdir(parents=True)
+    target.write_text("C:\\snap\\old", encoding="utf-8")
+
+    extra = f"""
+Publish-FileAtomically -Path "{target}" -Content "C:\\snap\\new" -Encoding ([System.Text.UTF8Encoding]::new($false))
+"""
+    _run_lock_harness(extra)
+    assert target.read_text(encoding="utf-8") == "C:\\snap\\new"
+    assert sorted(p.name for p in target.parent.iterdir()) == ["payload-dir"]
+
+
