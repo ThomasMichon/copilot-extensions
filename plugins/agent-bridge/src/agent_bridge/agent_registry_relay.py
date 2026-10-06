@@ -7,6 +7,8 @@ import logging
 import secrets
 import shutil
 import subprocess
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 from agent_procutil import no_window_flags
@@ -142,7 +144,7 @@ def _apply_relay_profile(builder, profile: dict) -> None:
             builder.require_token(list(gated), FileTokenValidator(store))
 
 
-def _relay_profile_via_cli(binstub: str) -> dict | None:
+def _relay_profile_via_cli(binstub: str, *, timeout: float = 20.0) -> dict | None:
     """Fetch a provider's declarative relay profile via ``<binstub> relay-profile``."""
     exe = shutil.which(binstub)
     if not exe:
@@ -152,7 +154,7 @@ def _relay_profile_via_cli(binstub: str) -> dict | None:
             [exe, "relay-profile"],
             capture_output=True,
             text=True,
-            timeout=20,
+            timeout=timeout,
             creationflags=no_window_flags(),
         )
     except Exception:
@@ -168,9 +170,68 @@ def _relay_profile_via_cli(binstub: str) -> dict | None:
         return None
 
 
-def _register_provider_relay(builder, binstub: str) -> None:
-    """Register one provider's relay profile via its ``relay-profile`` CLI seam."""
+#: Backoff (seconds) between ``relay-profile`` retries for a provider that is
+#: registered in ``providers.d`` but whose CLI seam is momentarily unavailable
+#: (e.g. its runtime is mid-update during a bridge cutover).
+_PROFILE_RETRY_DELAYS: tuple[float, ...] = (1.0, 2.0, 4.0, 8.0)
+#: Total wall-clock budget (seconds) for those retries, sleeps and probes
+#: included, so a truly broken provider can't stall relay startup or
+#: post-cutover relay adoption for long.
+_PROFILE_RETRY_BUDGET = 20.0
+#: Per-probe ``relay-profile`` timeout while retrying (a healthy seam answers
+#: in well under a second).
+_PROFILE_RETRY_PROBE_TIMEOUT = 5.0
+
+
+def _provider_registered(binstub: str) -> bool:
+    """Whether ``binstub`` has a ``providers.d/<binstub>.json`` manifest."""
+    try:
+        from .provider_sources import providers_dir
+
+        return (providers_dir() / f"{binstub}.json").is_file()
+    except Exception:
+        return False
+
+
+def _register_provider_relay(
+    builder, binstub: str, *,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> None:
+    """Register one provider's relay profile via its ``relay-profile`` CLI seam.
+
+    A provider that is not installed contributes nothing (debug log). A provider
+    that *is* registered in ``providers.d`` but whose seam fails is retried with
+    bounded backoff within ``_PROFILE_RETRY_BUDGET`` seconds; if it never
+    answers, a WARNING is logged, because the relay
+    would otherwise run for its whole lifetime without that provider's token
+    gate and silently deny its gated actions.
+    """
     profile = _relay_profile_via_cli(binstub)
+    if profile is None and _provider_registered(binstub):
+        deadline = clock() + _PROFILE_RETRY_BUDGET
+        for delay in _PROFILE_RETRY_DELAYS:
+            remaining = deadline - clock()
+            if remaining <= delay:
+                break
+            log.info(
+                "%s relay-profile unavailable but provider is registered -- "
+                "retrying in %.0fs", binstub, delay,
+            )
+            sleep(delay)
+            probe_timeout = min(_PROFILE_RETRY_PROBE_TIMEOUT, deadline - clock())
+            profile = _relay_profile_via_cli(binstub, timeout=probe_timeout)
+            if profile is not None:
+                break
+        if profile is None:
+            log.warning(
+                "%s is a registered bridge provider but its relay-profile is "
+                "unavailable; its credential-relay sources and token gate are "
+                "NOT active (gated actions such as get-azure-token will be "
+                "denied). Run `agent-bridge service restart` once %s is healthy.",
+                binstub, binstub,
+            )
+            return
     if profile is None:
         log.debug("%s relay-profile unavailable -- no relay sources", binstub)
         return

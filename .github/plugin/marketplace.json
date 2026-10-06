@@ -25,7 +25,7 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.9.11-dev3",
+      "version": "0.9.12-dev1",
       "source": "plugins/agent-bridge"
     },
     {
@@ -62,7 +62,7 @@
     {
       "name": "agent-logger",
       "description": "Reusable Copilot CLI session logging - segment sessions into digestible chunks, write Markdown session logs, sync local or validated provider-rescued sessions to a configurable target, and optionally run a scheduled orchestrator that crunches a backlog into committed logs",
-      "version": "0.2.10-dev1",
+      "version": "0.2.11-dev1",
       "source": "plugins/agent-logger"
     },
     {
@@ -152,7 +152,7 @@
     {
       "name": "agent-conduct-guidance",
       "description": "Consolidated, generally-good agent conduct guidance for Copilot CLI: one plugin hosting multiple independent ambient modules, each a concise checked-in instruction projection plus a paired on-demand skill. Modules: process-spawn hygiene (spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly, especially on Windows), coordinator-first delegation (route broad separable research, comparisons, evaluations, domain-tool calls, and disjoint bulk edits into bounded sub-agent contexts while the coordinator retains synthesis, integration, and completion), and scratch-space hygiene (resolve a portable scratch root and a timestamped per-task subfolder before writing an ad hoc working file outside a repository, instead of littering a drive root with undated loose files). Designed to absorb further similarly-scoped conduct guidance as its own module rather than proliferating single-purpose plugins.",
-      "version": "0.1.4-dev1",
+      "version": "0.1.5-dev1",
       "source": "plugins/agent-conduct-guidance"
     }
   ]
