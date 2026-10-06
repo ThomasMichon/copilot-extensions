@@ -171,47 +171,62 @@ def test_launchers_publish_managed_mux_observation_from_worktree_path():
 
 
 @pytest.mark.guard
-def test_launchers_deliver_pending_seed_only_on_fresh_mux_create():
-    """picker-new-session-prompt-and-composer Phase A seam 2: the launcher
-    itself hands the pane command straight to `new-session`/`tmux new-session`
-    -- Copilot starts the instant the pane exists, so a queued
-    `pending_seed` can only ever be delivered by a SEPARATE
-    `agent-worktrees embody --worktree-id` call made right after that create
-    succeeds (embody's own "already embodies this worktree" resume branch
-    claims + types it). This must fire only on the CREATE branch (a fresh
-    mux session this launcher just stood up), never on the JOIN branch (an
-    already-live session, whose seed -- if any -- was already delivered the
-    first time it was created)."""
+def test_launchers_deliver_pending_seed_on_both_create_and_join():
+    """picker-new-session-prompt-and-composer Phase A seam 2, revised by
+    resume-prompt-durable-seed-and-mux-fix Phase 3: the launcher hands the
+    pane command straight to `new-session`/`tmux new-session` -- Copilot
+    starts the instant the pane exists, so a queued `pending_seed` can only
+    ever be delivered by a SEPARATE `agent-worktrees embody --worktree-id`
+    call made right after that create succeeds (embody's own "already
+    embodies this worktree" resume branch claims + types it).
+
+    This ORIGINALLY fired only on the CREATE branch, on the assumption that
+    a JOIN (an already-live session) could never have a queued seed worth
+    delivering -- wrong whenever `resolve --json` (a separate, earlier
+    process) queues an explicit seed specifically BECAUSE it detected an
+    uncertain-or-live mux and deliberately did NOT embed it into the now-
+    discarded `cmd` (see resolve_cli.py's/resolve_launch_cli.py's own
+    `live_or_uncertain_mux`/`live_mux` gating). Without a JOIN-branch
+    delivery too, that queued seed was silently stranded. Fixed: BOTH
+    branches now call the same helper."""
     ps = _LAUNCH_PS1.read_text()
     sh = _LAUNCH_SCRIPT.read_text()
 
     # PowerShell: a detached, best-effort helper defined once ...
     assert "function Invoke-SeedDeliverySafe" in ps
     assert "'embody', '--worktree-id', $WorktreeId, '--json'" in ps
-    assert ps.count("Invoke-SeedDeliverySafe $plan.worktree_id") == 1
-    # ... called strictly between the CREATE branch's own setup-log marker
-    # and its nested-create early-exit -- never anywhere near the earlier
-    # JOIN branch (which has no seed-delivery call of its own).
+    assert ps.count("Invoke-SeedDeliverySafe $plan.worktree_id") == 2
+    # ... called once in the JOIN branch (before its attach), and once more
+    # strictly between the CREATE branch's own setup-log marker and its
+    # nested-create early-exit.
     join_idx = ps.index('Write-Host "Joining existing session: $sessName"')
     create_branch_idx = ps.index('Write-SetupLog "psmux: creating session $sessName"')
-    seed_call_idx = ps.index("Invoke-SeedDeliverySafe $plan.worktree_id")
+    join_seed_call_idx = ps.index("Invoke-SeedDeliverySafe $plan.worktree_id")
+    create_seed_call_idx = ps.index(
+        "Invoke-SeedDeliverySafe $plan.worktree_id", join_seed_call_idx + 1
+    )
     nested_exit_idx = ps.index(
         'Write-Host "Session created: $sessName (open a new terminal to join)"'
     )
-    assert join_idx < create_branch_idx < seed_call_idx < nested_exit_idx
+    assert join_idx < join_seed_call_idx < create_branch_idx
+    assert create_branch_idx < create_seed_call_idx < nested_exit_idx
 
     # bash: the mirrored helper function ...
     assert "_aw_deliver_pending_seed() {" in sh
     assert 'embody_args+=(embody --worktree-id "$wtid" --json)' in sh
-    assert sh.count('_aw_deliver_pending_seed "$WORKTREE_ID"') == 1
-    # ... called strictly between the CREATE branch's own mux_attached
-    # activity-log mark and its switch-client/attach-session call -- never
-    # anywhere near the earlier JOIN branch.
+    assert sh.count('_aw_deliver_pending_seed "$WORKTREE_ID"') == 2
+    # ... called once in the JOIN branch (before its attach), and once more
+    # strictly between the CREATE branch's own mux_attached activity-log
+    # mark and its switch-client/attach-session call.
     join_idx_sh = sh.index('echo "Joining existing session: $TMUX_SESS"')
     create_branch_idx_sh = sh.index('activity_log mux_attached "$WORKTREE_ID" mux=create')
-    seed_call_sh_idx = sh.index('_aw_deliver_pending_seed "$WORKTREE_ID"')
+    join_seed_call_sh_idx = sh.index('_aw_deliver_pending_seed "$WORKTREE_ID"')
+    create_seed_call_sh_idx = sh.index(
+        '_aw_deliver_pending_seed "$WORKTREE_ID"', join_seed_call_sh_idx + 1
+    )
     attach_idx_sh = sh.index("tmux switch-client", create_branch_idx_sh)
-    assert join_idx_sh < create_branch_idx_sh < seed_call_sh_idx < attach_idx_sh
+    assert join_idx_sh < join_seed_call_sh_idx < create_branch_idx_sh
+    assert create_branch_idx_sh < create_seed_call_sh_idx < attach_idx_sh
 
 
 def test_windows_launcher_encodes_wrapped_psmux_pane_argv():

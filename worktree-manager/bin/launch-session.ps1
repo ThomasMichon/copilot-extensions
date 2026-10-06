@@ -1713,6 +1713,17 @@ if (-not $noMux) {
         # Invoke-AwMuxCompanionBindSafe's own comment for why ordering matters.
         Invoke-AwMuxCompanionBindSafe $sessName
         Invoke-ManagedMuxRegister $sessName $muxStatusPath
+        # resume-prompt-durable-seed-and-mux-fix Phase 3: this is the ONE
+        # ground-truth point that knows a reattach (not a fresh launch) is
+        # happening -- the engine's own `resolve --json` call, run earlier
+        # in a separate process, can only guess at mux liveness and
+        # conservatively leaves an explicit seed QUEUED (`pending_seed`)
+        # rather than embedding it into a `cmd` this script discards right
+        # here. Deliver it now, the same way a worktree's first-ever
+        # session creation below already does -- `Invoke-SeedDeliverySafe`
+        # is a no-op when nothing is queued. Dispatched detached (see its
+        # own definition above), so it cannot delay the attach below.
+        Invoke-SeedDeliverySafe $plan.worktree_id
         # Write last_session immediately before attach: the 3.3.6 attach
         # regression reads that file instead of honoring -t, so this must
         # remain the final psmux-affecting action before attach.

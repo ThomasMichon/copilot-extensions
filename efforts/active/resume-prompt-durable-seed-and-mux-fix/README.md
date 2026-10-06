@@ -255,18 +255,21 @@ is this effort's actual Phase 1 deliverable.)
       uses for its own restore-on-failure case) -- this requires touching
       `launch-session.{ps1,sh}` directly, which is why it's deferred here
       rather than attempted in Phase 1.
-- [ ] **Deferred from Phase 1 (fifth review round):** a live-mux reattach
-      (`_resolve_resume_context`'s `verdict.mux_live` branch, Phase 1) now
-      correctly QUEUES a seed instead of losing it, but does not actually
-      DELIVER it on that exact reattach -- it is only delivered on the
-      next fresh launch/attach that reaches it. Actual delivery on the
-      reattach itself needs `launch-session.{ps1,sh}` to invoke the
-      existing send-keys mechanism (`pane_seed.mux_seed_pane`, via
-      whatever wraps it for the script's own live-session join path) after
-      its own reattach -- `resolve`'s single, fast, plan-only process has
-      no reasonable way to block synchronously on pane readiness itself
-      (`mux_seed_pane` can poll for up to minutes). Requires the same
-      launcher-script changes as the item above; fold into that work.
+- [x] **Deferred from Phase 1 (fifth review round) -- DONE:** a live-mux
+      reattach (`_resolve_resume_context`'s `verdict.mux_live` branch,
+      Phase 1) correctly QUEUES a seed instead of losing it, but did not
+      actually DELIVER it on that exact reattach -- only on the next fresh
+      launch/attach that reached it. Fixed by calling the ALREADY-EXISTING
+      `Invoke-SeedDeliverySafe`/`_aw_deliver_pending_seed` helper (the same
+      one the fresh-mux-create path already calls) from the "join existing
+      session" branch of `launch-session.{ps1,sh}` too -- the ONE
+      ground-truth point that actually knows a reattach, not a fresh
+      launch, is happening, and the helper is already a no-op when nothing
+      is queued. Neither script needed a new mechanism, only one more call
+      to the one that already existed. `test_launch_session_unwrap.py`'s
+      own drift guard (`test_launchers_deliver_pending_seed_only_on_fresh_
+      mux_create`, which had explicitly locked in the OLD, incomplete
+      behavior) renamed and rewritten to assert both call sites.
 - [ ] **Deferred from Phase 1 (ninth review round):** `claim_pending_seed`
       cannot distinguish "nothing was pending" from "claim failed" (lock
       contention, an unreadable record) -- both return `None`. With an
@@ -661,3 +664,58 @@ _Pending._
   - Full re-run: `agent-worktrees` full keyword sweep including
     `sessions`/`verify_worktree_active` (430 tests) passes with no
     regressions.
+- **2026-10-06** — Operator question on resume, worth recording verbatim
+  since it's the right question to ask after watching this effort's own
+  complexity grow across ten review rounds: *"I'm worried that the seed
+  is being tracked too durably. Is `--interactive` not reliable?"*
+
+  Answer: **`--interactive` itself is fully reliable** -- live-verified
+  back in Phase 1 (a single `copilot --resume=<id> --interactive
+  "<prompt>"` process resumes full history AND auto-executes the prompt
+  as the next turn, no caveats). The complexity this effort accumulated
+  is NOT compensating for that flag's own unreliability; it exists
+  because **multiple code paths can discard the planned command before
+  ever executing it with that flag attached**:
+  1. A live-mux reattach: the launcher scripts detect an existing pane and
+     just reattach to it, NEVER exec'ing the freshly resolved `cmd` at
+     all (not a bug -- correct behavior, since spawning a second Copilot
+     process into an already-live worktree would fork the conversation).
+  2. A delegated/relocated launch: the Worktree Manager re-resolves its
+     own plan a second time inside the launcher script, discarding the
+     first plan entirely.
+  3. A pre-exec launcher failure: the script's own update/preflight work
+     can fail before ever reaching `cmd`.
+
+  `pending_seed` persistence is the necessary fallback for exactly these
+  cases -- not redundant scaffolding layered on top of an unreliable
+  primitive, but the other half of a two-part contract: `resolve` embeds
+  the seed in argv when it's confident its own `cmd` will actually run,
+  and otherwise durably queues it for whichever mechanism DOES end up
+  running. The real, now-closed gap (this session's own work, see above)
+  was that the QUEUED half of that contract had a missing link: nothing
+  ever told the live-mux-reattach branch to actually go check the queue
+  and deliver it -- it only happened to get delivered on a LATER,
+  different, fresh-launch attempt that still had the queue to re-check.
+  Confirmed and fixed directly at the root: `launch-session.{ps1,sh}`'s
+  "join existing session" branch now calls the exact same
+  `Invoke-SeedDeliverySafe`/`_aw_deliver_pending_seed` helper the
+  fresh-session branch already called -- one new call to pre-existing
+  code, not a new mechanism. This was, in fact, the deepest of the three
+  Phase-3 items the prior round deferred (the two remaining are narrower
+  defensive-programming cases: a pre-existing lock primitive's own
+  failure-mode granularity, and `claim_pending_seed`'s long-standing
+  ambiguous return contract -- neither is "seed gets silently lost in
+  ordinary operation," which is what `--interactive`'s own reliability
+  question was really asking about).
+
+  New worktree created for this slice (the Phase 1 worktree was already
+  finalized/merged). All 34 `launch_session`/
+  `launch_passthrough`/`launch_scripts`-keyword tests pass (including the
+  rewritten drift guard), and the full 1707-test `worktree-manager` suite
+  passes except 4 nondeterministic failures in `test_mux_daemon.py`/
+  `test_mux_daemon_cutover_helper.py` -- confirmed unrelated (a different
+  subsystem entirely, work-coalescing-singleton daemon IPC/file-rename
+  races, reproduced with DIFFERENT failure signatures across repeated
+  reruns with no code changes between them -- this machine's own known
+  resource-contention flakiness, not a regression from this slice's
+  2-line-per-script change).
