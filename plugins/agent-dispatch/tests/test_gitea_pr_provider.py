@@ -245,6 +245,23 @@ def test_comment_only_review_maps_to_pending():
     assert observation.approval_status == ApprovalStatus.PENDING
 
 
+def test_request_review_after_request_changes_resets_to_pending():
+    """A fresh REQUEST_REVIEW row (Gitea's record of re-requesting that
+    reviewer) must be eligible to supersede that reviewer's own older
+    verdict -- a re-request after changes must return to PENDING, not
+    stay reported as the stale CHANGES_REQUESTED, since Gitea itself
+    includes request-review rows when selecting the latest approval
+    state per reviewer."""
+    observation = observe_pr_state(
+        _pr(),
+        reviews=[
+            _review(state="REQUEST_CHANGES", review_id=1, login="alice"),
+            _review(state="REQUEST_REVIEW", review_id=2, login="alice"),
+        ],
+    )
+    assert observation.approval_status == ApprovalStatus.PENDING
+
+
 def test_pending_review_is_ignored_entirely():
     observation = observe_pr_state(_pr(), reviews=[_review(state="PENDING", review_id=1)])
     assert observation.approval_status == ApprovalStatus.NONE

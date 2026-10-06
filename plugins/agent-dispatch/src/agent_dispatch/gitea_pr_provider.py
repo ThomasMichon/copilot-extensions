@@ -88,16 +88,23 @@ def _approval_status(reviews: list[Mapping[str, Any]]) -> ApprovalStatus:
     """Reduce Gitea's per-review list to one aggregate decision.
 
     Gitea has no server-computed aggregate like GitHub's ``reviewDecision``
-    -- only the latest *verdict-bearing* review **per reviewer** counts (an
-    earlier ``REQUEST_CHANGES`` superseded by that same reviewer's later
-    ``APPROVED`` must not still block), mirroring how GitHub's own
-    ``reviewDecision`` already discards a dismissed/superseded review.
-    A ``COMMENT``/``PENDING`` review carries no verdict of its own and must
-    never supersede that reviewer's last real verdict -- Gitea keeps an
-    approval/rejection as the official decision until another *verdict-
-    bearing* review changes it, so a later comment-only review is tracked
-    only far enough to know a review exists at all (for the all-comments,
-    no-verdicts-yet ``PENDING`` case below).
+    -- only the latest *verdict-bearing or request* review **per reviewer**
+    counts (an earlier ``REQUEST_CHANGES`` superseded by that same
+    reviewer's later ``APPROVED`` must not still block), mirroring how
+    GitHub's own ``reviewDecision`` already discards a dismissed/superseded
+    review. A fresh ``REQUEST_REVIEW`` row (Gitea's record of re-requesting
+    that reviewer, canonically ``PENDING``) must ALSO be eligible to
+    supersede that reviewer's own older verdict -- otherwise a
+    re-request after changes stays reported as the stale
+    ``CHANGES_REQUESTED``/``APPROVED`` instead of returning to
+    ``PENDING``, since Gitea itself includes request-review rows when
+    selecting the latest approval state per reviewer. Only a ``COMMENT``
+    review carries no verdict of its own and must never supersede that
+    reviewer's last real state -- Gitea keeps an approval/rejection (or a
+    pending re-request) as the official decision until another
+    *verdict-or-request-bearing* review changes it, so a comment-only
+    review is tracked only far enough to know a review exists at all (for
+    the all-comments, no-verdicts-yet ``PENDING`` case below).
     """
     verdict_by_reviewer: dict[str, tuple[int, str]] = {}
     reviewers_with_any_review: set[str] = set()
@@ -112,18 +119,22 @@ def _approval_status(reviews: list[Mapping[str, Any]]) -> ApprovalStatus:
         state = review.get("state")
         if state not in _REVIEW_STATE_TO_APPROVAL:
             raise GiteaPRObservationError(f"unrecognized Gitea review state {state!r}")
-        if _REVIEW_STATE_TO_APPROVAL[state] == "PENDING" and state == "PENDING":
+        if state == "PENDING":
             continue  # a draft/unsubmitted review carries no verdict yet.
         reviewer = str((review.get("user") or {}).get("login") or "")
         if not reviewer:
             continue
         reviewers_with_any_review.add(reviewer)
         canonical = _REVIEW_STATE_TO_APPROVAL[state]
-        if canonical not in ("APPROVED", "CHANGES_REQUESTED"):
-            continue  # COMMENT: feedback, not a verdict -- never supersedes one.
+        if canonical == "COMMENT":
+            continue  # feedback, not a verdict or request -- never supersedes one.
         review_id = int(review.get("id") or 0)
         existing = verdict_by_reviewer.get(reviewer)
         if existing is None or review_id >= existing[0]:
+            # canonical here is APPROVED, CHANGES_REQUESTED, or PENDING
+            # (a REQUEST_REVIEW row) -- any of these can be this
+            # reviewer's latest state, including resetting a stale verdict
+            # back to PENDING.
             verdict_by_reviewer[reviewer] = (review_id, canonical)
     canonical = {state for _rid, state in verdict_by_reviewer.values()}
     if "CHANGES_REQUESTED" in canonical:
