@@ -159,8 +159,18 @@ _DRIVER_SCRIPT = textwrap.dedent(
         # than narrowing it. Validated against the real downstream suite
         # that surfaced this: fully clean and reproducible across three
         # separate runs, where the pytest-cov-driven version failed on
-        # almost every attempt.
-        cov = coverage.Coverage(data_file=cov_data_file, source=[cov_source])
+        # almost every attempt. `data_suffix=False` is explicit, not
+        # relied-on-as-default: passing `data_file` alone does not
+        # override a *project-configured* `parallel = true` (or
+        # `concurrency = multiprocessing`) that a downstream consumer's
+        # own .coveragerc/pyproject.toml may set for its own reasons --
+        # `coverage.Coverage()` still reads that config and would
+        # re-enable a generated suffix, silently reintroducing the exact
+        # race this fix exists to close (flagged in review; see
+        # ThomasMichon/copilot-extensions#5471).
+        cov = coverage.Coverage(
+            data_file=cov_data_file, source=[cov_source], data_suffix=False
+        )
         cov.start()
         cov.save()  # force schema creation now, single-threaded
 
