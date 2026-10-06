@@ -328,7 +328,7 @@ def daemon_statuses(root: Path | None = None) -> list[dict[str, Any]]:
 
 
 def mapping_statuses(root: Path | None = None) -> list[dict[str, Any]]:
-    """Every live mux-session mapping this root's Manager knows about.
+    """Every mux-session mapping this root's Manager has ever registered.
 
     The issue's own Phase 1 scope names this alongside the per-daemon
     identity/health list above: "(via ``mux_daemon.get_mapping``) which
@@ -342,7 +342,14 @@ def mapping_statuses(root: Path | None = None) -> list[dict[str, Any]]:
     for every mapping at once via the registry's ``snapshot()`` rather than
     one lookup at a time.
 
-    No per-mapping ``busy`` field exists: the registry tracks only
+    This is NOT filtered to currently-live mappings: ``snapshot()`` also
+    returns tombstoned entries (``live: False``), which the registry keeps
+    indefinitely by design (see ``MuxMappingRegistry.remove()``'s own
+    docstring for why -- a tombstone fences a monotonic revision guard, not
+    something safe to drop). Each entry's own ``live`` field is exactly how
+    a caller tells the two apart; this function never filters it away.
+
+    No per-mapping ``busy`` field exists either: the registry tracks only
     ``live``/``attached_clients`` (whether/how many mux-session attachments
     are currently known), never a per-worktree activity/busy concept --
     that notion exists only at the per-DAEMON level (this module's

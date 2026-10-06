@@ -54,7 +54,7 @@ def cmd_daemons(rest: list[str]) -> int:
         if not mappings:
             print("  no known mux-session mappings for this root.")
             return 0
-        print("  known mux-session mappings (root-wide, not per-daemon):")
+        print("  known mux-session mappings (root-wide, not per-daemon; includes tombstoned/removed entries):")
         for entry in mappings:
             marker = "*" if entry.get("live") else " "
             bits = [
