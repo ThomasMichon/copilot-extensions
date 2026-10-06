@@ -1621,7 +1621,7 @@ def main(argv: list[str] | None = None) -> int:
         print("                         real project identity, faked worktree/pivot data")
         print("                         (in the Picker: l launch/resume · b bare-resume · n new)")
         print("  companion              Mux Companion: read-only status + session lineage for the current worktree (visions/mux-companion)")
-        print("  mux-daemon <run|ensure|register|remove|show|status [--json]>  (status alias: daemons status; #5001 Phase 1)")
+        print("  mux-daemon <run|ensure|register|remove|show|status [--json]>  (daemons status|mappings; #5001)")
         print()
         print("Phase 2 provisions prerequisites + drives the core install; Phase 3")
         print("adds the Manager state views (projects/repos/plugin enablement); later")

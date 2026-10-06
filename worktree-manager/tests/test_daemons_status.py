@@ -503,3 +503,58 @@ def test_process_start_time_handles_a_failed_ps_fallback(monkeypatch):
     monkeypatch.setattr(subprocess, "run", _raise)
     assert daemons_status._process_start_time(123) is None
 
+
+def test_mapping_statuses_reports_every_registry_entry_sorted(tmp_path: Path):
+    """A preliminary registry listing for copilot-extensions#5001: the
+    mapping registry is the one disk-backed source of "which worktrees/
+    sessions are known" -- root-wide stored state, shared across every
+    resident daemon for this root, so this cannot (and does not attempt
+    to) attribute an entry to one specific daemon pid or live wire
+    connection."""
+    from worktree_manager.mux_mapping_registry import MuxMappingRegistry, registry_path
+
+    root = tmp_path / "root"
+    root.mkdir()
+    registry = MuxMappingRegistry(registry_path(root))
+    registry.register(
+        {
+            "project": "proj-b",
+            "worktree_id": "wt-2",
+            "mux_session": "wt-2",
+            "mux_bin": "psmux",
+            "mapping_revision": 1,
+            "attached_clients": 0,
+            "live": False,
+        }
+    )
+    registry.register(
+        {
+            "project": "proj-a",
+            "worktree_id": "wt-1",
+            "mux_session": "wt-1",
+            "mux_bin": "psmux",
+            "mapping_revision": 1,
+            "attached_clients": 2,
+            "live": True,
+        }
+    )
+
+    mappings = daemons_status.mapping_statuses(root)
+
+    assert [m["project"] for m in mappings] == ["proj-a", "proj-b"]
+    assert mappings[0] == {
+        "project": "proj-a",
+        "worktree_id": "wt-1",
+        "mux_session": "wt-1",
+        "live": True,
+        "attached_clients": 2,
+        "observed_at": mappings[0]["observed_at"],
+    }
+    assert mappings[1]["live"] is False
+    assert mappings[1]["attached_clients"] == 0
+
+
+def test_mapping_statuses_empty_registry(tmp_path: Path):
+    root = tmp_path / "root"
+    root.mkdir()
+    assert daemons_status.mapping_statuses(root) == []
