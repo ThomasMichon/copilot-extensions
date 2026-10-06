@@ -617,6 +617,39 @@ class TestCreatePR:
         assert "another actor updating the remote branch" in rerun["error"]
         assert _git("rev-parse", "origin/feature/add-feature-aaaa", cwd=wt_path) == remote_head
 
+    def test_reused_open_pr_refuses_to_resurrect_deleted_remote_head(self, pr_repo):
+        """#5298: a concurrently merged+auto-pruned PR branch must not be
+        silently recreated by a later create-pr call that still believes the
+        PR is open. A plain push would read "ref absent" as "create a new
+        branch" and happily resurrect it, reporting the merged PR as freshly
+        updated -- this must fail instead, leaving the branch deleted.
+        """
+        config, wid, wt_path, remote_dir = pr_repo
+        first = pr_ops.create_pr(wid, config, title="Add feature")
+        assert first["success"], first
+
+        # Simulate an external merge + auto-prune: the PR branch is deleted
+        # from the bare remote directly (as a host does on merge), while this
+        # worktree's own tracking record still believes the PR is open.
+        _git(
+            "push", "origin", "--delete", "feature/add-feature-aaaa",
+            cwd=wt_path,
+        )
+
+        _git("checkout", f"worktree/{wid}", cwd=wt_path)
+        (wt_path / "local.txt").write_text("local feedback\n")
+        _git("add", "-A", cwd=wt_path)
+        _git("commit", "-m", "local update", cwd=wt_path)
+
+        rerun = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert rerun["success"] is False
+        ls_remote = _git(
+            "ls-remote", "--heads", "origin", "feature/add-feature-aaaa",
+            cwd=wt_path,
+        )
+        assert ls_remote == ""  # still deleted, not resurrected
+
     def test_branch_collision_error_suggests_explicit_distinguishing_suffix(self, pr_repo):
         config, wid, wt_path, _ = pr_repo
         _git("branch", "feature/add-feature-aaaa", cwd=wt_path)

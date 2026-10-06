@@ -886,6 +886,7 @@ def push(
     *,
     cwd: str | Path,
     force_with_lease: bool = False,
+    force_with_lease_expect: str | None = None,
     timeout: float | None = push_timeout.DEFAULT_PUSH_TIMEOUT,
 ) -> PushResult:
     """Push a branch to remote. Returns a :class:`PushResult` (truthy on success).
@@ -897,6 +898,26 @@ def push(
     by the PR workflow to update a feature branch whose history was rewritten
     by the rebase chain, without clobbering unrelated remote updates.
 
+    *force_with_lease_expect*, when given, builds an **expected-old-object**
+    lease -- ``--force-with-lease=<dest-ref>:<expect>`` -- instead of the plain
+    (locally-tracked) form. This is the atomic guard an *incremental* PR-branch
+    update needs (#5300/#5298 follow-up): a caller who deliberately did NOT
+    rebase/force the branch still wants the push to behave like an ordinary
+    fast-forward, EXCEPT it must refuse -- rather than silently recreate -- a
+    branch the remote deleted out from under it (e.g. the PR merged and its
+    head was auto-pruned between this call's own fetch and this push; a plain
+    ``git push`` treats an absent destination ref as "create a new branch" and
+    happily resurrects it, incorrectly leaving the caller believing a merged
+    PR was just updated). Passing the exact SHA this call observed as the
+    branch's current remote tip makes the push fail closed on ANY mismatch --
+    divergence (someone else pushed) or disappearance (deleted) alike --
+    without this call needing a second, non-atomic existence check of its own.
+    *force_with_lease_expect* takes precedence over a bare *force_with_lease*
+    when both are given (the common pattern: pass the latter as a fallback
+    default of ``True`` for callers that may not always have an expected SHA).
+    ``branch`` may be a plain name or a ``src:dest`` refspec; the lease always
+    targets ``dest`` (or ``branch`` itself when there is no ``:``).
+
     The result carries git's ``stderr`` and a ``retryable`` classification so a
     caller's retry loop can surface the real error (a pre-push hook decline, an
     auth 403, a protected-branch block) and fail fast instead of masking every
@@ -907,7 +928,11 @@ def push(
     pre-push release guard must be allowed to block a non-compliant push.
     Worktree-originated callers wrap this with ``hooks.allow_pr_push()``.
     """
-    extra = ["--force-with-lease"] if force_with_lease else []
+    if force_with_lease_expect is not None:
+        dest_ref = branch.split(":", 1)[1] if ":" in branch else branch
+        extra = [f"--force-with-lease={dest_ref}:{force_with_lease_expect}"]
+    else:
+        extra = ["--force-with-lease"] if force_with_lease else []
     auth_args = _auth_config_args(remote, cwd=cwd)
     # Retry without an injected auth override on failure (#900).
     attempts = [auth_args, []] if auth_args else [[]]

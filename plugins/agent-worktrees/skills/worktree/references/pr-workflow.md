@@ -455,13 +455,16 @@ may configure `pr.required_body_sections` (for example `Intent`, `Changes`, and
 Markdown section contains visible text. A hidden source marker never satisfies
 the human-readable body requirement.
 
-Squashes the worktree's commits into one and rebases onto upstream, leaving HEAD
-on `worktree/{id}` at the squashed commit (both schemes — it is never reset off
-it, #1804). Under the default **refspec** scheme it pushes `worktree/{id}`
-straight to the provider-resolved PR head ref (`pr/{slug}-{suffix}` for
+On the **initial** publish, squashes the worktree's commits into one and
+rebases onto upstream, leaving HEAD on `worktree/{id}` at the squashed commit
+(both schemes — it is never reset off it, #1804). A **later** `create-pr`
+against the same still-open PR instead reuses that published head without
+re-squashing or rebasing it onto newer upstream — see "Head scheme + branch
+topology" above. Under the default **refspec** scheme it pushes
+`worktree/{id}` straight to the provider-resolved PR head ref (`pr/{slug}-{suffix}` for
 non-Azure-DevOps repos; `user/{username}/{slug}-{suffix}` for Azure DevOps) —
-no local feature branch. Under **snapshot** it instead copies the squashed
-commit onto a local snapshot branch (`feature/{slug}-{suffix}` by default;
+no local feature branch. Under **snapshot** it instead copies the current
+PR-head commit onto a local snapshot branch (`feature/{slug}-{suffix}` by default;
 Azure DevOps still defaults to `user/{username}/{slug}-{suffix}`) and pushes
 that (no reset, no checkout dance). Either way HEAD never leaves
 `worktree/{id}`. Records `pr.state` and prints the
