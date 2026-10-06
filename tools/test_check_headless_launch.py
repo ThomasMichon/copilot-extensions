@@ -368,6 +368,23 @@ def test_flags_declarative_json_spawn(repo):
     assert any("declarative spawn of 'powershell'" in p for p in guard.verify())
 
 
+def test_json_repeated_identical_literal_maps_to_distinct_occurrences(repo):
+    """Regression: multiple arrays sharing an identical literal argv[0]
+    (e.g. several "python ..." prerequisite entries) must not all collapse
+    onto the first occurrence's position."""
+    plugin = repo / "plugins" / "agent-json-repeat"
+    (plugin / "scripts").mkdir(parents=True)
+    (plugin / "pyproject.toml").write_text(
+        '[project]\nname = "agent-json-repeat"\n', encoding="utf-8")
+    (plugin / "scripts" / "task.json").write_text(
+        '{\n  "a": ["python", "x"],\n  "b": ["python", "y"]\n}\n', encoding="utf-8",
+    )
+    problems = [p for p in guard.verify() if "agent-json-repeat" in p]
+    assert len(problems) == 2
+    linenos = sorted(int(p.split(":")[1]) for p in problems)
+    assert linenos == [2, 3]
+
+
 def test_flags_declarative_yaml_spawn(repo):
     plugin = repo / "plugins" / "agent-yaml"
     (plugin / "scripts").mkdir(parents=True)

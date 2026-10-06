@@ -333,13 +333,20 @@ def _find_json_spawns(text: str) -> list[tuple[int, str]]:
     walk(data)
     hits: list[tuple[int, str]] = []
     lines = text.splitlines()
+    consumed: dict[int, int] = {}  # lineno -> next search offset
     for literal in found:
         name = _program_name(literal) or literal.lower().removesuffix(".exe")
         needle = f'"{literal}"'
         for lineno, line in enumerate(lines, start=1):
-            if needle in line and _ALLOW not in line:
-                hits.append((lineno, name))
-                break
+            if _ALLOW in line:
+                continue
+            start = consumed.get(lineno, 0)
+            pos = line.find(needle, start)
+            if pos == -1:
+                continue
+            hits.append((lineno, name))
+            consumed[lineno] = pos + len(needle)
+            break
     return hits
 
 
