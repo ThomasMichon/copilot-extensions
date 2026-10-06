@@ -1,5 +1,5 @@
 {
-  "comment": "Clarify delegation guidance: scale plan detail and check-in cadence to the assigned worker model's capability tier",
+  "comment": "Clarify delegation guidance: scale plan detail and check-in cadence to a worker's demonstrated, observed track record in a role, defaulting conservative when that evidence is absent",
   "changes": [
     {
       "plugin": "agent-conduct-guidance",
