@@ -171,9 +171,13 @@ def mcp_server_tool_entries(frontmatter: str) -> list[tuple[str, str]]:
             field_indent = None
             continue
 
-        server_match = re.match(r"^([A-Za-z0-9_.-]+)\s*:\s*(?:#.*)?$", stripped)
+        server_match = re.match(
+            r"^(?:\"([^\"]+)\"|'([^']+)'|([A-Za-z0-9_.-]+))\s*:\s*(?:#.*)?$", stripped
+        )
         if server_match and (server_indent is None or indent <= server_indent):
-            server_name = server_match.group(1)
+            server_name = (
+                server_match.group(1) or server_match.group(2) or server_match.group(3)
+            )
             server_indent = indent
             field_indent = None
             continue

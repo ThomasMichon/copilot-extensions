@@ -1851,6 +1851,37 @@ def test_mcp_server_tools_entries_parsed_despite_trailing_comments(tmp_path: Pat
 
 
 @pytest.mark.guard
+def test_mcp_server_quoted_name_is_recognized(tmp_path: Path):
+    # A quoted YAML mapping key (`"svc-a":` or `'svc-a':`) is a valid server
+    # name, but the server-entry regex previously accepted only bare names --
+    # a quoted key meant `mcp_server_tool_entries()` returned no entry at
+    # all, so a narrowed tools list beneath it silently bypassed the check.
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['*']\n"
+        "mcp-servers:\n"
+        '  "svc-a":\n'
+        "    command: agent-mcp\n"
+        "    tools: ['example_search', 'example_status']\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health. On catalog failure use the materialized fleet.\n"
+        "Do NOT use the task tool to spawn another service agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    findings = [f for f in report.findings if f.check == "mcp-server-tools-allowlist"]
+    assert len(findings) == 1
+    assert "example_search" in findings[0].message
+
+
+@pytest.mark.guard
 def test_mcp_server_deeply_indented_comment_does_not_corrupt_field_indent(
     tmp_path: Path,
 ):
