@@ -860,16 +860,30 @@ worktree-manager.
       lease (a concurrent install can complete while waiting for it).
       Closes [#4999](https://github.com/ThomasMichon/copilot-extensions/issues/4999)
       via [#5000](https://github.com/ThomasMichon/copilot-extensions/pull/5000).
-- [ ] **PID-reuse-safe mux-daemon termination.** `_terminate_mux_daemon_pid`
-      identifies its target by command-line/root match, then signals by
-      bare PID — a reused PID between the check and the signal could kill
-      an unrelated process. Needs a breadcrumb schema change (recording
-      `process_start_time` alongside `new_pid`) threaded through
-      `zdd.cutover.CutoverOrchestrator`'s `spawn_passive` bookkeeping, a
-      shared-library change affecting every `zdd` consumer (agent-bridge,
-      agent-dispatch, agent-worktrees, worktree-manager), so it's scoped as
-      its own PR rather than folded into the fix above. Tracked as
-      [#5006](https://github.com/ThomasMichon/copilot-extensions/issues/5006).
+- [x] **PID-reuse-safe mux-daemon termination (mux-daemon call site).**
+      `_terminate_mux_daemon_pid` identifies its target by command-line/root
+      match, then signals by PID — a reused PID between the check and the
+      signal could kill an unrelated process. Landed via
+      [#5060](https://github.com/ThomasMichon/copilot-extensions/pull/5060):
+      routes through `zdd.diagnostics.terminate_pid_if_identity`, with the
+      identity token (`process_start_time`) captured **freshly, immediately
+      before the kill** — not a breadcrumb schema change as originally
+      scoped below, but a simpler, equally-safe design: re-derive liveness
+      and cmdline/root identity live at the kill moment (an independent,
+      cheap recheck this consumer already has via `_iter_mux_daemon_pids`),
+      rather than trusting a value recorded once at `spawn_passive` time.
+      Its own docstring states this closes
+      [#5006](https://github.com/ThomasMichon/copilot-extensions/issues/5006)
+      **for this call site**. The originally-scoped breadcrumb schema change
+      (`new_pid_start_time` threaded through `zdd.cutover.CutoverOrchestrator`,
+      a shared-library change touching every `zdd` consumer) turned out to be
+      unnecessary for this consumer and is not planned unless a genuine
+      second consumer surfaces that cannot cheaply re-verify liveness/identity
+      at its own kill site the way this one does — a broader per-consumer
+      audit (agent-bridge, agent-dispatch, agent-worktrees) found no such case
+      in a first pass (2026-10-05), but was not exhaustive. Left open on
+      #5006 for a maintainer call on whether to close it as resolved-
+      differently or keep it for that broader audit.
 - **Background daemon rotation.** Resident per-version mux-daemons
       accumulate indefinitely: `activate_after_update()`'s cutover is only
       attempted opportunistically (at whichever session's `self_update()`
@@ -902,9 +916,15 @@ worktree-manager.
         original Phase 1 scope, explicitly deferred in #5131/#5392 since
         no existing wire RPC or in-memory structure correlates a live
         connection to a mapping entry yet.
-  - [ ] Phases 2-4 (the actual retirement sweep): remain open, and still
-        need Phase 3's client-side re-resolution piece scoped in
-        `agent-worktrees` first.
+  - [ ] Phases 2-4 (the actual retirement sweep): remain open. **Ordering
+        note for whoever picks this up:** despite the numbering, Phase 2
+        (retire-idle-daemon) cannot be implemented first in isolation —
+        it depends on Phase 3's client-side re-resolution behavior (how a
+        caller notices and reconnects to a rotated daemon) being *designed*
+        first, even though Phase 3 is built/landed later. Write Phase 3's
+        design (a short planning doc, matching the Phase 3b/3e precedent)
+        before claiming Phase 2's implementation slice, or claim Phase 3's
+        design-only slice first and let Phase 2 follow it.
 - [x] `doctor`/validation breadth: plugin-catalog alignment (coverage)
       reporting landed (PR #4986), covering unmet-plugin-prerequisite/
       cross-plugin-drift detection. The governing vision
@@ -1088,6 +1108,19 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-05** — Revised the Plan's Phase 7 entries to reflect two
+  findings from continuing this effort: (1) #5006's PID-reuse-safe
+  mux-daemon termination is already resolved for the mux-daemon call site
+  via #5060, using a simpler live-reverification design than this Plan's
+  original breadcrumb-schema proposal — marked `[x]`, with the remaining
+  broader-consumer-audit question left open on the issue itself for a
+  maintainer call rather than closed unilaterally; (2) clarified the
+  Phase 2-4 ordering note under #5001's "Background daemon rotation" bullet
+  — Phase 2 genuinely depends on Phase 3's design existing first, despite
+  the numbering, which read ambiguously before. No vision revision was
+  needed: neither finding changes a stated behavior/guarantee in
+  `visions/installer` or `visions/picker`, only the effort's own
+  in-progress Plan detail.
 - **2026-10-03/06** — Claimed and landed Phase 7's "Background daemon
   rotation" Phase 1 (observability), copilot-extensions#5001: added
   `worktree-manager mux-daemon status [--json]` (aliased `daemons status`)
