@@ -77,6 +77,34 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
+# Raise the shared self-stage watchdog's deadline for THIS plugin specifically,
+# via the exact per-plugin override hook the byte-identical
+# install-contract:v4 self-stage block already reads
+# ($__wdEnvVar = "<PLUGIN>_INSTALL_DEADLINE_SEC") -- deliberately set OUTSIDE
+# that block (never edit its literal "480" default: tools/check-install-
+# contract.py enforces it byte-identical across every plugin's own copy).
+# agent-dispatch specifically can legitimately chain THREE sequential spans in
+# its own worst case, not just the lock-wait alone: its own build (30-120s)
+# PLUS waiting up to ~450s on its own cross-version activation/cutover lock
+# ($script:GlobalActivationLockTimeoutSeconds, set further below) for ANOTHER
+# invocation's reconciliation to finish, PLUS -- once THIS invocation finally
+# acquires that lock -- its OWN cutover/reconciliation work (a real
+# Invoke-CoordinatorCutover call, whose own zdd.cutover defaults allow up to
+# health_timeout(60s) + drain_timeout(300s) + 60s of its own internal
+# cutover-lease wait, ~420s). A genuine ~990s worst case (120 + 450 + 420)
+# the shared 480s default -- or an under-sized override -- would kill mid-
+# cutover, terminating a perfectly healthy install. An operator's own
+# explicit override (env var already set before this script runs) always
+# wins -- only supply a default when none is present. Checks BOTH the
+# plugin-specific AND the documented generic cross-plugin override
+# (docs/install-contract.md's resolution order:
+# <NAME>_INSTALL_DEADLINE_SEC -> COPILOT_PLUGIN_INSTALL_DEADLINE_SEC ->
+# default): setting only the plugin-specific variable here would mask an
+# operator-provided generic value -- including 0 to disable the watchdog
+# entirely -- since the self-stage block always resolves the
+# plugin-specific name first.
+if (-not $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC -and -not $env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC) { $env:AGENT_DISPATCH_INSTALL_DEADLINE_SEC = '1050' }
+
 # === install-contract:test-persistent-environment -- keep byte-identical across installers ===
 function Get-CopilotPersistentEnvironmentVariable {
     param(
@@ -430,6 +458,29 @@ $LinkDir          = $VenvDir
 $LinkPython       = $VenvPython
 $VersionedRuntime = $false
 $SrcVersion       = $null
+# Initialized here, at script scope, unconditionally -- NOT merely inside
+# Invoke-VersionedActivate (which only runs at all when $VersionedRuntime
+# ends up true below). Install-Runtime/Invoke-Install/Invoke-Update all read
+# $script:ActivationSuperseded immediately after their own
+# Install-Runtime/Invoke-VersionedActivate call regardless of whether
+# versioning actually applies -- a legacy/no-resolved-version run (see
+# New-PluginBuildSnapshot's own -BestEffort degrade path a few lines below)
+# leaves $VersionedRuntime false, so Invoke-VersionedActivate is never even
+# called, and this would otherwise stay a genuinely UNSET variable that
+# Set-StrictMode -Version 2.0 throws on at the very first read.
+$script:ActivationSuperseded = $false
+# Shared timeout for every acquisition of the GLOBAL (version-independent)
+# Enter-PluginSnapshotLock -InstallDir $InstallDir lock -- Invoke-
+# VersionedActivate's own marker-publish, Invoke-Stamp's marker-publish, and
+# Invoke-Update's cutover/coordinator-reconciliation span all contend on this
+# IDENTICAL lock. Whichever one of them can legitimately hold it
+# LONGEST (a real Invoke-CoordinatorCutover call: zdd.cutover's own
+# health_timeout(60s) + drain_timeout(300s) + 60s internal lease-wait slack
+# -- see Invoke-CoordinatorCutover's own call site) sets the floor every
+# OTHER caller's own timeout must meet -- a shorter one would throw "Timed
+# out waiting..." during a perfectly normal long cutover instead of simply
+# waiting its turn, since they all share one lock, not independent locks.
+$script:GlobalActivationLockTimeoutSeconds = 450
 if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VERSIONED retired)
     $pyprojForVer = Join-Path $PluginDir 'pyproject.toml'
     if (Test-Path $pyprojForVer) {
@@ -474,24 +525,94 @@ function Invoke-VersionedActivate {
        non-elevated in-place refresh. In the junction-free marker model `.venv` is
        normally absent (the binstub, task launchers, and deploy-manifest all
        resolve the slot through the marker), so this guard is correctly false on a
-       normal update. #>
+       normal update.
+
+       Version-ordering guard, UNDER a GLOBAL ($InstallDir-only, cross-version)
+       lock: Install-Runtime's own buildMutex is deliberately VERSION-scoped (a
+       wedged build for one version must never block an unrelated install of a
+       different version), so two DIFFERENT versions can legitimately build and
+       reach this activation call fully concurrently, each under its own
+       independent lock. Without a cross-version check right here, a slower
+       OLDER-version build that started first could still finish (and call
+       activate) AFTER a faster NEWER-version build already activated, silently
+       overwriting `current-version` with a regression -- versioned_runtime.py's
+       own `activate` performs no version comparison of its own. Mirrors
+       Invoke-Stamp's identical marker-publication guard (same lock scope,
+       same Test-VersionLt comparison, same -Force/AGENT_DISPATCH_ALLOW_DOWNGRADE
+       override for a deliberate rollback) -- read the currently-active version
+       INSIDE the lock so this observes the true latest publish, not a stale
+       snapshot read before acquiring it.
+
+       Skipping the marker write alone is NOT enough: $script:ActivationSuperseded
+       is a POINT-IN-TIME signal set here, at the moment this call either skips or
+       succeeds -- it is NOT, by itself, a sufficient guarantee for a caller that
+       acts LATER (manifest write, coordinator cutover): this invocation can
+       genuinely WIN its own activation (nothing newer was current yet), release
+       this lock, and only THEN have a separate, slower-to-build newer version
+       activate before this invocation reaches its own downstream action -- this
+       lock only serializes the compare-then-publish step itself, it cannot
+       serialize everything a caller does afterward. Callers must re-validate LIVE
+       immediately before acting via Test-ActivationSupersededNow (below) rather
+       than trusting this variable alone -- Install-Runtime, Invoke-Install, and
+       Invoke-Update all call it immediately before their own remaining steps
+       (manifest/verify/PATH/pivot; coordinator cutover) rather than proceeding as
+       if this invocation's own $VenvPython/$LinkPython were the one that's
+       actually live -- otherwise a superseded (older) invocation would still
+       publish its own manifest over the newer one's, or drive
+       `Invoke-CoordinatorCutover`/`Confirm-CoordinatorRunning` from its own stale
+       build, rolling back or misreporting the coordinator even though activation
+       itself was correctly skipped (or was correctly accepted at the time, then
+       overtaken). #>
+    $script:ActivationSuperseded = $false
     if (-not $VersionedRuntime) { return $true }
-    $legacyVenv = Join-Path $InstallDir '.venv'
-    if ((Test-Path $legacyVenv) -and -not (Test-VenvIsLink $legacyVenv)) {
-        Write-Step 'Releasing legacy .venv for versioned migration (stopping coordinator + supervisor)...'
-        try { Stop-DispatchProcess -Subcommand serve | Out-Null } catch {}
-        try { Retire-SupervisorProcesses | Out-Null } catch {}
+    $activateMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
+    try {
+        $currentActive = Get-VersionedCurrent
+        # Dual-authority comparison baseline, mirroring Invoke-Stamp's own
+        # guard: stamped-version is a SEPARATE authority a concurrent
+        # `stamp` action can publish WITHOUT ever activating (current-version
+        # stays untouched) -- comparing against current-version alone would
+        # let a delayed OLDER install still activate and overwrite
+        # current-version even though a NEWER version is already the
+        # intended/stamped one, stranding that newer snapshot. Read
+        # stamped-version directly (no interpreter needed, same marker-read
+        # pattern used throughout this file) and activate against whichever
+        # of the two authorities is actually newer.
+        $activateStamped = $null
+        $activateStampedPath = Join-Path $InstallDir 'stamped-version'
+        if (Test-Path $activateStampedPath) {
+            $activateStamped = (Get-Content -Path $activateStampedPath -Raw -ErrorAction SilentlyContinue)
+            if ($activateStamped) { $activateStamped = $activateStamped.Trim() }
+        }
+        $newestPublished = $currentActive
+        if ($activateStamped -and ((-not $newestPublished) -or (Test-VersionLt -A $newestPublished -B $activateStamped))) {
+            $newestPublished = $activateStamped
+        }
+        if ($newestPublished -and (Test-VersionLt -A $SrcVersion -B $newestPublished) -and -not $Force) {
+            Write-Skip "Not activating: source $SrcVersion is older than already-published $newestPublished (a newer build activated or stamped first; -Force to override)"
+            $script:ActivationSuperseded = $true
+            return $true
+        }
+        $legacyVenv = Join-Path $InstallDir '.venv'
+        if ((Test-Path $legacyVenv) -and -not (Test-VenvIsLink $legacyVenv)) {
+            Write-Step 'Releasing legacy .venv for versioned migration (stopping coordinator + supervisor)...'
+            try { Stop-DispatchProcess -Subcommand serve | Out-Null } catch {}
+            try { Retire-SupervisorProcesses | Out-Null } catch {}
+        }
+        $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+        $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
+        & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
+            ForEach-Object { Write-Step $_ }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
+            return $false
+        }
+        Write-Ok "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
+        return $true
+    } finally {
+        [void]$activateMutex.ReleaseMutex()
+        $activateMutex.Dispose()
     }
-    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
-        ForEach-Object { Write-Step $_ }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
-        return $false
-    }
-    Write-Ok "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
-    return $true
 }
 
 function Get-VersionedCurrent {
@@ -501,6 +622,25 @@ function Get-VersionedCurrent {
     if (-not $py) { return '' }
     $out = & $py $vr --root $InstallDir --link-name '.venv' current 2>$null
     return ("$out").Trim()
+}
+
+function Test-ActivationSupersededNow {
+    <# True iff THIS invocation should NOT proceed with its own downstream
+       publication/cutover -- re-validated LIVE at the moment of the call, not
+       merely a replay of Invoke-VersionedActivate's own point-in-time
+       $script:ActivationSuperseded snapshot. That snapshot alone is
+       insufficient: this invocation can genuinely WIN its own (lock-protected)
+       activation -- nothing newer was current yet -- release the lock, and
+       only THEN have a separate, slower-to-build newer version activate before
+       this invocation reaches Write-Manifest or Invoke-CoordinatorCutover.
+       Re-reading Get-VersionedCurrent here catches that window too: if the
+       live current version has since moved on to something other than this
+       invocation's own $SrcVersion, treat it as superseded regardless of how
+       the earlier activation call itself went. #>
+    if (-not $VersionedRuntime) { return $false }
+    if ($script:ActivationSuperseded) { return $true }
+    $now = Get-VersionedCurrent
+    return [bool]($now -and ($now -ne $SrcVersion))
 }
 
 function Invoke-VersionedGc {
@@ -676,8 +816,18 @@ function Test-VersionLt {
     $ta = Get-VerTuple $A; $tb = Get-VerTuple $B
     $n = [Math]::Max($ta.Count, $tb.Count)
     for ($i = 0; $i -lt $n; $i++) {
-        $x = if ($i -lt $ta.Count) { $ta[$i] } else { 0 }
-        $y = if ($i -lt $tb.Count) { $tb[$i] } else { 0 }
+        $aHas = $i -lt $ta.Count
+        $bHas = $i -lt $tb.Count
+        # A version that ran out of components here (e.g. "0.2.0" vs
+        # "0.2.0-dev1") is the finished release; a release outranks any
+        # devN pre-release build of the same prefix -- mirrors
+        # install.sh's own _version_lt (#377's same false-positive class:
+        # treating a missing component as 0 here would make "0.2.0" sort
+        # as OLDER than "0.2.0-dev1", silently blocking a legitimate
+        # dev-to-release promotion).
+        if (-not $aHas) { return $false }
+        if (-not $bHas) { return $true }
+        $x = $ta[$i]; $y = $tb[$i]
         if ($x -lt $y) { return $true }
         if ($x -gt $y) { return $false }
     }
@@ -711,13 +861,22 @@ function Invoke-DowngradeGuard {
 # -- Runtime install (venv + package + binstub + manifest + verify + pivot) --
 
 function Resolve-VendoredLib {
-    param([Parameter(Mandatory)][string]$LibName)
+    param(
+        [Parameter(Mandatory)][string]$LibName,
+        # Where candidate 1 looks for libs/<name> -- the durable build
+        # snapshot during a real install (see New-PluginBuildSnapshot),
+        # defaulting to the live $PluginDir for any other caller.
+        [string]$LibRoot = $PluginDir
+    )
     # 1. Vendored inside agent-dispatch (marketplace install layout)
-    $candidate = Join-Path $PluginDir "libs\$LibName"
+    $candidate = Join-Path $LibRoot "libs\$LibName"
     if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
         return (Resolve-Path $candidate).Path
     }
-    # 2. Relative path (git checkout layout)
+    # 2. Relative path (git checkout layout) -- always against the REAL
+    # $PluginDir (not $LibRoot): a snapshot is a flat copy with no `../../libs`
+    # sibling, so this candidate only ever makes sense against the true,
+    # on-disk checkout location.
     $candidate = Join-Path $PluginDir "..\..\libs\$LibName"
     if (Test-Path (Join-Path $candidate 'pyproject.toml')) {
         return (Resolve-Path $candidate).Path
@@ -757,7 +916,10 @@ raise SystemExit(1)
 }
 
 # zero-downtime graceful-cutover primitives (module ``zdd``).
-function Resolve-Zdd { return (Resolve-VendoredLib -LibName 'zdd') }
+function Resolve-Zdd {
+    param([string]$LibRoot = $PluginDir)
+    return (Resolve-VendoredLib -LibName 'zdd' -LibRoot $LibRoot)
+}
 
 # Check if the zdd cutover lib is already importable in the venv.
 function Test-ZddInstalled {
@@ -820,6 +982,335 @@ function Remove-PluginBuildArtifacts {
             (Join-Path $ExtraDir 'build'), `
             (Join-Path $ExtraDir '*.egg-info'), `
             (Join-Path (Join-Path $ExtraDir 'src') '*.egg-info')
+    }
+}
+
+function Publish-FileAtomically {
+    <# Atomically replace (or first-create) a marker file -- ported from
+       agent-machines' own scripts/init.ps1 (same helper, same semantics).
+       Invoke-Stamp's payload-dir/stamped-version markers are read by the
+       self-provisioning binstub OUTSIDE any lock, so a plain WriteAllText
+       could be observed mid-write (a torn, partially-written file) by a
+       racing reader. #>
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Content,
+        [Parameter(Mandatory)]$Encoding
+    )
+    # File.Replace requires fully-qualified paths -- a relative path throws
+    # "The path is not of a legal form."
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $tmp = "$fullPath.tmp-$PID"
+    [System.IO.File]::WriteAllText($tmp, $Content, $Encoding)
+    for ($attempt = 1; $true; $attempt++) {
+        try {
+            if (Test-Path -LiteralPath $fullPath) {
+                $backup = "$fullPath.bak-$PID"
+                [System.IO.File]::Replace($tmp, $fullPath, $backup)
+                Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+            } else {
+                # Two racing first-time installs can both pass the Test-Path
+                # check above before either publishes. Omit -Force here: a
+                # plain Move-Item throws if a concurrent writer created the
+                # destination in that gap, instead of silently -Force
+                # deleting+recreating the very no-file window this helper
+                # exists to prevent. Caught below and retried, which
+                # re-checks Test-Path and takes the safe Replace() branch.
+                Move-Item -LiteralPath $tmp -Destination $fullPath
+            }
+            return
+        } catch {
+            if ($attempt -ge 20) { throw }
+            Start-Sleep -Milliseconds 15
+        }
+    }
+}
+
+function Enter-PluginSnapshotLock {
+    <# Serializes a critical section against concurrent invocations (two
+       near-simultaneous install/stamp actions) under one named mutex keyed
+       by $InstallDir (and, for the build-lifecycle scope, $Version too) --
+       mirrors agent-machines' own Enter-StampLock
+       (plugins/agent-machines/scripts/init.ps1) in a distinct namespace.
+
+       Tries the "Global\" namespace first (serializes across EVERY
+       session on the machine, not just the caller's own) and falls back
+       to the pre-existing "Local\" namespace (this session only) when
+       creating a Global object fails -- a standard, non-elevated user
+       lacks the SeCreateGlobalPrivilege Windows requires to CREATE (not
+       merely open) one, so unconditionally requiring "Global\" would
+       break lock acquisition outright for ordinary users. This is a
+       strict best-effort widening: a "Local\"-only installer invocation
+       launched from a different session (e.g. the coordinator's own
+       Scheduled Task, often a different session than an interactive
+       sessionStart hook) would otherwise acquire its own independent
+       mutex instance and silently defeat this whole lock-ordering
+       contract; the fallback never regresses below that pre-existing
+       floor, it only widens the common case where the privilege is
+       available.
+
+       Two DISTINCT locks share this one implementation (different keys,
+       each independently thread-affine reentrant within its own scope):
+
+       - VERSION-SCOPED (pass -Version): New-PluginBuildSnapshot's own
+         (short) check/copy/publish sequence, and Install-Runtime's WIDER
+         span from snapshot resolution through the end of the actual
+         package install, both keyed by $InstallDir + $Version together.
+         Without the first, two callers could both observe no valid
+         snapshot, each finish their own temp copy, and the LATER
+         publisher's rename-aside step would retire the snapshot the
+         EARLIER caller already returned and may still be actively
+         building from. Without the second, two same-version callers could
+         both take the snapshot-reuse fast path and then concurrently
+         scrub/rebuild PEP 517 artifacts (build/, *.egg-info) under the
+         SAME shared $BuildSrcDir. Scoping this lock BY VERSION (not just
+         $InstallDir) is deliberate: a wedged build backend for one
+         version -- the exact failure mode this whole mechanism tolerates
+         -- must never block an unrelated install of a DIFFERENT,
+         newer version from acquiring its own independent lock.
+
+       - GLOBAL, $InstallDir-only (omit -Version): Invoke-Stamp's own
+         outer span covering BOTH marker publications. This one genuinely
+         needs cross-version visibility -- its whole purpose is comparing
+         against whatever stamped-version is CURRENTLY published,
+         regardless of which version last held it, to stop a
+         delayed/preempted OLDER stamp from overwriting a NEWER one's
+         markers. This span is always short (file writes only, no venv/uv
+         build work), so cross-version contention here is a non-issue.
+
+       -TimeoutSeconds defaults to 20s (comfortably covers both the short
+       snapshot-only and marker-publication scopes); Install-Runtime's own
+       wider, version-scoped acquisition passes a much larger value, since
+       a real venv+package build this lock can now span takes ~30-120s on
+       its own (see Deploy-SelfProvisioningBinstub's own first-use
+       provisioning estimate) -- the default would almost certainly time
+       out under any genuinely concurrent SAME-version build otherwise. #>
+    param(
+        [Parameter(Mandatory)][string]$InstallDir,
+        [string]$Version,
+        [int]$TimeoutSeconds = 20
+    )
+    $key = if ($Version) { "$($InstallDir.ToLowerInvariant())|$Version" } else { $InstallDir.ToLowerInvariant() }
+    $hash = [BitConverter]::ToString(
+        [Security.Cryptography.SHA256]::Create().ComputeHash(
+            [Text.Encoding]::UTF8.GetBytes($key)
+        )
+    ).Replace('-', '').Substring(0, 24)
+    $mutex = $null
+    if ($env:OS -eq 'Windows_NT') {
+        try {
+            $mutex = New-Object Threading.Mutex($false, "Global\CopilotExtensions.AgentDispatch.Snapshot.$hash")
+        } catch [UnauthorizedAccessException] {
+            # Caller lacks SeCreateGlobalPrivilege (the common case for a
+            # standard, non-elevated user) -- fall back to the pre-existing
+            # session-scoped namespace rather than failing the install.
+            $mutex = $null
+        }
+        if (-not $mutex) {
+            $mutex = New-Object Threading.Mutex($false, "Local\CopilotExtensions.AgentDispatch.Snapshot.$hash")
+        }
+    } else {
+        $mutex = New-Object Threading.Mutex($false, "CopilotExtensions.AgentDispatch.Snapshot.$hash")
+    }
+    $held = $false
+    try {
+        $held = $mutex.WaitOne([TimeSpan]::FromSeconds($TimeoutSeconds))
+    } catch [Threading.AbandonedMutexException] {
+        $held = $true
+    }
+    if (-not $held) { $mutex.Dispose(); throw 'Timed out waiting for the agent-dispatch snapshot lock.' }
+    return $mutex
+}
+
+function New-PluginBuildSnapshot {
+    <# Copy $PluginDir into a durable, version-pinned snapshot under
+       $InstallDir/snapshots/<ver>/ and return that path -- so every build
+       subprocess this installer spawns (uv's PEP 517 build backend included)
+       sets ITS OWN cwd inside a folder `copilot plugin update` never touches.
+       An update only ever deletes/replaces the live, swappable marketplace
+       payload (~/.copilot/installed-plugins/.../agent-dispatch); a snapshot
+       under $InstallDir is immutable once written and is removed only once
+       nothing references it. Confirmed live -- a stuck `uv pip install` build (its PEP 517 backend
+       cwd'd into libs/agent-procutil, directly inside the live payload) and
+       the init.ps1 installer process that spawned it both sat there for
+       hours, and `copilot plugin update agent-dispatch@copilot-extensions`
+       failed outright with os error 32 (ERROR_SHARING_VIOLATION) the entire
+       time.
+
+       A no-op (returns $PluginDir unchanged) when $PluginDir is ALREADY
+       under $InstallDir -- e.g. this install.ps1 is itself running from a
+       previously-made snapshot, as the self-provisioning binstub's
+       first-use `provision` dispatch does -- avoiding a redundant
+       copy-of-a-copy on the already-safe path.
+
+       Also a no-op for a LOCAL dev checkout (Get-SourceKind returns
+       anything other than 'marketplace'): a checkout's pyproject.toml
+       declares its `[tool.uv.sources]` workspace path deps relative to the
+       monorepo root (e.g. `../../libs/zdd`), which only resolves from the
+       checkout's own location -- copying just $PluginDir's own tree into a
+       flat snapshot would orphan those relative paths, breaking the
+       documented direct-from-worktree install path local testing relies
+       on. Only a marketplace payload (whose packaged pyproject.toml
+       already references its OWN co-located `libs/`) is both safe to
+       snapshot and actually exposed to `copilot plugin update`'s locking
+       hazard -- a local checkout is subject to neither.
+
+       -BestEffort (Install-Runtime's own call site): on ANY copy failure
+       (disk full, permissions) logs a warning and returns $PluginDir
+       unchanged -- an acceptable degraded outcome, since the only
+       consequence is building from the live payload again rather than
+       aborting the whole install. Without -BestEffort (Invoke-Stamp's call
+       site): a copy failure THROWS instead. Invoke-Stamp persists this
+       function's return value as the self-provisioning binstub's durable
+       `payload-dir`/`stamped-version` marker and reports success
+       regardless of what it received back -- a swallowed failure there
+       would silently publish a marker pointing at the wrong (transient,
+       or merely unchanged) directory while claiming the stamp succeeded,
+       instead of failing it outright. A missing source version always
+       degrades (no version to snapshot under), regardless of -BestEffort. #>
+    param(
+        [Parameter(Mandatory)][string]$PluginDir,
+        [Parameter(Mandatory)][string]$InstallDir,
+        [string]$Version,
+        [switch]$BestEffort
+    )
+    if ((Get-SourceKind -PluginPath $PluginDir) -ne 'marketplace') {
+        return $PluginDir
+    }
+    # Containment root is $InstallDir/snapshots specifically, NOT $InstallDir
+    # itself -- $InstallDir also hosts the self-stage area
+    # ($InstallDir/.install-stage/<ts>-<pid>/, see the self-stage relocation
+    # near the top of this script) that a normal marketplace stamp/install
+    # run commonly passes as $PluginDir. That stage is exactly as transient
+    # as the marketplace payload this function exists to avoid -- treating
+    # it as already-safe would skip snapshot creation entirely and leave
+    # Invoke-Stamp publishing a payload-dir marker that a later installer
+    # invocation reaps once its owner PID exits.
+    $snapshotsRoot = Join-Path $InstallDir 'snapshots'
+    $installRoot = Resolve-Path -LiteralPath $snapshotsRoot -ErrorAction SilentlyContinue
+    if ($installRoot) {
+        # Platform-portable, non-wildcard containment check: this script
+        # also runs under pwsh on Linux/macOS, where a hardcoded '\' never
+        # matches and a case-sensitive filesystem makes case-insensitive
+        # comparison wrong -- compare with the real separator and the
+        # platform's own case sensitivity, as a literal prefix (no `-like`
+        # globbing, which would mis-match a path containing '[', ']', or '*').
+        # $IsWindows is undefined under Windows PowerShell 5.1 (this script
+        # is PS5+ compatible, see its own synopsis) and would throw under
+        # Set-StrictMode -- use the script's existing PS5-safe OS check.
+        $sep = [IO.Path]::DirectorySeparatorChar
+        $prefix = $installRoot.Path.TrimEnd('/\') + $sep
+        $pluginNorm = $PluginDir.TrimEnd('/\') + $sep
+        $cmp = if ($env:OS -eq 'Windows_NT') { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+        if ($pluginNorm.StartsWith($prefix, $cmp)) {
+            return $PluginDir
+        }
+    }
+    if (-not $Version) {
+        Write-Skip 'No source version resolved -- building from the live payload (snapshot skipped)'
+        return $PluginDir
+    }
+    # Lock-free fast path, BEFORE acquiring any mutex: a published snapshot is
+    # immutable (see the rename-aside/immutable-publish comment below), so
+    # reading it needs no lock at all -- exactly how the binstub's own
+    # first-use read already works. Without this check up front, a `stamp`
+    # invocation (this function's only other caller besides Install-Runtime)
+    # would queue behind Install-Runtime's OWN acquisition of this identical
+    # version-scoped mutex -- which Install-Runtime can hold for its full
+    # 30-120+ second package build, not just this function's short
+    # check/copy/publish sequence -- and time out on this function's much
+    # shorter default lock timeout even though the snapshot it actually
+    # needs is already valid and sitting on disk. Checked again, inside the
+    # lock, below: a concurrent publisher could still be mid-build right
+    # now, so this early check is a (correct, since immutable) optimization,
+    # never a substitute for the authoritative check.
+    $snapDirFast = Join-Path (Join-Path $InstallDir 'snapshots') $Version
+    if (Test-Path (Join-Path $snapDirFast 'pyproject.toml')) {
+        Write-Ok "Reusing existing build snapshot: $snapDirFast"
+        return $snapDirFast
+    }
+    try {
+        # Initialized before any failure-prone step (mutex acquisition
+        # included) so the outer catch below can safely check it under this
+        # script's Set-StrictMode without an "uninitialized variable" error
+        # when a failure happens before $snapTmp is ever assigned.
+        $snapTmp = $null
+        # Serialize the whole check/copy/publish sequence below against a
+        # concurrent caller racing the same $InstallDir (see
+        # Enter-PluginSnapshotLock's own docstring for the exact race this
+        # closes). A lock-acquisition timeout flows through this same catch,
+        # so -BestEffort still governs whether that degrades gracefully.
+        $snapMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -Version $Version
+        try {
+            if (-not (Test-Path $InstallDir)) { New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null }
+            $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $Version
+            # Same-version idempotent fast path (mirrors agent-machines'
+            # scripts/init.ps1 stamp mutex): a snapshot for this EXACT version
+            # that already looks valid would be rebuilt byte-identical anyway,
+            # so skip the whole copy -- also closes the replacement race below
+            # for the common case (nothing to publish means nothing to race).
+            $snapValid = Test-Path (Join-Path $snapDir 'pyproject.toml')
+            if ($snapValid) {
+                Write-Ok "Reusing existing build snapshot: $snapDir"
+                return $snapDir
+            }
+            $snapTmp = "$snapDir.tmp-$PID"
+            if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+            New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+            # Copy everything needed to `uv pip install .` (src, libs, scripts,
+            # pyproject, plugin.json, hooks, README); skip VCS/build/test junk --
+            # same exclusion list Invoke-Stamp uses for its own snapshot.
+            $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+            Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+                Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+            }
+            # A published snapshot is immutable: Invoke-Stamp's payload-dir
+            # marker, and this function's own return value, can be read by a
+            # CONCURRENT first-use binstub invocation outside this mutex (the
+            # binstub is a reader, never a publisher, so it never takes this
+            # lock). Deleting $snapDir before moving the replacement in would
+            # leave NO snapshot at all for the entire remainder of this copy
+            # -- a race reading that window sees a missing directory, not
+            # merely a stale one. Rename the old copy aside first (a
+            # directory rename is metadata-only, so the window where
+            # $snapDir doesn't exist shrinks to the Move-Item's own atomic
+            # rename) rather than deleting the still-advertised snapshot
+            # outright.
+            if (Test-Path $snapDir) {
+                $snapStale = "$snapDir.stale-$PID"
+                # Terminating (no -ErrorAction SilentlyContinue): if this
+                # rename fails (e.g. Windows still has $snapDir open), letting
+                # execution continue to Move-Item below would find $snapDir
+                # STILL present -- PowerShell then treats it as a destination
+                # CONTAINER and moves $snapTmp INSIDE it instead of replacing
+                # it, silently returning a root that lacks pyproject.toml at
+                # the expected path. Let this throw into the outer catch,
+                # which cleans up $snapTmp and -- on the -BestEffort path --
+                # correctly degrades to the live payload instead.
+                Rename-Item -LiteralPath $snapDir -NewName (Split-Path -Leaf $snapStale)
+            }
+            Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
+            Get-ChildItem -LiteralPath (Split-Path -Parent $snapDir) -Directory -Filter "$(Split-Path -Leaf $snapDir).stale-*" -ErrorAction SilentlyContinue |
+                ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+            Write-Ok "Building from durable snapshot: $snapDir (never locks the marketplace payload)"
+            return $snapDir
+        } finally {
+            [void]$snapMutex.ReleaseMutex()
+            $snapMutex.Dispose()
+        }
+    } catch {
+        # A failure mid-copy/move (disk full, permissions) can leave this
+        # attempt's own $snapTmp behind. Every attempt uses a fresh PID
+        # suffix, so on the -BestEffort path (which swallows this and lets
+        # the caller retry on its next invocation) nothing else would ever
+        # remove it -- a repeatedly-failing degrade would accumulate a
+        # distinct, never-reaped partial tree on every single attempt.
+        if ($snapTmp -and (Test-Path $snapTmp)) {
+            Remove-Item -LiteralPath $snapTmp -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        if (-not $BestEffort) { throw }
+        Write-Warn "Could not create build snapshot ($($_.Exception.Message)) -- building from the live payload"
+        return $PluginDir
     }
 }
 
@@ -966,6 +1457,32 @@ function Install-Runtime {
         exit 1
     }
 
+    # Build from a durable, version-pinned snapshot -- never from the live,
+    # swappable marketplace payload ($PluginDir) -- so a uv/setuptools build
+    # subprocess's own cwd can never block `copilot plugin update`. See
+    # New-PluginBuildSnapshot's docstring for the confirmed incident.
+    # -BestEffort: a failed snapshot here only means building from the live
+    # payload again (the prior, only-ever behavior) -- not fatal.
+    #
+    # The OUTER lock below (same $InstallDir + $SrcVersion key
+    # New-PluginBuildSnapshot's own inner acquisition reenters harmlessly)
+    # spans snapshot resolution through the end of the actual package
+    # install: two same-version callers both taking the snapshot-reuse fast
+    # path would otherwise concurrently scrub/rebuild PEP 517 artifacts
+    # (build/, *.egg-info) under the SAME shared $BuildSrcDir, each able to
+    # delete the other's in-progress build output. Scoped BY VERSION (not
+    # just $InstallDir): a wedged build backend for one version must never
+    # block an unrelated, newer-version install's own independent lock. A
+    # real build can run ~30-120s on its own (see
+    # Deploy-SelfProvisioningBinstub's own first-use estimate), so this
+    # acquisition passes a much longer timeout than the short snapshot-only
+    # default -- `exit` (used throughout the build steps below on failure)
+    # still runs this `finally`, confirmed: PowerShell unwinds pending
+    # `finally` blocks before an `exit` actually terminates the process.
+    $buildMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -Version $SrcVersion -TimeoutSeconds 180
+    try {
+    $BuildSrcDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion -BestEffort
+
     $hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
 
     # Find a Python interpreter (skip Windows Store aliases that aren't real)
@@ -1063,7 +1580,7 @@ function Install-Runtime {
     # Declared as `agent-zdd` in pyproject but NOT on PyPI, so `uv pip install .`
     # cannot resolve it -- install it from the vendored lib FIRST so the package
     # install below finds the requirement already satisfied.
-    $ZddDir = Resolve-Zdd
+    $ZddDir = Resolve-Zdd -LibRoot $BuildSrcDir
     if ($ZddDir) {
         # Scrub BEFORE this standalone pre-install too, not just the main
         # install below -- this build reads from the exact same libs/zdd/
@@ -1072,13 +1589,13 @@ function Install-Runtime {
         # vulnerable to stale build/lib residue shadowing a fresh source
         # change if it runs first without this -- pass $ZddDir explicitly
         # so an external resolved path is reached too, not just libs/*.
-        Remove-PluginBuildArtifacts -PluginDir $PluginDir -ExtraDir $ZddDir
+        Remove-PluginBuildArtifacts -PluginDir $BuildSrcDir -ExtraDir $ZddDir
         if (Get-Command uv -ErrorAction SilentlyContinue) {
             $zddOut = & uv pip install --python $VenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet 2>&1
         } else {
             $zddOut = & $VenvPython -m pip install "$ZddDir" 2>&1
         }
-        Remove-PluginBuildArtifacts -PluginDir $PluginDir -ExtraDir $ZddDir
+        Remove-PluginBuildArtifacts -PluginDir $BuildSrcDir -ExtraDir $ZddDir
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP
             Write-Fail "zdd install failed (exit $LASTEXITCODE)"
@@ -1110,18 +1627,18 @@ function Install-Runtime {
         @{ Dir = 'agent-procutil'; Pkg = 'agent-procutil'; Display = 'agent-procutil' },
         @{ Dir = 'plugin-activation'; Pkg = 'agent-plugin-activation'; Display = 'plugin-activation' }
     )) {
-        $libDir = Resolve-VendoredLib -LibName $lib.Dir
+        $libDir = Resolve-VendoredLib -LibName $lib.Dir -LibRoot $BuildSrcDir
         if (-not $libDir) {
             Write-Fail "Cannot locate $($lib.Display) library. Reinstall the agent-dispatch plugin from the marketplace (copilot plugin install agent-dispatch@copilot-extensions), then rerun this installer."
             exit 1
         }
-        Remove-PluginBuildArtifacts -PluginDir $PluginDir -ExtraDir $libDir
+        Remove-PluginBuildArtifacts -PluginDir $BuildSrcDir -ExtraDir $libDir
         if (Get-Command uv -ErrorAction SilentlyContinue) {
             $libOut = & uv pip install --python $VenvPython "$libDir" --reinstall-package $lib.Pkg --refresh-package $lib.Pkg --quiet 2>&1
         } else {
             $libOut = & $VenvPython -m pip install "$libDir" 2>&1
         }
-        Remove-PluginBuildArtifacts -PluginDir $PluginDir -ExtraDir $libDir
+        Remove-PluginBuildArtifacts -PluginDir $BuildSrcDir -ExtraDir $libDir
         if ($LASTEXITCODE -ne 0) {
             $ErrorActionPreference = $prevEAP
             Write-Fail "$($lib.Display) install failed (exit $LASTEXITCODE)"
@@ -1160,26 +1677,26 @@ function Install-Runtime {
     )
     $installPkg = {
         param([string]$Spec)
-        # Installing FROM the pristine payload directory ($PluginDir, under
-        # the plugin install root) leaves setuptools' own build/lib +
-        # *.egg-info staging behind IN that tree -- pip's build isolation
-        # covers the *environment* the build runs in, not where the legacy
-        # build_meta backend writes intermediate files. Left in place, a
-        # stale build/lib/ (or a src-layout package's src/*.egg-info, one
-        # level deeper than a root-level glob reaches) can silently shadow
-        # fresh src/ on a later install if setuptools' incremental-build
-        # mtime check decides nothing "changed". Scrub on every attempt
-        # (success or not) so the payload directory stays the pristine
-        # clone it's supposed to be -- mirrors the POSIX installer's
+        # Installing FROM $BuildSrcDir (the durable per-version snapshot, NOT
+        # the live payload -- see New-PluginBuildSnapshot) leaves setuptools'
+        # own build/lib + *.egg-info staging behind IN that tree -- pip's
+        # build isolation covers the *environment* the build runs in, not
+        # where the legacy build_meta backend writes intermediate files. Left
+        # in place, a stale build/lib/ (or a src-layout package's
+        # src/*.egg-info, one level deeper than a root-level glob reaches)
+        # can silently shadow fresh src/ on a later install if setuptools'
+        # incremental-build mtime check decides nothing "changed". Scrub on
+        # every attempt (success or not) so the snapshot directory stays the
+        # pristine copy it's supposed to be -- mirrors the POSIX installer's
         # cleanup in install.sh. Also reaches every vendored
         # `[tool.uv.sources]` workspace path dep under libs/<name>/, which
         # is its own independent build root and equally vulnerable -- see
         # Remove-PluginBuildArtifacts's own docstring for the confirmed
         # live incident.
-        $scrubArtifacts = { Remove-PluginBuildArtifacts -PluginDir $PluginDir }
+        $scrubArtifacts = { Remove-PluginBuildArtifacts -PluginDir $BuildSrcDir }
         # Scrub BEFORE installing too, not just after: residue already
-        # sitting in $PluginDir the moment this call starts (an earlier
-        # failed attempt, a marketplace resync, a concurrent process) is
+        # sitting in $BuildSrcDir the moment this call starts (an earlier
+        # failed attempt, a re-stamped snapshot, a concurrent process) is
         # what shadows THIS build -- an after-only scrub only protects the
         # NEXT install, not this one. Confirmed live (2026-09-23,
         # copilot-extensions#3444): a truncated recipes_cli.py shipped this
@@ -1215,12 +1732,12 @@ function Install-Runtime {
         }
     }
 
-    $mcpResult = & $installPkg "$($PluginDir)[mcp]"
+    $mcpResult = & $installPkg "$($BuildSrcDir)[mcp]"
     if ($mcpResult.Code -eq 0) {
         Write-Ok 'Package installed: agent-dispatch [mcp]'
     } else {
         Write-Warn 'Could not install the [mcp] extra (its native deps may not build on this platform) -- falling back to a base install without the MCP server surface'
-        $baseResult = & $installPkg "$PluginDir"
+        $baseResult = & $installPkg "$BuildSrcDir"
         if ($baseResult.Code -ne 0) {
             Write-Fail 'Failed to install agent-dispatch package into venv'
             Write-Host $baseResult.Output
@@ -1248,8 +1765,12 @@ function Install-Runtime {
         Write-Warn "Build-info stamp skipped: $($_.Exception.Message)"
     }
 
-    # -- binstub (self-provisioning; #1393) --
-    Deploy-SelfProvisioningBinstub
+    # -- binstub (self-provisioning; #1393) -- moved to AFTER the versioned
+    # activation + supersession check below (not immediately after the
+    # build): a superseded (older, losing) invocation must not republish the
+    # shared binstub/resolver surface over whatever a newer, already-active
+    # build already published there -- same reasoning as the manifest/
+    # verify/PATH/pivot steps this guard already protects.
 
     # Versioned layout (#581): health-gate the freshly-built slot in isolation,
     # then swap the stable `.venv` link onto it. Everything below (manifest, task
@@ -1286,9 +1807,95 @@ function Install-Runtime {
         }
         Invoke-VersionedMarkComplete
         if (-not (Invoke-VersionedActivate)) { exit 1 }
+        # The supersession check and the shared publication it protects
+        # (the binstub + deploy-manifest, both readable/overwritable by any
+        # OTHER concurrent invocation) are NOT atomic unless the SAME global
+        # lock spans both: checking, then releasing, then publishing still
+        # leaves a gap where a newer installer (or stamp) could activate and
+        # publish in between, and this older invocation would still
+        # overwrite that newer content with its own stale one. Acquire the
+        # global lock NESTED inside the already-held version-scoped
+        # buildMutex (consistent with Invoke-VersionedActivate's own
+        # established ordering -- see Enter-PluginSnapshotLock's own
+        # docstring for why the opposite nesting order would deadlock) and
+        # hold it through Deploy-SelfProvisioningBinstub AND Write-Manifest
+        # -- the two steps that actually publish shared, version-sensitive
+        # content another invocation could race.
+        $publishMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
+        try {
+            if (Test-ActivationSupersededNow) {
+                # This invocation's own build lost the cross-version
+                # activation race -- either caught immediately inside
+                # Invoke-VersionedActivate, or only discovered HERE via the
+                # LIVE re-check (this invocation could have WON its own
+                # activation, only for a newer version to activate before
+                # reaching this exact point -- see
+                # Test-ActivationSupersededNow's own docstring). Everything
+                # below (manifest, verify, PATH, pivot, gc) resolves or
+                # reports through THIS invocation's own
+                # $VenvPython/$LinkPython -- publishing it now would
+                # overwrite the newer build's already-correct manifest with
+                # this older build's stale one. Stop here; the already-
+                # active newer slot remains fully installed and untouched.
+                # Both mutexes are still released normally via their
+                # enclosing `finally` blocks.
+                Write-Skip "Build $SrcVersion superseded by a newer concurrent build -- skipping remaining publication (manifest, verification, PATH, pivot) for this invocation"
+                return
+            }
+            # Dual-authority re-check, mirroring Invoke-Stamp's own guard
+            # but for the OPPOSITE direction: Test-ActivationSupersededNow
+            # above only re-reads current-version, which a STAMP action never
+            # touches (stamping deliberately defers activation). A newer
+            # concurrent stamp can therefore publish a newer stamped-version
+            # plus its own binstub/manifest/pivot entirely unnoticed by the
+            # check above, and this older install -- having already passed
+            # its own activation -- would otherwise overwrite that newer
+            # launcher surface with its own stale one. Read stamped-version
+            # directly (no interpreter needed, same marker-read pattern as
+            # Invoke-Stamp's own dual-authority guard) UNDER this same lock
+            # so this observes the true latest stamp, not a stale snapshot.
+            $publishStampedVersion = $null
+            $publishStampedVersionPath = Join-Path $InstallDir 'stamped-version'
+            if (Test-Path $publishStampedVersionPath) {
+                $publishStampedVersion = (Get-Content -Path $publishStampedVersionPath -Raw -ErrorAction SilentlyContinue)
+                if ($publishStampedVersion) { $publishStampedVersion = $publishStampedVersion.Trim() }
+            }
+            if ($publishStampedVersion -and (Test-VersionLt -A $SrcVersion -B $publishStampedVersion) -and -not $Force) {
+                Write-Skip "Not publishing: source $SrcVersion is older than already-stamped $publishStampedVersion (a newer stamp published first; -Force to override)"
+                return
+            }
+            Deploy-SelfProvisioningBinstub
+            Write-Manifest
+            # Register-PickerPivot ALSO writes shared, version-sensitive
+            # content (pivots/agent-dispatch.json, from THIS invocation's
+            # own $PluginDir) another invocation could race the exact same
+            # way as the binstub/manifest above -- keep it inside this same
+            # protected span rather than letting it run after the mutex is
+            # released.
+            Register-PickerPivot
+        } finally {
+            [void]$publishMutex.ReleaseMutex()
+            $publishMutex.Dispose()
+        }
+    } else {
+        # Legacy (non-versioned) mode: no supersession concept, no lock.
+        Deploy-SelfProvisioningBinstub
+        Write-Manifest
+        Register-PickerPivot
     }
-
-    Write-Manifest
+    } finally {
+        # Held through the health gate, completion marker, AND activation
+        # above (not just the package build/install): a second same-version
+        # installer that only waited out the earlier, narrower release
+        # point could force-reinstall into this exact versions/<version>
+        # venv while THIS process is still validating the slot or has only
+        # just activated it, exposing a partially modified "current" runtime
+        # to any daemon/CLI invocation racing the swap. Release only once
+        # this process's own slot is fully published and the stable `.venv`
+        # link (if versioned) has been swapped onto it.
+        [void]$buildMutex.ReleaseMutex()
+        $buildMutex.Dispose()
+    }
 
     # -- verify (through the stable `.venv` link) --
     $prevEAP = $ErrorActionPreference
@@ -1320,7 +1927,6 @@ function Install-Runtime {
         }
     }
 
-    Register-PickerPivot
 }
 
 function Write-Manifest {
@@ -2919,35 +3525,127 @@ function Invoke-Stamp {
     # build (and the coordinator/supervisor service install) to the binstub's
     # first use. No venv, no uv; fits a sessionStart grace window and NEVER holds
     # the marketplace payload open (it copies from the already self-staged
-    # $PluginDir, freeing the singleton immediately).
+    # $PluginDir, freeing the singleton immediately). Shares its copy logic with
+    # New-PluginBuildSnapshot (Install-Runtime's own build-isolation snapshot).
     Write-Host ''; Write-Host '=== agent-dispatch stamp (defer runtime to first use) ===' -ForegroundColor Cyan; Write-Host ''
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
-    $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
-    $snapTmp = "$snapDir.tmp-$PID"
-    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-    # Copy everything needed to `uv pip install .` from the slot (src, libs,
-    # scripts, pyproject, plugin.json, hooks, README); skip VCS/build/test junk.
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
-    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+    # Snapshot build happens with NO global lock held: New-PluginBuildSnapshot
+    # takes its OWN version-scoped lock (keyed $InstallDir+$SrcVersion)
+    # entirely internally, acquiring and releasing it before this function
+    # ever touches the global lock below. This ordering is deliberate, not
+    # incidental: Install-Runtime holds that SAME version-scoped lock as a
+    # wide OUTER scope spanning its full build+install+activate span, and
+    # (via Invoke-VersionedActivate) acquires the global, $InstallDir-only
+    # lock NESTED inside it for a short version-ordering check. If this
+    # function instead held the global lock OUTER and let
+    # New-PluginBuildSnapshot acquire the version-scoped lock NESTED inside
+    # it -- the previous shape here, and the exact opposite nesting order --
+    # a concurrent `stamp` and `install` for the same version could deadlock:
+    # stamp holding global and waiting on version, install holding version
+    # and waiting on global. Keeping the two acquisitions here strictly
+    # SEQUENTIAL (never nested) makes that AB-BA cycle impossible, regardless
+    # of which lock Install-Runtime nests inside the other.
+    $snapDir = New-PluginBuildSnapshot -PluginDir $PluginDir -InstallDir $InstallDir -Version $SrcVersion
+
+    # Hold ONE lock across the version-ordering guard AND both marker writes
+    # (not narrower, independent acquisitions for each): two overlapping
+    # stamps for DIFFERENT versions could otherwise each pass the guard, then
+    # race the writes below -- an older, slower invocation could publish its
+    # markers AFTER a newer one already finished, pointing
+    # payload-dir/stamped-version at stale content, or leaving the two
+    # markers naming different versions.
+    $stampMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
+    try {
+        # Version-ordering guard, UNDER this same lock: the mutex only
+        # serializes overlapping writes, it does not guarantee ARRIVAL
+        # order. A delayed/preempted older-version invocation could still
+        # acquire this lock AFTER a newer one already published, and
+        # (without this check) would unconditionally overwrite both
+        # markers with its own stale version. Compare against whatever
+        # stamped-version is CURRENTLY on disk (read inside the lock, so
+        # this observes the true latest publish) and skip rather than
+        # downgrade, mirroring Invoke-DowngradeGuard's own
+        # -Force/AGENT_DISPATCH_ALLOW_DOWNGRADE override for a deliberate
+        # rollback.
+        $stampedVersionMarker = Join-Path $InstallDir 'stamped-version'
+        $currentStamped = if (Test-Path $stampedVersionMarker) {
+            (Get-Content -LiteralPath $stampedVersionMarker -Raw -ErrorAction SilentlyContinue).Trim()
+        } else { $null }
+        # A direct install/update advances `current-version` (via
+        # Invoke-VersionedActivate) WITHOUT ever touching `stamped-version`
+        # -- the stamped-version check above only catches a delayed stamp
+        # racing another STAMP, not one racing a real install/update that
+        # has since activated a newer build. Check BOTH authorities (still
+        # under this same lock, so this reads the true latest of each) and
+        # skip if the source is older than EITHER one.
+        #
+        # Read `current-version` DIRECTLY as a plain marker file rather than
+        # via Get-VersionedCurrent: that helper resolves an interpreter from
+        # $LinkPython/$VenvPython, both of which point at THIS invocation's
+        # OWN source-version slot -- a `stamp` deliberately has no
+        # provisioned slot yet (that's the whole point of deferring the
+        # build), so Get-VersionedCurrent would silently return empty here
+        # even when a newer direct install HAS published current-version,
+        # defeating this exact guard for the realistic stamp scenario it
+        # exists to protect. The marker is a plain atomically-written text
+        # file (versioned_runtime.py's own CURRENT_VERSION_FILE) -- reading
+        # it needs no interpreter at all.
+        $currentVersionMarker = Join-Path $InstallDir 'current-version'
+        $currentActive = if (Test-Path $currentVersionMarker) {
+            (Get-Content -LiteralPath $currentVersionMarker -Raw -ErrorAction SilentlyContinue).Trim()
+        } else { $null }
+        if ($currentActive -and (Test-VersionLt -A $SrcVersion -B $currentActive) -and -not $Force) {
+            Write-Skip "Not publishing: source $SrcVersion is older than already-active $currentActive (a newer install/update activated first; -Force to override)"
+            return
+        }
+        if ($currentStamped -and (Test-VersionLt -A $SrcVersion -B $currentStamped) -and -not $Force) {
+            Write-Skip "Not publishing: source $SrcVersion is older than already-stamped $currentStamped (a newer stamp arrived first; -Force to override)"
+            return
+        }
+        # Publish-FileAtomically guards the binstub's self-provisioning read
+        # (which never takes this mutex) against observing a torn,
+        # partially-written marker file.
+        Publish-FileAtomically -Path (Join-Path $InstallDir 'payload-dir') -Content $snapDir -Encoding $utf8NoBom
+        Publish-FileAtomically -Path $stampedVersionMarker -Content $SrcVersion -Encoding $utf8NoBom
+        Write-Ok "Snapshot: $snapDir"
+        # Deployed INSIDE the lock (mirrors agent-machines' own stamp,
+        # plugins/agent-machines/scripts/init.ps1:2061-2065): otherwise an
+        # older, delayed invocation could resume AFTER a newer one already
+        # published AND deployed, then overwrite the resolver/binstub files
+        # from its own (older) $PSScriptRoot -- pairing fresh markers with a
+        # stale launcher surface, the exact same ordering hazard the
+        # version guard above exists to prevent for the markers themselves.
+        Deploy-SelfProvisioningBinstub
+        Write-Ok 'Stamped: agent-dispatch binstub on PATH; runtime provisions on first use.'
+    } finally {
+        [void]$stampMutex.ReleaseMutex()
+        $stampMutex.Dispose()
     }
-    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
-    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
-    Write-Ok "Snapshot: $snapDir"
-    Deploy-SelfProvisioningBinstub
-    Write-Ok 'Stamped: agent-dispatch binstub on PATH; runtime provisions on first use.'
 }
+
 
 function Invoke-Install {
     Write-Host ''; Write-Host '=== agent-dispatch install ===' -ForegroundColor Cyan; Write-Host ''
     Install-Runtime
+    if (Test-ActivationSupersededNow) {
+        # A concurrent, newer install already activated -- either caught at
+        # Install-Runtime's own return, or only now via the LIVE re-check
+        # (see Test-ActivationSupersededNow's own docstring: this invocation
+        # could have WON its own activation and only been overtaken
+        # afterward). Install-CoordinatorTask/Install-SupervisorTask are
+        # themselves version-agnostic (they register generic, marker-
+        # resolving launchers), but Confirm-CoordinatorRunning compares the
+        # running coordinator's reported version against THIS invocation's
+        # own (older, losing) $VenvPython build -- proceeding would
+        # misreport a perfectly healthy, already-newer coordinator as
+        # serving a stale build. Nothing else to do for this invocation.
+        Write-Host ''; Write-Host '=== agent-dispatch install complete (superseded by a newer concurrent build) ===' -ForegroundColor Cyan
+        return
+    }
     Install-CoordinatorTask
     Remove-CoordinatorFirewallRule
     Install-SupervisorTask
@@ -3011,6 +3709,22 @@ function Invoke-Update {
     try {
     Invoke-DowngradeGuard
     Install-Runtime
+    if (Test-ActivationSupersededNow) {
+        # This invocation's own build lost the cross-version activation race
+        # -- either caught immediately inside Install-Runtime, or only
+        # discovered HERE via the LIVE re-check (this invocation could have
+        # WON its own activation and released the lock, only for a newer
+        # version to activate before reaching this exact point -- see
+        # Test-ActivationSupersededNow's own docstring for why a one-time
+        # snapshot right after activation is not sufficient). The cutover
+        # logic below spawns the new coordinator from THIS invocation's own
+        # $VenvPython/$LinkPython -- proceeding would cut the ALREADY-newer,
+        # already-active coordinator OVER to this invocation's older build,
+        # a silent rollback. Nothing to update: the newer build's own update
+        # already did (or will do) the real cutover.
+        Write-Skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/task refresh for this invocation'
+        return
+    }
     # Thread B (graceful daemon cutover): a version update must NEVER kill
     # in-flight, non-resumable work. Install-Runtime built + activated the new
     # slot WITHOUT stopping the running daemon; now, if a live coordinator is
@@ -3024,26 +3738,58 @@ function Invoke-Update {
     # exists to cut over from, or the cutover cannot run.
     if (-not $NoService) {
         $didCutover = $false
-        if (Test-CoordinatorHealthy) {
-            if (Test-CoordinatorRouted) {
-                # A Thread-B coordinator (routed, /drain seam) -> graceful cutover.
-                $didCutover = Invoke-CoordinatorCutover
-            } else {
-                # Pre-Thread-B coordinator (unrouted, no /drain): one-time
-                # stop-and-swap (invariant #2 fallback). Every future update from a
-                # Thread-B build is graceful. The supervisor is left running.
-                $stopped = Stop-DispatchProcess -Subcommand serve
-                if ($stopped -gt 0) {
-                    Write-Step "Stopped $stopped pre-cutover coordinator process(es) -- one-time transition to graceful cutover"
+        # Hold the SAME global (version-independent) lock
+        # Invoke-VersionedActivate itself uses to publish current-version,
+        # across the ENTIRE coordinator reconciliation sequence below -- the
+        # live re-check, the cutover attempt itself, AND the task
+        # reconciliation that follows (the boot-task refresh below, the
+        # fallback Confirm-CoordinatorRunning start) -- not merely through
+        # Invoke-CoordinatorCutover. Releasing it any earlier still leaves a
+        # race: once this invocation's own cutover attempt returns (with
+        # $didCutover possibly still $false), a NEWER invocation could
+        # activate and complete its OWN cutover in the gap before this one
+        # reaches the boot-task refresh below -- whose existing-task path
+        # stops and restarts the task, potentially disrupting or
+        # duplicating the coordinator the newer cutover just promoted. A
+        # newer invocation's own Invoke-VersionedActivate call (needing
+        # this identical lock) cannot even start publishing its activation
+        # until this invocation's ENTIRE reconciliation sequence has
+        # finished and
+        # released it -- closing the window rather than merely narrowing
+        # it. -TimeoutSeconds uses the shared floor every caller of this
+        # identical mutex must honor (see $script:GlobalActivationLockTimeoutSeconds's
+        # own docstring): a real Invoke-CoordinatorCutover call can legitimately
+        # hold it for up to ~420s.
+        $cutoverMutex = Enter-PluginSnapshotLock -InstallDir $InstallDir -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
+        try {
+            if (Test-ActivationSupersededNow) {
+                Write-Skip 'Update superseded by a newer concurrent build that already activated -- skipping coordinator cutover/task refresh for this invocation'
+                return
+            }
+            if (Test-CoordinatorHealthy) {
+                if (Test-CoordinatorRouted) {
+                    # A Thread-B coordinator (routed, /drain seam) -> graceful cutover.
+                    $didCutover = Invoke-CoordinatorCutover
+                } else {
+                    # Pre-Thread-B coordinator (unrouted, no /drain): one-time
+                    # stop-and-swap (invariant #2 fallback). Every future update from a
+                    # Thread-B build is graceful. The supervisor is left running.
+                    $stopped = Stop-DispatchProcess -Subcommand serve
+                    if ($stopped -gt 0) {
+                        Write-Step "Stopped $stopped pre-cutover coordinator process(es) -- one-time transition to graceful cutover"
+                    }
                 }
             }
+            Remove-CoordinatorFirewallRule
+            # Refresh the boot task definition either way; -NoStart avoids launching a
+            # SECOND coordinator when the cutover already brought the new one up.
+            Install-CoordinatorTask -NoStart:$didCutover
+            Install-SupervisorTask
+            if (-not $didCutover) { Confirm-CoordinatorRunning }
+        } finally {
+            [void]$cutoverMutex.ReleaseMutex()
+            $cutoverMutex.Dispose()
         }
-        Remove-CoordinatorFirewallRule
-        # Refresh the boot task definition either way; -NoStart avoids launching a
-        # SECOND coordinator when the cutover already brought the new one up.
-        Install-CoordinatorTask -NoStart:$didCutover
-        Install-SupervisorTask
-        if (-not $didCutover) { Confirm-CoordinatorRunning }
     } else {
         Install-CoordinatorTask
         Install-SupervisorTask

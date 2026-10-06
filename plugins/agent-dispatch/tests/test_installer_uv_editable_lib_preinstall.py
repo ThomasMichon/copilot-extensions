@@ -54,6 +54,7 @@ function uv {{
 }}
 {_resolve_vendored_lib_fn()}
 $PluginDir = '{plugin_dir}'
+$BuildSrcDir = '{plugin_dir}'
 $VenvPython = 'unused'
 $prevEAP = 'Continue'
 {_preinstall_loop()}
