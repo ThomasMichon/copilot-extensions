@@ -92,12 +92,92 @@ def test_versioned_slot_clean_fails_closed_for_an_existing_slot_without_bootstra
     text = _INSTALL_SH.read_text(encoding="utf-8")
     body = _function_body(text, "_versioned_slot_clean")
 
-    assert 'py="$(_bootstrap_python)"' in body
+    assert 'py="$(_bootstrap_python exclude-venv-dir)"' in body
     no_py_branch = body.split('if [[ -z "$py" ]]; then', 1)[1].split(
         "\n    fi\n", 1
     )[0]
     assert '[[ -e "$VENV_DIR" ]] && return 1' in no_py_branch
     assert "return 0" in no_py_branch
+
+
+def test_bootstrap_python_excludes_the_target_slot_even_when_link_dir_resolves_into_it():
+    """`_versioned_slot_clean` inspects whether a live process is running
+    FROM the target slot -- using that slot's OWN interpreter to run the
+    census would make the helper process itself show up as such a
+    process, permanently self-reporting an incomplete slot with a stale
+    python as still in use on every retry. `LINK_DIR` (the `.venv` symlink)
+    is not guaranteed to be a different directory from `VENV_DIR` -- it can
+    physically resolve into the target slot mid-migration even when the
+    two variables hold different literal strings -- so `exclude-venv-dir`
+    must compare REAL (symlink-resolved) paths, not the variable strings."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    body = _function_body(text, "_bootstrap_python")
+
+    assert 'exclude_venv_dir="${1:-}"' in body
+    assert 'link_real="$(cd "$LINK_DIR" 2>/dev/null && pwd -P)"' in body
+    assert 'venv_real="$(cd "$VENV_DIR" 2>/dev/null && pwd -P)"' in body
+    assert '[[ -n "$link_real" && "$link_real" == "$venv_real" ]]' in body
+
+    # The lease's own resident helper must also be excluded -- it runs an
+    # actual interpreter and would show up in the very census it's trying
+    # to avoid contaminating if resolved from inside the slot.
+    fallback_body = _function_body(
+        text, "_acquire_versioned_slot_lease_python_fallback"
+    )
+    assert 'py="$(_bootstrap_python exclude-venv-dir)"' in fallback_body
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash is unavailable")
+def test_bootstrap_python_exclude_venv_dir_behavioral(tmp_path: Path):
+    """Behavioral (not just textual) regression guard: with `LINK_DIR`
+    SYMLINKED into `VENV_DIR` (the exact mid-migration scenario a plain
+    string comparison of the two variables wouldn't catch),
+    `_bootstrap_python exclude-venv-dir` must never return the slot's own
+    interpreter -- it must fall through to `python3`/`python` on PATH."""
+    venv_dir = tmp_path / "versions" / "1.0.0"
+    (venv_dir / "bin").mkdir(parents=True)
+    target_python = venv_dir / "bin" / "python"
+    target_python.write_text("#!/bin/sh\necho target-slot-python\n")
+    target_python.chmod(0o755)
+
+    link_dir = tmp_path / ".venv"
+    try:
+        link_dir.symlink_to(venv_dir, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"cannot create symlinks in this environment: {exc}")
+
+    fallback_bin = tmp_path / "fallback-bin"
+    fallback_bin.mkdir()
+    fallback_python = fallback_bin / "python3"
+    fallback_python.write_text("#!/bin/sh\necho fallback-python\n")
+    fallback_python.chmod(0o755)
+
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    fn_body = _function_body(text, "_bootstrap_python")
+
+    harness = f"""
+set -uo pipefail
+LINK_DIR="{link_dir.as_posix()}"
+VENV_DIR="{venv_dir.as_posix()}"
+PATH="{fallback_bin.as_posix()}:$PATH"
+_bootstrap_python() {{
+{fn_body}
+}}
+_bootstrap_python exclude-venv-dir
+"""
+    with tempfile.TemporaryDirectory() as td:
+        harness_path = Path(td) / "harness.sh"
+        harness_path.write_text(harness, encoding="utf-8")
+        r = subprocess.run(
+            [_BASH, str(harness_path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert r.returncode == 0, f"harness failed: {r.stdout} {r.stderr}"
+        result = r.stdout.strip()
+        assert result == str(fallback_python), (
+            "_bootstrap_python exclude-venv-dir must never select the "
+            f"target slot's own interpreter; got {result!r}"
+        )
 
 
 def test_deploy_venv_retries_then_hard_fails_on_a_dirty_slot():
@@ -186,16 +266,16 @@ def test_versioned_slot_lease_uses_flock_held_for_process_lifetime():
 
 def test_versioned_slot_lease_python_fallback_delegates_to_real_fcntl_flock():
     """A hand-rolled dotlock protocol (create-if-absent, detect-and-reclaim
-    stale owners, ...) hit an unbounded chain of narrowing TOCTOU windows
-    across several rounds of review -- every userspace "is it safe to
-    reclaim?" check is itself a second check-then-act race one level down,
-    which is exactly the class of problem flock/fcntl exist to solve. When
-    the `flock` CLI is unavailable (e.g. stock macOS), the fallback must
-    delegate to Python's `fcntl.flock` instead -- the SAME real kernel
-    advisory lock the primary path uses, via a resident helper process
-    whose lifetime holds the lock (never a separate marker file requiring
-    explicit, crash-unsafe cleanup) -- rather than reinventing the
-    primitive in shell. Python is already a hard dependency here
+    stale owners, ...) is an unbounded chain of narrowing TOCTOU windows --
+    every userspace "is it safe to reclaim?" check is itself a second
+    check-then-act race one level down, which is exactly the class of
+    problem flock/fcntl exist to solve. When the `flock` CLI is unavailable
+    (e.g. stock macOS), the fallback must delegate to Python's
+    `fcntl.flock` instead -- the SAME real kernel advisory lock the
+    primary path uses, via a resident helper process whose lifetime holds
+    the lock (never a separate marker file requiring explicit,
+    crash-unsafe cleanup) -- rather than reinventing the primitive in
+    shell. Python is already a hard dependency here
     (versioned_runtime.py), so this introduces no new dependency."""
     text = _INSTALL_SH.read_text(encoding="utf-8")
     acquire_body = _function_body(text, "_acquire_versioned_slot_lease")
@@ -216,7 +296,7 @@ def test_versioned_slot_lease_python_fallback_delegates_to_real_fcntl_flock():
 
     # No bootstrap python resolvable at all must fail closed, not silently
     # succeed.
-    assert 'py="$(_bootstrap_python)" || return 1' in fallback_body
+    assert 'py="$(_bootstrap_python exclude-venv-dir)" || return 1' in fallback_body
     assert "fcntl.flock" in fallback_body
     assert "LOCK_EX | fcntl.LOCK_NB" in fallback_body
     # A failed (non-blocking) flock attempt must propagate as a real

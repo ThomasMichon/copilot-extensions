@@ -791,7 +791,29 @@ _bootstrap_python() {
     # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
     # python, then python3/python on PATH. Prints nothing + returns 1 if none
     # found (#935).
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
+    #
+    # Pass "exclude-venv-dir" when the caller is about to INSPECT $VENV_DIR
+    # itself (the slot-clean liveness census, and the lease's own resident
+    # helper process, which must never itself run from inside the slot
+    # being censused) -- using that slot's own interpreter would make the
+    # calling process itself show up as "a live process running from this
+    # slot", permanently self-reporting an incomplete slot with a stale
+    # python as still in use on every retry. Compares REAL
+    # (symlink-resolved) paths rather than the LINK_DIR/VENV_DIR variable
+    # strings: `.venv` can physically resolve into the target slot
+    # mid-migration even when the two variables hold different literal
+    # strings.
+    local exclude_venv_dir="${1:-}" use_link_python=1
+    if [[ "$exclude_venv_dir" == "exclude-venv-dir" ]] && [[ -d "$LINK_DIR" ]] && [[ -d "$VENV_DIR" ]]; then
+        local link_real venv_real
+        link_real="$(cd "$LINK_DIR" 2>/dev/null && pwd -P)"
+        venv_real="$(cd "$VENV_DIR" 2>/dev/null && pwd -P)"
+        [[ -n "$link_real" && "$link_real" == "$venv_real" ]] && use_link_python=0
+    fi
+    if [[ "$use_link_python" == 1 ]] && [[ -x "$LINK_DIR/bin/python" ]]; then
+        echo "$LINK_DIR/bin/python"
+        return 0
+    fi
     local __c
     for __c in python3 python; do
         if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
@@ -883,7 +905,12 @@ _acquire_versioned_slot_lease_python_fallback() {
     #
     # Returns 0 (helper pid + keep-alive fd recorded) or 1.
     local lock_file="$1" py tmp_dir in_fifo out_fifo pid line
-    py="$(_bootstrap_python)" || return 1
+    # exclude-venv-dir: this helper process holds the lease/flock, but it
+    # still runs an actual python.exe -- if that interpreter were resolved
+    # from inside $VENV_DIR, the helper itself would show up as "a live
+    # process running from this slot" the next time _versioned_slot_clean
+    # censuses it, same as the direct census call above.
+    py="$(_bootstrap_python exclude-venv-dir)" || return 1
     [[ -n "$py" ]] || return 1
     tmp_dir="$(mktemp -d 2>/dev/null)" || return 1
     in_fifo="$tmp_dir/in"
@@ -1003,7 +1030,7 @@ _versioned_slot_clean() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py
-    py="$(_bootstrap_python)"
+    py="$(_bootstrap_python exclude-venv-dir)"
     if [[ -z "$py" ]]; then
         # No bootstrap python to run the actual census with (e.g. a
         # uv-only machine with no system python on PATH yet and no prior
