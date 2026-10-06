@@ -120,18 +120,29 @@ supervision a worker needs from these fields.
 Instead, key the supervision level off demonstrated, observed track record for
 that worker in that kind of role — evidence that it reliably decomposed a
 goal-based contract, self-corrected without drifting, and reported completion
-accurately in past delegations — never off the model's name, generation, or
-routing metadata. Absent that evidence (a first-time assignment, a worker with
-no observed history in this role, or evidence that has gone stale), default to
-the conservative, more-supervised side below rather than assuming competence.
+accurately in past delegations. The model-routing contract's own `state`,
+`evidence`, and `recheckAfter` fields are the durable, cross-session record of
+exactly that track record when they specifically establish unsupervised
+reliability for the role being delegated — use them for this. What remains
+forbidden is inferring supervision need from a model's name or generation
+alone, or from `reasoningEfforts`/`costRank`/an unqualified `state` value
+alone (a `demonstrated` state without role-matching evidence, or evidence that
+has gone stale past its `recheckAfter` date, does not establish reliability
+for a new role). Absent qualifying evidence (a first-time assignment, a worker
+with no observed history in this role, or evidence that has gone stale),
+default to the conservative, more-supervised side below rather than assuming
+competence.
 
 A worker **without demonstrated unsupervised reliability in this role** needs
 to be kept on the rails with:
 
 - a literal, ordered checklist of steps rather than a single open-ended goal —
   spell out the sequence, not just the destination;
-- an explicit validation command and stop condition after each step, so the
-  delegate cannot silently skip ahead or paper over a failure;
+- an explicit validation action and stop condition after each step (a command
+  when the step produces one, otherwise a concrete criterion — e.g. a named
+  evidence citation for a research step, or a specific tool-call result for a
+  service-tool step), so the delegate cannot silently skip ahead or paper over
+  a failure;
 - more frequent check-ins — prefer synchronous delegation, or background
   delegation with scheduled interim check-ins at named milestones — so drift
   is caught at the milestone closest to where it happened, not only once the
@@ -145,7 +156,7 @@ shape) and background execution with a single check-in at completion.
 
 | Demonstrated supervision need for this worker/role | Plan detail to give it | Check-in cadence |
 |---|---|---|
-| Not yet demonstrated reliable (default — no observed track record, or evidence has gone stale) | Literal, ordered step list with a validation command and stop condition per step — not just a goal | Synchronous, or background with scheduled interim check-ins at named milestones |
+| Not yet demonstrated reliable (default — no observed track record, or evidence has gone stale) | Literal, ordered step list with a validation action (a command where applicable) and stop condition per step — not just a goal | Synchronous, or background with scheduled interim check-ins at named milestones |
 | Demonstrated reliable (observed self-correction and accurate completion reporting in this kind of role) | Goal-based bounded contract (scope, exclusions, evidence, output shape) | Background with a single check-in at completion is usually sufficient |
 
 Regardless of demonstrated reliability, always independently re-verify a
@@ -179,11 +190,11 @@ Each prompt to a delegate should state:
 4. **Inputs:** the minimum context required to begin.
 5. **Output:** a compact result shape, including citations, paths, commands, or
    diffs needed for integration.
-6. **Plan detail:** a literal ordered step list with a validation command and
-   stop condition per step for a worker without demonstrated unsupervised
-   reliability in this role; a goal-based contract is enough for one with a
-   demonstrated track record — see "Scale plan detail and check-ins to
-   demonstrated supervision need" above.
+6. **Plan detail:** a literal ordered step list with a validation action (a
+   command where applicable) and stop condition per step for a worker without
+   demonstrated unsupervised reliability in this role; a goal-based contract
+   is enough for one with a demonstrated track record — see "Scale plan
+   detail and check-ins to demonstrated supervision need" above.
 7. **Check-ins:** the cadence to verify progress at — synchronous or
    milestone-scheduled absent a demonstrated track record, a single
    completion check-in once one exists.
