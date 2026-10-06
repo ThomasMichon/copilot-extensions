@@ -338,7 +338,36 @@ def _run_direct_launch_fallback(project: str | None, passthrough: list[str]) -> 
 def _exec_worktree_manager(
     mgr: str | tuple[str, ...] | list[str], project: str | None, *, subcommand: list[str] | None = None
 ) -> int:
-    """Hand an invocation off to the Worktree Manager (the seam)."""
+    """Hand an invocation off to the Worktree Manager (the seam).
+
+    On Windows there is no process-image-replacing ``exec`` (unlike the POSIX
+    branch below, which really does become the child via ``os.execvpe`` --
+    so the whole tree lives and dies as a single process tied to its own
+    console/job). The Windows branch must instead ``Popen`` + ``wait()``, and
+    the Worktree Manager's own launch chain is several processes deep (a
+    ``.cmd`` shim -> ``uv run`` -> a venv interpreter -> the real
+    ``worktree_manager`` module, sometimes further re-exec'd through another
+    ``uv``-managed interpreter). If *this* process is torn down abruptly --
+    its console window closed, the owning Copilot session/worktree killed,
+    anything that skips Python's normal exception unwinding -- a plain
+    ``subprocess.Popen`` leaves that entire descendant chain parentless and
+    running forever: nothing was ever watching it, and nothing ever sends it
+    a termination signal. This is exactly the shape of the zombie
+    ``worktree_manager --project <X>`` process trees found piled up (some
+    days old) in the picker-performance-and-responsiveness effort's
+    diagnosis session.
+
+    Contained in a Windows Job Object with
+    ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`` instead (the same primitive
+    ``agent_machines.fleet_update`` already uses for this identical failure
+    class): the OS itself closes the job handle -- and kills every process
+    still assigned to it -- the moment this process exits, by ANY means,
+    clean or not. A legitimately long-lived descendant this launch spawns
+    (the mux-daemon) is unaffected: it is spawned elsewhere with its own
+    Job-breakaway containment specifically so it outlives any single
+    Picker invocation; only processes that never opted out of this job stay
+    tied to it.
+    """
     argv = [mgr] if isinstance(mgr, str) else list(mgr)
     if subcommand:
         argv += list(subcommand)
@@ -349,15 +378,29 @@ def _exec_worktree_manager(
         _WORKTREE_MANAGER_ENGINE_ARGV_ENV: json.dumps([sys.executable, "-m", "agent_worktrees"]),
     }
     if platform.system() == "Windows":
-        proc = subprocess.Popen(argv, env=env)
+        from agent_procutil import spawn_sync_in_kill_on_close_job
+
+        proc, job_handle = spawn_sync_in_kill_on_close_job(argv, env=env)
         try:
-            rc = proc.wait()
-        except KeyboardInterrupt:
             try:
-                rc = proc.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                rc = 130
+                rc = proc.wait()
+            except KeyboardInterrupt:
+                try:
+                    rc = proc.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    rc = 130
+        finally:
+            # Whether the child exited cleanly, was interrupted, or timed
+            # out above: close the job now so any descendant this launch's
+            # own tree still owns (one that never broke away) is reaped
+            # immediately, rather than left to a GC-timed __del__.
+            if job_handle is not None:
+                job_handle.close()
+            else:
+                try:
+                    proc.kill()
+                except (ProcessLookupError, OSError):
+                    pass
         sys.exit(rc)
     os.execvpe(argv[0], argv, env)
     return 1
