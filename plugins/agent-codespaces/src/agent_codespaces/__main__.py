@@ -4637,10 +4637,11 @@ def _cmd_acp_model_flags() -> int:
 def _cmd_provision_command(args: argparse.Namespace | None = None) -> int:
     """Print the CodeSpace provision command (#892 Inc 1): see provision.dispatch_provision_command."""
     from .config import load_merged_config
+    from .lifecycle import repository_for_codespace
     from .provision import dispatch_provision_command
 
     cfg = load_merged_config(include_cwd=False)
-    print(dispatch_provision_command(cfg, getattr(args, "codespace", None), _lookup_codespace_repo))
+    print(dispatch_provision_command(cfg, getattr(args, "codespace", None), repository_for_codespace))
     return 0
 
 

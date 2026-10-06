@@ -131,3 +131,45 @@ def test_account_for_codespace_resolves_owner():
 def test_account_for_codespace_swallows_errors():
     with patch.object(lifecycle, "list_codespaces", side_effect=RuntimeError("boom")):
         assert lifecycle.account_for_codespace("cs-a") is None
+
+
+# --- repository_for_codespace (#5441: targeted, not listing-capped) ---------
+
+
+def test_repository_for_codespace_prefers_the_bound_repo(monkeypatch):
+    monkeypatch.setattr("agent_codespaces.account_binding.bound_repo", lambda n: "o/bound")
+    with patch("subprocess.run") as run, patch.object(lifecycle, "list_codespaces") as listing:
+        assert lifecycle.repository_for_codespace("cs-a") == "o/bound"
+    run.assert_not_called()
+    listing.assert_not_called()
+
+
+def test_repository_for_codespace_uses_targeted_api_as_owner(monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr("agent_codespaces.account_binding.bound_repo", lambda n: None)
+    monkeypatch.setattr("agent_codespaces.account_binding.bound_account", lambda n: "owner")
+    monkeypatch.setattr(gh_account, "env_for_account", lambda login: {"GH_TOKEN": f"tok-{login}"})
+    ok = subprocess.CompletedProcess([], 0, "o/api\n", "")
+    with patch("subprocess.run", return_value=ok) as run, \
+         patch.object(lifecycle, "list_codespaces") as listing:
+        assert lifecycle.repository_for_codespace("cs-a") == "o/api"
+    assert run.call_args.args[0][:3] == ["gh", "api", "/user/codespaces/cs-a"]
+    assert run.call_args.kwargs["env"] == {"GH_TOKEN": "tok-owner"}
+    listing.assert_not_called()
+
+
+def test_repository_for_codespace_falls_back_to_listing_then_none(monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr("agent_codespaces.account_binding.bound_repo", lambda n: None)
+    monkeypatch.setattr(gh_account, "env_for_account", lambda login: {})
+    miss = subprocess.CompletedProcess([], 1, "", "HTTP 404")
+    listed = _cs("cs-a", "")
+    listed.repository = "o/listed"
+    with patch("subprocess.run", return_value=miss), \
+         patch.object(lifecycle, "list_codespaces", return_value=[listed]):
+        assert lifecycle.repository_for_codespace("cs-a") == "o/listed"
+        assert lifecycle.repository_for_codespace("missing") is None
+    with patch("subprocess.run", side_effect=OSError("no gh")):
+        assert lifecycle.repository_for_codespace("cs-a") is None
