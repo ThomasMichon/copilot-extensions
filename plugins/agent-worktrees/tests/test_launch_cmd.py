@@ -1096,8 +1096,8 @@ def test_launch_command_falls_back_when_noprofile_is_omitted(tmp_path):
 def test_launch_command_falls_back_when_requested_engine_differs_from_host(tmp_path):
     """Requesting `powershell.exe` (Windows PowerShell) while the current
     host is `pwsh` (PowerShell Core) -- or vice versa -- must not silently
-    run default-setup.ps1 under the wrong engine; fall back so the
-    requested engine is actually used."""
+    run default-setup.ps1 under the wrong binary; fall back so the
+    requested binary is actually used."""
     shell = shutil.which("pwsh")
     if not shell:
         pytest.skip("pwsh is unavailable")
@@ -1106,7 +1106,7 @@ def test_launch_command_falls_back_when_requested_engine_differs_from_host(tmp_p
     staged_launch_command = _stage_launch_command(tmp_path)
     fake_default_setup = _fake_default_setup_pid_only(tmp_path)
 
-    # Host is pwsh (Core); requested engine is powershell.exe (Desktop).
+    # Host is pwsh (Core); requested binary is powershell.exe (Desktop).
     _rc, outer_pid, inner_pid = _run_launch_command_for_pid_check(
         shell, staged_launch_command, tmp_path,
         [
@@ -1115,18 +1115,63 @@ def test_launch_command_falls_back_when_requested_engine_differs_from_host(tmp_p
         ],
     )
     assert inner_pid != outer_pid, (
-        "a requested engine that differs from the current host must not "
+        "a requested binary that differs from the current host must not "
         "take the dot-source fast path"
     )
 
 
+def test_launch_command_falls_back_for_an_alternate_pwsh_binary(tmp_path):
+    """An explicitly requested, alternate `pwsh.exe` install (e.g. a
+    different pinned version or architecture) must get exactly that
+    binary -- never silently run under whatever binary happens to host
+    launch-command.ps1, even though both resolve to the same basename."""
+    shell = shutil.which("pwsh")
+    if not shell:
+        pytest.skip("pwsh is unavailable")
+    staged_launch_command = _stage_launch_command(tmp_path)
+    fake_default_setup = _fake_default_setup_pid_only(tmp_path)
+    marker = tmp_path / "result.txt"
+
+    # A same-named but nonexistent alternate pwsh.exe: a rooted path never
+    # requires an existence check in the guard (only a string comparison
+    # against the current host's own resolved executable path), so this
+    # alone proves the match is by actual binary identity, not merely by
+    # basename. The attempted fallback exec then legitimately fails
+    # (confirming it really was attempted, not silently skipped) --
+    # covering a real, resolvable alternate install is the concern of the
+    # ordinary non-fast-path tests elsewhere in this file, not this guard.
+    alternate_pwsh = tmp_path / "alternate-install" / "pwsh.exe"
+    env = os.environ.copy()
+    env["RESULT_MARKER"] = str(marker)
+    env["AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED"] = "1"
+    proc = subprocess.run(
+        [
+            shell, "-NoProfile", "-NoLogo", "-File", str(staged_launch_command), "--",
+            str(alternate_pwsh), "-NoProfile", "-NoLogo",
+            "-File", str(fake_default_setup), "-Machine", "testbox",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert proc.returncode != 0, "a nonexistent alternate binary should fail, not silently succeed"
+    assert not marker.exists(), (
+        "an alternate pwsh.exe binary distinct from the current host must "
+        "not take the dot-source fast path (default-setup.ps1 must never "
+        "have actually run)"
+    )
+
+
 def test_launch_command_falls_back_for_a_custom_same_named_script(tmp_path):
-    """copilot-extensions#5595 review (Medium): a repo's own authoritative
-    launch template can point at ITS OWN custom script that merely shares
-    the 'default-setup.ps1' basename -- matching by basename alone would
-    incorrectly dot-source that unrelated, not-provably-compatible script.
-    Only launch-command.ps1's own canonical sibling script
-    (Join-Path $PSScriptRoot 'default-setup.ps1') may use the fast path."""
+    """A repo's own authoritative launch template can point at its OWN
+    custom script that merely shares the 'default-setup.ps1' basename.
+    Dot-sourcing is not generally equivalent to `pwsh -File` for arbitrary
+    script content, so only launch-command.ps1's own canonical sibling
+    script (Join-Path $PSScriptRoot 'default-setup.ps1') may use the fast
+    path; any other same-named script must fall back to the original
+    child-process relaunch."""
     shell = shutil.which("pwsh")
     if not shell:
         pytest.skip("pwsh is unavailable")
@@ -1149,7 +1194,8 @@ def test_launch_command_falls_back_for_a_custom_same_named_script(tmp_path):
 
 
 def test_default_setup_launches_absolute_copilot_with_empty_path(
-    tmp_path,):
+    tmp_path,
+):
     marker = tmp_path / "launched"
     env = os.environ.copy()
     env["PATH"] = ""

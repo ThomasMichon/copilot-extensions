@@ -26,31 +26,50 @@ if ($args.Count -gt ($offset + 1)) {
 }
 
 $usesDefaultSetup = $false
-$executableName = [IO.Path]::GetFileNameWithoutExtension($executable)
 # The fast path below runs default-setup.ps1 IN THIS HOST PROCESS, so it is
 # only behavior-preserving when the requested invocation is actually
-# equivalent to this host: same engine (an explicit `powershell.exe`
-# request must still get real Windows PowerShell, never silently run under
-# whatever engine happens to host launch-command.ps1), the host options
-# before `-File` are EXACTLY the fixed `-NoProfile -NoLogo` pair this
-# wrapper's own host was itself started with (not merely a subset -- this
-# process already has no profile loaded, so a requested child that OMITS
-# -NoProfile, signaling the caller actually wants one loaded, must not be
-# silently coerced into this already-profile-less host; any other
-# unrecognized option, e.g. -ExecutionPolicy/-WindowStyle/-Mta/-Sta, would
-# otherwise be silently dropped instead of applied), AND the resolved
-# script is genuinely THIS plugin's own canonical default-setup.ps1 -- not
-# merely a same-named file. A repo's authoritative launch template can
-# point at its OWN custom script that merely happens to share the
-# 'default-setup.ps1' basename; dot-sourcing isn't generally equivalent to
-# `pwsh -File` for arbitrary script content (e.g. $MyInvocation.InvocationName
-# and top-level `return` semantics differ), so only this plugin's own,
+# equivalent to this host: the requested executable resolves to the SAME
+# binary currently hosting this process -- not merely the same basename.
+# An explicit, alternate `pwsh`/`powershell` install (a pinned version, a
+# different architecture) must still get exactly that binary, never
+# silently run under whatever happens to host launch-command.ps1. The host
+# options before `-File` must also be EXACTLY the fixed `-NoProfile
+# -NoLogo` pair this wrapper's own host was itself started with (not
+# merely a subset -- this process already has no profile loaded, so a
+# requested child that OMITS -NoProfile, signaling the caller actually
+# wants one loaded, must not be silently coerced into this already-
+# profile-less host; any other unrecognized option, e.g.
+# -ExecutionPolicy/-WindowStyle/-Mta/-Sta, would otherwise be silently
+# dropped instead of applied). AND the resolved script is genuinely THIS
+# plugin's own canonical default-setup.ps1 -- not merely a same-named
+# file. A repo's authoritative launch template can point at its OWN
+# custom script that merely happens to share the 'default-setup.ps1'
+# basename; dot-sourcing isn't generally equivalent to `pwsh -File` for
+# arbitrary script content (e.g. $MyInvocation.InvocationName and
+# top-level `return` semantics differ), so only this plugin's own,
 # known-compatible script qualifies. Anything else falls through to the
-# original spawn-and-wait, which honors the requested engine/options/script
-# exactly as before.
-$currentHostEngine = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh' } else { 'powershell' }
+# original spawn-and-wait, which honors the requested executable/
+# options/script exactly as before.
 $ownDefaultSetupScript = Join-Path $PSScriptRoot 'default-setup.ps1'
-if ([string]::Equals($executableName, $currentHostEngine, [StringComparison]::OrdinalIgnoreCase)) {
+$currentHostExecutablePath = $null
+try {
+    $currentHostExecutablePath = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+} catch { }
+$requestedExecutablePath = $null
+try {
+    if ([IO.Path]::IsPathRooted($executable)) {
+        $requestedExecutablePath = [IO.Path]::GetFullPath($executable)
+    } else {
+        $resolvedCommand = Get-Command $executable -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($resolvedCommand) { $requestedExecutablePath = $resolvedCommand.Source }
+    }
+} catch { }
+$isCurrentHostExecutable = (
+    $currentHostExecutablePath -and $requestedExecutablePath -and
+    [string]::Equals($requestedExecutablePath, $currentHostExecutablePath, [StringComparison]::OrdinalIgnoreCase)
+)
+if ($isCurrentHostExecutable) {
     for ($index = 0; $index -lt ($remainingArgs.Count - 1); $index++) {
         if (
             [string]::Equals(
