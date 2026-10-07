@@ -559,8 +559,14 @@ replaces the authored PR description.
 > duplicate. This applies to re-runs too: a re-run on an already-pushed branch
 > **surfaces the existing PR's number/url** (and opens a still-pending PR),
 > rather than silently succeeding with no PR. Only fall back to Steps 2-3 when
-> the result carries a `pr_open_error`, or when `pr.auto_open` is off / no
-> provider creds are configured.
+> the result carries a `pr_open_error`, a `pr_open_skipped` (`--no-open`, or
+> `pr.auto_open` is off), or no provider creds are configured. (After `--no-open`,
+> re-running `create-pr` without it is the alternative where auto-open is on.) A run that pushed the branch but opened no PR
+> says why in `pr_open_skipped` (`--no-open`, or `pr.auto_open is off`), and its
+> reminder reads `no PR opened` (state `pushed`), never `PR created`: there is
+> nothing to review or merge until the PR is opened and recorded.
+> A `--dry-run` reads `dry run: nothing was pushed or opened` (state `dry-run`)
+> and says it *would* push.
 
 > **Never run `create-pr`/`push-changes` for the same worktree from two
 > actors at once -- not even a delegated sub-agent "helping" with the exact
@@ -609,8 +615,8 @@ replaces the authored PR description.
 ### Step 2: Delegate PR creation to the provider sub-agent
 
 *(Manual fallback -- used only when `create-pr` did **not** open the PR: i.e.
-the result carries a `pr_open_error`, `pr.auto_open` is off, or no provider
-creds are configured. If `create-pr` already reported `pr_opened: true` /
+the result carries a `pr_open_error` or a `pr_open_skipped` (`--no-open`, or
+`pr.auto_open` is off), or no provider creds are configured. If `create-pr` already reported `pr_opened: true` /
 a `number`, do not run this step -- the PR exists.)* The CLI does **not** call
 any provider API in this path -- you do, via the matching sub-agent. Read the
 provider and route accordingly:

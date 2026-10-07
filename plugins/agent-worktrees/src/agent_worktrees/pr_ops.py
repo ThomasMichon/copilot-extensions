@@ -1629,7 +1629,23 @@ def _finish_auto_open(
                                            (never re-create -> no duplicate, #1167).
     """
     want_open = prcfg.auto_open if open_pr is None else open_pr
-    if not want_open or target_pr is None:
+    if target_pr is None:
+        if not want_open:  # untracked worktree: still say why nothing was opened
+            result["pr_open_skipped"] = "--no-open" if open_pr is False else "pr.auto_open is off"
+        return
+    if not want_open:
+        # Nothing is opened or changed on the provider (create-pr already read the tracked
+        # PR's state, so a merged PR's branch is never reused); say what exists so no caller is told
+        # a PR was created when none was, or that none exists when one does.
+        if target_pr.number is None:
+            result["pr_open_skipped"] = "--no-open" if open_pr is False else "pr.auto_open is off"
+        else:
+            result["pr_opened"] = True
+            result["pr_existing"] = True  # it was already open: this run opened nothing
+            result["number"] = target_pr.number
+            result["draft"] = False  # nothing was opened here, so no draft was created
+            if target_pr.url:
+                result["url"] = target_pr.url
         return
     if target_pr.number is None:
         # codename-attribution-by-default (fix-PR-#3037-review finding):

@@ -654,12 +654,20 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                 result["viewer_permission"],
             )
             reminder_flow = pr_config._profile_for_pr_config(reminder_prcfg)
+        # "created" only when a PR was actually opened: a pushed branch with no PR
+        # (--no-open, a dry run, or a provider refusal) has nothing to merge yet.
+        opened = bool(result.get("pr_opened"))
+        why_not = ("" if opened or result.get("dry_run") else
+                   f"the provider refused: {result['pr_open_error']}" if result.get("pr_open_error") else
+                   f"the branch was pushed ({result['pr_open_skipped']})" if result.get("pr_open_skipped") else
+                   "the branch was pushed")
         reminder = context_cli._pr_reminder_for(
             config,
             "create-pr",
-            state=("created" if result.get("success") else ""),
+            state=(("created" if opened else "dry-run" if result.get("dry_run") else "pushed")
+                   if result.get("success") else ""),
             ok=bool(result.get("success")),
-            reason=("" if result.get("success") else result.get("error", "")),
+            reason=(why_not if result.get("success") else result.get("error", "")),
             flow=reminder_flow,
         )
         if reminder is not None:
@@ -677,7 +685,8 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             branch = result.get("branch", "")
             remote = result.get("remote", "")
             provider = result.get("provider", "")
-            output.ok(f"Feature branch '{branch}' pushed to {remote}.")
+            output.ok(f"Dry run: would push feature branch '{branch}' to {remote}." if result.get("dry_run")
+                      else f"Feature branch '{branch}' pushed to {remote}.")
             if result.get("history_action"):
                 output.ok(str(result["history_action"]))
             if result.get("topic_note"):
@@ -688,6 +697,8 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             )
             if result.get("pr_opened"):
                 output.ok(
+                    f"PR #{result.get('number')} is already open via '{provider}': {result.get('url')}"
+                    if result.get("pr_existing") else
                     f"Opened PR #{result.get('number')} via '{provider}': {result.get('url')}"
                 )
                 if result.get("draft"):
@@ -710,7 +721,7 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
                     f"Open the PR via the '{provider}' provider, then record it:\n"
                     f"  agent-worktrees set-pr {worktree_id} --url <URL> --number <N>"
                 )
-            else:
+            elif not result.get("dry_run"):  # a dry run pushed nothing: no branch to open from
                 print(
                     f"Next: delegate PR creation to the '{provider}' provider, "
                     f"then record it with:\n"

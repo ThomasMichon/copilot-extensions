@@ -8,6 +8,8 @@ against the CALLER's own repo while mislabeling the PR as the foreign one.
 
 from __future__ import annotations
 
+import pytest
+
 import agent_worktrees.__main__ as m
 from agent_worktrees import pr_config, pr_foreign_create
 from agent_worktrees import worktree_identity
@@ -384,3 +386,61 @@ class TestCreatePrFromBranch:
 
         assert rc == 2
         assert called["foreign"] is False
+
+
+
+_PUSHED = {"success": True, "branch": "b", "remote": "fork", "provider": "github",
+           "base_sha": "a" * 40, "head_sha": "b" * 40, "draft": False,
+           "pr_open_skipped": "--no-open"}
+
+
+@pytest.mark.parametrize("result, state, headline", [
+    (_PUSHED, "pushed", "no PR opened: the branch was pushed (--no-open)"),
+    ({**_PUSHED, "pr_open_skipped": None, "dry_run": True}, "dry-run",
+     "dry run: nothing was pushed or opened"),
+    ({**_PUSHED, "pr_open_skipped": None, "pr_opened": False, "pr_open_error": "HTTP 422"}, "pushed",
+     "no PR opened: the provider refused: HTTP 422"),
+    ({**_PUSHED, "pr_open_skipped": None, "pr_opened": True, "number": 7,
+      "url": "https://h/o/r/pull/7"}, "created", "PR created"),
+])
+def test_create_pr_json_reminder_says_created_only_when_a_pr_was_opened(
+        pr_repo, monkeypatch, result, state, headline):
+    """A pushed branch with no PR (here: --no-open) must not read "PR created" with a
+    merge as the next step; an opened PR still does."""
+    import json
+
+    config, wid, _wt_path, _ = pr_repo
+    monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(m.pr_ops, "create_pr", lambda *_a, **_k: dict(result))
+    from agent_worktrees import output
+
+    with output.capture_json_output() as buf:  # the envelope goes to sys.__stdout__
+        assert m.cmd_create_pr(_args(["create-pr", wid, "--title", "x", "--json"])) == 0
+    reminder = json.loads(buf.getvalue())["reminder"]
+    assert (reminder["state"], reminder["headline"]) == (state, headline)
+
+
+def test_a_dry_run_never_says_it_pushed(pr_repo, monkeypatch, capsys):
+    """Human output for a preview: 'would push', never 'pushed', and no PR claimed."""
+    config, wid, _wt_path, _ = pr_repo
+    monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(m.pr_ops, "create_pr", lambda *_a, **_k: {**_PUSHED, "pr_open_skipped": None,
+                                                                  "dry_run": True})
+    assert m.cmd_create_pr(_args(["create-pr", wid, "--title", "x", "--dry-run"])) == 0
+    out = capsys.readouterr()
+    text = out.out + out.err
+    assert "would push" in text and "pushed to" not in text
+    assert "set-pr" not in text  # no branch exists, so no "open it and record it" advice
+
+
+def test_a_no_open_rerun_reports_the_existing_pr_as_already_open(pr_repo, monkeypatch, capsys):
+    config, wid, _wt_path, _ = pr_repo
+    monkeypatch.setattr(m.cfg, "load_config", lambda *_a, **_k: config)
+    monkeypatch.setattr(m.pr_ops, "create_pr", lambda *_a, **_k: {
+        **_PUSHED, "pr_open_skipped": None, "pr_opened": True, "pr_existing": True, "number": 7,
+        "url": "https://h/o/r/pull/7"})
+    assert m.cmd_create_pr(_args(["create-pr", wid, "--title", "x", "--no-open"])) == 0
+    out = capsys.readouterr()
+    text = out.out + out.err
+    assert "PR #7 is already open" in text and "Opened PR" not in text
+
