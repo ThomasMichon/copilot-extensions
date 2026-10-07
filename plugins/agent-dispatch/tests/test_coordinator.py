@@ -1632,6 +1632,14 @@ def test_connect_retry_client_preserves_environment_proxy_routing(monkeypatch):
     changes nothing about how Client resolves or mounts proxies."""
     from agent_dispatch.client_transport import ConnectRetryClient
 
+    # Isolate from whatever proxy variables the test runner's own environment
+    # happens to carry -- an inherited HTTP_PROXY/ALL_PROXY/lowercase variant
+    # would otherwise change the expected mount count underneath this test.
+    for name in (
+        "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
+        "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy",
+    ):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example.com:8080")
 
     plain = httpx.Client()
