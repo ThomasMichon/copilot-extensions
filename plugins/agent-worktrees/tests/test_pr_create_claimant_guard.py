@@ -396,6 +396,10 @@ _PUSHED = {"success": True, "branch": "b", "remote": "fork", "provider": "github
 
 @pytest.mark.parametrize("result, state, headline", [
     (_PUSHED, "pushed", "no PR opened: the branch was pushed (--no-open)"),
+    ({**_PUSHED, "pr_open_skipped": None, "dry_run": True}, "pushed",
+     "no PR opened: dry run, nothing was pushed"),
+    ({**_PUSHED, "pr_open_skipped": None, "pr_opened": False, "pr_open_error": "HTTP 422"}, "pushed",
+     "no PR opened: the provider refused: HTTP 422"),
     ({**_PUSHED, "pr_open_skipped": None, "pr_opened": True, "number": 7,
       "url": "https://h/o/r/pull/7"}, "created", "PR created"),
 ])
